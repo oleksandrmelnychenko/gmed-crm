@@ -222,6 +222,16 @@ async fn medical_appointments_support_care_path_kind_round_trip_and_filtering() 
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["care_path_kind"], "control");
+    // The edited provider + doctor must round-trip into the detail so the edit form
+    // can rebind them (regression: provider/doctor showing "not specified" on edit).
+    assert_eq!(
+        body["provider_id"], provider_id.to_string(),
+        "edited provider_id must be returned by the appointment detail"
+    );
+    assert_eq!(
+        body["doctor_id"], doctor_id.to_string(),
+        "edited doctor_id must be returned by the appointment detail"
+    );
 
     let (status, body) = json_request(
         &app,
