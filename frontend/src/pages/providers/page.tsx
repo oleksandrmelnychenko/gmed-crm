@@ -769,11 +769,8 @@ function WeeklyAvailabilityEditor({
     const end = addOneHour(previous.end);
     return previous.end < end ? { start: previous.end, end } : defaultInterval;
   };
-  const commit = (
-    nextSchedule: WeeklyAvailabilitySchedule,
-    edit?: { day: WeeklyAvailabilityRow["day"]; index: number; field: "start" | "end" },
-  ) => {
-    const normalized = normalizeWeeklyAvailabilitySchedule(nextSchedule, edit);
+  const commit = (nextSchedule: WeeklyAvailabilitySchedule) => {
+    const normalized = normalizeWeeklyAvailabilitySchedule(nextSchedule);
     const nextValue = formatWeeklyAvailabilityValue(normalized);
     setDraftSchedule(normalized);
     if (nextValue !== value) {
@@ -822,7 +819,6 @@ function WeeklyAvailabilityEditor({
             }
           : row,
       ),
-      { day, index, field },
     );
   };
   const addInterval = (day: WeeklyAvailabilityRow["day"]) => {

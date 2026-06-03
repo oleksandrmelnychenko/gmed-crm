@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_FILTERS,
-  availabilityMaxStartForEnd,
-  availabilityMinEndForStart,
   blankDoctorForm,
   blankProviderForm,
   blankServiceForm,
@@ -316,24 +314,34 @@ describe("weekly availability helpers", () => {
     ).toBe("Mon 09:00-22:00");
   });
 
-  it("does not move the start time when an end picker edit is earlier than the current start", () => {
+  it("preserves an end picker edit even when it is earlier than the current start", () => {
     expect(
       updateWeeklyAvailabilityIntervalValue("Mo 08:00-16:00", "mon", 0, "end", "01:00"),
-    ).toBe("Mon 08:00-08:01");
+    ).toBe("Mon 08:00-01:00");
   });
 
-  it("does not move the end time when a start picker edit is later than the current end", () => {
+  it("preserves a start picker edit even when it is later than the current end", () => {
     expect(
       updateWeeklyAvailabilityIntervalValue("Mo 08:00-16:00", "mon", 0, "start", "18:00"),
-    ).toBe("Mon 15:59-16:00");
+    ).toBe("Mon 18:00-16:00");
+  });
+
+  it("does not reorder or clamp editor intervals", () => {
+    expect(
+      normalizeAvailabilityEditorIntervals([
+        { start: "18:00", end: "16:00" },
+        { start: "09:00", end: "09:00" },
+      ]),
+    ).toEqual([
+      { start: "18:00", end: "16:00" },
+      { start: "09:00", end: "09:00" },
+    ]);
   });
 
   it("supports full-day availability expressed as 00:00-00:00", () => {
     expect(normalizeAvailabilityEditorIntervals([{ start: "00:00", end: "00:00" }])).toEqual([
       { start: "00:00", end: "00:00" },
     ]);
-    expect(availabilityMaxStartForEnd("00:00")).toBe("23:59");
-    expect(availabilityMinEndForStart("23:59")).toBe("00:00");
     expect(formatWeeklyAvailabilityDisplay("Mo 00:00-00:00", "de")).toBe("Mo 00:00-24:00");
   });
 
