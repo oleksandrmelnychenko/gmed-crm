@@ -9125,6 +9125,37 @@ async fn patient_relation_accepts_friend_type() {
 }
 
 #[tokio::test]
+async fn patient_relation_accepts_standalone_emergency_contact() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-relation-emergency");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    let (status, created_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/relations"),
+        &bearer,
+        Some(json!({
+            "related_name": "Emergency Contact",
+            "relation_type": "caregiver",
+            "is_emergency_contact": true,
+            "phone": "+49 30 111222",
+            "notes": "Standalone non-patient contact"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created_body}");
+    assert_eq!(created_body["related_patient_id"], Value::Null);
+    assert_eq!(created_body["related_name"], "Emergency Contact");
+    assert_eq!(created_body["relation_type"], "caregiver");
+    assert_eq!(created_body["is_emergency_contact"], true);
+    assert_eq!(created_body["phone"], "+49 30 111222");
+}
+
+#[tokio::test]
 async fn patient_profile_updates_structured_legal_status() {
     let Some((app, pool, admin_id, bearer)) = test_context().await else {
         return;

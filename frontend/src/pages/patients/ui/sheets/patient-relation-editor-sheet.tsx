@@ -195,8 +195,12 @@ function PatientRelationEditorSheet({
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      if (!patientId || (!form.relatedPatientId && !form.relatedName.trim())) {
+      if (!patientId) {
         onError(dictionary.common_failed_create);
+        return;
+      }
+      if (!form.relatedPatientId && !form.relatedName.trim()) {
+        onError(`${t.patient_relation_name}: ${t.cf_required}`);
         return;
       }
 
