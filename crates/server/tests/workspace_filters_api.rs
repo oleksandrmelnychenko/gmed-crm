@@ -9097,6 +9097,34 @@ async fn patient_relations_crud_round_trip() {
 }
 
 #[tokio::test]
+async fn patient_relation_accepts_friend_type() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    // "friend" is offered by the relationship editor and allowed by the backend
+    // validator; the DB CHECK constraint must accept it too (regression: it used to
+    // violate the constraint and fail with a generic "creation error").
+    let tag = unique_tag("patient-relation-friend");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    let (status, created_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/relations"),
+        &bearer,
+        Some(json!({
+            "related_name": "Best friend",
+            "relation_type": "friend",
+            "is_emergency_contact": false
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created_body}");
+    assert_eq!(created_body["relation_type"], "friend");
+}
+
+#[tokio::test]
 async fn patient_profile_updates_structured_legal_status() {
     let Some((app, pool, admin_id, bearer)) = test_context().await else {
         return;
