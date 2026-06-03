@@ -2999,6 +2999,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
         bindings: Value,
         text_block_keys: Vec<&'static str>,
         min_pdf_size: usize,
+        expected_pdf_text: &'static str,
     }
 
     let cases = vec![
@@ -3011,6 +3012,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             bindings: json!({}),
             text_block_keys: vec!["fasting"],
             min_pdf_size: 1000,
+            expected_pdf_text: "Intro for treatment_plan",
         },
         TemplateCase {
             template_id: "medication_summary",
@@ -3021,6 +3023,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             bindings: json!({}),
             text_block_keys: vec!["doctor_changes_only"],
             min_pdf_size: 1000,
+            expected_pdf_text: "Intro for medication_summary",
         },
         TemplateCase {
             template_id: "framework_contract",
@@ -3031,6 +3034,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             bindings: json!({}),
             text_block_keys: vec!["contract_scope_clause"],
             min_pdf_size: 1000,
+            expected_pdf_text: "Rahmendienstleistungsvertrag",
         },
         TemplateCase {
             template_id: "visa_invitation_letter",
@@ -3041,6 +3045,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             bindings: json!({}),
             text_block_keys: vec![],
             min_pdf_size: 1000,
+            expected_pdf_text: "Intro for visa_invitation_letter",
         },
         TemplateCase {
             template_id: "patient_sticker_compact",
@@ -3051,6 +3056,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             bindings: json!({}),
             text_block_keys: vec![],
             min_pdf_size: 500,
+            expected_pdf_text: "ID: PT-",
         },
         TemplateCase {
             template_id: "patient_sticker_standard",
@@ -3061,6 +3067,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             bindings: json!({}),
             text_block_keys: vec![],
             min_pdf_size: 500,
+            expected_pdf_text: "ID: PT-",
         },
         TemplateCase {
             template_id: "patient_sticker_sheet",
@@ -3071,6 +3078,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             bindings: json!({}),
             text_block_keys: vec![],
             min_pdf_size: 500,
+            expected_pdf_text: "ID: PT-",
         },
         TemplateCase {
             template_id: "single_order",
@@ -3090,6 +3098,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             }),
             text_block_keys: vec![],
             min_pdf_size: 800,
+            expected_pdf_text: "EA-ALL-1",
         },
         TemplateCase {
             template_id: "cost_coverage_declaration",
@@ -3108,6 +3117,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             }),
             text_block_keys: vec![],
             min_pdf_size: 800,
+            expected_pdf_text: "Template Payer",
         },
         TemplateCase {
             template_id: "cost_estimate",
@@ -3120,6 +3130,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             }),
             text_block_keys: vec![],
             min_pdf_size: 800,
+            expected_pdf_text: "Koordination vor stationärer Aufnahme",
         },
         TemplateCase {
             template_id: "appointment_confirmation",
@@ -3139,6 +3150,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             }),
             text_block_keys: vec![],
             min_pdf_size: 800,
+            expected_pdf_text: "ALL-1251119",
         },
         TemplateCase {
             template_id: "consent_data_release_child",
@@ -3154,6 +3166,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             }),
             text_block_keys: vec![],
             min_pdf_size: 800,
+            expected_pdf_text: "Max Mustermann",
         },
         TemplateCase {
             template_id: "consent_data_release_single",
@@ -3168,6 +3181,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             }),
             text_block_keys: vec![],
             min_pdf_size: 800,
+            expected_pdf_text: "Max Mustermann",
         },
     ];
 
@@ -3267,6 +3281,16 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             "{} PDF too small: {}",
             case.template_id,
             bytes.len()
+        );
+        let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap_or_else(|error| {
+            panic!("{} PDF text extraction failed: {error}", case.template_id)
+        });
+        assert!(
+            pdf_text.contains(case.expected_pdf_text),
+            "{} PDF text did not contain expected text {:?}. Extracted text: {:?}",
+            case.template_id,
+            case.expected_pdf_text,
+            pdf_text
         );
     }
 }

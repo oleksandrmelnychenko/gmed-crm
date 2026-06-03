@@ -45,6 +45,28 @@ async fn json_request(
     (status, payload)
 }
 
+async fn bytes_request(
+    app: &axum::Router,
+    method: &str,
+    path: &str,
+    bearer: &str,
+) -> (StatusCode, Vec<u8>) {
+    let request = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("Authorization", bearer)
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap()
+        .to_vec();
+    (status, bytes)
+}
+
 fn auth_header_for(user_id: Uuid, role: &str) -> String {
     let token = jwt::issue_access_token(TEST_SECRET, user_id, role, Uuid::new_v4()).unwrap();
     format!("Bearer {token}")
@@ -495,6 +517,22 @@ async fn documents_catalog_includes_provider_templates_and_generation_uses_provi
             .contains("provider_template:"),
         "expected provider template source marker"
     );
+
+    let (download_status, pdf_bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &bearer,
+    )
+    .await;
+    assert_eq!(download_status, StatusCode::OK);
+    assert!(pdf_bytes.starts_with(b"%PDF-"));
+    assert!(pdf_bytes.len() > 1_000);
+    let pdf_text = pdf_extract::extract_text_from_mem(&pdf_bytes).unwrap();
+    assert!(pdf_text.contains(&format!("Clinic {tag}")));
+    assert!(pdf_text.contains(&format!("Dr {tag}")));
+    assert!(pdf_text.contains("Hallo"));
+    assert!(pdf_text.contains("ORD-"));
 
     let (second_create_status, second_create_body) = json_request(
         &app,

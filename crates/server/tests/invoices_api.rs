@@ -2000,6 +2000,8 @@ async fn patient_can_download_own_invoice_pdf() {
     );
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 1_000);
+    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(pdf_text.contains("Portal-visible invoice line"));
 }
 
 #[tokio::test]
