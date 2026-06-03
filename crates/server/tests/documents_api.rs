@@ -3988,6 +3988,11 @@ async fn document_templates_can_generate_patient_sticker_pdf_document() {
     assert_eq!(status, StatusCode::OK);
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 500);
+    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(pdf_text.contains("ID:"));
+    assert!(pdf_text.contains("PT-"));
+    assert!(pdf_text.contains(&tag));
+    assert!(pdf_text.contains("Agency Street 1"));
 }
 
 #[tokio::test]

@@ -367,6 +367,25 @@ async fn drug_search_and_german_equivalents_hide_unverified_by_default() {
             .iter()
             .all(|item| item.verification_status == "verified")
     );
+    assert!(verified
+        .iter()
+        .all(|item| item.staff_warning.contains("не назначением")));
+    assert!(verified
+        .iter()
+        .all(|item| item.staff_warning_ru.contains("не назначением")));
+    assert!(verified
+        .iter()
+        .all(|item| item.staff_warning_de.contains("keine Verordnung")));
+    assert!(verified.iter().any(|item| {
+        item.note_ru
+            .as_deref()
+            .is_some_and(|note| note.contains("Только для команды"))
+    }));
+    assert!(verified.iter().any(|item| {
+        item.note_de
+            .as_deref()
+            .is_some_and(|note| note.contains("Nur Team-Information"))
+    }));
     assert!(
         !verified
             .iter()

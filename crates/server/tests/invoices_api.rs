@@ -1937,6 +1937,9 @@ async fn staff_can_download_invoice_pdf_document() {
     );
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 1_000);
+    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(pdf_text.contains(invoice_number));
+    assert!(pdf_text.contains("Approved PDF line"));
 }
 
 #[tokio::test]

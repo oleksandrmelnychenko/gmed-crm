@@ -145,7 +145,11 @@ export type GermanEquivalent = {
   verification_status: string;
   substances: string[];
   note: string | null;
+  note_ru?: string | null;
+  note_de?: string | null;
   staff_warning: string;
+  staff_warning_ru?: string;
+  staff_warning_de?: string;
 };
 
 export type MedicationEquivalentPayload = {

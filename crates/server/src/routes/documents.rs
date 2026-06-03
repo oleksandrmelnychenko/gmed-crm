@@ -15,8 +15,7 @@ use axum::{
 };
 use chrono::{Datelike, NaiveDate, NaiveTime, Weekday};
 use printpdf::{
-    Color, Mm, Op, ParsedFont, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, PdfWarnMsg,
-    Point, Pt, Rgb, TextItem,
+    BuiltinFont, Color, Mm, Op, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point, Pt, Rgb,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -28,6 +27,7 @@ use crate::{
     auth::middleware::AuthUser,
     file_scan::{FileScanOutcome, scan_upload_bytes},
     file_sniff::validate_upload_magic_bytes,
+    pdf_text::{pdf_text_save_options, win_ansi_show_text_op},
     routes::{
         me::resolve_self_patient_id,
         patients::{
@@ -223,10 +223,6 @@ const IMAGE_OCR_FAILED_MESSAGE: &str = "Image OCR failed.";
 const PDF_TEXT_NO_TEXT_MESSAGE: &str =
     "The PDF does not expose extractable text. Manual transcription is required.";
 const PDF_TEXT_FAILED_MESSAGE: &str = "PDF text extraction failed.";
-const TREATMENT_PLAN_ARIAL_TTF: &[u8] =
-    include_bytes!("../../../../docs/comparison/fonts/arial.ttf");
-const TREATMENT_PLAN_ARIAL_BOLD_TTF: &[u8] =
-    include_bytes!("../../../../docs/comparison/fonts/arialbd.ttf");
 const PROVIDER_TEMPLATE_ID_PREFIX: &str = "provider_template:";
 
 #[derive(Clone, Copy)]
@@ -3097,10 +3093,15 @@ fn append_pdf_text_line(
     ops.push(Op::SetFillColor {
         col: treatment_plan_pdf_color(color),
     });
-    ops.push(Op::ShowText {
-        items: vec![TextItem::Text(text.to_string())],
-    });
+    ops.push(win_ansi_show_text_op(text));
     ops.push(Op::EndTextSection);
+}
+
+fn pdf_text_font_handles() -> (PdfFontHandle, PdfFontHandle) {
+    (
+        PdfFontHandle::Builtin(BuiltinFont::Helvetica),
+        PdfFontHandle::Builtin(BuiltinFont::HelveticaBold),
+    )
 }
 
 struct TreatmentPlanPdfLayout {
@@ -3497,17 +3498,8 @@ fn build_treatment_plan_html(context: &GeneratedTreatmentPlanContext) -> String 
 fn build_treatment_plan_pdf(
     context: &GeneratedTreatmentPlanContext,
 ) -> Result<Vec<u8>, &'static str> {
-    let mut font_warnings: Vec<String> = Vec::new();
-    let regular_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_TTF, 0, &mut font_warnings)
-        .ok_or("Failed to load PDF font")?;
-    let bold_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_BOLD_TTF, 0, &mut font_warnings)
-        .ok_or("Failed to load PDF font")?;
-
     let mut document = PdfDocument::new(&context.auto_name);
-    let regular_font_id = document.add_font(&regular_font);
-    let bold_font_id = document.add_font(&bold_font);
-    let regular_handle = PdfFontHandle::External(regular_font_id);
-    let bold_handle = PdfFontHandle::External(bold_font_id);
+    let (regular_handle, bold_handle) = pdf_text_font_handles();
 
     let title = context.title_override.clone().unwrap_or_else(|| {
         format!(
@@ -3805,9 +3797,10 @@ fn build_treatment_plan_pdf(
 
     let pages = layout.finish();
     let mut save_warnings: Vec<PdfWarnMsg> = Vec::new();
+    let save_options = pdf_text_save_options();
     Ok(document
         .with_pages(pages)
-        .save(&PdfSaveOptions::default(), &mut save_warnings))
+        .save(&save_options, &mut save_warnings))
 }
 
 fn build_medication_summary_html(context: &GeneratedMedicationSummaryContext) -> String {
@@ -4099,17 +4092,8 @@ fn build_medication_summary_html(context: &GeneratedMedicationSummaryContext) ->
 fn build_medication_summary_pdf(
     context: &GeneratedMedicationSummaryContext,
 ) -> Result<Vec<u8>, &'static str> {
-    let mut font_warnings: Vec<String> = Vec::new();
-    let regular_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_TTF, 0, &mut font_warnings)
-        .ok_or("Failed to load PDF font")?;
-    let bold_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_BOLD_TTF, 0, &mut font_warnings)
-        .ok_or("Failed to load PDF font")?;
-
     let mut document = PdfDocument::new(&context.auto_name);
-    let regular_font_id = document.add_font(&regular_font);
-    let bold_font_id = document.add_font(&bold_font);
-    let regular_handle = PdfFontHandle::External(regular_font_id);
-    let bold_handle = PdfFontHandle::External(bold_font_id);
+    let (regular_handle, bold_handle) = pdf_text_font_handles();
 
     let title = context.title_override.clone().unwrap_or_else(|| {
         format!(
@@ -4507,9 +4491,10 @@ fn build_medication_summary_pdf(
 
     let pages = layout.finish();
     let mut save_warnings: Vec<PdfWarnMsg> = Vec::new();
+    let save_options = pdf_text_save_options();
     Ok(document
         .with_pages(pages)
-        .save(&PdfSaveOptions::default(), &mut save_warnings))
+        .save(&save_options, &mut save_warnings))
 }
 
 fn build_framework_contract_html(context: &GeneratedFrameworkContractContext) -> String {
@@ -6445,17 +6430,8 @@ fn build_visa_invitation_html(context: &GeneratedVisaInvitationContext) -> Strin
 fn build_visa_invitation_pdf(
     context: &GeneratedVisaInvitationContext,
 ) -> Result<Vec<u8>, &'static str> {
-    let mut font_warnings: Vec<String> = Vec::new();
-    let regular_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_TTF, 0, &mut font_warnings)
-        .ok_or("Failed to load PDF font")?;
-    let bold_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_BOLD_TTF, 0, &mut font_warnings)
-        .ok_or("Failed to load PDF font")?;
-
     let mut document = PdfDocument::new(&context.auto_name);
-    let regular_font_id = document.add_font(&regular_font);
-    let bold_font_id = document.add_font(&bold_font);
-    let regular_handle = PdfFontHandle::External(regular_font_id);
-    let bold_handle = PdfFontHandle::External(bold_font_id);
+    let (regular_handle, bold_handle) = pdf_text_font_handles();
 
     let title = context.title_override.clone().unwrap_or_else(|| {
         format!(
@@ -6650,9 +6626,10 @@ fn build_visa_invitation_pdf(
 
     let pages = layout.finish();
     let mut save_warnings: Vec<PdfWarnMsg> = Vec::new();
+    let save_options = pdf_text_save_options();
     Ok(document
         .with_pages(pages)
-        .save(&PdfSaveOptions::default(), &mut save_warnings))
+        .save(&save_options, &mut save_warnings))
 }
 
 fn format_sticker_birth_date(value: NaiveDate) -> String {
@@ -6792,17 +6769,8 @@ fn build_patient_sticker_html(context: &GeneratedPatientStickerContext) -> Strin
 fn build_patient_sticker_pdf(
     context: &GeneratedPatientStickerContext,
 ) -> Result<Vec<u8>, &'static str> {
-    let mut font_warnings: Vec<String> = Vec::new();
-    let regular_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_TTF, 0, &mut font_warnings)
-        .ok_or("Failed to load PDF font")?;
-    let bold_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_BOLD_TTF, 0, &mut font_warnings)
-        .ok_or("Failed to load PDF font")?;
-
     let mut document = PdfDocument::new(&context.auto_name);
-    let regular_font_id = document.add_font(&regular_font);
-    let bold_font_id = document.add_font(&bold_font);
-    let regular_handle = PdfFontHandle::External(regular_font_id);
-    let bold_handle = PdfFontHandle::External(bold_font_id);
+    let (regular_handle, bold_handle) = pdf_text_font_handles();
 
     let width_mm = context.format.width_mm as f32;
     let height_mm = context.format.height_mm as f32;
@@ -6896,9 +6864,10 @@ fn build_patient_sticker_pdf(
     }
 
     let mut save_warnings: Vec<PdfWarnMsg> = Vec::new();
+    let save_options = pdf_text_save_options();
     Ok(document
         .with_pages(vec![PdfPage::new(Mm(width_mm), Mm(height_mm), ops)])
-        .save(&PdfSaveOptions::default(), &mut save_warnings))
+        .save(&save_options, &mut save_warnings))
 }
 
 fn provider_template_body_for_language<'a>(
@@ -7102,17 +7071,8 @@ fn build_provider_template_html(context: &GeneratedProviderTemplateContext) -> S
 fn build_provider_template_pdf(
     context: &GeneratedProviderTemplateContext,
 ) -> Result<Vec<u8>, &'static str> {
-    let mut font_warnings: Vec<String> = Vec::new();
-    let regular_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_TTF, 0, &mut font_warnings)
-        .ok_or("Failed to load PDF font")?;
-    let bold_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_BOLD_TTF, 0, &mut font_warnings)
-        .ok_or("Failed to load PDF font")?;
-
     let mut document = PdfDocument::new(&context.auto_name);
-    let regular_font_id = document.add_font(&regular_font);
-    let bold_font_id = document.add_font(&bold_font);
-    let regular_handle = PdfFontHandle::External(regular_font_id);
-    let bold_handle = PdfFontHandle::External(bold_font_id);
+    let (regular_handle, bold_handle) = pdf_text_font_handles();
 
     let footer_text = format!(
         "{} · {}",
@@ -7315,9 +7275,10 @@ fn build_provider_template_pdf(
     }
 
     let mut save_warnings: Vec<PdfWarnMsg> = Vec::new();
+    let save_options = pdf_text_save_options();
     Ok(document
         .with_pages(layout.finish())
-        .save(&PdfSaveOptions::default(), &mut save_warnings))
+        .save(&save_options, &mut save_warnings))
 }
 
 fn parse_share_status(value: &str) -> Option<ShareStatus> {
@@ -11001,27 +10962,18 @@ fn admin_preview_html(title: &str, lines: &[String]) -> String {
 }
 
 fn new_admin_pdf() -> Result<(PdfDocument, PdfFontHandle, PdfFontHandle), &'static str> {
-    let mut font_warnings: Vec<String> = Vec::new();
-    let regular_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_TTF, 0, &mut font_warnings)
-        .ok_or("Failed to load PDF font")?;
-    let bold_font = ParsedFont::from_bytes(TREATMENT_PLAN_ARIAL_BOLD_TTF, 0, &mut font_warnings)
-        .ok_or("Failed to load PDF font")?;
-    let mut document = PdfDocument::new("Generated document");
-    let regular_font_id = document.add_font(&regular_font);
-    let bold_font_id = document.add_font(&bold_font);
-    Ok((
-        document,
-        PdfFontHandle::External(regular_font_id),
-        PdfFontHandle::External(bold_font_id),
-    ))
+    let document = PdfDocument::new("Generated document");
+    let (regular, bold) = pdf_text_font_handles();
+    Ok((document, regular, bold))
 }
 
 fn finalize_admin_pdf(mut document: PdfDocument, layout: TreatmentPlanPdfLayout) -> Vec<u8> {
     let pages = layout.finish();
     let mut save_warnings: Vec<PdfWarnMsg> = Vec::new();
+    let save_options = pdf_text_save_options();
     document
         .with_pages(pages)
-        .save(&PdfSaveOptions::default(), &mut save_warnings)
+        .save(&save_options, &mut save_warnings)
 }
 
 fn admin_block(layout: &mut TreatmentPlanPdfLayout, text: &str, before: f32, after: f32) {
@@ -16682,4 +16634,63 @@ async fn list_document_categories(
     };
 
     Json(json!({ "categories": categories, "arts": arts })).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GeneratedPatientStickerContext, build_patient_sticker_pdf, pdf_text_font_handles};
+    use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
+    use chrono::NaiveDate;
+    use printpdf::{BuiltinFont, PdfFontHandle};
+
+    #[test]
+    fn patient_sticker_pdf_uses_renderable_builtin_font_text() {
+        let context = GeneratedPatientStickerContext {
+            patient_pid: "PT-UNIT-1".to_string(),
+            patient_title: Some("Dr.".to_string()),
+            patient_salutation: "Herr".to_string(),
+            patient_first_name: "Max".to_string(),
+            patient_last_name: "Müller".to_string(),
+            birth_date: NaiveDate::from_ymd_opt(1990, 1, 1).unwrap(),
+            country_code: Some("DE".to_string()),
+            insurance_provider: Some("AOK Rheinland".to_string()),
+            kt1: Some("KT1-UNIT".to_string()),
+            kt2: Some("KT2-UNIT".to_string()),
+            cost_code: Some("FRA".to_string()),
+            agency: PatientLabelAgencySettings {
+                name: "GMED Köln".to_string(),
+                care_of: "c/o Ärzteteam".to_string(),
+                address: Some("Agency Street 1, 50667 Cologne".to_string()),
+                phone: Some("+49 221 123456".to_string()),
+                email: Some("label@example.test".to_string()),
+            },
+            format: PATIENT_LABEL_FORMATS[1],
+            auto_name: "Patientenetikett".to_string(),
+            language: "de".to_string(),
+            generated_at: chrono::Utc::now(),
+        };
+
+        let bytes = build_patient_sticker_pdf(&context).unwrap();
+        let raw_pdf = String::from_utf8_lossy(&bytes);
+
+        assert!(raw_pdf.contains("/F5"));
+        assert!(raw_pdf.contains("/F6"));
+        assert!(raw_pdf.contains("ID: PT-UNIT-1"));
+        assert!(raw_pdf.contains("4DFC6C6C65722"));
+        assert!(!raw_pdf.contains("4DC3BC6C6C65722"));
+        assert!(!raw_pdf.contains("[] TJ"));
+
+        let extracted_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+        assert!(extracted_text.contains("ID: PT-UNIT-1"));
+        assert!(extracted_text.contains("Müller"));
+        assert!(extracted_text.contains("Agency Street 1"));
+    }
+
+    #[test]
+    fn document_pdf_font_handles_are_builtin_helvetica() {
+        let (regular, bold) = pdf_text_font_handles();
+
+        assert_eq!(regular, PdfFontHandle::Builtin(BuiltinFont::Helvetica));
+        assert_eq!(bold, PdfFontHandle::Builtin(BuiltinFont::HelveticaBold));
+    }
 }

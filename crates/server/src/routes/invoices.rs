@@ -8,8 +8,7 @@ use axum::{
 };
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use printpdf::{
-    Color, Mm, Op, ParsedFont, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, PdfWarnMsg,
-    Point, Pt, Rgb, TextItem,
+    BuiltinFont, Color, Mm, Op, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point, Pt, Rgb,
 };
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -22,6 +21,7 @@ use uuid::Uuid;
 use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::pdf_text::{pdf_text_save_options, win_ansi_show_text_op};
 use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -35,9 +35,6 @@ const INVOICE_PDF_BOTTOM_MARGIN_MM: f32 = 16.0;
 const INVOICE_PDF_FOOTER_GAP_MM: f32 = 10.0;
 const INVOICE_PDF_CONTENT_WIDTH_MM: f32 =
     INVOICE_PDF_PAGE_WIDTH_MM - INVOICE_PDF_LEFT_MARGIN_MM - INVOICE_PDF_RIGHT_MARGIN_MM;
-const INVOICE_ARIAL_TTF: &[u8] = include_bytes!("../../../../docs/comparison/fonts/arial.ttf");
-const INVOICE_ARIAL_BOLD_TTF: &[u8] =
-    include_bytes!("../../../../docs/comparison/fonts/arialbd.ttf");
 const AUTO_DUNNING_CHECK_INTERVAL_SECS: u64 = 60 * 60;
 const DEFAULT_AUTO_DUNNING_SECOND_DELAY_DAYS: i64 = 14;
 const DEFAULT_AUTO_DUNNING_COLLECTIONS_DELAY_DAYS: i64 = 28;
@@ -1245,10 +1242,15 @@ fn append_invoice_pdf_text_line(
     ops.push(Op::SetFillColor {
         col: invoice_pdf_color(color),
     });
-    ops.push(Op::ShowText {
-        items: vec![TextItem::Text(text.to_string())],
-    });
+    ops.push(win_ansi_show_text_op(text));
     ops.push(Op::EndTextSection);
+}
+
+fn invoice_pdf_text_font_handles() -> (PdfFontHandle, PdfFontHandle) {
+    (
+        PdfFontHandle::Builtin(BuiltinFont::Helvetica),
+        PdfFontHandle::Builtin(BuiltinFont::HelveticaBold),
+    )
 }
 
 fn invoice_pdf_footer_line(footer_text: &str, page_number: usize, total_pages: usize) -> String {
@@ -2430,17 +2432,8 @@ async fn load_invoice_pdf_context(
 }
 
 fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static str> {
-    let mut font_warnings = Vec::new();
-    let regular_font = ParsedFont::from_bytes(INVOICE_ARIAL_TTF, 0, &mut font_warnings)
-        .ok_or("Failed to load invoice PDF font")?;
-    let bold_font = ParsedFont::from_bytes(INVOICE_ARIAL_BOLD_TTF, 0, &mut font_warnings)
-        .ok_or("Failed to load invoice PDF bold font")?;
-
     let mut document = PdfDocument::new(&context.invoice_number);
-    let regular_font_id = document.add_font(&regular_font);
-    let bold_font_id = document.add_font(&bold_font);
-    let regular_handle = PdfFontHandle::External(regular_font_id);
-    let bold_handle = PdfFontHandle::External(bold_font_id);
+    let (regular_handle, bold_handle) = invoice_pdf_text_font_handles();
 
     let footer_text = format!(
         "{}: {}",
@@ -2815,9 +2808,10 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
     }
 
     let mut warnings: Vec<PdfWarnMsg> = Vec::new();
+    let save_options = pdf_text_save_options();
     let bytes = document
         .with_pages(layout.finish())
-        .save(&PdfSaveOptions::default(), &mut warnings);
+        .save(&save_options, &mut warnings);
     Ok(bytes)
 }
 
@@ -4327,10 +4321,72 @@ async fn update_invoice_status(
 
 #[cfg(test)]
 mod tests {
-    use super::invoice_pdf_footer_line;
+    use super::{
+        InvoicePdfContext, InvoicePdfLineItem, build_invoice_pdf, invoice_pdf_footer_line,
+    };
+    use chrono::{NaiveDate, Utc};
+    use uuid::Uuid;
 
     #[test]
     fn invoice_footer_includes_current_and_total_pages() {
         assert_eq!(invoice_pdf_footer_line("GMED", 2, 5), "GMED · Page 2 of 5");
+    }
+
+    #[test]
+    fn invoice_pdf_uses_renderable_builtin_font_text() {
+        let context = InvoicePdfContext {
+            invoice_id: Uuid::new_v4(),
+            patient_id: Uuid::new_v4(),
+            invoice_number: "INV-UNIT-1".to_string(),
+            invoice_type: "final".to_string(),
+            status: "sent".to_string(),
+            portal_visible: true,
+            hide_amounts_from_patient: false,
+            pdf_visible_to_patient: true,
+            issued_at: Utc::now(),
+            due_date: Some(NaiveDate::from_ymd_opt(2026, 6, 30).unwrap()),
+            total_net: "145.00".to_string(),
+            total_vat: "0.00".to_string(),
+            total_gross: "145.00".to_string(),
+            paid_amount: "0.00".to_string(),
+            balance_due: "145.00".to_string(),
+            notes: Some("Zahlbar nach Rechnungserhalt.".to_string()),
+            patient_pid: "PT-INV-UNIT".to_string(),
+            patient_name: "Max Müller".to_string(),
+            patient_title: Some("Dr.".to_string()),
+            birth_date: Some(NaiveDate::from_ymd_opt(1990, 1, 1).unwrap()),
+            order_number: "ORD-UNIT-1".to_string(),
+            quote_number: Some("Q-UNIT-1".to_string()),
+            language: "de".to_string(),
+            line_items: vec![InvoicePdfLineItem {
+                description: "Approved PDF line".to_string(),
+                quantity: "1".to_string(),
+                unit_price: "145.00".to_string(),
+                vat_rate: "0".to_string(),
+                is_cost_passthrough: false,
+                line_net: "145.00".to_string(),
+                line_vat: "0.00".to_string(),
+                line_gross: "145.00".to_string(),
+                notes: None,
+            }],
+            dunning_events: Vec::new(),
+        };
+
+        let bytes = build_invoice_pdf(&context).unwrap();
+        let raw_pdf = String::from_utf8_lossy(&bytes);
+
+        assert!(raw_pdf.contains("/F5"));
+        assert!(raw_pdf.contains("/F6"));
+        assert!(raw_pdf.contains("INV-UNIT-1"));
+        assert!(raw_pdf.contains("Approved PDF line"));
+        assert!(raw_pdf.contains("4D6178204DFC6C6C6572"));
+        assert!(!raw_pdf.contains("4D6178204DC3BC6C6C6572"));
+        assert!(!raw_pdf.contains("[] TJ"));
+
+        let extracted_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+        assert!(extracted_text.contains("INV-UNIT-1"));
+        assert!(extracted_text.contains("Approved PDF line"));
+        assert!(extracted_text.contains("PT-INV-UNIT"));
+        assert!(extracted_text.contains("Müller"));
     }
 }

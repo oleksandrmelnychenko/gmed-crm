@@ -31,8 +31,31 @@ pub struct GermanEquivalentResult {
     pub verification_status: String,
     pub substances: Vec<String>,
     pub note: Option<String>,
+    pub note_ru: Option<String>,
+    pub note_de: Option<String>,
     pub staff_warning: String,
+    pub staff_warning_ru: String,
+    pub staff_warning_de: String,
 }
+
+const ACTIVE_SUBSTANCE_REFERENCE_NOTE_EN: &str =
+    "Same active substance reference. Staff information only; not a prescription.";
+const ACTIVE_SUBSTANCE_REFERENCE_NOTE_RU: &str =
+    "Справочная связь по тому же действующему веществу. Только для команды, не назначение.";
+const ACTIVE_SUBSTANCE_REFERENCE_NOTE_DE: &str =
+    "Referenz zum gleichen Wirkstoff. Nur Team-Information, keine Verordnung.";
+
+const ACTIVE_SUBSTANCE_MATCH_NOTE_EN: &str =
+    "Matched by active substance. Staff information only; not a prescription.";
+const ACTIVE_SUBSTANCE_MATCH_NOTE_RU: &str =
+    "Совпадение по действующему веществу. Только для команды, не назначение.";
+const ACTIVE_SUBSTANCE_MATCH_NOTE_DE: &str =
+    "Abgleich über den Wirkstoff. Nur Team-Information, keine Verordnung.";
+
+const STAFF_WARNING_RU: &str =
+    "Немецкие эквиваленты являются только справочной информацией для команды, не назначением.";
+const STAFF_WARNING_DE: &str =
+    "Deutsche Äquivalente sind nur Team-Referenzinformationen, keine Verordnung.";
 
 #[derive(Debug, Serialize)]
 pub struct MedicationEquivalentResult {
@@ -268,6 +291,9 @@ fn equivalent_from_row(row: sqlx::postgres::PgRow) -> GermanEquivalentResult {
     let confidence = row
         .try_get::<Decimal, _>("confidence")
         .unwrap_or(Decimal::ZERO);
+    let source_note: Option<String> = row.try_get("note").unwrap_or_default();
+    let (note_ru, note_de) = localized_equivalent_note(source_note.as_deref());
+    let note = note_ru.clone().or(source_note);
     GermanEquivalentResult {
         equivalent_id: row.try_get("id").unwrap_or_default(),
         relationship_id: row.try_get("relationship_id").unwrap_or_default(),
@@ -282,10 +308,27 @@ fn equivalent_from_row(row: sqlx::postgres::PgRow) -> GermanEquivalentResult {
             .try_get("verification_status")
             .unwrap_or_else(|_| "candidate".to_string()),
         substances: row.try_get("substances").unwrap_or_default(),
-        note: row.try_get("note").unwrap_or_default(),
-        staff_warning:
-            "German equivalents are staff reference information only, not a prescription."
-                .to_string(),
+        note,
+        note_ru,
+        note_de,
+        staff_warning: STAFF_WARNING_RU.to_string(),
+        staff_warning_ru: STAFF_WARNING_RU.to_string(),
+        staff_warning_de: STAFF_WARNING_DE.to_string(),
+    }
+}
+
+fn localized_equivalent_note(note: Option<&str>) -> (Option<String>, Option<String>) {
+    match note {
+        Some(ACTIVE_SUBSTANCE_REFERENCE_NOTE_EN) => (
+            Some(ACTIVE_SUBSTANCE_REFERENCE_NOTE_RU.to_string()),
+            Some(ACTIVE_SUBSTANCE_REFERENCE_NOTE_DE.to_string()),
+        ),
+        Some(ACTIVE_SUBSTANCE_MATCH_NOTE_EN) => (
+            Some(ACTIVE_SUBSTANCE_MATCH_NOTE_RU.to_string()),
+            Some(ACTIVE_SUBSTANCE_MATCH_NOTE_DE.to_string()),
+        ),
+        Some(value) => (Some(value.to_string()), Some(value.to_string())),
+        None => (None, None),
     }
 }
 
