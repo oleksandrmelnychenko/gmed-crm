@@ -718,9 +718,15 @@ function buildAvailabilityEditorSchedule(value: string) {
   });
 }
 
-function normalizeAvailabilityEditorSchedule(schedule: WeeklyAvailabilitySchedule) {
+function normalizeAvailabilityEditorSchedule(
+  schedule: WeeklyAvailabilitySchedule,
+  edit?: { day: WeeklyAvailabilityRow["day"]; index: number; field: "start" | "end" },
+) {
   return schedule.map((row) => {
-    const intervals = normalizeAvailabilityEditorIntervals(row.intervals);
+    const intervals = normalizeAvailabilityEditorIntervals(
+      row.intervals,
+      edit?.day === row.day ? { index: edit.index, field: edit.field } : undefined,
+    );
     return {
       ...row,
       enabled: row.enabled && intervals.length > 0,
@@ -786,8 +792,11 @@ function WeeklyAvailabilityEditor({
     const end = addOneHour(previous.end);
     return previous.end < end ? { start: previous.end, end } : defaultInterval;
   };
-  const commit = (nextSchedule: WeeklyAvailabilitySchedule) => {
-    const normalized = normalizeAvailabilityEditorSchedule(nextSchedule);
+  const commit = (
+    nextSchedule: WeeklyAvailabilitySchedule,
+    edit?: { day: WeeklyAvailabilityRow["day"]; index: number; field: "start" | "end" },
+  ) => {
+    const normalized = normalizeAvailabilityEditorSchedule(nextSchedule, edit);
     const nextValue = formatWeeklyAvailabilityValue(normalized);
     setDraftSchedule(normalized);
     if (nextValue !== value) {
@@ -825,8 +834,8 @@ function WeeklyAvailabilityEditor({
     field: "start" | "end",
     nextValue: string,
   ) => {
-    setDraftSchedule((current) =>
-      current.map((row) =>
+    commit(
+      draftSchedule.map((row) =>
         row.day === day
           ? {
               ...row,
@@ -836,6 +845,7 @@ function WeeklyAvailabilityEditor({
             }
           : row,
       ),
+      { day, index, field },
     );
   };
   const addInterval = (day: WeeklyAvailabilityRow["day"]) => {
