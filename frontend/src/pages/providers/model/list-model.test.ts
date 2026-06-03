@@ -298,14 +298,14 @@ describe("weekly availability helpers", () => {
     expect(formatWeeklyAvailabilityDisplay("Mo 18:00-00:00", "de")).toBe("Mo 18:00-24:00");
   });
 
-  it("pads incomplete minute input instead of falling back to a one-minute interval", () => {
+  it("keeps the picked time verbatim — no padding, reformatting or validation", () => {
     expect(normalizeAvailabilityEditorIntervals([{ start: "9:0", end: "22:0" }])).toEqual([
-      { start: "09:00", end: "22:00" },
+      { start: "9:0", end: "22:0" },
     ]);
     expect(normalizeAvailabilityEditorIntervals([{ start: "09:00", end: "22:0" }])).toEqual([
-      { start: "09:00", end: "22:00" },
+      { start: "09:00", end: "22:0" },
     ]);
-    expect(formatWeeklyAvailabilityDisplay("Mo 9:0-22:0", "de")).toBe("Mo 09:00-22:00");
+    expect(formatWeeklyAvailabilityDisplay("Mo 9:0-22:0", "de")).toBe("Mo 9:0-22:0");
   });
 
   it("commits picker interval edits into the serialized opening hours immediately", () => {

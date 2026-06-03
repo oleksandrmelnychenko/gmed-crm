@@ -367,22 +367,14 @@ function weeklyDayRange(
   ];
 }
 
-function normalizeAvailabilityTime(value: string) {
-  const match = value.trim().match(/^(\d{1,2}):(\d{1,2})$/);
-  if (!match) return "";
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return "";
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return "";
-  return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
-}
-
 export function normalizeAvailabilityEditorIntervals(
   intervals: readonly WeeklyAvailabilityInterval[],
 ) {
+  // No validation or reformatting — keep exactly what the user picked. Drop only an
+  // interval that is missing a side. Any time can be entered.
   return intervals.flatMap((interval) => {
-    const start = normalizeAvailabilityTime(interval.start);
-    const end = normalizeAvailabilityTime(interval.end);
+    const start = interval.start.trim();
+    const end = interval.end.trim();
     if (!start || !end) return [];
     return [{ start, end }];
   });
@@ -428,8 +420,8 @@ function normalizeAvailabilityIntervals(
 ) {
   const seen = new Set<string>();
   return intervals.flatMap((interval) => {
-    const start = normalizeAvailabilityTime(interval.start);
-    const end = normalizeAvailabilityTime(interval.end);
+    const start = interval.start.trim();
+    const end = interval.end.trim();
     const key = `${start}-${end}`;
     if (!start || !end || seen.has(key)) return [];
     seen.add(key);
