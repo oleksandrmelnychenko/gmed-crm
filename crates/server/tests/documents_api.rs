@@ -4106,6 +4106,11 @@ async fn document_templates_can_generate_framework_contract_pdf_document() {
     assert_eq!(status, StatusCode::OK);
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 1000);
+    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(pdf_text.contains("Informationsblatt zum Datenschutz"));
+    assert!(pdf_text.contains("Beschwerderecht"));
+    assert!(pdf_text.contains("datenschutz@gmed-health.com"));
+    assert!(!pdf_text.contains("(E-Mail-Adresse"));
 }
 
 #[tokio::test]

@@ -5912,7 +5912,7 @@ fn build_framework_contract_pdf(
     );
     fc_body(
         &mut layout,
-        "Bevor Sie von Ihrem Beschwerderecht bei einer Datenschutzaufsichtsbehörde Gebrauch machen, möchten wir Sie bitten, zunächst noch einmal auf uns zuzukommen (beispielsweise über (E-Mail-Adresse oder durch Anschreiben an Ihren Ansprechpartner).",
+        "Bevor Sie von Ihrem Beschwerderecht bei einer Datenschutzaufsichtsbehörde Gebrauch machen, möchten wir Sie bitten, zunächst noch einmal auf uns zuzukommen (beispielsweise über datenschutz@gmed-health.com oder durch Anschreiben an Ihren Ansprechpartner).",
     );
 
     // ======================================================================
