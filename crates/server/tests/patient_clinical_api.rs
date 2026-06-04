@@ -1106,5 +1106,9 @@ async fn patient_clinical_pdf_export_returns_pdf() {
         .await
         .unwrap();
     assert!(bytes.starts_with(b"%PDF"), "expected PDF magic bytes");
-    assert!(bytes.len() > 500, "expected a non-trivial PDF, got {} bytes", bytes.len());
+    assert!(
+        bytes.len() > 500,
+        "expected a non-trivial PDF, got {} bytes",
+        bytes.len()
+    );
 }
