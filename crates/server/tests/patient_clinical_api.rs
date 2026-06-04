@@ -926,9 +926,18 @@ async fn patient_clinical_narrative_upserts() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["narrative"]["anamnese_aktuelle"], "Fieber und Husten seit zwei Tagen.");
-    assert_eq!(body["narrative"]["anamnese_sozial"], "Lebt allein, mobil mit Gehstock.");
-    assert_eq!(body["narrative"]["beurteilung"], "Verdacht auf ambulant erworbene Pneumonie.");
+    assert_eq!(
+        body["narrative"]["anamnese_aktuelle"],
+        "Fieber und Husten seit zwei Tagen."
+    );
+    assert_eq!(
+        body["narrative"]["anamnese_sozial"],
+        "Lebt allein, mobil mit Gehstock."
+    );
+    assert_eq!(
+        body["narrative"]["beurteilung"],
+        "Verdacht auf ambulant erworbene Pneumonie."
+    );
     assert!(body["narrative"]["verlauf"].is_null());
 
     // Second save upserts the same row (no duplicate, value replaced).
@@ -954,7 +963,10 @@ async fn patient_clinical_narrative_upserts() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["narrative"]["anamnese_aktuelle"], "Beschwerden gebessert.");
+    assert_eq!(
+        body["narrative"]["anamnese_aktuelle"],
+        "Beschwerden gebessert."
+    );
     assert_eq!(body["narrative"]["verlauf"], "Komplikationsloser Verlauf.");
     // Fields omitted from the second payload are cleared by the upsert.
     assert!(body["narrative"]["beurteilung"].is_null());
@@ -966,4 +978,79 @@ async fn patient_clinical_narrative_upserts() {
             .await
             .unwrap();
     assert_eq!(count, 1);
+}
+
+#[tokio::test]
+async fn patient_procedures_round_trip_with_ops_code() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-procedures");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_provider_doctor(&pool, provider_id, &tag).await;
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/procedures"),
+        &pm_bearer,
+        Some(json!({
+            "items": [
+                {
+                    "label": "Appendektomie, laparoskopisch",
+                    "ops_code": "5-470.10",
+                    "performed_on": "31.07.2016",
+                    "provider_id": provider_id.to_string(),
+                    "doctor_id": doctor_id.to_string(),
+                },
+            ],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let procedures = body["procedures"].as_array().expect("procedures array");
+    assert_eq!(procedures.len(), 1);
+    assert_eq!(procedures[0]["label"], "Appendektomie, laparoskopisch");
+    assert_eq!(procedures[0]["ops_code"], "5-470.10");
+    assert_eq!(procedures[0]["performed_on"], "31.07.2016");
+    assert_eq!(procedures[0]["provider_name"], format!("Provider {tag}"));
+    assert_eq!(procedures[0]["doctor_name"], format!("Doctor {tag}"));
+
+    // Replace-all clears the section.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/procedures"),
+        &pm_bearer,
+        Some(json!({ "items": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["procedures"].as_array().expect("procedures").len(), 0);
 }

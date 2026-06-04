@@ -45,6 +45,10 @@ pub fn router() -> Router<AppState> {
             post(save_patient_narrative),
         )
         .route(
+            "/patients/{patient_id}/procedures",
+            post(save_patient_procedures),
+        )
+        .route(
             "/patients/{patient_id}/card-entries",
             get(list_patient_card_entries).post(create_patient_card_entry),
         )
@@ -6900,6 +6904,42 @@ async fn get_patient_clinical(
         })
         .collect::<Vec<_>>();
 
+    let proc_rows = sqlx::query(
+        r#"SELECT p2.id, p2.label, p2.ops_code, p2.performed_on, p2.note,
+                  p2.provider_id, pv.name AS provider_name,
+                  p2.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title
+           FROM patient_procedures p2
+           LEFT JOIN providers pv ON pv.id = p2.provider_id
+           LEFT JOIN provider_doctors dr ON dr.id = p2.doctor_id
+           WHERE p2.patient_id = $1
+           ORDER BY p2.sort_order, p2.created_at"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "load patient procedures");
+        load_fail()
+    })?;
+
+    let procedures = proc_rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.get::<Uuid, _>("id"),
+                "label": row.get::<String, _>("label"),
+                "ops_code": row.get::<Option<String>, _>("ops_code"),
+                "performed_on": row.get::<Option<String>, _>("performed_on"),
+                "note": row.get::<Option<String>, _>("note"),
+                "provider_id": row.get::<Option<Uuid>, _>("provider_id"),
+                "provider_name": row.get::<Option<String>, _>("provider_name"),
+                "doctor_id": row.get::<Option<Uuid>, _>("doctor_id"),
+                "doctor_name": row.get::<Option<String>, _>("doctor_name"),
+                "doctor_title": row.get::<Option<String>, _>("doctor_title"),
+            })
+        })
+        .collect::<Vec<_>>();
+
     let narrative_row = sqlx::query(
         r#"SELECT anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
                   untersuchungsbefund, beurteilung, verlauf
@@ -6930,6 +6970,7 @@ async fn get_patient_clinical(
         "diagnoses": diagnoses,
         "medications": medications,
         "examinations": examinations,
+        "procedures": procedures,
         "narrative": narrative,
     })))
 }
@@ -7219,4 +7260,82 @@ async fn save_patient_narrative(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     Json(json!({ "ok": true })).into_response()
+}
+
+#[derive(Deserialize)]
+struct PatientProcedureInput {
+    #[serde(default)]
+    provider_id: Option<String>,
+    #[serde(default)]
+    doctor_id: Option<String>,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    ops_code: Option<String>,
+    #[serde(default)]
+    performed_on: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+async fn save_patient_procedures(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+    Json(body): Json<PatientClinicalItems<PatientProcedureInput>>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+        return e;
+    }
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin patient procedures tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(e) = sqlx::query("DELETE FROM patient_procedures WHERE patient_id = $1")
+        .bind(patient_uuid)
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient procedures");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    let mut saved = 0i32;
+    for item in body.items {
+        let Some(label) = clinical_opt_text(item.label) else {
+            continue;
+        };
+        if let Err(e) = sqlx::query(
+            "INSERT INTO patient_procedures (patient_id, provider_id, doctor_id, label, ops_code, performed_on, note, sort_order)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        )
+        .bind(patient_uuid)
+        .bind(clinical_opt_uuid(item.provider_id))
+        .bind(clinical_opt_uuid(item.doctor_id))
+        .bind(&label)
+        .bind(clinical_opt_text(item.ops_code))
+        .bind(clinical_opt_text(item.performed_on))
+        .bind(clinical_opt_text(item.note))
+        .bind(saved)
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "insert patient procedure");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        saved += 1;
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient procedures");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    Json(json!({ "ok": true, "count": saved })).into_response()
 }

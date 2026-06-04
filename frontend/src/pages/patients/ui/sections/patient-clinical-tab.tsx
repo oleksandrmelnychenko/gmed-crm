@@ -21,11 +21,13 @@ import {
   savePatientExaminations,
   savePatientMedications,
   savePatientNarrative,
+  savePatientProcedures,
   type ClinicalAttribution,
   type ClinicalDiagnosis,
   type ClinicalExamination,
   type ClinicalMedication,
   type ClinicalNarrative,
+  type ClinicalProcedure,
   type PatientRecommendation,
 } from "@/pages/patients/data/patient-clinical";
 
@@ -73,6 +75,16 @@ function blankMedication(): ClinicalMedication {
     einheit: null,
     hinweis: null,
     grund: null,
+  };
+}
+
+function blankProcedure(): ClinicalProcedure {
+  return {
+    ...blankAttribution(),
+    label: "",
+    ops_code: null,
+    performed_on: null,
+    note: null,
   };
 }
 
@@ -196,6 +208,8 @@ function ClinicalSection<T extends { id?: string }>({
   onSave,
   canManage,
   tx,
+  groups,
+  groupOf,
 }: {
   title: string;
   count?: ReactNode;
@@ -207,6 +221,9 @@ function ClinicalSection<T extends { id?: string }>({
   onSave: (next: T[]) => Promise<unknown>;
   canManage: boolean;
   tx: Bilingual;
+  /** When provided, rows render under sub-headers (a Haupt/Neben-style tree). */
+  groups?: Array<{ key: string; label: string }>;
+  groupOf?: (item: T) => string;
 }) {
   const [list, setList] = useState<T[]>(items);
   const [editing, setEditing] = useState<{ index: number | null; draft: T } | null>(null);
@@ -240,6 +257,40 @@ function ClinicalSection<T extends { id?: string }>({
     void persist(next);
   }
 
+  const renderRow = (item: T, index: number) => (
+    <div
+      key={item.id ?? index}
+      className="flex items-start justify-between gap-3 rounded-lg border border-border/50 bg-background px-3 py-2"
+    >
+      <div className="min-w-0 flex-1">{rowView(item)}</div>
+      {canManage ? (
+        <div className="flex shrink-0 gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 rounded-md px-2 text-xs"
+            onClick={() => setEditing({ index, draft: { ...item } })}
+          >
+            {tx("Изм.", "Bearb.")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 rounded-md px-2 text-xs text-destructive"
+            disabled={busy}
+            onClick={() => void persist(list.filter((_, i) => i !== index))}
+          >
+            {tx("Удал.", "Lösch.")}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const indexed = list.map((item, index) => ({ item, index }));
+
   return (
     <section className="rounded-xl border border-border/70 bg-card">
       <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
@@ -267,37 +318,20 @@ function ClinicalSection<T extends { id?: string }>({
           </p>
         ) : null}
 
-        {list.map((item, index) => (
-          <div
-            key={item.id ?? index}
-            className="flex items-start justify-between gap-3 rounded-lg border border-border/50 bg-background px-3 py-2"
-          >
-            <div className="min-w-0 flex-1">{rowView(item)}</div>
-            {canManage ? (
-              <div className="flex shrink-0 gap-1">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 rounded-md px-2 text-xs"
-                  onClick={() => setEditing({ index, draft: { ...item } })}
-                >
-                  {tx("Изм.", "Bearb.")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 rounded-md px-2 text-xs text-destructive"
-                  disabled={busy}
-                  onClick={() => void persist(list.filter((_, i) => i !== index))}
-                >
-                  {tx("Удал.", "Lösch.")}
-                </Button>
-              </div>
-            ) : null}
-          </div>
-        ))}
+        {groups && groupOf
+          ? groups.map((group) => {
+              const rows = indexed.filter(({ item }) => groupOf(item) === group.key);
+              if (rows.length === 0) return null;
+              return (
+                <div key={group.key} className="space-y-2">
+                  <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {group.label}
+                  </p>
+                  {rows.map(({ item, index }) => renderRow(item, index))}
+                </div>
+              );
+            })
+          : indexed.map(({ item, index }) => renderRow(item, index))}
 
         {editing ? (
           <div className="space-y-3 rounded-lg border border-primary/40 bg-primary/[0.03] p-3">
@@ -423,6 +457,7 @@ export function PatientClinicalTab({
   const [diagnoses, setDiagnoses] = useState<ClinicalDiagnosis[]>([]);
   const [medications, setMedications] = useState<ClinicalMedication[]>([]);
   const [examinations, setExaminations] = useState<ClinicalExamination[]>([]);
+  const [procedures, setProcedures] = useState<ClinicalProcedure[]>([]);
   const [narrative, setNarrative] = useState<ClinicalNarrative>(blankNarrative());
   const [recommendations, setRecommendations] = useState<PatientRecommendation[]>([]);
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
@@ -443,6 +478,7 @@ export function PatientClinicalTab({
         setDiagnoses(clinical.diagnoses ?? []);
         setMedications(clinical.medications ?? []);
         setExaminations(clinical.examinations ?? []);
+        setProcedures(clinical.procedures ?? []);
         setNarrative(clinical.narrative ?? blankNarrative());
         setRecommendations(recs ?? []);
         setProviders(providerRows ?? []);
@@ -510,6 +546,11 @@ export function PatientClinicalTab({
         isValid={(d) => d.label.trim() !== ""}
         canManage={canManage}
         tx={tx}
+        groups={[
+          { key: "main", label: tx("Основной диагноз", "Hauptdiagnose") },
+          { key: "secondary", label: tx("Сопутствующие диагнозы", "Nebendiagnosen") },
+        ]}
+        groupOf={(d) => d.kind}
         onSave={async (next) => {
           await savePatientDiagnoses(patientId, next);
           setDiagnoses(next);
@@ -625,6 +666,82 @@ export function PatientClinicalTab({
         )}
       />
 
+      {/* ---- Therapie / Procedures (OPS) ---- */}
+      <ClinicalSection<ClinicalProcedure>
+        title={tx("Терапия / Процедуры", "Therapie / Eingriffe")}
+        items={procedures}
+        blank={blankProcedure}
+        isValid={(p) => p.label.trim() !== ""}
+        canManage={canManage}
+        tx={tx}
+        onSave={async (next) => {
+          await savePatientProcedures(patientId, next);
+          setProcedures(next);
+        }}
+        rowView={(p) => (
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              {p.performed_on ? (
+                <span className="text-[11px] text-muted-foreground">{p.performed_on}</span>
+              ) : null}
+              <span className="text-sm font-medium text-foreground">{p.label}</span>
+              {p.ops_code ? (
+                <span className="font-mono text-[11px] text-muted-foreground">({p.ops_code})</span>
+              ) : null}
+            </div>
+            {p.note ? <p className="text-[11px] text-muted-foreground">{p.note}</p> : null}
+            {attributionRow(p)}
+          </div>
+        )}
+        form={(draft, set) => (
+          <div className="space-y-2">
+            <div>
+              <FieldLabel>{tx("Терапия / Вмешательство", "Therapie / Eingriff")}</FieldLabel>
+              <Input
+                value={draft.label}
+                onChange={(e) => set({ label: e.target.value })}
+                className={inputClass}
+                placeholder="Appendektomie, laparoskopisch"
+              />
+            </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              <div>
+                <FieldLabel>OPS</FieldLabel>
+                <Input
+                  value={draft.ops_code ?? ""}
+                  onChange={(e) => set({ ops_code: trimToNull(e.target.value) })}
+                  className={inputClass}
+                  placeholder="5-470.10"
+                />
+              </div>
+              <div>
+                <FieldLabel>{tx("Дата", "Datum")}</FieldLabel>
+                <Input
+                  value={draft.performed_on ?? ""}
+                  onChange={(e) => set({ performed_on: trimToNull(e.target.value) })}
+                  className={inputClass}
+                  placeholder="31.07.2016"
+                />
+              </div>
+            </div>
+            <div>
+              <FieldLabel>{tx("Примечание", "Notiz")}</FieldLabel>
+              <Input
+                value={draft.note ?? ""}
+                onChange={(e) => set({ note: trimToNull(e.target.value) })}
+                className={inputClass}
+              />
+            </div>
+            <ProviderDoctorFields
+              value={draft}
+              providers={providers}
+              tx={tx}
+              onChange={(attr) => set(attr as Partial<ClinicalProcedure>)}
+            />
+          </div>
+        )}
+      />
+
       {/* ---- Anamnese / Befund / Beurteilung / Verlauf ---- */}
       <NarrativeSection
         value={narrative}
@@ -644,6 +761,12 @@ export function PatientClinicalTab({
         isValid={(m) => m.handelsname.trim() !== ""}
         canManage={canManage}
         tx={tx}
+        groups={[
+          { key: "dauer", label: tx("Постоянная", "Dauermedikation") },
+          { key: "besondere", label: tx("По особым показаниям", "Zu besonderen Zeiten") },
+          { key: "selbst", label: tx("Самолечение", "Selbstmedikation") },
+        ]}
+        groupOf={(m) => m.category}
         onSave={async (next) => {
           await savePatientMedications(patientId, next);
           setMedications(next);
