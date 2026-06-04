@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
+  canViewPatientClinicalProfile,
   canViewPatientContractsSurface,
   canViewPatientDocumentsSurface,
   canViewPatientInvoicesSurface,
@@ -29,6 +30,7 @@ export function PatientWorkspaceNav() {
   const l = (key: string) => t.uiText[key] ?? key;
 
   const canViewOperationalSurface = canViewPatientOperationalSurface(user?.role);
+  const canViewClinical = canViewPatientClinicalProfile(user?.role);
   const canViewDocuments = canViewPatientDocumentsSurface(user?.role);
   const canViewContracts = canViewPatientContractsSurface(user?.role);
   const canViewInvoices = canViewPatientInvoicesSurface(user?.role);
@@ -40,6 +42,7 @@ export function PatientWorkspaceNav() {
   const currentTab = routeId
     ? normalizePatientDetailTab(searchParams.get("tab"), {
         canViewOperationalSurface,
+        canViewClinical,
         canViewDocuments,
         canViewContracts,
         canViewInvoices,
@@ -47,6 +50,7 @@ export function PatientWorkspaceNav() {
     : id
       ? normalizePatientDetailTab(contextualTab, {
           canViewOperationalSurface,
+          canViewClinical,
           canViewDocuments,
           canViewContracts,
           canViewInvoices,
@@ -87,7 +91,7 @@ export function PatientWorkspaceNav() {
           icon: CalendarClock,
         }
       : null,
-    canViewOperationalSurface
+    canViewClinical
       ? {
           key: "clinical",
           label: l("patients_clinical_profile"),

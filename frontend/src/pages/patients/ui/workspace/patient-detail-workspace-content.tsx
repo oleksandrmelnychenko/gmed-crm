@@ -144,6 +144,9 @@ function preloadPatientWorkspaceTab(tab: string) {
     case "appointments":
       void loadPatientAppointmentsTab();
       break;
+    case "clinical":
+      void loadPatientClinicalTab();
+      break;
     case "documents":
       void loadPatientDocumentsTab();
       break;

@@ -90,6 +90,7 @@ type PatientTabAccess = {
   canViewDocuments: boolean;
   canViewContracts: boolean;
   canViewInvoices: boolean;
+  canViewClinical?: boolean;
 };
 
 type PatientTimelineFilters = {
@@ -154,11 +155,15 @@ const PATIENT_OPERATIONAL_TAB_KEYS = new Set([
   "cases",
   "orders",
   "appointments",
-  "clinical",
   "workflow",
   "curators",
   "timeline",
 ]);
+
+// Clinical profile (diagnoses / medication / Befunde) is restricted to the same
+// roles the backend allows on /patients/{id}/clinical — not the broader
+// operational surface (which also includes billing / interpreter / concierge).
+const PATIENT_CLINICAL_PROFILE_ROLES = new Set(["ceo", "patient_manager", "it_admin"]);
 
 const PATIENT_LABEL_BIRTH_DATE_FORMATTER = new Intl.DateTimeFormat("de-DE", {
   day: "2-digit",
@@ -210,6 +215,10 @@ export function canViewPatientContractsSurface(role?: string) {
   return PATIENT_CONTRACT_SURFACE_ROLES.has(role ?? "");
 }
 
+export function canViewPatientClinicalProfile(role?: string) {
+  return PATIENT_CLINICAL_PROFILE_ROLES.has(role ?? "");
+}
+
 export function canViewPatientInvoicesSurface(role?: string) {
   return PATIENT_INVOICE_SURFACE_ROLES.has(role ?? "");
 }
@@ -217,6 +226,9 @@ export function canViewPatientInvoicesSurface(role?: string) {
 export function normalizePatientDetailTab(tab: string | null | undefined, access: PatientTabAccess) {
   const requestedTab = (tab ?? "profile").trim() || "profile";
   if (PATIENT_OPERATIONAL_TAB_KEYS.has(requestedTab) && !access.canViewOperationalSurface) {
+    return "profile";
+  }
+  if (requestedTab === "clinical" && !access.canViewClinical) {
     return "profile";
   }
   if (requestedTab === "documents" && !access.canViewDocuments) {

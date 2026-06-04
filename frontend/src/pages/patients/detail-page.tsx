@@ -44,6 +44,7 @@ import {
   canViewPatientContractsSurface,
   canViewPatientDocumentsSurface,
   canViewPatientInvoicesSurface,
+  canViewPatientClinicalProfile,
   canViewPatientOperationalSurface,
   DEFAULT_PATIENT_LABEL_FORMAT_ID,
   filterPatientTimelineItems,
@@ -1257,6 +1258,7 @@ function usePatientDetailPageContent() {
   const canManage = user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "teamlead_interpreter";
   const canManageRelations = user?.role === "ceo" || user?.role === "patient_manager";
   const canViewOperationalSurface = canViewPatientOperationalSurface(user?.role);
+  const canViewClinical = canViewPatientClinicalProfile(user?.role);
   const canViewDocuments = canViewPatientDocumentsSurface(user?.role);
   const canOpenDocumentsWorkspace = canOpenPatientDocumentsWorkspace(user?.role);
   const canManageDocuments =
@@ -1381,6 +1383,12 @@ function usePatientDetailPageContent() {
       ? {
           key: "appointments",
           label: t.appointments_title,
+        }
+      : null,
+    canViewClinical
+      ? {
+          key: "clinical",
+          label: l("patients_clinical_profile"),
         }
       : null,
     canViewDocuments
@@ -1788,6 +1796,7 @@ function usePatientDetailPageContent() {
     const requestedTab = searchParams.get("tab");
     const normalizedTab = normalizePatientDetailTab(requestedTab, {
       canViewOperationalSurface,
+      canViewClinical,
       canViewDocuments,
       canViewContracts,
       canViewInvoices,
