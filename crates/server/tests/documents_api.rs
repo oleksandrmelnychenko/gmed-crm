@@ -3003,6 +3003,14 @@ async fn appointment_confirmation_auto_generates_doc_id() {
         "generated appointment confirmation must include auto Doc.-ID {expected_doc_id}; got: {pdf_text:?}"
     );
     assert!(
+        pdf_text.contains("Reisepass Nr.: ____________"),
+        "generated appointment confirmation must keep the passport-number socket when no binding is provided; got: {pdf_text:?}"
+    );
+    assert!(
+        pdf_text.contains("gültig bis ____________"),
+        "generated appointment confirmation must keep the passport-validity socket when no binding is provided; got: {pdf_text:?}"
+    );
+    assert!(
         !pdf_text.contains("Doc.-ID: ____________"),
         "generated appointment confirmation must not leave Doc.-ID blank; got: {pdf_text:?}"
     );

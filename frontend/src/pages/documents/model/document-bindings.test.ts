@@ -75,15 +75,30 @@ describe("document template binding payloads", () => {
       buildBindingsPayload("appointment_confirmation", {
         clinics_text:
           "Klinik München | Musterstr. 1, München\nPraxis Berlin",
-        doc_id: "DOC-1",
+        passport_number: "MA1234567",
+        passport_valid_until: "2050-01-01",
       }),
     ).toEqual({
-      doc_id: "DOC-1",
+      passport_number: "MA1234567",
+      passport_valid_until: "2050-01-01",
       clinics: [
         { name: "Klinik München", address: "Musterstr. 1, München" },
         { name: "Praxis Berlin", address: undefined },
       ],
     });
+  });
+
+  it("shows passport sockets first for appointment confirmation", () => {
+    expect(
+      DOCUMENT_BINDING_FIELDS.appointment_confirmation
+        .slice(0, 2)
+        .map((field) => field.key),
+    ).toEqual(["passport_number", "passport_valid_until"]);
+    expect(
+      DOCUMENT_BINDING_FIELDS.appointment_confirmation.some(
+        (field) => field.key === "doc_id",
+      ),
+    ).toBe(false);
   });
 
   it("returns null when a template has no non-empty known bindings", () => {

@@ -93,7 +93,6 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     { key: "estimate_total", label: "Gesamt (Spanne)", kind: "text" },
   ],
   appointment_confirmation: [
-    { key: "doc_id", label: "Doc-ID", kind: "text" },
     { key: "passport_number", label: "Reisepass-Nr.", kind: "text" },
     { key: "passport_valid_until", label: "Reisepass gültig bis", kind: "date" },
     { key: "period_from", label: "Erste Untersuchung am", kind: "date" },

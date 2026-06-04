@@ -12520,21 +12520,17 @@ fn build_appointment_confirmation_pdf(
         .birth_date
         .map(|value| format!(", geb. am {}", value.format("%d.%m.%Y")))
         .unwrap_or_default();
-    let passport = match (
-        context
-            .passport_number
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty()),
-        context.passport_valid_until,
-    ) {
-        (Some(number), Some(valid)) => format!(
-            ", Reisepass Nr.: {number}, gültig bis {}",
-            valid.format("%d.%m.%Y")
-        ),
-        (Some(number), None) => format!(", Reisepass Nr.: {number}"),
-        _ => String::new(),
-    };
+    let passport_number = context
+        .passport_number
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("____________");
+    let passport_valid_until = context
+        .passport_valid_until
+        .map(|value| value.format("%d.%m.%Y").to_string())
+        .unwrap_or_else(|| "____________".to_string());
+    let passport = format!(", Reisepass Nr.: {passport_number}, gültig bis {passport_valid_until}");
     let clinics = if context.clinics.is_empty() {
         "den vereinbarten Kliniken".to_string()
     } else {
