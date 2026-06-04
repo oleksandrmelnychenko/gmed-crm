@@ -103,6 +103,14 @@ async fn add_provider_specialization(
     .unwrap();
 }
 
+async fn taxonomy_node_id(pool: &PgPool, code: &str) -> Uuid {
+    sqlx::query_scalar("SELECT id FROM provider_taxonomy_nodes WHERE code = $1")
+        .bind(code)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
 #[tokio::test]
 async fn provider_people_returns_doctors_staff_counts_and_patient_filter() {
     let Some((app, pool, admin_id)) = test_context().await else {
@@ -120,6 +128,26 @@ async fn provider_people_returns_doctors_staff_counts_and_patient_filter() {
     )
     .bind(format!("People Clinic {tag}"))
     .fetch_one(&pool)
+    .await
+    .unwrap();
+    let clinic_taxonomy_id =
+        taxonomy_node_id(&pool, "medical_clinics_practices_specialized_centers").await;
+    let clinic_parent_taxonomy_id: Uuid =
+        sqlx::query_scalar("SELECT parent_id FROM provider_taxonomy_nodes WHERE id = $1")
+            .bind(clinic_taxonomy_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let pharmacy_taxonomy_id = taxonomy_node_id(&pool, "medical_pharmacies").await;
+    sqlx::query(
+        r#"INSERT INTO provider_taxonomy_assignments (provider_id, taxonomy_node_id, is_primary)
+           VALUES ($1, $2, TRUE)
+           ON CONFLICT (provider_id, taxonomy_node_id)
+           DO UPDATE SET is_primary = EXCLUDED.is_primary"#,
+    )
+    .bind(provider_id)
+    .bind(clinic_taxonomy_id)
+    .execute(&pool)
     .await
     .unwrap();
 
@@ -309,6 +337,50 @@ async fn provider_people_returns_doctors_staff_counts_and_patient_filter() {
     let staff_role_items = staff_role_body.as_array().expect("staff role array");
     assert_eq!(staff_role_items.len(), 1);
     assert_eq!(staff_role_items[0]["staff_id"], staff_id.to_string());
+
+    let (status, taxonomy_body) = json_request(
+        &app,
+        "GET",
+        &format!(
+            "/api/v1/provider-people?person_type=all&search={tag}&provider_taxonomy_node_id={clinic_parent_taxonomy_id}"
+        ),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let taxonomy_items = taxonomy_body.as_array().expect("taxonomy filtered array");
+    assert!(
+        taxonomy_items
+            .iter()
+            .any(|item| item["doctor_id"] == doctor_id.to_string()),
+        "doctor must be listed through parent taxonomy filter"
+    );
+    assert!(
+        taxonomy_items
+            .iter()
+            .any(|item| item["staff_id"] == staff_id.to_string()),
+        "staff must be listed through parent taxonomy filter"
+    );
+
+    let (status, wrong_taxonomy_body) = json_request(
+        &app,
+        "GET",
+        &format!(
+            "/api/v1/provider-people?person_type=all&search={tag}&provider_taxonomy_node_id={pharmacy_taxonomy_id}"
+        ),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        wrong_taxonomy_body
+            .as_array()
+            .expect("wrong taxonomy filtered array")
+            .len(),
+        0
+    );
 
     let (status, patient_body) = json_request(
         &app,

@@ -60,6 +60,7 @@ export type ProviderPeopleFilters = {
   personType: "" | ProviderPeoplePersonType;
   providerId: string;
   providerType: "" | ProviderType;
+  taxonomyNodeId: string;
   gender: "" | ProviderPersonGender;
   fachbereich: string;
   specialization: string;
@@ -72,6 +73,7 @@ export const DEFAULT_PROVIDER_PEOPLE_FILTERS: ProviderPeopleFilters = {
   personType: "",
   providerId: "",
   providerType: "",
+  taxonomyNodeId: "",
   gender: "",
   fachbereich: "",
   specialization: "",

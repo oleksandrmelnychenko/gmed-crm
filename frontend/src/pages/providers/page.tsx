@@ -1369,6 +1369,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       searchParams.get("people_provider_type") === "non_medical"
         ? (searchParams.get("people_provider_type") as ProviderPeopleFilters["providerType"])
         : "",
+    taxonomyNodeId: searchParams.get("people_taxonomy") ?? "",
     gender:
       searchParams.get("people_gender") === "male" ||
       searchParams.get("people_gender") === "female" ||
@@ -1773,6 +1774,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       person_type: nextFilters.personType || null,
       people_provider: nextFilters.providerId || null,
       people_provider_type: nextFilters.providerType || null,
+      people_taxonomy: nextFilters.taxonomyNodeId || null,
       people_gender: nextFilters.gender || null,
       people_fachbereich: nextFilters.fachbereich || null,
       people_specialization: nextFilters.specialization || null,

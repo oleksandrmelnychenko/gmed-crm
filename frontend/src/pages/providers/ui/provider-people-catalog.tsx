@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
   ArrowUpRight,
   Building2,
@@ -697,17 +697,25 @@ function FiltersBar({
   onResetFilters?: () => void;
 }) {
   const allLabel = labels.providers_all ?? localizedFallback(lang, "Alle", "Все");
-  const [providerTaxonomyNodeId, setProviderTaxonomyNodeId] = useState("");
   const roleOptions = buildRoleOptions(filters, labels, uiText, staffRoles, lang);
+  const selectedTaxonomyNode = taxonomyNodes.find((node) => node.id === filters.taxonomyNodeId);
+  const showClinicalFilters =
+    filters.providerType !== "non_medical" && filters.personType !== "staff";
+  const showPatientFilter = showClinicalFilters;
   const filteredProviderOptions = useMemo(() => {
-    if (!providerTaxonomyNodeId || providers.length === 0) return providerOptions;
+    if ((!filters.taxonomyNodeId && !filters.providerType) || providers.length === 0) {
+      return providerOptions;
+    }
     const matchingProviderIds = new Set(
       providers
-        .filter((provider) => providerMatchesTaxonomy(provider, providerTaxonomyNodeId))
+        .filter((provider) =>
+          (!filters.providerType || provider.provider_type === filters.providerType) &&
+          providerMatchesTaxonomy(provider, filters.taxonomyNodeId),
+        )
         .map((provider) => provider.id),
     );
     return providerOptions.filter((option) => matchingProviderIds.has(option.value));
-  }, [providerOptions, providerTaxonomyNodeId, providers]);
+  }, [filters.providerType, filters.taxonomyNodeId, providerOptions, providers]);
   const activeSpecializationOptions = specializations.flatMap((item) => {
     if (!item.is_active) return [];
     return [{
@@ -720,6 +728,57 @@ function FiltersBar({
     key: K,
     value: ProviderPeopleFilters[K],
   ) => onFiltersChange({ ...filters, [key]: value });
+  const selectedProviderMatches = (
+    providerId: string,
+    providerType: ProviderPeopleFilters["providerType"],
+    taxonomyNodeId: string,
+  ) => {
+    if (!providerId || providers.length === 0) return true;
+    const provider = providers.find((item) => item.id === providerId);
+    if (!provider) return false;
+    return (
+      (!providerType || provider.provider_type === providerType) &&
+      providerMatchesTaxonomy(provider, taxonomyNodeId)
+    );
+  };
+  const setPersonType = (value: ProviderPeopleFilters["personType"]) => {
+    const patch: Partial<ProviderPeopleFilters> = { personType: value };
+    if (value === "staff") {
+      patch.fachbereich = "";
+      patch.specialization = "";
+      patch.patientId = "";
+    }
+    onFiltersChange({ ...filters, ...patch });
+  };
+  const setProviderType = (value: ProviderPeopleFilters["providerType"]) => {
+    const taxonomyMatchesType =
+      !filters.taxonomyNodeId ||
+      !value ||
+      !selectedTaxonomyNode ||
+      selectedTaxonomyNode.provider_kind === value;
+    const nextTaxonomyNodeId = taxonomyMatchesType ? filters.taxonomyNodeId : "";
+    const patch: Partial<ProviderPeopleFilters> = {
+      providerType: value,
+      taxonomyNodeId: nextTaxonomyNodeId,
+    };
+
+    if (!selectedProviderMatches(filters.providerId, value, nextTaxonomyNodeId)) {
+      patch.providerId = "";
+    }
+    if (value === "non_medical") {
+      patch.fachbereich = "";
+      patch.specialization = "";
+      patch.patientId = "";
+    }
+    onFiltersChange({ ...filters, ...patch });
+  };
+  const setTaxonomyNode = (value: string) => {
+    const patch: Partial<ProviderPeopleFilters> = { taxonomyNodeId: value };
+    if (!selectedProviderMatches(filters.providerId, filters.providerType, value)) {
+      patch.providerId = "";
+    }
+    onFiltersChange({ ...filters, ...patch });
+  };
   const reset = () => {
     if (onResetFilters) {
       onResetFilters();
@@ -750,39 +809,28 @@ function FiltersBar({
         <SelectField
           label={uiLabel(uiText, "providers_people_type", localizedFallback(lang, "Personentyp", "Тип человека"))}
           value={filters.personType}
-          onChange={(value) =>
-            setFilter("personType", value as ProviderPeopleFilters["personType"])
-          }
+          onChange={(value) => setPersonType(value as ProviderPeopleFilters["personType"])}
         >
           <option value="">{allLabel}</option>
-          <option value="doctor">{personTypeLabel("doctor", labels, uiText)}</option>
+          <option value="doctor">
+            {filters.providerType === "non_medical"
+              ? uiLabel(uiText, "providers_contacts", localizedFallback(lang, "Kontakte", "Контакты"))
+              : personTypeLabel("doctor", labels, uiText)}
+          </option>
           <option value="staff">{personTypeLabel("staff", labels, uiText)}</option>
         </SelectField>
 
         <label className="min-w-0">
           <FieldLabel>{labels.providers_category ?? allLabel}</FieldLabel>
           <ProviderTaxonomyCascadeSelect
-            value={providerTaxonomyNodeId}
+            value={filters.taxonomyNodeId}
             nodes={[...taxonomyNodes]}
             providerType={filters.providerType}
             mode="any"
             placeholder={labels.providers_category ?? allLabel}
             allLabel={allLabel}
             selectClassName="h-8 rounded-md bg-background text-xs"
-            onChange={(nextValue) => {
-              setProviderTaxonomyNodeId(nextValue);
-              if (
-                filters.providerId &&
-                providers.length > 0 &&
-                !providers.some(
-                  (provider) =>
-                    provider.id === filters.providerId &&
-                    providerMatchesTaxonomy(provider, nextValue),
-                )
-              ) {
-                setFilter("providerId", "");
-              }
-            }}
+            onChange={setTaxonomyNode}
           />
         </label>
 
@@ -802,9 +850,7 @@ function FiltersBar({
         <SelectField
           label={labels.providers_type ?? localizedFallback(lang, "Providertyp", "Тип провайдера")}
           value={filters.providerType}
-          onChange={(value) =>
-            setFilter("providerType", value as ProviderPeopleFilters["providerType"])
-          }
+          onChange={(value) => setProviderType(value as ProviderPeopleFilters["providerType"])}
         >
           <option value="">{allLabel}</option>
           <option value="medical">{providerTypeLabel("medical", labels)}</option>
@@ -823,25 +869,29 @@ function FiltersBar({
         </Button>
       </div>
 
-      <div className="grid gap-1.5 md:grid-cols-4">
-        <TextFilterField
-          label={labels.providers_fachbereich ?? localizedFallback(lang, "Fachbereich", "Специализация")}
-          placeholder={labels.providers_fachbereich ?? localizedFallback(lang, "Fachbereich", "Специализация")}
-          value={filters.fachbereich}
-          onChange={(value) => setFilter("fachbereich", value)}
-        />
-        <SelectField
-          label={uiLabel(uiText, "providers_doctor_specializations", localizedFallback(lang, "Spezialisierungen", "Специализации"))}
-          value={filters.specialization}
-          onChange={(value) => setFilter("specialization", value)}
-        >
-          <option value="">{allLabel}</option>
-          {activeSpecializationOptions.map((option) => (
-            <option key={option.id} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </SelectField>
+      <div className={cn("grid gap-1.5", showClinicalFilters ? "md:grid-cols-4" : "md:grid-cols-1")}>
+        {showClinicalFilters ? (
+          <>
+            <TextFilterField
+              label={labels.providers_fachbereich ?? localizedFallback(lang, "Fachbereich", "Специализация")}
+              placeholder={labels.providers_fachbereich ?? localizedFallback(lang, "Fachbereich", "Специализация")}
+              value={filters.fachbereich}
+              onChange={(value) => setFilter("fachbereich", value)}
+            />
+            <SelectField
+              label={uiLabel(uiText, "providers_doctor_specializations", localizedFallback(lang, "Spezialisierungen", "Специализации"))}
+              value={filters.specialization}
+              onChange={(value) => setFilter("specialization", value)}
+            >
+              <option value="">{allLabel}</option>
+              {activeSpecializationOptions.map((option) => (
+                <option key={option.id} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </SelectField>
+          </>
+        ) : null}
         <SelectField
           label={uiLabel(uiText, "providers_people_role", localizedFallback(lang, "Funktion", "Должность"))}
           value={filters.role}
@@ -854,18 +904,20 @@ function FiltersBar({
             </option>
           ))}
         </SelectField>
-        <SelectField
-          label={labels.patients_title ?? localizedFallback(lang, "Patienten", "Пациенты")}
-          value={filters.patientId}
-          onChange={(value) => setFilter("patientId", value)}
-        >
-          <option value="">{allLabel}</option>
-          {patients.map((patient) => (
-            <option key={patient.id} value={patient.id}>
-              {patientOptionLabel(patient)}
-            </option>
-          ))}
-        </SelectField>
+        {showPatientFilter ? (
+          <SelectField
+            label={labels.patients_title ?? localizedFallback(lang, "Patienten", "Пациенты")}
+            value={filters.patientId}
+            onChange={(value) => setFilter("patientId", value)}
+          >
+            <option value="">{allLabel}</option>
+            {patients.map((patient) => (
+              <option key={patient.id} value={patient.id}>
+                {patientOptionLabel(patient)}
+              </option>
+            ))}
+          </SelectField>
+        ) : null}
       </div>
     </div>
   );

@@ -25,6 +25,8 @@ struct ProviderPeopleQuery {
     search: Option<String>,
     provider_id: Option<Uuid>,
     provider_type: Option<String>,
+    provider_taxonomy_node_id: Option<Uuid>,
+    taxonomy_node_id: Option<Uuid>,
     fachbereich: Option<String>,
     specialization: Option<String>,
     specializations: Option<String>,
@@ -75,6 +77,7 @@ async fn list_provider_people(
     }
 
     let provider_id = query.provider_id;
+    let provider_taxonomy_node_id = query.provider_taxonomy_node_id.or(query.taxonomy_node_id);
     let patient_id = query.patient_id;
     let search_pattern = like_pattern(query.search);
     let specialization_terms = normalize_filter_terms([
@@ -98,6 +101,7 @@ async fn list_provider_people(
             &state,
             active_only,
             provider_id,
+            provider_taxonomy_node_id,
             patient_id,
             provider_type.as_deref(),
             &search_pattern,
@@ -121,6 +125,7 @@ async fn list_provider_people(
             &state,
             active_only,
             provider_id,
+            provider_taxonomy_node_id,
             provider_type.as_deref(),
             &search_pattern,
             role.as_deref(),
@@ -148,6 +153,7 @@ async fn load_doctor_people(
     state: &AppState,
     active_only: bool,
     provider_id: Option<Uuid>,
+    provider_taxonomy_node_id: Option<Uuid>,
     patient_id: Option<Uuid>,
     provider_type: Option<&str>,
     search_pattern: &str,
@@ -287,6 +293,26 @@ async fn load_doctor_people(
                        AND a.patient_id = $9
                  )
              )
+             AND (
+                 $10::uuid IS NULL
+                 OR EXISTS (
+                    WITH RECURSIVE assigned_taxonomy AS (
+                        SELECT ptn.id, ptn.parent_id
+                        FROM provider_taxonomy_assignments pta
+                        JOIN provider_taxonomy_nodes ptn ON ptn.id = pta.taxonomy_node_id
+                        WHERE pta.provider_id = p.id
+
+                        UNION ALL
+
+                        SELECT parent.id, parent.parent_id
+                        FROM provider_taxonomy_nodes parent
+                        JOIN assigned_taxonomy child ON child.parent_id = parent.id
+                    )
+                    SELECT 1
+                    FROM assigned_taxonomy
+                    WHERE id = $10
+                 )
+             )
            ORDER BY p.name, d.name"#,
     )
     .bind(active_only)
@@ -298,6 +324,7 @@ async fn load_doctor_people(
     .bind(role_pattern)
     .bind(gender)
     .bind(patient_id)
+    .bind(provider_taxonomy_node_id)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
@@ -377,6 +404,7 @@ async fn load_staff_people(
     state: &AppState,
     active_only: bool,
     provider_id: Option<Uuid>,
+    provider_taxonomy_node_id: Option<Uuid>,
     provider_type: Option<&str>,
     search_pattern: &str,
     role: Option<&str>,
@@ -456,6 +484,26 @@ async fn load_staff_people(
                  OR COALESCE(sr.name_ru, '') ILIKE $6
              )
              AND ($7::text IS NULL OR s.gender = $7)
+             AND (
+                 $8::uuid IS NULL
+                 OR EXISTS (
+                    WITH RECURSIVE assigned_taxonomy AS (
+                        SELECT ptn.id, ptn.parent_id
+                        FROM provider_taxonomy_assignments pta
+                        JOIN provider_taxonomy_nodes ptn ON ptn.id = pta.taxonomy_node_id
+                        WHERE pta.provider_id = p.id
+
+                        UNION ALL
+
+                        SELECT parent.id, parent.parent_id
+                        FROM provider_taxonomy_nodes parent
+                        JOIN assigned_taxonomy child ON child.parent_id = parent.id
+                    )
+                    SELECT 1
+                    FROM assigned_taxonomy
+                    WHERE id = $8
+                 )
+             )
            ORDER BY p.name, s.is_active DESC, s.role, s.display_name"#,
     )
     .bind(active_only)
@@ -465,6 +513,7 @@ async fn load_staff_people(
     .bind(role)
     .bind(role_pattern)
     .bind(gender)
+    .bind(provider_taxonomy_node_id)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {

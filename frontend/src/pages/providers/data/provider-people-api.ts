@@ -234,6 +234,7 @@ export function buildProviderPeopleQuery(filters: Partial<ProviderPeopleFilters>
   setQueryParam(params, "person_type", next.personType);
   setQueryParam(params, "provider_id", next.providerId);
   setQueryParam(params, "provider_type", next.providerType);
+  setQueryParam(params, "provider_taxonomy_node_id", next.taxonomyNodeId);
   setQueryParam(params, "gender", next.gender);
   setQueryParam(params, "fachbereich", next.fachbereich);
   setQueryParam(params, "specialization", next.specialization);
