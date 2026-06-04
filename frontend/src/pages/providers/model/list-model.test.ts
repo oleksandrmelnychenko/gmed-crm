@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_FILTERS,
+  applyDoctorFieldChange,
   blankDoctorForm,
   blankProviderForm,
   blankServiceForm,
   buildProvidersQuery,
+  composeDoctorDisplayName,
   doctorListDisplayName,
   formatDoctorTitleValue,
   formatWeeklyAvailabilityDisplay,
@@ -194,7 +196,7 @@ describe("doctor title helpers", () => {
     expect(formatDoctorTitleValue("Dr. Prof.")).toBe("Prof. Dr.");
   });
 
-  it("adds Herr/Frau salutation only for German doctor lists", () => {
+  it("adds the gender-derived Herr/Frau salutation in front of the title", () => {
     const maleDoctor = {
       name: "JOHN REMBO",
       title: "Prof. Dr.",
@@ -206,9 +208,59 @@ describe("doctor title helpers", () => {
       gender: "female" as const,
     };
 
-    expect(doctorListDisplayName(maleDoctor, "de")).toBe("Herr Prof. Dr. JOHN REMBO");
-    expect(doctorListDisplayName(femaleDoctor, "de")).toBe("Frau Priv.-Doz. Dr. med. ANNA KELLER");
-    expect(doctorListDisplayName(maleDoctor, "ru")).toBe("Prof. Dr. JOHN REMBO");
+    // Salutation is shown in every locale, not gated to German.
+    expect(doctorListDisplayName(maleDoctor)).toBe("Herr Prof. Dr. JOHN REMBO");
+    expect(doctorListDisplayName(femaleDoctor)).toBe("Frau Priv.-Doz. Dr. med. ANNA KELLER");
+  });
+
+  it("omits the salutation when gender is unknown", () => {
+    expect(
+      doctorListDisplayName({ name: "JOHN REMBO", title: "Prof. Dr.", gender: "unknown" }),
+    ).toBe("Prof. Dr. JOHN REMBO");
+  });
+
+  it("keeps a salutation baked into the name without doubling it", () => {
+    const doctor = { name: "Herr Max Mustermann", title: "Dr.", gender: "male" as const };
+
+    // Salutation stays in front, title slots after it, and it is not repeated.
+    expect(doctorListDisplayName(doctor)).toBe("Herr Dr. Max Mustermann");
+  });
+});
+
+describe("composeDoctorDisplayName", () => {
+  it("prefixes Herr/Frau by gender and omits it when unknown", () => {
+    expect(composeDoctorDisplayName("Max", "Mustermann", "male")).toBe("Herr Max Mustermann");
+    expect(composeDoctorDisplayName("Anna", "Keller", "female")).toBe("Frau Anna Keller");
+    expect(composeDoctorDisplayName("Sam", "Doe", "unknown")).toBe("Sam Doe");
+  });
+});
+
+describe("applyDoctorFieldChange", () => {
+  const base = { ...blankDoctorForm(), firstName: "", lastName: "", name: "", gender: "unknown" as const };
+
+  it("auto-fills the display name from name parts while it is still auto-managed", () => {
+    const afterFirst = applyDoctorFieldChange(base, "firstName", "Max");
+    expect(afterFirst.name).toBe("Max");
+    const afterLast = applyDoctorFieldChange(afterFirst, "lastName", "Mustermann");
+    expect(afterLast.name).toBe("Max Mustermann");
+  });
+
+  it("adds and updates the gendered salutation in the display name", () => {
+    const withName = applyDoctorFieldChange(
+      applyDoctorFieldChange(base, "firstName", "Max"),
+      "lastName",
+      "Mustermann",
+    );
+    const male = applyDoctorFieldChange(withName, "gender", "male");
+    expect(male.name).toBe("Herr Max Mustermann");
+    const female = applyDoctorFieldChange(male, "gender", "female");
+    expect(female.name).toBe("Frau Max Mustermann");
+  });
+
+  it("does not overwrite a manually edited display name", () => {
+    const manual = applyDoctorFieldChange(base, "name", "Chief Surgeon");
+    const afterFirst = applyDoctorFieldChange(manual, "firstName", "Max");
+    expect(afterFirst.name).toBe("Chief Surgeon");
   });
 });
 

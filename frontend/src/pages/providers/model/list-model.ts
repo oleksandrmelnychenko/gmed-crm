@@ -209,14 +209,49 @@ function doctorGermanSalutation(gender: ProviderPersonGender) {
   return "";
 }
 
-export function doctorListDisplayName(
-  doctor: { name: string; title?: string | null; gender?: ProviderPersonGender | null },
-  lang: Lang,
-) {
-  const salutation = lang === "de" && doctor.gender ? doctorGermanSalutation(doctor.gender) : "";
-  return [salutation, formatDoctorTitleValue(doctor.title), doctor.name.trim()]
+const DOCTOR_SALUTATIONS = ["Herr", "Frau"] as const;
+
+/**
+ * Splits a leading gendered salutation ("Herr"/"Frau") off a doctor name, so the
+ * display helper can keep it out front and never double it up. Returns the bare
+ * remainder when no salutation is present.
+ */
+function splitLeadingDoctorSalutation(name: string): { salutation: string; rest: string } {
+  const trimmed = name.trim();
+  for (const salutation of DOCTOR_SALUTATIONS) {
+    if (trimmed === salutation) return { salutation, rest: "" };
+    if (trimmed.startsWith(`${salutation} `)) {
+      return { salutation, rest: trimmed.slice(salutation.length + 1).trim() };
+    }
+  }
+  return { salutation: "", rest: trimmed };
+}
+
+/**
+ * Builds the doctor display name the form pre-fills: "Herr/Frau Firstname Lastname".
+ * The salutation is always included (no locale gate) because it is baked into the
+ * stored name and must read the same in every UI language.
+ */
+export function composeDoctorDisplayName(
+  firstName: string,
+  lastName: string,
+  gender: ProviderPersonGender,
+): string {
+  return [doctorGermanSalutation(gender), firstName.trim(), lastName.trim()]
     .filter(Boolean)
     .join(" ");
+}
+
+export function doctorListDisplayName(doctor: {
+  name: string;
+  title?: string | null;
+  gender?: ProviderPersonGender | null;
+}) {
+  const { salutation: baked, rest } = splitLeadingDoctorSalutation(doctor.name);
+  // Prefer a salutation already baked into the name; otherwise derive it from
+  // gender. Shown in every locale (incl. Russian), not only German lists.
+  const salutation = baked || (doctor.gender ? doctorGermanSalutation(doctor.gender) : "");
+  return [salutation, formatDoctorTitleValue(doctor.title), rest].filter(Boolean).join(" ");
 }
 
 export type WeeklyAvailabilityDayCode =
@@ -1216,6 +1251,39 @@ export function doctorToForm(doctor: DoctorSummary): DoctorFormState {
   };
 }
 
+/**
+ * True when the display name still mirrors what auto-fill would produce, so it is
+ * safe to keep recomposing it. A name the user typed by hand (matching neither the
+ * bare "First Last" nor the salutation form) is treated as manual and left alone.
+ */
+function isAutoDoctorDisplayName(form: DoctorFormState): boolean {
+  const name = form.name.trim();
+  if (name === "") return true;
+  const bare = [form.firstName.trim(), form.lastName.trim()].filter(Boolean).join(" ");
+  const withSalutation = composeDoctorDisplayName(form.firstName, form.lastName, form.gender);
+  return name === bare || name === withSalutation;
+}
+
+/**
+ * Applies a single doctor-form field edit and live-fills the display name from
+ * first/last name + gender ("Herr/Frau Firstname Lastname") while the field is
+ * still auto-managed. Manual edits to the display name itself are preserved.
+ */
+export function applyDoctorFieldChange(
+  current: DoctorFormState,
+  field: keyof DoctorFormState,
+  value: string,
+): DoctorFormState {
+  const next: DoctorFormState = { ...current, [field]: value };
+  if (
+    (field === "firstName" || field === "lastName" || field === "gender") &&
+    isAutoDoctorDisplayName(current)
+  ) {
+    next.name = composeDoctorDisplayName(next.firstName, next.lastName, next.gender);
+  }
+  return next;
+}
+
 export function serviceToForm(service: ServiceItem): ServiceFormState {
   return {
     id: service.id,
@@ -1301,8 +1369,9 @@ export function toProviderPayload(form: ProviderFormState, forceNonMedical: bool
 }
 
 export function toDoctorPayload(form: DoctorFormState) {
-  const nameFromParts = [form.firstName.trim(), form.lastName.trim()].filter(Boolean).join(" ");
-  const name = form.name.trim() || nameFromParts;
+  const name =
+    form.name.trim() ||
+    composeDoctorDisplayName(form.firstName, form.lastName, form.gender);
   const contacts = buildDoctorContacts(form);
   return {
     name,

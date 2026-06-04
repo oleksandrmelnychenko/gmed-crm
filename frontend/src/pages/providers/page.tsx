@@ -92,6 +92,7 @@ import {
   blankProviderForm,
   blankServiceForm,
   blankStaffForm,
+  applyDoctorFieldChange,
   buildProvidersQuery,
   compactDate,
   compactDateTime,
@@ -1660,9 +1661,18 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   );
 
   const relationshipProviderOptions = useMemo(() => {
-    if (!detail) return parentProviderOptions;
-    if (parentProviderOptions.some((provider) => provider.id === detail.id)) {
-      return parentProviderOptions;
+    // A doctor↔doctor relationship needs a target doctor, so only providers that
+    // actually have doctors can be a valid target. Hiding doctorless providers
+    // keeps the user from picking a dead end where the save button stays disabled.
+    const withDoctors = parentProviderOptions.filter(
+      (provider) => provider.doctor_count > 0,
+    );
+    if (!detail) return withDoctors;
+    if (withDoctors.some((provider) => provider.id === detail.id)) {
+      return withDoctors;
+    }
+    if (detail.doctors.length === 0) {
+      return withDoctors;
     }
     const currentProvider: ProviderSummary = {
       id: detail.id,
@@ -1698,7 +1708,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       last_interaction_at: null,
       created_at: detail.created_at,
     };
-    return [currentProvider, ...parentProviderOptions];
+    return [currentProvider, ...withDoctors];
   }, [detail, parentProviderOptions]);
 
   const { columns, metrics, sortedAndFilteredProviders } = useProvidersListTableModel({
@@ -2817,7 +2827,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             error={doctorError}
             onSubmit={handleDoctorSubmit}
             onChange={(field, value) =>
-              setDoctorForm((current) => ({ ...current, [field]: value }))
+              setDoctorForm((current) => applyDoctorFieldChange(current, field, value))
             }
             onContactsChange={(contacts) =>
               setDoctorForm((current) => ({ ...current, contacts }))
@@ -3575,7 +3585,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           error={doctorError}
           onSubmit={handleDoctorSubmit}
           onChange={(field, value) =>
-            setDoctorForm((current) => ({ ...current, [field]: value }))
+            setDoctorForm((current) => applyDoctorFieldChange(current, field, value))
           }
           onContactsChange={(contacts) =>
             setDoctorForm((current) => ({ ...current, contacts }))
@@ -3917,15 +3927,12 @@ function ProviderDoctorDetailSheet({
   const doctor = isProviderDoctor ? view.doctor : null;
   const row = view.source === "catalog" ? view.row : null;
   const displayName = doctor
-    ? doctorListDisplayName(doctor, lang)
-    : doctorListDisplayName(
-        {
-          name: row?.name ?? "",
-          title: row?.title ?? null,
-          gender: row?.gender ?? "unknown",
-        },
-        lang,
-      );
+    ? doctorListDisplayName(doctor)
+    : doctorListDisplayName({
+        name: row?.name ?? "",
+        title: row?.title ?? null,
+        gender: row?.gender ?? "unknown",
+      });
   const providerName = view.source === "provider" ? view.providerName : row?.provider_name ?? "";
   const role = doctor
     ? doctor.role_label || (doctor.role_code ? doctorRoleLabel(doctor.role_code) : "")
@@ -4283,7 +4290,7 @@ function ProviderDoctorRelationshipFormSheet({
   onChange: (patch: Partial<DoctorRelationshipFormState>) => void;
   onTargetProviderChange: (providerId: string) => void;
 }) {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   const sourceDoctor = sourceDoctors.find((doctor) => doctor.id === form.sourceDoctorId);
   const availableTargetDoctors = targetDoctors.filter(
@@ -4329,7 +4336,7 @@ function ProviderDoctorRelationshipFormSheet({
                       required
                     >
                       {sourceDoctor ? (
-                        <option value={sourceDoctor.id}>{doctorListDisplayName(sourceDoctor, lang)}</option>
+                        <option value={sourceDoctor.id}>{doctorListDisplayName(sourceDoctor)}</option>
                       ) : (
                         <option value="">{t.common_not_set}</option>
                       )}
@@ -4343,6 +4350,8 @@ function ProviderDoctorRelationshipFormSheet({
                       providerPlaceholder={t.common_select_placeholder}
                       taxonomyPlaceholder={t.providers_category}
                       taxonomyAllLabel={t.providers_all}
+                      restrictTaxonomyToAvailable
+                      noProvidersLabel={t.providers_none_in_category}
                       containerClassName="grid gap-2"
                       taxonomySelectClassName={formSelectClassName}
                       providerSelectClassName={formSelectClassName}
@@ -4368,7 +4377,7 @@ function ProviderDoctorRelationshipFormSheet({
                         </option>
                         {availableTargetDoctors.map((doctor) => (
                           <option key={doctor.id} value={doctor.id}>
-                            {doctorListDisplayName(doctor, lang)}
+                            {doctorListDisplayName(doctor)}
                           </option>
                         ))}
                       </NativeComboboxSelect>
@@ -5661,7 +5670,7 @@ function DoctorCardSummary({
         </div>
         <div className="min-w-0">
           <p className="text-sm font-semibold text-foreground">
-            {doctorListDisplayName(doctor, lang)}
+            {doctorListDisplayName(doctor)}
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             <Badge

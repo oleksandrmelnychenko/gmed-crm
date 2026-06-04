@@ -316,7 +316,7 @@ function PersonIdentityCell({
       <div className="min-w-0">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="truncate text-xs font-medium text-foreground">
-            {row.person_type === "doctor" ? doctorListDisplayName(row, lang) : row.name}
+            {row.person_type === "doctor" ? doctorListDisplayName(row) : row.name}
           </span>
           <PersonTypeBadge labels={labels} row={row} uiText={uiText} />
         </div>
@@ -956,7 +956,7 @@ function MobilePeopleCards({
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <h4 className="truncate text-sm font-semibold text-foreground">
-                  {row.person_type === "doctor" ? doctorListDisplayName(row, lang) : row.name}
+                  {row.person_type === "doctor" ? doctorListDisplayName(row) : row.name}
                 </h4>
                 <PersonTypeBadge labels={labels} row={row} uiText={uiText} />
               </div>
