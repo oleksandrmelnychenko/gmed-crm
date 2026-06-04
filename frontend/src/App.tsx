@@ -310,8 +310,12 @@ class RouteErrorBoundary extends Component<
 function AppRoutes() {
   const location = useLocation();
 
+  // Reset the route error boundary only when navigating to a different PATH — not on
+  // query-string changes. Keying on location.search remounted the entire route subtree on
+  // every keystroke in any search box (which writes ?search=/?q= to the URL), which dropped
+  // input focus and made list pages lag.
   return (
-    <RouteErrorBoundary key={`${location.pathname}${location.search}`}>
+    <RouteErrorBoundary key={location.pathname}>
       <Suspense fallback={<div className="min-h-screen bg-background" />}>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
