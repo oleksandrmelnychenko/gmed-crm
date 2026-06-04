@@ -810,13 +810,13 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
       const generatedDocument = buildDocument({
         id: generatedId,
         auto_name: generatedName,
-        original_filename: `${generatedName}.html`,
+        original_filename: `${generatedName}.pdf`,
         art: template?.art ?? "generated_document",
         category: template?.category ?? "generated",
         status: payload.status ?? template?.default_status ?? "active",
         visibility:
           payload.visibility ?? template?.default_visibility ?? "patient_visible",
-        mime_type: "text/html",
+        mime_type: "application/pdf",
         file_size: 4096,
         uploaded_by_name: "Admin GMED",
         version_root_document_id: generatedId,
@@ -832,8 +832,8 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
       return json(route, {
         id: generatedId,
         auto_name: generatedName,
-        original_filename: `${generatedName}.html`,
-        mime_type: "text/html",
+        original_filename: `${generatedName}.pdf`,
+        mime_type: "application/pdf",
         file_size: 4096,
         language: payload.language ?? "de",
         version_number: 1,
@@ -851,8 +851,12 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
       }
       return route.fulfill({
         status: 200,
-        contentType: requestedDocument.mime_type ?? "text/html",
-        body: `<html><body><h1>${requestedDocument.auto_name}</h1></body></html>`,
+        contentType: requestedDocument.mime_type ?? "application/pdf",
+        body: `%PDF-1.4
+1 0 obj
+<< /Type /Catalog >>
+endobj
+%%EOF`,
       });
     }
 
