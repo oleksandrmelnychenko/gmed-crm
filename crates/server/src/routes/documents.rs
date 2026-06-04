@@ -717,6 +717,7 @@ struct DocumentShareInsert<'a> {
 }
 
 pub(crate) struct NewStoredDocument<'a> {
+    pub(crate) document_id: Option<Uuid>,
     pub(crate) patient_id: Option<Uuid>,
     pub(crate) order_id: Option<Uuid>,
     pub(crate) appointment_id: Option<Uuid>,
@@ -3289,6 +3290,15 @@ fn default_generated_document_name(
         "{base} · {patient_name} · {}",
         generated_at.format("%Y-%m-%d")
     )
+}
+
+fn generated_document_public_id(document_id: Uuid) -> String {
+    let simple = document_id.simple().to_string();
+    let suffix = simple
+        .get(..8)
+        .unwrap_or(simple.as_str())
+        .to_ascii_uppercase();
+    format!("DOC-{suffix}")
 }
 
 fn build_treatment_plan_html(context: &GeneratedTreatmentPlanContext) -> String {
@@ -9019,7 +9029,7 @@ pub(crate) async fn persist_document_file(
     data: &[u8],
     input: &NewStoredDocument<'_>,
 ) -> Result<(Uuid, i64, String, String), axum::response::Response> {
-    let document_id = Uuid::new_v4();
+    let document_id = input.document_id.unwrap_or_else(Uuid::new_v4);
     let original_filename = if input.original_filename.trim().is_empty() {
         "document.bin".to_string()
     } else {
@@ -9574,6 +9584,7 @@ async fn generate_provider_document_from_template_internal(
     };
 
     let persist_input = NewStoredDocument {
+        document_id: None,
         patient_id,
         order_id,
         appointment_id,
@@ -9922,6 +9933,8 @@ async fn generate_document(
     }
 
     let generated_at = chrono::Utc::now();
+    let generated_document_id = Uuid::new_v4();
+    let generated_doc_id = generated_document_public_id(generated_document_id);
     let auto_name = body
         .auto_name
         .as_deref()
@@ -10871,7 +10884,13 @@ async fn generate_document(
                 language: language.to_string(),
                 auto_name: auto_name.clone(),
                 title_override: title_override.clone(),
-                doc_id: bindings.doc_id.clone(),
+                doc_id: bindings
+                    .doc_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned)
+                    .or_else(|| Some(generated_doc_id.clone())),
                 patient: patient_party.clone(),
                 passport_number: bindings.passport_number.clone(),
                 passport_valid_until: bindings.passport_valid_until,
@@ -10992,6 +11011,7 @@ async fn generate_document(
         .unwrap_or_else(|| format!("template:{}", template.id));
 
     let persist_input = NewStoredDocument {
+        document_id: Some(generated_document_id),
         patient_id,
         order_id,
         appointment_id,
@@ -14492,6 +14512,7 @@ async fn create_translated_document_from_request(
     let data = translated_text.as_bytes().to_vec();
     let notes = format!("Generated from translation request {request_id}");
     let persist_input = NewStoredDocument {
+        document_id: None,
         patient_id,
         order_id,
         appointment_id,
@@ -14922,6 +14943,7 @@ async fn upload_my_document(
 
     let original_filename = file_name.unwrap_or_else(|| "document".to_string());
     let persist_input = NewStoredDocument {
+        document_id: None,
         patient_id,
         order_id,
         appointment_id,
@@ -15327,6 +15349,7 @@ async fn upload_document(
         ursprung.as_deref(),
     );
     let persist_input = NewStoredDocument {
+        document_id: None,
         patient_id,
         order_id,
         appointment_id,

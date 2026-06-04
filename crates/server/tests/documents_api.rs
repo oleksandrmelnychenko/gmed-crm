@@ -2948,6 +2948,67 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
 }
 
 #[tokio::test]
+async fn appointment_confirmation_auto_generates_doc_id() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("appointment-doc-id");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "appointment_confirmation",
+            "patient_id": patient_id,
+            "language": "de",
+            "bindings": {
+                "passport_number": "MA1234567",
+                "passport_valid_until": "2050-01-01",
+                "period_from": "2025-11-17",
+                "clinics": [
+                    {"name": "Klinik München", "address": "Musterstr. 1, München"}
+                ],
+                "contact_phones": "0176 9999999"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "generate appointment confirmation: {body:?}"
+    );
+    assert_eq!(body["generated_template_id"], "appointment_confirmation");
+    let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+    let mut expected_suffix = document_id.simple().to_string();
+    expected_suffix.truncate(8);
+    let expected_doc_id = format!("DOC-{}", expected_suffix.to_ascii_uppercase());
+
+    let (status, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &admin_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(bytes.starts_with(b"%PDF-"));
+
+    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(
+        pdf_text.contains(&expected_doc_id),
+        "generated appointment confirmation must include auto Doc.-ID {expected_doc_id}; got: {pdf_text:?}"
+    );
+    assert!(
+        !pdf_text.contains("Doc.-ID: ____________"),
+        "generated appointment confirmation must not leave Doc.-ID blank; got: {pdf_text:?}"
+    );
+}
+
+#[tokio::test]
 async fn consent_child_autofills_guardians_from_patient_relations() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
