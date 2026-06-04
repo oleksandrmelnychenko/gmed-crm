@@ -6752,10 +6752,14 @@ struct PatientExaminationInput {
     note: Option<String>,
 }
 
-/// Trim a value, dropping empties to NULL.
+/// Max characters stored per clinical text field. Generous enough that realistic
+/// clinical text is never truncated, but bounds accidental or abusive payloads.
+const CLINICAL_TEXT_MAX_CHARS: usize = 16_000;
+
+/// Trim a value, drop empties to NULL, and cap length to guard against bloat.
 fn clinical_opt_text(value: Option<String>) -> Option<String> {
     value
-        .map(|v| v.trim().to_string())
+        .map(|v| v.trim().chars().take(CLINICAL_TEXT_MAX_CHARS).collect::<String>())
         .filter(|v| !v.is_empty())
 }
 
@@ -7051,6 +7055,13 @@ async fn save_patient_diagnoses(
         tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient diagnoses");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    state.audit_sender.try_send(audit::domain_event(
+        "save_patient_diagnoses",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({ "count": saved }),
+    ));
     Json(json!({ "ok": true, "count": saved })).into_response()
 }
 
@@ -7123,6 +7134,13 @@ async fn save_patient_medications(
         tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient medications");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    state.audit_sender.try_send(audit::domain_event(
+        "save_patient_medications",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({ "count": saved }),
+    ));
     Json(json!({ "ok": true, "count": saved })).into_response()
 }
 
@@ -7202,6 +7220,13 @@ async fn save_patient_examinations(
         tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient examinations");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    state.audit_sender.try_send(audit::domain_event(
+        "save_patient_examinations",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({ "count": saved }),
+    ));
     Json(json!({ "ok": true, "count": saved })).into_response()
 }
 
@@ -7267,6 +7292,13 @@ async fn save_patient_narrative(
         tracing::error!(error = %e, patient_id = %patient_uuid, "save patient narrative");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    state.audit_sender.try_send(audit::domain_event(
+        "save_patient_narrative",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({}),
+    ));
     Json(json!({ "ok": true })).into_response()
 }
 
@@ -7345,6 +7377,13 @@ async fn save_patient_procedures(
         tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient procedures");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    state.audit_sender.try_send(audit::domain_event(
+        "save_patient_procedures",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({ "count": saved }),
+    ));
     Json(json!({ "ok": true, "count": saved })).into_response()
 }
 
@@ -7637,7 +7676,7 @@ async fn get_patient_clinical_pdf(
     let mut pdf = ClinPdf::new();
     pdf.text("Arztbrief", 16.0, true, false, 0.0, 0.0, 1.0);
     pdf.text(
-        &format!("{} {}", first.trim(), last.trim()).trim().to_string(),
+        format!("{} {}", first.trim(), last.trim()).trim(),
         12.0,
         true,
         false,
@@ -7804,6 +7843,14 @@ async fn get_patient_clinical_pdf(
     let bytes = document
         .with_pages(pdf.finish())
         .save(&pdf_text_save_options(), &mut warnings);
+
+    state.audit_sender.try_send(audit::domain_event(
+        "export_patient_clinical_pdf",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({ "bytes": bytes.len() }),
+    ));
 
     (
         [
