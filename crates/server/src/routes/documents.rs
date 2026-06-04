@@ -11146,9 +11146,7 @@ fn admin_doc_label(language: &str, key: &str) -> &'static str {
         ("en", "consent_title") => "Data transfer and confidentiality release",
         (_, "single_order_title") => "Einzelauftrag",
         (_, "cost_coverage_title") => "Kostenübernahmeerklärung",
-        (_, "cost_estimate_title") => {
-            "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen"
-        }
+        (_, "cost_estimate_title") => cost_estimate_default_title(),
         (_, "appointment_confirmation_title") => "Terminbestätigung",
         (_, "consent_title") => {
             "Einverständniserklärung zur Datenübermittlung und Schweigepflichtsentbindung"
@@ -12041,6 +12039,39 @@ fn cost_estimate_price_text(raw: &str) -> String {
     }
 }
 
+fn cost_estimate_default_title() -> &'static str {
+    "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen / \
+     Ориентировочный расчёт стоимости медицинских услуг диагностики"
+}
+
+fn cost_estimate_total_label() -> &'static str {
+    "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen \
+     (gesamt) / Ориентировочный расчёт стоимости медицинских услуг диагностики \
+     (общий):"
+}
+
+fn cost_estimate_legal_notice() -> &'static str {
+    "Rechtliche Hinweise: Die Kosten für medizinische Diagnostik und/oder Behandlung können von \
+     angegebenen Preisen/Kosten abweichen und dienen ausschließlich Informationszwecken. \
+     Dementsprechend geben wir keine Gewährleistungen oder Zusicherungen hinsichtlich der \
+     Genauigkeit, Vollständigkeit oder Richtigkeit der hierin enthaltenen Informationen oder \
+     Meinungen ab. Wir übernehmen keine Haftung für unmittelbare oder mittelbare Schäden, die \
+     durch die Verteilung und/oder Verwendung dieses Dokuments verursacht und/oder mit der \
+     Verteilung und/oder Verwendung dieses Dokuments im Zusammenhang stehen. Die Aussagen \
+     entsprechen dem Stand zum Zeitpunkt der Erstellung des Dokuments und entspricht den \
+     Medianpreisen für aufgeführte medizinische Leistungen aufgrund unserer Erfahrung. Sie können \
+     aufgrund künftiger Entwicklungen überholt sein, ohne dass das Dokument geändert wurde. / \
+     Правовая информация: Стоимость медицинской диагностики и/или лечения может отличаться от \
+     заявленных цен/стоимостей и представлена исключительно в информационных целях. Следовательно, \
+     мы не предоставляем никаких гарантий или заявлений относительно точности, полноты или \
+     правильности любой информации или мнения, содержащихся здесь. Мы не несем ответственности за \
+     прямые или косвенные убытки, вызванные и/или связанные с распространением и/или использованием \
+     данного документа. Информация соответствует статусу на момент создания документа и \
+     соответствует среднему диапазону цен за указанные медицинские услуги исходя из нашего опыта. \
+     Дальнейшее развитие может сделать предоставленную информацию устаревшей без внесения \
+     изменений в данный документ."
+}
+
 /// Two-line institutional footer block for the cost estimate, mirroring the
 /// reference .docx footer:
 ///   "Agentur für Patientenbetreuung | HEORHII HUDIIEV | <address>"
@@ -12106,11 +12137,10 @@ fn build_cost_estimate_pdf(
     let page_footer = footer_lines.join(" · ");
     let mut layout = TreatmentPlanPdfLayout::new(page_footer, regular, bold);
 
-    // German-only title.
-    let title = context.title_override.clone().unwrap_or_else(|| {
-        "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen"
-            .to_string()
-    });
+    let title = context
+        .title_override
+        .clone()
+        .unwrap_or_else(|| cost_estimate_default_title().to_string());
     layout.text_block(
         &title,
         15.0,
@@ -12125,29 +12155,31 @@ fn build_cost_estimate_pdf(
     // is never a blank placeholder here.
     admin_block(
         &mut layout,
-        &format!("Datum: {}", fmt_de_date(context.estimate_date)),
+        &format!("Datum/Дата: {}", fmt_de_date(context.estimate_date)),
         0.0,
         0.5,
     );
     // Patient line uses the gendered salutation ("Herr Max Musterman").
     admin_block(
         &mut layout,
-        &format!("Patient: {}", context.patient.name_with_salutation()),
+        &format!(
+            "Patient/Пациент: {}",
+            context.patient.name_with_salutation()
+        ),
         0.0,
         0.5,
     );
     if let Some(birth) = context.patient.birth_date {
         admin_block(
             &mut layout,
-            &format!("Geb. am: {}", birth.format("%d.%m.%Y")),
+            &format!("Geb. am./дата рождения: {}", birth.format("%d.%m.%Y")),
             0.0,
             2.0,
         );
     }
 
-    // German-only column headers.
     layout.text_block(
-        "Medizinische Leistungen",
+        "Medizinische Leistungen/Медицинские услуги",
         12.0,
         true,
         0.0,
@@ -12156,7 +12188,7 @@ fn build_cost_estimate_pdf(
         0.0,
     );
     layout.text_block(
-        "Unverbindliche Kostenschätzung",
+        "Unverbindliche Kostenschätzung/Ориентировочная стоимость",
         11.0,
         true,
         0.0,
@@ -12198,14 +12230,7 @@ fn build_cost_estimate_pdf(
         }
     }
 
-    // German-only total line.
-    admin_block(
-        &mut layout,
-        "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen \
-         (gesamt):",
-        2.0,
-        0.5,
-    );
+    admin_block(&mut layout, cost_estimate_total_label(), 2.0, 0.5);
     let total_text = context
         .total_range
         .as_deref()
@@ -12223,23 +12248,7 @@ fn build_cost_estimate_pdf(
         3.0,
     );
 
-    // German-only legal notice.
-    admin_block(
-        &mut layout,
-        "Rechtliche Hinweise: Die Kosten für medizinische Diagnostik und/oder Behandlung können von \
-         angegebenen Preisen/Kosten abweichen und dienen ausschließlich Informationszwecken. \
-         Dementsprechend geben wir keine Gewährleistungen oder Zusicherungen hinsichtlich der \
-         Genauigkeit, Vollständigkeit oder Richtigkeit der hierin enthaltenen Informationen oder \
-         Meinungen ab. Wir übernehmen keine Haftung für unmittelbare oder mittelbare Schäden, die \
-         durch die Verteilung und/oder Verwendung dieses Dokuments verursacht und/oder mit der \
-         Verteilung und/oder Verwendung dieses Dokuments im Zusammenhang stehen. Die Aussagen \
-         entsprechen dem Stand zum Zeitpunkt der Erstellung des Dokuments und beruhen auf \
-         Medianpreisen für aufgeführte medizinische Leistungen aufgrund unserer Erfahrung. Sie \
-         können aufgrund künftiger Entwicklungen überholt sein, ohne dass das Dokument geändert \
-         wurde.",
-        2.0,
-        3.0,
-    );
+    admin_block(&mut layout, cost_estimate_legal_notice(), 2.0, 3.0);
 
     // Institutional footer block rendered in the document body, matching the
     // reference .docx footer (two lines, from context.agency).

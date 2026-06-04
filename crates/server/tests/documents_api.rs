@@ -3452,6 +3452,7 @@ async fn cost_estimate_uses_order_quote_when_manual_lines_are_omitted() {
     assert_eq!(body["language"], "de");
     let preview_html = body["preview_html"].as_str().unwrap();
     assert!(preview_html.contains("Koordination vor stationärer Aufnahme"));
+    assert!(preview_html.contains("Ориентировочный расчёт стоимости"));
     // Quote total is now rendered in German currency format ("1.428,00 EUR").
     assert!(preview_html.contains("1.428,00"));
 
@@ -3466,6 +3467,11 @@ async fn cost_estimate_uses_order_quote_when_manual_lines_are_omitted() {
     assert_eq!(status, StatusCode::OK);
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 800);
+    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(pdf_text.contains("Medizinische Leistungen"));
+    assert!(pdf_text.contains("Медицинские услуги"));
+    assert!(pdf_text.contains("Ориентировочная стоимость"));
+    assert!(pdf_text.contains("Правовая информация"));
 }
 
 #[tokio::test]
