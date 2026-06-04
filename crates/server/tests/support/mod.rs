@@ -184,10 +184,18 @@ async fn connect_pool(database_url: &str, database_name: &str) -> Result<PgPool,
         PgConnectOptions::from_str(database_url).map(|options| options.database(database_name));
 
     PgPoolOptions::new()
-        .max_connections(20)
+        .max_connections(test_database_max_connections())
         .min_connections(0)
         .connect_with(connect_options?)
         .await
+}
+
+fn test_database_max_connections() -> u32 {
+    std::env::var("TEST_DATABASE_MAX_CONNECTIONS")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(8)
 }
 
 async fn start_docker_postgres() -> Result<TestDatabaseBackend, String> {

@@ -5398,7 +5398,9 @@ async fn appointment_update_preserves_category_and_persists_recurrence_rule_edit
             Some("updated_category"),
         );
         assert_eq!(
-            row.try_get::<Option<String>, _>("notes").unwrap().as_deref(),
+            row.try_get::<Option<String>, _>("notes")
+                .unwrap()
+                .as_deref(),
             Some("Updated note"),
         );
         assert_eq!(
@@ -5407,8 +5409,15 @@ async fn appointment_update_preserves_category_and_persists_recurrence_rule_edit
                 .as_deref(),
             Some("Series room"),
         );
-        assert_eq!(row.try_get::<Option<i32>, _>("recurrence_interval").unwrap(), Some(2));
-        assert_eq!(row.try_get::<Option<i32>, _>("recurrence_count").unwrap(), Some(4));
+        assert_eq!(
+            row.try_get::<Option<i32>, _>("recurrence_interval")
+                .unwrap(),
+            Some(2)
+        );
+        assert_eq!(
+            row.try_get::<Option<i32>, _>("recurrence_count").unwrap(),
+            Some(4)
+        );
     }
 }
 

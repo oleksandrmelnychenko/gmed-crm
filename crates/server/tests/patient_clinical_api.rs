@@ -82,11 +82,7 @@ async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     .unwrap()
 }
 
-async fn seed_minor_patient_without_guardian(
-    pool: &PgPool,
-    created_by: Uuid,
-    tag: &str,
-) -> Uuid {
+async fn seed_minor_patient_without_guardian(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by, languages)
            VALUES ($1, $2, $3, '2020-01-01', 'female', $4, ARRAY['de']::text[])
