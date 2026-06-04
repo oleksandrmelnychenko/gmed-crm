@@ -239,6 +239,7 @@ export interface Translations
   providers_type: string;
   providers_category: string;
   providers_none_in_category: string;
+  providers_no_doctors: string;
   providers_choose_category: string;
   providers_type_medical: string;
   providers_type_non_medical: string;

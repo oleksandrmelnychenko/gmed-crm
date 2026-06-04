@@ -247,6 +247,7 @@ export const de = {
   providers_type: "Typ",
   providers_category: "Provider-Kategorie",
   providers_none_in_category: "Keine Anbieter in dieser Kategorie",
+  providers_no_doctors: "Dieser Anbieter hat keine Ärzte",
   providers_choose_category: "Provider-Kategorie wählen",
   providers_type_medical: "Medizinisch",
   providers_type_non_medical: "Nicht-medizinisch",

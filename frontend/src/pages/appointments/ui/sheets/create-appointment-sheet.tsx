@@ -794,6 +794,11 @@ function useCreateAppointmentSheetContent({
                         </option>
                       ))}
                     </NativeComboboxSelect>
+                    {form.providerId && doctors.length === 0 ? (
+                      <p className="mt-1 text-[11px] leading-tight text-muted-foreground">
+                        {t.providers_no_doctors}
+                      </p>
+                    ) : null}
                   </Field>
                 </div>
                 {form.appointmentType === "medical" ? (
