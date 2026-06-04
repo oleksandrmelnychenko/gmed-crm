@@ -4149,7 +4149,7 @@ function StaffDocumentsPage({
       >
         <DialogContent className="flex h-[86vh] w-[94vw] max-w-none sm:w-[70vw] sm:max-w-[1500px] flex-col overflow-hidden rounded-xl p-0">
           <DialogHeader className="border-b border-border/70 px-5 py-4">
-            <div className="flex min-w-0 items-start justify-between gap-4">
+            <div className="flex min-w-0 items-start justify-between gap-4 pr-10">
               <div className="min-w-0">
                 <DialogTitle className="truncate text-base">
                   {documentPreview?.title ?? t.documents_preview}
@@ -4161,7 +4161,7 @@ function StaffDocumentsPage({
               {documentPreview ? (
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="default"
                   size="sm"
                   className="h-8 shrink-0 gap-1.5 rounded-lg"
                   onClick={() =>
