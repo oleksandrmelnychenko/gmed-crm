@@ -209,7 +209,7 @@ function formatLanguageLabel(language?: string | null) {
 
 const TRANSLATION_LANGUAGE_OPTIONS = ["de"] as const;
 
-type BindingFieldKind = "text" | "date" | "textarea";
+type BindingFieldKind = "text" | "date" | "number" | "textarea";
 type BindingFieldDef = { key: string; label: string; kind: BindingFieldKind };
 
 const PATIENT_STICKER_BINDING_FIELDS: BindingFieldDef[] = [
@@ -233,7 +233,7 @@ const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
   framework_contract: [
     { key: "contract_date", label: "Rahmenvertrag vom / Inkrafttreten", kind: "date" },
     ...PATIENT_PARTY_BINDING_FIELDS,
-    { key: "order_sequence", label: "Laufende Nr. des Einzelauftrags", kind: "text" },
+    { key: "order_sequence", label: "Laufende Nr. des Einzelauftrags", kind: "number" },
     { key: "cost_threshold", label: "Mehrkosten-Freigabegrenze", kind: "text" },
     {
       key: "extra_release_recipients",
@@ -244,7 +244,7 @@ const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     { key: "sign_date", label: "Unterzeichnungsdatum", kind: "date" },
   ],
   single_order: [
-    { key: "order_sequence", label: "Laufende Nr. des Einzelauftrags", kind: "text" },
+    { key: "order_sequence", label: "Laufende Nr. des Einzelauftrags", kind: "number" },
     { key: "order_number", label: "Auftragsnummer", kind: "text" },
     { key: "order_date", label: "Einzelauftrag vom", kind: "date" },
     { key: "contract_date", label: "Rahmenvertrag vom", kind: "date" },
@@ -266,7 +266,7 @@ const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     { key: "sign_date", label: "Unterzeichnungsdatum", kind: "date" },
   ],
   cost_coverage_declaration: [
-    { key: "order_sequence", label: "Laufende Nr. des Einzelauftrags", kind: "text" },
+    { key: "order_sequence", label: "Laufende Nr. des Einzelauftrags", kind: "number" },
     { key: "order_date", label: "Einzelauftrag vom", kind: "date" },
     { key: "contract_date", label: "Rahmenvertrag vom", kind: "date" },
     { key: "quote_number", label: "Kostenvoranschlag-Nr.", kind: "text" },
@@ -398,9 +398,9 @@ function buildBindingsPayload(
   bindings: Record<string, string>,
 ): Record<string, unknown> | null {
   const out: Record<string, unknown> = {};
-  const fieldKeys = new Set(
-    (DOCUMENT_BINDING_FIELDS[templateId] ?? []).map((field) => field.key),
-  );
+  const fieldDefs = DOCUMENT_BINDING_FIELDS[templateId] ?? [];
+  const fieldDefsByKey = new Map(fieldDefs.map((field) => [field.key, field]));
+  const fieldKeys = new Set(fieldDefs.map((field) => field.key));
   for (const [key, value] of Object.entries(bindings)) {
     if (
       !fieldKeys.has(key) ||
@@ -410,7 +410,14 @@ function buildBindingsPayload(
       continue;
     }
     const trimmed = (value ?? "").trim();
-    if (trimmed) out[key] = trimmed;
+    if (!trimmed) continue;
+    const field = fieldDefsByKey.get(key);
+    if (field?.kind === "number") {
+      const parsed = Number(trimmed);
+      if (Number.isInteger(parsed)) out[key] = parsed;
+      continue;
+    }
+    out[key] = trimmed;
   }
   if (fieldKeys.has("service_lines_text")) {
     const serviceLines = parseBindingServiceLines(
@@ -3215,7 +3222,15 @@ function StaffDocumentsPage({
                         ) : (
                           <Field key={field.key} label={field.label}>
                             <Input
-                              type={field.kind === "date" ? "date" : "text"}
+                              type={
+                                field.kind === "date"
+                                  ? "date"
+                                  : field.kind === "number"
+                                    ? "number"
+                                    : "text"
+                              }
+                              min={field.kind === "number" ? 1 : undefined}
+                              step={field.kind === "number" ? 1 : undefined}
                               value={generateForm.bindings[field.key] ?? ""}
                               onChange={(event) =>
                                 updateBindingField(field.key, event.target.value)
