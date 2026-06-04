@@ -4172,7 +4172,12 @@ async fn document_templates_can_generate_patient_sticker_pdf_document() {
         Some(json!({
             "template_id": "patient_sticker_standard",
             "patient_id": patient_id,
-            "language": "de"
+            "language": "de",
+            "bindings": {
+                "kt1": "SZ",
+                "kt2": "BG",
+                "cost_code": "FRA"
+            }
         })),
     )
     .await;
@@ -4184,7 +4189,9 @@ async fn document_templates_can_generate_patient_sticker_pdf_document() {
     // format eyebrow, Versicherer (insurance) and Land (country) lines were removed.
     assert!(preview_html.contains("ID:"));
     assert!(preview_html.contains("geb. am"));
-    assert!(preview_html.contains("KT1:"));
+    assert!(preview_html.contains("KT1: SZ"));
+    assert!(preview_html.contains("KT2: BG"));
+    assert!(preview_html.contains("FRA"));
     assert!(preview_html.contains("Agency Street 1"));
     assert!(preview_html.contains("PT-"));
 
@@ -4217,6 +4224,9 @@ async fn document_templates_can_generate_patient_sticker_pdf_document() {
     assert!(pdf_text.contains("ID:"));
     assert!(pdf_text.contains("PT-"));
     assert!(pdf_text.contains(&short_pid));
+    assert!(pdf_text.contains("KT1: SZ"));
+    assert!(pdf_text.contains("KT2: BG"));
+    assert!(pdf_text.contains("FRA"));
     assert!(pdf_text.contains("Agency Street 1"));
 }
 

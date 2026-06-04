@@ -212,6 +212,12 @@ const TRANSLATION_LANGUAGE_OPTIONS = ["de"] as const;
 type BindingFieldKind = "text" | "date" | "textarea";
 type BindingFieldDef = { key: string; label: string; kind: BindingFieldKind };
 
+const PATIENT_STICKER_BINDING_FIELDS: BindingFieldDef[] = [
+  { key: "kt1", label: "KT1", kind: "text" },
+  { key: "kt2", label: "KT2", kind: "text" },
+  { key: "cost_code", label: "Kostenstelle / Code", kind: "text" },
+];
+
 // Manual "binding socket" fields per generated template id. Field keys match
 // the backend `bindings` field names; `*_text` keys are parsed into arrays.
 const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
@@ -308,6 +314,9 @@ const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     { key: "sign_place", label: "Ort", kind: "text" },
     { key: "sign_date", label: "Datum", kind: "date" },
   ],
+  patient_sticker_compact: PATIENT_STICKER_BINDING_FIELDS,
+  patient_sticker_standard: PATIENT_STICKER_BINDING_FIELDS,
+  patient_sticker_sheet: PATIENT_STICKER_BINDING_FIELDS,
   consent_data_release_child: [
     { key: "child_name", label: "Kind (Name)", kind: "text" },
     { key: "child_birth_date", label: "Kind (geb. am)", kind: "date" },
