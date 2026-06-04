@@ -9615,11 +9615,20 @@ async fn generate_provider_document_from_template_internal(
         uploaded_by: actor_user_id,
     };
 
-    let (document_id, file_size, original_filename, _storage_key) =
+    let (document_id, file_size, original_filename, storage_key) =
         match persist_document_file(state, &pdf_bytes, &persist_input).await {
             Ok(value) => value,
             Err(resp) => return Err(resp),
         };
+    best_effort_extract_document_text_and_store(
+        state,
+        document_id,
+        Some(original_filename.as_str()),
+        Some("application/pdf"),
+        storage_key.as_str(),
+        actor_user_id,
+    )
+    .await;
 
     if let Some(replaced) = replacement.as_ref() {
         if let Err(e) = sqlx::query(
@@ -11046,11 +11055,20 @@ async fn generate_document(
         uploaded_by: auth.user_id,
     };
 
-    let (document_id, file_size, original_filename, _storage_key) =
+    let (document_id, file_size, original_filename, storage_key) =
         match persist_document_file(&state, &pdf_bytes, &persist_input).await {
             Ok(value) => value,
             Err(resp) => return resp,
         };
+    best_effort_extract_document_text_and_store(
+        &state,
+        document_id,
+        Some(original_filename.as_str()),
+        Some(template.mime_type),
+        storage_key.as_str(),
+        auth.user_id,
+    )
+    .await;
 
     if let Some(replaced) = replacement.as_ref() {
         if let Err(e) = sqlx::query(

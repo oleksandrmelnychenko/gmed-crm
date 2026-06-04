@@ -2965,8 +2965,6 @@ async fn appointment_confirmation_auto_generates_doc_id() {
             "patient_id": patient_id,
             "language": "de",
             "bindings": {
-                "passport_number": "MA1234567",
-                "passport_valid_until": "2050-01-01",
                 "period_from": "2025-11-17",
                 "clinics": [
                     {"name": "Klinik München", "address": "Musterstr. 1, München"}
@@ -3013,6 +3011,85 @@ async fn appointment_confirmation_auto_generates_doc_id() {
     assert!(
         !pdf_text.contains("Doc.-ID: ____________"),
         "generated appointment confirmation must not leave Doc.-ID blank; got: {pdf_text:?}"
+    );
+
+    let (status, extraction_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/text-extraction"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(extraction_body["status"], "completed");
+    assert_eq!(extraction_body["method"], "pdf_text");
+    assert!(
+        extraction_body["extracted_text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains(&expected_doc_id),
+        "generated PDFs should persist extracted text for edit prefill"
+    );
+}
+
+#[tokio::test]
+async fn appointment_confirmation_extracts_passport_bindings_for_edit_prefill() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("appointment-passport-prefill");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "appointment_confirmation",
+            "patient_id": patient_id,
+            "language": "de",
+            "bindings": {
+                "passport_number": "MA1234567",
+                "passport_valid_until": "2050-01-01",
+                "period_from": "2025-11-17",
+                "clinics": [
+                    {"name": "Klinik München", "address": "Musterstr. 1, München"}
+                ],
+                "contact_phones": "0176 9999999"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "generate appointment confirmation with passport: {body:?}"
+    );
+    let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let (status, extraction_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/text-extraction"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(extraction_body["status"], "completed");
+    assert_eq!(extraction_body["method"], "pdf_text");
+    let extracted_text = extraction_body["extracted_text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        extracted_text.contains("MA1234567"),
+        "passport number must be available for edit prefill; got: {extracted_text:?}"
+    );
+    assert!(
+        extracted_text.contains("01.01.2050"),
+        "passport validity must be available for edit prefill; got: {extracted_text:?}"
     );
 }
 

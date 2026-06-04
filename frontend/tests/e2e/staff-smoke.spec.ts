@@ -41,6 +41,7 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
   const userId = options.userId ?? "00000000-0000-0000-0000-000000000001";
   let portalShareActive = false;
   const documentId = "00000000-0000-0000-0000-000000000501";
+  const appointmentConfirmationId = "00000000-0000-0000-0000-000000000502";
   const patientId = "00000000-0000-0000-0000-000000000301";
   const appointmentDate = localIsoDate();
   let nextGeneratedDocumentIndex = 1;
@@ -114,6 +115,19 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
         default_auto_name: "Einzelauftrag",
         default_status: "active",
         default_visibility: "internal",
+        is_medical: false,
+        supported_languages: ["de"],
+        text_block_keys: [],
+      },
+      {
+        id: "appointment_confirmation",
+        label: "Terminbestätigung",
+        description: "Formelle Terminbestätigung.",
+        art: "appointment_confirmation",
+        category: "clinic_correspondence",
+        default_auto_name: "Terminbestätigung",
+        default_status: "draft",
+        default_visibility: "patient_visible",
         is_medical: false,
         supported_languages: ["de"],
         text_block_keys: [],
@@ -352,7 +366,26 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
     ...overrides,
   });
 
-  let documents = [buildDocument()];
+  let documents = [
+    buildDocument(),
+    buildDocument({
+      id: appointmentConfirmationId,
+      auto_name: "Terminbestätigung",
+      original_filename: "Terminbestätigung.pdf",
+      art: "appointment_confirmation",
+      category: "clinic_correspondence",
+      status: "draft",
+      visibility: "patient_visible",
+      is_medical: false,
+      klinik: null,
+      ursprung: "template:appointment_confirmation",
+      generated_template_id: "appointment_confirmation",
+      data_sensitivity: "Patient Identity",
+      version_root_document_id: appointmentConfirmationId,
+      created_at: "2026-04-02T09:00:00Z",
+      updated_at: "2026-04-02T09:00:00Z",
+    }),
+  ];
   let providerShares: Array<{
     id: string;
     shared_with_provider_id: string | null;
@@ -1054,11 +1087,17 @@ endobj
     }
 
     if (path.startsWith("/documents/") && path.endsWith("/text-extraction")) {
+      const requestedId = path
+        .replace("/documents/", "")
+        .replace("/text-extraction", "");
       return json(route, {
         status: "available",
         method: "pdf_text",
         message: null,
-        extracted_text: "MRI report text",
+        extracted_text:
+          requestedId === appointmentConfirmationId
+            ? "hiermit bestätigen wir, dass Frau MUSTER, Anna, geb. am 01.01.1990, Reisepass Nr.: MA1234567, gültig bis 01.01.2050, sämtliche Termine hat."
+            : "MRI report text",
         has_text: true,
         extracted_at: "2026-04-05T09:00:00Z",
         extracted_by: "00000000-0000-0000-0000-000000000001",
@@ -1295,6 +1334,43 @@ test.describe("staff smoke flows", () => {
         payer_salutation: "Frau",
         payer_name: "Erika Zahlerin",
         order_components: "Anlage A: Vorbefunde und Medikationsliste",
+      },
+    });
+  });
+
+  test("staff sees passport bindings when editing a Terminbestätigung version", async ({
+    page,
+  }) => {
+    await page.goto("/documents");
+    const appointmentConfirmationRow = page
+      .getByText("Terminbestätigung", { exact: true })
+      .first();
+    await expect(appointmentConfirmationRow).toBeVisible();
+
+    await appointmentConfirmationRow.click();
+    const detail = page.getByRole("main");
+    await expect(
+      detail.getByRole("heading", { name: "Terminbestätigung" }),
+    ).toBeVisible();
+
+    await detail.getByRole("button", { name: /Neue Version/i }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Reisepass-Nr.")).toHaveValue("MA1234567");
+    await expect(dialog.getByLabel("Reisepass gültig bis")).toHaveValue(
+      "2050-01-01",
+    );
+
+    await dialog.locator("form").evaluate((formElement) => {
+      (formElement as HTMLFormElement).requestSubmit();
+    });
+
+    expect(generatedDocumentPayloads.at(-1)).toMatchObject({
+      template_id: "appointment_confirmation",
+      replace_document_id: "00000000-0000-0000-0000-000000000502",
+      bindings: {
+        passport_number: "MA1234567",
+        passport_valid_until: "2050-01-01",
       },
     });
   });

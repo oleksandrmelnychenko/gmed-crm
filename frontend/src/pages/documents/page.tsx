@@ -1722,14 +1722,38 @@ function StaffDocumentsPage({
     });
   }
 
-  function openReplacementTemplate(document: DocumentItem) {
+  async function openReplacementTemplate(document: DocumentItem) {
     const template = templateForDocument(templates, document);
     if (!template || !document.patient_id) {
       setNotice(t.documents_not_linked_template);
       return;
     }
-    const extractedText =
+    let extractedText =
       detail?.id === document.id ? textExtraction?.extracted_text : null;
+    if (
+      detail?.id === document.id &&
+      !extractedText &&
+      document.has_stored_file &&
+      (document.mime_type?.startsWith("application/pdf") ||
+        document.mime_type?.startsWith("text/") ||
+        document.mime_type?.startsWith("text/html"))
+    ) {
+      setTextExtractionBusy(true);
+      setTextExtractionError("");
+      try {
+        const response = await runDocumentTextExtraction(document.id);
+        setTextExtraction(response);
+        extractedText = response.extracted_text;
+      } catch (nextError) {
+        setTextExtractionError(
+          nextError instanceof Error
+            ? nextError.message
+            : t.documents_failed_extract,
+        );
+      } finally {
+        setTextExtractionBusy(false);
+      }
+    }
     setGenerateForm({
       templateId: template.id,
       patientId: document.patient_id,
@@ -4096,7 +4120,7 @@ function StaffDocumentsPage({
                           type="button"
                           variant="outline"
                           className="h-9 gap-1.5 rounded-lg px-3.5"
-                          onClick={() => openReplacementTemplate(detail)}
+                          onClick={() => void openReplacementTemplate(detail)}
                         >
                           <FileText className="size-3.5" />
                           {text.newVersion}
