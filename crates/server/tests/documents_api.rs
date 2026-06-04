@@ -3186,18 +3186,22 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             order_id: Some(order_id),
             appointment_id: None,
             bindings: json!({
+                "order_sequence": 2,
                 "order_number": "EA-ALL-1",
                 "order_date": "2026-05-01",
                 "contract_date": "2026-04-01",
                 "specialties": "Kardiologie",
+                "examination_purpose": "kardiologischen Abklärung",
+                "treatment_purpose": "eine interventionelle Behandlung",
                 "period_from": "2026-06-01",
                 "period_to": "2026-06-05",
                 "payer_name": "Template Payer",
-                "payer_birth_date": "1980-01-01"
+                "payer_birth_date": "1980-01-01",
+                "order_components": "Anlage A: Vorbefunde und Medikationsliste"
             }),
             text_block_keys: vec![],
             min_pdf_size: 800,
-            expected_pdf_text: "EA-ALL-1",
+            expected_pdf_text: "Anlage A: Vorbefunde",
         },
         TemplateCase {
             template_id: "cost_coverage_declaration",
