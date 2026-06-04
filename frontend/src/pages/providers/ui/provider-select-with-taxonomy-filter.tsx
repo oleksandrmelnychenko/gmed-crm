@@ -5,19 +5,12 @@ import { tokens } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
 import { ProviderTaxonomyCascadeSelect } from "@/pages/providers/ui/provider-taxonomy-cascade-select";
 import type { ProviderTaxonomyNode, ProviderType } from "@/pages/providers/model/types";
-
-type ProviderTaxonomyCarrier = {
-  id: string;
-  name: string;
-  provider_type?: string | null;
-  address_city?: string | null;
-  taxonomy_node_id?: string | null;
-  taxonomy_node_ids?: string[];
-  /** Assigned nodes + all their ancestors; used for parent-category filtering. */
-  taxonomy_filter_ids?: string[];
-  taxonomy_node?: { id?: string | null } | null;
-  taxonomy_path?: Array<{ id?: string | null }>;
-};
+import {
+  type ProviderTaxonomyCarrier,
+  providerMatchesTaxonomy,
+  providerMatchesType,
+  selectAvailableTaxonomyNodes,
+} from "@/pages/providers/model/provider-selection";
 
 type ProviderSelectWithTaxonomyFilterProps<TProvider extends ProviderTaxonomyCarrier> = {
   value: string;
@@ -48,30 +41,6 @@ type ProviderSelectWithTaxonomyFilterProps<TProvider extends ProviderTaxonomyCar
   onChange: (providerId: string) => void;
   onTaxonomyChange?: (taxonomyNodeId: string) => void;
 };
-
-function providerTaxonomyIdList(provider: ProviderTaxonomyCarrier): string[] {
-  return [
-    provider.taxonomy_node_id ?? "",
-    provider.taxonomy_node?.id ?? "",
-    ...(provider.taxonomy_filter_ids ?? []),
-    ...(provider.taxonomy_node_ids ?? []),
-    ...(provider.taxonomy_path ?? []).map((node) => node.id ?? ""),
-  ].filter(Boolean);
-}
-
-function providerMatchesTaxonomy(provider: ProviderTaxonomyCarrier, taxonomyNodeId: string) {
-  const selected = taxonomyNodeId.trim();
-  if (!selected) return true;
-  return new Set(providerTaxonomyIdList(provider)).has(selected);
-}
-
-function providerMatchesType(
-  provider: ProviderTaxonomyCarrier,
-  providerType: ProviderType | "" | null | undefined,
-) {
-  if (providerType !== "medical" && providerType !== "non_medical") return true;
-  return provider.provider_type === providerType;
-}
 
 function defaultProviderLabel(provider: ProviderTaxonomyCarrier) {
   return provider.address_city ? `${provider.name} (${provider.address_city})` : provider.name;
@@ -125,29 +94,20 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
     filteredProviders.length === 0 &&
     selectedTaxonomyValue.trim() !== "";
 
-  // Categories that actually contain at least one provider of the current type (plus the
-  // ancestor chain of the current selection, so it stays navigable). Empty categories like
-  // pharmacies on a medical appointment are then never offered.
-  const availableTaxonomyNodes = useMemo(() => {
-    if (!restrictTaxonomyToAvailable || providers.length === 0) return taxonomyNodes;
-    const byId = new Map(taxonomyNodes.map((node) => [node.id, node]));
-    const allowed = new Set<string>();
-    const addWithAncestors = (startId: string) => {
-      let cursor: string | null = startId;
-      while (cursor && !allowed.has(cursor)) {
-        allowed.add(cursor);
-        cursor = byId.get(cursor)?.parent_id ?? null;
-      }
-    };
-    for (const provider of providers) {
-      if (!providerMatchesType(provider, providerType)) continue;
-      for (const id of providerTaxonomyIdList(provider)) addWithAncestors(id);
-    }
-    // Keep the current selection navigable even if no provider currently backs it.
-    const selected = selectedTaxonomyValue.trim();
-    if (selected) addWithAncestors(selected);
-    return taxonomyNodes.filter((node) => allowed.has(node.id));
-  }, [restrictTaxonomyToAvailable, providers, providerType, taxonomyNodes, selectedTaxonomyValue]);
+  // Only offer categories that actually contain a matching provider (empty categories like
+  // pharmacies on a medical appointment are never shown). See selectAvailableTaxonomyNodes.
+  const availableTaxonomyNodes = useMemo(
+    () =>
+      restrictTaxonomyToAvailable
+        ? selectAvailableTaxonomyNodes(
+            taxonomyNodes,
+            providers,
+            providerType,
+            selectedTaxonomyValue,
+          )
+        : taxonomyNodes,
+    [restrictTaxonomyToAvailable, providers, providerType, taxonomyNodes, selectedTaxonomyValue],
+  );
 
   const handleTaxonomyChange = (taxonomyNodeId: string) => {
     if (taxonomyValue === undefined) {
