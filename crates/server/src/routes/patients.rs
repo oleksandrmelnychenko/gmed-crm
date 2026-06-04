@@ -28,6 +28,22 @@ pub fn router() -> Router<AppState> {
             get(list_patient_vitals).post(create_patient_vital_measurement),
         )
         .route(
+            "/patients/{patient_id}/clinical",
+            get(get_patient_clinical),
+        )
+        .route(
+            "/patients/{patient_id}/diagnoses",
+            post(save_patient_diagnoses),
+        )
+        .route(
+            "/patients/{patient_id}/medications",
+            post(save_patient_medications),
+        )
+        .route(
+            "/patients/{patient_id}/examinations",
+            post(save_patient_examinations),
+        )
+        .route(
             "/patients/{patient_id}/card-entries",
             get(list_patient_card_entries).post(create_patient_card_entry),
         )
@@ -6631,4 +6647,483 @@ async fn delete_patient(
             )
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Patient-level clinical master record (diagnoses / medications / examinations).
+// Independent of case episodes; replace-all save per section, like the case
+// clinical sections. Each entry is attributed to the issuing provider + doctor.
+// See migration 20260604100000_patient_clinical_master.sql.
+// ---------------------------------------------------------------------------
+
+const PATIENT_CLINICAL_ROLES: &[Role] = &[Role::Ceo, Role::PatientManager, Role::ItAdmin];
+
+#[derive(Deserialize)]
+struct PatientClinicalItems<T> {
+    items: Vec<T>,
+}
+
+#[derive(Deserialize)]
+struct PatientDiagnosisInput {
+    #[serde(default)]
+    provider_id: Option<String>,
+    #[serde(default)]
+    doctor_id: Option<String>,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    icd_code: Option<String>,
+    #[serde(default)]
+    grade: Option<String>,
+    #[serde(default)]
+    laterality: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    diagnosed_on: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct PatientMedicationInput {
+    #[serde(default)]
+    provider_id: Option<String>,
+    #[serde(default)]
+    doctor_id: Option<String>,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default)]
+    wirkstoff: Option<String>,
+    #[serde(default)]
+    handelsname: Option<String>,
+    #[serde(default)]
+    staerke: Option<String>,
+    #[serde(default)]
+    form: Option<String>,
+    #[serde(default)]
+    dose_morgens: Option<String>,
+    #[serde(default)]
+    dose_mittags: Option<String>,
+    #[serde(default)]
+    dose_abends: Option<String>,
+    #[serde(default)]
+    dose_nachts: Option<String>,
+    #[serde(default)]
+    einheit: Option<String>,
+    #[serde(default)]
+    hinweis: Option<String>,
+    #[serde(default)]
+    grund: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct PatientExaminationInput {
+    #[serde(default)]
+    provider_id: Option<String>,
+    #[serde(default)]
+    doctor_id: Option<String>,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    performed_on: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    result: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+/// Trim a value, dropping empties to NULL.
+fn clinical_opt_text(value: Option<String>) -> Option<String> {
+    value
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+/// Normalize a constrained value to one of `allowed` (lower-cased), else None.
+fn clinical_one_of(value: Option<String>, allowed: &[&str]) -> Option<String> {
+    value
+        .map(|v| v.trim().to_lowercase())
+        .filter(|v| allowed.contains(&v.as_str()))
+}
+
+/// Parse an optional UUID string; empty / invalid become None.
+fn clinical_opt_uuid(value: Option<String>) -> Option<Uuid> {
+    value.and_then(|v| Uuid::parse_str(v.trim()).ok())
+}
+
+async fn get_patient_clinical(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+) -> impl IntoResponse {
+    auth.require_any_role(PATIENT_CLINICAL_ROLES)?;
+
+    if !has_patient_access(&state, &auth, patient_uuid).await? {
+        return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+    }
+
+    let load_fail = || {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load clinical profile",
+        )
+    };
+
+    let diag_rows = sqlx::query(
+        r#"SELECT d.id, d.kind, d.label, d.icd_code, d.grade, d.laterality, d.status,
+                  d.diagnosed_on, d.note, d.provider_id, p.name AS provider_name,
+                  d.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title
+           FROM patient_diagnoses d
+           LEFT JOIN providers p ON p.id = d.provider_id
+           LEFT JOIN provider_doctors dr ON dr.id = d.doctor_id
+           WHERE d.patient_id = $1
+           ORDER BY d.sort_order, d.created_at"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "load patient diagnoses");
+        load_fail()
+    })?;
+
+    let med_rows = sqlx::query(
+        r#"SELECT m.id, m.category, m.wirkstoff, m.handelsname, m.staerke, m.form,
+                  m.dose_morgens, m.dose_mittags, m.dose_abends, m.dose_nachts,
+                  m.einheit, m.hinweis, m.grund, m.provider_id, p.name AS provider_name,
+                  m.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title
+           FROM patient_medications m
+           LEFT JOIN providers p ON p.id = m.provider_id
+           LEFT JOIN provider_doctors dr ON dr.id = m.doctor_id
+           WHERE m.patient_id = $1
+           ORDER BY m.sort_order, m.created_at"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "load patient medications");
+        load_fail()
+    })?;
+
+    let exam_rows = sqlx::query(
+        r#"SELECT e.id, e.kind, e.title, e.performed_on, e.status, e.result, e.note,
+                  e.provider_id, p.name AS provider_name,
+                  e.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title
+           FROM patient_examinations e
+           LEFT JOIN providers p ON p.id = e.provider_id
+           LEFT JOIN provider_doctors dr ON dr.id = e.doctor_id
+           WHERE e.patient_id = $1
+           ORDER BY e.sort_order, e.created_at"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "load patient examinations");
+        load_fail()
+    })?;
+
+    let diagnoses = diag_rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.get::<Uuid, _>("id"),
+                "kind": row.get::<String, _>("kind"),
+                "label": row.get::<String, _>("label"),
+                "icd_code": row.get::<Option<String>, _>("icd_code"),
+                "grade": row.get::<Option<String>, _>("grade"),
+                "laterality": row.get::<Option<String>, _>("laterality"),
+                "status": row.get::<String, _>("status"),
+                "diagnosed_on": row.get::<Option<String>, _>("diagnosed_on"),
+                "note": row.get::<Option<String>, _>("note"),
+                "provider_id": row.get::<Option<Uuid>, _>("provider_id"),
+                "provider_name": row.get::<Option<String>, _>("provider_name"),
+                "doctor_id": row.get::<Option<Uuid>, _>("doctor_id"),
+                "doctor_name": row.get::<Option<String>, _>("doctor_name"),
+                "doctor_title": row.get::<Option<String>, _>("doctor_title"),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let medications = med_rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.get::<Uuid, _>("id"),
+                "category": row.get::<String, _>("category"),
+                "wirkstoff": row.get::<Option<String>, _>("wirkstoff"),
+                "handelsname": row.get::<String, _>("handelsname"),
+                "staerke": row.get::<Option<String>, _>("staerke"),
+                "form": row.get::<Option<String>, _>("form"),
+                "dose_morgens": row.get::<Option<String>, _>("dose_morgens"),
+                "dose_mittags": row.get::<Option<String>, _>("dose_mittags"),
+                "dose_abends": row.get::<Option<String>, _>("dose_abends"),
+                "dose_nachts": row.get::<Option<String>, _>("dose_nachts"),
+                "einheit": row.get::<Option<String>, _>("einheit"),
+                "hinweis": row.get::<Option<String>, _>("hinweis"),
+                "grund": row.get::<Option<String>, _>("grund"),
+                "provider_id": row.get::<Option<Uuid>, _>("provider_id"),
+                "provider_name": row.get::<Option<String>, _>("provider_name"),
+                "doctor_id": row.get::<Option<Uuid>, _>("doctor_id"),
+                "doctor_name": row.get::<Option<String>, _>("doctor_name"),
+                "doctor_title": row.get::<Option<String>, _>("doctor_title"),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let examinations = exam_rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.get::<Uuid, _>("id"),
+                "kind": row.get::<Option<String>, _>("kind"),
+                "title": row.get::<String, _>("title"),
+                "performed_on": row.get::<Option<String>, _>("performed_on"),
+                "status": row.get::<String, _>("status"),
+                "result": row.get::<Option<String>, _>("result"),
+                "note": row.get::<Option<String>, _>("note"),
+                "provider_id": row.get::<Option<Uuid>, _>("provider_id"),
+                "provider_name": row.get::<Option<String>, _>("provider_name"),
+                "doctor_id": row.get::<Option<Uuid>, _>("doctor_id"),
+                "doctor_name": row.get::<Option<String>, _>("doctor_name"),
+                "doctor_title": row.get::<Option<String>, _>("doctor_title"),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    Ok(Json(json!({
+        "diagnoses": diagnoses,
+        "medications": medications,
+        "examinations": examinations,
+    })))
+}
+
+async fn save_patient_diagnoses(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+    Json(body): Json<PatientClinicalItems<PatientDiagnosisInput>>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+        return e;
+    }
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin patient diagnoses tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(e) = sqlx::query("DELETE FROM patient_diagnoses WHERE patient_id = $1")
+        .bind(patient_uuid)
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient diagnoses");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    let mut saved = 0i32;
+    for item in body.items {
+        let Some(label) = clinical_opt_text(item.label) else {
+            continue;
+        };
+        let kind = clinical_one_of(item.kind, &["main", "secondary"])
+            .unwrap_or_else(|| "secondary".to_string());
+        let status = clinical_one_of(item.status, &["active", "chronic", "resolved"])
+            .unwrap_or_else(|| "active".to_string());
+        let laterality = clinical_one_of(item.laterality, &["left", "right", "bilateral"]);
+        if let Err(e) = sqlx::query(
+            "INSERT INTO patient_diagnoses (patient_id, provider_id, doctor_id, kind, label, icd_code, grade, laterality, status, diagnosed_on, note, sort_order)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+        )
+        .bind(patient_uuid)
+        .bind(clinical_opt_uuid(item.provider_id))
+        .bind(clinical_opt_uuid(item.doctor_id))
+        .bind(&kind)
+        .bind(&label)
+        .bind(clinical_opt_text(item.icd_code))
+        .bind(clinical_opt_text(item.grade))
+        .bind(laterality)
+        .bind(&status)
+        .bind(clinical_opt_text(item.diagnosed_on))
+        .bind(clinical_opt_text(item.note))
+        .bind(saved)
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "insert patient diagnosis");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        saved += 1;
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient diagnoses");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    Json(json!({ "ok": true, "count": saved })).into_response()
+}
+
+async fn save_patient_medications(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+    Json(body): Json<PatientClinicalItems<PatientMedicationInput>>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+        return e;
+    }
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin patient medications tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(e) = sqlx::query("DELETE FROM patient_medications WHERE patient_id = $1")
+        .bind(patient_uuid)
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient medications");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    let mut saved = 0i32;
+    for item in body.items {
+        let Some(handelsname) = clinical_opt_text(item.handelsname) else {
+            continue;
+        };
+        let category = clinical_one_of(item.category, &["dauer", "besondere", "selbst"])
+            .unwrap_or_else(|| "dauer".to_string());
+        if let Err(e) = sqlx::query(
+            "INSERT INTO patient_medications (patient_id, provider_id, doctor_id, category, wirkstoff, handelsname, staerke, form, dose_morgens, dose_mittags, dose_abends, dose_nachts, einheit, hinweis, grund, sort_order)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
+        )
+        .bind(patient_uuid)
+        .bind(clinical_opt_uuid(item.provider_id))
+        .bind(clinical_opt_uuid(item.doctor_id))
+        .bind(&category)
+        .bind(clinical_opt_text(item.wirkstoff))
+        .bind(&handelsname)
+        .bind(clinical_opt_text(item.staerke))
+        .bind(clinical_opt_text(item.form))
+        .bind(clinical_opt_text(item.dose_morgens))
+        .bind(clinical_opt_text(item.dose_mittags))
+        .bind(clinical_opt_text(item.dose_abends))
+        .bind(clinical_opt_text(item.dose_nachts))
+        .bind(clinical_opt_text(item.einheit))
+        .bind(clinical_opt_text(item.hinweis))
+        .bind(clinical_opt_text(item.grund))
+        .bind(saved)
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "insert patient medication");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        saved += 1;
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient medications");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    Json(json!({ "ok": true, "count": saved })).into_response()
+}
+
+async fn save_patient_examinations(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+    Json(body): Json<PatientClinicalItems<PatientExaminationInput>>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+        return e;
+    }
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin patient examinations tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(e) = sqlx::query("DELETE FROM patient_examinations WHERE patient_id = $1")
+        .bind(patient_uuid)
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient examinations");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    let mut saved = 0i32;
+    for item in body.items {
+        let Some(title) = clinical_opt_text(item.title) else {
+            continue;
+        };
+        let kind = clinical_one_of(
+            item.kind,
+            &[
+                "sonography",
+                "lab",
+                "histology",
+                "ecg",
+                "microbiology",
+                "radiology",
+                "exam",
+                "other",
+            ],
+        );
+        let status = clinical_one_of(item.status, &["final", "pending"])
+            .unwrap_or_else(|| "final".to_string());
+        if let Err(e) = sqlx::query(
+            "INSERT INTO patient_examinations (patient_id, provider_id, doctor_id, kind, title, performed_on, status, result, note, sort_order)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+        )
+        .bind(patient_uuid)
+        .bind(clinical_opt_uuid(item.provider_id))
+        .bind(clinical_opt_uuid(item.doctor_id))
+        .bind(kind)
+        .bind(&title)
+        .bind(clinical_opt_text(item.performed_on))
+        .bind(&status)
+        .bind(clinical_opt_text(item.result))
+        .bind(clinical_opt_text(item.note))
+        .bind(saved)
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "insert patient examination");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        saved += 1;
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient examinations");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    Json(json!({ "ok": true, "count": saved })).into_response()
 }

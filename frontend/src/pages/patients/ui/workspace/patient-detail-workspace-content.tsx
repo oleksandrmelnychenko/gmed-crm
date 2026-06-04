@@ -57,6 +57,7 @@ const loadPatientRelationsTab = () => import("../sections/patient-relations-tab"
 const loadPatientCasesTab = () => import("../sections/patient-cases-tab");
 const loadPatientOrdersTab = () => import("../sections/patient-orders-tab");
 const loadPatientAppointmentsTab = () => import("../sections/patient-appointments-tab");
+const loadPatientClinicalTab = () => import("../sections/patient-clinical-tab");
 const loadPatientDocumentsTab = () => import("../sections/patient-documents-tab");
 const loadPatientContractsTab = () => import("../sections/patient-contracts-tab");
 const loadPatientInvoicesTab = () => import("../sections/patient-invoices-tab");
@@ -96,6 +97,11 @@ const LazyPatientAppointmentsTab = lazy(async () => {
 const LazyPatientDocumentsTab = lazy(async () => {
   const mod = await loadPatientDocumentsTab();
   return { default: mod.PatientDocumentsTab };
+});
+
+const LazyPatientClinicalTab = lazy(async () => {
+  const mod = await loadPatientClinicalTab();
+  return { default: mod.PatientClinicalTab };
 });
 
 const LazyPatientContractsTab = lazy(async () => {
@@ -816,6 +822,10 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               t={t}
               tabLoading={tabLoading}
             />
+          ) : null}
+
+          {activeTab === "clinical" && id ? (
+            <LazyPatientClinicalTab patientId={id} canManage={canManageDocuments} />
           ) : null}
 
           {activeTab === "documents" ? (

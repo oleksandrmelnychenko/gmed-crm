@@ -656,3 +656,219 @@ async fn billing_cannot_access_patient_risk_scores_routes() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+async fn seed_provider(pool: &PgPool, tag: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO providers (name, provider_type)
+           VALUES ($1, 'medical')
+           RETURNING id"#,
+    )
+    .bind(format!("Provider {tag}"))
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn seed_provider_doctor(pool: &PgPool, provider_id: Uuid, tag: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO provider_doctors (provider_id, name, title)
+           VALUES ($1, $2, 'Dr. med.')
+           RETURNING id"#,
+    )
+    .bind(provider_id)
+    .bind(format!("Doctor {tag}"))
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn patient_clinical_master_round_trip_with_provider_doctor() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-clinical");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_provider_doctor(&pool, provider_id, &tag).await;
+
+    // ---- Diagnoses (main with ICD + provider/doctor, plus a secondary) ----
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/diagnoses"),
+        &pm_bearer,
+        Some(json!({
+            "items": [
+                {
+                    "kind": "main",
+                    "label": "Ambulant erworbene Pneumonie",
+                    "icd_code": "J15.9",
+                    "status": "active",
+                    "diagnosed_on": "ED 03/2017",
+                    "provider_id": provider_id.to_string(),
+                    "doctor_id": doctor_id.to_string(),
+                },
+                {
+                    "kind": "secondary",
+                    "label": "Arterielle Hypertonie",
+                    "icd_code": "I10.0",
+                    "grade": "Grad 1",
+                    "status": "chronic",
+                },
+            ],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // ---- Medications (Medikationsplan) ----
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/medications"),
+        &pm_bearer,
+        Some(json!({
+            "items": [
+                {
+                    "category": "dauer",
+                    "handelsname": "Bisoprolol-ratiopharm",
+                    "wirkstoff": "Bisoprolol",
+                    "staerke": "5 mg",
+                    "form": "Filmtabl.",
+                    "dose_morgens": "1",
+                    "dose_mittags": "0",
+                    "dose_abends": "1",
+                    "dose_nachts": "0",
+                    "einheit": "Stück",
+                    "grund": "Bluthochdruck",
+                    "provider_id": provider_id.to_string(),
+                    "doctor_id": doctor_id.to_string(),
+                },
+            ],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // ---- Examinations / Befunde ----
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/examinations"),
+        &pm_bearer,
+        Some(json!({
+            "items": [
+                {
+                    "kind": "radiology",
+                    "title": "Röntgen-Thorax",
+                    "performed_on": "01.03.2017",
+                    "status": "pending",
+                    "result": "Befund ausstehend",
+                    "provider_id": provider_id.to_string(),
+                },
+            ],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // ---- GET aggregated clinical profile ----
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let diagnoses = body["diagnoses"].as_array().expect("diagnoses array");
+    assert_eq!(diagnoses.len(), 2);
+    assert_eq!(diagnoses[0]["kind"], "main");
+    assert_eq!(diagnoses[0]["label"], "Ambulant erworbene Pneumonie");
+    assert_eq!(diagnoses[0]["icd_code"], "J15.9");
+    assert_eq!(diagnoses[0]["provider_id"], provider_id.to_string());
+    assert_eq!(diagnoses[0]["provider_name"], format!("Provider {tag}"));
+    assert_eq!(diagnoses[0]["doctor_name"], format!("Doctor {tag}"));
+    assert_eq!(diagnoses[1]["kind"], "secondary");
+    assert_eq!(diagnoses[1]["grade"], "Grad 1");
+
+    let medications = body["medications"].as_array().expect("medications array");
+    assert_eq!(medications.len(), 1);
+    assert_eq!(medications[0]["handelsname"], "Bisoprolol-ratiopharm");
+    assert_eq!(medications[0]["category"], "dauer");
+    assert_eq!(medications[0]["dose_morgens"], "1");
+    assert_eq!(medications[0]["dose_abends"], "1");
+    assert_eq!(medications[0]["einheit"], "Stück");
+    assert_eq!(medications[0]["doctor_name"], format!("Doctor {tag}"));
+
+    let examinations = body["examinations"].as_array().expect("examinations array");
+    assert_eq!(examinations.len(), 1);
+    assert_eq!(examinations[0]["title"], "Röntgen-Thorax");
+    assert_eq!(examinations[0]["status"], "pending");
+    assert_eq!(examinations[0]["kind"], "radiology");
+    assert_eq!(examinations[0]["provider_name"], format!("Provider {tag}"));
+
+    // ---- Replace-all clears the diagnoses section without touching the others ----
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/diagnoses"),
+        &pm_bearer,
+        Some(json!({ "items": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["diagnoses"].as_array().expect("diagnoses").len(), 0);
+    assert_eq!(body["medications"].as_array().expect("medications").len(), 1);
+    assert_eq!(body["examinations"].as_array().expect("examinations").len(), 1);
+}
+
+#[tokio::test]
+async fn billing_cannot_access_patient_clinical_routes() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-clinical-billing");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/diagnoses"),
+        &billing_bearer,
+        Some(json!({ "items": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
