@@ -6824,6 +6824,9 @@ fn build_patient_sticker_pdf(
             TreatmentPlanPdfColor::Body,
             &mut y_mm,
         );
+        // The name below is set in a much larger font; reserve the remainder of its line
+        // height so its ascenders don't overlap the salutation row above it.
+        y_mm -= (pdf_line_height_mm(name_size, 1.18) - pdf_line_height_mm(body_size, 1.18)).max(0.0);
     }
     // Name: "Lastname, Firstname"
     push_wrapped(
