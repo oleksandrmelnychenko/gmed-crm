@@ -218,11 +218,21 @@ const PATIENT_STICKER_BINDING_FIELDS: BindingFieldDef[] = [
   { key: "cost_code", label: "Kostenstelle / Code", kind: "text" },
 ];
 
+const PATIENT_PARTY_BINDING_FIELDS: BindingFieldDef[] = [
+  { key: "party_street", label: "Patient Straße", kind: "text" },
+  { key: "party_zip", label: "Patient PLZ", kind: "text" },
+  { key: "party_city", label: "Patient Ort", kind: "text" },
+  { key: "party_country", label: "Patient Land", kind: "text" },
+  { key: "party_email", label: "Patient E-Mail", kind: "text" },
+  { key: "party_phone", label: "Patient Telefon", kind: "text" },
+];
+
 // Manual "binding socket" fields per generated template id. Field keys match
 // the backend `bindings` field names; `*_text` keys are parsed into arrays.
 const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
   framework_contract: [
     { key: "contract_date", label: "Rahmenvertrag vom / Inkrafttreten", kind: "date" },
+    ...PATIENT_PARTY_BINDING_FIELDS,
     { key: "order_sequence", label: "Laufende Nr. des Einzelauftrags", kind: "text" },
     { key: "cost_threshold", label: "Mehrkosten-Freigabegrenze", kind: "text" },
     {
@@ -238,6 +248,7 @@ const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     { key: "order_number", label: "Auftragsnummer", kind: "text" },
     { key: "order_date", label: "Einzelauftrag vom", kind: "date" },
     { key: "contract_date", label: "Rahmenvertrag vom", kind: "date" },
+    ...PATIENT_PARTY_BINDING_FIELDS,
     { key: "specialties", label: "Fachbereiche", kind: "text" },
     { key: "examination_purpose", label: "Untersuchungszweck", kind: "text" },
     { key: "treatment_purpose", label: "Behandlungszweck", kind: "text" },

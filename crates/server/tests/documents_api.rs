@@ -4081,6 +4081,12 @@ async fn document_templates_can_generate_framework_contract_pdf_document() {
             "text_block_keys": ["contract_scope_clause", "quote_reference_clause"],
             "bindings": {
                 "contract_date": "2025-11-11",
+                "party_street": "Override Str. 9",
+                "party_zip": "80331",
+                "party_city": "Muenchen",
+                "party_country": "Deutschland",
+                "party_email": "override.patient@example.test",
+                "party_phone": "+49 89 123456",
                 "order_sequence": 4,
                 "cost_threshold": "2500",
                 "extra_release_recipients": "Klinik Datenschutzstelle",
@@ -4127,6 +4133,9 @@ async fn document_templates_can_generate_framework_contract_pdf_document() {
     assert!(pdf_text.contains("Informationsblatt zum Datenschutz"));
     assert!(pdf_text.contains("Beschwerderecht"));
     assert!(pdf_text.contains("datenschutz@gmed-health.com"));
+    assert!(pdf_text.contains("Override Str. 9 | 80331 Muenchen | Deutschland"));
+    assert!(pdf_text.contains("override.patient@example.test"));
+    assert!(pdf_text.contains("+49 89 123456"));
     assert!(pdf_text.contains("4. EINZELAUFTRAG"));
     assert!(pdf_text.contains("2.500,00 EUR"));
     assert!(pdf_text.contains("Klinik Datenschutzstelle"));
