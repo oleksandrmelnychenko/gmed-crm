@@ -44,6 +44,7 @@ import { localizeDocumentCode } from "@/lib/required-document-labels";
 import {
   DOCUMENT_BINDING_FIELDS,
   buildBindingsPayload,
+  prefillDocumentBindingsFromText,
 } from "@/pages/documents/model/document-bindings";
 import { localizeTextBlock } from "@/pages/documents/model/text-block-labels";
 import {
@@ -1727,6 +1728,8 @@ function StaffDocumentsPage({
       setNotice(t.documents_not_linked_template);
       return;
     }
+    const extractedText =
+      detail?.id === document.id ? textExtraction?.extracted_text : null;
     setGenerateForm({
       templateId: template.id,
       patientId: document.patient_id,
@@ -1747,7 +1750,7 @@ function StaffDocumentsPage({
       ursprung: document.ursprung ?? "",
       notes: document.notes ?? "",
       textBlockKeys: [],
-      bindings: {},
+      bindings: prefillDocumentBindingsFromText(template.id, extractedText),
     });
     setGenerateError("");
     setTemplateOpen(true);

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DOCUMENT_BINDING_FIELDS,
   buildBindingsPayload,
+  prefillDocumentBindingsFromText,
 } from "./document-bindings";
 
 describe("document template binding payloads", () => {
@@ -99,6 +100,27 @@ describe("document template binding payloads", () => {
         (field) => field.key === "doc_id",
       ),
     ).toBe(false);
+  });
+
+  it("prefills appointment confirmation passport bindings from extracted PDF text", () => {
+    expect(
+      prefillDocumentBindingsFromText(
+        "appointment_confirmation",
+        "hiermit bestätigen wir, dass Herr MUSTERMAN, Max, geb. am 01.01.1930, Reisepass Nr.: MA1234567, gültig bis 01.01.2050, sämtliche Termine hat.",
+      ),
+    ).toEqual({
+      passport_number: "MA1234567",
+      passport_valid_until: "2050-01-01",
+    });
+  });
+
+  it("does not prefill blank appointment confirmation passport sockets", () => {
+    expect(
+      prefillDocumentBindingsFromText(
+        "appointment_confirmation",
+        "Reisepass Nr.: ____________, gültig bis ____________, sämtliche Termine",
+      ),
+    ).toEqual({});
   });
 
   it("returns null when a template has no non-empty known bindings", () => {

@@ -5,6 +5,8 @@ export type BindingFieldDef = {
   kind: BindingFieldKind;
 };
 
+export type DocumentBindingForm = Record<string, string>;
+
 const PATIENT_STICKER_BINDING_FIELDS: BindingFieldDef[] = [
   { key: "kt1", label: "KT1", kind: "text" },
   { key: "kt2", label: "KT2", kind: "text" },
@@ -187,7 +189,7 @@ function parseBindingClinics(text: string) {
 
 export function buildBindingsPayload(
   templateId: string,
-  bindings: Record<string, string>,
+  bindings: DocumentBindingForm,
 ): Record<string, unknown> | null {
   const out: Record<string, unknown> = {};
   const fieldDefs = DOCUMENT_BINDING_FIELDS[templateId] ?? [];
@@ -223,4 +225,46 @@ export function buildBindingsPayload(
     if (clinics.length) out.clinics = clinics;
   }
   return Object.keys(out).length ? out : null;
+}
+
+function cleanSocketValue(value: string | undefined) {
+  const trimmed = (value ?? "").trim().replace(/[.,;:]+$/, "").trim();
+  if (!trimmed || /^_+$/.test(trimmed)) return "";
+  return trimmed;
+}
+
+function germanDateToInputDate(value: string | undefined) {
+  const trimmed = cleanSocketValue(value);
+  const match = trimmed.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (!match) return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : "";
+  const [, day, month, year] = match;
+  return `${year}-${month}-${day}`;
+}
+
+function prefillAppointmentConfirmationBindingsFromText(
+  text: string,
+): DocumentBindingForm {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const passportMatch = normalized.match(
+    /Reisepass\s+Nr\.?:\s*([^,]+?)(?:,\s*g(?:ü|u)ltig\s+bis\s+([^,]+))?(?=,|\s|$)/i,
+  );
+  if (!passportMatch) return {};
+
+  const bindings: DocumentBindingForm = {};
+  const passportNumber = cleanSocketValue(passportMatch[1]);
+  const passportValidUntil = germanDateToInputDate(passportMatch[2]);
+  if (passportNumber) bindings.passport_number = passportNumber;
+  if (passportValidUntil) bindings.passport_valid_until = passportValidUntil;
+  return bindings;
+}
+
+export function prefillDocumentBindingsFromText(
+  templateId: string,
+  text: string | null | undefined,
+): DocumentBindingForm {
+  if (!text?.trim()) return {};
+  if (templateId === "appointment_confirmation") {
+    return prefillAppointmentConfirmationBindingsFromText(text);
+  }
+  return {};
 }
