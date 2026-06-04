@@ -264,7 +264,7 @@ function NotFoundPage() {
 }
 
 class RouteErrorBoundary extends Component<
-  { children: ReactNode },
+  { children: ReactNode; resetKey: string },
   { hasError: boolean }
 > {
   state = { hasError: false };
@@ -278,6 +278,15 @@ class RouteErrorBoundary extends Component<
       return;
     }
     console.error("Route render failed", error, info);
+  }
+
+  componentDidUpdate(prevProps: { resetKey: string }) {
+    // Clear a caught error when navigating to a different route — without remounting the
+    // whole subtree. (Keying this boundary by location remounted Suspense + the shell on
+    // every navigation, which flashed like a full page reload.)
+    if (prevProps.resetKey !== this.props.resetKey && this.state.hasError) {
+      this.setState({ hasError: false });
+    }
   }
 
   render() {
@@ -310,12 +319,11 @@ class RouteErrorBoundary extends Component<
 function AppRoutes() {
   const location = useLocation();
 
-  // Reset the route error boundary only when navigating to a different PATH — not on
-  // query-string changes. Keying on location.search remounted the entire route subtree on
-  // every keystroke in any search box (which writes ?search=/?q= to the URL), which dropped
-  // input focus and made list pages lag.
+  // The error boundary stays mounted across navigation (no key) so switching menu items
+  // doesn't remount Suspense + the whole shell (which flashed like a full reload). It
+  // recovers from a caught error via resetKey when the path changes.
   return (
-    <RouteErrorBoundary key={location.pathname}>
+    <RouteErrorBoundary resetKey={location.pathname}>
       <Suspense fallback={<div className="min-h-screen bg-background" />}>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
