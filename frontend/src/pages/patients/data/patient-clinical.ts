@@ -72,10 +72,21 @@ export type ClinicalExamination = ClinicalAttribution & {
   note: string | null;
 };
 
+export type ClinicalNarrative = {
+  anamnese_aktuelle: string | null;
+  anamnese_vorgeschichte: string | null;
+  anamnese_vegetative: string | null;
+  anamnese_sozial: string | null;
+  untersuchungsbefund: string | null;
+  beurteilung: string | null;
+  verlauf: string | null;
+};
+
 export type PatientClinicalProfile = {
   diagnoses: ClinicalDiagnosis[];
   medications: ClinicalMedication[];
   examinations: ClinicalExamination[];
+  narrative: ClinicalNarrative | null;
 };
 
 export type PatientRecommendation = {
@@ -107,4 +118,20 @@ export function savePatientMedications(patientId: string, items: ClinicalMedicat
 
 export function savePatientExaminations(patientId: string, items: ClinicalExamination[]) {
   return postJson(`/patients/${patientId}/examinations`, { items });
+}
+
+export function savePatientNarrative(patientId: string, narrative: ClinicalNarrative) {
+  return postJson(`/patients/${patientId}/narrative`, { ...narrative });
+}
+
+export function blankNarrative(): ClinicalNarrative {
+  return {
+    anamnese_aktuelle: null,
+    anamnese_vorgeschichte: null,
+    anamnese_vegetative: null,
+    anamnese_sozial: null,
+    untersuchungsbefund: null,
+    beurteilung: null,
+    verlauf: null,
+  };
 }

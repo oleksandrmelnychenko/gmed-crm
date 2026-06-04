@@ -837,8 +837,14 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["diagnoses"].as_array().expect("diagnoses").len(), 0);
-    assert_eq!(body["medications"].as_array().expect("medications").len(), 1);
-    assert_eq!(body["examinations"].as_array().expect("examinations").len(), 1);
+    assert_eq!(
+        body["medications"].as_array().expect("medications").len(),
+        1
+    );
+    assert_eq!(
+        body["examinations"].as_array().expect("examinations").len(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -871,4 +877,93 @@ async fn billing_cannot_access_patient_clinical_routes() {
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn patient_clinical_narrative_upserts() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-narrative");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    // Before any save the narrative is absent.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["narrative"].is_null());
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/narrative"),
+        &pm_bearer,
+        Some(json!({
+            "anamnese_aktuelle": "Fieber und Husten seit zwei Tagen.",
+            "anamnese_sozial": "Lebt allein, mobil mit Gehstock.",
+            "beurteilung": "Verdacht auf ambulant erworbene Pneumonie.",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["narrative"]["anamnese_aktuelle"], "Fieber und Husten seit zwei Tagen.");
+    assert_eq!(body["narrative"]["anamnese_sozial"], "Lebt allein, mobil mit Gehstock.");
+    assert_eq!(body["narrative"]["beurteilung"], "Verdacht auf ambulant erworbene Pneumonie.");
+    assert!(body["narrative"]["verlauf"].is_null());
+
+    // Second save upserts the same row (no duplicate, value replaced).
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/narrative"),
+        &pm_bearer,
+        Some(json!({
+            "anamnese_aktuelle": "Beschwerden gebessert.",
+            "verlauf": "Komplikationsloser Verlauf.",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["narrative"]["anamnese_aktuelle"], "Beschwerden gebessert.");
+    assert_eq!(body["narrative"]["verlauf"], "Komplikationsloser Verlauf.");
+    // Fields omitted from the second payload are cleared by the upsert.
+    assert!(body["narrative"]["beurteilung"].is_null());
+
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM patient_clinical_narrative WHERE patient_id = $1")
+            .bind(patient_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(count, 1);
 }

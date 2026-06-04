@@ -27,10 +27,7 @@ pub fn router() -> Router<AppState> {
             "/patients/{patient_id}/vitals",
             get(list_patient_vitals).post(create_patient_vital_measurement),
         )
-        .route(
-            "/patients/{patient_id}/clinical",
-            get(get_patient_clinical),
-        )
+        .route("/patients/{patient_id}/clinical", get(get_patient_clinical))
         .route(
             "/patients/{patient_id}/diagnoses",
             post(save_patient_diagnoses),
@@ -42,6 +39,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/patients/{patient_id}/examinations",
             post(save_patient_examinations),
+        )
+        .route(
+            "/patients/{patient_id}/narrative",
+            post(save_patient_narrative),
         )
         .route(
             "/patients/{patient_id}/card-entries",
@@ -6899,10 +6900,37 @@ async fn get_patient_clinical(
         })
         .collect::<Vec<_>>();
 
+    let narrative_row = sqlx::query(
+        r#"SELECT anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
+                  untersuchungsbefund, beurteilung, verlauf
+           FROM patient_clinical_narrative
+           WHERE patient_id = $1"#,
+    )
+    .bind(patient_uuid)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "load patient narrative");
+        load_fail()
+    })?;
+
+    let narrative = narrative_row.map(|row| {
+        json!({
+            "anamnese_aktuelle": row.get::<Option<String>, _>("anamnese_aktuelle"),
+            "anamnese_vorgeschichte": row.get::<Option<String>, _>("anamnese_vorgeschichte"),
+            "anamnese_vegetative": row.get::<Option<String>, _>("anamnese_vegetative"),
+            "anamnese_sozial": row.get::<Option<String>, _>("anamnese_sozial"),
+            "untersuchungsbefund": row.get::<Option<String>, _>("untersuchungsbefund"),
+            "beurteilung": row.get::<Option<String>, _>("beurteilung"),
+            "verlauf": row.get::<Option<String>, _>("verlauf"),
+        })
+    });
+
     Ok(Json(json!({
         "diagnoses": diagnoses,
         "medications": medications,
         "examinations": examinations,
+        "narrative": narrative,
     })))
 }
 
@@ -7126,4 +7154,69 @@ async fn save_patient_examinations(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     Json(json!({ "ok": true, "count": saved })).into_response()
+}
+
+#[derive(Deserialize)]
+struct PatientNarrativeInput {
+    #[serde(default)]
+    anamnese_aktuelle: Option<String>,
+    #[serde(default)]
+    anamnese_vorgeschichte: Option<String>,
+    #[serde(default)]
+    anamnese_vegetative: Option<String>,
+    #[serde(default)]
+    anamnese_sozial: Option<String>,
+    #[serde(default)]
+    untersuchungsbefund: Option<String>,
+    #[serde(default)]
+    beurteilung: Option<String>,
+    #[serde(default)]
+    verlauf: Option<String>,
+}
+
+async fn save_patient_narrative(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+    Json(body): Json<PatientNarrativeInput>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+        return e;
+    }
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    if let Err(e) = sqlx::query(
+        r#"INSERT INTO patient_clinical_narrative
+               (patient_id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative,
+                anamnese_sozial, untersuchungsbefund, beurteilung, verlauf, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+           ON CONFLICT (patient_id) DO UPDATE SET
+               anamnese_aktuelle = EXCLUDED.anamnese_aktuelle,
+               anamnese_vorgeschichte = EXCLUDED.anamnese_vorgeschichte,
+               anamnese_vegetative = EXCLUDED.anamnese_vegetative,
+               anamnese_sozial = EXCLUDED.anamnese_sozial,
+               untersuchungsbefund = EXCLUDED.untersuchungsbefund,
+               beurteilung = EXCLUDED.beurteilung,
+               verlauf = EXCLUDED.verlauf,
+               updated_at = now()"#,
+    )
+    .bind(patient_uuid)
+    .bind(clinical_opt_text(body.anamnese_aktuelle))
+    .bind(clinical_opt_text(body.anamnese_vorgeschichte))
+    .bind(clinical_opt_text(body.anamnese_vegetative))
+    .bind(clinical_opt_text(body.anamnese_sozial))
+    .bind(clinical_opt_text(body.untersuchungsbefund))
+    .bind(clinical_opt_text(body.beurteilung))
+    .bind(clinical_opt_text(body.verlauf))
+    .execute(&state.db)
+    .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "save patient narrative");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    Json(json!({ "ok": true })).into_response()
 }
