@@ -246,6 +246,7 @@ export const ru = {
     "Выберите провайдера для управления врачами, услугами и пациентами.",
   providers_type: "Тип",
   providers_category: "Категория провайдера",
+  providers_none_in_category: "В этой категории нет провайдеров",
   providers_choose_category: "Выберите категорию провайдера",
   providers_type_medical: "Медицинский",
   providers_type_non_medical: "Немедицинский",

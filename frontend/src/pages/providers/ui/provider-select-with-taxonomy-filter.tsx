@@ -38,6 +38,8 @@ type ProviderSelectWithTaxonomyFilterProps<TProvider extends ProviderTaxonomyCar
   providerSelectClassName?: string;
   taxonomyLabel?: ReactNode;
   providerSelectLabel?: ReactNode;
+  /** Shown under the provider select when a category is chosen but no provider matches it. */
+  noProvidersLabel?: ReactNode;
   providerLabel?: (provider: TProvider) => ReactNode;
   providerSearchText?: (provider: TProvider) => string;
   "aria-label"?: string;
@@ -89,6 +91,7 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
   providerSelectClassName,
   taxonomyLabel,
   providerSelectLabel,
+  noProvidersLabel,
   providerLabel = defaultProviderLabel,
   providerSearchText,
   "aria-label": ariaLabel,
@@ -111,6 +114,10 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
   );
   const selectedProviderStillVisible =
     !value || filteredProviders.some((provider) => provider.id === value);
+  const showNoProvidersHint =
+    Boolean(noProvidersLabel) &&
+    filteredProviders.length === 0 &&
+    selectedTaxonomyValue.trim() !== "";
 
   const handleTaxonomyChange = (taxonomyNodeId: string) => {
     if (taxonomyValue === undefined) {
@@ -186,9 +193,17 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
             {providerSelectLabel}
           </label>
           {providerControl}
+          {showNoProvidersHint ? (
+            <p className="text-[11px] leading-tight text-muted-foreground">{noProvidersLabel}</p>
+          ) : null}
         </div>
       ) : (
-        providerControl
+        <div className="space-y-1.5">
+          {providerControl}
+          {showNoProvidersHint ? (
+            <p className="text-[11px] leading-tight text-muted-foreground">{noProvidersLabel}</p>
+          ) : null}
+        </div>
       )}
     </div>
   );

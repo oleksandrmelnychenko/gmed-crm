@@ -540,6 +540,7 @@ function useAppointmentFollowUpVisitSectionContent({
               providerPlaceholder={t.common_not_set}
               taxonomyPlaceholder={t.appointments_provider_category}
               taxonomyAllLabel={t.providers_all}
+              noProvidersLabel={t.providers_none_in_category}
               taxonomySelectClassName={selectClassName}
               providerSelectClassName={selectClassName}
               providerLabel={(provider) => provider.name}

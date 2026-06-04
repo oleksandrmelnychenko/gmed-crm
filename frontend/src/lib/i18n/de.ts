@@ -246,6 +246,7 @@ export const de = {
     "Zeitachse der mit diesem Anbieter verbundenen Termine und Service-Interaktionen.",
   providers_type: "Typ",
   providers_category: "Provider-Kategorie",
+  providers_none_in_category: "Keine Anbieter in dieser Kategorie",
   providers_choose_category: "Provider-Kategorie wählen",
   providers_type_medical: "Medizinisch",
   providers_type_non_medical: "Nicht-medizinisch",
