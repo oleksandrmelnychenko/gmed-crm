@@ -313,6 +313,7 @@ type PatientDetailWorkspaceContentProps = {
   onDocsPreviewOpenChange: (open: boolean) => void;
   onDocumentCategoryFilterChange: (value: string) => void;
   onDocumentStatusFilterChange: (value: string) => void;
+  onDocumentGenerated: () => void;
   onEditContractStatus: (contract: ContractItem) => void;
   onEditRelation: (relation: RelationItem) => void;
   onInvoicesPreviewOpenChange: (open: boolean) => void;
@@ -508,6 +509,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     onDeleteRelation,
     onDocsPreviewOpenChange,
     onDocumentCategoryFilterChange,
+    onDocumentGenerated,
     onDocumentStatusFilterChange,
     onEditContractStatus,
     onEditRelation,
@@ -834,6 +836,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
           {activeTab === "documents" ? (
             <LazyPatientDocumentsTab
               l={l}
+              patientId={id}
               commonNotSet={t.common_not_set}
               commonUnknown={t.common_unknown}
               documentsFilenameLabel={documentsFilenameLabel}
@@ -853,6 +856,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               documentCategoryFilter={documentCategoryFilter}
               onDocumentStatusFilterChange={onDocumentStatusFilterChange}
               onDocumentCategoryFilterChange={onDocumentCategoryFilterChange}
+              onDocumentGenerated={onDocumentGenerated}
               onResetDocumentFilters={onResetDocumentFilters}
               canManageDocuments={canManageDocuments}
               onOpenUpload={onOpenUpload}

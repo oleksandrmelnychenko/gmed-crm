@@ -4500,6 +4500,29 @@ async fn document_templates_can_generate_visa_invitation_pdf_document() {
     assert!(pdf_text.contains("gültig bis 01.01.2050"));
     assert!(pdf_text.contains("Klinik München"));
     assert!(pdf_text.contains("0176 9999999"));
+
+    let (status, extraction_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/text-extraction"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(extraction_body["status"], "completed");
+    assert_eq!(extraction_body["method"], "pdf_text");
+    let extracted_text = extraction_body["extracted_text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        extracted_text.contains("MA1234567"),
+        "visa passport number must be available for edit prefill; got: {extracted_text:?}"
+    );
+    assert!(
+        extracted_text.contains("01.01.2050"),
+        "visa passport validity must be available for edit prefill; got: {extracted_text:?}"
+    );
 }
 
 #[tokio::test]

@@ -2300,6 +2300,7 @@ function usePatientDetailPageContent() {
         onCreateRelation={openCreateRelation}
         onDeleteRelation={(relationId) => { void handleDeleteRelation(relationId); }}
         onDocsPreviewOpenChange={setDocsPreviewOpen}
+        onDocumentGenerated={reload}
         onDocumentCategoryFilterChange={setDocumentCategoryFilter}
         onDocumentStatusFilterChange={setDocumentStatusFilter}
         onEditContractStatus={openContractStatusEditor}

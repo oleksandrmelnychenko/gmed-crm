@@ -208,7 +208,7 @@ export function buildBindingsPayload(
     const field = fieldDefsByKey.get(key);
     if (field?.kind === "number") {
       const parsed = Number(trimmed);
-      if (Number.isInteger(parsed)) out[key] = parsed;
+      if (Number.isInteger(parsed) && parsed >= 1) out[key] = parsed;
       continue;
     }
     out[key] = trimmed;
@@ -241,9 +241,12 @@ function germanDateToInputDate(value: string | undefined) {
   return `${year}-${month}-${day}`;
 }
 
-function prefillAppointmentConfirmationBindingsFromText(
-  text: string,
-): DocumentBindingForm {
+const PASSPORT_PREFILL_TEMPLATE_IDS = new Set([
+  "appointment_confirmation",
+  "visa_invitation_letter",
+]);
+
+function prefillPassportBindingsFromText(text: string): DocumentBindingForm {
   const normalized = text.replace(/\s+/g, " ").trim();
   const passportMatch = normalized.match(
     /Reisepass\s+Nr\.?:\s*([^,]+?)(?:,\s*g(?:ü|u)ltig\s+bis\s+([^,]+))?(?=,|\s|$)/i,
@@ -263,8 +266,8 @@ export function prefillDocumentBindingsFromText(
   text: string | null | undefined,
 ): DocumentBindingForm {
   if (!text?.trim()) return {};
-  if (templateId === "appointment_confirmation") {
-    return prefillAppointmentConfirmationBindingsFromText(text);
+  if (PASSPORT_PREFILL_TEMPLATE_IDS.has(templateId)) {
+    return prefillPassportBindingsFromText(text);
   }
   return {};
 }

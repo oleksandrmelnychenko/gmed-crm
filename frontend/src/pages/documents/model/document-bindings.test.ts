@@ -29,6 +29,14 @@ describe("document template binding payloads", () => {
     ).toEqual({
       payer_name: "Justus Geldgeber",
     });
+    expect(
+      buildBindingsPayload("single_order", {
+        order_sequence: "0",
+        order_number: "EA-123",
+      }),
+    ).toEqual({
+      order_number: "EA-123",
+    });
   });
 
   it("parses cost coverage service lines from textarea input", () => {
@@ -102,7 +110,7 @@ describe("document template binding payloads", () => {
     ).toBe(false);
   });
 
-  it("prefills appointment confirmation passport bindings from extracted PDF text", () => {
+  it("prefills passport bindings from extracted PDF text", () => {
     expect(
       prefillDocumentBindingsFromText(
         "appointment_confirmation",
@@ -111,6 +119,15 @@ describe("document template binding payloads", () => {
     ).toEqual({
       passport_number: "MA1234567",
       passport_valid_until: "2050-01-01",
+    });
+    expect(
+      prefillDocumentBindingsFromText(
+        "visa_invitation_letter",
+        "Hiermit bestätigen wir, dass Frau MUSTER, Anna, Reisepass Nr.: AA987654, gültig bis 31.12.2049, eingeladen ist.",
+      ),
+    ).toEqual({
+      passport_number: "AA987654",
+      passport_valid_until: "2049-12-31",
     });
   });
 

@@ -6246,21 +6246,17 @@ fn visa_invitation_birth_clause(context: &GeneratedVisaInvitationContext) -> Str
 }
 
 fn visa_invitation_passport_clause(context: &GeneratedVisaInvitationContext) -> String {
-    match (
-        context
-            .passport_number
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty()),
-        context.passport_valid_until,
-    ) {
-        (Some(number), Some(valid_until)) => format!(
-            ", Reisepass Nr.: {number}, gültig bis {}",
-            valid_until.format("%d.%m.%Y")
-        ),
-        (Some(number), None) => format!(", Reisepass Nr.: {number}"),
-        _ => String::new(),
-    }
+    let passport_number = context
+        .passport_number
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("____________");
+    let passport_valid_until = context
+        .passport_valid_until
+        .map(|value| value.format("%d.%m.%Y").to_string())
+        .unwrap_or_else(|| "____________".to_string());
+    format!(", Reisepass Nr.: {passport_number}, gültig bis {passport_valid_until}")
 }
 
 fn visa_invitation_clinic_list(clinics: &[ClinicInput]) -> Option<String> {

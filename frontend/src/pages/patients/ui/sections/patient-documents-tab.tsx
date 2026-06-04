@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 
 import type { DocumentAlerts, DocumentItem } from "../../model/detail-tab-types";
 import { FormSection } from "../shared/patient-form-primitives";
+import { PatientDocumentGenerateDialog } from "../sheets/patient-document-generate-dialog";
 import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
 
 type LocalizeFn = (key: string) => string;
@@ -28,6 +29,7 @@ type DateFormatter = (value?: string | null, fallback?: string) => string;
 
 type PatientDocumentsTabProps = {
   l: LocalizeFn;
+  patientId: string | undefined;
   commonNotSet: string;
   commonUnknown: string;
   documentsFilenameLabel: string;
@@ -47,6 +49,7 @@ type PatientDocumentsTabProps = {
   documentCategoryFilter: string;
   onDocumentStatusFilterChange: (value: string) => void;
   onDocumentCategoryFilterChange: (value: string) => void;
+  onDocumentGenerated: () => void;
   onResetDocumentFilters: () => void;
   canManageDocuments: boolean;
   onOpenUpload: () => void;
@@ -136,6 +139,7 @@ function DocumentsOverviewSection({
 
 export function PatientDocumentsTab({
   l,
+  patientId,
   commonNotSet,
   commonUnknown,
   documentsFilenameLabel,
@@ -155,6 +159,7 @@ export function PatientDocumentsTab({
   documentCategoryFilter,
   onDocumentStatusFilterChange,
   onDocumentCategoryFilterChange,
+  onDocumentGenerated,
   onResetDocumentFilters,
   canManageDocuments,
   onOpenUpload,
@@ -162,6 +167,7 @@ export function PatientDocumentsTab({
   statusLabel,
   formatDate,
 }: PatientDocumentsTabProps) {
+  const [generateOpen, setGenerateOpen] = useState(false);
   const documentStatusCounts = useMemo(() => {
     const counts = new Map<string, number>();
 
@@ -249,14 +255,25 @@ export function PatientDocumentsTab({
           <div className="flex flex-wrap items-center gap-2">
             <CountBadge>{documents.length}</CountBadge>
             {canManageDocuments ? (
-              <Button
-                type="button"
-                size="sm"
-                className="h-8 rounded-lg gap-1.5"
-                onClick={onOpenUpload}
-              >
-                {l("patients_upload_document")}
-              </Button>
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 rounded-lg gap-1.5"
+                  onClick={() => setGenerateOpen(true)}
+                >
+                  {l("documents_generate_from_template")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 rounded-lg gap-1.5"
+                  onClick={onOpenUpload}
+                >
+                  {l("patients_upload_document")}
+                </Button>
+              </>
             ) : null}
           </div>
         }
@@ -414,6 +431,14 @@ export function PatientDocumentsTab({
           </>
         )}
       </FormSection>
+      {canManageDocuments ? (
+        <PatientDocumentGenerateDialog
+          open={generateOpen}
+          patientId={patientId}
+          onOpenChange={setGenerateOpen}
+          onGenerated={onDocumentGenerated}
+        />
+      ) : null}
     </TabsContent>
   );
 }
