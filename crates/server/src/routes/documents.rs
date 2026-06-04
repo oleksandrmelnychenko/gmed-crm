@@ -11797,7 +11797,23 @@ fn build_cost_coverage_pdf(
         2.0,
     );
 
-    admin_heading(&mut layout, "2. Vergütungsvereinbarung");
+    admin_heading(&mut layout, "2. Übernahme der Vertragspflichten");
+    admin_block(
+        &mut layout,
+        &format!(
+            "Der Kostenübernehmer übernimmt im Umfang dieses Einzelauftrags sämtliche Pflichten \
+             des Auftraggebers gemäß § 2 des Rahmendienstleistungsvertrages vom {} und des \
+             {ordinal}. Einzelauftrags vom {} zwischen dem Auftragnehmer und dem Auftraggeber, \
+             einschließlich etwaiger Mitwirkungs- oder Informationspflichten, soweit diese in \
+             Zusammenhang mit der Durchführung der beauftragten Dienstleistung stehen.",
+            fmt_de_date(context.contract_date),
+            fmt_de_date(context.order_date)
+        ),
+        0.0,
+        2.0,
+    );
+
+    admin_heading(&mut layout, "3. Vergütungsvereinbarung");
     admin_block(
         &mut layout,
         "Für diese Auftragserfüllung wird folgende Vergütung vereinbart:",
@@ -11889,25 +11905,63 @@ fn build_cost_coverage_pdf(
 
     for (heading, body) in [
         (
-            "3. Rechtsverbindlichkeit",
+            "4. Rechtsverbindlichkeit",
             "Diese Erklärung wird mit ihrer Unterzeichnung rechtsverbindlich. Der Einzelauftrag entfaltet seine Rechtswirkung gegenüber dem Auftragnehmer erst mit Zugang dieser Kostenübernahmeerklärung.",
         ),
         (
-            "4. Anwendbares Recht",
+            "5. Anwendbares Recht",
             "Auf diesen Vertrag ist ausschließlich das deutsche Recht anzuwenden.",
         ),
         (
-            "5. Erfüllungsort",
+            "6. Erfüllungsort",
             "Erfüllungsort für sämtliche Leistungen ist München.",
         ),
         (
-            "6. Gerichtsstand",
+            "7. Gerichtsstand",
             "Ausschließlicher Gerichtsstand für alle aus dem Vertragsverhältnis entstehenden Streitigkeiten ist München, Deutschland.",
         ),
     ] {
         admin_heading(&mut layout, heading);
         admin_block(&mut layout, body, 0.0, 1.0);
     }
+
+    admin_heading(&mut layout, "8. Salvatorische Klausel");
+    admin_block(
+        &mut layout,
+        "Sollten einzelne Bestimmungen dieser Erklärung ganz oder teilweise unwirksam sein oder \
+         werden, so wird hierdurch die Wirksamkeit der übrigen Bestimmungen nicht berührt. \
+         Anstelle der unwirksamen Bestimmung gilt diejenige wirksame Bestimmung als vereinbart, \
+         die dem Sinn und Zweck der unwirksamen Bestimmung am nächsten kommt.",
+        0.0,
+        1.0,
+    );
+
+    admin_heading(
+        &mut layout,
+        "9. Bestandteile der Kostenübernahmeerklärung und Rangfolge",
+    );
+    let quote_label = context
+        .quote_number
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("________");
+    for line in [
+        format!("Anlage 1: Kostenvoranschlag zum {ordinal}. Einzelauftrag Nr. {quote_label};"),
+        format!(
+            "Anlage 2: {ordinal}. Einzelauftrag vom {} zum Rahmendienstleistungsvertrag vom {} - Auftraggeber: {};",
+            fmt_de_date(context.order_date),
+            fmt_de_date(context.contract_date),
+            context.patient.name_with_salutation()
+        ),
+        format!(
+            "Anlage 3: Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen für {}.",
+            context.patient.name_with_salutation()
+        ),
+    ] {
+        admin_block(&mut layout, &line, 0.0, 0.5);
+    }
+    layout.spacer(1.0);
 
     // Anlage: Kostenvoranschlag zum {n}. Einzelauftrag
     admin_heading(

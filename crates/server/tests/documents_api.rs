@@ -3422,6 +3422,57 @@ async fn framework_contract_document_requires_existing_contract() {
 }
 
 #[tokio::test]
+async fn cost_coverage_declaration_includes_contract_obligations_and_annexes() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-cost-coverage-obligations");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let contract_id = seed_framework_contract(&pool, patient_id, admin_id, &tag).await;
+    let order_id = seed_order_with_contract(&pool, patient_id, contract_id, admin_id, &tag).await;
+    let _quote_id = seed_quote_for_order(&pool, order_id, admin_id, &tag).await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "cost_coverage_declaration",
+            "patient_id": patient_id,
+            "order_id": order_id,
+            "language": "de",
+            "bindings": {
+                "order_date": "2025-11-11",
+                "contract_date": "2025-11-11",
+                "quote_number": "KV77777777",
+                "payer_name": "Justus Geldgeber",
+                "payer_birth_date": "2000-01-01",
+                "bank_iban": "DE00 0000 0000 0000 0000 00"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "generate cost coverage: {body:?}");
+    let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+    let (status, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &admin_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(bytes.starts_with(b"%PDF-"));
+    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(pdf_text.contains("Übernahme der Vertragspflichten"));
+    assert!(pdf_text.contains("sämtliche Pflichten des Auftraggebers"));
+    assert!(pdf_text.contains("Bestandteile der Kostenübernahmeerklärung"));
+    assert!(pdf_text.contains("Anlage 1"));
+    assert!(pdf_text.contains("KV77777777"));
+}
+
+#[tokio::test]
 async fn cost_estimate_uses_order_quote_when_manual_lines_are_omitted() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
