@@ -237,9 +237,11 @@ export function composeDoctorDisplayName(
   lastName: string,
   gender: ProviderPersonGender,
 ): string {
-  return [doctorGermanSalutation(gender), firstName.trim(), lastName.trim()]
-    .filter(Boolean)
-    .join(" ");
+  const parts = [firstName.trim(), lastName.trim()].filter(Boolean);
+  // A salutation on its own is not a name — without any name part there is
+  // nothing to display, so callers can fall back to a stored value.
+  if (parts.length === 0) return "";
+  return [doctorGermanSalutation(gender), ...parts].filter(Boolean).join(" ");
 }
 
 export function doctorListDisplayName(doctor: {
@@ -1252,22 +1254,10 @@ export function doctorToForm(doctor: DoctorSummary): DoctorFormState {
 }
 
 /**
- * True when the display name still mirrors what auto-fill would produce, so it is
- * safe to keep recomposing it. A name the user typed by hand (matching neither the
- * bare "First Last" nor the salutation form) is treated as manual and left alone.
- */
-function isAutoDoctorDisplayName(form: DoctorFormState): boolean {
-  const name = form.name.trim();
-  if (name === "") return true;
-  const bare = [form.firstName.trim(), form.lastName.trim()].filter(Boolean).join(" ");
-  const withSalutation = composeDoctorDisplayName(form.firstName, form.lastName, form.gender);
-  return name === bare || name === withSalutation;
-}
-
-/**
- * Applies a single doctor-form field edit and live-fills the display name from
- * first/last name + gender ("Herr/Frau Firstname Lastname") while the field is
- * still auto-managed. Manual edits to the display name itself are preserved.
+ * Applies a single doctor-form field edit. The display name is read-only and
+ * always derived ("Herr/Frau Firstname Lastname"), so any change to first/last
+ * name or gender recomposes it. An existing name is kept only when there are no
+ * name parts to compose from (e.g. a legacy record with just a free-form name).
  */
 export function applyDoctorFieldChange(
   current: DoctorFormState,
@@ -1275,11 +1265,9 @@ export function applyDoctorFieldChange(
   value: string,
 ): DoctorFormState {
   const next: DoctorFormState = { ...current, [field]: value };
-  if (
-    (field === "firstName" || field === "lastName" || field === "gender") &&
-    isAutoDoctorDisplayName(current)
-  ) {
-    next.name = composeDoctorDisplayName(next.firstName, next.lastName, next.gender);
+  if (field === "firstName" || field === "lastName" || field === "gender") {
+    next.name =
+      composeDoctorDisplayName(next.firstName, next.lastName, next.gender) || next.name;
   }
   return next;
 }
@@ -1369,9 +1357,10 @@ export function toProviderPayload(form: ProviderFormState, forceNonMedical: bool
 }
 
 export function toDoctorPayload(form: DoctorFormState) {
+  // Display name is always derived from the parts; fall back to a stored
+  // free-form name only when there is nothing to compose from.
   const name =
-    form.name.trim() ||
-    composeDoctorDisplayName(form.firstName, form.lastName, form.gender);
+    composeDoctorDisplayName(form.firstName, form.lastName, form.gender) || form.name.trim();
   const contacts = buildDoctorContacts(form);
   return {
     name,

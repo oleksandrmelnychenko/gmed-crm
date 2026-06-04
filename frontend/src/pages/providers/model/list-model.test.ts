@@ -233,6 +233,11 @@ describe("composeDoctorDisplayName", () => {
     expect(composeDoctorDisplayName("Anna", "Keller", "female")).toBe("Frau Anna Keller");
     expect(composeDoctorDisplayName("Sam", "Doe", "unknown")).toBe("Sam Doe");
   });
+
+  it("returns empty when there is no name part (a salutation alone is not a name)", () => {
+    expect(composeDoctorDisplayName("", "", "male")).toBe("");
+    expect(composeDoctorDisplayName("  ", "", "female")).toBe("");
+  });
 });
 
 describe("applyDoctorFieldChange", () => {
@@ -257,10 +262,42 @@ describe("applyDoctorFieldChange", () => {
     expect(female.name).toBe("Frau Max Mustermann");
   });
 
-  it("does not overwrite a manually edited display name", () => {
-    const manual = applyDoctorFieldChange(base, "name", "Chief Surgeon");
-    const afterFirst = applyDoctorFieldChange(manual, "firstName", "Max");
-    expect(afterFirst.name).toBe("Chief Surgeon");
+  it("always recomposes the read-only display name when name parts change", () => {
+    // The field is read-only/derived, so a stray name value is overwritten as
+    // soon as a name part changes.
+    const withStray = applyDoctorFieldChange(base, "name", "Chief Surgeon");
+    const afterFirst = applyDoctorFieldChange(withStray, "firstName", "Max");
+    expect(afterFirst.name).toBe("Max");
+  });
+
+  it("tracks the display name through char-by-char typing, then adds the salutation", () => {
+    // Simulate a real "Новый врач" session: type first name, then last name,
+    // then pick the gender — the display name should follow the whole time.
+    let form = base;
+    for (const value of ["ц", "цу", "цуу", "цууц", "цууцу", "цууцуц"]) {
+      form = applyDoctorFieldChange(form, "firstName", value);
+    }
+    expect(form.name).toBe("цууцуц");
+    for (const value of ["ц", "цу", "цуу", "цууц", "цууцу"]) {
+      form = applyDoctorFieldChange(form, "lastName", value);
+    }
+    expect(form.name).toBe("цууцуц цууцу");
+    form = applyDoctorFieldChange(form, "gender", "male");
+    expect(form.name).toBe("Herr цууцуц цууцу");
+  });
+
+  it("recomposes on a later gender change regardless of a prior name value", () => {
+    let form = applyDoctorFieldChange(base, "firstName", "цууцуц");
+    form = applyDoctorFieldChange(form, "lastName", "цууцу");
+    form = applyDoctorFieldChange(form, "name", "цу");
+    form = applyDoctorFieldChange(form, "gender", "male");
+    expect(form.name).toBe("Herr цууцуц цууцу");
+  });
+
+  it("keeps an existing free-form name when there are no parts to compose from", () => {
+    const legacy = { ...base, name: "Dr. House" };
+    const afterGender = applyDoctorFieldChange(legacy, "gender", "male");
+    expect(afterGender.name).toBe("Dr. House");
   });
 });
 

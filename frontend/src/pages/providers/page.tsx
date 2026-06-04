@@ -96,6 +96,7 @@ import {
   buildProvidersQuery,
   compactDate,
   compactDateTime,
+  composeDoctorDisplayName,
   doctorToForm,
   doctorListDisplayName,
   doctorRelationshipTypeLabel,
@@ -7263,9 +7264,11 @@ function DoctorProfileFields({
         </Field>
         <Field label={l("patients_display_name")}>
           <Input
-            value={form.name}
-            onChange={(event) => onChange("name", event.target.value)}
-            className={shellInputClassName}
+            value={composeDoctorDisplayName(form.firstName, form.lastName, form.gender) || form.name}
+            readOnly
+            tabIndex={-1}
+            aria-readonly
+            className={cn(shellInputClassName, "bg-muted/40 text-muted-foreground")}
             placeholder={l("patients_display_name")}
           />
         </Field>
