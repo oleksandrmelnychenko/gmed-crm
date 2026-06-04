@@ -223,6 +223,7 @@ const PATIENT_STICKER_BINDING_FIELDS: BindingFieldDef[] = [
 const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
   framework_contract: [
     { key: "contract_date", label: "Rahmenvertrag vom / Inkrafttreten", kind: "date" },
+    { key: "order_sequence", label: "Laufende Nr. des Einzelauftrags", kind: "text" },
     { key: "cost_threshold", label: "Mehrkosten-Freigabegrenze", kind: "text" },
     {
       key: "extra_release_recipients",
