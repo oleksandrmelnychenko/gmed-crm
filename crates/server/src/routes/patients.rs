@@ -6759,7 +6759,12 @@ const CLINICAL_TEXT_MAX_CHARS: usize = 16_000;
 /// Trim a value, drop empties to NULL, and cap length to guard against bloat.
 fn clinical_opt_text(value: Option<String>) -> Option<String> {
     value
-        .map(|v| v.trim().chars().take(CLINICAL_TEXT_MAX_CHARS).collect::<String>())
+        .map(|v| {
+            v.trim()
+                .chars()
+                .take(CLINICAL_TEXT_MAX_CHARS)
+                .collect::<String>()
+        })
         .filter(|v| !v.is_empty())
 }
 
@@ -7062,6 +7067,14 @@ async fn save_patient_diagnoses(
         Some(patient_uuid),
         json!({ "count": saved }),
     ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.clinical_updated",
+        patient_uuid,
+        json!({ "section": "diagnoses" }),
+    )
+    .await;
     Json(json!({ "ok": true, "count": saved })).into_response()
 }
 
@@ -7141,6 +7154,14 @@ async fn save_patient_medications(
         Some(patient_uuid),
         json!({ "count": saved }),
     ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.clinical_updated",
+        patient_uuid,
+        json!({ "section": "medications" }),
+    )
+    .await;
     Json(json!({ "ok": true, "count": saved })).into_response()
 }
 
@@ -7227,6 +7248,14 @@ async fn save_patient_examinations(
         Some(patient_uuid),
         json!({ "count": saved }),
     ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.clinical_updated",
+        patient_uuid,
+        json!({ "section": "examinations" }),
+    )
+    .await;
     Json(json!({ "ok": true, "count": saved })).into_response()
 }
 
@@ -7299,6 +7328,14 @@ async fn save_patient_narrative(
         Some(patient_uuid),
         json!({}),
     ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.clinical_updated",
+        patient_uuid,
+        json!({ "section": "narrative" }),
+    )
+    .await;
     Json(json!({ "ok": true })).into_response()
 }
 
@@ -7384,6 +7421,14 @@ async fn save_patient_procedures(
         Some(patient_uuid),
         json!({ "count": saved }),
     ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.clinical_updated",
+        patient_uuid,
+        json!({ "section": "procedures" }),
+    )
+    .await;
     Json(json!({ "ok": true, "count": saved })).into_response()
 }
 
@@ -7485,7 +7530,16 @@ impl ClinPdf {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn text(&mut self, text: &str, size_pt: f32, bold: bool, gray: bool, indent_mm: f32, before: f32, after: f32) {
+    fn text(
+        &mut self,
+        text: &str,
+        size_pt: f32,
+        bold: bool,
+        gray: bool,
+        indent_mm: f32,
+        before: f32,
+        after: f32,
+    ) {
         let lines = clin_wrap(text, size_pt, (CLIN_PDF_CONTENT_W - indent_mm).max(40.0));
         if lines.is_empty() {
             return;
@@ -7495,7 +7549,11 @@ impl ClinPdf {
         }
         let lh = clin_line_height(size_pt);
         let x = CLIN_PDF_LEFT + indent_mm;
-        let font = if bold { self.bold.clone() } else { self.regular.clone() };
+        let font = if bold {
+            self.bold.clone()
+        } else {
+            self.regular.clone()
+        };
         let col = if gray {
             Color::Rgb(Rgb::new(0.42, 0.46, 0.54, None))
         } else {
@@ -7534,16 +7592,27 @@ impl ClinPdf {
 /// "Dr. med. Doctor X · Provider Y" attribution from a joined clinical row.
 fn clin_attribution(row: &sqlx::postgres::PgRow) -> Option<String> {
     let doctor = [
-        row.try_get::<Option<String>, _>("doctor_title").ok().flatten(),
-        row.try_get::<Option<String>, _>("doctor_name").ok().flatten(),
+        row.try_get::<Option<String>, _>("doctor_title")
+            .ok()
+            .flatten(),
+        row.try_get::<Option<String>, _>("doctor_name")
+            .ok()
+            .flatten(),
     ]
     .into_iter()
     .flatten()
     .collect::<Vec<_>>()
     .join(" ");
-    let provider = row.try_get::<Option<String>, _>("provider_name").ok().flatten();
+    let provider = row
+        .try_get::<Option<String>, _>("provider_name")
+        .ok()
+        .flatten();
     let parts: Vec<String> = [
-        if doctor.trim().is_empty() { None } else { Some(doctor) },
+        if doctor.trim().is_empty() {
+            None
+        } else {
+            Some(doctor)
+        },
         provider,
     ]
     .into_iter()
@@ -7570,7 +7639,12 @@ async fn get_patient_clinical_pdf(
         Err(resp) => return resp,
     }
 
-    let fail = || err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to build clinical PDF");
+    let fail = || {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to build clinical PDF",
+        )
+    };
 
     let patient = match sqlx::query(
         "SELECT first_name, last_name, birth_date, patient_id FROM patients WHERE id = $1",
@@ -7663,9 +7737,21 @@ async fn get_patient_clinical_pdf(
     .ok()
     .flatten();
 
-    let first = patient.try_get::<Option<String>, _>("first_name").ok().flatten().unwrap_or_default();
-    let last = patient.try_get::<Option<String>, _>("last_name").ok().flatten().unwrap_or_default();
-    let mrn = patient.try_get::<Option<String>, _>("patient_id").ok().flatten().unwrap_or_default();
+    let first = patient
+        .try_get::<Option<String>, _>("first_name")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let last = patient
+        .try_get::<Option<String>, _>("last_name")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let mrn = patient
+        .try_get::<Option<String>, _>("patient_id")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
     let dob = patient
         .try_get::<Option<chrono::NaiveDate>, _>("birth_date")
         .ok()
@@ -7685,7 +7771,10 @@ async fn get_patient_clinical_pdf(
         0.5,
     );
     pdf.text(
-        &format!("Geb.: {dob}   ·   ID: {mrn}   ·   Stand: {}", chrono::Utc::now().format("%d.%m.%Y")),
+        &format!(
+            "Geb.: {dob}   ·   ID: {mrn}   ·   Stand: {}",
+            chrono::Utc::now().format("%d.%m.%Y")
+        ),
         9.0,
         false,
         true,
@@ -7700,7 +7789,11 @@ async fn get_patient_clinical_pdf(
         for (kind, header) in [("main", "Hauptdiagnose"), ("secondary", "Nebendiagnosen")] {
             let group: Vec<&sqlx::postgres::PgRow> = diag_rows
                 .iter()
-                .filter(|r| r.try_get::<String, _>("kind").map(|k| k == kind).unwrap_or(false))
+                .filter(|r| {
+                    r.try_get::<String, _>("kind")
+                        .map(|k| k == kind)
+                        .unwrap_or(false)
+                })
                 .collect();
             if group.is_empty() {
                 continue;
@@ -7731,7 +7824,10 @@ async fn get_patient_clinical_pdf(
         for row in &proc_rows {
             let label = row.try_get::<String, _>("label").unwrap_or_default();
             let ops = row.try_get::<Option<String>, _>("ops_code").ok().flatten();
-            let date = row.try_get::<Option<String>, _>("performed_on").ok().flatten();
+            let date = row
+                .try_get::<Option<String>, _>("performed_on")
+                .ok()
+                .flatten();
             let mut line = String::new();
             if let Some(d) = date.filter(|d| !d.is_empty()) {
                 line.push_str(&format!("{d} "));
@@ -7758,7 +7854,12 @@ async fn get_patient_clinical_pdf(
             ("beurteilung", "Beurteilung"),
             ("verlauf", "Verlauf"),
         ] {
-            if let Some(text) = row.try_get::<Option<String>, _>(col).ok().flatten().filter(|t| !t.trim().is_empty()) {
+            if let Some(text) = row
+                .try_get::<Option<String>, _>(col)
+                .ok()
+                .flatten()
+                .filter(|t| !t.trim().is_empty())
+            {
                 pdf.text(header, 9.0, true, true, 0.0, 2.0, 0.5);
                 pdf.text(&text, 10.5, false, false, 0.0, 0.0, 0.5);
             }
@@ -7770,7 +7871,10 @@ async fn get_patient_clinical_pdf(
         pdf.heading("Befunde");
         for row in &exam_rows {
             let title = row.try_get::<String, _>("title").unwrap_or_default();
-            let date = row.try_get::<Option<String>, _>("performed_on").ok().flatten();
+            let date = row
+                .try_get::<Option<String>, _>("performed_on")
+                .ok()
+                .flatten();
             let status = row.try_get::<String, _>("status").unwrap_or_default();
             let result = row.try_get::<Option<String>, _>("result").ok().flatten();
             let mut head = title;
@@ -7800,7 +7904,11 @@ async fn get_patient_clinical_pdf(
         ] {
             let group: Vec<&sqlx::postgres::PgRow> = med_rows
                 .iter()
-                .filter(|r| r.try_get::<String, _>("category").map(|c| c == cat).unwrap_or(false))
+                .filter(|r| {
+                    r.try_get::<String, _>("category")
+                        .map(|c| c == cat)
+                        .unwrap_or(false)
+                })
                 .collect();
             if group.is_empty() {
                 continue;
@@ -7811,16 +7919,28 @@ async fn get_patient_clinical_pdf(
                 let staerke = row.try_get::<Option<String>, _>("staerke").ok().flatten();
                 let form = row.try_get::<Option<String>, _>("form").ok().flatten();
                 let dosing = [
-                    row.try_get::<Option<String>, _>("dose_morgens").ok().flatten(),
-                    row.try_get::<Option<String>, _>("dose_mittags").ok().flatten(),
-                    row.try_get::<Option<String>, _>("dose_abends").ok().flatten(),
-                    row.try_get::<Option<String>, _>("dose_nachts").ok().flatten(),
+                    row.try_get::<Option<String>, _>("dose_morgens")
+                        .ok()
+                        .flatten(),
+                    row.try_get::<Option<String>, _>("dose_mittags")
+                        .ok()
+                        .flatten(),
+                    row.try_get::<Option<String>, _>("dose_abends")
+                        .ok()
+                        .flatten(),
+                    row.try_get::<Option<String>, _>("dose_nachts")
+                        .ok()
+                        .flatten(),
                 ]
                 .into_iter()
                 .map(|v| v.unwrap_or_else(|| "0".to_string()))
                 .collect::<Vec<_>>()
                 .join("-");
-                let einheit = row.try_get::<Option<String>, _>("einheit").ok().flatten().unwrap_or_default();
+                let einheit = row
+                    .try_get::<Option<String>, _>("einheit")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
                 let grund = row.try_get::<Option<String>, _>("grund").ok().flatten();
                 let mut line = name;
                 if let Some(s) = staerke.filter(|s| !s.is_empty()) {

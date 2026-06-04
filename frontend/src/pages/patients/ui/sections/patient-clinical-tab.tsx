@@ -8,6 +8,7 @@ import { TabsContent } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
 import { downloadApiFile } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import type { DoctorOption } from "@/pages/appointments/model/types";
@@ -464,6 +465,14 @@ export function PatientClinicalTab({
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [version, setVersion] = useState(0);
+
+  // Refetch when another client edits this patient's clinical record.
+  useDebouncedRealtimeSubscription(["patient.clinical_updated"], (_event, events) => {
+    if (events.some((event) => event.patient_id === patientId)) {
+      setVersion((current) => current + 1);
+    }
+  });
 
   useEffect(() => {
     let active = true;
@@ -494,7 +503,7 @@ export function PatientClinicalTab({
     return () => {
       active = false;
     };
-  }, [patientId]);
+  }, [patientId, version]);
 
   const dosingSchema = (m: ClinicalMedication) =>
     [m.dose_morgens, m.dose_mittags, m.dose_abends, m.dose_nachts].map((v) => v ?? "0").join("-");
