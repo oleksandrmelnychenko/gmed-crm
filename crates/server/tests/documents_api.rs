@@ -3195,6 +3195,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
                 "treatment_purpose": "eine interventionelle Behandlung",
                 "period_from": "2026-06-01",
                 "period_to": "2026-06-05",
+                "payer_salutation": "Frau",
                 "payer_name": "Template Payer",
                 "payer_birth_date": "1980-01-01",
                 "order_components": "Anlage A: Vorbefunde und Medikationsliste"
@@ -3451,6 +3452,7 @@ async fn cost_coverage_declaration_includes_contract_obligations_and_annexes() {
                 "order_date": "2025-11-11",
                 "contract_date": "2025-11-11",
                 "quote_number": "KV77777777",
+                "payer_salutation": "Herr",
                 "payer_name": "Justus Geldgeber",
                 "payer_birth_date": "2000-01-01",
                 "bank_iban": "DE00 0000 0000 0000 0000 00"
@@ -3472,6 +3474,7 @@ async fn cost_coverage_declaration_includes_contract_obligations_and_annexes() {
     let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
     assert!(pdf_text.contains("Übernahme der Vertragspflichten"));
     assert!(pdf_text.contains("sämtliche Pflichten des Auftraggebers"));
+    assert!(pdf_text.contains("Herr Justus Geldgeber"));
     assert!(pdf_text.contains("Bestandteile der Kostenübernahmeerklärung"));
     assert!(pdf_text.contains("3. Einzelauftrag"));
     assert!(pdf_text.contains("Anlage 1"));

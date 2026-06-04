@@ -242,6 +242,7 @@ const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     { key: "treatment_purpose", label: "Behandlungszweck", kind: "text" },
     { key: "period_from", label: "Zeitraum von", kind: "date" },
     { key: "period_to", label: "Zeitraum bis", kind: "date" },
+    { key: "payer_salutation", label: "Kostenübernehmer Anrede", kind: "text" },
     { key: "payer_name", label: "Kostenübernehmer (Name)", kind: "text" },
     { key: "payer_birth_date", label: "Kostenübernehmer (geb. am)", kind: "date" },
     {
@@ -257,6 +258,7 @@ const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     { key: "order_date", label: "Einzelauftrag vom", kind: "date" },
     { key: "contract_date", label: "Rahmenvertrag vom", kind: "date" },
     { key: "quote_number", label: "Kostenvoranschlag-Nr.", kind: "text" },
+    { key: "payer_salutation", label: "Kostenübernehmer Anrede", kind: "text" },
     { key: "payer_name", label: "Kostenübernehmer (Name)", kind: "text" },
     { key: "payer_birth_date", label: "Kostenübernehmer (geb. am)", kind: "date" },
     { key: "payer_street", label: "Kostenübernehmer Straße", kind: "text" },
