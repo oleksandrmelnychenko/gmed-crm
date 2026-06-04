@@ -268,6 +268,10 @@ export function resolvePatientTimelineRoute(
       return access.canViewInvoices ? `/invoices?invoice=${item.entity_id}` : null;
     case "invoice_visibility":
       return access.canViewInvoices ? `/invoices?invoice=${item.entity_id}` : null;
+    case "clinical":
+      // Only clinical-access roles ever receive clinical timeline entries (gated
+      // server-side), so anyone who sees one can open the tab.
+      return access.patientId ? `/patients/${access.patientId}?tab=clinical` : null;
     case "service_package":
     case "service_package_consumption":
     case "service_package_change":

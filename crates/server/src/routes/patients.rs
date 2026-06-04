@@ -5068,7 +5068,7 @@ async fn get_patient_timeline(
         }
     };
 
-    let events_cte = r#"WITH events AS (
+    let events_cte_static = r#"WITH events AS (
             SELECT 'appointment'::text AS entity_type,
                    a.id AS entity_id,
                    a.title AS title,
@@ -5451,6 +5451,50 @@ async fn get_patient_timeline(
                 OR COALESCE(source_label, '') ILIKE $5)
           AND ($6::timestamptz IS NULL OR happened_at >= $6)
     "#;
+
+    // Clinical-record activity (from the audit log) is only woven into the timeline
+    // for the roles that can actually open the clinical profile, so it is never
+    // surfaced to billing / interpreter / concierge who cannot see clinical data.
+    let can_view_clinical = matches!(
+        auth.role,
+        Role::Ceo | Role::PatientManager | Role::ItAdmin
+    );
+    const CLINICAL_TIMELINE_BRANCH: &str = r#"
+            UNION ALL
+
+            SELECT 'clinical'::text AS entity_type,
+                   al.entity_id AS entity_id,
+                   CASE al.action
+                       WHEN 'save_patient_diagnoses' THEN 'Diagnosen aktualisiert'
+                       WHEN 'save_patient_medications' THEN 'Medikation aktualisiert'
+                       WHEN 'save_patient_examinations' THEN 'Befunde aktualisiert'
+                       WHEN 'save_patient_procedures' THEN 'Therapie aktualisiert'
+                       WHEN 'save_patient_narrative' THEN 'Anamnese aktualisiert'
+                       ELSE 'Klinisches Profil aktualisiert'
+                   END AS title,
+                   'clinical'::text AS category,
+                   NULL::text AS status,
+                   al.created_at AS happened_at,
+                   u.name AS source_label
+            FROM audit_log al
+            LEFT JOIN users u ON u.id = al.user_id
+            WHERE al.entity_type = 'patient'
+              AND al.entity_id = $1
+              AND al.action IN (
+                  'save_patient_diagnoses', 'save_patient_medications',
+                  'save_patient_examinations', 'save_patient_procedures',
+                  'save_patient_narrative'
+              )
+        "#;
+    let events_cte = if can_view_clinical {
+        let mut cte = events_cte_static.to_string();
+        if let Some(pos) = cte.rfind(')') {
+            cte.insert_str(pos, CLINICAL_TIMELINE_BRANCH);
+        }
+        cte
+    } else {
+        events_cte_static.to_string()
+    };
 
     let rows_sql = format!(
         "{events_cte}
@@ -7972,10 +8016,24 @@ async fn get_patient_clinical_pdf(
         json!({ "bytes": bytes.len() }),
     ));
 
+    let slug: String = mrn
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .collect();
+    let slug = slug.trim_matches('-');
+    let filename = if slug.is_empty() {
+        "arztbrief.pdf".to_string()
+    } else {
+        format!("arztbrief-{slug}.pdf")
+    };
+
     (
         [
-            ("content-type", "application/pdf"),
-            ("content-disposition", "inline; filename=\"arztbrief.pdf\""),
+            (axum::http::header::CONTENT_TYPE, "application/pdf".to_string()),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("inline; filename=\"{filename}\""),
+            ),
         ],
         bytes,
     )
