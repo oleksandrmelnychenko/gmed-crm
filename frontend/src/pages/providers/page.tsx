@@ -2707,13 +2707,20 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             </div>
           ) : detail ? (
             <div className="flex min-h-0 flex-col">
-              <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
-                <div className="min-w-0">
-                  <h1 className="truncate text-xl font-semibold text-foreground">
-                    {detail.name || t.providers_detail}
-                  </h1>
-                  <p className="mt-1 text-sm text-muted-foreground">{t.providers_subtitle}</p>
-                </div>
+              <div
+                className={cn(
+                  "flex flex-wrap items-start gap-3 px-4 py-3",
+                  detail.provider_type === "non_medical" ? "justify-end" : "justify-between",
+                )}
+              >
+                {detail.provider_type === "medical" ? (
+                  <div className="min-w-0">
+                    <h1 className="truncate text-xl font-semibold text-foreground">
+                      {detail.name || t.providers_detail}
+                    </h1>
+                    <p className="mt-1 text-sm text-muted-foreground">{t.providers_subtitle}</p>
+                  </div>
+                ) : null}
                 <div className="flex items-center gap-2">
                   <Button
                     type="button"
@@ -3402,6 +3409,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               <AdminSheetScaffold
                 title={detail.name || t.providers_detail}
                 description={t.providers_subtitle}
+                hideHeader={detail.provider_type === "non_medical"}
                 footer={(
                   <SheetActionsFooter>
                     <Button
