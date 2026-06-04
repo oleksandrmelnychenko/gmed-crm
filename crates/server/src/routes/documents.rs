@@ -10620,6 +10620,35 @@ async fn generate_document(
         }
         "consent_data_release_child" | "consent_data_release_single" => {
             let sole_guardian = template.id == "consent_data_release_single";
+            // Auto-fill the guardians (Mutter/Vater) from the child's parent/guardian
+            // relations when not provided manually. patient_relations stores no gender, so
+            // they are filled positionally; a manual binding always takes precedence.
+            let guardian_relations = sqlx::query(
+                r#"SELECT pr.related_name, rp.birth_date
+                   FROM patient_relations pr
+                   LEFT JOIN patients rp ON rp.id = pr.related_patient_id
+                   WHERE pr.patient_id = $1
+                     AND pr.relation_type IN ('parent', 'guardian')
+                   ORDER BY pr.created_at"#,
+            )
+            .bind(patient_uuid)
+            .fetch_all(&state.db)
+            .await
+            .unwrap_or_default();
+            let guardian_at = |idx: usize| -> (Option<String>, Option<NaiveDate>) {
+                match guardian_relations.get(idx) {
+                    Some(row) => (
+                        row.try_get::<String, _>("related_name")
+                            .ok()
+                            .map(|name| name.trim().to_string())
+                            .filter(|name| !name.is_empty()),
+                        row.try_get::<Option<NaiveDate>, _>("birth_date").ok().flatten(),
+                    ),
+                    None => (None, None),
+                }
+            };
+            let (guardian1_name, guardian1_birth) = guardian_at(0);
+            let (guardian2_name_derived, guardian2_birth_derived) = guardian_at(1);
             let context = GeneratedConsentContext {
                 sole_guardian,
                 auto_name: auto_name.clone(),
@@ -10635,11 +10664,11 @@ async fn generate_document(
                     .child_address
                     .clone()
                     .or_else(|| patient_party.address_line()),
-                guardian_name: bindings.guardian_name.clone(),
-                guardian_birth_date: bindings.guardian_birth_date,
+                guardian_name: bindings.guardian_name.clone().or(guardian1_name),
+                guardian_birth_date: bindings.guardian_birth_date.or(guardian1_birth),
                 guardian_address: bindings.guardian_address.clone(),
-                guardian2_name: bindings.guardian2_name.clone(),
-                guardian2_birth_date: bindings.guardian2_birth_date,
+                guardian2_name: bindings.guardian2_name.clone().or(guardian2_name_derived),
+                guardian2_birth_date: bindings.guardian2_birth_date.or(guardian2_birth_derived),
                 extra_release_recipients: bindings.extra_release_recipients.clone(),
                 generated_at,
             };

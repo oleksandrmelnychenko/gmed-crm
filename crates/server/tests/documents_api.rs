@@ -2917,6 +2917,65 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
 }
 
 #[tokio::test]
+async fn consent_child_autofills_guardians_from_patient_relations() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("consent-guardian-autofill");
+    let child_id = seed_patient(&pool, admin_id, &tag).await;
+
+    // The child has two guardians recorded as relations (no gender stored, ordered by time).
+    // Short single-token names so they don't wrap in the generated PDF.
+    let guardian_one = "Erikaautofillmother";
+    let guardian_two = "Hansautofillfather";
+    sqlx::query(
+        r#"INSERT INTO patient_relations (patient_id, related_name, relation_type, created_at)
+           VALUES ($1, $2, 'parent', now() - interval '1 minute'),
+                  ($1, $3, 'guardian', now())"#,
+    )
+    .bind(child_id)
+    .bind(guardian_one)
+    .bind(guardian_two)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Generate WITHOUT manual guardian bindings — they must be auto-filled from relations.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "consent_data_release_child",
+            "patient_id": child_id,
+            "language": "de",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "generate consent: {body:?}");
+    let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let (status, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &admin_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(
+        pdf_text.contains(guardian_one),
+        "first guardian must be auto-filled from relations; got: {pdf_text:?}"
+    );
+    assert!(
+        pdf_text.contains(guardian_two),
+        "second guardian must be auto-filled from relations; got: {pdf_text:?}"
+    );
+}
+
+#[tokio::test]
 async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
