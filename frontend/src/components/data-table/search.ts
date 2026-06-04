@@ -25,21 +25,17 @@ export function tokenize(query: string): string[] {
     .filter(Boolean);
 }
 
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function digitsOnly(value: string): string {
   return value.replace(/\D/g, "");
 }
 
-function blobContainsToken(blob: string, token: string) {
-  if (new RegExp(escapeRegExp(deNormalize(token))).test(blob)) return true;
-  // Phone format tolerance: compare digit-only forms so spacing/dashes/"+" differences
-  // don't break a phone search (mirrors the SQL phone_digits()). Requires >=3 digits to
-  // avoid trivial matches. (Does not canonicalize country-code vs. national prefix.)
+// Substring match against the (already de_normalize'd) blob, plus a digit-only fallback
+// for phone format tolerance. `digitBlob` is the precomputed digit-only form of `blob`.
+function blobContainsToken(blob: string, digitBlob: string, token: string) {
+  const folded = deNormalize(token);
+  if (blob.includes(folded)) return true;
   const tokenDigits = digitsOnly(token);
-  return tokenDigits.length >= 3 && digitsOnly(blob).includes(tokenDigits);
+  return tokenDigits.length >= 3 && digitBlob.includes(tokenDigits);
 }
 
 function valueToSearchString(value: unknown): string {
@@ -57,7 +53,8 @@ function buildSearchBlob<T>(row: T, ctx: SearchContext<T>): string {
 export function matchesSearch<T>(row: T, tokens: readonly string[], ctx: SearchContext<T>): boolean {
   if (tokens.length === 0) return true;
   const blob = buildSearchBlob(row, ctx);
-  return tokens.every((token) => blobContainsToken(blob, token));
+  const digitBlob = digitsOnly(blob);
+  return tokens.every((token) => blobContainsToken(blob, digitBlob, token));
 }
 
 export function applySearch<T>(
@@ -70,13 +67,16 @@ export function applySearch<T>(
   return rows.filter((row) => matchesSearch(row, tokens, ctx));
 }
 
-export type SearchIndex<T> = Array<{ row: T; blob: string }>;
+export type SearchIndex<T> = Array<{ row: T; blob: string; digitBlob: string }>;
 
 export function buildSearchIndex<T>(
   rows: readonly T[],
   ctx: SearchContext<T>,
 ): SearchIndex<T> {
-  return rows.map((row) => ({ row, blob: buildSearchBlob(row, ctx) }));
+  return rows.map((row) => {
+    const blob = buildSearchBlob(row, ctx);
+    return { row, blob, digitBlob: digitsOnly(blob) };
+  });
 }
 
 export function searchWithIndex<T>(
@@ -85,9 +85,21 @@ export function searchWithIndex<T>(
 ): T[] {
   const tokens = tokenize(query);
   if (tokens.length === 0) return index.map((entry) => entry.row);
+  // Tokens from tokenize() are already de_normalize'd; precompute each token's digit form
+  // once (not per row) so filtering stays cheap on large lists.
+  const prepared = tokens.map((text) => {
+    const digits = digitsOnly(text);
+    return { text, digits: digits.length >= 3 ? digits : "" };
+  });
   const rows: T[] = [];
   for (const entry of index) {
-    if (tokens.every((token) => blobContainsToken(entry.blob, token))) {
+    if (
+      prepared.every(
+        (token) =>
+          entry.blob.includes(token.text) ||
+          (token.digits !== "" && entry.digitBlob.includes(token.digits)),
+      )
+    ) {
       rows.push(entry.row);
     }
   }
