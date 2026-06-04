@@ -275,6 +275,19 @@ const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     { key: "sign_place", label: "Ort", kind: "text" },
     { key: "sign_date", label: "Datum", kind: "date" },
   ],
+  visa_invitation_letter: [
+    { key: "passport_number", label: "Reisepass-Nr.", kind: "text" },
+    { key: "passport_valid_until", label: "Reisepass gültig bis", kind: "date" },
+    {
+      key: "clinics_text",
+      label: "Kliniken (eine pro Zeile: Name | Adresse)",
+      kind: "textarea",
+    },
+    { key: "recipient_block", label: "Empfänger (Adressblock)", kind: "textarea" },
+    { key: "contact_phones", label: "Rückfragen-Telefon(e)", kind: "text" },
+    { key: "sign_place", label: "Ort", kind: "text" },
+    { key: "sign_date", label: "Datum", kind: "date" },
+  ],
   consent_data_release_child: [
     { key: "child_name", label: "Kind (Name)", kind: "text" },
     { key: "child_birth_date", label: "Kind (geb. am)", kind: "date" },

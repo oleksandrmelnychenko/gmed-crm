@@ -2711,6 +2711,32 @@ async fn document_templates_can_generate_treatment_plan_pdf_document() {
     let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
     let appointment_id =
         seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by)
+           VALUES ($1, $2, 'execution', 'active', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("AUF-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE appointments SET order_id = $2 WHERE id = $1")
+        .bind(appointment_id)
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"INSERT INTO order_planning_preparation (order_id, treatment_plan_note)
+           VALUES ($1, $2)"#,
+    )
+    .bind(order_id)
+    .bind("Patient benötigt Dolmetscherkoordination vor Aufnahme.")
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let (status, catalog_body) = json_request(
         &app,
@@ -2737,6 +2763,7 @@ async fn document_templates_can_generate_treatment_plan_pdf_document() {
         Some(json!({
             "template_id": "treatment_plan",
             "patient_id": patient_id,
+            "order_id": order_id,
             "appointment_id": appointment_id,
             "language": "de",
             "introduction": "Bitte beachten Sie die unten aufgeführten Termine.",
@@ -2748,9 +2775,10 @@ async fn document_templates_can_generate_treatment_plan_pdf_document() {
     assert_eq!(status, StatusCode::OK);
     let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
     let preview_html = body["preview_html"].as_str().unwrap();
-    assert!(preview_html.contains("Untersuchungs-/Behandlungsplan"));
+    assert!(preview_html.contains("Behandlungsplan"));
     assert!(preview_html.contains("Bitte beachten Sie die unten aufgeführten Termine."));
     assert!(preview_html.contains("Bitte nüchtern bleiben"));
+    assert!(preview_html.contains("Patient benötigt Dolmetscherkoordination"));
 
     let (status, detail_body) = json_request(
         &app,
@@ -2775,6 +2803,9 @@ async fn document_templates_can_generate_treatment_plan_pdf_document() {
     assert_eq!(status, StatusCode::OK);
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 1000);
+    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(pdf_text.contains("Planungsnotiz"));
+    assert!(pdf_text.contains("Patient benötigt Dolmetscherkoordination"));
 }
 
 #[tokio::test]
@@ -3845,6 +3876,17 @@ async fn document_templates_can_generate_medication_summary_pdf_document() {
         "Glucose control",
     )
     .await;
+    let update_result = sqlx::query(
+        r#"UPDATE medikamente
+           SET expiry_date = '2026-07-31'
+           WHERE case_id = $1 AND handelsname = $2"#,
+    )
+    .bind(active_case_two)
+    .bind("Metformin 500")
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(update_result.rows_affected(), 1);
     seed_case_medication(
         &pool,
         closed_case,
@@ -3894,9 +3936,10 @@ async fn document_templates_can_generate_medication_summary_pdf_document() {
     assert_eq!(status, StatusCode::OK);
     let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
     let preview_html = body["preview_html"].as_str().unwrap();
-    assert!(preview_html.contains("Medikamentenplan"));
+    assert!(preview_html.contains("Medikamentenübersicht"));
     assert!(preview_html.contains("Ramipril 5"));
     assert!(preview_html.contains("Metformin 500"));
+    assert!(preview_html.contains("Bis: 31.07.2026"));
     assert!(preview_html.contains("Dr. Active"));
     assert!(preview_html.contains("Alle aktiven Patientencases"));
     assert!(!preview_html.contains("Legacy Closed Med"));
@@ -3924,6 +3967,9 @@ async fn document_templates_can_generate_medication_summary_pdf_document() {
     assert_eq!(status, StatusCode::OK);
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 1000);
+    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(pdf_text.contains("Medikamentenübersicht"));
+    assert!(pdf_text.contains("Bis: 31.07.2026"));
 }
 
 #[tokio::test]
@@ -4148,16 +4194,30 @@ async fn document_templates_can_generate_visa_invitation_pdf_document() {
             "appointment_id": appointment_id,
             "language": "de",
             "introduction": "Dieses Einladungsschreiben wird für den Konsulatstermin benötigt.",
-            "closing_note": "Bitte dem Visumantrag als ergänzende medizinische Unterlage beilegen."
+            "closing_note": "Bitte dem Visumantrag als ergänzende medizinische Unterlage beilegen.",
+            "bindings": {
+                "passport_number": "MA1234567",
+                "passport_valid_until": "2050-01-01",
+                "recipient_block": "An das Generalkonsulat\nVisastelle",
+                "clinics": [
+                    {"name": "Klinik München", "address": "Musterstr. 1, München"}
+                ],
+                "contact_phones": "0176 9999999",
+                "sign_place": "München",
+                "sign_date": "2025-11-19"
+            }
         })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
     let preview_html = body["preview_html"].as_str().unwrap();
-    assert!(preview_html.contains("Visa-Einladungsschreiben"));
+    assert!(preview_html.contains("Einladungsschreiben (Visum)"));
     assert!(preview_html.contains("Ukraine"));
     assert!(preview_html.contains("Germany"));
+    assert!(preview_html.contains("Reisepass Nr.: MA1234567"));
+    assert!(preview_html.contains("Klinik München"));
+    assert!(preview_html.contains("0176 9999999"));
     assert!(
         preview_html.contains("Dieses Schreiben dient zur Vorlage bei Botschaft oder Konsulat")
     );
@@ -4185,6 +4245,14 @@ async fn document_templates_can_generate_visa_invitation_pdf_document() {
     assert_eq!(status, StatusCode::OK);
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 1000);
+    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(pdf_text.contains("An das Generalkonsulat"));
+    assert!(pdf_text.contains("Visastelle"));
+    assert!(pdf_text.contains("München, 19.11.2025"));
+    assert!(pdf_text.contains("Reisepass Nr.: MA1234567"));
+    assert!(pdf_text.contains("gültig bis 01.01.2050"));
+    assert!(pdf_text.contains("Klinik München"));
+    assert!(pdf_text.contains("0176 9999999"));
 }
 
 #[tokio::test]

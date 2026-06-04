@@ -296,6 +296,7 @@ struct GeneratedMedicationLine {
     note: Option<String>,
     reason: Option<String>,
     since: Option<String>,
+    expiry_date: Option<NaiveDate>,
     prescribing_doctor: Option<String>,
     medication_type: String,
     source_case_id: String,
@@ -321,6 +322,7 @@ struct GeneratedTreatmentPlanContext {
     title_override: Option<String>,
     introduction: Option<String>,
     closing_note: Option<String>,
+    treatment_plan_note: Option<String>,
     appointments: Vec<GeneratedAppointmentLine>,
     text_blocks: Vec<String>,
     generated_at: chrono::DateTime<chrono::Utc>,
@@ -397,14 +399,23 @@ struct GeneratedVisaInvitationContext {
     patient_pid: String,
     patient_name: String,
     patient_title: Option<String>,
+    patient: DocPartyBlock,
     birth_date: Option<NaiveDate>,
     language: String,
     auto_name: String,
     title_override: Option<String>,
     introduction: Option<String>,
     closing_note: Option<String>,
+    agency: AgencyContractSettings,
     nationality: Option<String>,
     residence_country: Option<String>,
+    passport_number: Option<String>,
+    passport_valid_until: Option<NaiveDate>,
+    recipient_block: Option<String>,
+    clinics: Vec<ClinicInput>,
+    contact_phones: Option<String>,
+    sign_place: Option<String>,
+    sign_date: Option<NaiveDate>,
     provider_name: Option<String>,
     doctor_name: Option<String>,
     appointment_title: Option<String>,
@@ -760,11 +771,11 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     },
     DocumentTemplateDefinition {
         id: "medication_summary",
-        label: "Medikamentenplan",
+        label: "Medikamentenübersicht",
         description: "Konsolidierte Medikamentenübersicht für den ausgewählten Patientenkontext.",
         art: "medication_summary",
         category: "generated",
-        default_auto_name: "Medikamentenplan",
+        default_auto_name: "Medikamentenübersicht",
         default_status: "draft",
         default_visibility: "patient_visible",
         mime_type: "application/pdf",
@@ -799,11 +810,11 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     },
     DocumentTemplateDefinition {
         id: "visa_invitation_letter",
-        label: "Visa-Einladungsschreiben",
+        label: "Einladungsschreiben (Visum)",
         description: "Formelles Einladungsschreiben für Botschaft oder Konsulat aus Patient- und Terminkontext.",
         art: "visa_invitation",
         category: "generated",
-        default_auto_name: "Visa-Einladung",
+        default_auto_name: "Einladungsschreiben (Visum)",
         default_status: "draft",
         default_visibility: "patient_visible",
         mime_type: "application/pdf",
@@ -2599,6 +2610,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         ("uk", "prescribed_by") => "Призначив",
         ("uk", "medication_reason") => "Показання",
         ("uk", "since") => "З",
+        ("uk", "expiry_date") => "До",
         ("uk", "source_case") => "Джерело",
         ("uk", "medication_note") => "Примітка",
         ("uk", "medication_scope_active") => "Включено всі активні кейси пацієнта.",
@@ -2617,6 +2629,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         ("uk", "program_heading") => "Програма по днях",
         ("uk", "notes_heading") => "Важливі вказівки",
         ("uk", "appointment_notes") => "Коментар до візиту",
+        ("uk", "treatment_plan_note") => "Нотатка планування",
         ("uk", "generated_footer") => "Згенеровано",
         ("uk", "provider") => "Провайдер",
         ("uk", "doctor") => "Лікар",
@@ -2665,6 +2678,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         ("en", "prescribed_by") => "Prescribed by",
         ("en", "medication_reason") => "Reason",
         ("en", "since") => "Since",
+        ("en", "expiry_date") => "Until",
         ("en", "source_case") => "Source",
         ("en", "medication_note") => "Note",
         ("en", "medication_scope_active") => "Includes all active patient cases.",
@@ -2683,6 +2697,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         ("en", "program_heading") => "Schedule by day",
         ("en", "notes_heading") => "Important notes",
         ("en", "appointment_notes") => "Visit note",
+        ("en", "treatment_plan_note") => "Planning note",
         ("en", "generated_footer") => "Generated",
         ("en", "provider") => "Provider",
         ("en", "doctor") => "Doctor",
@@ -2692,7 +2707,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         ("en", "no_medications") => "No medication is available for the selected context yet.",
         ("en", "draft_badge") => "Working document",
         (_, "framework_contract_title") => "Rahmenvertrag für",
-        (_, "visa_invitation_title") => "Visa-Einladungsschreiben für",
+        (_, "visa_invitation_title") => "Einladungsschreiben (Visum) für",
         (_, "contract_data_heading") => "Vertragsdaten",
         (_, "contract_terms_heading") => "Standardklauseln",
         (_, "contract_conditions_heading") => "Zusätzliche Bedingungen",
@@ -2719,7 +2734,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         (_, "sticker_country") => "Land",
         (_, "sticker_insurance") => "Versicherer",
         (_, "sticker_generated") => "Erstellt",
-        (_, "medication_title") => "Medikamentenplan für",
+        (_, "medication_title") => "Medikamentenübersicht für",
         (_, "medication_heading") => "Aktuelle Medikation",
         (_, "medication_permanent") => "Dauermedikation",
         (_, "medication_temporary") => "Temporäre Medikation",
@@ -2731,6 +2746,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         (_, "prescribed_by") => "Verordnet von",
         (_, "medication_reason") => "Indikation",
         (_, "since") => "Seit",
+        (_, "expiry_date") => "Bis",
         (_, "source_case") => "Quelle",
         (_, "medication_note") => "Anmerkung",
         (_, "medication_scope_active") => {
@@ -2739,7 +2755,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         (_, "medication_scope_latest") => {
             "Kein aktives Case gefunden, daher wurde das zuletzt erfasste Patientencase verwendet."
         }
-        (_, "document_title") => "Untersuchungs-/Behandlungsplan für",
+        (_, "document_title") => "Behandlungsplan für",
         (_, "created_on") => "Datum",
         (_, "patient_id") => "Patienten-ID",
         (_, "birth_date") => "Geburtsdatum",
@@ -2751,6 +2767,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         (_, "program_heading") => "Programm nach Tagen",
         (_, "notes_heading") => "Wichtige Hinweise",
         (_, "appointment_notes") => "Terminnotiz",
+        (_, "treatment_plan_note") => "Planungsnotiz",
         (_, "generated_footer") => "Erstellt",
         (_, "provider") => "Leistungserbringer",
         (_, "doctor") => "Arzt",
@@ -3234,7 +3251,7 @@ fn default_generated_document_name(
         ("framework_contract", _) => "Rahmenvertrag",
         ("visa_invitation_letter", "uk") => "Візове запрошення",
         ("visa_invitation_letter", "en") => "Visa invitation letter",
-        ("visa_invitation_letter", _) => "Visa-Einladung",
+        ("visa_invitation_letter", _) => "Einladungsschreiben (Visum)",
         (
             "patient_sticker_compact" | "patient_sticker_standard" | "patient_sticker_sheet",
             "uk",
@@ -3248,7 +3265,7 @@ fn default_generated_document_name(
         }
         ("medication_summary", "uk") => "Медикаментозний план",
         ("medication_summary", "en") => "Medication summary",
-        ("medication_summary", _) => "Medikamentenplan",
+        ("medication_summary", _) => "Medikamentenübersicht",
         ("treatment_plan", "uk") => "План лікування",
         ("treatment_plan", "en") => "Treatment plan",
         ("treatment_plan", _) => "Behandlungsplan",
@@ -3291,6 +3308,11 @@ fn build_treatment_plan_html(context: &GeneratedTreatmentPlanContext) -> String 
         .filter(|value| !value.is_empty());
     let closing = context
         .closing_note
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let treatment_plan_note = context
+        .treatment_plan_note
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
@@ -3373,24 +3395,32 @@ fn build_treatment_plan_html(context: &GeneratedTreatmentPlanContext) -> String 
         }
     }
 
-    let note_items = if context.text_blocks.is_empty() && closing.is_none() {
-        String::new()
-    } else {
-        let mut markup = String::from("<section class=\"notes\"><h2>");
-        markup.push_str(&escape_html(translated_label(
-            &context.language,
-            "notes_heading",
-        )));
-        markup.push_str("</h2><ul>");
-        for block in &context.text_blocks {
-            markup.push_str(&format!("<li>{}</li>", escape_html(block)));
-        }
-        if let Some(closing) = closing {
-            markup.push_str(&format!("<li>{}</li>", escape_html(closing)));
-        }
-        markup.push_str("</ul></section>");
-        markup
-    };
+    let note_items =
+        if context.text_blocks.is_empty() && closing.is_none() && treatment_plan_note.is_none() {
+            String::new()
+        } else {
+            let mut markup = String::from("<section class=\"notes\"><h2>");
+            markup.push_str(&escape_html(translated_label(
+                &context.language,
+                "notes_heading",
+            )));
+            markup.push_str("</h2><ul>");
+            for block in &context.text_blocks {
+                markup.push_str(&format!("<li>{}</li>", escape_html(block)));
+            }
+            if let Some(treatment_plan_note) = treatment_plan_note {
+                markup.push_str(&format!(
+                    "<li><strong>{}:</strong> {}</li>",
+                    escape_html(translated_label(&context.language, "treatment_plan_note")),
+                    escape_html(treatment_plan_note)
+                ));
+            }
+            if let Some(closing) = closing {
+                markup.push_str(&format!("<li>{}</li>", escape_html(closing)));
+            }
+            markup.push_str("</ul></section>");
+            markup
+        };
 
     let patient_title = context
         .patient_title
@@ -3755,6 +3785,12 @@ fn build_treatment_plan_pdf(
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .is_some()
+        || context
+            .treatment_plan_note
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some()
     {
         layout.text_block(
             translated_label(&context.language, "notes_heading"),
@@ -3769,6 +3805,26 @@ fn build_treatment_plan_pdf(
         for block in &context.text_blocks {
             layout.text_block(
                 &format!("- {block}"),
+                10.5,
+                false,
+                4.0,
+                TreatmentPlanPdfColor::Body,
+                0.0,
+                1.0,
+            );
+        }
+        if let Some(treatment_plan_note) = context
+            .treatment_plan_note
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            layout.text_block(
+                &format!(
+                    "- {}: {}",
+                    translated_label(&context.language, "treatment_plan_note"),
+                    treatment_plan_note
+                ),
                 10.5,
                 false,
                 4.0,
@@ -3868,6 +3924,9 @@ fn build_medication_summary_html(context: &GeneratedMedicationSummaryContext) ->
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty());
+            let expiry_date = item
+                .expiry_date
+                .map(|value| value.format("%d.%m.%Y").to_string());
             let note = item
                 .note
                 .as_deref()
@@ -3931,6 +3990,13 @@ fn build_medication_summary_html(context: &GeneratedMedicationSummaryContext) ->
                     "{}: {}",
                     translated_label(&context.language, "since"),
                     escape_html(since)
+                ));
+            }
+            if let Some(expiry_date) = expiry_date.as_deref() {
+                secondary.push(format!(
+                    "{}: {}",
+                    translated_label(&context.language, "expiry_date"),
+                    escape_html(expiry_date)
                 ));
             }
             secondary.push(format!(
@@ -4296,6 +4362,9 @@ fn build_medication_summary_pdf(
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty());
+            let expiry_date = item
+                .expiry_date
+                .map(|value| value.format("%d.%m.%Y").to_string());
             let note = item
                 .note
                 .as_deref()
@@ -4394,6 +4463,21 @@ fn build_medication_summary_pdf(
                         "{}: {}",
                         translated_label(&context.language, "since"),
                         since
+                    ),
+                    10.0,
+                    false,
+                    10.0,
+                    TreatmentPlanPdfColor::Body,
+                    0.0,
+                    0.8,
+                );
+            }
+            if let Some(expiry_date) = expiry_date.as_deref() {
+                layout.text_block(
+                    &format!(
+                        "{}: {}",
+                        translated_label(&context.language, "expiry_date"),
+                        expiry_date
                     ),
                     10.0,
                     false,
@@ -6134,16 +6218,102 @@ fn build_framework_contract_pdf(
     Ok(finalize_admin_pdf(document, layout))
 }
 
-fn visa_invitation_summary_lines(context: &GeneratedVisaInvitationContext) -> Vec<String> {
-    let mut lines = Vec::new();
-    let patient_line = match context
-        .patient_title
+fn visa_invitation_patient_reference(context: &GeneratedVisaInvitationContext) -> String {
+    let name = context.patient.name_last_comma_first();
+    let salutation = appointment_nominative_salutation(&context.patient);
+    if salutation.is_empty() {
+        name
+    } else {
+        format!("{salutation} {name}")
+    }
+}
+
+fn visa_invitation_birth_clause(context: &GeneratedVisaInvitationContext) -> String {
+    context
+        .birth_date
+        .map(|value| format!(", geb. am {}", value.format("%d.%m.%Y")))
+        .unwrap_or_default()
+}
+
+fn visa_invitation_passport_clause(context: &GeneratedVisaInvitationContext) -> String {
+    match (
+        context
+            .passport_number
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+        context.passport_valid_until,
+    ) {
+        (Some(number), Some(valid_until)) => format!(
+            ", Reisepass Nr.: {number}, gültig bis {}",
+            valid_until.format("%d.%m.%Y")
+        ),
+        (Some(number), None) => format!(", Reisepass Nr.: {number}"),
+        _ => String::new(),
+    }
+}
+
+fn visa_invitation_clinic_list(clinics: &[ClinicInput]) -> Option<String> {
+    let items = clinics
+        .iter()
+        .filter_map(|clinic| {
+            let name = clinic.name.trim();
+            if name.is_empty() {
+                return None;
+            }
+            let address = clinic
+                .address
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            Some(match address {
+                Some(address) => format!("{name} ({address})"),
+                None => name.to_string(),
+            })
+        })
+        .collect::<Vec<_>>();
+    if items.is_empty() {
+        None
+    } else {
+        Some(items.join(", "))
+    }
+}
+
+fn visa_invitation_contact_line(context: &GeneratedVisaInvitationContext) -> String {
+    let phones = context
+        .contact_phones
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-    {
-        Some(title_prefix) => format!("{title_prefix} {}", context.patient_name),
-        None => context.patient_name.clone(),
+        .or_else(|| {
+            context
+                .agency
+                .phone
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        });
+    match phones {
+        Some(phones) => {
+            format!("Für Rückfragen stehen wir Ihnen gerne zur Verfügung unter {phones}.")
+        }
+        None => "Für Rückfragen stehen wir Ihnen gerne zur Verfügung.".to_string(),
+    }
+}
+
+fn visa_invitation_summary_lines(context: &GeneratedVisaInvitationContext) -> Vec<String> {
+    let mut lines = Vec::new();
+    let patient_line = match context.language.as_str() {
+        "uk" | "en" => match context
+            .patient_title
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            Some(title_prefix) => format!("{title_prefix} {}", context.patient_name),
+            None => context.patient_name.clone(),
+        },
+        _ => visa_invitation_patient_reference(context),
     };
 
     match context.language.as_str() {
@@ -6247,7 +6417,9 @@ fn visa_invitation_summary_lines(context: &GeneratedVisaInvitationContext) -> Ve
         }
         _ => {
             lines.push(format!(
-                "Hiermit bestätigen wir, dass {patient_line} zur medizinischen Koordination und Vorstellung{} eingeladen ist.",
+                "Hiermit bestätigen wir, dass {patient_line}{}{} zur medizinischen Koordination und Vorstellung{} eingeladen ist.",
+                visa_invitation_birth_clause(context),
+                visa_invitation_passport_clause(context),
                 context
                     .provider_name
                     .as_deref()
@@ -6281,6 +6453,9 @@ fn visa_invitation_summary_lines(context: &GeneratedVisaInvitationContext) -> Ve
             {
                 lines.push(format!("Zweck der Reise: {appointment_title}."));
             }
+            if let Some(clinic_list) = visa_invitation_clinic_list(&context.clinics) {
+                lines.push(format!("Vorgesehene Einrichtung(en): {clinic_list}."));
+            }
             if let Some(order_number) = context
                 .order_number
                 .as_deref()
@@ -6293,6 +6468,7 @@ fn visa_invitation_summary_lines(context: &GeneratedVisaInvitationContext) -> Ve
                 "Dieses Schreiben dient zur Vorlage bei Botschaft oder Konsulat im Rahmen des Visumantrags."
                     .to_string(),
             );
+            lines.push(visa_invitation_contact_line(context));
         }
     }
 
@@ -6450,6 +6626,50 @@ fn build_visa_invitation_pdf(
         context.generated_at.format("%d.%m.%Y %H:%M UTC")
     );
     let mut layout = TreatmentPlanPdfLayout::new(footer_text, regular_handle, bold_handle);
+
+    if let Some(sender) = appointment_sender_line(&context.agency) {
+        layout.text_block(
+            &sender,
+            9.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            1.0,
+        );
+    }
+    for line in agency_block_lines(&context.agency) {
+        admin_block(&mut layout, &line, 0.0, 0.3);
+    }
+    layout.spacer(2.0);
+
+    let recipient = context
+        .recipient_block
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("An die Botschaft / das Konsulat");
+    for line in recipient
+        .lines()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        admin_block(&mut layout, line, 0.0, 0.3);
+    }
+    layout.spacer(2.0);
+
+    let sign_place = context
+        .sign_place
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("München");
+    admin_block(
+        &mut layout,
+        &format!("{sign_place}, {}", fmt_de_date(context.sign_date)),
+        0.0,
+        3.0,
+    );
 
     layout.text_block(
         translated_label(&context.language, "draft_badge"),
@@ -6623,6 +6843,24 @@ fn build_visa_invitation_pdf(
             0.0,
         );
     }
+
+    admin_block(&mut layout, "Mit freundlichen Grüßen,", 3.0, 8.0);
+    let signer = context
+        .agency
+        .care_of
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(context.agency.name.as_str());
+    layout.text_block(
+        signer,
+        11.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        0.5,
+    );
 
     let pages = layout.finish();
     let mut save_warnings: Vec<PdfWarnMsg> = Vec::new();
@@ -6826,7 +7064,8 @@ fn build_patient_sticker_pdf(
         );
         // The name below is set in a much larger font; reserve the remainder of its line
         // height so its ascenders don't overlap the salutation row above it.
-        y_mm -= (pdf_line_height_mm(name_size, 1.18) - pdf_line_height_mm(body_size, 1.18)).max(0.0);
+        y_mm -=
+            (pdf_line_height_mm(name_size, 1.18) - pdf_line_height_mm(body_size, 1.18)).max(0.0);
     }
     // Name: "Lastname, Firstname"
     push_wrapped(
@@ -9834,6 +10073,29 @@ async fn generate_document(
                 );
             }
 
+            let treatment_plan_note = if let Some(order_uuid) = order_id {
+                match sqlx::query_scalar::<_, Option<String>>(
+                    r#"SELECT treatment_plan_note
+                       FROM order_planning_preparation
+                       WHERE order_id = $1"#,
+                )
+                .bind(order_uuid)
+                .fetch_optional(&state.db)
+                .await
+                {
+                    Ok(value) => value.flatten(),
+                    Err(e) => {
+                        tracing::error!(error = %e, order_id = %order_uuid, "load treatment plan planning note");
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to load treatment plan context",
+                        );
+                    }
+                }
+            } else {
+                None
+            };
+
             let context = GeneratedTreatmentPlanContext {
                 patient_pid: patient_pid.clone(),
                 patient_name: patient_name.clone(),
@@ -9845,6 +10107,7 @@ async fn generate_document(
                 title_override,
                 introduction,
                 closing_note,
+                treatment_plan_note,
                 appointments,
                 text_blocks,
                 generated_at,
@@ -9931,7 +10194,7 @@ async fn generate_document(
             let medication_rows = match sqlx::query(
                 r#"SELECT case_id, handelsname, wirkstoff, dosis, dosis_einheit, einnahmeschema,
                           darreichungsform, einheit, anmerkung, grund, seit, verordnender_arzt,
-                          med_typ
+                          expiry_date, med_typ
                    FROM medikamente
                    WHERE case_id = ANY($1::uuid[])
                    ORDER BY sort_order ASC, created_at ASC"#,
@@ -9984,6 +10247,9 @@ async fn generate_document(
                             .try_get::<Option<String>, _>("grund")
                             .unwrap_or_default(),
                         since: row.try_get::<Option<String>, _>("seit").unwrap_or_default(),
+                        expiry_date: row
+                            .try_get::<Option<NaiveDate>, _>("expiry_date")
+                            .unwrap_or_default(),
                         prescribing_doctor: row
                             .try_get::<Option<String>, _>("verordnender_arzt")
                             .unwrap_or_default(),
@@ -10280,19 +10546,33 @@ async fn generate_document(
             } else {
                 None
             };
+            let mut agency = match load_agency_contract_settings(&state).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+            apply_bank_overrides(&mut agency, &bindings);
 
             let context = GeneratedVisaInvitationContext {
                 patient_pid: patient_pid.clone(),
                 patient_name: patient_name.clone(),
                 patient_title: patient_title.clone(),
+                patient: patient_party.clone(),
                 birth_date,
                 language: language.to_string(),
                 auto_name: auto_name.clone(),
                 title_override,
                 introduction,
                 closing_note,
+                agency,
                 nationality,
                 residence_country,
+                passport_number: bindings.passport_number.clone(),
+                passport_valid_until: bindings.passport_valid_until,
+                recipient_block: bindings.recipient_block.clone(),
+                clinics: bindings.clinics.clone(),
+                contact_phones: bindings.contact_phones.clone(),
+                sign_place: bindings.sign_place.clone(),
+                sign_date: bindings.sign_date,
                 provider_name: appointment_context.as_ref().and_then(|row| {
                     row.try_get::<Option<String>, _>("provider_name")
                         .ok()
@@ -10642,7 +10922,9 @@ async fn generate_document(
                             .ok()
                             .map(|name| name.trim().to_string())
                             .filter(|name| !name.is_empty()),
-                        row.try_get::<Option<NaiveDate>, _>("birth_date").ok().flatten(),
+                        row.try_get::<Option<NaiveDate>, _>("birth_date")
+                            .ok()
+                            .flatten(),
                     ),
                     None => (None, None),
                 }
