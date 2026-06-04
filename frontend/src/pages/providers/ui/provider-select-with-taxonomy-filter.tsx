@@ -40,6 +40,8 @@ type ProviderSelectWithTaxonomyFilterProps<TProvider extends ProviderTaxonomyCar
   providerSelectLabel?: ReactNode;
   /** Shown under the provider select when a category is chosen but no provider matches it. */
   noProvidersLabel?: ReactNode;
+  /** When true, the category dropdown only lists categories that actually have a provider of the current type. */
+  restrictTaxonomyToAvailable?: boolean;
   providerLabel?: (provider: TProvider) => ReactNode;
   providerSearchText?: (provider: TProvider) => string;
   "aria-label"?: string;
@@ -47,17 +49,20 @@ type ProviderSelectWithTaxonomyFilterProps<TProvider extends ProviderTaxonomyCar
   onTaxonomyChange?: (taxonomyNodeId: string) => void;
 };
 
-function providerMatchesTaxonomy(provider: ProviderTaxonomyCarrier, taxonomyNodeId: string) {
-  const selected = taxonomyNodeId.trim();
-  if (!selected) return true;
-
-  return new Set([
+function providerTaxonomyIdList(provider: ProviderTaxonomyCarrier): string[] {
+  return [
     provider.taxonomy_node_id ?? "",
     provider.taxonomy_node?.id ?? "",
     ...(provider.taxonomy_filter_ids ?? []),
     ...(provider.taxonomy_node_ids ?? []),
     ...(provider.taxonomy_path ?? []).map((node) => node.id ?? ""),
-  ].filter(Boolean)).has(selected);
+  ].filter(Boolean);
+}
+
+function providerMatchesTaxonomy(provider: ProviderTaxonomyCarrier, taxonomyNodeId: string) {
+  const selected = taxonomyNodeId.trim();
+  if (!selected) return true;
+  return new Set(providerTaxonomyIdList(provider)).has(selected);
 }
 
 function providerMatchesType(
@@ -92,6 +97,7 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
   taxonomyLabel,
   providerSelectLabel,
   noProvidersLabel,
+  restrictTaxonomyToAvailable,
   providerLabel = defaultProviderLabel,
   providerSearchText,
   "aria-label": ariaLabel,
@@ -119,6 +125,30 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
     filteredProviders.length === 0 &&
     selectedTaxonomyValue.trim() !== "";
 
+  // Categories that actually contain at least one provider of the current type (plus the
+  // ancestor chain of the current selection, so it stays navigable). Empty categories like
+  // pharmacies on a medical appointment are then never offered.
+  const availableTaxonomyNodes = useMemo(() => {
+    if (!restrictTaxonomyToAvailable || providers.length === 0) return taxonomyNodes;
+    const byId = new Map(taxonomyNodes.map((node) => [node.id, node]));
+    const allowed = new Set<string>();
+    const addWithAncestors = (startId: string) => {
+      let cursor: string | null = startId;
+      while (cursor && !allowed.has(cursor)) {
+        allowed.add(cursor);
+        cursor = byId.get(cursor)?.parent_id ?? null;
+      }
+    };
+    for (const provider of providers) {
+      if (!providerMatchesType(provider, providerType)) continue;
+      for (const id of providerTaxonomyIdList(provider)) addWithAncestors(id);
+    }
+    // Keep the current selection navigable even if no provider currently backs it.
+    const selected = selectedTaxonomyValue.trim();
+    if (selected) addWithAncestors(selected);
+    return taxonomyNodes.filter((node) => allowed.has(node.id));
+  }, [restrictTaxonomyToAvailable, providers, providerType, taxonomyNodes, selectedTaxonomyValue]);
+
   const handleTaxonomyChange = (taxonomyNodeId: string) => {
     if (taxonomyValue === undefined) {
       setInternalTaxonomyValue(taxonomyNodeId);
@@ -142,12 +172,12 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
     <ProviderTaxonomyCascadeSelect
       id={taxonomySelectId}
       value={selectedTaxonomyValue}
-      nodes={taxonomyNodes}
+      nodes={availableTaxonomyNodes}
       providerType={providerType}
       mode={taxonomyMode}
       placeholder={taxonomyPlaceholder}
       allLabel={taxonomyAllLabel ?? taxonomyPlaceholder}
-      disabled={disabled || taxonomyDisabled || taxonomyNodes.length === 0}
+      disabled={disabled || taxonomyDisabled || availableTaxonomyNodes.length === 0}
       containerClassName={taxonomyContainerClassName}
       selectClassName={taxonomySelectClassName}
       onChange={handleTaxonomyChange}

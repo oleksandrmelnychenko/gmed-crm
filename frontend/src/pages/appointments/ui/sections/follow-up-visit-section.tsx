@@ -541,6 +541,7 @@ function useAppointmentFollowUpVisitSectionContent({
               taxonomyPlaceholder={t.appointments_provider_category}
               taxonomyAllLabel={t.providers_all}
               noProvidersLabel={t.providers_none_in_category}
+              restrictTaxonomyToAvailable
               taxonomySelectClassName={selectClassName}
               providerSelectClassName={selectClassName}
               providerLabel={(provider) => provider.name}

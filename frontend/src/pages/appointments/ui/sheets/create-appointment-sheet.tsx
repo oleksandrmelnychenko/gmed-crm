@@ -744,6 +744,7 @@ function useCreateAppointmentSheetContent({
                       taxonomyPlaceholder={t.appointments_provider_category}
                       taxonomyAllLabel={t.providers_all}
                       noProvidersLabel={t.providers_none_in_category}
+                      restrictTaxonomyToAvailable
                       taxonomyLabel={t.appointments_provider_category}
                       providerSelectLabel={t.common_provider}
                       taxonomySelectClassName={createSheetSelectClassName}
