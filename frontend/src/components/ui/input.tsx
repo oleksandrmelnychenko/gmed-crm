@@ -281,7 +281,6 @@ function Input({
           referenceDate={timePickerReferenceDate}
           format={TIME_FORMAT}
           ampm={false}
-          closeOnSelect
           keepOpenDuringFieldFocus
           minutesStep={timePickerMinutesStep(step)}
           views={["hours", "minutes"]}
