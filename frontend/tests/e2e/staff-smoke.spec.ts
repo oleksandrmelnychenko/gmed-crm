@@ -16,6 +16,8 @@ type StaffMockOptions = {
   userId?: string;
 };
 
+let generatedDocumentPayloads: Array<Record<string, unknown>> = [];
+
 function localIsoDate(date = new Date()) {
   const year = date.getFullYear();
   const month = `${date.getMonth() + 1}`.padStart(2, "0");
@@ -32,6 +34,7 @@ async function loginAsStaff(page: Page, email: string) {
 }
 
 async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) {
+  generatedDocumentPayloads = [];
   const role = options.role ?? "ceo";
   const email = options.email ?? "admin@gmed.de";
   const name = options.name ?? "Admin GMED";
@@ -101,6 +104,19 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
         is_medical: true,
         supported_languages: ["de"],
         text_block_keys: ["intro", "next_steps"],
+      },
+      {
+        id: "single_order",
+        label: "Einzelauftrag",
+        description: "Einzelauftrag zum Rahmendienstleistungsvertrag.",
+        art: "single_order",
+        category: "contract",
+        default_auto_name: "Einzelauftrag",
+        default_status: "active",
+        default_visibility: "internal",
+        is_medical: false,
+        supported_languages: ["de"],
+        text_block_keys: [],
       },
     ],
     text_blocks: [
@@ -784,6 +800,7 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
         visibility?: string;
         language?: string | null;
       };
+      generatedDocumentPayloads.push(payload as Record<string, unknown>);
       const template = templateCatalog.templates.find(
         (item) => item.id === payload.template_id,
       );
@@ -1218,6 +1235,64 @@ test.describe("staff smoke flows", () => {
     await expect(
       page.getByRole("heading", { name: "Behandlungsplan April" }),
     ).toBeVisible();
+  });
+
+  test("staff sends typed bindings when generating a single order", async ({
+    page,
+  }) => {
+    await page.goto("/documents");
+
+    await page
+      .getByRole("button", { name: /Aus Vorlage generieren/i })
+      .click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    await chooseComboboxOption(
+      page,
+      dialog.getByRole("combobox", { name: /Vorlage/i }),
+      /Einzelauftrag/i,
+    );
+    await chooseComboboxOption(
+      page,
+      dialog.getByRole("combobox", { name: /Patient/i }),
+      /Anna Muster/i,
+    );
+
+    await dialog.getByLabel("Dateiname").first().fill("Einzelauftrag Mai");
+    await dialog.getByLabel("Laufende Nr. des Einzelauftrags").fill("5");
+    await dialog.getByLabel("Patient E-Mail").fill("anna.binding@example.test");
+    await dialog.getByLabel("Auftragsnummer").fill("EA-BIND-5");
+    await dialog.getByLabel("Kostenübernehmer Anrede").fill("Frau");
+    await dialog.getByLabel("Kostenübernehmer (Name)").fill("Erika Zahlerin");
+    await dialog
+      .getByLabel("Bestandteile / Rangfolge")
+      .fill("Anlage A: Vorbefunde und Medikationsliste");
+
+    await dialog.locator("form").evaluate((formElement) => {
+      (formElement as HTMLFormElement).requestSubmit();
+    });
+
+    await expect(
+      page
+        .locator('[role="status"]')
+        .filter({ hasText: /Version 1 erzeugt/i }),
+    ).toBeVisible();
+
+    expect(generatedDocumentPayloads.at(-1)).toMatchObject({
+      template_id: "single_order",
+      auto_name: "Einzelauftrag Mai",
+      patient_id: "00000000-0000-0000-0000-000000000301",
+      bindings: {
+        order_sequence: 5,
+        party_email: "anna.binding@example.test",
+        order_number: "EA-BIND-5",
+        payer_salutation: "Frau",
+        payer_name: "Erika Zahlerin",
+        order_components: "Anlage A: Vorbefunde und Medikationsliste",
+      },
+    });
   });
 
   test("staff can share a document with provider and revoke it with cover message", async ({
