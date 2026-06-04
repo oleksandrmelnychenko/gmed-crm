@@ -1054,3 +1054,57 @@ async fn patient_procedures_round_trip_with_ops_code() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["procedures"].as_array().expect("procedures").len(), 0);
 }
+
+#[tokio::test]
+async fn patient_clinical_pdf_export_returns_pdf() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-clinical-pdf");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    // Seed some content so the Arztbrief is non-empty.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/diagnoses"),
+        &pm_bearer,
+        Some(json!({ "items": [{ "kind": "main", "label": "Ambulant erworbene Pneumonie", "icd_code": "J15.9" }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/narrative"),
+        &pm_bearer,
+        Some(json!({ "beurteilung": "Verdacht auf Pneumonie." })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!("/api/v1/patients/{patient_id}/clinical.pdf"))
+        .header("Authorization", &pm_bearer)
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    assert_eq!(content_type, "application/pdf");
+    let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
+    assert!(bytes.starts_with(b"%PDF"), "expected PDF magic bytes");
+    assert!(bytes.len() > 500, "expected a non-trivial PDF, got {} bytes", bytes.len());
+}

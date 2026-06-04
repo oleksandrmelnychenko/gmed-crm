@@ -6,6 +6,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { TabsContent } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
+import { downloadApiFile } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
@@ -522,14 +523,25 @@ export function PatientClinicalTab({
 
   return (
     <TabsContent value="clinical" className="mt-4 min-h-[400px] space-y-4">
-      <div>
-        <h2 className="text-base font-semibold text-foreground">{tx("Клинический профиль", "Klinisches Profil")}</h2>
-        <p className="text-xs text-muted-foreground">
-          {tx(
-            "Диагнозы, медикаменты и обследования пациента (с привязкой к провайдеру и врачу).",
-            "Diagnosen, Medikation und Befunde des Patienten (mit Anbieter- und Arztbezug).",
-          )}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">{tx("Клинический профиль", "Klinisches Profil")}</h2>
+          <p className="text-xs text-muted-foreground">
+            {tx(
+              "Диагнозы, медикаменты и обследования пациента (с привязкой к провайдеру и врачу).",
+              "Diagnosen, Medikation und Befunde des Patienten (mit Anbieter- und Arztbezug).",
+            )}
+          </p>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 rounded-lg"
+          onClick={() => void downloadApiFile(`/patients/${patientId}/clinical.pdf`, "arztbrief.pdf")}
+        >
+          {tx("Экспорт Arztbrief (PDF)", "Arztbrief (PDF)")}
+        </Button>
       </div>
 
       {error ? (

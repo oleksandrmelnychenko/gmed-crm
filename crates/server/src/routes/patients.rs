@@ -14,8 +14,12 @@ use uuid::Uuid;
 use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::pdf_text::{pdf_text_save_options, win_ansi_show_text_op};
 use crate::state::AppState;
 use gmed_domain::role::Role;
+use printpdf::{
+    BuiltinFont, Color, Mm, Op, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point, Pt, Rgb,
+};
 use sqlx::types::Json as SqlxJson;
 use sqlx::{Postgres, Row, Transaction};
 
@@ -47,6 +51,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/patients/{patient_id}/procedures",
             post(save_patient_procedures),
+        )
+        .route(
+            "/patients/{patient_id}/clinical.pdf",
+            get(get_patient_clinical_pdf),
         )
         .route(
             "/patients/{patient_id}/card-entries",
@@ -7338,4 +7346,471 @@ async fn save_patient_procedures(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     Json(json!({ "ok": true, "count": saved })).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Arztbrief (clinical profile) PDF export. Self-contained A4 layout built on
+// printpdf directly (no dependency on the documents.rs PDF helpers).
+// ---------------------------------------------------------------------------
+
+const CLIN_PDF_W: f32 = 210.0;
+const CLIN_PDF_H: f32 = 297.0;
+const CLIN_PDF_LEFT: f32 = 18.0;
+const CLIN_PDF_TOP: f32 = 18.0;
+const CLIN_PDF_BOTTOM: f32 = 16.0;
+const CLIN_PDF_CONTENT_W: f32 = CLIN_PDF_W - CLIN_PDF_LEFT - 18.0;
+
+fn clin_pt_to_mm(value: f32) -> f32 {
+    value * 0.352_778
+}
+
+fn clin_line_height(size_pt: f32) -> f32 {
+    clin_pt_to_mm(size_pt) * 1.32
+}
+
+fn clin_wrap(text: &str, size_pt: f32, width_mm: f32) -> Vec<String> {
+    let normalized = text.trim();
+    if normalized.is_empty() {
+        return Vec::new();
+    }
+    let avg = clin_pt_to_mm(size_pt) * 0.54;
+    let max_chars = ((width_mm / avg).floor() as usize).max(18);
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for word in normalized.split_whitespace() {
+        let projected = if current.is_empty() {
+            word.chars().count()
+        } else {
+            current.chars().count() + 1 + word.chars().count()
+        };
+        if projected <= max_chars {
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(word);
+        } else {
+            if !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
+            }
+            current.push_str(word);
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
+struct ClinPdf {
+    pages: Vec<PdfPage>,
+    ops: Vec<Op>,
+    y: f32,
+    regular: PdfFontHandle,
+    bold: PdfFontHandle,
+}
+
+impl ClinPdf {
+    fn new() -> Self {
+        Self {
+            pages: Vec::new(),
+            ops: Vec::new(),
+            y: CLIN_PDF_H - CLIN_PDF_TOP,
+            regular: PdfFontHandle::Builtin(BuiltinFont::Helvetica),
+            bold: PdfFontHandle::Builtin(BuiltinFont::HelveticaBold),
+        }
+    }
+
+    fn flush_page(&mut self) {
+        if self.ops.is_empty() {
+            return;
+        }
+        self.pages.push(PdfPage::new(
+            Mm(CLIN_PDF_W),
+            Mm(CLIN_PDF_H),
+            std::mem::take(&mut self.ops),
+        ));
+        self.y = CLIN_PDF_H - CLIN_PDF_TOP;
+    }
+
+    fn ensure(&mut self, need_mm: f32) {
+        if self.y - need_mm < CLIN_PDF_BOTTOM {
+            self.flush_page();
+        }
+    }
+
+    fn gap(&mut self, mm: f32) {
+        if mm > 0.0 {
+            self.ensure(mm);
+            self.y -= mm;
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn text(&mut self, text: &str, size_pt: f32, bold: bool, gray: bool, indent_mm: f32, before: f32, after: f32) {
+        let lines = clin_wrap(text, size_pt, (CLIN_PDF_CONTENT_W - indent_mm).max(40.0));
+        if lines.is_empty() {
+            return;
+        }
+        if before > 0.0 {
+            self.gap(before);
+        }
+        let lh = clin_line_height(size_pt);
+        let x = CLIN_PDF_LEFT + indent_mm;
+        let font = if bold { self.bold.clone() } else { self.regular.clone() };
+        let col = if gray {
+            Color::Rgb(Rgb::new(0.42, 0.46, 0.54, None))
+        } else {
+            Color::Rgb(Rgb::new(0.09, 0.12, 0.18, None))
+        };
+        for line in lines {
+            self.ensure(lh);
+            self.ops.push(Op::SetFont {
+                font: font.clone(),
+                size: Pt(size_pt),
+            });
+            self.ops.push(Op::StartTextSection);
+            self.ops.push(Op::SetTextCursor {
+                pos: Point::new(Mm(x), Mm(self.y)),
+            });
+            self.ops.push(Op::SetFillColor { col: col.clone() });
+            self.ops.push(win_ansi_show_text_op(&line));
+            self.ops.push(Op::EndTextSection);
+            self.y -= lh;
+        }
+        if after > 0.0 {
+            self.gap(after);
+        }
+    }
+
+    fn heading(&mut self, text: &str) {
+        self.text(text, 12.0, true, false, 0.0, 4.0, 1.0);
+    }
+
+    fn finish(mut self) -> Vec<PdfPage> {
+        self.flush_page();
+        self.pages
+    }
+}
+
+/// "Dr. med. Doctor X · Provider Y" attribution from a joined clinical row.
+fn clin_attribution(row: &sqlx::postgres::PgRow) -> Option<String> {
+    let doctor = [
+        row.try_get::<Option<String>, _>("doctor_title").ok().flatten(),
+        row.try_get::<Option<String>, _>("doctor_name").ok().flatten(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" ");
+    let provider = row.try_get::<Option<String>, _>("provider_name").ok().flatten();
+    let parts: Vec<String> = [
+        if doctor.trim().is_empty() { None } else { Some(doctor) },
+        provider,
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" · "))
+    }
+}
+
+async fn get_patient_clinical_pdf(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+        return e;
+    }
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let fail = || err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to build clinical PDF");
+
+    let patient = match sqlx::query(
+        "SELECT first_name, last_name, birth_date, patient_id FROM patients WHERE id = $1",
+    )
+    .bind(patient_uuid)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Patient not found"),
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "load patient for clinical PDF");
+            return fail();
+        }
+    };
+
+    let diag_rows = match sqlx::query(
+        r#"SELECT d.kind, d.label, d.icd_code, d.grade, d.laterality, d.status, d.diagnosed_on,
+                  pv.name AS provider_name, dr.name AS doctor_name, dr.title AS doctor_title
+           FROM patient_diagnoses d
+           LEFT JOIN providers pv ON pv.id = d.provider_id
+           LEFT JOIN provider_doctors dr ON dr.id = d.doctor_id
+           WHERE d.patient_id = $1 ORDER BY d.sort_order, d.created_at"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(_) => return fail(),
+    };
+
+    let proc_rows = match sqlx::query(
+        r#"SELECT p2.label, p2.ops_code, p2.performed_on, p2.note,
+                  pv.name AS provider_name, dr.name AS doctor_name, dr.title AS doctor_title
+           FROM patient_procedures p2
+           LEFT JOIN providers pv ON pv.id = p2.provider_id
+           LEFT JOIN provider_doctors dr ON dr.id = p2.doctor_id
+           WHERE p2.patient_id = $1 ORDER BY p2.sort_order, p2.created_at"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(_) => return fail(),
+    };
+
+    let exam_rows = match sqlx::query(
+        r#"SELECT e.title, e.performed_on, e.status, e.result,
+                  pv.name AS provider_name, dr.name AS doctor_name, dr.title AS doctor_title
+           FROM patient_examinations e
+           LEFT JOIN providers pv ON pv.id = e.provider_id
+           LEFT JOIN provider_doctors dr ON dr.id = e.doctor_id
+           WHERE e.patient_id = $1 ORDER BY e.sort_order, e.created_at"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(_) => return fail(),
+    };
+
+    let med_rows = match sqlx::query(
+        r#"SELECT m.category, m.wirkstoff, m.handelsname, m.staerke, m.form,
+                  m.dose_morgens, m.dose_mittags, m.dose_abends, m.dose_nachts, m.einheit, m.hinweis, m.grund,
+                  pv.name AS provider_name, dr.name AS doctor_name, dr.title AS doctor_title
+           FROM patient_medications m
+           LEFT JOIN providers pv ON pv.id = m.provider_id
+           LEFT JOIN provider_doctors dr ON dr.id = m.doctor_id
+           WHERE m.patient_id = $1 ORDER BY m.sort_order, m.created_at"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(_) => return fail(),
+    };
+
+    let narrative = sqlx::query(
+        r#"SELECT anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
+                  untersuchungsbefund, beurteilung, verlauf
+           FROM patient_clinical_narrative WHERE patient_id = $1"#,
+    )
+    .bind(patient_uuid)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
+
+    let first = patient.try_get::<Option<String>, _>("first_name").ok().flatten().unwrap_or_default();
+    let last = patient.try_get::<Option<String>, _>("last_name").ok().flatten().unwrap_or_default();
+    let mrn = patient.try_get::<Option<String>, _>("patient_id").ok().flatten().unwrap_or_default();
+    let dob = patient
+        .try_get::<Option<chrono::NaiveDate>, _>("birth_date")
+        .ok()
+        .flatten()
+        .map(|d| d.format("%d.%m.%Y").to_string())
+        .unwrap_or_default();
+
+    let mut pdf = ClinPdf::new();
+    pdf.text("Arztbrief", 16.0, true, false, 0.0, 0.0, 1.0);
+    pdf.text(
+        &format!("{} {}", first.trim(), last.trim()).trim().to_string(),
+        12.0,
+        true,
+        false,
+        0.0,
+        0.0,
+        0.5,
+    );
+    pdf.text(
+        &format!("Geb.: {dob}   ·   ID: {mrn}   ·   Stand: {}", chrono::Utc::now().format("%d.%m.%Y")),
+        9.0,
+        false,
+        true,
+        0.0,
+        0.0,
+        2.5,
+    );
+
+    // ---- Diagnosen (Haupt / Neben) ----
+    if !diag_rows.is_empty() {
+        pdf.heading("Diagnosen");
+        for (kind, header) in [("main", "Hauptdiagnose"), ("secondary", "Nebendiagnosen")] {
+            let group: Vec<&sqlx::postgres::PgRow> = diag_rows
+                .iter()
+                .filter(|r| r.try_get::<String, _>("kind").map(|k| k == kind).unwrap_or(false))
+                .collect();
+            if group.is_empty() {
+                continue;
+            }
+            pdf.text(header, 9.0, true, true, 0.0, 1.0, 0.5);
+            for row in group {
+                let label = row.try_get::<String, _>("label").unwrap_or_default();
+                let icd = row.try_get::<Option<String>, _>("icd_code").ok().flatten();
+                let grade = row.try_get::<Option<String>, _>("grade").ok().flatten();
+                let mut line = label;
+                if let Some(g) = grade.filter(|g| !g.is_empty()) {
+                    line.push_str(&format!(" {g}"));
+                }
+                if let Some(code) = icd.filter(|c| !c.is_empty()) {
+                    line.push_str(&format!(" ({code})"));
+                }
+                pdf.text(&format!("• {line}"), 10.5, false, false, 3.0, 0.0, 0.0);
+                if let Some(attr) = clin_attribution(row) {
+                    pdf.text(&attr, 8.5, false, true, 6.0, 0.0, 0.5);
+                }
+            }
+        }
+    }
+
+    // ---- Therapie ----
+    if !proc_rows.is_empty() {
+        pdf.heading("Therapie");
+        for row in &proc_rows {
+            let label = row.try_get::<String, _>("label").unwrap_or_default();
+            let ops = row.try_get::<Option<String>, _>("ops_code").ok().flatten();
+            let date = row.try_get::<Option<String>, _>("performed_on").ok().flatten();
+            let mut line = String::new();
+            if let Some(d) = date.filter(|d| !d.is_empty()) {
+                line.push_str(&format!("{d} "));
+            }
+            line.push_str(&label);
+            if let Some(code) = ops.filter(|c| !c.is_empty()) {
+                line.push_str(&format!(" ({code})"));
+            }
+            pdf.text(&format!("• {line}"), 10.5, false, false, 3.0, 0.0, 0.0);
+            if let Some(attr) = clin_attribution(row) {
+                pdf.text(&attr, 8.5, false, true, 6.0, 0.0, 0.5);
+            }
+        }
+    }
+
+    // ---- Anamnese / Befund / Beurteilung / Verlauf ----
+    if let Some(row) = &narrative {
+        for (col, header) in [
+            ("anamnese_aktuelle", "Aktuelle Anamnese"),
+            ("anamnese_vorgeschichte", "Weitere Vorgeschichte"),
+            ("anamnese_vegetative", "Vegetative Anamnese"),
+            ("anamnese_sozial", "Sozialanamnese"),
+            ("untersuchungsbefund", "Untersuchungsbefund"),
+            ("beurteilung", "Beurteilung"),
+            ("verlauf", "Verlauf"),
+        ] {
+            if let Some(text) = row.try_get::<Option<String>, _>(col).ok().flatten().filter(|t| !t.trim().is_empty()) {
+                pdf.text(header, 9.0, true, true, 0.0, 2.0, 0.5);
+                pdf.text(&text, 10.5, false, false, 0.0, 0.0, 0.5);
+            }
+        }
+    }
+
+    // ---- Befunde ----
+    if !exam_rows.is_empty() {
+        pdf.heading("Befunde");
+        for row in &exam_rows {
+            let title = row.try_get::<String, _>("title").unwrap_or_default();
+            let date = row.try_get::<Option<String>, _>("performed_on").ok().flatten();
+            let status = row.try_get::<String, _>("status").unwrap_or_default();
+            let result = row.try_get::<Option<String>, _>("result").ok().flatten();
+            let mut head = title;
+            if let Some(d) = date.filter(|d| !d.is_empty()) {
+                head.push_str(&format!(" ({d})"));
+            }
+            if status == "pending" {
+                head.push_str(" — Befund ausstehend");
+            }
+            pdf.text(&format!("• {head}"), 10.5, true, false, 3.0, 0.5, 0.0);
+            if let Some(text) = result.filter(|t| !t.trim().is_empty()) {
+                pdf.text(&text, 10.0, false, false, 6.0, 0.0, 0.0);
+            }
+            if let Some(attr) = clin_attribution(row) {
+                pdf.text(&attr, 8.5, false, true, 6.0, 0.0, 0.5);
+            }
+        }
+    }
+
+    // ---- Medikation (by category) ----
+    if !med_rows.is_empty() {
+        pdf.heading("Medikation");
+        for (cat, header) in [
+            ("dauer", "Dauermedikation"),
+            ("besondere", "Zu besonderen Zeiten"),
+            ("selbst", "Selbstmedikation"),
+        ] {
+            let group: Vec<&sqlx::postgres::PgRow> = med_rows
+                .iter()
+                .filter(|r| r.try_get::<String, _>("category").map(|c| c == cat).unwrap_or(false))
+                .collect();
+            if group.is_empty() {
+                continue;
+            }
+            pdf.text(header, 9.0, true, true, 0.0, 1.0, 0.5);
+            for row in group {
+                let name = row.try_get::<String, _>("handelsname").unwrap_or_default();
+                let staerke = row.try_get::<Option<String>, _>("staerke").ok().flatten();
+                let form = row.try_get::<Option<String>, _>("form").ok().flatten();
+                let dosing = [
+                    row.try_get::<Option<String>, _>("dose_morgens").ok().flatten(),
+                    row.try_get::<Option<String>, _>("dose_mittags").ok().flatten(),
+                    row.try_get::<Option<String>, _>("dose_abends").ok().flatten(),
+                    row.try_get::<Option<String>, _>("dose_nachts").ok().flatten(),
+                ]
+                .into_iter()
+                .map(|v| v.unwrap_or_else(|| "0".to_string()))
+                .collect::<Vec<_>>()
+                .join("-");
+                let einheit = row.try_get::<Option<String>, _>("einheit").ok().flatten().unwrap_or_default();
+                let grund = row.try_get::<Option<String>, _>("grund").ok().flatten();
+                let mut line = name;
+                if let Some(s) = staerke.filter(|s| !s.is_empty()) {
+                    line.push_str(&format!(" {s}"));
+                }
+                if let Some(f) = form.filter(|f| !f.is_empty()) {
+                    line.push_str(&format!(" {f}"));
+                }
+                line.push_str(&format!("  [{dosing} {einheit}]"));
+                if let Some(g) = grund.filter(|g| !g.is_empty()) {
+                    line.push_str(&format!("  — {g}"));
+                }
+                pdf.text(&format!("• {line}"), 10.0, false, false, 3.0, 0.0, 0.0);
+            }
+        }
+    }
+
+    let mut document = PdfDocument::new("Arztbrief");
+    let mut warnings: Vec<PdfWarnMsg> = Vec::new();
+    let bytes = document
+        .with_pages(pdf.finish())
+        .save(&pdf_text_save_options(), &mut warnings);
+
+    (
+        [
+            ("content-type", "application/pdf"),
+            ("content-disposition", "inline; filename=\"arztbrief.pdf\""),
+        ],
+        bytes,
+    )
+        .into_response()
 }
