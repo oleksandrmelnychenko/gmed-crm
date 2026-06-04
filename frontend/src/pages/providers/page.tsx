@@ -1066,12 +1066,14 @@ type CatalogPersonContext = {
   providerId: string;
   personId: string;
   personType: ProviderPeoplePersonType;
+  providerType: ProviderType;
 };
 
 type DoctorDetailView =
   | {
       source: "provider";
       providerName: string;
+      providerType: ProviderType;
       doctor: DoctorSummary;
     }
   | {
@@ -1193,6 +1195,25 @@ function providerPeopleDoctorToForm(row: ProviderPeopleRow): DoctorFormState {
     licensingCountry: row.licensing_country ?? "",
     licensingValidUntil: row.licensing_valid_until ?? "",
     notes: row.notes ?? "",
+  };
+}
+
+function providerDoctorFormForPayload(
+  form: DoctorFormState,
+  providerType: ProviderType,
+): DoctorFormState {
+  if (providerType === "medical") return form;
+
+  return {
+    ...form,
+    title: "",
+    roleCode: "",
+    roleLabel: "",
+    fachbereich: "",
+    specializations: "",
+    licenseNumber: "",
+    licensingCountry: "",
+    licensingValidUntil: "",
   };
 }
 
@@ -2072,6 +2093,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       providerId: view.row.provider_id,
       personId: view.row.person_id,
       personType: view.row.person_type,
+      providerType: view.row.provider_type,
     });
     setDoctorForm(providerPeopleDoctorToForm(view.row));
     setDoctorDialogOpen(true);
@@ -2089,6 +2111,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       providerId: view.row.provider_id,
       personId: view.row.person_id,
       personType: view.row.person_type,
+      providerType: view.row.provider_type,
     });
     setStaffForm(providerPeopleStaffToForm(view.row));
     setStaffDialogOpen(true);
@@ -2211,12 +2234,17 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     event.preventDefault();
     const providerId = catalogPersonContext?.providerId ?? detail?.id;
     if (!providerId) return;
+    const providerType = catalogPersonContext?.providerType ?? detail?.provider_type ?? "medical";
 
     setDoctorBusy(true);
     setDoctorError("");
 
     try {
-      await saveProviderDoctor(providerId, doctorForm.id, toDoctorPayload(doctorForm));
+      await saveProviderDoctor(
+        providerId,
+        doctorForm.id,
+        toDoctorPayload(providerDoctorFormForPayload(doctorForm, providerType)),
+      );
       setDoctorDialogOpen(false);
       setDoctorForm(blankDoctorForm());
       setCatalogPersonContext(null);
@@ -2245,9 +2273,13 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
   async function handleDeleteDoctor(doctorId: string, doctorName: string) {
     if (!detail) return;
+    const confirmMessage =
+      detail.provider_type === "non_medical"
+        ? t.providers_delete_contact_confirm
+        : t.providers_delete_doctor_confirm;
     if (
       !window.confirm(
-        formatUiText(t.providers_delete_doctor_confirm, { name: doctorName }),
+        formatUiText(confirmMessage, { name: doctorName }),
       )
     ) {
       return;
@@ -2628,7 +2660,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
   async function handleDeleteStaff(staffId: string, staffName: string) {
     if (!detail) return;
-    if (!window.confirm(formatUiText(t.providers_delete_doctor_confirm, { name: staffName }))) {
+    if (!window.confirm(formatUiText(t.providers_delete_staff_confirm, { name: staffName }))) {
       return;
     }
 
@@ -2729,6 +2761,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                       setDoctorDetailView({
                         source: "provider",
                         providerName: detail.name,
+                        providerType: detail.provider_type,
                         doctor,
                       })
                     }
@@ -2823,6 +2856,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             open={doctorDialogOpen}
             onOpenChange={handleDoctorDialogOpenChange}
             form={doctorForm}
+            providerType={catalogPersonContext?.providerType ?? detail?.provider_type ?? "medical"}
             specializations={specializations}
             busy={doctorBusy}
             error={doctorError}
@@ -3460,6 +3494,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     setDoctorDetailView({
                       source: "provider",
                       providerName: detail.name,
+                      providerType: detail.provider_type,
                       doctor,
                     })
                   }
@@ -3581,6 +3616,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           open={doctorDialogOpen}
           onOpenChange={handleDoctorDialogOpenChange}
           form={doctorForm}
+          providerType={catalogPersonContext?.providerType ?? detail?.provider_type ?? "medical"}
           specializations={specializations}
           busy={doctorBusy}
           error={doctorError}
@@ -3927,6 +3963,8 @@ function ProviderDoctorDetailSheet({
   const isProviderDoctor = view.source === "provider";
   const doctor = isProviderDoctor ? view.doctor : null;
   const row = view.source === "catalog" ? view.row : null;
+  const providerType = isProviderDoctor ? view.providerType : row?.provider_type ?? "medical";
+  const isMedicalProvider = providerType === "medical";
   const displayName = doctor
     ? doctorListDisplayName(doctor)
     : doctorListDisplayName({
@@ -3954,7 +3992,10 @@ function ProviderDoctorDetailSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <AdminSheetScaffold
-          title={displayName || t.providers_doctor_detail}
+          title={
+            displayName ||
+            (isMedicalProvider ? t.providers_doctor_detail : t.providers_contact_person_detail)
+          }
           description={providerName}
           footer={
             canManage ? (
@@ -3967,7 +4008,7 @@ function ProviderDoctorDetailSheet({
                 >
                   {t.common_cancel}
                 </Button>
-                {doctor ? (
+                {doctor && isMedicalProvider ? (
                   <Button
                     type="button"
                     variant="outline"
@@ -3986,12 +4027,19 @@ function ProviderDoctorDetailSheet({
           }
         >
           <div className="space-y-3 rounded-xl p-4">
-            <Section title={l("providers_doctor_profile")}>
+            <Section title={isMedicalProvider ? l("providers_doctor_profile") : t.providers_contact_profile}>
               <ReadOnlyLine label={l("patients_display_name")} value={displayName || t.common_not_set} />
-              <ReadOnlyLine label={l("providers_doctor_role")} value={role || t.common_not_set} />
-              <ReadOnlyLine label={l("providers_doctor_subrole")} value={(doctor?.subrole ?? row?.subrole) || t.common_not_set} />
+              {isMedicalProvider ? (
+                <ReadOnlyLine label={l("providers_doctor_role")} value={role || t.common_not_set} />
+              ) : null}
+              <ReadOnlyLine
+                label={isMedicalProvider ? l("providers_doctor_subrole") : t.providers_contact_position}
+                value={(doctor?.subrole ?? row?.subrole) || t.common_not_set}
+              />
               <ReadOnlyLine label={t.patients_gender} value={personGenderLabel(doctor?.gender ?? row?.gender ?? "unknown")} />
-              <ReadOnlyLine label={l("providers_doctor_specializations")} value={specializations || t.common_not_set} />
+              {isMedicalProvider ? (
+                <ReadOnlyLine label={l("providers_doctor_specializations")} value={specializations || t.common_not_set} />
+              ) : null}
               <ReadOnlyLine
                 label={l("providers_opening_hours")}
                 value={
@@ -4004,12 +4052,14 @@ function ProviderDoctorDetailSheet({
             <Section title={l("providers_contacts")}>
               <ReadOnlyContacts contacts={contacts} fallbackPhone={phone} fallbackEmail={email} />
             </Section>
-            <Section title={l("providers_license")}>
-              <ReadOnlyLine label={l("providers_license_number")} value={licenseNumber || t.common_not_set} />
-              <ReadOnlyLine label={l("providers_licensing_country")} value={licensingCountry || t.common_not_set} />
-              <ReadOnlyLine label={l("providers_license_valid_until")} value={compactDate(licensingValidUntil, t.common_not_set)} />
-            </Section>
-            {doctor ? (
+            {isMedicalProvider ? (
+              <Section title={l("providers_license")}>
+                <ReadOnlyLine label={l("providers_license_number")} value={licenseNumber || t.common_not_set} />
+                <ReadOnlyLine label={l("providers_licensing_country")} value={licensingCountry || t.common_not_set} />
+                <ReadOnlyLine label={l("providers_license_valid_until")} value={compactDate(licensingValidUntil, t.common_not_set)} />
+              </Section>
+            ) : null}
+            {doctor && isMedicalProvider ? (
               <Section title={l("providers_doctor_relationships")}>
                 {doctor.relationships.length === 0 ? (
                   <p className="text-sm text-muted-foreground">{l("providers_relationships_empty")}</p>
@@ -4210,6 +4260,7 @@ function ProviderDoctorFormSheet({
   open,
   onOpenChange,
   form,
+  providerType,
   specializations,
   busy,
   error,
@@ -4220,6 +4271,7 @@ function ProviderDoctorFormSheet({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   form: DoctorFormState;
+  providerType: ProviderType;
   specializations: SpecializationItem[];
   busy: boolean;
   error: string;
@@ -4228,14 +4280,21 @@ function ProviderDoctorFormSheet({
   onContactsChange: (contacts: DoctorFormState["contacts"]) => void;
 }) {
   const { t } = useLang();
-  const submitLabel = form.id ? t.common_save : t.providers_doctor_new;
+  const isMedicalProvider = providerType === "medical";
+  const createLabel = isMedicalProvider
+    ? t.providers_doctor_new
+    : t.providers_contact_person_new;
+  const detailLabel = isMedicalProvider
+    ? t.providers_doctor_detail
+    : t.providers_contact_person_detail;
+  const submitLabel = form.id ? t.common_save : createLabel;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
           <AdminSheetScaffold
-            title={form.id ? t.providers_doctor_detail : t.providers_doctor_new}
+            title={form.id ? detailLabel : createLabel}
             footer={
               <SheetFormFooter
                 cancelLabel={t.common_cancel}
@@ -4248,12 +4307,20 @@ function ProviderDoctorFormSheet({
           >
             <div className="space-y-3 rounded-xl p-4">
               {error ? <Banner tone="error">{error}</Banner> : null}
-              <DoctorFormFields
-                form={form}
-                specializations={specializations}
-                onChange={onChange}
-                onContactsChange={onContactsChange}
-              />
+              {isMedicalProvider ? (
+                <DoctorFormFields
+                  form={form}
+                  specializations={specializations}
+                  onChange={onChange}
+                  onContactsChange={onContactsChange}
+                />
+              ) : (
+                <ContactPersonFormFields
+                  form={form}
+                  onChange={onChange}
+                  onContactsChange={onContactsChange}
+                />
+              )}
             </div>
           </AdminSheetScaffold>
         </form>
@@ -5509,9 +5576,11 @@ function DoctorSection({
 }) {
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
-  const title = detail.provider_type === "non_medical"
-    ? l("providers_contacts")
-    : t.providers_doctors;
+  const isMedicalProvider = detail.provider_type === "medical";
+  const title = isMedicalProvider ? t.providers_doctors : l("providers_contacts");
+  const createLabel = isMedicalProvider
+    ? t.providers_doctor_new
+    : t.providers_contact_person_new;
 
   return (
     <section className={providerDetailPanelClassName}>
@@ -5535,7 +5604,7 @@ function DoctorSection({
               onClick={onNew}
             >
               <Plus className="size-3.5" />
-              {t.providers_doctor_new}
+              {createLabel}
             </Button>
           </div>
         ) : null}
@@ -5545,29 +5614,140 @@ function DoctorSection({
         <div className="mt-4">
           <EmptyPanel
             title={title}
-            text={t.providers_no_patients}
+            text={isMedicalProvider ? t.providers_no_patients : t.providers_no_contacts}
           />
         </div>
       ) : (
         <div className="mt-4 space-y-3">
           {detail.doctors.map((doctor) => (
-            <DoctorCard
-              key={doctor.id}
-              doctor={doctor}
-              busy={busy}
-              canManage={canManage}
-              relationshipBusy={relationshipBusy}
-              onOpen={onOpen}
-              onDelete={onDelete}
-              onDeleteRelationship={onDeleteRelationship}
-              onEdit={onEdit}
-              onEditRelationship={onEditRelationship}
-              onNewRelationship={onNewRelationship}
-            />
+            isMedicalProvider ? (
+              <DoctorCard
+                key={doctor.id}
+                doctor={doctor}
+                busy={busy}
+                canManage={canManage}
+                relationshipBusy={relationshipBusy}
+                onOpen={onOpen}
+                onDelete={onDelete}
+                onDeleteRelationship={onDeleteRelationship}
+                onEdit={onEdit}
+                onEditRelationship={onEditRelationship}
+                onNewRelationship={onNewRelationship}
+              />
+            ) : (
+              <ContactPersonCard
+                key={doctor.id}
+                contact={doctor}
+                busy={busy}
+                canManage={canManage}
+                onOpen={onOpen}
+                onDelete={onDelete}
+                onEdit={onEdit}
+              />
+            )
           ))}
         </div>
       )}
     </section>
+  );
+}
+
+function ContactPersonCard({
+  contact,
+  busy,
+  canManage,
+  onOpen,
+  onDelete,
+  onEdit,
+}: {
+  contact: DoctorSummary;
+  busy: boolean;
+  canManage: boolean;
+  onOpen: (doctor: DoctorSummary) => void;
+  onDelete: (doctorId: string, doctorName: string) => void;
+  onEdit: (doctor: DoctorSummary) => void;
+}) {
+  const { t, lang } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+  const contacts = contactSummary(contact.contacts, contact.phone, contact.email);
+  const position = contact.subrole?.trim() ?? "";
+
+  return (
+    <div className="grid gap-4 rounded-[1.4rem] border border-border bg-card p-4 md:grid-cols-[minmax(0,1fr)_160px]">
+      <button
+        type="button"
+        className="min-w-0 text-left"
+        onClick={() => onOpen(contact)}
+      >
+        <div className="flex min-w-0 gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-sm font-medium text-muted-foreground">
+            <UsersRound className="size-4" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-foreground">
+              {doctorListDisplayName(contact)}
+            </span>
+            <span className="mt-2 flex flex-wrap gap-1.5">
+              {position ? (
+                <Badge
+                  variant="outline"
+                  className="rounded-full border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700"
+                >
+                  {position}
+                </Badge>
+              ) : null}
+              <Badge
+                variant="outline"
+                className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+              >
+                {personGenderLabel(contact.gender)}
+              </Badge>
+              {contact.languages.map((language) => (
+                <Badge
+                  key={`${contact.id}-${language}`}
+                  variant="outline"
+                  className="rounded-full border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
+                >
+                  {languageLabel(language, lang)}
+                </Badge>
+              ))}
+            </span>
+            <span className="mt-2 block text-xs leading-snug text-muted-foreground">
+              {contacts || t.common_not_set}
+            </span>
+            {contact.opening_hours ? (
+              <span className="mt-1 block text-xs leading-snug text-muted-foreground">
+                {formatWeeklyAvailabilityDisplay(contact.opening_hours, lang)}
+              </span>
+            ) : null}
+          </span>
+        </div>
+      </button>
+      {canManage ? (
+        <div className="flex flex-col items-stretch justify-end gap-2 border-t border-dashed border-border pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 w-full justify-center rounded-lg bg-muted/20"
+            onClick={() => onEdit(contact)}
+          >
+            {l("patients_edit")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 w-full justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
+            disabled={busy}
+            onClick={() => onDelete(contact.id, contact.name)}
+          >
+            <Trash2 className="size-3.5" />
+            {l("patients_delete")}
+          </Button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -7222,6 +7402,137 @@ function DoctorFormFields({
       <DoctorLicenseFields form={form} onChange={onChange} />
       <DoctorNotesFields notes={form.notes} onChange={(value) => onChange("notes", value)} />
     </div>
+  );
+}
+
+function ContactPersonFormFields({
+  form,
+  onChange,
+  onContactsChange,
+}: {
+  form: DoctorFormState;
+  onChange: (field: keyof DoctorFormState, value: string) => void;
+  onContactsChange: (contacts: DoctorFormState["contacts"]) => void;
+}) {
+  const updateContact = (
+    contactId: string,
+    patch: Partial<DoctorFormState["contacts"][number]>,
+  ) => {
+    onContactsChange(normalizePrimaryContacts(applyContactPatch(form.contacts, contactId, patch)));
+  };
+  const addContact = (preferredKind?: PersonContactFormState["contactKind"]) => {
+    const hasPhone = form.contacts.some((contact) => contact.contactKind === "phone");
+    const contactKind = preferredKind ?? (hasPhone ? "email" : "phone");
+    onContactsChange(normalizePrimaryContacts([
+      ...form.contacts,
+      {
+        id: makeContactFormId("contact"),
+        contactKind,
+        contactType: "work",
+        value: "",
+        isPrimary: !form.contacts.some((contact) => contact.contactKind === contactKind),
+        notes: "",
+      },
+    ]));
+  };
+  const removeContact = (contactId: string) => {
+    onContactsChange(normalizePrimaryContacts(form.contacts.filter((contact) => contact.id !== contactId)));
+  };
+
+  return (
+    <div className="space-y-3">
+      <ContactPersonProfileFields form={form} onChange={onChange} />
+      <DoctorContactFields
+        contacts={form.contacts}
+        onAdd={addContact}
+        onRemove={removeContact}
+        onUpdate={updateContact}
+      />
+      <DoctorNotesFields notes={form.notes} onChange={(value) => onChange("notes", value)} />
+    </div>
+  );
+}
+
+function ContactPersonProfileFields({
+  form,
+  onChange,
+}: {
+  form: DoctorFormState;
+  onChange: (field: keyof DoctorFormState, value: string) => void;
+}) {
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+
+  return (
+    <Section title={t.providers_contact_profile}>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Field label={t.patients_first_name}>
+          <Input
+            value={form.firstName}
+            onChange={(event) => onChange("firstName", event.target.value)}
+            className={shellInputClassName}
+          />
+        </Field>
+        <Field label={t.patients_last_name}>
+          <Input
+            value={form.lastName}
+            onChange={(event) => onChange("lastName", event.target.value)}
+            className={shellInputClassName}
+          />
+        </Field>
+        <Field label={l("patients_display_name")}>
+          <Input
+            value={composeDoctorDisplayName(form.firstName, form.lastName, form.gender) || form.name}
+            readOnly
+            tabIndex={-1}
+            aria-readonly
+            className={cn(shellInputClassName, "bg-muted/40 text-muted-foreground")}
+            placeholder={l("patients_display_name")}
+          />
+        </Field>
+        <Field label={t.providers_contact_position}>
+          <Input
+            value={form.subrole}
+            onChange={(event) => onChange("subrole", event.target.value)}
+            className={shellInputClassName}
+          />
+        </Field>
+        <Field label={t.patients_gender}>
+          <NativeComboboxSelect
+            value={form.gender}
+            onChange={(event) =>
+              onChange(
+                "gender",
+                event.target.value === "male" || event.target.value === "female"
+                  ? event.target.value
+                  : "unknown",
+              )
+            }
+            className={formSelectClassName}
+          >
+            <option value="unknown">{t.common_unknown}</option>
+            <option value="male">{t.gender_male}</option>
+            <option value="female">{t.gender_female}</option>
+          </NativeComboboxSelect>
+        </Field>
+        <Field label={l("providers_languages")}>
+          <LanguageMultiSelect
+            value={form.languages}
+            onChange={(nextValue) => onChange("languages", nextValue)}
+            className={formSelectClassName}
+            placeholder={l("patients_languages_select_placeholder")}
+          />
+        </Field>
+        <div className="md:col-span-2">
+          <FieldGroup label={l("providers_opening_hours")}>
+            <WeeklyAvailabilityEditor
+              value={form.openingHours}
+              onChange={(nextValue) => onChange("openingHours", nextValue)}
+            />
+          </FieldGroup>
+        </div>
+      </div>
+    </Section>
   );
 }
 

@@ -267,6 +267,10 @@ export interface Translations
   providers_doctor_new: string;
   providers_doctor_detail: string;
   providers_doctor_title: string;
+  providers_contact_person_new: string;
+  providers_contact_person_detail: string;
+  providers_contact_profile: string;
+  providers_contact_position: string;
   providers_services: string;
   providers_service_new: string;
   providers_service_detail: string;
@@ -280,6 +284,7 @@ export interface Translations
   providers_service_valid_to: string;
   providers_linked_patients: string;
   providers_no_patients: string;
+  providers_no_contacts: string;
   providers_no_activity: string;
   providers_add_service: string;
   providers_interactions: string;
@@ -294,6 +299,8 @@ export interface Translations
   providers_price_numeric: string;
   providers_delete_provider_confirm: string;
   providers_delete_doctor_confirm: string;
+  providers_delete_contact_confirm: string;
+  providers_delete_staff_confirm: string;
   providers_delete_service_confirm: string;
   gender_male: string;
   gender_female: string;
