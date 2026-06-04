@@ -247,6 +247,7 @@ const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     { key: "sign_date", label: "Unterzeichnungsdatum", kind: "date" },
   ],
   cost_coverage_declaration: [
+    { key: "order_sequence", label: "Laufende Nr. des Einzelauftrags", kind: "text" },
     { key: "order_date", label: "Einzelauftrag vom", kind: "date" },
     { key: "contract_date", label: "Rahmenvertrag vom", kind: "date" },
     { key: "quote_number", label: "Kostenvoranschlag-Nr.", kind: "text" },

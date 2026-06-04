@@ -3447,6 +3447,7 @@ async fn cost_coverage_declaration_includes_contract_obligations_and_annexes() {
             "order_id": order_id,
             "language": "de",
             "bindings": {
+                "order_sequence": 3,
                 "order_date": "2025-11-11",
                 "contract_date": "2025-11-11",
                 "quote_number": "KV77777777",
@@ -3472,6 +3473,7 @@ async fn cost_coverage_declaration_includes_contract_obligations_and_annexes() {
     assert!(pdf_text.contains("Übernahme der Vertragspflichten"));
     assert!(pdf_text.contains("sämtliche Pflichten des Auftraggebers"));
     assert!(pdf_text.contains("Bestandteile der Kostenübernahmeerklärung"));
+    assert!(pdf_text.contains("3. Einzelauftrag"));
     assert!(pdf_text.contains("Anlage 1"));
     assert!(pdf_text.contains("KV77777777"));
 }
