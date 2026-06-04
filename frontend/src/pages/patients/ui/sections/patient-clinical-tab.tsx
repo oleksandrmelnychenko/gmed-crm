@@ -152,6 +152,7 @@ function ProviderDoctorFields({
     <div className="grid gap-2 md:grid-cols-2">
       <NativeComboboxSelect
         value={value.provider_id ?? ""}
+        aria-label={tx("Провайдер", "Anbieter")}
         className={inputClass}
         onChange={(event) => {
           const id = event.target.value || null;
@@ -175,6 +176,7 @@ function ProviderDoctorFields({
       <NativeComboboxSelect
         value={value.doctor_id ?? ""}
         disabled={!value.provider_id}
+        aria-label={tx("Врач", "Arzt")}
         className={inputClass}
         onChange={(event) => {
           const id = event.target.value || null;
@@ -369,6 +371,17 @@ function FieldLabel({ children }: { children: ReactNode }) {
   return <label className="mb-1 block text-[11px] font-medium text-muted-foreground">{children}</label>;
 }
 
+// A label that wraps its control, so the visible caption is also the control's
+// accessible name (implicit association — no id juggling needed).
+function Field({ label, children }: { label: ReactNode; children: ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[11px] font-medium text-muted-foreground">{label}</span>
+      {children}
+    </label>
+  );
+}
+
 /** Free-text Arztbrief blocks (Anamnese sub-sections, Befund, Beurteilung, Verlauf). */
 function NarrativeSection({
   value,
@@ -429,8 +442,7 @@ function NarrativeSection({
       </header>
       <div className="grid gap-3 p-3 md:grid-cols-2">
         {fields.map((field) => (
-          <div key={field.key}>
-            <FieldLabel>{field.label}</FieldLabel>
+          <Field key={field.key} label={field.label}>
             <textarea
               value={draft[field.key] ?? ""}
               disabled={!canManage}
@@ -439,7 +451,7 @@ function NarrativeSection({
               }
               className={cn(inputClass, "h-20 py-2")}
             />
-          </div>
+          </Field>
         ))}
       </div>
     </section>
@@ -600,8 +612,7 @@ export function PatientClinicalTab({
         form={(draft, set) => (
           <div className="space-y-2">
             <div className="grid gap-2 md:grid-cols-2">
-              <div>
-                <FieldLabel>{tx("Тип", "Art")}</FieldLabel>
+              <Field label={tx("Тип", "Art")}>
                 <NativeComboboxSelect
                   value={draft.kind}
                   className={inputClass}
@@ -610,9 +621,8 @@ export function PatientClinicalTab({
                   <option value="main">{tx("Основной", "Hauptdiagnose")}</option>
                   <option value="secondary">{tx("Сопутствующий", "Nebendiagnose")}</option>
                 </NativeComboboxSelect>
-              </div>
-              <div>
-                <FieldLabel>{tx("Статус", "Status")}</FieldLabel>
+              </Field>
+              <Field label={tx("Статус", "Status")}>
                 <NativeComboboxSelect
                   value={draft.status}
                   className={inputClass}
@@ -622,38 +632,34 @@ export function PatientClinicalTab({
                   <option value="chronic">{tx("Хронический", "Chronisch")}</option>
                   <option value="resolved">{tx("Разрешён", "Ausgeheilt")}</option>
                 </NativeComboboxSelect>
-              </div>
+              </Field>
             </div>
-            <div>
-              <FieldLabel>{tx("Диагноз", "Diagnose")}</FieldLabel>
+            <Field label={tx("Диагноз", "Diagnose")}>
               <Input
                 value={draft.label}
                 onChange={(e) => set({ label: e.target.value })}
                 className={inputClass}
                 placeholder={tx("напр. Akute Appendizitis", "z. B. Akute Appendizitis")}
               />
-            </div>
+            </Field>
             <div className="grid gap-2 md:grid-cols-3">
-              <div>
-                <FieldLabel>ICD-10</FieldLabel>
+              <Field label="ICD-10">
                 <Input
                   value={draft.icd_code ?? ""}
                   onChange={(e) => set({ icd_code: trimToNull(e.target.value) })}
                   className={inputClass}
                   placeholder="K35.8"
                 />
-              </div>
-              <div>
-                <FieldLabel>{tx("Степень", "Grad")}</FieldLabel>
+              </Field>
+              <Field label={tx("Степень", "Grad")}>
                 <Input
                   value={draft.grade ?? ""}
                   onChange={(e) => set({ grade: trimToNull(e.target.value) })}
                   className={inputClass}
                   placeholder="Grad 1"
                 />
-              </div>
-              <div>
-                <FieldLabel>{tx("Сторона", "Seite")}</FieldLabel>
+              </Field>
+              <Field label={tx("Сторона", "Seite")}>
                 <NativeComboboxSelect
                   value={draft.laterality ?? ""}
                   className={inputClass}
@@ -666,17 +672,16 @@ export function PatientClinicalTab({
                   <option value="right">{tx("Справа", "Rechts")}</option>
                   <option value="bilateral">{tx("Двусторонне", "Beidseits")}</option>
                 </NativeComboboxSelect>
-              </div>
+              </Field>
             </div>
-            <div>
-              <FieldLabel>{tx("Дата диагноза", "Erstdiagnose")}</FieldLabel>
+            <Field label={tx("Дата диагноза", "Erstdiagnose")}>
               <Input
                 value={draft.diagnosed_on ?? ""}
                 onChange={(e) => set({ diagnosed_on: trimToNull(e.target.value) })}
                 className={inputClass}
                 placeholder="ED 08/2022"
               />
-            </div>
+            </Field>
             <ProviderDoctorFields
               value={draft}
               providers={providers}
@@ -716,43 +721,39 @@ export function PatientClinicalTab({
         )}
         form={(draft, set) => (
           <div className="space-y-2">
-            <div>
-              <FieldLabel>{tx("Терапия / Вмешательство", "Therapie / Eingriff")}</FieldLabel>
+            <Field label={tx("Терапия / Вмешательство", "Therapie / Eingriff")}>
               <Input
                 value={draft.label}
                 onChange={(e) => set({ label: e.target.value })}
                 className={inputClass}
                 placeholder="Appendektomie, laparoskopisch"
               />
-            </div>
+            </Field>
             <div className="grid gap-2 md:grid-cols-2">
-              <div>
-                <FieldLabel>OPS</FieldLabel>
+              <Field label="OPS">
                 <Input
                   value={draft.ops_code ?? ""}
                   onChange={(e) => set({ ops_code: trimToNull(e.target.value) })}
                   className={inputClass}
                   placeholder="5-470.10"
                 />
-              </div>
-              <div>
-                <FieldLabel>{tx("Дата", "Datum")}</FieldLabel>
+              </Field>
+              <Field label={tx("Дата", "Datum")}>
                 <Input
                   value={draft.performed_on ?? ""}
                   onChange={(e) => set({ performed_on: trimToNull(e.target.value) })}
                   className={inputClass}
                   placeholder="31.07.2016"
                 />
-              </div>
+              </Field>
             </div>
-            <div>
-              <FieldLabel>{tx("Примечание", "Notiz")}</FieldLabel>
+            <Field label={tx("Примечание", "Notiz")}>
               <Input
                 value={draft.note ?? ""}
                 onChange={(e) => set({ note: trimToNull(e.target.value) })}
                 className={inputClass}
               />
-            </div>
+            </Field>
             <ProviderDoctorFields
               value={draft}
               providers={providers}
@@ -815,8 +816,7 @@ export function PatientClinicalTab({
         form={(draft, set) => (
           <div className="space-y-2">
             <div className="grid gap-2 md:grid-cols-2">
-              <div>
-                <FieldLabel>{tx("Категория", "Kategorie")}</FieldLabel>
+              <Field label={tx("Категория", "Kategorie")}>
                 <NativeComboboxSelect
                   value={draft.category}
                   className={inputClass}
@@ -826,56 +826,51 @@ export function PatientClinicalTab({
                   <option value="besondere">{tx("По особым показаниям", "Zu besonderen Zeiten")}</option>
                   <option value="selbst">{tx("Самолечение", "Selbstmedikation")}</option>
                 </NativeComboboxSelect>
-              </div>
-              <div>
-                <FieldLabel>Form</FieldLabel>
+              </Field>
+              <Field label="Form">
                 <Input
                   value={draft.form ?? ""}
                   onChange={(e) => set({ form: trimToNull(e.target.value) })}
                   className={inputClass}
                   placeholder="Filmtabl."
                 />
-              </div>
+              </Field>
             </div>
             <div className="grid gap-2 md:grid-cols-2">
-              <div>
-                <FieldLabel>Handelsname</FieldLabel>
+              <Field label="Handelsname">
                 <Input
                   value={draft.handelsname}
                   onChange={(e) => set({ handelsname: e.target.value })}
                   className={inputClass}
                   placeholder="Bisoprolol-ratiopharm"
                 />
-              </div>
-              <div>
-                <FieldLabel>Wirkstoff</FieldLabel>
+              </Field>
+              <Field label="Wirkstoff">
                 <Input
                   value={draft.wirkstoff ?? ""}
                   onChange={(e) => set({ wirkstoff: trimToNull(e.target.value) })}
                   className={inputClass}
                   placeholder="Bisoprolol"
                 />
-              </div>
+              </Field>
             </div>
             <div className="grid gap-2 md:grid-cols-2">
-              <div>
-                <FieldLabel>Stärke</FieldLabel>
+              <Field label="Stärke">
                 <Input
                   value={draft.staerke ?? ""}
                   onChange={(e) => set({ staerke: trimToNull(e.target.value) })}
                   className={inputClass}
                   placeholder="5 mg"
                 />
-              </div>
-              <div>
-                <FieldLabel>Einheit</FieldLabel>
+              </Field>
+              <Field label="Einheit">
                 <Input
                   value={draft.einheit ?? ""}
                   onChange={(e) => set({ einheit: trimToNull(e.target.value) })}
                   className={inputClass}
                   placeholder="Stück"
                 />
-              </div>
+              </Field>
             </div>
             <div>
               <FieldLabel>{tx("Приём: Утро · День · Вечер · Ночь", "Einnahme: Morgens · Mittags · Abends · zur Nacht")}</FieldLabel>
@@ -886,29 +881,35 @@ export function PatientClinicalTab({
                     value={draft[key] ?? ""}
                     onChange={(e) => set({ [key]: trimToNull(e.target.value) } as Partial<ClinicalMedication>)}
                     className={cn(inputClass, "text-center")}
+                    aria-label={
+                      [
+                        tx("Доза утром", "Dosis morgens"),
+                        tx("Доза в обед", "Dosis mittags"),
+                        tx("Доза вечером", "Dosis abends"),
+                        tx("Доза на ночь", "Dosis zur Nacht"),
+                      ][idx]
+                    }
                     placeholder={["M", "Mi", "A", "N"][idx]}
                   />
                 ))}
               </div>
             </div>
-            <div>
-              <FieldLabel>Grund</FieldLabel>
+            <Field label="Grund">
               <Input
                 value={draft.grund ?? ""}
                 onChange={(e) => set({ grund: trimToNull(e.target.value) })}
                 className={inputClass}
                 placeholder="Bluthochdruck"
               />
-            </div>
-            <div>
-              <FieldLabel>Hinweise</FieldLabel>
+            </Field>
+            <Field label="Hinweise">
               <Input
                 value={draft.hinweis ?? ""}
                 onChange={(e) => set({ hinweis: trimToNull(e.target.value) })}
                 className={inputClass}
                 placeholder="Während oder nach den Mahlzeiten"
               />
-            </div>
+            </Field>
             <ProviderDoctorFields
               value={draft}
               providers={providers}
@@ -951,8 +952,7 @@ export function PatientClinicalTab({
         form={(draft, set) => (
           <div className="space-y-2">
             <div className="grid gap-2 md:grid-cols-2">
-              <div>
-                <FieldLabel>{tx("Тип", "Art")}</FieldLabel>
+              <Field label={tx("Тип", "Art")}>
                 <NativeComboboxSelect
                   value={draft.kind ?? ""}
                   className={inputClass}
@@ -968,9 +968,8 @@ export function PatientClinicalTab({
                   <option value="exam">{tx("Осмотр", "Untersuchung")}</option>
                   <option value="other">{tx("Другое", "Sonstige")}</option>
                 </NativeComboboxSelect>
-              </div>
-              <div>
-                <FieldLabel>{tx("Статус", "Status")}</FieldLabel>
+              </Field>
+              <Field label={tx("Статус", "Status")}>
                 <NativeComboboxSelect
                   value={draft.status}
                   className={inputClass}
@@ -979,37 +978,34 @@ export function PatientClinicalTab({
                   <option value="final">{tx("Готов", "Final")}</option>
                   <option value="pending">{tx("Ожидается", "Ausstehend")}</option>
                 </NativeComboboxSelect>
-              </div>
+              </Field>
             </div>
             <div className="grid gap-2 md:grid-cols-2">
-              <div>
-                <FieldLabel>{tx("Название", "Titel")}</FieldLabel>
+              <Field label={tx("Название", "Titel")}>
                 <Input
                   value={draft.title}
                   onChange={(e) => set({ title: e.target.value })}
                   className={inputClass}
                   placeholder="Röntgen-Thorax"
                 />
-              </div>
-              <div>
-                <FieldLabel>{tx("Дата", "Datum")}</FieldLabel>
+              </Field>
+              <Field label={tx("Дата", "Datum")}>
                 <Input
                   value={draft.performed_on ?? ""}
                   onChange={(e) => set({ performed_on: trimToNull(e.target.value) })}
                   className={inputClass}
                   placeholder="01.03.2017"
                 />
-              </div>
+              </Field>
             </div>
-            <div>
-              <FieldLabel>{tx("Результат / Befund", "Befund")}</FieldLabel>
+            <Field label={tx("Результат / Befund", "Befund")}>
               <textarea
                 value={draft.result ?? ""}
                 onChange={(e) => set({ result: trimToNull(e.target.value) })}
                 className={cn(inputClass, "h-20 py-2")}
                 placeholder={tx("Описание результата", "Befundtext")}
               />
-            </div>
+            </Field>
             <ProviderDoctorFields
               value={draft}
               providers={providers}
