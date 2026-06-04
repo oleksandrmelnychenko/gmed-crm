@@ -4069,7 +4069,14 @@ async fn document_templates_can_generate_framework_contract_pdf_document() {
             "language": "de",
             "introduction": "Dieser Rahmenvertrag bündelt den aktuellen Leistungs- und Abwicklungsstand.",
             "closing_note": "Bitte prüfen Sie alle Positionen vor finaler Freigabe.",
-            "text_block_keys": ["contract_scope_clause", "quote_reference_clause"]
+            "text_block_keys": ["contract_scope_clause", "quote_reference_clause"],
+            "bindings": {
+                "contract_date": "2025-11-11",
+                "cost_threshold": "2500",
+                "extra_release_recipients": "Klinik Datenschutzstelle",
+                "sign_place": "München",
+                "sign_date": "2025-11-11"
+            }
         })),
     )
     .await;
@@ -4110,6 +4117,8 @@ async fn document_templates_can_generate_framework_contract_pdf_document() {
     assert!(pdf_text.contains("Informationsblatt zum Datenschutz"));
     assert!(pdf_text.contains("Beschwerderecht"));
     assert!(pdf_text.contains("datenschutz@gmed-health.com"));
+    assert!(pdf_text.contains("2.500,00 EUR"));
+    assert!(pdf_text.contains("Klinik Datenschutzstelle"));
     assert!(!pdf_text.contains("(E-Mail-Adresse"));
 }
 

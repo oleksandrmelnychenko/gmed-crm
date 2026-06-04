@@ -215,6 +215,17 @@ type BindingFieldDef = { key: string; label: string; kind: BindingFieldKind };
 // Manual "binding socket" fields per generated template id. Field keys match
 // the backend `bindings` field names; `*_text` keys are parsed into arrays.
 const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
+  framework_contract: [
+    { key: "contract_date", label: "Rahmenvertrag vom / Inkrafttreten", kind: "date" },
+    { key: "cost_threshold", label: "Mehrkosten-Freigabegrenze", kind: "text" },
+    {
+      key: "extra_release_recipients",
+      label: "Zusätzliche Datenempfänger / Entbindung",
+      kind: "textarea",
+    },
+    { key: "sign_place", label: "Unterzeichnungsort", kind: "text" },
+    { key: "sign_date", label: "Unterzeichnungsdatum", kind: "date" },
+  ],
   single_order: [
     { key: "order_number", label: "Auftragsnummer", kind: "text" },
     { key: "order_date", label: "Einzelauftrag vom", kind: "date" },
