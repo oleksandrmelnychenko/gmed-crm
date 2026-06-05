@@ -70,6 +70,16 @@ async fn bytes_request(
     (status, bytes)
 }
 
+/// Extract text from a generated PDF for content assertions. PDF word-wrapping
+/// inserts line breaks mid-phrase (so e.g. a label and its value land on
+/// separate lines), which `pdf_extract` surfaces as newlines. We collapse every
+/// run of whitespace to a single space so `contains(...)` checks assert on
+/// content rather than on where the layout happens to wrap.
+fn extract_pdf_text(bytes: &[u8]) -> String {
+    let raw = pdf_extract::extract_text_from_mem(bytes).unwrap();
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 async fn multipart_upload(
     app: &axum::Router,
     path: &str,
@@ -2803,7 +2813,7 @@ async fn document_templates_can_generate_treatment_plan_pdf_document() {
     assert_eq!(status, StatusCode::OK);
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 1000);
-    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    let pdf_text = extract_pdf_text(&bytes);
     assert!(pdf_text.contains("Planungsnotiz"));
     assert!(pdf_text.contains("Patient benötigt Dolmetscherkoordination"));
 }
@@ -2995,7 +3005,7 @@ async fn appointment_confirmation_auto_generates_doc_id() {
     assert_eq!(status, StatusCode::OK);
     assert!(bytes.starts_with(b"%PDF-"));
 
-    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    let pdf_text = extract_pdf_text(&bytes);
     assert!(
         pdf_text.contains(&expected_doc_id),
         "generated appointment confirmation must include auto Doc.-ID {expected_doc_id}; got: {pdf_text:?}"
@@ -3141,7 +3151,7 @@ async fn consent_child_autofills_guardians_from_patient_relations() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    let pdf_text = extract_pdf_text(&bytes);
     assert!(
         pdf_text.contains(guardian_one),
         "first guardian must be auto-filled from relations; got: {pdf_text:?}"
@@ -3617,7 +3627,7 @@ async fn cost_coverage_declaration_includes_contract_obligations_and_annexes() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert!(bytes.starts_with(b"%PDF-"));
-    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    let pdf_text = extract_pdf_text(&bytes);
     assert!(pdf_text.contains("Übernahme der Vertragspflichten"));
     assert!(pdf_text.contains("sämtliche Pflichten des Auftraggebers"));
     assert!(pdf_text.contains("Herr Justus Geldgeber"));
@@ -3673,7 +3683,7 @@ async fn cost_estimate_uses_order_quote_when_manual_lines_are_omitted() {
     assert_eq!(status, StatusCode::OK);
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 800);
-    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    let pdf_text = extract_pdf_text(&bytes);
     assert!(pdf_text.contains("Medizinische Leistungen"));
     assert!(pdf_text.contains("Медицинские услуги"));
     assert!(pdf_text.contains("Ориентировочная стоимость"));
@@ -4179,7 +4189,7 @@ async fn document_templates_can_generate_medication_summary_pdf_document() {
     assert_eq!(status, StatusCode::OK);
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 1000);
-    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    let pdf_text = extract_pdf_text(&bytes);
     assert!(pdf_text.contains("Medikamentenübersicht"));
     assert!(pdf_text.contains("Bis: 31.07.2026"));
 }
@@ -4275,7 +4285,7 @@ async fn document_templates_can_generate_framework_contract_pdf_document() {
     assert_eq!(status, StatusCode::OK);
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 1000);
-    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    let pdf_text = extract_pdf_text(&bytes);
     assert!(pdf_text.contains("Informationsblatt zum Datenschutz"));
     assert!(pdf_text.contains("Beschwerderecht"));
     assert!(pdf_text.contains("datenschutz@gmed-health.com"));
@@ -4380,7 +4390,7 @@ async fn document_templates_can_generate_patient_sticker_pdf_document() {
     assert_eq!(status, StatusCode::OK);
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 500);
-    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    let pdf_text = extract_pdf_text(&bytes);
     assert!(pdf_text.contains("ID:"));
     assert!(pdf_text.contains("PT-"));
     assert!(pdf_text.contains(&short_pid));
@@ -4492,7 +4502,7 @@ async fn document_templates_can_generate_visa_invitation_pdf_document() {
     assert_eq!(status, StatusCode::OK);
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 1000);
-    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    let pdf_text = extract_pdf_text(&bytes);
     assert!(pdf_text.contains("An das Generalkonsulat"));
     assert!(pdf_text.contains("Visastelle"));
     assert!(pdf_text.contains("München, 19.11.2025"));
