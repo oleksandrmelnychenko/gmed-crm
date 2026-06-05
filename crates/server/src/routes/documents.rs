@@ -9729,8 +9729,24 @@ async fn generate_document(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<GenerateDocumentRequest>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin]) {
         return resp;
+    }
+
+    // Assignment-scoped roles (e.g. patient_manager) may only generate documents
+    // for patients they are assigned to; full-access roles (ceo, it_admin) skip
+    // this. Mirrors the clinical handlers' has_patient_access guard so generation
+    // cannot pull an unassigned patient's PII into a document.
+    if let Some(target_patient) = body.patient_id
+        && access::requires_patient_assignment(auth.role)
+    {
+        let assignment_set = match load_assignment_set(&state, &auth).await {
+            Ok(set) => set,
+            Err(resp) => return resp,
+        };
+        if !assignment_set.contains(&target_patient) {
+            return err(StatusCode::FORBIDDEN, "You are not assigned to this patient");
+        }
     }
 
     if let Some(provider_template_id) = parse_provider_template_public_id(body.template_id.trim()) {
@@ -15161,6 +15177,7 @@ async fn upload_document(
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Interpreter,
+        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -15528,7 +15545,12 @@ async fn update_document(
     Json(body): Json<UpdateDocumentRequest>,
 ) -> axum::response::Response {
     if let Err(resp) =
-        auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::TeamleadInterpreter])
+        auth.require_any_role(&[
+            Role::Ceo,
+            Role::PatientManager,
+            Role::TeamleadInterpreter,
+            Role::ItAdmin,
+        ])
     {
         return resp;
     }

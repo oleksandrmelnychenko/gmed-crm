@@ -848,6 +848,76 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
 }
 
 #[tokio::test]
+async fn patient_clinical_rejects_invalid_provider_doctor_attribution() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-clinical-attr");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let provider_id = seed_provider(&pool, &tag).await;
+    let other_provider_id = seed_provider(&pool, &format!("{tag}-other")).await;
+    // Doctor that belongs to `other_provider_id`, not `provider_id`.
+    let foreign_doctor_id = seed_provider_doctor(&pool, other_provider_id, &tag).await;
+
+    let post_diagnosis = |attribution: serde_json::Value| {
+        let app = app.clone();
+        let bearer = pm_bearer.clone();
+        async move {
+            let mut item = json!({ "kind": "main", "label": "Test" });
+            item.as_object_mut()
+                .unwrap()
+                .extend(attribution.as_object().unwrap().clone());
+            json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/patients/{patient_id}/diagnoses"),
+                &bearer,
+                Some(json!({ "items": [item] })),
+            )
+            .await
+            .0
+        }
+    };
+
+    // Unknown provider id (well-formed UUID, no matching row) -> 422.
+    let status = post_diagnosis(json!({ "provider_id": Uuid::new_v4().to_string() })).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Unknown doctor id -> 422.
+    let status = post_diagnosis(json!({ "doctor_id": Uuid::new_v4().to_string() })).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Doctor that belongs to a different provider -> 422.
+    let status = post_diagnosis(json!({
+        "provider_id": provider_id.to_string(),
+        "doctor_id": foreign_doctor_id.to_string(),
+    }))
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Malformed (non-empty, non-UUID) id -> 422 rather than a silent NULL.
+    let status = post_diagnosis(json!({ "provider_id": "not-a-uuid" })).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Nothing was persisted by any of the rejected saves.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["diagnoses"].as_array().expect("diagnoses").len(), 0);
+}
+
+#[tokio::test]
 async fn billing_cannot_access_patient_clinical_routes() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;

@@ -6816,9 +6816,79 @@ fn clinical_one_of(value: Option<String>, allowed: &[&str]) -> Option<String> {
         .filter(|v| allowed.contains(&v.as_str()))
 }
 
-/// Parse an optional UUID string; empty / invalid become None.
-fn clinical_opt_uuid(value: Option<String>) -> Option<Uuid> {
-    value.and_then(|v| Uuid::parse_str(v.trim()).ok())
+/// Parse an optional UUID string. Empty → `None`, but a non-empty malformed
+/// value is a client error (422) rather than a silent drop.
+#[allow(clippy::result_large_err)]
+fn clinical_parse_uuid(value: Option<String>) -> Result<Option<Uuid>, axum::response::Response> {
+    match value.map(|v| v.trim().to_string()).filter(|v| !v.is_empty()) {
+        None => Ok(None),
+        Some(v) => Uuid::parse_str(&v)
+            .map(Some)
+            .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid attribution id")),
+    }
+}
+
+/// Resolve and validate a provider/doctor attribution pair against the DB.
+/// Returns 422 when a non-empty id is malformed, references a missing provider
+/// or doctor, or when the doctor does not belong to the selected provider — so
+/// a record can never be persisted with dangling or mismatched attribution
+/// (which previously surfaced as an opaque 500 from the FK, or a silent NULL).
+async fn clinical_resolve_attribution(
+    state: &AppState,
+    provider_raw: Option<String>,
+    doctor_raw: Option<String>,
+) -> Result<(Option<Uuid>, Option<Uuid>), axum::response::Response> {
+    let provider_id = clinical_parse_uuid(provider_raw)?;
+    let doctor_id = clinical_parse_uuid(doctor_raw)?;
+
+    let attribution_fail = || {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate attribution",
+        )
+    };
+
+    if let Some(pid) = provider_id {
+        let exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM providers WHERE id = $1)")
+                .bind(pid)
+                .fetch_one(&state.db)
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e, provider_id = %pid, "validate clinical provider");
+                    attribution_fail()
+                })?;
+        if !exists {
+            return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Unknown provider"));
+        }
+    }
+
+    if let Some(did) = doctor_id {
+        // provider_doctors.provider_id is NOT NULL, so a present row always
+        // yields the owning provider.
+        let doc_provider: Option<Uuid> =
+            sqlx::query_scalar("SELECT provider_id FROM provider_doctors WHERE id = $1")
+                .bind(did)
+                .fetch_optional(&state.db)
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e, doctor_id = %did, "validate clinical doctor");
+                    attribution_fail()
+                })?;
+        let Some(doc_provider) = doc_provider else {
+            return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Unknown doctor"));
+        };
+        if let Some(pid) = provider_id
+            && doc_provider != pid
+        {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Doctor does not belong to the selected provider",
+            ));
+        }
+    }
+
+    Ok((provider_id, doctor_id))
 }
 
 async fn get_patient_clinical(
@@ -7073,13 +7143,18 @@ async fn save_patient_diagnoses(
         let status = clinical_one_of(item.status, &["active", "chronic", "resolved"])
             .unwrap_or_else(|| "active".to_string());
         let laterality = clinical_one_of(item.laterality, &["left", "right", "bilateral"]);
+        let (provider_id, doctor_id) =
+            match clinical_resolve_attribution(&state, item.provider_id, item.doctor_id).await {
+                Ok(pair) => pair,
+                Err(resp) => return resp,
+            };
         if let Err(e) = sqlx::query(
             "INSERT INTO patient_diagnoses (patient_id, provider_id, doctor_id, kind, label, icd_code, grade, laterality, status, diagnosed_on, note, sort_order)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
         )
         .bind(patient_uuid)
-        .bind(clinical_opt_uuid(item.provider_id))
-        .bind(clinical_opt_uuid(item.doctor_id))
+        .bind(provider_id)
+        .bind(doctor_id)
         .bind(&kind)
         .bind(&label)
         .bind(clinical_opt_text(item.icd_code))
@@ -7156,13 +7231,18 @@ async fn save_patient_medications(
         };
         let category = clinical_one_of(item.category, &["dauer", "besondere", "selbst"])
             .unwrap_or_else(|| "dauer".to_string());
+        let (provider_id, doctor_id) =
+            match clinical_resolve_attribution(&state, item.provider_id, item.doctor_id).await {
+                Ok(pair) => pair,
+                Err(resp) => return resp,
+            };
         if let Err(e) = sqlx::query(
             "INSERT INTO patient_medications (patient_id, provider_id, doctor_id, category, wirkstoff, handelsname, staerke, form, dose_morgens, dose_mittags, dose_abends, dose_nachts, einheit, hinweis, grund, sort_order)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
         )
         .bind(patient_uuid)
-        .bind(clinical_opt_uuid(item.provider_id))
-        .bind(clinical_opt_uuid(item.doctor_id))
+        .bind(provider_id)
+        .bind(doctor_id)
         .bind(&category)
         .bind(clinical_opt_text(item.wirkstoff))
         .bind(&handelsname)
@@ -7256,13 +7336,18 @@ async fn save_patient_examinations(
         );
         let status = clinical_one_of(item.status, &["final", "pending"])
             .unwrap_or_else(|| "final".to_string());
+        let (provider_id, doctor_id) =
+            match clinical_resolve_attribution(&state, item.provider_id, item.doctor_id).await {
+                Ok(pair) => pair,
+                Err(resp) => return resp,
+            };
         if let Err(e) = sqlx::query(
             "INSERT INTO patient_examinations (patient_id, provider_id, doctor_id, kind, title, performed_on, status, result, note, sort_order)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         )
         .bind(patient_uuid)
-        .bind(clinical_opt_uuid(item.provider_id))
-        .bind(clinical_opt_uuid(item.doctor_id))
+        .bind(provider_id)
+        .bind(doctor_id)
         .bind(kind)
         .bind(&title)
         .bind(clinical_opt_text(item.performed_on))
@@ -7431,13 +7516,18 @@ async fn save_patient_procedures(
         let Some(label) = clinical_opt_text(item.label) else {
             continue;
         };
+        let (provider_id, doctor_id) =
+            match clinical_resolve_attribution(&state, item.provider_id, item.doctor_id).await {
+                Ok(pair) => pair,
+                Err(resp) => return resp,
+            };
         if let Err(e) = sqlx::query(
             "INSERT INTO patient_procedures (patient_id, provider_id, doctor_id, label, ops_code, performed_on, note, sort_order)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
         .bind(patient_uuid)
-        .bind(clinical_opt_uuid(item.provider_id))
-        .bind(clinical_opt_uuid(item.doctor_id))
+        .bind(provider_id)
+        .bind(doctor_id)
         .bind(&label)
         .bind(clinical_opt_text(item.ops_code))
         .bind(clinical_opt_text(item.performed_on))
@@ -7767,7 +7857,10 @@ async fn get_patient_clinical_pdf(
         Err(_) => return fail(),
     };
 
-    let narrative = sqlx::query(
+    // Use the same fail-on-error pattern as the sibling queries: a DB error must
+    // not be silently rendered as "no narrative", which would drop Anamnese /
+    // Beurteilung / Verlauf from a clinical document without any signal.
+    let narrative = match sqlx::query(
         r#"SELECT anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
                   untersuchungsbefund, beurteilung, verlauf
            FROM patient_clinical_narrative WHERE patient_id = $1"#,
@@ -7775,8 +7868,10 @@ async fn get_patient_clinical_pdf(
     .bind(patient_uuid)
     .fetch_optional(&state.db)
     .await
-    .ok()
-    .flatten();
+    {
+        Ok(row) => row,
+        Err(_) => return fail(),
+    };
 
     let first = patient
         .try_get::<Option<String>, _>("first_name")
