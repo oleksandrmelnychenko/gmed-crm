@@ -112,7 +112,10 @@ async fn get_or_create_test_backend() -> Result<Arc<TestDatabaseBackend>, String
 }
 
 async fn create_suite_database(backend: Arc<TestDatabaseBackend>) -> Result<SuiteDatabase, String> {
-    let admin_pool = connect_pool(&backend.admin_database_url, "postgres")
+    // One-off admin connection used only to CREATE DATABASE; a single
+    // connection keeps total connection pressure low when many suites
+    // provision their databases in parallel.
+    let admin_pool = connect_pool(&backend.admin_database_url, "postgres", 1)
         .await
         .map_err(|error| format!("connect admin database: {error}"))?;
     let database_name = format!(
@@ -127,7 +130,13 @@ async fn create_suite_database(backend: Arc<TestDatabaseBackend>) -> Result<Suit
         .await
         .map_err(|error| format!("create database {database_name}: {error}"))?;
 
-    let pool = match connect_pool(&backend.admin_database_url, &database_name).await {
+    let pool = match connect_pool(
+        &backend.admin_database_url,
+        &database_name,
+        test_database_max_connections(),
+    )
+    .await
+    {
         Ok(pool) => pool,
         Err(error) => {
             let drop_sql = format!(r#"DROP DATABASE IF EXISTS "{database_name}""#);
@@ -179,12 +188,16 @@ async fn resolve_test_backend() -> Result<TestDatabaseBackend, String> {
     start_docker_postgres().await
 }
 
-async fn connect_pool(database_url: &str, database_name: &str) -> Result<PgPool, sqlx::Error> {
+async fn connect_pool(
+    database_url: &str,
+    database_name: &str,
+    max_connections: u32,
+) -> Result<PgPool, sqlx::Error> {
     let connect_options =
         PgConnectOptions::from_str(database_url).map(|options| options.database(database_name));
 
     PgPoolOptions::new()
-        .max_connections(test_database_max_connections())
+        .max_connections(max_connections)
         .min_connections(0)
         .connect_with(connect_options?)
         .await
@@ -230,7 +243,10 @@ async fn start_docker_postgres() -> Result<TestDatabaseBackend, String> {
     let admin_database_url = format!("postgres://postgres:postgres@127.0.0.1:{host_port}/postgres");
 
     for _ in 0..60 {
-        if connect_pool(&admin_database_url, "postgres").await.is_ok() {
+        if connect_pool(&admin_database_url, "postgres", 1)
+            .await
+            .is_ok()
+        {
             return Ok(TestDatabaseBackend {
                 admin_database_url,
                 docker_container: Some(container_id),
@@ -304,7 +320,7 @@ impl Drop for SuiteDatabase {
             };
 
             runtime.block_on(async move {
-                let Ok(admin_pool) = connect_pool(&admin_database_url, "postgres").await else {
+                let Ok(admin_pool) = connect_pool(&admin_database_url, "postgres", 1).await else {
                     return;
                 };
 
