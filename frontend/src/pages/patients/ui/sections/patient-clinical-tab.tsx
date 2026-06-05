@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { downloadApiFile } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import type { DoctorOption } from "@/pages/appointments/model/types";
 import { fetchProviders } from "@/pages/providers/data/provider-api";
@@ -37,6 +38,16 @@ type Bilingual = (ru: string, de: string) => string;
 
 const inputClass =
   "h-9 w-full rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
+
+type ClinicalSectionGroup = { key: string; label: string };
+type IndexedClinicalItem<T> = { item: T; index: number };
+
+type ClinicalSectionListViewArgs<T extends { id?: string }> = {
+  indexed: IndexedClinicalItem<T>[];
+  groups?: ClinicalSectionGroup[];
+  groupOf?: (item: T) => string;
+  renderActions: (item: T, index: number) => ReactNode;
+};
 
 function blankAttribution(): ClinicalAttribution {
   return {
@@ -110,6 +121,201 @@ function trimToNull(value: string): string | null {
 function attributionLabel(item: ClinicalAttribution): string | null {
   const doctor = [item.doctor_title, item.doctor_name].filter(Boolean).join(" ").trim();
   return [doctor || null, item.provider_name].filter(Boolean).join(" · ") || null;
+}
+
+function medicationDoseSlots(medication: ClinicalMedication, tx: Bilingual) {
+  return [
+    { label: tx("Утро", "Morg."), value: medication.dose_morgens },
+    { label: tx("День", "Mitt."), value: medication.dose_mittags },
+    { label: tx("Вечер", "Ab."), value: medication.dose_abends },
+    { label: tx("Ночь", "Nacht"), value: medication.dose_nachts },
+  ].map((slot) => ({
+    ...slot,
+    value: slot.value?.trim() || "0",
+  }));
+}
+
+function medicationDoseSchema(medication: ClinicalMedication) {
+  const values = [
+    medication.dose_morgens,
+    medication.dose_mittags,
+    medication.dose_abends,
+    medication.dose_nachts,
+  ];
+  if (values.every((value) => !value?.trim())) return "—";
+  return values.map((value) => value?.trim() || "0").join("-");
+}
+
+function groupedClinicalItems<T>(
+  indexed: IndexedClinicalItem<T>[],
+  groups: ClinicalSectionGroup[] | undefined,
+  groupOf: ((item: T) => string) | undefined,
+  fallbackLabel: string,
+) {
+  if (!groups || !groupOf) return [{ key: "all", label: null as string | null, rows: indexed }];
+
+  const groupedIndexes = new Set<number>();
+  const sections = groups.flatMap((group) => {
+    const rows = indexed.filter(({ item, index }) => {
+      const matches = groupOf(item) === group.key;
+      if (matches) groupedIndexes.add(index);
+      return matches;
+    });
+    return rows.length > 0 ? [{ key: group.key, label: group.label, rows }] : [];
+  });
+  const remaining = indexed.filter(({ index }) => !groupedIndexes.has(index));
+  return remaining.length > 0
+    ? [...sections, { key: "other", label: fallbackLabel, rows: remaining }]
+    : sections;
+}
+
+export function PatientMedicationTable({
+  canManage,
+  categoryLabel,
+  groupOf,
+  groups,
+  indexed,
+  renderActions,
+  tx,
+}: {
+  canManage: boolean;
+  categoryLabel: (category: ClinicalMedication["category"]) => string;
+  groupOf?: (item: ClinicalMedication) => string;
+  groups?: ClinicalSectionGroup[];
+  indexed: IndexedClinicalItem<ClinicalMedication>[];
+  renderActions: (item: ClinicalMedication, index: number) => ReactNode;
+  tx: Bilingual;
+}) {
+  const sections = groupedClinicalItems(indexed, groups, groupOf, tx("Другое", "Weitere"));
+  const columnCount = canManage ? 6 : 5;
+
+  return (
+    <div className="overflow-x-auto rounded-lg border border-border/70 bg-background">
+      <table className="w-full min-w-[760px] table-fixed border-collapse text-left text-xs">
+        <colgroup>
+          <col className={canManage ? "w-[25%]" : "w-[29%]"} />
+          <col className={canManage ? "w-[20%]" : "w-[23%]"} />
+          <col className={canManage ? "w-[16%]" : "w-[18%]"} />
+          <col className={canManage ? "w-[17%]" : "w-[18%]"} />
+          <col className={canManage ? "w-[15%]" : "w-[12%]"} />
+          {canManage ? <col className="w-[7%]" /> : null}
+        </colgroup>
+        <thead className="border-b border-border/70 bg-muted/40 text-[11px] uppercase text-muted-foreground">
+          <tr>
+            <th scope="col" className="px-3 py-2 font-semibold">{tx("Препарат", "Medikament")}</th>
+            <th scope="col" className="px-3 py-2 font-semibold">{tx("Приём", "Einnahme")}</th>
+            <th scope="col" className="px-3 py-2 font-semibold">{tx("Категория", "Kategorie")}</th>
+            <th scope="col" className="px-3 py-2 font-semibold">{tx("Причина / заметки", "Grund / Hinweise")}</th>
+            <th scope="col" className="px-3 py-2 font-semibold">{tx("Назначил", "Verordnung")}</th>
+            {canManage ? (
+              <th scope="col" className="px-2 py-2 text-right font-semibold">
+                <span className="sr-only">{tx("Действия", "Aktionen")}</span>
+              </th>
+            ) : null}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border/60">
+          {sections.map((section) => (
+            <Fragment key={section.key}>
+              {section.label ? (
+                <tr className="bg-card/80">
+                  <td colSpan={columnCount} className="px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        {section.label}
+                      </span>
+                      <Badge variant="outline" className="rounded-full text-[10px]">
+                        {section.rows.length}
+                      </Badge>
+                    </div>
+                  </td>
+                </tr>
+              ) : null}
+              {section.rows.map(({ item, index }) => {
+                const doseSlots = medicationDoseSlots(item, tx);
+                const attribution = attributionLabel(item);
+                return (
+                  <tr key={item.id ?? index} className="align-top transition-colors hover:bg-muted/25">
+                    <td className="px-3 py-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-foreground">
+                          {item.handelsname || tx("Без названия", "Ohne Namen")}
+                        </p>
+                        {item.wirkstoff ? (
+                          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.wirkstoff}</p>
+                        ) : null}
+                        {item.staerke || item.form ? (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {item.staerke ? (
+                              <Badge variant="outline" className="rounded-md px-1.5 py-0 text-[10px]">
+                                {item.staerke}
+                              </Badge>
+                            ) : null}
+                            {item.form ? (
+                              <Badge variant="outline" className="rounded-md px-1.5 py-0 text-[10px]">
+                                {item.form}
+                              </Badge>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="grid grid-cols-4 gap-1">
+                        {doseSlots.map((slot) => (
+                          <div
+                            key={slot.label}
+                            className="min-h-[38px] rounded-md border border-border/70 bg-card px-1 py-1 text-center"
+                          >
+                            <span className="block text-[10px] leading-none text-muted-foreground">
+                              {slot.label}
+                            </span>
+                            <span className="mt-1 block font-mono text-[12px] font-semibold text-foreground">
+                              {slot.value}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        {medicationDoseSchema(item)}
+                        {item.einheit ? ` ${item.einheit}` : ""}
+                      </p>
+                    </td>
+                    <td className="px-3 py-3">
+                      <Badge
+                        variant="outline"
+                        className="h-auto max-w-full justify-start whitespace-normal rounded-md px-1.5 py-0.5 text-left text-[10px] leading-snug"
+                      >
+                        {categoryLabel(item.category)}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-3">
+                      {item.grund ? (
+                        <p className="break-words text-xs text-foreground">{item.grund}</p>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                      {item.hinweis ? (
+                        <p className="mt-1 break-words text-[11px] text-muted-foreground">{item.hinweis}</p>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-3">
+                      <p className="break-words text-xs text-foreground">{attribution || "—"}</p>
+                    </td>
+                    {canManage ? (
+                      <td className="px-2 py-2 text-right">
+                        {renderActions(item, index)}
+                      </td>
+                    ) : null}
+                  </tr>
+                );
+              })}
+            </Fragment>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 /** Provider + doctor attribution selector, reused by every section's form. */
@@ -208,6 +414,7 @@ function ClinicalSection<T extends { id?: string }>({
   blank,
   isValid,
   rowView,
+  listView,
   form,
   onSave,
   canManage,
@@ -221,12 +428,13 @@ function ClinicalSection<T extends { id?: string }>({
   blank: () => T;
   isValid: (draft: T) => boolean;
   rowView: (item: T) => ReactNode;
+  listView?: (args: ClinicalSectionListViewArgs<T>) => ReactNode;
   form: (draft: T, set: (patch: Partial<T>) => void) => ReactNode;
   onSave: (next: T[]) => Promise<unknown>;
   canManage: boolean;
   tx: Bilingual;
   /** When provided, rows render under sub-headers (a Haupt/Neben-style tree). */
-  groups?: Array<{ key: string; label: string }>;
+  groups?: ClinicalSectionGroup[];
   groupOf?: (item: T) => string;
 }) {
   const [list, setList] = useState<T[]>(items);
@@ -261,35 +469,42 @@ function ClinicalSection<T extends { id?: string }>({
     void persist(next);
   }
 
+  const renderActions = (item: T, index: number) =>
+    canManage ? (
+      <div className="flex shrink-0 gap-1">
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="size-7 rounded-md p-0"
+          aria-label={tx("Редактировать", "Bearbeiten")}
+          title={tx("Редактировать", "Bearbeiten")}
+          onClick={() => setEditing({ index, draft: { ...item } })}
+        >
+          <Pencil className="size-3.5" />
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="size-7 rounded-md p-0 text-destructive"
+          aria-label={tx("Удалить", "Löschen")}
+          title={tx("Удалить", "Löschen")}
+          disabled={busy}
+          onClick={() => void persist(list.filter((_, i) => i !== index))}
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
+      </div>
+    ) : null;
+
   const renderRow = (item: T, index: number) => (
     <div
       key={item.id ?? index}
       className="flex items-start justify-between gap-3 rounded-lg border border-border/50 bg-background px-3 py-2"
     >
       <div className="min-w-0 flex-1">{rowView(item)}</div>
-      {canManage ? (
-        <div className="flex shrink-0 gap-1">
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 rounded-md px-2 text-xs"
-            onClick={() => setEditing({ index, draft: { ...item } })}
-          >
-            {tx("Изм.", "Bearb.")}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 rounded-md px-2 text-xs text-destructive"
-            disabled={busy}
-            onClick={() => void persist(list.filter((_, i) => i !== index))}
-          >
-            {tx("Удал.", "Lösch.")}
-          </Button>
-        </div>
-      ) : null}
+      {renderActions(item, index)}
     </div>
   );
 
@@ -310,7 +525,8 @@ function ClinicalSection<T extends { id?: string }>({
             className="h-8 rounded-lg"
             onClick={() => setEditing({ index: null, draft: blank() })}
           >
-            + {tx("Добавить", "Hinzufügen")}
+            <Plus className="size-3.5" />
+            {tx("Добавить", "Hinzufügen")}
           </Button>
         ) : null}
       </header>
@@ -322,20 +538,24 @@ function ClinicalSection<T extends { id?: string }>({
           </p>
         ) : null}
 
-        {groups && groupOf
-          ? groups.map((group) => {
-              const rows = indexed.filter(({ item }) => groupOf(item) === group.key);
-              if (rows.length === 0) return null;
-              return (
-                <div key={group.key} className="space-y-2">
-                  <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    {group.label}
-                  </p>
-                  {rows.map(({ item, index }) => renderRow(item, index))}
-                </div>
-              );
-            })
-          : indexed.map(({ item, index }) => renderRow(item, index))}
+        {list.length > 0 ? (
+          listView
+            ? listView({ indexed, groups, groupOf, renderActions })
+            : groups && groupOf
+              ? groups.map((group) => {
+                  const rows = indexed.filter(({ item }) => groupOf(item) === group.key);
+                  if (rows.length === 0) return null;
+                  return (
+                    <div key={group.key} className="space-y-2">
+                      <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        {group.label}
+                      </p>
+                      {rows.map(({ item, index }) => renderRow(item, index))}
+                    </div>
+                  );
+                })
+              : indexed.map(({ item, index }) => renderRow(item, index))
+        ) : null}
 
         {editing ? (
           <div className="space-y-3 rounded-lg border border-primary/40 bg-primary/[0.03] p-3">
@@ -516,9 +736,6 @@ export function PatientClinicalTab({
       active = false;
     };
   }, [patientId, version]);
-
-  const dosingSchema = (m: ClinicalMedication) =>
-    [m.dose_morgens, m.dose_mittags, m.dose_abends, m.dose_nachts].map((v) => v ?? "0").join("-");
 
   const categoryLabel = (category: ClinicalMedication["category"]) =>
     category === "besondere"
@@ -793,6 +1010,17 @@ export function PatientClinicalTab({
           await savePatientMedications(patientId, next);
           setMedications(next);
         }}
+        listView={({ indexed, groups, groupOf, renderActions }) => (
+          <PatientMedicationTable
+            indexed={indexed}
+            groups={groups}
+            groupOf={groupOf}
+            canManage={canManage}
+            renderActions={renderActions}
+            tx={tx}
+            categoryLabel={categoryLabel}
+          />
+        )}
         rowView={(m) => (
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -800,7 +1028,7 @@ export function PatientClinicalTab({
               {m.staerke ? <span className="text-[11px] text-muted-foreground">{m.staerke}</span> : null}
               {m.form ? <span className="text-[11px] text-muted-foreground">{m.form}</span> : null}
               <Badge variant="outline" className="rounded-full font-mono text-[10px]">
-                {dosingSchema(m)}
+                {medicationDoseSchema(m)}
                 {m.einheit ? ` ${m.einheit}` : ""}
               </Badge>
               <Badge variant="outline" className="rounded-full text-[10px]">
