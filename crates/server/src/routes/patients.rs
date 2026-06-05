@@ -6820,7 +6820,10 @@ fn clinical_one_of(value: Option<String>, allowed: &[&str]) -> Option<String> {
 /// value is a client error (422) rather than a silent drop.
 #[allow(clippy::result_large_err)]
 fn clinical_parse_uuid(value: Option<String>) -> Result<Option<Uuid>, axum::response::Response> {
-    match value.map(|v| v.trim().to_string()).filter(|v| !v.is_empty()) {
+    match value
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    {
         None => Ok(None),
         Some(v) => Uuid::parse_str(&v)
             .map(Some)

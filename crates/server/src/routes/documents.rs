@@ -9745,7 +9745,10 @@ async fn generate_document(
             Err(resp) => return resp,
         };
         if !assignment_set.contains(&target_patient) {
-            return err(StatusCode::FORBIDDEN, "You are not assigned to this patient");
+            return err(
+                StatusCode::FORBIDDEN,
+                "You are not assigned to this patient",
+            );
         }
     }
 
@@ -15544,14 +15547,12 @@ async fn update_document(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateDocumentRequest>,
 ) -> axum::response::Response {
-    if let Err(resp) =
-        auth.require_any_role(&[
-            Role::Ceo,
-            Role::PatientManager,
-            Role::TeamleadInterpreter,
-            Role::ItAdmin,
-        ])
-    {
+    if let Err(resp) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::ItAdmin,
+    ]) {
         return resp;
     }
 
