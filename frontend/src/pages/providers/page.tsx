@@ -1334,6 +1334,20 @@ function blankDoctorRelationshipForm(
   };
 }
 
+function normalizeProviderPeopleFiltersForScope(
+  filters: ProviderPeopleFilters,
+  forceNonMedical: boolean,
+): ProviderPeopleFilters {
+  if (!forceNonMedical) return filters;
+  return {
+    ...filters,
+    providerType: "non_medical",
+    fachbereich: "",
+    specialization: "",
+    patientId: "",
+  };
+}
+
 function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}) {
   const { user } = useAuth();
   const { t, lang } = useLang();
@@ -1348,6 +1362,39 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       ? providerDetailReturnTo
       : "/providers";
   const permissions = useMemo(() => providerPermissions(user?.role), [user?.role]);
+  const providerPageCopy = useMemo(() => {
+    if (!permissions.forceNonMedical) {
+      return {
+        createDescription: t.providers_create_description,
+        newLabel: t.providers_new,
+        subtitle: t.providers_subtitle,
+        title: t.providers_title,
+      };
+    }
+    if (lang === "de") {
+      return {
+        createDescription:
+          "Servicepartner mit Kontakten, Vertragsnotizen und operativer Kategorie anlegen.",
+        newLabel: "Neuer Servicepartner",
+        subtitle: "Servicepartner, Kontakte und Leistungskatalog verwalten",
+        title: "Servicepartner",
+      };
+    }
+    return {
+      createDescription:
+        "Добавьте сервисного партнёра с контактами, договорными заметками и операционной категорией.",
+      newLabel: "Новый сервисный партнёр",
+      subtitle: "Управление сервисными партнёрами, контактами и каталогом услуг",
+      title: "Сервисные партнёры",
+    };
+  }, [
+    lang,
+    permissions.forceNonMedical,
+    t.providers_create_description,
+    t.providers_new,
+    t.providers_subtitle,
+    t.providers_title,
+  ]);
   const relationshipTargetDoctorsRequestRef = useRef(0);
   const [catalogMode, setCatalogModeState] = useState<ProviderCatalogMode>(() =>
     searchParams.get("mode") === "people" ? "people" : "providers",
@@ -1356,31 +1403,36 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   const [providerEditOpen, setProviderEditOpen] = useState(false);
   const [doctorDetailView, setDoctorDetailView] = useState<DoctorDetailView | null>(null);
   const [staffDetailView, setStaffDetailView] = useState<StaffDetailView | null>(null);
-  const [peopleFilters, setPeopleFilters] = useState<ProviderPeopleFilters>(() => ({
-    ...DEFAULT_PROVIDER_PEOPLE_FILTERS,
-    search: searchParams.get("people_search") ?? "",
-    personType:
-      searchParams.get("person_type") === "doctor" || searchParams.get("person_type") === "staff"
-        ? (searchParams.get("person_type") as ProviderPeopleFilters["personType"])
-        : "",
-    providerId: searchParams.get("people_provider") ?? "",
-    providerType:
-      searchParams.get("people_provider_type") === "medical" ||
-      searchParams.get("people_provider_type") === "non_medical"
-        ? (searchParams.get("people_provider_type") as ProviderPeopleFilters["providerType"])
-        : "",
-    taxonomyNodeId: searchParams.get("people_taxonomy") ?? "",
-    gender:
-      searchParams.get("people_gender") === "male" ||
-      searchParams.get("people_gender") === "female" ||
-      searchParams.get("people_gender") === "unknown"
-        ? (searchParams.get("people_gender") as ProviderPeopleFilters["gender"])
-        : "",
-    fachbereich: searchParams.get("people_fachbereich") ?? "",
-    specialization: searchParams.get("people_specialization") ?? "",
-    role: searchParams.get("people_role") ?? "",
-    patientId: searchParams.get("people_patient") ?? "",
-  }));
+  const [peopleFilters, setPeopleFilters] = useState<ProviderPeopleFilters>(() =>
+    normalizeProviderPeopleFiltersForScope(
+      {
+        ...DEFAULT_PROVIDER_PEOPLE_FILTERS,
+        search: searchParams.get("people_search") ?? "",
+        personType:
+          searchParams.get("person_type") === "doctor" || searchParams.get("person_type") === "staff"
+            ? (searchParams.get("person_type") as ProviderPeopleFilters["personType"])
+            : "",
+        providerId: searchParams.get("people_provider") ?? "",
+        providerType:
+          searchParams.get("people_provider_type") === "medical" ||
+          searchParams.get("people_provider_type") === "non_medical"
+            ? (searchParams.get("people_provider_type") as ProviderPeopleFilters["providerType"])
+            : "",
+        taxonomyNodeId: searchParams.get("people_taxonomy") ?? "",
+        gender:
+          searchParams.get("people_gender") === "male" ||
+          searchParams.get("people_gender") === "female" ||
+          searchParams.get("people_gender") === "unknown"
+            ? (searchParams.get("people_gender") as ProviderPeopleFilters["gender"])
+            : "",
+        fachbereich: searchParams.get("people_fachbereich") ?? "",
+        specialization: searchParams.get("people_specialization") ?? "",
+        role: searchParams.get("people_role") ?? "",
+        patientId: searchParams.get("people_patient") ?? "",
+      },
+      permissions.forceNonMedical,
+    ),
+  );
   const [peopleVersion, setPeopleVersion] = useState(0);
   type PersistedProviderFilters = Pick<
     ProviderFilters,
@@ -1784,13 +1836,21 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   }
 
   function handlePeopleFiltersChange(nextFilters: ProviderPeopleFilters) {
-    setPeopleFilters(nextFilters);
-    syncPeopleFilters(nextFilters);
+    const scopedFilters = normalizeProviderPeopleFiltersForScope(
+      nextFilters,
+      permissions.forceNonMedical,
+    );
+    setPeopleFilters(scopedFilters);
+    syncPeopleFilters(scopedFilters);
   }
 
   function resetPeopleFilters() {
-    setPeopleFilters(DEFAULT_PROVIDER_PEOPLE_FILTERS);
-    syncPeopleFilters(DEFAULT_PROVIDER_PEOPLE_FILTERS);
+    const nextFilters = normalizeProviderPeopleFiltersForScope(
+      DEFAULT_PROVIDER_PEOPLE_FILTERS,
+      permissions.forceNonMedical,
+    );
+    setPeopleFilters(nextFilters);
+    syncPeopleFilters(nextFilters);
   }
 
   function refreshPeople() {
@@ -2034,8 +2094,28 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           ? current
           : { ...current, providerType: "non_medical" },
       );
+      setPeopleFilters((current) =>
+        normalizeProviderPeopleFiltersForScope(current, true),
+      );
     }
   }, [permissions.forceNonMedical, setFilters]);
+
+  useEffect(() => {
+    if (!peopleFilters.providerId || parentProviderOptions.length === 0) return;
+    const selectedProvider = parentProviderOptions.find(
+      (provider) => provider.id === peopleFilters.providerId,
+    );
+    const selectedProviderFitsScope =
+      selectedProvider &&
+      (!permissions.forceNonMedical || selectedProvider.provider_type === "non_medical");
+    if (selectedProviderFitsScope) return;
+
+    setPeopleFilters({ ...peopleFilters, providerId: "" });
+  }, [
+    parentProviderOptions,
+    peopleFilters,
+    permissions.forceNonMedical,
+  ]);
 
   function refreshList() {
     setListVersion((current) => current + 1);
@@ -3015,7 +3095,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     <>
       <div className="space-y-4">
         <PageHeader
-          title={t.providers_title}
+          title={providerPageCopy.title}
+          description={providerPageCopy.subtitle}
           actions={
             <>
               {permissions.canManageRegistry ? (
@@ -3026,7 +3107,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     onClick={openCreateSheet}
                   >
                     <Plus className="size-4" />
-                    {t.providers_new}
+                    {providerPageCopy.newLabel}
                   </Button>
                 </>
               ) : null}
@@ -3036,7 +3117,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
         {/* KPI inline stats */}
         <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
-          <AdminInlineMetric icon={Building2} label={t.providers_title} value={metrics.total} tone="sky" />
+          <AdminInlineMetric icon={Building2} label={providerPageCopy.title} value={metrics.total} tone="sky" />
           <AdminInlineMetric
             icon={UsersRound}
             label={permissions.forceNonMedical ? l("appointments_services") : t.providers_doctors}
@@ -3065,7 +3146,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             className="h-8 rounded-md px-3"
             onClick={() => setCatalogMode("providers")}
           >
-            {t.providers_title}
+            {providerPageCopy.title}
           </Button>
           <Button
             type="button"
@@ -3322,6 +3403,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         ) : (
           <ProviderPeopleCatalog
             rows={peopleRows}
+            forceNonMedical={permissions.forceNonMedical}
             filters={peopleFilters}
             patients={peoplePatientOptions}
             providers={parentProviderOptions}
@@ -3343,12 +3425,12 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
           <form onSubmit={handleCreateProvider} className="flex flex-1 min-h-0 flex-col">
             <AdminSheetScaffold
-              title={t.providers_new}
-              description={t.providers_create_description}
+              title={providerPageCopy.newLabel}
+              description={providerPageCopy.createDescription}
               footer={(
                 <SheetFormFooter
                   cancelLabel={t.common_cancel}
-                  submitLabel={t.providers_new}
+                  submitLabel={providerPageCopy.newLabel}
                   submittingLabel={t.patients_creating}
                   submitting={createBusy}
                   onCancel={() => setCreateOpen(false)}
@@ -6891,6 +6973,11 @@ function ProviderProfileFields({
   const l = (key: string) => t.uiText[key] ?? key;
   const selectedTaxonomyNode = taxonomyNodes.find((node) => node.id === form.taxonomyNodeId);
   const formAttributeKeys = taxonomyAttributeKeys(selectedTaxonomyNode);
+  const namePlaceholder = forceNonMedical
+    ? lang === "de"
+      ? "Servicepartner"
+      : "Сервисный партнёр"
+    : t.providers_title;
 
   return (
     <>
@@ -6900,7 +6987,7 @@ function ProviderProfileFields({
             value={form.name}
             onChange={(event) => onChange("name", event.target.value)}
             className={shellInputClassName}
-            placeholder={t.providers_title}
+            placeholder={namePlaceholder}
             required
             disabled={disabled}
           />

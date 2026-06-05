@@ -62,12 +62,17 @@ async fn list_provider_people(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
-    let provider_type = normalize_optional(query.provider_type);
-    if let Some(ref provider_type) = provider_type
+    let requested_provider_type = normalize_optional(query.provider_type);
+    if let Some(ref provider_type) = requested_provider_type
         && !matches!(provider_type.as_str(), "medical" | "non_medical")
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid provider type");
     }
+    let provider_type = if auth.role == Role::Concierge {
+        Some("non_medical".to_string())
+    } else {
+        requested_provider_type
+    };
 
     let gender = normalize_optional(query.gender).map(|value| value.to_lowercase());
     if let Some(ref gender) = gender
@@ -169,6 +174,7 @@ async fn load_doctor_people(
                   d.license_number, d.licensing_country, d.licensing_valid_until, d.notes,
                   d.created_at,
                   p.name AS provider_name,
+                  p.provider_type AS provider_type,
                   jsonb_build_object(
                       'id', p.id,
                       'name', p.name,
@@ -366,6 +372,7 @@ async fn load_doctor_people(
                 "staff_id": Value::Null,
                 "provider_id": provider_id,
                 "provider_name": row.try_get::<String, _>("provider_name").unwrap_or_default(),
+                "provider_type": row.try_get::<String, _>("provider_type").unwrap_or_default(),
                 "provider": row.try_get::<Value, _>("provider").unwrap_or_else(|_| json!({})),
                 "name": row.try_get::<String, _>("name").unwrap_or_default(),
                 "first_name": row.try_get::<Option<String>, _>("first_name").unwrap_or_default(),
@@ -424,6 +431,7 @@ async fn load_staff_people(
                   s.department, s.gender, s.opening_hours, s.status, s.notes, s.is_active,
                   s.created_at, s.updated_at,
                   p.name AS provider_name,
+                  p.provider_type AS provider_type,
                   jsonb_build_object(
                       'id', p.id,
                       'name', p.name,
@@ -538,6 +546,7 @@ async fn load_staff_people(
                 "staff_id": staff_id,
                 "provider_id": provider_id,
                 "provider_name": row.try_get::<String, _>("provider_name").unwrap_or_default(),
+                "provider_type": row.try_get::<String, _>("provider_type").unwrap_or_default(),
                 "provider": row.try_get::<Value, _>("provider").unwrap_or_else(|_| json!({})),
                 "name": row.try_get::<String, _>("display_name").unwrap_or_default(),
                 "first_name": row.try_get::<Option<String>, _>("first_name").unwrap_or_default(),

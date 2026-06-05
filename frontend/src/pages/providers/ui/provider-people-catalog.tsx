@@ -46,6 +46,7 @@ import type {
 type ProviderPeopleCatalogProps = {
   className?: string;
   error?: string | null;
+  forceNonMedical?: boolean;
   filters: ProviderPeopleFilters;
   loading?: boolean;
   patients?: readonly ProviderPeoplePatientOption[];
@@ -123,6 +124,22 @@ function localizedName(
 
 function localizedFallback(lang: Lang, de: string, ru: string) {
   return lang === "de" ? de : ru;
+}
+
+function providerCatalogLabel(
+  labels: Record<string, string>,
+  lang: Lang,
+  forceNonMedical: boolean,
+) {
+  return forceNonMedical
+    ? localizedFallback(lang, "Servicepartner", "Сервисные партнёры")
+    : labels.providers_title ?? localizedFallback(lang, "Provider", "Провайдер");
+}
+
+function peopleCatalogTitle(lang: Lang, forceNonMedical: boolean) {
+  return forceNonMedical
+    ? localizedFallback(lang, "Kontakte und Personal", "Контакты и персонал")
+    : localizedFallback(lang, "Ärzte und Personal", "Врачи и персонал");
 }
 
 function staffRoleSelectLabel(
@@ -378,8 +395,10 @@ function buildPeopleColumns(
   labels: Record<string, string>,
   uiText: Record<string, string>,
   lang: Lang,
+  forceNonMedical: boolean,
 ): ColumnDef<ProviderPeopleRow>[] {
   const notSet = labels.common_not_set ?? "-";
+  const providerLabel = providerCatalogLabel(labels, lang, forceNonMedical);
 
   return [
     {
@@ -411,7 +430,7 @@ function buildPeopleColumns(
     },
     {
       id: "provider",
-      label: labels.providers_title ?? localizedFallback(lang, "Provider", "Провайдер"),
+      label: providerLabel,
       accessor: (row) => row.provider_name,
       filterType: "text",
       searchable: true,
@@ -554,11 +573,13 @@ function FieldLabel({ children }: { children: ReactNode }) {
 
 function SelectField({
   children,
+  disabled,
   label,
   value,
   onChange,
 }: {
   children: ReactNode;
+  disabled?: boolean;
   label: string;
   value: string;
   onChange: (value: string) => void;
@@ -569,6 +590,7 @@ function SelectField({
       <NativeComboboxSelect
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
         className="h-8 w-full min-w-0 rounded-md border border-input bg-background px-2 py-1 text-xs text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25"
       >
         {children}
@@ -670,6 +692,7 @@ function buildRoleOptions(
 }
 
 function FiltersBar({
+  forceNonMedical = false,
   filters,
   lang,
   labels,
@@ -683,6 +706,7 @@ function FiltersBar({
   onFiltersChange,
   onResetFilters,
 }: {
+  forceNonMedical?: boolean;
   filters: ProviderPeopleFilters;
   lang: Lang;
   labels: Record<string, string>;
@@ -697,25 +721,29 @@ function FiltersBar({
   onResetFilters?: () => void;
 }) {
   const allLabel = labels.providers_all ?? localizedFallback(lang, "Alle", "Все");
+  const effectiveProviderType: ProviderPeopleFilters["providerType"] = forceNonMedical
+    ? "non_medical"
+    : filters.providerType;
+  const providerLabel = providerCatalogLabel(labels, lang, forceNonMedical);
   const roleOptions = buildRoleOptions(filters, labels, uiText, staffRoles, lang);
   const selectedTaxonomyNode = taxonomyNodes.find((node) => node.id === filters.taxonomyNodeId);
   const showClinicalFilters =
-    filters.providerType !== "non_medical" && filters.personType !== "staff";
+    !forceNonMedical && effectiveProviderType !== "non_medical" && filters.personType !== "staff";
   const showPatientFilter = showClinicalFilters;
   const filteredProviderOptions = useMemo(() => {
-    if ((!filters.taxonomyNodeId && !filters.providerType) || providers.length === 0) {
+    if ((!filters.taxonomyNodeId && !effectiveProviderType) || providers.length === 0) {
       return providerOptions;
     }
     const matchingProviderIds = new Set(
       providers
         .filter((provider) =>
-          (!filters.providerType || provider.provider_type === filters.providerType) &&
+          (!effectiveProviderType || provider.provider_type === effectiveProviderType) &&
           providerMatchesTaxonomy(provider, filters.taxonomyNodeId),
         )
         .map((provider) => provider.id),
     );
     return providerOptions.filter((option) => matchingProviderIds.has(option.value));
-  }, [filters.providerType, filters.taxonomyNodeId, providerOptions, providers]);
+  }, [effectiveProviderType, filters.taxonomyNodeId, providerOptions, providers]);
   const activeSpecializationOptions = specializations.flatMap((item) => {
     if (!item.is_active) return [];
     return [{
@@ -743,14 +771,25 @@ function FiltersBar({
   };
   const setPersonType = (value: ProviderPeopleFilters["personType"]) => {
     const patch: Partial<ProviderPeopleFilters> = { personType: value };
-    if (value === "staff") {
+    if (value === "staff" || forceNonMedical) {
       patch.fachbereich = "";
       patch.specialization = "";
       patch.patientId = "";
     }
+    if (forceNonMedical) patch.providerType = "non_medical";
     onFiltersChange({ ...filters, ...patch });
   };
   const setProviderType = (value: ProviderPeopleFilters["providerType"]) => {
+    if (forceNonMedical) {
+      onFiltersChange({
+        ...filters,
+        providerType: "non_medical",
+        fachbereich: "",
+        specialization: "",
+        patientId: "",
+      });
+      return;
+    }
     const taxonomyMatchesType =
       !filters.taxonomyNodeId ||
       !value ||
@@ -773,9 +812,24 @@ function FiltersBar({
     onFiltersChange({ ...filters, ...patch });
   };
   const setTaxonomyNode = (value: string) => {
-    const patch: Partial<ProviderPeopleFilters> = { taxonomyNodeId: value };
-    if (!selectedProviderMatches(filters.providerId, filters.providerType, value)) {
+    const selectedNode = taxonomyNodes.find((node) => node.id === value);
+    const nextProviderType: ProviderPeopleFilters["providerType"] =
+      forceNonMedical
+        ? "non_medical"
+        : selectedNode?.provider_kind === "medical" || selectedNode?.provider_kind === "non_medical"
+          ? selectedNode.provider_kind
+          : filters.providerType;
+    const patch: Partial<ProviderPeopleFilters> = {
+      providerType: nextProviderType,
+      taxonomyNodeId: value,
+    };
+    if (!selectedProviderMatches(filters.providerId, nextProviderType, value)) {
       patch.providerId = "";
+    }
+    if (nextProviderType === "non_medical") {
+      patch.fachbereich = "";
+      patch.specialization = "";
+      patch.patientId = "";
     }
     onFiltersChange({ ...filters, ...patch });
   };
@@ -784,7 +838,10 @@ function FiltersBar({
       onResetFilters();
       return;
     }
-    onFiltersChange(DEFAULT_PROVIDER_PEOPLE_FILTERS);
+    onFiltersChange({
+      ...DEFAULT_PROVIDER_PEOPLE_FILTERS,
+      providerType: forceNonMedical ? "non_medical" : "",
+    });
   };
 
   return (
@@ -813,7 +870,7 @@ function FiltersBar({
         >
           <option value="">{allLabel}</option>
           <option value="doctor">
-            {filters.providerType === "non_medical"
+            {effectiveProviderType === "non_medical"
               ? uiLabel(uiText, "providers_contacts", localizedFallback(lang, "Kontakte", "Контакты"))
               : personTypeLabel("doctor", labels, uiText)}
           </option>
@@ -825,7 +882,7 @@ function FiltersBar({
           <ProviderTaxonomyCascadeSelect
             value={filters.taxonomyNodeId}
             nodes={[...taxonomyNodes]}
-            providerType={filters.providerType}
+            providerType={effectiveProviderType}
             mode="any"
             placeholder={labels.providers_category ?? allLabel}
             allLabel={allLabel}
@@ -835,7 +892,7 @@ function FiltersBar({
         </label>
 
         <SelectField
-          label={labels.providers_title ?? localizedFallback(lang, "Provider", "Провайдер")}
+          label={providerLabel}
           value={filters.providerId}
           onChange={(value) => setFilter("providerId", value)}
         >
@@ -849,7 +906,8 @@ function FiltersBar({
 
         <SelectField
           label={labels.providers_type ?? localizedFallback(lang, "Providertyp", "Тип провайдера")}
-          value={filters.providerType}
+          value={effectiveProviderType}
+          disabled={forceNonMedical}
           onChange={(value) => setProviderType(value as ProviderPeopleFilters["providerType"])}
         >
           <option value="">{allLabel}</option>
@@ -1080,6 +1138,7 @@ function MobilePeopleCards({
 export function ProviderPeopleCatalog({
   className,
   error,
+  forceNonMedical = false,
   filters,
   loading = false,
   patients = EMPTY_PATIENT_OPTIONS,
@@ -1101,8 +1160,13 @@ export function ProviderPeopleCatalog({
     const options = providerOptionsFromProviders(providers);
     return options.length > 0 ? options : deriveProviderOptions(rows);
   }, [providers, rows]);
-  const columns = useMemo(() => buildPeopleColumns(labels, uiText, lang), [labels, lang, uiText]);
-  const title = uiLabel(uiText, "providers_people_catalog", localizedFallback(lang, "Ärzte und Personal", "Врачи и персонал"));
+  const columns = useMemo(
+    () => buildPeopleColumns(labels, uiText, lang, forceNonMedical),
+    [forceNonMedical, labels, lang, uiText],
+  );
+  const title = forceNonMedical
+    ? peopleCatalogTitle(lang, true)
+    : uiLabel(uiText, "providers_people_catalog", peopleCatalogTitle(lang, false));
   const countLabelText = uiLabel(uiText, "providers_people_count", localizedFallback(lang, "Personen", "людей"));
 
   return (
@@ -1118,6 +1182,7 @@ export function ProviderPeopleCatalog({
       </div>
 
       <FiltersBar
+        forceNonMedical={forceNonMedical}
         filters={filters}
         lang={lang}
         labels={labels}
@@ -1155,7 +1220,7 @@ export function ProviderPeopleCatalog({
             clinical: labels.providers_fachbereich ?? localizedFallback(lang, "Fachbereich", "Специализация"),
             contact: uiLabel(uiText, "providers_contacts", localizedFallback(lang, "Kontakte", "Контакты")),
             identity: uiLabel(uiText, "providers_people_person", localizedFallback(lang, "Person", "Человек")),
-            provider: labels.providers_title ?? localizedFallback(lang, "Provider", "Провайдер"),
+            provider: providerCatalogLabel(labels, lang, forceNonMedical),
           }}
           loading={loading}
           maxFrozenColumns={2}

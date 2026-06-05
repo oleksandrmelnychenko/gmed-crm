@@ -345,7 +345,7 @@ async fn list_providers(
     let active_only = query.active_only.unwrap_or(true);
     let search_term = normalize_optional(query.search);
     let search_pattern = format!("%{}%", search_term.clone().unwrap_or_default());
-    let provider_type = normalize_optional(query.provider_type);
+    let requested_provider_type = normalize_optional(query.provider_type);
     let city_pattern = format!("%{}%", query.city.unwrap_or_default());
     let country_pattern = format!("%{}%", query.country.unwrap_or_default());
     let fachbereich_pattern = format!("%{}%", query.fachbereich.unwrap_or_default());
@@ -362,11 +362,16 @@ async fn list_providers(
     let internal_rating_gte = query.internal_rating_gte;
     let linked_patient_id = query.linked_patient_id;
 
-    if let Some(ref provider_type) = provider_type
+    if let Some(ref provider_type) = requested_provider_type
         && !is_valid_provider_type(provider_type)
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid provider type");
     }
+    let provider_type = if auth.role == Role::Concierge {
+        Some("non_medical".to_string())
+    } else {
+        requested_provider_type
+    };
     if internal_rating_gte.is_some_and(|value| !value.is_finite() || !(0.0..=5.0).contains(&value))
     {
         return err(
@@ -1527,6 +1532,12 @@ async fn get_provider(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to get provider");
         }
     };
+    let provider_type = provider
+        .try_get::<String, _>("provider_type")
+        .unwrap_or_default();
+    if auth.role == Role::Concierge && provider_type != "non_medical" {
+        return err(StatusCode::FORBIDDEN, "Provider is outside concierge scope");
+    }
 
     let (
         doctors,
@@ -1605,7 +1616,7 @@ async fn get_provider(
     Json(json!({
         "id": provider.try_get::<Uuid, _>("id").unwrap_or(provider_id),
         "name": provider.try_get::<String, _>("name").unwrap_or_default(),
-        "provider_type": provider.try_get::<String, _>("provider_type").unwrap_or_default(),
+        "provider_type": provider_type,
         "legal_name": provider.try_get::<Option<String>, _>("legal_name").unwrap_or_default(),
         "tax_id": provider.try_get::<Option<String>, _>("tax_id").unwrap_or_default(),
         "address_street": provider.try_get::<Option<String>, _>("address_street").unwrap_or_default(),

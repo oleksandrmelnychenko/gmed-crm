@@ -398,6 +398,124 @@ async fn provider_people_returns_doctors_staff_counts_and_patient_filter() {
 }
 
 #[tokio::test]
+async fn concierge_provider_people_is_scoped_to_non_medical_providers() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("provider-people-concierge");
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    let bearer = auth_header_for(concierge_id, "concierge");
+
+    let medical_provider_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO providers (name, provider_type, address_city, address_country)
+           VALUES ($1, 'medical', 'Berlin', 'Germany')
+           RETURNING id"#,
+    )
+    .bind(format!("Medical People {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let non_medical_provider_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO providers (name, provider_type, address_city, address_country)
+           VALUES ($1, 'non_medical', 'Munich', 'Germany')
+           RETURNING id"#,
+    )
+    .bind(format!("Service People {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO provider_doctors (provider_id, name, first_name, last_name, display_name, gender)
+           VALUES ($1, $2, 'Medi', $3, $2, 'unknown')"#,
+    )
+    .bind(medical_provider_id)
+    .bind(format!("Medical Contact {tag}"))
+    .bind(format!("Doctor {tag}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO provider_doctors (provider_id, name, first_name, last_name, display_name, gender)
+           VALUES ($1, $2, 'Ops', $3, $2, 'unknown')"#,
+    )
+    .bind(non_medical_provider_id)
+    .bind(format!("Service Contact {tag}"))
+    .bind(format!("Contact {tag}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/provider-people?person_type=all&provider_type=medical&search={tag}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().expect("provider people array");
+    assert!(!items.is_empty());
+    assert!(
+        items
+            .iter()
+            .all(|item| item["provider_type"] == "non_medical"),
+        "concierge must not see medical provider people: {items:?}"
+    );
+    assert!(
+        items
+            .iter()
+            .any(|item| item["provider_id"] == non_medical_provider_id.to_string())
+    );
+    assert!(
+        items
+            .iter()
+            .all(|item| item["provider_id"] != medical_provider_id.to_string())
+    );
+
+    let (status, providers_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers?provider_type=medical&search={tag}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let providers = providers_body.as_array().expect("providers array");
+    assert!(!providers.is_empty());
+    assert!(
+        providers
+            .iter()
+            .all(|item| item["provider_type"] == "non_medical"),
+        "concierge provider list must stay non-medical: {providers:?}"
+    );
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{medical_provider_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, non_medical_detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{non_medical_provider_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(non_medical_detail["provider_type"], "non_medical");
+}
+
+#[tokio::test]
 async fn provider_doctor_accepts_academic_title_combinations_and_keeps_salutation_in_gender() {
     let Some((app, pool, _admin_id)) = test_context().await else {
         return;
