@@ -5455,10 +5455,7 @@ async fn get_patient_timeline(
     // Clinical-record activity (from the audit log) is only woven into the timeline
     // for the roles that can actually open the clinical profile, so it is never
     // surfaced to billing / interpreter / concierge who cannot see clinical data.
-    let can_view_clinical = matches!(
-        auth.role,
-        Role::Ceo | Role::PatientManager | Role::ItAdmin
-    );
+    let can_view_clinical = matches!(auth.role, Role::Ceo | Role::PatientManager | Role::ItAdmin);
     const CLINICAL_TIMELINE_BRANCH: &str = r#"
             UNION ALL
 
@@ -8018,7 +8015,13 @@ async fn get_patient_clinical_pdf(
 
     let slug: String = mrn
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     let slug = slug.trim_matches('-');
     let filename = if slug.is_empty() {
@@ -8029,7 +8032,10 @@ async fn get_patient_clinical_pdf(
 
     (
         [
-            (axum::http::header::CONTENT_TYPE, "application/pdf".to_string()),
+            (
+                axum::http::header::CONTENT_TYPE,
+                "application/pdf".to_string(),
+            ),
             (
                 axum::http::header::CONTENT_DISPOSITION,
                 format!("inline; filename=\"{filename}\""),

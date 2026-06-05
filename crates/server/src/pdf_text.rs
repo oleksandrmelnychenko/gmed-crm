@@ -1,11 +1,12 @@
 use printpdf::{DictItem, Op, PdfSaveOptions};
 
 pub(crate) fn pdf_text_save_options() -> PdfSaveOptions {
-    let mut options = PdfSaveOptions::default();
     // The generated document builders emit pre-encoded Tj text operations so
     // German WinAnsi characters render correctly with PDF built-in fonts.
-    options.secure = false;
-    options
+    PdfSaveOptions {
+        secure: false,
+        ..Default::default()
+    }
 }
 
 pub(crate) fn win_ansi_show_text_op(text: &str) -> Op {
@@ -22,7 +23,7 @@ pub(crate) fn win_ansi_show_text_op(text: &str) -> Op {
 fn needs_hex_encoding(bytes: &[u8]) -> bool {
     bytes
         .iter()
-        .any(|&byte| byte < 32 || byte > 126 || matches!(byte, b'(' | b')' | b'\\' | b'%'))
+        .any(|&byte| !(32..=126).contains(&byte) || matches!(byte, b'(' | b')' | b'\\' | b'%'))
 }
 
 fn encode_win_ansi_text(text: &str) -> Vec<u8> {

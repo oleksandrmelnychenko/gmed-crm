@@ -59,18 +59,17 @@
 - `testing/worktree-stabilization-inventory_ua.md` - інвентаризація незведеного worktree перед фінальним stabilization pass
 - `testing/ui-rbac-route-guard-plan_ua.md` - план доведення staff shell і route guards до single source of truth
 
-### Поточний Freeze Status
+### Поточний Release Status
 
-Станом на `2026-04-27` current-state зріз підтверджений повним freeze pass:
+Станом на `2026-06-05` current-state зріз підтверджений release gate pass:
 
 - `cargo fmt --all -- --check`
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`
-- Rust domain/API/server tests in bounded batches (`495` tests)
-- `frontend npm run test` (`245` tests)
-- `frontend npm run lint`
-- `frontend npm run build`
-- `frontend npm run test:e2e` (`43/43`)
-- `frontend npm run test:e2e:live` (`84/84`)
+- `cargo test --workspace --locked` (`581` tests)
+- `frontend npm audit --audit-level=high --omit=dev` (`0` vulnerabilities)
+- `frontend npm run test` (`398` tests)
+- `frontend npm run release:check` (`lint` + production `build`)
+- browser E2E suites remain the next explicit smoke pass when a release candidate is deployed
 
 Детальний status і незакриті інтеграційні/engineering tails дивись у `testing/full-docs-backlog-reconciliation_ua.md` і `testing/current-state-gap-audit_ua.md`.
 Для normalization / commit slicing / canonical test infra дивись `testing/worktree-stabilization-inventory_ua.md`.

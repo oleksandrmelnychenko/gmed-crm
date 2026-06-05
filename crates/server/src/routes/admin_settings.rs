@@ -308,13 +308,13 @@ async fn list_activity(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
-    if let (Some(from), Some(to_exclusive)) = (date_from.as_ref(), date_to_exclusive.as_ref()) {
-        if to_exclusive <= from {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "date_to must be on or after date_from",
-            );
-        }
+    if let (Some(from), Some(to_exclusive)) = (date_from.as_ref(), date_to_exclusive.as_ref())
+        && to_exclusive <= from
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "date_to must be on or after date_from",
+        );
     }
 
     let total = match sqlx::query(
