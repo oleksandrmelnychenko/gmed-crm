@@ -427,7 +427,8 @@ function ClinicalSection<T extends { id?: string }>({
   items: T[];
   blank: () => T;
   isValid: (draft: T) => boolean;
-  rowView: (item: T) => ReactNode;
+  /** Per-row read view. Optional when a `listView` renders the whole list. */
+  rowView?: (item: T) => ReactNode;
   listView?: (args: ClinicalSectionListViewArgs<T>) => ReactNode;
   form: (draft: T, set: (patch: Partial<T>) => void) => ReactNode;
   onSave: (next: T[]) => Promise<unknown>;
@@ -441,9 +442,12 @@ function ClinicalSection<T extends { id?: string }>({
   const [editing, setEditing] = useState<{ index: number | null; draft: T } | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Sync the local list from props, but never while a row is being edited:
+  // a realtime refresh landing mid-edit would otherwise swap the baseline the
+  // user is editing against. Once the editor closes, we re-sync to the latest.
   useEffect(() => {
-    setList(items);
-  }, [items]);
+    if (!editing) setList(items);
+  }, [items, editing]);
 
   const set = (patch: Partial<T>) =>
     setEditing((current) => (current ? { ...current, draft: { ...current.draft, ...patch } } : current));
@@ -503,7 +507,7 @@ function ClinicalSection<T extends { id?: string }>({
       key={item.id ?? index}
       className="flex items-start justify-between gap-3 rounded-lg border border-border/50 bg-background px-3 py-2"
     >
-      <div className="min-w-0 flex-1">{rowView(item)}</div>
+      <div className="min-w-0 flex-1">{rowView ? rowView(item) : null}</div>
       {renderActions(item, index)}
     </div>
   );
@@ -832,6 +836,7 @@ export function PatientClinicalTab({
               <Field label={tx("Тип", "Art")}>
                 <NativeComboboxSelect
                   value={draft.kind}
+                  aria-label={tx("Тип", "Art")}
                   className={inputClass}
                   onChange={(e) => set({ kind: e.target.value as ClinicalDiagnosis["kind"] })}
                 >
@@ -842,6 +847,7 @@ export function PatientClinicalTab({
               <Field label={tx("Статус", "Status")}>
                 <NativeComboboxSelect
                   value={draft.status}
+                  aria-label={tx("Статус", "Status")}
                   className={inputClass}
                   onChange={(e) => set({ status: e.target.value as ClinicalDiagnosis["status"] })}
                 >
@@ -879,6 +885,7 @@ export function PatientClinicalTab({
               <Field label={tx("Сторона", "Seite")}>
                 <NativeComboboxSelect
                   value={draft.laterality ?? ""}
+                  aria-label={tx("Сторона", "Seite")}
                   className={inputClass}
                   onChange={(e) =>
                     set({ laterality: (e.target.value || null) as ClinicalDiagnosis["laterality"] })
@@ -1021,32 +1028,13 @@ export function PatientClinicalTab({
             categoryLabel={categoryLabel}
           />
         )}
-        rowView={(m) => (
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium text-foreground">{m.handelsname}</span>
-              {m.staerke ? <span className="text-[11px] text-muted-foreground">{m.staerke}</span> : null}
-              {m.form ? <span className="text-[11px] text-muted-foreground">{m.form}</span> : null}
-              <Badge variant="outline" className="rounded-full font-mono text-[10px]">
-                {medicationDoseSchema(m)}
-                {m.einheit ? ` ${m.einheit}` : ""}
-              </Badge>
-              <Badge variant="outline" className="rounded-full text-[10px]">
-                {categoryLabel(m.category)}
-              </Badge>
-            </div>
-            {m.wirkstoff ? <p className="text-[11px] text-muted-foreground">{m.wirkstoff}</p> : null}
-            {m.grund ? <p className="text-[11px] text-muted-foreground">{tx("Причина", "Grund")}: {m.grund}</p> : null}
-            {m.hinweis ? <p className="text-[11px] text-muted-foreground">{m.hinweis}</p> : null}
-            {attributionRow(m)}
-          </div>
-        )}
         form={(draft, set) => (
           <div className="space-y-2">
             <div className="grid gap-2 md:grid-cols-2">
               <Field label={tx("Категория", "Kategorie")}>
                 <NativeComboboxSelect
                   value={draft.category}
+                  aria-label={tx("Категория", "Kategorie")}
                   className={inputClass}
                   onChange={(e) => set({ category: e.target.value as ClinicalMedication["category"] })}
                 >
@@ -1183,6 +1171,7 @@ export function PatientClinicalTab({
               <Field label={tx("Тип", "Art")}>
                 <NativeComboboxSelect
                   value={draft.kind ?? ""}
+                  aria-label={tx("Тип", "Art")}
                   className={inputClass}
                   onChange={(e) => set({ kind: (e.target.value || null) as ClinicalExamination["kind"] })}
                 >
@@ -1200,6 +1189,7 @@ export function PatientClinicalTab({
               <Field label={tx("Статус", "Status")}>
                 <NativeComboboxSelect
                   value={draft.status}
+                  aria-label={tx("Статус", "Status")}
                   className={inputClass}
                   onChange={(e) => set({ status: e.target.value as ClinicalExamination["status"] })}
                 >

@@ -41,6 +41,8 @@ export function PatientDocumentGenerateDialog({
 
   const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
   const [templatesLoaded, setTemplatesLoaded] = useState(false);
+  const [templatesError, setTemplatesError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [templateId, setTemplateId] = useState("");
   const [language, setLanguage] = useState("");
   const [autoName, setAutoName] = useState("");
@@ -57,10 +59,13 @@ export function PatientDocumentGenerateDialog({
     }
   }, [open]);
 
-  // Load the template catalog on first open.
+  // Load the template catalog on first open. On failure we surface the error and
+  // leave `templatesLoaded` false so reopening (or the retry link) tries again —
+  // a transient failure must not strand the dialog with a permanently empty list.
   useEffect(() => {
     if (!open || templatesLoaded) return;
     let active = true;
+    setTemplatesError(false);
     apiFetch<TemplateCatalogResponse>("/documents/templates")
       .then((res) => {
         if (!active) return;
@@ -68,12 +73,18 @@ export function PatientDocumentGenerateDialog({
         setTemplatesLoaded(true);
       })
       .catch(() => {
-        if (active) setTemplatesLoaded(true);
+        if (!active) return;
+        setTemplatesError(true);
+        toast.error(
+          lang === "de"
+            ? "Vorlagen konnten nicht geladen werden"
+            : "Не удалось загрузить шаблоны",
+        );
       });
     return () => {
       active = false;
     };
-  }, [open, templatesLoaded]);
+  }, [open, templatesLoaded, reloadKey, lang]);
 
   const selectedTemplate = templates.find((t) => t.id === templateId) ?? null;
   const bindingFields = selectedTemplate ? DOCUMENT_BINDING_FIELDS[selectedTemplate.id] ?? [] : [];
@@ -153,7 +164,11 @@ export function PatientDocumentGenerateDialog({
           onChange={(e) => selectTemplate(e.target.value)}
         >
           <option value="">
-            {templatesLoaded ? tx("Выберите шаблон", "Vorlage wählen") : tx("Загрузка…", "Laden…")}
+            {templatesError
+              ? tx("Ошибка загрузки", "Ladefehler")
+              : templatesLoaded
+                ? tx("Выберите шаблон", "Vorlage wählen")
+                : tx("Загрузка…", "Laden…")}
           </option>
           {templates.map((template) => (
             <option key={template.id} value={template.id}>
@@ -161,6 +176,18 @@ export function PatientDocumentGenerateDialog({
             </option>
           ))}
         </NativeComboboxSelect>
+        {templatesError ? (
+          <p className="mt-1 text-[11px] text-destructive">
+            {tx("Не удалось загрузить шаблоны.", "Vorlagen konnten nicht geladen werden.")}{" "}
+            <button
+              type="button"
+              className="font-medium underline underline-offset-2"
+              onClick={() => setReloadKey((key) => key + 1)}
+            >
+              {tx("Повторить", "Erneut versuchen")}
+            </button>
+          </p>
+        ) : null}
       </label>
 
       {selectedTemplate ? (
