@@ -1244,6 +1244,20 @@ export function buildProvidersQuery(filters: ProviderFilters, forceNonMedical: b
   return query ? `/providers?${query}` : "/providers";
 }
 
+export function buildProviderAttributeValueOptionsQuery(
+  filters: ProviderFilters,
+  forceNonMedical: boolean,
+) {
+  if (!filters.taxonomyAttributeKey.trim()) return "";
+  return buildProvidersQuery(
+    {
+      ...filters,
+      taxonomyAttributeValue: "",
+    },
+    forceNonMedical,
+  );
+}
+
 export function providerToForm(detail: ProviderDetail): ProviderFormState {
   return {
     name: detail.name,

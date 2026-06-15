@@ -6,6 +6,7 @@ import {
   blankDoctorForm,
   blankProviderForm,
   blankServiceForm,
+  buildProviderAttributeValueOptionsQuery,
   buildProvidersQuery,
   composeDoctorDisplayName,
   doctorListDisplayName,
@@ -75,6 +76,24 @@ describe("buildProvidersQuery", () => {
 
     expect(params.get("provider_type")).toBe("non_medical");
     expect(params.get("taxonomy_node_id")).toBe("0f5ac3c1-0000-4000-9000-000000000002");
+  });
+
+  it("builds attribute option queries without the currently selected attribute value", () => {
+    const filters: ProviderFilters = {
+      ...DEFAULT_FILTERS,
+      activeOnly: "",
+      providerType: "non_medical",
+      taxonomyNodeId: "restaurants",
+      taxonomyAttributeKey: "cuisine",
+      taxonomyAttributeValue: "Steak House",
+    };
+
+    const params = paramsFromPath(buildProviderAttributeValueOptionsQuery(filters, false));
+
+    expect(params.get("provider_type")).toBe("non_medical");
+    expect(params.get("taxonomy_node_id")).toBe("restaurants");
+    expect(params.get("taxonomy_attribute_key")).toBe("cuisine");
+    expect(params.get("taxonomy_attribute_value")).toBeNull();
   });
 });
 

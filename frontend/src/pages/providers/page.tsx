@@ -93,6 +93,7 @@ import {
   blankServiceForm,
   blankStaffForm,
   applyDoctorFieldChange,
+  buildProviderAttributeValueOptionsQuery,
   buildProvidersQuery,
   compactDate,
   compactDateTime,
@@ -1642,6 +1643,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     staffBusy,
     staffError,
   } = pageState;
+  const [attributeOptionProviders, setAttributeOptionProviders] = useState<ProviderSummary[]>([]);
   const setProvidersPageField = <K extends keyof ProvidersPageState>(
     field: K,
     value: SetStateAction<ProvidersPageState[K]>,
@@ -1744,6 +1746,14 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     () => buildProvidersQuery(effectiveFilters, permissions.forceNonMedical),
     [effectiveFilters, permissions.forceNonMedical]
   );
+  const attributeValueOptionsPath = useMemo(
+    () =>
+      buildProviderAttributeValueOptionsQuery(
+        effectiveFilters,
+        permissions.forceNonMedical,
+      ),
+    [effectiveFilters, permissions.forceNonMedical],
+  );
 
   const relationshipProviderOptions = useMemo(() => {
     // A doctor↔doctor relationship needs a target doctor, so only providers that
@@ -1810,10 +1820,10 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   const filterAttributeValueOptions = useMemo(
     () =>
       taxonomyAttributeValueOptions(
-        providers,
+        attributeOptionProviders,
         filters.taxonomyAttributeKey,
       ),
-    [filters.taxonomyAttributeKey, providers],
+    [attributeOptionProviders, filters.taxonomyAttributeKey],
   );
   const advancedProviderFilterCount = useMemo(
     () => countAdvancedProviderFilters(filters, permissions.forceNonMedical),
@@ -1996,6 +2006,34 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     providersPath,
     listVersion,
     startProviderListLoad,
+  ]);
+
+  useEffect(() => {
+    if (!permissions.canViewPage || detailPageMode || !attributeValueOptionsPath) {
+      setAttributeOptionProviders([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    void fetchProviders(attributeValueOptionsPath)
+      .then((items) => {
+        if (cancelled) return;
+        setAttributeOptionProviders(items);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAttributeOptionProviders([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    attributeValueOptionsPath,
+    detailPageMode,
+    listVersion,
+    permissions.canViewPage,
   ]);
 
   useEffect(() => {
