@@ -36,6 +36,11 @@ import {
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
+import {
+  contractActionErrorMessage,
+  validateContractStatusForm,
+  type ContractFormValidationMessages,
+} from "@/pages/contracts/model/contracts-model";
 
 import {
   buildPatientLabelPrintHtml,
@@ -1054,6 +1059,43 @@ function usePatientDetailPageContent() {
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const l = (key: string) => t.uiText[key] ?? key;
+  const contractValidationMessages = useMemo<ContractFormValidationMessages>(
+    () => ({
+      invalidConditionsJson:
+        lang === "de"
+          ? `${t.contracts_notes}: Bitte geben Sie gültiges JSON ein.`
+          : `${t.contracts_notes}: введите корректный JSON.`,
+      invalidDate:
+        lang === "de"
+          ? "Bitte prüfen Sie die Datumsfelder im Vertrag."
+          : "Проверьте даты в договоре.",
+      invalidDateTime:
+        lang === "de"
+          ? `${t.contracts_signed_at}: Bitte geben Sie Datum und Uhrzeit korrekt ein.`
+          : `${t.contracts_signed_at}: укажите корректные дату и время.`,
+      invalidPatient:
+        lang === "de"
+          ? `${t.contracts_patient}: Bitte wählen Sie einen gültigen Patienten aus.`
+          : `${t.contracts_patient}: выберите корректного пациента.`,
+      invalidStatus:
+        lang === "de"
+          ? `${t.users_status}: Bitte wählen Sie einen gültigen Status aus.`
+          : `${t.users_status}: выберите корректный статус.`,
+      patientRequired: `${t.contracts_patient}: ${t.cf_required}`,
+      requiredFields:
+        lang === "de"
+          ? "Bitte füllen Sie die Pflichtfelder im Vertrag aus."
+          : "Заполните обязательные поля договора.",
+      sessionExpired:
+        t.uiText.contracts_session_expired_retry ?? t.common_error,
+      validFromRequired: `${l("patients_valid_from")}: ${t.cf_required}`,
+      validToBeforeValidFrom:
+        lang === "de"
+          ? `${l("patients_valid_to")}: darf nicht vor ${l("patients_valid_from")} liegen.`
+          : `${l("patients_valid_to")}: дата не может быть раньше поля «${l("patients_valid_from")}».`,
+    }),
+    [l, lang, t],
+  );
 
   const [pageState, dispatchPageState] = useReducer(
     patientDetailPageReducer,
@@ -1939,6 +1981,14 @@ function usePatientDetailPageContent() {
   async function handleCreateContract(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!id) return;
+    const validationError = validateContractStatusForm(
+      { ...contractCreateForm, conditionsText: "" },
+      contractValidationMessages,
+    );
+    if (validationError) {
+      setTabActionError(validationError);
+      return;
+    }
     setContractBusy(true);
     setTabActionError("");
     try {
@@ -1956,7 +2006,13 @@ function usePatientDetailPageContent() {
       setContractCreateForm(blankContractForm());
       reload();
     } catch (error) {
-      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
+      setTabActionError(
+        contractActionErrorMessage(
+          error,
+          contractValidationMessages,
+          t.common_failed_create,
+        ),
+      );
     } finally {
       setContractBusy(false);
     }
@@ -1976,6 +2032,14 @@ function usePatientDetailPageContent() {
   async function handleSaveContractStatus(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!contractStatusId) return;
+    const validationError = validateContractStatusForm(
+      { ...contractStatusForm, conditionsText: "" },
+      contractValidationMessages,
+    );
+    if (validationError) {
+      setTabActionError(validationError);
+      return;
+    }
     setContractBusy(true);
     setTabActionError("");
     try {
@@ -1992,7 +2056,13 @@ function usePatientDetailPageContent() {
       setContractStatusForm(blankContractForm());
       reload();
     } catch (error) {
-      setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
+      setTabActionError(
+        contractActionErrorMessage(
+          error,
+          contractValidationMessages,
+          t.common_failed_update,
+        ),
+      );
     } finally {
       setContractBusy(false);
     }

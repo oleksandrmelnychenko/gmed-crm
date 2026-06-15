@@ -2290,6 +2290,7 @@ async fn create_appointment(
         }
         if let Err(resp) = ensure_no_overlapping_appointments_in_tx(
             &mut tx,
+            &auth,
             patient_id,
             interpreter_id,
             doctor_id,
@@ -3889,6 +3890,7 @@ async fn update_appointment(
         }
         if let Err(resp) = ensure_no_overlapping_appointments_in_tx(
             &mut tx,
+            &auth,
             target.patient_id,
             body.interpreter_id,
             body.doctor_id,
@@ -3990,6 +3992,7 @@ async fn update_appointment(
             }
             if let Err(resp) = ensure_no_overlapping_appointments_in_tx(
                 &mut tx,
+                &auth,
                 patient_id,
                 body.interpreter_id,
                 body.doctor_id,
@@ -6790,6 +6793,7 @@ async fn acquire_appointment_schedule_locks(
 #[allow(clippy::too_many_arguments)]
 async fn ensure_no_overlapping_appointments_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    auth: &AuthUser,
     patient_id: Uuid,
     interpreter_id: Option<Uuid>,
     doctor_id: Option<Uuid>,
@@ -6799,17 +6803,34 @@ async fn ensure_no_overlapping_appointments_in_tx(
     exclude_appointment_ids: &[Uuid],
 ) -> Result<(), axum::response::Response> {
     let rows = sqlx::query(
-        r#"SELECT id, patient_id, interpreter_id, doctor_id, time_start, time_end
-           FROM appointments
-           WHERE date = $1
-             AND status <> 'cancelled'
-              AND (
-                 patient_id = $2
-                 OR ($3::uuid IS NOT NULL AND interpreter_id = $3)
-                 OR ($4::uuid IS NOT NULL AND doctor_id = $4)
-              )
-              AND NOT (id = ANY($5))
-            FOR UPDATE"#,
+        r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type,
+                  a.care_path_kind, a.status, a.location, a.interpreter_response,
+                  a.checklist_phase, a.patient_id, a.interpreter_id, a.provider_id,
+                  a.doctor_id, a.owner_user_id, a.recurrence_series_id,
+                  a.recurrence_frequency, a.recurrence_interval, a.recurrence_count,
+                  a.recurrence_until, a.recurrence_index,
+                  p.first_name, p.last_name, p.patient_id AS patient_code,
+                  pr.name AS provider_name,
+                  d.name AS doctor_name,
+                  u.name AS interpreter_name,
+                  owner.name AS owner_name,
+                  owner.role AS owner_role
+           FROM appointments a
+           JOIN patients p ON p.id = a.patient_id
+           LEFT JOIN providers pr ON pr.id = a.provider_id
+           LEFT JOIN provider_doctors d ON d.id = a.doctor_id
+           LEFT JOIN users u ON u.id = a.interpreter_id
+           LEFT JOIN users owner ON owner.id = a.owner_user_id
+           WHERE a.date = $1
+             AND a.status <> 'cancelled'
+             AND (
+                 a.patient_id = $2
+                 OR ($3::uuid IS NOT NULL AND a.interpreter_id = $3)
+                 OR ($4::uuid IS NOT NULL AND a.doctor_id = $4)
+             )
+             AND NOT (a.id = ANY($5))
+           ORDER BY a.time_start NULLS FIRST, a.created_at
+           FOR UPDATE OF a"#,
     )
     .bind(date)
     .bind(patient_id)
@@ -6868,18 +6889,64 @@ async fn ensure_no_overlapping_appointments_in_tx(
         {
             scopes.push("doctor");
         }
-        scopes.sort_unstable();
-        scopes.dedup();
+        let appointment_id = row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil());
+        let existing_patient_id = row
+            .try_get::<Uuid, _>("patient_id")
+            .unwrap_or_else(|_| Uuid::nil());
+        let conflict_item =
+            build_appointment_list_json(auth, &row, appointment_id, existing_patient_id);
+        let conflict_title = conflict_item["title"]
+            .as_str()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("existing booking");
+        let conflict_date = conflict_item["date"].as_str().unwrap_or_default();
+        let conflict_start = conflict_item["time_start"].as_str().unwrap_or_default();
+        let conflict_end = conflict_item["time_end"].as_str().unwrap_or_default();
+        let conflict_slot = match (conflict_start.is_empty(), conflict_end.is_empty()) {
+            (false, false) => format!("{conflict_date} {conflict_start}-{conflict_end}"),
+            (false, true) => format!("{conflict_date} {conflict_start}"),
+            _ => conflict_date.to_string(),
+        };
 
+        let mut patient_conflicts = Vec::new();
+        let mut interpreter_conflicts = Vec::new();
+        let mut doctor_conflicts = Vec::new();
+        if scopes.contains(&"patient") {
+            patient_conflicts.push(conflict_item.clone());
+        }
+        if scopes.contains(&"interpreter") {
+            interpreter_conflicts.push(conflict_item.clone());
+        }
+        if scopes.contains(&"doctor") {
+            doctor_conflicts.push(conflict_item.clone());
+        }
         let message = if scopes.is_empty() {
-            "Appointment conflicts with an existing booking".to_string()
+            format!(
+                "Appointment conflict: selected slot overlaps with {conflict_title} at {conflict_slot}"
+            )
         } else {
             format!(
-                "Appointment conflicts with an existing {} booking",
+                "Appointment conflict: selected slot overlaps with existing {} booking {conflict_title} at {conflict_slot}",
                 scopes.join("/")
             )
         };
-        return Err(err(StatusCode::CONFLICT, &message));
+        return Err(err_with_details(
+            StatusCode::CONFLICT,
+            &message,
+            serde_json::json!({
+                "conflicts": {
+                    "patient_conflict_count": patient_conflicts.len(),
+                    "interpreter_conflict_count": interpreter_conflicts.len(),
+                    "doctor_conflict_count": doctor_conflicts.len(),
+                    "has_conflicts": !patient_conflicts.is_empty()
+                        || !interpreter_conflicts.is_empty()
+                        || !doctor_conflicts.is_empty(),
+                    "patient_conflicts": patient_conflicts,
+                    "interpreter_conflicts": interpreter_conflicts,
+                    "doctor_conflicts": doctor_conflicts,
+                }
+            }),
+        ));
     }
 
     Ok(())
@@ -7243,6 +7310,20 @@ async fn validate_provider_doctor_context(
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(serde_json::json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message }))).into_response()
+}
+
+fn err_with_details(
+    status: StatusCode,
+    message: &str,
+    details: serde_json::Value,
+) -> axum::response::Response {
+    let mut body = serde_json::json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message });
+    if let (Some(body), Some(details)) = (body.as_object_mut(), details.as_object()) {
+        for (key, value) in details {
+            body.insert(key.clone(), value.clone());
+        }
+    }
+    (status, Json(body)).into_response()
 }
 
 async fn ensure_patient_access(

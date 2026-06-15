@@ -57,6 +57,7 @@ import {
 import {
   buildLocalScheduleWarnings,
   buildScheduleNotice,
+  formatScheduleConflictError,
 } from "@/pages/appointments/model/schedule-warnings";
 import { filterAppointmentOwnerOptions } from "@/pages/appointments/model/staff-roles";
 import {
@@ -199,7 +200,7 @@ function formatEditAppointmentError(
   if (message.includes("recurrence rule updates require following or series scope")) {
     return translations.uiText.appointments_recurring_scope_required ?? message;
   }
-  return message || fallback;
+  return formatScheduleConflictError(error, fallback);
 }
 
 const selectClassName = appointmentSelectControlClassName;

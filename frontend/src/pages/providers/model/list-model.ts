@@ -718,6 +718,8 @@ export function blankDoctorForm(): DoctorFormState {
     roleCode: "",
     roleLabel: "",
     subrole: "",
+    website: "",
+    schwerpunkt: "",
     gender: "unknown",
     openingHours: "",
     fachbereich: "",
@@ -1132,6 +1134,44 @@ export function taxonomyAttributeValue(value: string, key: string) {
   return String(raw);
 }
 
+export function taxonomyAttributeValueOptions(
+  providers: readonly ProviderSummary[],
+  key: string,
+) {
+  const attributeKey = key.trim();
+  if (!attributeKey) return [];
+
+  const seen = new Set<string>();
+  const values: string[] = [];
+  const addValue = (raw: unknown) => {
+    if (Array.isArray(raw)) {
+      for (const item of raw) addValue(item);
+      return;
+    }
+    if (
+      typeof raw !== "string" &&
+      typeof raw !== "number" &&
+      typeof raw !== "boolean"
+    ) {
+      return;
+    }
+    const value = String(raw).trim();
+    if (!value) return;
+    const normalized = value.toLocaleLowerCase();
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    values.push(value);
+  };
+
+  for (const provider of providers) {
+    addValue(provider.taxonomy_attributes?.[attributeKey]);
+  }
+
+  return values.sort((left, right) =>
+    left.localeCompare(right, undefined, { sensitivity: "base" }),
+  );
+}
+
 export function updateTaxonomyAttributeValue(value: string, key: string, nextValue: string) {
   const next = parseTaxonomyAttributes(value);
   if (nextValue.trim()) {
@@ -1174,7 +1214,13 @@ export function buildProvidersQuery(filters: ProviderFilters, forceNonMedical: b
   const providerType = forceNonMedical ? "non_medical" : filters.providerType;
   if (filters.search.trim()) params.set("search", filters.search.trim());
   if (providerType) params.set("provider_type", providerType);
-  if (filters.activeOnly) params.set("active_only", filters.activeOnly);
+  if (filters.activeOnly === "true") {
+    params.set("active_only", "true");
+  } else if (filters.activeOnly === "false") {
+    params.set("is_active", "false");
+  } else {
+    params.set("active_only", "false");
+  }
   if (filters.city.trim()) params.set("city", filters.city.trim());
   if (filters.country.trim()) params.set("country", filters.country.trim());
   if (filters.fachbereich.trim()) params.set("fachbereich", filters.fachbereich.trim());
@@ -1236,6 +1282,8 @@ export function doctorToForm(doctor: DoctorSummary): DoctorFormState {
     roleCode: doctor.role_code ?? "",
     roleLabel: doctor.role_label ?? "",
     subrole: doctor.subrole ?? "",
+    website: doctor.website ?? "",
+    schwerpunkt: doctor.schwerpunkt ?? "",
     gender: normalizeGender(doctor.gender),
     openingHours: doctor.opening_hours ?? "",
     fachbereich: doctor.fachbereich ?? "",
@@ -1371,6 +1419,8 @@ export function toDoctorPayload(form: DoctorFormState) {
     role_code: toOptional(form.roleCode),
     role_label: form.roleCode === "other" ? toOptional(form.roleLabel) : null,
     subrole: toOptional(form.subrole),
+    website: toOptional(form.website),
+    schwerpunkt: toOptional(form.schwerpunkt),
     gender: form.gender,
     opening_hours: toOptional(form.openingHours),
     fachbereich: toOptional(form.fachbereich),

@@ -107,6 +107,7 @@ export type TranslationRequest = {
 };
 
 export type TranslationWorkspaceDraft = {
+  assignedTo: string | null;
   note: string;
   sourceLanguage: string;
   sourceText: string;

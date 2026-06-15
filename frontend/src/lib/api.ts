@@ -12,6 +12,7 @@ export const DEFAULT_API_TIMEOUT_MS = 20_000;
 type ApiErrorBody = {
   error?: string;
   message?: string;
+  [key: string]: unknown;
 };
 
 type ApiFetchInit = RequestInit & {

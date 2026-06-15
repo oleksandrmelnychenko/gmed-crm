@@ -45,7 +45,11 @@ import {
   staffLabel,
 } from "@/pages/appointments/model/labels";
 import { buildConflictQuery } from "@/pages/appointments/model/query-builders";
-import { buildLocalScheduleWarnings, buildScheduleNotice } from "@/pages/appointments/model/schedule-warnings";
+import {
+  buildLocalScheduleWarnings,
+  buildScheduleNotice,
+  formatScheduleConflictError,
+} from "@/pages/appointments/model/schedule-warnings";
 import {
   providerSelectionFitsAppointmentScope,
 } from "@/pages/appointments/model/provider-taxonomy";
@@ -433,10 +437,10 @@ function useCreateAppointmentSheetContent({
       onCreated({ id: result.id, notice });
     } catch (submitError) {
       dispatchSheetState({
-        error:
-          submitError instanceof Error
-            ? submitError.message
-            : appointmentText("appointments_failed_to_create_appointment"),
+        error: formatScheduleConflictError(
+          submitError,
+          appointmentText("appointments_failed_to_create_appointment"),
+        ),
         busy: false,
       });
     }

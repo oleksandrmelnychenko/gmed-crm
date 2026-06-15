@@ -321,4 +321,310 @@ test.describe("appointments recurring flows", () => {
 
     await expect(cancelWholeSeriesButton).toHaveAttribute("aria-pressed", "true");
   });
+
+  test("staff can save recurring rule edits and refresh the appointment list", async ({
+    page,
+  }) => {
+    const patientId = "00000000-0000-0000-0000-00000000a011";
+    const providerId = "00000000-0000-0000-0000-00000000b011";
+    const doctorId = "00000000-0000-0000-0000-00000000c011";
+    const ownerId = "00000000-0000-0000-0000-000000000011";
+    const seriesId = "series-root-011";
+    const appointmentIds = [
+      "00000000-0000-0000-0000-00000000d011",
+      "00000000-0000-0000-0000-00000000d012",
+      "00000000-0000-0000-0000-00000000d013",
+      "00000000-0000-0000-0000-00000000d014",
+    ];
+
+    let recurrenceInterval = 1;
+    let recurrenceCount = 3;
+    let updateSeen = false;
+    let listRequestsAfterUpdate = 0;
+    let capturedUpdatePayload: Record<string, unknown> | null = null;
+
+    const activeAppointmentIds = () => appointmentIds.slice(0, recurrenceCount);
+
+    const buildList = () =>
+      activeAppointmentIds().map((id, index) => ({
+        id,
+        title: "Recurring therapy",
+        date: `2026-04-${14 + index * recurrenceInterval}`,
+        time_start: "09:00",
+        time_end: "10:00",
+        type: "medical",
+        care_path_kind: "control",
+        status: "planned",
+        location: "Clinic Cologne",
+        interpreter_response: null,
+        checklist_phase: "coordination",
+        patient_id: patientId,
+        patient_name: "Anna Muster",
+        patient_pid: "PT-011",
+        provider_id: providerId,
+        provider_name: "Clinic Cologne",
+        doctor_id: doctorId,
+        doctor_name: "Doctor Cologne",
+        owner_user_id: ownerId,
+        owner_name: "Admin GMED",
+        owner_role: "ceo",
+        interpreter_id: null,
+        interpreter_name: null,
+        recurrence_series_id: seriesId,
+        recurrence_frequency: "weekly",
+        recurrence_interval: recurrenceInterval,
+        recurrence_count: recurrenceCount,
+        recurrence_until: null,
+        recurrence_index: index,
+        recurrence_series_size: recurrenceCount,
+        is_blocked: false,
+      }));
+
+    const buildScopePreview = () =>
+      buildList().map((item, index) => ({
+        id: item.id,
+        date: item.date,
+        status: item.status,
+        recurrence_index: index,
+        open_checklist_count: 0,
+      }));
+
+    const buildDetail = (id: string) => {
+      const listItem = buildList().find((item) => item.id === id) ?? buildList()[0];
+      return {
+        ...listItem,
+        category: "followup",
+        preparation_notes: null,
+        followup_notes: null,
+        notes: "Recurring treatment block.",
+        order_id: null,
+        order_number: null,
+        recurrence_parent_series_id: null,
+        recurrence_split_from_appointment_id: null,
+        recurrence_split_from_index: null,
+        recurring_scope_preview: buildScopePreview(),
+        recurring_lineage_history: [
+          {
+            series_id: seriesId,
+            parent_series_id: null,
+            split_from_appointment_id: null,
+            split_from_index: null,
+            first_date: "2026-04-14",
+            last_date: `2026-04-${14 + (recurrenceCount - 1) * recurrenceInterval}`,
+            total_occurrences: recurrenceCount,
+            active_occurrences: recurrenceCount,
+            completed_occurrences: 0,
+            cancelled_occurrences: 0,
+            relation: "current",
+            depth: 0,
+          },
+        ],
+        created_at: "2026-04-01T09:00:00Z",
+      };
+    };
+
+    await page.addInitScript(() => {
+      window.localStorage.setItem("gmed_lang", "de");
+    });
+
+    await page.route("**/auth/**", async (route) => {
+      const url = new URL(route.request().url());
+      const { pathname } = url;
+
+      if (pathname === "/auth/login" && route.request().method() === "POST") {
+        return json(route, {
+          access_token: "playwright-access-token",
+          refresh_token: "playwright-refresh-token",
+          token_type: "Bearer",
+          expires_in: 900,
+        });
+      }
+
+      if (pathname === "/auth/logout") {
+        return json(route, { ok: true });
+      }
+
+      return json(route, { message: "Not mocked" }, 404);
+    });
+
+    await page.route("**/api/v1/**", async (route) => {
+      const url = new URL(route.request().url());
+      const path = url.pathname.replace("/api/v1", "");
+
+      if (path === "/me") {
+        return json(route, {
+          id: ownerId,
+          email: "admin@gmed.de",
+          name: "Admin GMED",
+          role: "ceo",
+          created_at: "2026-01-01T00:00:00Z",
+        });
+      }
+
+      if (path === "/patients") {
+        return json(route, [
+          {
+            id: patientId,
+            patient_id: "PT-011",
+            first_name: "Anna",
+            last_name: "Muster",
+          },
+        ]);
+      }
+
+      if (path === "/providers") {
+        return json(route, [
+          {
+            id: providerId,
+            name: "Clinic Cologne",
+            provider_type: "medical",
+            address_city: "Cologne",
+            fachbereich: "Cardiology",
+          },
+        ]);
+      }
+
+      if (path === `/providers/${providerId}/doctors`) {
+        return json(route, [
+          {
+            id: doctorId,
+            name: "Doctor Cologne",
+            title: "Dr.",
+            fachbereich: "Cardiology",
+          },
+        ]);
+      }
+
+      if (path === "/appointments/meta/interpreters") {
+        return json(route, []);
+      }
+
+      if (path === "/appointments/meta/staff") {
+        return json(route, [
+          {
+            id: ownerId,
+            name: "Admin GMED",
+            role: "ceo",
+          },
+        ]);
+      }
+
+      if (
+        path === "/appointments/meta/conflicts" ||
+        path.startsWith("/appointments/meta/conflicts?")
+      ) {
+        return json(route, {
+          patient_conflict_count: 0,
+          interpreter_conflict_count: 0,
+          has_conflicts: false,
+          patient_conflicts: [],
+          interpreter_conflicts: [],
+        });
+      }
+
+      if (path === "/appointments" || path.startsWith("/appointments?")) {
+        if (updateSeen) {
+          listRequestsAfterUpdate += 1;
+        }
+        return json(route, buildList());
+      }
+
+      if (
+        path === "/appointments/meta/attention" ||
+        path.startsWith("/appointments/meta/attention?")
+      ) {
+        return json(route, []);
+      }
+
+      if (
+        path === `/appointments/${appointmentIds[0]}/update` &&
+        route.request().method() === "POST"
+      ) {
+        capturedUpdatePayload = JSON.parse(route.request().postData() ?? "{}") as
+          Record<string, unknown>;
+        recurrenceInterval =
+          Number(capturedUpdatePayload.recurrence_interval) || recurrenceInterval;
+        recurrenceCount =
+          Number(capturedUpdatePayload.recurrence_count) || recurrenceCount;
+        updateSeen = true;
+        return json(route, { ok: true });
+      }
+
+      if (path.startsWith("/appointments/") && path.endsWith("/checklist")) {
+        return json(route, []);
+      }
+
+      if (path.startsWith("/appointments/") && path.endsWith("/reminders")) {
+        return json(route, []);
+      }
+
+      if (path.startsWith("/appointments/") && path.endsWith("/report")) {
+        return json(route, null);
+      }
+
+      if (
+        path.startsWith("/appointments/") &&
+        path.endsWith("/communications")
+      ) {
+        return json(route, []);
+      }
+
+      if (path.startsWith("/tasks")) {
+        return json(route, []);
+      }
+
+      if (path.startsWith("/concierge-services")) {
+        return json(route, []);
+      }
+
+      if (path === `/patients/${patientId}/assignments`) {
+        return json(route, []);
+      }
+
+      const selectedId = appointmentIds.find((item) => path === `/appointments/${item}`);
+      if (selectedId) {
+        return json(route, buildDetail(selectedId));
+      }
+
+      return json(route, []);
+    });
+
+    await page.goto("/login");
+    await page.locator("#email").fill("admin@gmed.de");
+    await page.locator("#password").fill("admin123");
+    await page.getByRole("button", { name: /Anmelden|Войти/i }).click();
+    await page.waitForURL(/\/$/, { timeout: 15_000 });
+
+    await page.goto(`/appointments?appointment=${appointmentIds[0]}`);
+
+    await page.getByRole("button", { name: /Bearbeiten|Изменить/i }).first().click();
+    const scopeSelect = page.getByRole("combobox", {
+      name: /Terminänderung anwenden auf|Применить смену расписания к/i,
+    });
+    await chooseComboboxOption(page, scopeSelect, /Ganze Serie|Вся серия/i);
+    await page.getByLabel(/Wiederholen alle|Повторять каждые/i).fill("2");
+    await page.getByLabel(/Anzahl Termine|Всего повторов/i).fill("4");
+
+    const updateRequest = page.waitForRequest((request) => {
+      return (
+        request.method() === "POST" &&
+        request.url().includes(`/api/v1/appointments/${appointmentIds[0]}/update`)
+      );
+    });
+    await Promise.all([
+      updateRequest,
+      page.getByRole("button", { name: /Speichern|Сохранить/i }).click(),
+    ]);
+
+    expect(capturedUpdatePayload).toEqual(
+      expect.objectContaining({
+        recurrence_count: 4,
+        recurrence_frequency: "weekly",
+        recurrence_interval: 2,
+        recurrence_scope: "series",
+        recurrence_until: null,
+      }),
+    );
+    await expect.poll(() => listRequestsAfterUpdate).toBeGreaterThan(0);
+  });
 });

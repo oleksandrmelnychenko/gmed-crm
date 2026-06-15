@@ -76,6 +76,7 @@ import {
   buildContractsPath,
   buildQuotesPath,
   buildSearchParams,
+  contractActionErrorMessage,
   contractToStatusForm,
   contractsPermissions,
   enumLabel,
@@ -86,6 +87,7 @@ import {
   patientOptionLabel,
   quoteToStatusForm,
   toOptional,
+  validateContractStatusForm,
   validateCreateContractForm,
   valueToInput,
 } from "./model/contracts-model";
@@ -878,7 +880,29 @@ function useContractsPageContent() {
         lang === "de"
           ? `${t.contracts_notes}: Bitte geben Sie gültiges JSON ein.`
           : `${t.contracts_notes}: введите корректный JSON.`,
+      invalidDate:
+        lang === "de"
+          ? "Bitte prüfen Sie die Datumsfelder im Vertrag."
+          : "Проверьте даты в договоре.",
+      invalidDateTime:
+        lang === "de"
+          ? `${t.contracts_signed_at}: Bitte geben Sie Datum und Uhrzeit korrekt ein.`
+          : `${t.contracts_signed_at}: укажите корректные дату и время.`,
+      invalidPatient:
+        lang === "de"
+          ? `${t.contracts_patient}: Bitte wählen Sie einen gültigen Patienten aus.`
+          : `${t.contracts_patient}: выберите корректного пациента.`,
+      invalidStatus:
+        lang === "de"
+          ? `${t.users_status}: Bitte wählen Sie einen gültigen Status aus.`
+          : `${t.users_status}: выберите корректный статус.`,
       patientRequired: `${t.contracts_patient}: ${t.cf_required}`,
+      requiredFields:
+        lang === "de"
+          ? "Bitte füllen Sie die Pflichtfelder im Vertrag aus."
+          : "Заполните обязательные поля договора.",
+      sessionExpired:
+        t.uiText.contracts_session_expired_retry ?? t.common_error,
       validFromRequired: `${t.providers_service_valid_from}: ${t.cf_required}`,
       validToBeforeValidFrom:
         lang === "de"
@@ -888,10 +912,14 @@ function useContractsPageContent() {
     [
       lang,
       t.cf_required,
+      t.common_error,
       t.contracts_notes,
       t.contracts_patient,
+      t.contracts_signed_at,
       t.providers_service_valid_from,
       t.providers_service_valid_to,
+      t.uiText.contracts_session_expired_retry,
+      t.users_status,
     ],
   );
 
@@ -1686,7 +1714,13 @@ function useContractsPageContent() {
       setContractsReloadToken((current) => current + 1);
       openContract(result.id);
     } catch (error) {
-      setCreateContractError(error instanceof Error ? error.message : t.common_error);
+      setCreateContractError(
+        contractActionErrorMessage(
+          error,
+          createContractValidationMessages,
+          t.common_error,
+        ),
+      );
     } finally {
       setCreateContractBusy(false);
     }
@@ -1772,6 +1806,14 @@ function useContractsPageContent() {
 
   async function handleSaveContractStatus() {
     if (!selectedContractId) return;
+    const validationError = validateContractStatusForm(
+      contractStatusForm,
+      createContractValidationMessages,
+    );
+    if (validationError) {
+      setContractStatusError(validationError);
+      return;
+    }
     setContractStatusBusy(true);
     setContractStatusError(null);
     try {
@@ -1791,7 +1833,13 @@ function useContractsPageContent() {
       });
       setContractsReloadToken((current) => current + 1);
     } catch (error) {
-      setContractStatusError(contractActionErrorMessage(error, t));
+      setContractStatusError(
+        contractActionErrorMessage(
+          error,
+          createContractValidationMessages,
+          t.common_error,
+        ),
+      );
     } finally {
       setContractStatusBusy(false);
     }
@@ -3155,20 +3203,6 @@ function titleWithDot(title: ReactNode) {
       <span>{title}</span>
     </span>
   );
-}
-
-function contractActionErrorMessage(
-  error: unknown,
-  translations: { common_error: string; uiText: Record<string, string> },
-) {
-  const message = error instanceof Error ? error.message : "";
-  if (message.includes("Invalid or expired token")) {
-    return (
-      translations.uiText.contracts_session_expired_retry ??
-      translations.common_error
-    );
-  }
-  return message || translations.common_error;
 }
 
 function Field({

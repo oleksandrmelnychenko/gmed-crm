@@ -189,6 +189,18 @@ function runtimeLocale() {
   return getLang() === "ru" ? "ru-RU" : "de-DE";
 }
 
+function translationWorkspaceDraftFromRequest(
+  request: TranslationRequest,
+): TranslationWorkspaceDraft {
+  return {
+    assignedTo: request.assigned_to ?? null,
+    note: request.note ?? "",
+    sourceLanguage: request.source_language ?? "",
+    sourceText: request.source_text ?? "",
+    translatedText: request.translated_text ?? "",
+  };
+}
+
 function formatRoleLabel(role?: string | null) {
   const tr = runtimeTranslations();
   if (!role) return tr.common_unknown;
@@ -1407,12 +1419,7 @@ function StaffDocumentsPage({
   useEffect(() => {
     const next: Record<string, TranslationWorkspaceDraft> = {};
     for (const request of translationRequests) {
-      next[request.id] = {
-        note: request.note ?? "",
-        sourceLanguage: request.source_language ?? "",
-        sourceText: request.source_text ?? "",
-        translatedText: request.translated_text ?? "",
-      };
+      next[request.id] = translationWorkspaceDraftFromRequest(request);
     }
     translationDraftsRef.current = next;
     setTranslationDrafts(next);
@@ -1868,6 +1875,7 @@ function StaffDocumentsPage({
     patch: Partial<TranslationWorkspaceDraft>,
   ) {
     const nextDraft: TranslationWorkspaceDraft = {
+      assignedTo: translationDraftsRef.current[requestId]?.assignedTo ?? null,
       note: translationDraftsRef.current[requestId]?.note ?? "",
       sourceLanguage: translationDraftsRef.current[requestId]?.sourceLanguage ?? "",
       sourceText: translationDraftsRef.current[requestId]?.sourceText ?? "",
@@ -1946,25 +1954,62 @@ function StaffDocumentsPage({
     setTranslationError("");
     try {
       const existingDraft = translationDraftsRef.current[requestId];
+      const currentRequest = translationRequests.find(
+        (request) => request.id === requestId,
+      );
+      const assignedToProvided =
+        Boolean(options && "assignedTo" in options) ||
+        Boolean(patch && "assignedTo" in patch);
+      const assignedTo =
+        options && "assignedTo" in options
+          ? (options.assignedTo ?? null)
+          : patch && "assignedTo" in patch
+            ? (patch.assignedTo ?? null)
+            : existingDraft?.assignedTo ?? currentRequest?.assigned_to ?? null;
       const draft: TranslationWorkspaceDraft = {
-        note: patch?.note ?? existingDraft?.note ?? "",
+        assignedTo,
+        note: patch?.note ?? existingDraft?.note ?? currentRequest?.note ?? "",
         sourceLanguage:
-          patch?.sourceLanguage ?? existingDraft?.sourceLanguage ?? "",
-        sourceText: patch?.sourceText ?? existingDraft?.sourceText ?? "",
+          patch?.sourceLanguage ??
+          existingDraft?.sourceLanguage ??
+          currentRequest?.source_language ??
+          "",
+        sourceText:
+          patch?.sourceText ??
+          existingDraft?.sourceText ??
+          currentRequest?.source_text ??
+          "",
         translatedText:
-          patch?.translatedText ?? existingDraft?.translatedText ?? "",
+          patch?.translatedText ??
+          existingDraft?.translatedText ??
+          currentRequest?.translated_text ??
+          "",
       };
-      await updateTranslationRequest(requestId, {
+      const updatedRequest = await updateTranslationRequest(requestId, {
         status,
         note: draft.note.trim() || null,
         source_language: draft.sourceLanguage || null,
         source_text: draft.sourceText.trim() || null,
         translated_text: draft.translatedText.trim() || null,
-        assigned_to: options?.assignedTo || undefined,
+        assigned_to: assignedToProvided ? draft.assignedTo : undefined,
         create_translated_document: options?.createTranslatedDocument || undefined,
         translated_document_auto_name: options?.translatedDocumentAutoName || undefined,
       });
-      await reloadTranslationRequests(detail.id);
+      setTranslationRequests((current) => {
+        const hasRequest = current.some(
+          (request) => request.id === updatedRequest.id,
+        );
+        if (!hasRequest) {
+          return [updatedRequest, ...current];
+        }
+        return current.map((request) =>
+          request.id === updatedRequest.id ? updatedRequest : request,
+        );
+      });
+      updateTranslationDraft(
+        updatedRequest.id,
+        translationWorkspaceDraftFromRequest(updatedRequest),
+      );
       clearApiCache("/documents/translation-requests");
       clearApiCache("/documents/translation-requests?status=pending,in_progress");
       setVersion((current) => current + 1);
@@ -1996,7 +2041,8 @@ function StaffDocumentsPage({
     try {
       await updateTranslationRequest(request.id, {
         status,
-        assigned_to: options?.assignedTo || undefined,
+        assigned_to:
+          options && "assignedTo" in options ? options.assignedTo : undefined,
         create_translated_document: options?.createTranslatedDocument || undefined,
         translated_document_auto_name: options?.translatedDocumentAutoName || undefined,
       });
@@ -4608,12 +4654,9 @@ function StaffDocumentsPage({
                     ) : (
                       <div className="space-y-0">
                         {translationRequests.map((request) => {
-                          const draft = translationDrafts[request.id] ?? {
-                            note: request.note ?? "",
-                            sourceLanguage: request.source_language ?? "",
-                            sourceText: request.source_text ?? "",
-                            translatedText: request.translated_text ?? "",
-                          };
+                          const draft =
+                            translationDrafts[request.id] ??
+                            translationWorkspaceDraftFromRequest(request);
                           const canEditWorkspace =
                             canUpdateTranslation && request.status !== "cancelled";
                           const canActOnTranslation =
@@ -4915,14 +4958,17 @@ function StaffDocumentsPage({
                                         </Field>
                                         <Field label={t.documents_assignee}>
                                           <NativeComboboxSelect
-                                            value={request.assigned_to ?? ""}
+                                            value={draft.assignedTo ?? ""}
                                             onChange={(event) => {
-                                              const assignedTo = event.target.value;
-                                              if (!assignedTo) return;
+                                              const assignedTo =
+                                                event.target.value || null;
+                                              updateTranslationDraft(request.id, {
+                                                assignedTo,
+                                              });
                                               void handleUpdateTranslationRequest(
                                                 request.id,
                                                 request.status === "pending" ? "in_progress" : request.status,
-                                                undefined,
+                                                { assignedTo },
                                                 t.documents_assignee_updated,
                                                 { assignedTo },
                                               );

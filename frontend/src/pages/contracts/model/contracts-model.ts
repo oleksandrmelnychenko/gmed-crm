@@ -112,10 +112,72 @@ export function blankContractForm(patientId = ""): ContractFormState {
 
 export type ContractFormValidationMessages = {
   invalidConditionsJson: string;
+  invalidDate: string;
+  invalidDateTime: string;
+  invalidPatient: string;
+  invalidStatus: string;
   patientRequired: string;
+  requiredFields: string;
+  sessionExpired: string;
   validFromRequired: string;
   validToBeforeValidFrom: string;
 };
+
+function errorStatus(error: unknown) {
+  if (!error || typeof error !== "object" || !("status" in error)) return null;
+  const status = (error as { status?: unknown }).status;
+  return typeof status === "number" ? status : null;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "";
+}
+
+function hasAnyNeedle(message: string, needles: string[]) {
+  const normalized = message.toLowerCase();
+  return needles.some((needle) => normalized.includes(needle));
+}
+
+export function contractActionErrorMessage(
+  error: unknown,
+  messages: ContractFormValidationMessages,
+  fallback: string,
+) {
+  const message = errorMessage(error);
+  if (message.includes("Invalid or expired token")) {
+    return messages.sessionExpired || fallback;
+  }
+
+  if (errorStatus(error) === 422) {
+    if (
+      hasAnyNeedle(message, [
+        "patient is required",
+        "missing field `patient_id`",
+        "missing field \"patient_id\"",
+      ])
+    ) {
+      return messages.patientRequired;
+    }
+    if (hasAnyNeedle(message, ["invalid patient", "patient_id", "uuid"])) {
+      return messages.invalidPatient;
+    }
+    if (hasAnyNeedle(message, ["valid-from is required", "valid_from"])) {
+      return messages.validFromRequired;
+    }
+    if (hasAnyNeedle(message, ["invalid status", "status"])) {
+      return messages.invalidStatus;
+    }
+    if (hasAnyNeedle(message, ["invalid datetime", "rfc3339", "signed_at"])) {
+      return messages.invalidDateTime;
+    }
+    if (hasAnyNeedle(message, ["invalid date", "valid_to", "valid_from"])) {
+      return messages.invalidDate;
+    }
+    return messages.requiredFields;
+  }
+
+  return message || fallback;
+}
 
 export function validateCreateContractForm(
   form: ContractFormState,
@@ -123,6 +185,23 @@ export function validateCreateContractForm(
 ) {
   if (!form.patientId) return messages.patientRequired;
   if (!form.validFrom) return messages.validFromRequired;
+  if (form.validTo && form.validFrom && form.validTo < form.validFrom) {
+    return messages.validToBeforeValidFrom;
+  }
+  if (form.conditionsText.trim()) {
+    try {
+      JSON.parse(form.conditionsText);
+    } catch {
+      return messages.invalidConditionsJson;
+    }
+  }
+  return "";
+}
+
+export function validateContractStatusForm(
+  form: Pick<ContractStatusFormState, "validFrom" | "validTo" | "conditionsText">,
+  messages: ContractFormValidationMessages,
+) {
   if (form.validTo && form.validFrom && form.validTo < form.validFrom) {
     return messages.validToBeforeValidFrom;
   }

@@ -2189,6 +2189,78 @@ async fn translation_workspace_can_store_source_and_translated_text() {
     assert_eq!(status, StatusCode::OK);
     let request_id = create_body["id"].as_str().unwrap().to_string();
 
+    let (status, auto_assigned_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/translation-requests/{request_id}/update"),
+        &admin_bearer,
+        Some(json!({
+            "status": "in_progress"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(auto_assigned_body["status"], "in_progress");
+    assert_eq!(auto_assigned_body["assigned_to"], admin_id.to_string());
+    assert!(auto_assigned_body["assigned_at"].as_str().is_some());
+
+    let (status, draft_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/translation-requests/{request_id}/update"),
+        &admin_bearer,
+        Some(json!({
+            "status": "in_progress",
+            "assigned_to": admin_id,
+            "source_language": "de",
+            "source_text": "Hallo Welt",
+            "translated_text": "Hallo Welt auf Deutsch",
+            "note": "Draft saved before completion."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(draft_body["status"], "in_progress");
+    assert_eq!(draft_body["source_language"], "de");
+    assert_eq!(draft_body["source_text"], "Hallo Welt");
+    assert_eq!(draft_body["translated_text"], "Hallo Welt auf Deutsch");
+    assert_eq!(draft_body["note"], "Draft saved before completion.");
+    assert_eq!(draft_body["assigned_to"], admin_id.to_string());
+    assert!(draft_body["translated_at"].as_str().is_some());
+    assert!(draft_body["completed_at"].is_null());
+
+    let (status, list_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/translation-requests"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list_body[0]["status"], "in_progress");
+    assert_eq!(list_body[0]["source_text"], "Hallo Welt");
+    assert_eq!(list_body[0]["translated_text"], "Hallo Welt auf Deutsch");
+    assert_eq!(list_body[0]["note"], "Draft saved before completion.");
+    assert_eq!(list_body[0]["assigned_to"], admin_id.to_string());
+
+    let (status, cleared_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/translation-requests/{request_id}/update"),
+        &admin_bearer,
+        Some(json!({
+            "status": "in_progress",
+            "assigned_to": null
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(cleared_body["assigned_to"].is_null());
+    assert!(cleared_body["assigned_at"].is_null());
+    assert_eq!(cleared_body["source_text"], "Hallo Welt");
+    assert_eq!(cleared_body["translated_text"], "Hallo Welt auf Deutsch");
+
     let (status, update_body) = json_request(
         &app,
         "POST",

@@ -1229,7 +1229,7 @@ struct CreateDocumentTranslationRequest {
 #[derive(Deserialize)]
 struct UpdateDocumentTranslationRequest {
     status: String,
-    assigned_to: Option<Uuid>,
+    assigned_to: Option<serde_json::Value>,
     note: Option<String>,
     source_language: Option<String>,
     source_text: Option<String>,
@@ -14296,16 +14296,36 @@ async fn update_document_translation_request(
         );
     }
 
-    let assigned_to = match body.assigned_to {
-        Some(user_id) if user_id != Uuid::nil() => {
-            if let Err(resp) = validate_translation_assignee(&state, user_id).await {
-                return resp;
+    let assigned_to_update = match body.assigned_to.as_ref() {
+        Some(serde_json::Value::Null) => Some(None),
+        Some(serde_json::Value::String(raw_user_id)) if raw_user_id.trim().is_empty() => Some(None),
+        Some(serde_json::Value::String(raw_user_id)) => {
+            let Ok(user_id) = Uuid::parse_str(raw_user_id.trim()) else {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Invalid translation assignee",
+                );
+            };
+            if user_id == Uuid::nil() {
+                Some(None)
+            } else {
+                if let Err(resp) = validate_translation_assignee(&state, user_id).await {
+                    return resp;
+                }
+                Some(Some(user_id))
             }
-            Some(user_id)
         }
-        _ if next_status == "in_progress" => Some(auth.user_id),
-        _ => None,
+        Some(_) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid translation assignee",
+            );
+        }
+        None if next_status == "in_progress" => Some(Some(auth.user_id)),
+        None => None,
     };
+    let assigned_to_provided = assigned_to_update.is_some();
+    let assigned_to = assigned_to_update.flatten();
 
     let requested_language = request_row
         .try_get::<String, _>("requested_language")
@@ -14354,9 +14374,10 @@ async fn update_document_translation_request(
                source_text = COALESCE($5, source_text),
                translated_text = COALESCE($6, translated_text),
                translated_document_id = COALESCE($8, translated_document_id),
-               assigned_to = COALESCE($9, assigned_to),
+               assigned_to = CASE WHEN $10 THEN $9 ELSE assigned_to END,
                assigned_at = CASE
-                   WHEN $9 IS NOT NULL AND assigned_to IS DISTINCT FROM $9 THEN now()
+                   WHEN $10 AND $9 IS NULL THEN NULL
+                   WHEN $10 AND $9 IS NOT NULL AND assigned_to IS DISTINCT FROM $9 THEN now()
                    ELSE assigned_at
                END,
                translated_by = CASE
@@ -14381,6 +14402,7 @@ async fn update_document_translation_request(
     .bind(auth.user_id)
     .bind(translated_document_id)
     .bind(assigned_to)
+    .bind(assigned_to_provided)
     .execute(&state.db)
     .await
     {

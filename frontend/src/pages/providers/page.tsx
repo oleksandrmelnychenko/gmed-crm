@@ -122,6 +122,7 @@ import {
   staffToForm,
   splitDoctorTitleValue,
   taxonomyAttributeValue,
+  taxonomyAttributeValueOptions,
   toDoctorPayload,
   toProviderPayload,
   toServicePayload,
@@ -1183,6 +1184,8 @@ function providerPeopleDoctorToForm(row: ProviderPeopleRow): DoctorFormState {
     roleCode,
     roleLabel: roleCode === "other" ? row.role_label ?? row.role_code ?? "" : row.role_label ?? "",
     subrole: row.subrole ?? "",
+    website: row.website ?? "",
+    schwerpunkt: row.schwerpunkt ?? "",
     gender: row.gender,
     openingHours: row.opening_hours ?? "",
     fachbereich: row.fachbereich ?? "",
@@ -1210,6 +1213,7 @@ function providerDoctorFormForPayload(
     roleCode: "",
     roleLabel: "",
     fachbereich: "",
+    schwerpunkt: "",
     specializations: "",
     licenseNumber: "",
     licensingCountry: "",
@@ -1803,6 +1807,14 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     (node) => node.id === filters.taxonomyNodeId,
   );
   const filterAttributeKeys = taxonomyAttributeKeys(selectedFilterTaxonomyNode);
+  const filterAttributeValueOptions = useMemo(
+    () =>
+      taxonomyAttributeValueOptions(
+        providers,
+        filters.taxonomyAttributeKey,
+      ),
+    [filters.taxonomyAttributeKey, providers],
+  );
   const advancedProviderFilterCount = useMemo(
     () => countAdvancedProviderFilters(filters, permissions.forceNonMedical),
     [filters, permissions.forceNonMedical],
@@ -2324,15 +2336,17 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     if (!providerId) return;
     const providerType = catalogPersonContext?.providerType ?? detail?.provider_type ?? "medical";
 
+    const payload = toDoctorPayload(providerDoctorFormForPayload(doctorForm, providerType));
+    if (!payload.name.trim()) {
+      setDoctorError(t.uiText.providers_doctor_name_required ?? t.common_failed_update);
+      return;
+    }
+
     setDoctorBusy(true);
     setDoctorError("");
 
     try {
-      await saveProviderDoctor(
-        providerId,
-        doctorForm.id,
-        toDoctorPayload(providerDoctorFormForPayload(doctorForm, providerType)),
-      );
+      await saveProviderDoctor(providerId, doctorForm.id, payload);
       setDoctorDialogOpen(false);
       setDoctorForm(blankDoctorForm());
       setCatalogPersonContext(null);
@@ -3304,11 +3318,11 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                       setFilters((current) => ({
                         ...current,
                         taxonomyAttributeKey: nextKey,
-                        taxonomyAttributeValue: nextKey ? current.taxonomyAttributeValue : "",
+                        taxonomyAttributeValue: "",
                       }));
                       syncQuery({
                         attr_key: nextKey || null,
-                        attr_value: nextKey ? filters.taxonomyAttributeValue || null : null,
+                        attr_value: null,
                       });
                     }}
                     className={cn(selectClassName, "h-8 w-[168px] bg-card text-[13px]")}
@@ -3320,15 +3334,39 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                       </option>
                     ))}
                   </NativeComboboxSelect>
-                  <Input
-                    value={filters.taxonomyAttributeValue}
-                    onChange={(event) =>
-                      setServerFilter("taxonomyAttributeValue", event.target.value, "attr_value")
-                    }
-                    disabled={!filters.taxonomyAttributeKey}
-                    placeholder={t.common_value}
-                    className="h-8 w-[160px] rounded-lg bg-card text-[13px]"
-                  />
+                  {filterAttributeValueOptions.length > 0 ? (
+                    <NativeComboboxSelect
+                      value={filters.taxonomyAttributeValue}
+                      onChange={(event) =>
+                        setServerFilter("taxonomyAttributeValue", event.target.value, "attr_value")
+                      }
+                      disabled={!filters.taxonomyAttributeKey}
+                      className={cn(selectClassName, "h-8 w-[190px] bg-card text-[13px]")}
+                    >
+                      <option value="">{t.providers_all}</option>
+                      {filters.taxonomyAttributeValue &&
+                      !filterAttributeValueOptions.includes(filters.taxonomyAttributeValue) ? (
+                        <option value={filters.taxonomyAttributeValue}>
+                          {filters.taxonomyAttributeValue}
+                        </option>
+                      ) : null}
+                      {filterAttributeValueOptions.map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  ) : (
+                    <Input
+                      value={filters.taxonomyAttributeValue}
+                      onChange={(event) =>
+                        setServerFilter("taxonomyAttributeValue", event.target.value, "attr_value")
+                      }
+                      disabled={!filters.taxonomyAttributeKey}
+                      placeholder={t.common_value}
+                      className="h-8 w-[160px] rounded-lg bg-card text-[13px]"
+                    />
+                  )}
                 </>
               ) : null}
 
@@ -4137,6 +4175,18 @@ function ProviderDoctorDetailSheet({
               <ReadOnlyLine label={t.patients_gender} value={personGenderLabel(doctor?.gender ?? row?.gender ?? "unknown")} />
               {isMedicalProvider ? (
                 <ReadOnlyLine label={l("providers_doctor_specializations")} value={specializations || t.common_not_set} />
+              ) : null}
+              {isMedicalProvider ? (
+                <ReadOnlyLine
+                  label={l("providers_doctor_schwerpunkt")}
+                  value={(doctor?.schwerpunkt ?? row?.schwerpunkt) || t.common_not_set}
+                />
+              ) : null}
+              {isMedicalProvider ? (
+                <ReadOnlyLine
+                  label={l("providers_doctor_website")}
+                  value={(doctor?.website ?? row?.website) || t.common_not_set}
+                />
               ) : null}
               <ReadOnlyLine
                 label={l("providers_opening_hours")}
@@ -7749,6 +7799,24 @@ function DoctorProfileFields({
               onChange("specializations", nextValue);
               onChange("fachbereich", firstSpecializationValue(nextValue));
             }}
+          />
+        </Field>
+        <Field label={l("providers_doctor_schwerpunkt")}>
+          <Input
+            value={form.schwerpunkt}
+            onChange={(event) => onChange("schwerpunkt", event.target.value)}
+            className={shellInputClassName}
+            placeholder={l("providers_doctor_schwerpunkt_placeholder")}
+          />
+        </Field>
+        <Field label={l("providers_doctor_website")}>
+          <Input
+            type="url"
+            inputMode="url"
+            value={form.website}
+            onChange={(event) => onChange("website", event.target.value)}
+            className={shellInputClassName}
+            placeholder={l("providers_doctor_website_placeholder")}
           />
         </Field>
         <Field label={l("providers_languages")}>

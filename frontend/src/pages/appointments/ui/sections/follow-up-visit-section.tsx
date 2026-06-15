@@ -48,6 +48,7 @@ import {
 import {
   buildLocalScheduleWarnings,
   buildScheduleNotice,
+  formatScheduleConflictError,
 } from "@/pages/appointments/model/schedule-warnings";
 import {
   appointmentAnchorDateTime,
@@ -440,10 +441,7 @@ function useAppointmentFollowUpVisitSectionContent({
       onCreated({ id: result.id, notice });
     } catch (submitError) {
       dispatchSectionState({
-        error:
-          submitError instanceof Error
-            ? submitError.message
-            : tr.common_failed_create,
+        error: formatScheduleConflictError(submitError, tr.common_failed_create),
         busy: false,
       });
     }

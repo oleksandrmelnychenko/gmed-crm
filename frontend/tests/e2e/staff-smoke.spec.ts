@@ -39,6 +39,8 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
   const email = options.email ?? "admin@gmed.de";
   const name = options.name ?? "Admin GMED";
   const userId = options.userId ?? "00000000-0000-0000-0000-000000000001";
+  const translatorId = "00000000-0000-0000-0000-000000000002";
+  const translatorName = "Uliana Mu";
   let portalShareActive = false;
   const documentId = "00000000-0000-0000-0000-000000000501";
   const appointmentConfirmationId = "00000000-0000-0000-0000-000000000502";
@@ -410,6 +412,9 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
     note: string | null;
     requested_at: string;
     requested_by_name: string | null;
+    assigned_to: string | null;
+    assigned_to_name: string | null;
+    assigned_at: string | null;
     source_language: string | null;
     source_text: string | null;
     translated_text: string | null;
@@ -806,7 +811,10 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
     }
 
     if (path === "/documents/meta/staff") {
-      return json(route, []);
+      return json(route, [
+        { id: userId, name, role },
+        { id: translatorId, name: translatorName, role: "patient_manager" },
+      ]);
     }
 
     if (path === "/documents/meta/categories") {
@@ -1008,6 +1016,9 @@ endobj
         note: payload.note ?? null,
         requested_at: `2026-04-1${nextTranslationRequestIndex}T09:00:00Z`,
         requested_by_name: "Admin GMED",
+        assigned_to: null,
+        assigned_to_name: null,
+        assigned_at: null,
         source_language: null,
         source_text: null,
         translated_text: null,
@@ -1044,14 +1055,32 @@ endobj
         source_language?: string | null;
         source_text?: string | null;
         translated_text?: string | null;
+        assigned_to?: string | null;
       };
       let updatedRequest: (typeof translationRequests)[number] | null = null;
       translationRequests = translationRequests.map((item) => {
         if (item.id !== requestId) return item;
+        const assignedTo =
+          payload.assigned_to === undefined
+            ? item.assigned_to
+            : payload.assigned_to;
         updatedRequest = {
           ...item,
           status: payload.status ?? item.status,
           note: payload.note ?? item.note,
+          assigned_to: assignedTo,
+          assigned_to_name:
+            assignedTo === userId
+              ? name
+              : assignedTo === translatorId
+                ? translatorName
+                : null,
+          assigned_at:
+            payload.assigned_to === undefined
+              ? item.assigned_at
+              : assignedTo
+                ? "2026-04-13T10:05:00Z"
+                : null,
           source_language:
             payload.source_language !== undefined
               ? payload.source_language
@@ -1491,11 +1520,83 @@ test.describe("staff smoke flows", () => {
     await sheet
       .getByLabel(/Notizen|Notes/i)
       .fill("Ready for patient delivery.");
-    await sheet.getByRole("button", { name: /Workspace speichern/i }).click();
+    const assigneeSaveRequest = page.waitForRequest((request) => {
+      if (
+        request.method() !== "POST" ||
+        !request.url().includes("/api/v1/documents/translation-requests/") ||
+        !request.url().endsWith("/update")
+      ) {
+        return false;
+      }
+      const payload = JSON.parse(request.postData() ?? "{}") as {
+        assigned_to?: string | null;
+        status?: string;
+      };
+      return (
+        payload.status === "in_progress" &&
+        payload.assigned_to === "00000000-0000-0000-0000-000000000002"
+      );
+    });
+    await Promise.all([
+      assigneeSaveRequest,
+      chooseComboboxOption(
+        page,
+        sheet.getByRole("combobox", { name: /Assignee|Ausf/i }),
+        /Uliana Mu/i,
+      ),
+    ]);
+    const workspaceSaveRequest = page.waitForRequest((request) => {
+      if (
+        request.method() !== "POST" ||
+        !request.url().includes("/api/v1/documents/translation-requests/") ||
+        !request.url().endsWith("/update")
+      ) {
+        return false;
+      }
+      const payload = JSON.parse(request.postData() ?? "{}") as {
+        status?: string;
+        source_text?: string | null;
+        translated_text?: string | null;
+        note?: string | null;
+        assigned_to?: string | null;
+      };
+      return (
+        payload.status === "in_progress" &&
+        payload.source_text === "Original German report" &&
+        payload.translated_text === "Patient-safe English report" &&
+        payload.note === "Ready for patient delivery." &&
+        !Object.prototype.hasOwnProperty.call(payload, "assigned_to")
+      );
+    });
+    await Promise.all([
+      workspaceSaveRequest,
+      sheet.getByRole("button", { name: /Workspace speichern/i }).click(),
+    ]);
 
     await expect(
       sheet.getByLabel(/bersetzter Text/i),
     ).toHaveValue("Patient-safe English report");
+
+    await page.reload();
+    const reloadedSheet = page.getByRole("main");
+    await expect(
+      reloadedSheet.getByRole("heading", { name: "MRI report" }),
+    ).toBeVisible();
+    await reloadedSheet
+      .getByText(/Zugewiesen: Uliana Mu|Assigned: Uliana Mu/i)
+      .click();
+    await expect(reloadedSheet.getByLabel(/Ausgangstext/i)).toHaveValue(
+      "Original German report",
+    );
+    await expect(reloadedSheet.getByLabel(/bersetzter Text/i)).toHaveValue(
+      "Patient-safe English report",
+    );
+    await expect(reloadedSheet.getByLabel(/Notizen|Notes/i)).toHaveValue(
+      "Ready for patient delivery.",
+    );
+    await expect(
+      reloadedSheet.getByText(/Zugewiesen: Uliana Mu|Assigned: Uliana Mu/i),
+    ).toBeVisible();
 
     await sheet.getByRole("button", { name: /Aktionen|Actions/i }).click();
     await page

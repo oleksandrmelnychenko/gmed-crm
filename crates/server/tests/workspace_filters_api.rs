@@ -8389,11 +8389,22 @@ async fn create_appointment_returns_conflict_error_for_overlapping_slot() {
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
-    assert!(
-        body["message"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("conflicts")
+    let message = body["message"].as_str().unwrap_or_default();
+    assert!(message.contains("Appointment conflict"));
+    assert!(message.contains("patient/interpreter/doctor"));
+    assert!(message.contains("Existing overlap"));
+    assert!(message.contains("09:00-10:00"));
+    assert_eq!(body["conflicts"]["has_conflicts"], true);
+    assert_eq!(body["conflicts"]["patient_conflict_count"], 1);
+    assert_eq!(body["conflicts"]["interpreter_conflict_count"], 1);
+    assert_eq!(body["conflicts"]["doctor_conflict_count"], 1);
+    assert_eq!(
+        body["conflicts"]["patient_conflicts"][0]["title"],
+        "Existing overlap"
+    );
+    assert_eq!(
+        body["conflicts"]["patient_conflicts"][0]["time_start"],
+        "09:00"
     );
 }
 
@@ -8470,6 +8481,87 @@ async fn providers_list_supports_country_and_doctor_filters() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"], non_medical_provider_id.to_string());
     assert_eq!(items[0]["provider_type"], "non_medical");
+}
+
+#[tokio::test]
+async fn providers_list_supports_all_and_inactive_only_filters() {
+    let Some((app, pool, _admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("provider-active-filter");
+    let active_provider_id =
+        seed_provider_with_type(&pool, &format!("{tag}-active"), "medical", "Germany").await;
+    let inactive_provider_id =
+        seed_provider_with_type(&pool, &format!("{tag}-inactive"), "medical", "Germany").await;
+    let taxonomy_node_id =
+        assign_primary_provider_taxonomy(&pool, inactive_provider_id, "medical_pharmacies").await;
+    sqlx::query("UPDATE providers SET is_active = false WHERE id = $1")
+        .bind(inactive_provider_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let provider_ids = |body: &Value| -> Vec<String> {
+        body.as_array()
+            .expect("providers array")
+            .iter()
+            .filter_map(|item| item["id"].as_str().map(ToOwned::to_owned))
+            .collect()
+    };
+
+    let (status, default_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers?search={tag}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let ids = provider_ids(&default_body);
+    assert!(ids.contains(&active_provider_id.to_string()));
+    assert!(!ids.contains(&inactive_provider_id.to_string()));
+
+    let (status, all_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers?search={tag}&active_only=false"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let ids = provider_ids(&all_body);
+    assert!(ids.contains(&active_provider_id.to_string()));
+    assert!(ids.contains(&inactive_provider_id.to_string()));
+
+    let (status, inactive_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers?search={tag}&is_active=false"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let ids = provider_ids(&inactive_body);
+    assert!(!ids.contains(&active_provider_id.to_string()));
+    assert!(ids.contains(&inactive_provider_id.to_string()));
+
+    let (status, inactive_taxonomy_body) = json_request(
+        &app,
+        "GET",
+        &format!(
+            "/api/v1/providers?search={tag}&is_active=false&taxonomy_node_id={taxonomy_node_id}"
+        ),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let ids = provider_ids(&inactive_taxonomy_body);
+    assert_eq!(ids, vec![inactive_provider_id.to_string()]);
 }
 
 #[tokio::test]

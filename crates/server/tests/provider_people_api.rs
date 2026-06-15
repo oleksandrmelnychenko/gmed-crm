@@ -154,16 +154,18 @@ async fn provider_people_returns_doctors_staff_counts_and_patient_filter() {
     let doctor_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO provider_doctors (
                 provider_id, name, first_name, last_name, display_name,
-                title, role_code, role_label, gender, fachbereich, email
+                title, role_code, role_label, website, schwerpunkt, gender, fachbereich, email
            ) VALUES (
                 $1, $2, 'Ada', $3, $2,
-                'Dr.', 'chefarzt', 'Chief physician', 'female', 'Cardiology', $4
+                'Dr.', 'chefarzt', 'Chief physician', $4, $5, 'female', 'Cardiology', $6
            )
            RETURNING id"#,
     )
     .bind(provider_id)
     .bind(format!("Dr People {tag}"))
     .bind(format!("Doctor {tag}"))
+    .bind("https://people-doctor.example")
+    .bind("Interventionelle Kardiologie")
     .bind(format!("doctor-{tag}@clinic.example"))
     .fetch_one(&pool)
     .await
@@ -266,6 +268,8 @@ async fn provider_people_returns_doctors_staff_counts_and_patient_filter() {
     assert_eq!(doctor["title"], "Dr.");
     assert_eq!(doctor["role_code"], "chefarzt");
     assert_eq!(doctor["role_label"], "Chief physician");
+    assert_eq!(doctor["website"], "https://people-doctor.example");
+    assert_eq!(doctor["schwerpunkt"], "Interventionelle Kardiologie");
     assert_eq!(doctor["gender"], "female");
     assert_eq!(doctor["patient_count"], 1);
     assert_eq!(doctor["appointment_count"], 1);
@@ -545,6 +549,8 @@ async fn provider_doctor_accepts_academic_title_combinations_and_keeps_salutatio
             "last_name": format!("Title {tag}"),
             "title": "Priv.-Doz. Dr. med.",
             "gender": "female",
+            "website": "https://title-doctor.example",
+            "schwerpunkt": "Rhythmologie",
             "specializations": ["Cardiology"],
             "contacts": [],
         })),
@@ -553,14 +559,25 @@ async fn provider_doctor_accepts_academic_title_combinations_and_keeps_salutatio
     assert_eq!(status, StatusCode::CREATED);
     let doctor_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
 
-    let (saved_title, saved_gender): (Option<String>, String) =
-        sqlx::query_as("SELECT title, gender FROM provider_doctors WHERE id = $1")
-            .bind(doctor_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let (saved_title, saved_gender, saved_website, saved_schwerpunkt): (
+        Option<String>,
+        String,
+        Option<String>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT title, gender, website, schwerpunkt FROM provider_doctors WHERE id = $1",
+    )
+    .bind(doctor_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(saved_title.as_deref(), Some("Priv.-Doz. Dr. med."));
     assert_eq!(saved_gender, "female");
+    assert_eq!(
+        saved_website.as_deref(),
+        Some("https://title-doctor.example")
+    );
+    assert_eq!(saved_schwerpunkt.as_deref(), Some("Rhythmologie"));
 
     let (status, _) = json_request(
         &app,
@@ -572,6 +589,8 @@ async fn provider_doctor_accepts_academic_title_combinations_and_keeps_salutatio
             "last_name": format!("Title {tag}"),
             "title": "Prof., Dr.",
             "gender": "male",
+            "website": "https://updated-title-doctor.example",
+            "schwerpunkt": "Interventionelle Kardiologie",
             "specializations": ["Cardiology"],
             "contacts": [],
         })),
@@ -579,14 +598,28 @@ async fn provider_doctor_accepts_academic_title_combinations_and_keeps_salutatio
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let (updated_title, updated_gender): (Option<String>, String) =
-        sqlx::query_as("SELECT title, gender FROM provider_doctors WHERE id = $1")
-            .bind(doctor_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let (updated_title, updated_gender, updated_website, updated_schwerpunkt): (
+        Option<String>,
+        String,
+        Option<String>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT title, gender, website, schwerpunkt FROM provider_doctors WHERE id = $1",
+    )
+    .bind(doctor_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(updated_title.as_deref(), Some("Prof. Dr."));
     assert_eq!(updated_gender, "male");
+    assert_eq!(
+        updated_website.as_deref(),
+        Some("https://updated-title-doctor.example")
+    );
+    assert_eq!(
+        updated_schwerpunkt.as_deref(),
+        Some("Interventionelle Kardiologie")
+    );
 
     let (status, invalid_body) = json_request(
         &app,

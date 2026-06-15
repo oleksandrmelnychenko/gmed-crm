@@ -9,12 +9,14 @@ import {
   buildProvidersQuery,
   composeDoctorDisplayName,
   doctorListDisplayName,
+  doctorToForm,
   formatDoctorTitleValue,
   formatWeeklyAvailabilityDisplay,
   formatWeeklyAvailabilityValue,
   normalizeAvailabilityEditorIntervals,
   parseWeeklyAvailability,
   splitDoctorTitleValue,
+  taxonomyAttributeValueOptions,
   taxonomyAttributeValue,
   toDoctorPayload,
   toProviderPayload,
@@ -29,6 +31,26 @@ function paramsFromPath(path: string) {
 }
 
 describe("buildProvidersQuery", () => {
+  it("serializes provider activity filters as active, all, and inactive-only states", () => {
+    expect(
+      paramsFromPath(buildProvidersQuery({ ...DEFAULT_FILTERS, activeOnly: "true" }, false)).get(
+        "active_only",
+      ),
+    ).toBe("true");
+
+    const allParams = paramsFromPath(
+      buildProvidersQuery({ ...DEFAULT_FILTERS, activeOnly: "" }, false),
+    );
+    expect(allParams.get("active_only")).toBe("false");
+    expect(allParams.get("is_active")).toBeNull();
+
+    const inactiveParams = paramsFromPath(
+      buildProvidersQuery({ ...DEFAULT_FILTERS, activeOnly: "false" }, false),
+    );
+    expect(inactiveParams.get("active_only")).toBeNull();
+    expect(inactiveParams.get("is_active")).toBe("false");
+  });
+
   it("serializes multiple specializations as the specializations CSV filter", () => {
     const filters: ProviderFilters = {
       ...DEFAULT_FILTERS,
@@ -53,6 +75,54 @@ describe("buildProvidersQuery", () => {
 
     expect(params.get("provider_type")).toBe("non_medical");
     expect(params.get("taxonomy_node_id")).toBe("0f5ac3c1-0000-4000-9000-000000000002");
+  });
+});
+
+describe("taxonomyAttributeValueOptions", () => {
+  it("builds unique existing filter choices for provider taxonomy attributes", () => {
+    const baseProvider = {
+      id: "provider-1",
+      name: "Restaurant",
+      provider_type: "non_medical" as const,
+      legal_name: null,
+      tax_id: null,
+      address_city: null,
+      address_country: null,
+      fachbereich: null,
+      phone: null,
+      email: null,
+      opening_hours: null,
+      parent_provider_id: null,
+      parent_provider_name: null,
+      organization_level: "organization" as const,
+      taxonomy_attributes: {},
+      specializations: [],
+      is_active: true,
+      has_contract: false,
+      doctor_count: 0,
+      patient_count: 0,
+      appointment_count: 0,
+      service_count: 0,
+      concierge_service_count: 0,
+      open_concierge_service_count: 0,
+      rating_count: 0,
+      avg_rating: null,
+      last_interaction_at: null,
+      created_at: "2026-01-01T00:00:00Z",
+    };
+
+    expect(
+      taxonomyAttributeValueOptions(
+        [
+          { ...baseProvider, id: "provider-1", taxonomy_attributes: { cuisine: "Steak House" } },
+          { ...baseProvider, id: "provider-2", taxonomy_attributes: { cuisine: "Fine dining" } },
+          { ...baseProvider, id: "provider-3", taxonomy_attributes: { cuisine: " steak house " } },
+          { ...baseProvider, id: "provider-4", taxonomy_attributes: { cuisine: "" } },
+          { ...baseProvider, id: "provider-5", taxonomy_attributes: { diet: "Halal" } },
+        ],
+        "cuisine",
+      ),
+    ).toEqual(["Fine dining", "Steak House"]);
   });
 });
 
@@ -200,6 +270,68 @@ describe("toDoctorPayload", () => {
     const payload = toDoctorPayload(form);
 
     expect(payload.title).toBe("Priv.-Doz. Dr. med.");
+  });
+
+  it("sends the website link and narrow specialization (Schwerpunkt)", () => {
+    const form = {
+      ...blankDoctorForm(),
+      firstName: "Max",
+      lastName: "Mustermann",
+      gender: "male" as const,
+      fachbereich: "internal medicine",
+      schwerpunkt: "interventional cardiology",
+      website: "https://praxis-mustermann.de",
+    };
+
+    const payload = toDoctorPayload(form);
+
+    expect(payload.schwerpunkt).toBe("interventional cardiology");
+    expect(payload.website).toBe("https://praxis-mustermann.de");
+  });
+
+  it("sends blank website and Schwerpunkt as null (cleared), not as empty strings", () => {
+    const payload = toDoctorPayload({ ...blankDoctorForm(), firstName: "Max", lastName: "Braun" });
+
+    expect(payload.website).toBeNull();
+    expect(payload.schwerpunkt).toBeNull();
+  });
+});
+
+describe("doctorToForm", () => {
+  it("hydrates the website link and narrow specialization from the API doctor", () => {
+    const form = doctorToForm({
+      id: "doc-1",
+      provider_id: "prov-1",
+      name: "Herr Max Mustermann",
+      first_name: "Max",
+      last_name: "Mustermann",
+      display_name: "Herr Max Mustermann",
+      title: null,
+      fachbereich: "Innere Medizin",
+      specializations: [],
+      languages: [],
+      phone: null,
+      email: null,
+      contacts: [],
+      role_code: null,
+      role_label: null,
+      subrole: null,
+      website: "https://praxis-mustermann.de",
+      schwerpunkt: "Interventionelle Kardiologie",
+      gender: "male",
+      opening_hours: null,
+      relationships: [],
+      license_number: null,
+      licensing_country: null,
+      licensing_valid_until: null,
+      notes: null,
+      patient_count: 0,
+      appointment_count: 0,
+      created_at: "2026-01-01T00:00:00Z",
+    });
+
+    expect(form.website).toBe("https://praxis-mustermann.de");
+    expect(form.schwerpunkt).toBe("Interventionelle Kardiologie");
   });
 });
 

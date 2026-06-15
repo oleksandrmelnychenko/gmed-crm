@@ -11,6 +11,7 @@ import { statusActionKey } from "@/pages/appointments/model/form-factories";
 import {
   buildLocalScheduleWarnings,
   buildScheduleNotice,
+  formatScheduleConflictError,
 } from "@/pages/appointments/model/schedule-warnings";
 import { toDateInput, toTimeInput } from "@/pages/appointments/model/date-time";
 import type {
@@ -102,7 +103,7 @@ export function useAppointmentSchedulerActions({
       } catch (error) {
         info.revert();
         onAppointmentsError(
-          error instanceof Error ? error.message : dictionary.common_failed_update,
+          formatScheduleConflictError(error, dictionary.common_failed_update),
         );
       }
     },

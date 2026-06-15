@@ -1331,8 +1331,9 @@ function useStaffAppointmentsPageContent() {
 
   const handleEditSaved = useCallback((notice: string) => {
     reportAppointmentsNotice(notice);
+    refreshAppointments();
     refreshDetail();
-  }, [refreshDetail, reportAppointmentsNotice]);
+  }, [refreshAppointments, refreshDetail, reportAppointmentsNotice]);
 
   const openDetailSheet = useCallback((id: string, detailTabOverride?: AppointmentWorkspaceTab) => {
     const nextDetailTab = detailTabOverride ?? defaultDetailTabForAppointment(id);

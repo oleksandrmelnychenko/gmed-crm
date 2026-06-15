@@ -34,6 +34,9 @@ function mergeScopedConflictItems(conflicts: ConflictSummary) {
   for (const item of conflicts.interpreter_conflicts) {
     addItem(item, appointmentText("appointments_interpreter"));
   }
+  for (const item of conflicts.doctor_conflicts ?? []) {
+    addItem(item, appointmentText("appointments_doctor"));
+  }
 
   return [...byId.values()];
 }

@@ -5,7 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { t as translateCatalog, useLang } from "@/lib/i18n";
 
-import { type VegetativeForm, useCaseWorkspace } from "./context";
+import {
+  type VegetativeForm,
+  type VegetativeNumericValue,
+  useCaseWorkspace,
+} from "./context";
 import {
   Banner,
   Field,
@@ -19,12 +23,22 @@ function tri(lang: string, key: string) {
   return catalog.uiText[key] ?? key;
 }
 
-function hydrateVegetative(
+function hydrateNumericInput(value: VegetativeNumericValue | undefined): string {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "";
+  }
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  return "";
+}
+
+export function hydrateVegetative(
   raw:
     | {
         appetit_durst?: string | null;
-        koerpergroesse?: number | null;
-        gewicht?: number | null;
+        koerpergroesse?: VegetativeNumericValue;
+        gewicht?: VegetativeNumericValue;
         gewichtsveraenderung?: string | null;
         grund?: string | null;
       }
@@ -33,12 +47,8 @@ function hydrateVegetative(
 ): VegetativeForm {
   return {
     appetit_durst: raw?.appetit_durst ?? "",
-    koerpergroesse:
-      raw?.koerpergroesse != null && Number.isFinite(raw.koerpergroesse)
-        ? String(raw.koerpergroesse)
-        : "",
-    gewicht:
-      raw?.gewicht != null && Number.isFinite(raw.gewicht) ? String(raw.gewicht) : "",
+    koerpergroesse: hydrateNumericInput(raw?.koerpergroesse),
+    gewicht: hydrateNumericInput(raw?.gewicht),
     gewichtsveraenderung: raw?.gewichtsveraenderung ?? "",
     grund: raw?.grund ?? "",
   };
@@ -73,8 +83,8 @@ type VegetativeSectionFormProps = {
   rawValue:
     | {
         appetit_durst?: string | null;
-        koerpergroesse?: number | null;
-        gewicht?: number | null;
+        koerpergroesse?: VegetativeNumericValue;
+        gewicht?: VegetativeNumericValue;
         gewichtsveraenderung?: string | null;
         grund?: string | null;
       }

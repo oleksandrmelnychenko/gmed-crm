@@ -279,7 +279,10 @@ export function runDocumentTextExtraction(documentId: string) {
 }
 
 export function updateTranslationRequest(requestId: string, payload: JsonPayload) {
-  return postJson<void>(`/documents/translation-requests/${requestId}/update`, payload);
+  return postJson<TranslationRequest>(
+    `/documents/translation-requests/${requestId}/update`,
+    payload,
+  );
 }
 
 export function createBulkDocumentShares(documentIds: string[], payload: JsonPayload) {

@@ -335,8 +335,8 @@ type CaseDetail = {
   urology?: Partial<UrologyAssessment> | null;
   vegetative_anamnese?: {
     appetit_durst?: string | null;
-    koerpergroesse?: number | null;
-    gewicht?: number | null;
+    koerpergroesse?: number | string | null;
+    gewicht?: number | string | null;
     gewichtsveraenderung?: string | null;
     grund?: string | null;
   } | null;

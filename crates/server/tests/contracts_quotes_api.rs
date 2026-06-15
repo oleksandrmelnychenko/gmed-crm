@@ -210,6 +210,57 @@ async fn framework_contract_create_list_and_sign_flow_work() {
 }
 
 #[tokio::test]
+async fn framework_contract_create_returns_user_facing_patient_validation_errors() {
+    let Some((app, _pool, _admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &admin_bearer,
+        Some(json!({
+            "status": "sent",
+            "valid_from": "2026-04-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["message"], "Patient is required");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &admin_bearer,
+        Some(json!({
+            "patient_id": "",
+            "status": "sent",
+            "valid_from": "2026-04-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["message"], "Patient is required");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &admin_bearer,
+        Some(json!({
+            "patient_id": "not-a-uuid",
+            "status": "sent",
+            "valid_from": "2026-04-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["message"], "Invalid patient");
+}
+
+#[tokio::test]
 async fn create_order_rejects_contract_from_other_patient() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;

@@ -233,9 +233,11 @@ type ConflictItem = {
 export type ConflictSummary = {
   patient_conflict_count: number;
   interpreter_conflict_count: number;
+  doctor_conflict_count?: number;
   has_conflicts: boolean;
   patient_conflicts: ConflictItem[];
   interpreter_conflicts: ConflictItem[];
+  doctor_conflicts?: ConflictItem[];
 };
 
 export type PatientSummary = {

@@ -203,6 +203,8 @@ export type DoctorSummary = {
   role_code: DoctorRoleCode | null;
   role_label: string | null;
   subrole: string | null;
+  website: string | null;
+  schwerpunkt: string | null;
   gender: ProviderPersonGender;
   opening_hours: string | null;
   relationships: DoctorRelationship[];
@@ -362,6 +364,8 @@ export type DoctorFormState = {
   roleCode: "" | DoctorRoleCode;
   roleLabel: string;
   subrole: string;
+  website: string;
+  schwerpunkt: string;
   gender: ProviderPersonGender;
   openingHours: string;
   fachbereich: string;

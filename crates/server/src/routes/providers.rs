@@ -142,6 +142,7 @@ struct ListProvidersQuery {
     search: Option<String>,
     provider_type: Option<String>,
     active_only: Option<bool>,
+    is_active: Option<bool>,
     city: Option<String>,
     country: Option<String>,
     fachbereich: Option<String>,
@@ -214,6 +215,8 @@ struct UpsertDoctorRequest {
     role_code: Option<String>,
     role_label: Option<String>,
     subrole: Option<String>,
+    website: Option<String>,
+    schwerpunkt: Option<String>,
     gender: Option<String>,
     opening_hours: Option<String>,
     fachbereich: Option<String>,
@@ -343,6 +346,7 @@ async fn list_providers(
     }
 
     let active_only = query.active_only.unwrap_or(true);
+    let is_active_filter = query.is_active;
     let search_term = normalize_optional(query.search);
     let search_pattern = format!("%{}%", search_term.clone().unwrap_or_default());
     let requested_provider_type = normalize_optional(query.provider_type);
@@ -460,7 +464,8 @@ async fn list_providers(
                   ) AS last_interaction_at
            FROM providers p
            LEFT JOIN providers parent ON parent.id = p.parent_provider_id
-           WHERE ($1::bool = false OR p.is_active = true)
+           WHERE ($20::bool IS NULL OR p.is_active = $20)
+             AND ($20::bool IS NOT NULL OR $1::bool = false OR p.is_active = true)
              AND ($2::text IS NULL OR p.provider_type = $2)
              AND (
                 $3::text = '%%'
@@ -515,7 +520,7 @@ async fn list_providers(
                        AND de_normalize(concat_ws(' ',
                              d.name, d.display_name, d.first_name, d.last_name,
                              d.fachbereich, d.title, d.role_code, d.role_label, d.subrole,
-                             d.license_number, d.licensing_country, d.phone, d.email, d.notes
+                             d.schwerpunkt, d.license_number, d.licensing_country, d.phone, d.email, d.notes
                            )) LIKE de_normalize($3)
                  )
                  OR EXISTS (
@@ -815,6 +820,7 @@ async fn list_providers(
     .bind(taxonomy_attribute_value)
     .bind(linked_patient_id)
     .bind(search_term)
+    .bind(is_active_filter)
     .fetch_all(&state.db)
     .await
     {
@@ -2466,7 +2472,7 @@ async fn get_doctor(
 
     match sqlx::query(
         r#"SELECT d.id, d.provider_id, d.name, d.first_name, d.last_name, d.display_name,
-                  d.title, d.role_code, d.role_label, d.subrole, d.gender, d.opening_hours,
+                  d.title, d.role_code, d.role_label, d.subrole, d.website, d.schwerpunkt, d.gender, d.opening_hours,
                   d.fachbereich, d.languages,
                   d.phone, d.email, d.license_number, d.licensing_country,
                   d.licensing_valid_until, d.notes, d.created_at,
@@ -2534,6 +2540,8 @@ async fn get_doctor(
                 "role_code": row.try_get::<Option<String>, _>("role_code").unwrap_or_default(),
                 "role_label": row.try_get::<Option<String>, _>("role_label").unwrap_or_default(),
                 "subrole": row.try_get::<Option<String>, _>("subrole").unwrap_or_default(),
+                "website": row.try_get::<Option<String>, _>("website").unwrap_or_default(),
+                "schwerpunkt": row.try_get::<Option<String>, _>("schwerpunkt").unwrap_or_default(),
                 "gender": row.try_get::<String, _>("gender").unwrap_or_else(|_| "unknown".to_string()),
                 "opening_hours": row.try_get::<Option<String>, _>("opening_hours").unwrap_or_default(),
                 "fachbereich": row.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
@@ -2609,12 +2617,12 @@ async fn create_doctor(
     let row = match sqlx::query(
         r#"INSERT INTO provider_doctors (
                 provider_id, name, first_name, last_name, display_name,
-                title, role_code, role_label, subrole, gender, opening_hours, fachbereich, languages,
+                title, role_code, role_label, subrole, website, schwerpunkt, gender, opening_hours, fachbereich, languages,
                 phone, email, license_number, licensing_country, licensing_valid_until, notes
            ) VALUES (
                 $1, $2, $3, $4, $5,
-                $6, $7, $8, $9, $10, $11, $12, $13,
-                $14, $15, $16, $17, $18, $19
+                $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+                $16, $17, $18, $19, $20, $21
            )
            RETURNING id, created_at"#,
     )
@@ -2627,6 +2635,8 @@ async fn create_doctor(
     .bind(doctor.role_code)
     .bind(doctor.role_label)
     .bind(doctor.subrole)
+    .bind(doctor.website)
+    .bind(doctor.schwerpunkt)
     .bind(doctor.gender)
     .bind(doctor.opening_hours)
     .bind(doctor.fachbereich)
@@ -2768,16 +2778,18 @@ async fn update_doctor(
                role_code = $8,
                role_label = $9,
                subrole = $10,
-               gender = $11,
-               opening_hours = $12,
-               fachbereich = $13,
-               languages = $14,
-               phone = $15,
-               email = $16,
-               license_number = $17,
-               licensing_country = $18,
-               licensing_valid_until = $19,
-               notes = $20
+               website = $11,
+               schwerpunkt = $12,
+               gender = $13,
+               opening_hours = $14,
+               fachbereich = $15,
+               languages = $16,
+               phone = $17,
+               email = $18,
+               license_number = $19,
+               licensing_country = $20,
+               licensing_valid_until = $21,
+               notes = $22
            WHERE provider_id = $1 AND id = $2"#,
     )
     .bind(provider_id)
@@ -2790,6 +2802,8 @@ async fn update_doctor(
     .bind(doctor.role_code)
     .bind(doctor.role_label)
     .bind(doctor.subrole)
+    .bind(doctor.website)
+    .bind(doctor.schwerpunkt)
     .bind(doctor.gender)
     .bind(doctor.opening_hours)
     .bind(doctor.fachbereich)
@@ -3556,6 +3570,8 @@ struct DoctorPayload {
     role_code: Option<String>,
     role_label: Option<String>,
     subrole: Option<String>,
+    website: Option<String>,
+    schwerpunkt: Option<String>,
     gender: String,
     opening_hours: Option<String>,
     fachbereich: Option<String>,
@@ -3807,6 +3823,14 @@ fn normalize_doctor_payload(body: UpsertDoctorRequest) -> Result<DoctorPayload, 
     if subrole.as_ref().is_some_and(|value| value.len() > 255) {
         return Err("Doctor subrole is too long");
     }
+    let website = normalize_optional(body.website);
+    if website.as_ref().is_some_and(|value| value.len() > 500) {
+        return Err("Doctor website is too long");
+    }
+    let schwerpunkt = normalize_optional(body.schwerpunkt);
+    if schwerpunkt.as_ref().is_some_and(|value| value.len() > 255) {
+        return Err("Doctor schwerpunkt is too long");
+    }
     let gender = normalize_gender(body.gender)?;
     let opening_hours = normalize_optional(body.opening_hours);
     if opening_hours
@@ -3841,6 +3865,8 @@ fn normalize_doctor_payload(body: UpsertDoctorRequest) -> Result<DoctorPayload, 
         role_code,
         role_label,
         subrole,
+        website,
+        schwerpunkt,
         gender,
         opening_hours,
         fachbereich,
@@ -6141,7 +6167,7 @@ async fn load_doctors_json(
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
     let rows = sqlx::query(
         r#"SELECT d.id, d.provider_id, d.name, d.first_name, d.last_name, d.display_name,
-                  d.title, d.role_code, d.role_label, d.subrole, d.gender, d.opening_hours,
+                  d.title, d.role_code, d.role_label, d.subrole, d.website, d.schwerpunkt, d.gender, d.opening_hours,
                   d.fachbereich, d.languages,
                   d.phone, d.email, d.license_number, d.licensing_country,
                   d.licensing_valid_until, d.notes, d.created_at,
@@ -6209,6 +6235,8 @@ async fn load_doctors_json(
             "role_code": row.try_get::<Option<String>, _>("role_code").unwrap_or_default(),
             "role_label": row.try_get::<Option<String>, _>("role_label").unwrap_or_default(),
             "subrole": row.try_get::<Option<String>, _>("subrole").unwrap_or_default(),
+            "website": row.try_get::<Option<String>, _>("website").unwrap_or_default(),
+            "schwerpunkt": row.try_get::<Option<String>, _>("schwerpunkt").unwrap_or_default(),
             "gender": row.try_get::<String, _>("gender").unwrap_or_else(|_| "unknown".to_string()),
             "opening_hours": row.try_get::<Option<String>, _>("opening_hours").unwrap_or_default(),
             "fachbereich": row.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),

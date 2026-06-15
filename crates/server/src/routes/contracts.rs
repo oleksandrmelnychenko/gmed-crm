@@ -65,7 +65,7 @@ struct ListAgencyServicesQuery {
 
 #[derive(Deserialize)]
 struct CreateFrameworkContractRequest {
-    patient_id: Uuid,
+    patient_id: Option<String>,
     signed_at: Option<String>,
     valid_from: Option<String>,
     valid_to: Option<String>,
@@ -229,6 +229,13 @@ fn parse_optional_datetime(value: Option<&str>) -> Result<Option<DateTime<Utc>>,
             .map_err(|_| "Invalid datetime (RFC3339)"),
         _ => Ok(None),
     }
+}
+
+fn parse_required_uuid(value: Option<&str>) -> Result<Uuid, &'static str> {
+    let Some(raw) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Err("Patient is required");
+    };
+    Uuid::parse_str(raw).map_err(|_| "Invalid patient")
 }
 
 fn decimal_to_string(value: Decimal) -> String {
@@ -843,7 +850,12 @@ async fn create_framework_contract(
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    match ensure_patient_access(&state, &auth, body.patient_id).await {
+    let patient_id = match parse_required_uuid(body.patient_id.as_deref()) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+
+    match ensure_patient_access(&state, &auth, patient_id).await {
         Ok(()) => {}
         Err(resp) => return resp,
     }
@@ -896,7 +908,7 @@ async fn create_framework_contract(
            )
            RETURNING id, created_at, updated_at"#,
     )
-    .bind(body.patient_id)
+    .bind(patient_id)
     .bind(contract_number.clone())
     .bind(signed_at)
     .bind(valid_from)
@@ -916,7 +928,7 @@ async fn create_framework_contract(
                 Some(contract_id),
                 serde_json::json!({
                     "contract_number": contract_number,
-                    "patient_id": body.patient_id,
+                    "patient_id": patient_id,
                     "status": status,
                 }),
             ));
@@ -927,7 +939,7 @@ async fn create_framework_contract(
                 contract_id,
                 serde_json::json!({
                     "contract_number": contract_number.clone(),
-                    "patient_id": body.patient_id,
+                    "patient_id": patient_id,
                     "status": status.clone(),
                 }),
             )

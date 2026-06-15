@@ -80,6 +80,8 @@ export type VegetativeForm = {
   grund: string;
 };
 
+export type VegetativeNumericValue = number | string | null;
+
 export type CardiologyAssessment = {
   is_relevant: boolean;
   chest_pain: boolean;
@@ -204,8 +206,8 @@ export type CaseWorkspaceDetail = {
   symptome?: SymptomItem[];
   vegetative_anamnese?: {
     appetit_durst?: string | null;
-    koerpergroesse?: number | null;
-    gewicht?: number | null;
+    koerpergroesse?: VegetativeNumericValue;
+    gewicht?: VegetativeNumericValue;
     gewichtsveraenderung?: string | null;
     grund?: string | null;
   } | null;
