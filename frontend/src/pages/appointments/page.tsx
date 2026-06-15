@@ -56,6 +56,7 @@ import {
 } from "@/pages/appointments/model/query-builders";
 import { isAppointmentTaskAssignableRole } from "@/pages/appointments/model/staff-roles";
 import { toCalendarEvent } from "@/pages/appointments/model/calendar-events";
+import { renderStaticCalendarEventContent } from "@/pages/appointments/model/calendar-event-content";
 import { useAppointmentDetail } from "@/pages/appointments/data/use-appointment-detail";
 import { useAppointmentLinkedPatientAssignment } from "@/pages/appointments/data/use-appointment-linked-patient-assignment";
 import { useAppointmentLinkedRecords } from "@/pages/appointments/data/use-appointment-linked-records";
@@ -208,63 +209,6 @@ const APPOINTMENT_REALTIME_EVENTS = [
   "task.created",
   "task.status_changed",
 ] as const;
-
-function escapeCalendarEventHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function resolveCalendarEventDurationMinutes(arg: EventContentArg): number {
-  const { start, end } = arg.event;
-  if (!start || !end) return 30;
-
-  const diffMinutes = Math.round((end.getTime() - start.getTime()) / 60_000);
-  return diffMinutes > 0 ? diffMinutes : 30;
-}
-
-function renderStaticCalendarEventContent(
-  arg: EventContentArg,
-  dictionary: Record<string, string>,
-) {
-  const props = arg.event.extendedProps as CalendarEventExtendedProps;
-  const statusOrTypeLabel = props.isBlocked
-    ? appointmentText("appointments_blocked")
-    : props.appointmentStatus === "completed"
-      ? dictionary.dash_completed
-      : props.appointmentStatus === "cancelled"
-        ? dictionary.appointments_status_cancelled
-        : appointmentTypeLabel(props.appointmentType, dictionary);
-  const secondaryLine = [
-    arg.timeText,
-    props.patientName,
-    props.doctorName ||
-      props.providerName ||
-      props.location ||
-      props.ownerName ||
-      appointmentText("appointments_appointment_2"),
-    props.interpreterName
-      ? `${appointmentText("appointments_interpreter_2")}: ${props.interpreterName}`
-      : "",
-  ]
-    .filter((value): value is string => Boolean(value && value.trim()))
-    .join(" - ");
-
-  return {
-    html: [
-      `<div class="fc-apt-event-card group relative" data-event-duration-minutes="${resolveCalendarEventDurationMinutes(arg)}">`,
-      `<div class="fc-apt-event-row-primary">${escapeCalendarEventHtml(arg.event.title)}</div>`,
-      secondaryLine
-        ? `<div class="fc-apt-event-row-secondary">${escapeCalendarEventHtml(secondaryLine)}</div>`
-        : "",
-      `<div class="mt-auto pt-1"><div class="fc-apt-event-tag">${escapeCalendarEventHtml(statusOrTypeLabel)}</div></div>`,
-      "</div>",
-    ].join(""),
-  };
-}
 
 const loadDesktopDetailWorkspaceContent = () =>
   import("@/pages/appointments/ui/workspace/desktop-detail-workspace-content");
