@@ -1229,13 +1229,35 @@ struct CreateDocumentTranslationRequest {
 #[derive(Deserialize)]
 struct UpdateDocumentTranslationRequest {
     status: String,
-    assigned_to: Option<serde_json::Value>,
+    #[serde(default)]
+    assigned_to: NullableJsonField,
     note: Option<String>,
     source_language: Option<String>,
     source_text: Option<String>,
     translated_text: Option<String>,
     create_translated_document: Option<bool>,
     translated_document_auto_name: Option<String>,
+}
+
+#[derive(Default)]
+enum NullableJsonField {
+    #[default]
+    Missing,
+    Null,
+    Value(serde_json::Value),
+}
+
+impl<'de> Deserialize<'de> for NullableJsonField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match value {
+            serde_json::Value::Null => Self::Null,
+            value => Self::Value(value),
+        })
+    }
 }
 
 struct ShareableDocumentContext {
@@ -14296,10 +14318,14 @@ async fn update_document_translation_request(
         );
     }
 
-    let assigned_to_update = match body.assigned_to.as_ref() {
-        Some(serde_json::Value::Null) => Some(None),
-        Some(serde_json::Value::String(raw_user_id)) if raw_user_id.trim().is_empty() => Some(None),
-        Some(serde_json::Value::String(raw_user_id)) => {
+    let assigned_to_update = match &body.assigned_to {
+        NullableJsonField::Null => Some(None),
+        NullableJsonField::Value(serde_json::Value::String(raw_user_id))
+            if raw_user_id.trim().is_empty() =>
+        {
+            Some(None)
+        }
+        NullableJsonField::Value(serde_json::Value::String(raw_user_id)) => {
             let Ok(user_id) = Uuid::parse_str(raw_user_id.trim()) else {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
@@ -14315,14 +14341,14 @@ async fn update_document_translation_request(
                 Some(Some(user_id))
             }
         }
-        Some(_) => {
+        NullableJsonField::Value(_) => {
             return err(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "Invalid translation assignee",
             );
         }
-        None if next_status == "in_progress" => Some(Some(auth.user_id)),
-        None => None,
+        NullableJsonField::Missing if next_status == "in_progress" => Some(Some(auth.user_id)),
+        NullableJsonField::Missing => None,
     };
     let assigned_to_provided = assigned_to_update.is_some();
     let assigned_to = assigned_to_update.flatten();
