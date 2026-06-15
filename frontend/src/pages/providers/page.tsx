@@ -1367,6 +1367,9 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       return {
         createDescription: t.providers_create_description,
         newLabel: t.providers_new,
+        peopleLabel:
+          t.uiText.providers_people_catalog ??
+          (lang === "de" ? "Ärzte und Personal" : "Врачи и персонал"),
         subtitle: t.providers_subtitle,
         title: t.providers_title,
       };
@@ -1376,6 +1379,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         createDescription:
           "Servicepartner mit Kontakten, Vertragsnotizen und operativer Kategorie anlegen.",
         newLabel: "Neuer Servicepartner",
+        peopleLabel: "Kontakte und Personal",
         subtitle: "Servicepartner, Kontakte und Leistungskatalog verwalten",
         title: "Servicepartner",
       };
@@ -1384,6 +1388,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       createDescription:
         "Добавьте сервисного партнёра с контактами, договорными заметками и операционной категорией.",
       newLabel: "Новый сервисный партнёр",
+      peopleLabel: "Контакты и персонал",
       subtitle: "Управление сервисными партнёрами, контактами и каталогом услуг",
       title: "Сервисные партнёры",
     };
@@ -1394,6 +1399,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     t.providers_new,
     t.providers_subtitle,
     t.providers_title,
+    t.uiText.providers_people_catalog,
   ]);
   const relationshipTargetDoctorsRequestRef = useRef(0);
   const [catalogMode, setCatalogModeState] = useState<ProviderCatalogMode>(() =>
@@ -3155,7 +3161,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             className="h-8 rounded-md px-3"
             onClick={() => setCatalogMode("people")}
           >
-            {l("providers_people_catalog")}
+            {providerPageCopy.peopleLabel}
           </Button>
         </div>
 

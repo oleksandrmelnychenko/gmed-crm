@@ -161,11 +161,35 @@ function patientOptionLabel(patient: ProviderPeoplePatientOption) {
     .join(" - ");
 }
 
+function contactPersonLabel(lang: Lang) {
+  return localizedFallback(lang, "Kontakt", "Контакт");
+}
+
+function isContactPersonType(
+  value: ProviderPeoplePersonType,
+  providerType: ProviderType | "" | null | undefined,
+  forceNonMedical = false,
+) {
+  return value === "doctor" && (forceNonMedical || providerType === "non_medical");
+}
+
+function personDisplayName(row: ProviderPeopleRow, forceNonMedical: boolean) {
+  return row.person_type === "doctor" && !isContactPersonType(row.person_type, row.provider_type, forceNonMedical)
+    ? doctorListDisplayName(row)
+    : row.name;
+}
+
 function personTypeLabel(
   value: ProviderPeoplePersonType,
   labels: Record<string, string>,
   uiText: Record<string, string>,
+  lang: Lang,
+  providerType?: ProviderType | "" | null,
+  forceNonMedical = false,
 ) {
+  if (isContactPersonType(value, providerType, forceNonMedical)) {
+    return contactPersonLabel(lang);
+  }
   return value === "doctor"
     ? uiLabel(uiText, "providers_doctor", labelFrom(labels, "common_doctor", labels.common_not_set ?? "-"))
     : uiLabel(uiText, "providers_staff", labels.common_not_set ?? "-");
@@ -265,25 +289,30 @@ function visibleCounts(row: ProviderPeopleRow) {
 }
 
 function PersonTypeBadge({
+  forceNonMedical,
+  lang,
   row,
   labels,
   uiText,
 }: {
+  forceNonMedical: boolean;
+  lang: Lang;
   labels: Record<string, string>;
   row: ProviderPeopleRow;
   uiText: Record<string, string>;
 }) {
+  const isContactPerson = isContactPersonType(row.person_type, row.provider_type, forceNonMedical);
   return (
     <Badge
       variant="outline"
       className={cn(
         "rounded-full text-[10px]",
-        row.person_type === "doctor"
+        row.person_type === "doctor" && !isContactPerson
           ? "border-sky-200 bg-sky-50 text-sky-700"
           : "border-amber-200 bg-amber-50 text-amber-700",
       )}
     >
-      {personTypeLabel(row.person_type, labels, uiText)}
+      {personTypeLabel(row.person_type, labels, uiText, lang, row.provider_type, forceNonMedical)}
     </Badge>
   );
 }
@@ -311,20 +340,23 @@ function ProviderTypeBadge({
 }
 
 function PersonIdentityCell({
+  forceNonMedical,
   lang,
   labels,
   row,
   uiText,
 }: {
+  forceNonMedical: boolean;
   lang: Lang;
   labels: Record<string, string>;
   row: ProviderPeopleRow;
   uiText: Record<string, string>;
 }) {
+  const isContactPerson = isContactPersonType(row.person_type, row.provider_type, forceNonMedical);
   return (
     <div className="flex min-w-0 items-center gap-2">
       <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-        {row.person_type === "doctor" ? (
+        {row.person_type === "doctor" && !isContactPerson ? (
           <Stethoscope className="size-3.5" />
         ) : (
           <UserRound className="size-3.5" />
@@ -333,9 +365,15 @@ function PersonIdentityCell({
       <div className="min-w-0">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="truncate text-xs font-medium text-foreground">
-            {row.person_type === "doctor" ? doctorListDisplayName(row) : row.name}
+            {personDisplayName(row, forceNonMedical)}
           </span>
-          <PersonTypeBadge labels={labels} row={row} uiText={uiText} />
+          <PersonTypeBadge
+            forceNonMedical={forceNonMedical}
+            labels={labels}
+            lang={lang}
+            row={row}
+            uiText={uiText}
+          />
         </div>
         <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
           {roleLabel(row, labels, uiText, lang)}
@@ -412,21 +450,38 @@ function buildPeopleColumns(
       pinned: "left",
       width: 300,
       group: "identity",
-      render: (row) => <PersonIdentityCell labels={labels} lang={lang} row={row} uiText={uiText} />,
+      render: (row) => (
+        <PersonIdentityCell
+          forceNonMedical={forceNonMedical}
+          labels={labels}
+          lang={lang}
+          row={row}
+          uiText={uiText}
+        />
+      ),
     },
     {
       id: "person_type",
       label: uiLabel(uiText, "providers_people_type", localizedFallback(lang, "Personentyp", "Тип человека")),
-      accessor: (row) => personTypeLabel(row.person_type, labels, uiText),
+      accessor: (row) =>
+        personTypeLabel(row.person_type, labels, uiText, lang, row.provider_type, forceNonMedical),
       filterType: "enum",
       filterOptions: [
-        { value: "doctor", label: personTypeLabel("doctor", labels, uiText) },
-        { value: "staff", label: personTypeLabel("staff", labels, uiText) },
+        { value: "doctor", label: personTypeLabel("doctor", labels, uiText, lang, "", forceNonMedical) },
+        { value: "staff", label: personTypeLabel("staff", labels, uiText, lang) },
       ],
       sortable: true,
       width: 130,
       group: "identity",
-      render: (row) => <PersonTypeBadge labels={labels} row={row} uiText={uiText} />,
+      render: (row) => (
+        <PersonTypeBadge
+          forceNonMedical={forceNonMedical}
+          labels={labels}
+          lang={lang}
+          row={row}
+          uiText={uiText}
+        />
+      ),
     },
     {
       id: "provider",
@@ -871,10 +926,10 @@ function FiltersBar({
           <option value="">{allLabel}</option>
           <option value="doctor">
             {effectiveProviderType === "non_medical"
-              ? uiLabel(uiText, "providers_contacts", localizedFallback(lang, "Kontakte", "Контакты"))
-              : personTypeLabel("doctor", labels, uiText)}
+              ? contactPersonLabel(lang)
+              : personTypeLabel("doctor", labels, uiText, lang)}
           </option>
-          <option value="staff">{personTypeLabel("staff", labels, uiText)}</option>
+          <option value="staff">{personTypeLabel("staff", labels, uiText, lang)}</option>
         </SelectField>
 
         <label className="min-w-0">
@@ -1011,6 +1066,7 @@ function ErrorBanner({
 }
 
 function MobilePeopleCards({
+  forceNonMedical,
   labels,
   lang,
   loading,
@@ -1019,6 +1075,7 @@ function MobilePeopleCards({
   onOpenPerson,
   onOpenProvider,
 }: {
+  forceNonMedical: boolean;
   labels: Record<string, string>;
   lang: Lang;
   loading: boolean;
@@ -1057,7 +1114,8 @@ function MobilePeopleCards({
         >
           <div className="flex items-start gap-3">
             <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/30 text-muted-foreground">
-              {row.person_type === "doctor" ? (
+              {row.person_type === "doctor" &&
+              !isContactPersonType(row.person_type, row.provider_type, forceNonMedical) ? (
                 <Stethoscope className="size-4" />
               ) : (
                 <UserRound className="size-4" />
@@ -1066,9 +1124,15 @@ function MobilePeopleCards({
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <h4 className="truncate text-sm font-semibold text-foreground">
-                  {row.person_type === "doctor" ? doctorListDisplayName(row) : row.name}
+                  {personDisplayName(row, forceNonMedical)}
                 </h4>
-                <PersonTypeBadge labels={labels} row={row} uiText={uiText} />
+                <PersonTypeBadge
+                  forceNonMedical={forceNonMedical}
+                  labels={labels}
+                  lang={lang}
+                  row={row}
+                  uiText={uiText}
+                />
               </div>
               <p className="mt-1 truncate text-xs text-muted-foreground">
                 {roleLabel(row, labels, uiText, lang)}
@@ -1246,6 +1310,7 @@ export function ProviderPeopleCatalog({
       </div>
 
       <MobilePeopleCards
+        forceNonMedical={forceNonMedical}
         labels={labels}
         lang={lang}
         loading={loading}

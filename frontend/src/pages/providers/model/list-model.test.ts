@@ -40,6 +40,20 @@ describe("buildProvidersQuery", () => {
 
     expect(params.get("specializations")).toBe("cardiology,neurology");
   });
+
+  it("serializes provider category filters to the backend taxonomy key", () => {
+    const filters: ProviderFilters = {
+      ...DEFAULT_FILTERS,
+      activeOnly: "",
+      providerType: "non_medical",
+      taxonomyNodeId: "0f5ac3c1-0000-4000-9000-000000000002",
+    };
+
+    const params = paramsFromPath(buildProvidersQuery(filters, false));
+
+    expect(params.get("provider_type")).toBe("non_medical");
+    expect(params.get("taxonomy_node_id")).toBe("0f5ac3c1-0000-4000-9000-000000000002");
+  });
 });
 
 describe("toProviderPayload", () => {
