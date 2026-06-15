@@ -38,6 +38,7 @@ import {
 import {
   buildEditAppointmentForm,
   hasAppointmentFormChanges,
+  restoreEditAppointmentRecurrenceFields,
 } from "@/pages/appointments/model/form-factories";
 import {
   buildEditAppointmentUpdatePayload,
@@ -381,11 +382,16 @@ function useEditAppointmentSectionContentContent({
       type: "update",
       updater: (state) => {
         const next = resolveStateAction(value, state.recurrenceScope);
+        const nextForm =
+          next === "single"
+            ? restoreEditAppointmentRecurrenceFields(state.form, detail)
+            : state.form;
 
-        updateDirtyRef(state.form, next);
+        updateDirtyRef(nextForm, next);
 
         return {
           ...state,
+          form: nextForm,
           recurrenceScope: next,
           conflicts: state.conflicts ? null : state.conflicts,
           error: state.error ? "" : state.error,
@@ -876,6 +882,7 @@ function useEditAppointmentSectionContentContent({
         title={t.appointments_title}
         maxWidthClassName="sm:max-w-[760px]"
         onSubmit={handleSubmit}
+        footerError={error || undefined}
         footer={
           <>
             <Button
@@ -900,7 +907,6 @@ function useEditAppointmentSectionContentContent({
         }
       >
         <div className="space-y-4 rounded-xl">
-        {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
         {editSheetSectionTitle(appointmentText("appointments_appointment_and_timing"))}
         <div className="grid gap-4 md:grid-cols-3">

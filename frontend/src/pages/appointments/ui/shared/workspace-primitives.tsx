@@ -89,6 +89,7 @@ export function AppointmentEditorSheet({
   maxWidthClassName = "sm:max-w-[560px]",
   onSubmit,
   children,
+  footerError,
   footer,
 }: {
   open: boolean;
@@ -103,6 +104,7 @@ export function AppointmentEditorSheet({
   maxWidthClassName?: string;
   onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
   children: ReactNode;
+  footerError?: ReactNode;
   footer: ReactNode;
 }) {
   const content = (
@@ -111,7 +113,9 @@ export function AppointmentEditorSheet({
       description={description}
       headerClassName="px-4 py-3"
       bodyClassName="min-h-0 overscroll-y-contain space-y-4 px-5 py-4"
-      footer={<SheetActionsFooter>{footer}</SheetActionsFooter>}
+      footer={
+        <SheetActionsFooter error={footerError}>{footer}</SheetActionsFooter>
+      }
     >
       {children}
     </AdminSheetScaffold>

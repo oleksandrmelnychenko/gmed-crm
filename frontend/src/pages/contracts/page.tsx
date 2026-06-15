@@ -86,6 +86,7 @@ import {
   patientOptionLabel,
   quoteToStatusForm,
   toOptional,
+  validateCreateContractForm,
   valueToInput,
 } from "./model/contracts-model";
 import {
@@ -871,6 +872,28 @@ function useContractsPageContent() {
     () => orders.find((order) => order.id === createQuoteForm.orderId) ?? null,
     [orders, createQuoteForm.orderId],
   );
+  const createContractValidationMessages = useMemo(
+    () => ({
+      invalidConditionsJson:
+        lang === "de"
+          ? `${t.contracts_notes}: Bitte geben Sie gültiges JSON ein.`
+          : `${t.contracts_notes}: введите корректный JSON.`,
+      patientRequired: `${t.contracts_patient}: ${t.cf_required}`,
+      validFromRequired: `${t.providers_service_valid_from}: ${t.cf_required}`,
+      validToBeforeValidFrom:
+        lang === "de"
+          ? `${t.providers_service_valid_to}: darf nicht vor ${t.providers_service_valid_from} liegen.`
+          : `${t.providers_service_valid_to}: дата не может быть раньше поля «${t.providers_service_valid_from}».`,
+    }),
+    [
+      lang,
+      t.cf_required,
+      t.contracts_notes,
+      t.contracts_patient,
+      t.providers_service_valid_from,
+      t.providers_service_valid_to,
+    ],
+  );
 
   const agencyServiceColumns = useMemo<ColumnDef<AgencyServiceItem>[]>(
     () => [
@@ -1631,6 +1654,14 @@ function useContractsPageContent() {
 
   async function handleCreateContract(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const validationError = validateCreateContractForm(
+      createContractForm,
+      createContractValidationMessages,
+    );
+    if (validationError) {
+      setCreateContractError(validationError);
+      return;
+    }
     setCreateContractBusy(true);
     setCreateContractError(null);
     try {
@@ -2256,6 +2287,7 @@ function useContractsPageContent() {
               footer={
                 <SheetFormFooter
                   cancelLabel={t.common_cancel}
+                  error={agencyServiceFormError}
                   submitLabel={agencyServiceForm.id ? text.saveCatalogItem : text.createCatalogItem}
                   submitting={agencyServiceBusy}
                   onCancel={closeAgencyServiceSheet}
@@ -2263,7 +2295,6 @@ function useContractsPageContent() {
               }
             >
               <div className="space-y-4 rounded-xl">
-                {agencyServiceFormError ? <ShellBanner tone="error">{agencyServiceFormError}</ShellBanner> : null}
                 <section className="rounded-xl border border-border bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.basicData)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -2412,6 +2443,7 @@ function useContractsPageContent() {
               footer={
                 <SheetFormFooter
                   cancelLabel={t.common_cancel}
+                  error={createContractError}
                   submitLabel={text.createContract}
                   submitting={createContractBusy}
                   onCancel={() => setCreateContractOpen(false)}
@@ -2419,12 +2451,12 @@ function useContractsPageContent() {
               }
             >
               <div className="space-y-4 rounded-xl">
-                {createContractError ? <ShellBanner tone="error">{createContractError}</ShellBanner> : null}
                 <section className="rounded-xl border border-border bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.contractPatientStatus)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                    <Field label={t.contracts_patient}>
+                    <Field label={t.contracts_patient} required>
                       <NativeComboboxSelect
+                        aria-invalid={Boolean(createContractError && !createContractForm.patientId)}
                         value={createContractForm.patientId || "__empty__"}
                         onChange={(event) =>
                           setCreateContractForm((current) => ({
@@ -2469,9 +2501,10 @@ function useContractsPageContent() {
                 <section className="rounded-xl border border-border bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.contractDates)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                    <Field label={t.providers_service_valid_from}>
+                    <Field label={t.providers_service_valid_from} required>
                       <Input
                         type="date"
+                        aria-invalid={Boolean(createContractError && !createContractForm.validFrom)}
                         className={shellInputClassName}
                         value={createContractForm.validFrom}
                         onChange={(event) =>
@@ -2482,6 +2515,12 @@ function useContractsPageContent() {
                     <Field label={t.providers_service_valid_to}>
                       <Input
                         type="date"
+                        aria-invalid={Boolean(
+                          createContractError &&
+                          createContractForm.validFrom &&
+                          createContractForm.validTo &&
+                          createContractForm.validTo < createContractForm.validFrom,
+                        )}
                         className={shellInputClassName}
                         value={createContractForm.validTo}
                         onChange={(event) =>
@@ -2535,6 +2574,7 @@ function useContractsPageContent() {
               footer={
                 <SheetFormFooter
                   cancelLabel={t.common_cancel}
+                  error={createQuoteError}
                   submitLabel={text.createQuote}
                   submitting={createQuoteBusy}
                   submitDisabled={!createQuoteForm.orderId}
@@ -2543,7 +2583,6 @@ function useContractsPageContent() {
               }
             >
               <div className="space-y-4 rounded-xl">
-                {createQuoteError ? <ShellBanner tone="error">{createQuoteError}</ShellBanner> : null}
                 <section className="rounded-xl border border-border bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.quoteOrderSection)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -3136,15 +3175,22 @@ function Field({
   label,
   className,
   children,
+  required = false,
 }: {
   label: string;
   className?: string;
   children: ReactNode;
+  required?: boolean;
 }) {
   return (
     <label className={cn("flex flex-col gap-1.5", className)}>
       <span className="text-[11.5px] font-medium text-muted-foreground leading-tight">
         {label}
+        {required ? (
+          <span aria-hidden="true" className="ml-1 text-[var(--brand)]">
+            *
+          </span>
+        ) : null}
       </span>
       {children}
     </label>

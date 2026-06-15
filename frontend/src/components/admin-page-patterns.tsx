@@ -60,6 +60,17 @@ function SheetBodyContent({
   return <div className={className}>{children}</div>;
 }
 
+function SheetFooterError({ error }: { error?: ReactNode }) {
+  return error ? (
+    <div
+      role="alert"
+      className="border-t border-rose-200 bg-rose-50 px-4 py-2 text-xs font-medium text-rose-800"
+    >
+      {error}
+    </div>
+  ) : null;
+}
+
 export function AdminToolbar({
   children,
   className,
@@ -244,6 +255,7 @@ export function AdminSheetScaffold({
 
 export function SheetFormFooter({
   cancelLabel,
+  error,
   submitLabel,
   submittingLabel,
   submitting = false,
@@ -252,6 +264,7 @@ export function SheetFormFooter({
   onSubmit,
 }: {
   cancelLabel: ReactNode;
+  error?: ReactNode;
   submitLabel: ReactNode;
   submittingLabel?: ReactNode;
   submitting?: boolean;
@@ -262,33 +275,43 @@ export function SheetFormFooter({
   const handleCancel = useSheetDismissalGuard(onCancel);
 
   return (
-    <div className="shrink-0 flex justify-end gap-2 bg-popover px-4 py-3">
-      <Button
-        type="button"
-        variant="outline"
-        className="h-9 rounded-lg"
-        onClick={handleCancel}
-        disabled={submitting}
-      >
-        {cancelLabel}
-      </Button>
-      <Button
-        type={onSubmit ? "button" : "submit"}
-        className="h-9 rounded-lg"
-        disabled={submitting || submitDisabled}
-        onClick={onSubmit}
-      >
-        {submitting ? <LoaderCircle className="size-4 animate-spin" /> : null}
-        {submitting ? (submittingLabel ?? submitLabel) : submitLabel}
-      </Button>
+    <div className="shrink-0 bg-popover">
+      <SheetFooterError error={error} />
+      <div className="flex justify-end gap-2 px-4 py-3">
+        <Button
+          type="button"
+          variant="outline"
+          className="h-9 rounded-lg"
+          onClick={handleCancel}
+          disabled={submitting}
+        >
+          {cancelLabel}
+        </Button>
+        <Button
+          type={onSubmit ? "button" : "submit"}
+          className="h-9 rounded-lg"
+          disabled={submitting || submitDisabled}
+          onClick={onSubmit}
+        >
+          {submitting ? <LoaderCircle className="size-4 animate-spin" /> : null}
+          {submitting ? (submittingLabel ?? submitLabel) : submitLabel}
+        </Button>
+      </div>
     </div>
   );
 }
 
-export function SheetActionsFooter({ children }: { children: ReactNode }) {
+export function SheetActionsFooter({
+  children,
+  error,
+}: {
+  children: ReactNode;
+  error?: ReactNode;
+}) {
   return (
-    <div className="shrink-0 flex justify-end gap-2 bg-popover px-4 py-3">
-      {children}
+    <div className="shrink-0 bg-popover">
+      <SheetFooterError error={error} />
+      <div className="flex justify-end gap-2 px-4 py-3">{children}</div>
     </div>
   );
 }

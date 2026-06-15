@@ -459,6 +459,7 @@ function useCreateAppointmentSheetContent({
       title={title}
       maxWidthClassName="sm:max-w-[760px]"
       onSubmit={handleSubmit}
+      footerError={error || undefined}
       footer={
         <>
           <Button
@@ -487,7 +488,6 @@ function useCreateAppointmentSheetContent({
       }
     >
       <div className="space-y-4">
-        {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
                 {sectionTitle(appointmentText("appointments_appointment_and_timing"))}
                 <div className="grid gap-4 md:grid-cols-3">

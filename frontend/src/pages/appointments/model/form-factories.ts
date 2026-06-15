@@ -139,6 +139,21 @@ export function buildEditAppointmentForm(
   };
 }
 
+export function restoreEditAppointmentRecurrenceFields(
+  form: AppointmentFormState,
+  detail: AppointmentDetail,
+): AppointmentFormState {
+  const saved = buildEditAppointmentForm(detail);
+  return {
+    ...form,
+    repeatEnabled: saved.repeatEnabled,
+    repeatFrequency: saved.repeatFrequency,
+    repeatInterval: saved.repeatInterval,
+    repeatCount: saved.repeatCount,
+    repeatUntil: saved.repeatUntil,
+  };
+}
+
 export function buildFollowUpVisitForm(
   detail: AppointmentDetail,
   defaultReminderUserId = "",

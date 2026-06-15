@@ -110,6 +110,32 @@ export function blankContractForm(patientId = ""): ContractFormState {
   };
 }
 
+export type ContractFormValidationMessages = {
+  invalidConditionsJson: string;
+  patientRequired: string;
+  validFromRequired: string;
+  validToBeforeValidFrom: string;
+};
+
+export function validateCreateContractForm(
+  form: ContractFormState,
+  messages: ContractFormValidationMessages,
+) {
+  if (!form.patientId) return messages.patientRequired;
+  if (!form.validFrom) return messages.validFromRequired;
+  if (form.validTo && form.validFrom && form.validTo < form.validFrom) {
+    return messages.validToBeforeValidFrom;
+  }
+  if (form.conditionsText.trim()) {
+    try {
+      JSON.parse(form.conditionsText);
+    } catch {
+      return messages.invalidConditionsJson;
+    }
+  }
+  return "";
+}
+
 export function blankQuoteForm(orderId = ""): QuoteFormState {
   return {
     orderId,
