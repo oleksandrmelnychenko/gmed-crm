@@ -136,12 +136,41 @@ describe("taxonomyAttributeValueOptions", () => {
           { ...baseProvider, id: "provider-1", taxonomy_attributes: { cuisine: "Steak House" } },
           { ...baseProvider, id: "provider-2", taxonomy_attributes: { cuisine: "Fine dining" } },
           { ...baseProvider, id: "provider-3", taxonomy_attributes: { cuisine: " steak house " } },
-          { ...baseProvider, id: "provider-4", taxonomy_attributes: { cuisine: "" } },
-          { ...baseProvider, id: "provider-5", taxonomy_attributes: { diet: "Halal" } },
+          {
+            ...baseProvider,
+            id: "provider-4",
+            taxonomy_attributes: { cuisine: "Amerikanische, Steak House, Seafood" },
+          },
+          {
+            ...baseProvider,
+            id: "provider-5",
+            taxonomy_attributes: { cuisine: "Fine Dining. Fruehstueck" },
+          },
+          {
+            ...baseProvider,
+            id: "provider-6",
+            taxonomy_attributes: { cuisine: "Bayerische & Mediterrane Kueche" },
+          },
+          {
+            ...baseProvider,
+            id: "provider-7",
+            taxonomy_attributes: { cuisine: "Asiatische Kueche Mediterrane Kueche" },
+          },
+          { ...baseProvider, id: "provider-8", taxonomy_attributes: { cuisine: "" } },
+          { ...baseProvider, id: "provider-9", taxonomy_attributes: { diet: "Halal" } },
         ],
         "cuisine",
       ),
-    ).toEqual(["Fine dining", "Steak House"]);
+    ).toEqual([
+      "Amerikanische",
+      "Asiatische Kueche",
+      "Bayerische Kueche",
+      "Fine dining",
+      "Fruehstueck",
+      "Mediterrane Kueche",
+      "Seafood",
+      "Steak House",
+    ]);
   });
 });
 

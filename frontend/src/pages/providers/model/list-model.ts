@@ -1155,12 +1155,13 @@ export function taxonomyAttributeValueOptions(
     ) {
       return;
     }
-    const value = String(raw).trim();
-    if (!value) return;
-    const normalized = value.toLocaleLowerCase();
-    if (seen.has(normalized)) return;
-    seen.add(normalized);
-    values.push(value);
+    const candidates = taxonomyAttributeFilterValueParts(attributeKey, raw);
+    for (const value of candidates) {
+      const normalized = value.toLocaleLowerCase();
+      if (seen.has(normalized)) continue;
+      seen.add(normalized);
+      values.push(value);
+    }
   };
 
   for (const provider of providers) {
@@ -1170,6 +1171,35 @@ export function taxonomyAttributeValueOptions(
   return values.sort((left, right) =>
     left.localeCompare(right, undefined, { sensitivity: "base" }),
   );
+}
+
+function taxonomyAttributeFilterValueParts(key: string, raw: string | number | boolean) {
+  const value = String(raw).trim();
+  if (!value) return [];
+  if (key !== "cuisine") return [value];
+  return completeCuisineSuffixes(
+    value
+      .replace(/\b(K(?:ue|\u00fc)che|Cuisine)\b\s+(?=\p{Lu})/gu, "$1, ")
+      .split(/(?:[,;|/\u2022]+|\.|\s{2,}|&(?=.*\b(?:K(?:ue|\u00fc)che|Cuisine)\b))/u)
+      .map((part) => part.trim())
+      .filter(Boolean),
+    /[&/]/.test(value),
+  );
+}
+
+function completeCuisineSuffixes(parts: string[], shareCuisineSuffix: boolean) {
+  if (!shareCuisineSuffix) return parts;
+  const suffix = [...parts]
+    .reverse()
+    .map((part) => part.match(/\b(K(?:ue|\u00fc)che|Cuisine)\b$/iu)?.[1] ?? "")
+    .find(Boolean);
+  if (!suffix) return parts;
+  return parts
+    .map((part) =>
+      /\b(K(?:ue|\u00fc)che|Cuisine)\b$/iu.test(part) ? part : `${part} ${suffix}`,
+    )
+    .map((part) => part.trim())
+    .filter(Boolean);
 }
 
 export function updateTaxonomyAttributeValue(value: string, key: string, nextValue: string) {

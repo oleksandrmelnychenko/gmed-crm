@@ -2379,6 +2379,10 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       setDoctorError(t.uiText.providers_doctor_name_required ?? t.common_failed_update);
       return;
     }
+    if (!doctorForm.id && providerType === "medical" && !payload.title) {
+      setDoctorError(t.uiText.providers_doctor_title_required ?? t.common_failed_update);
+      return;
+    }
 
     setDoctorBusy(true);
     setDoctorError("");
@@ -7774,7 +7778,7 @@ function DoctorProfileFields({
             placeholder={l("patients_display_name")}
           />
         </Field>
-        <Field label={t.providers_doctor_title}>
+        <Field label={t.providers_doctor_title} required={!form.id}>
           <DoctorTitleMultiSelect
             value={form.title}
             onChange={(nextValue) => onChange("title", nextValue)}
