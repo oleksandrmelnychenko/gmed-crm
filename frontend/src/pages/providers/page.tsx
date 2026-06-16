@@ -1902,6 +1902,29 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     setSearchParams(params, { replace: true });
   }
 
+  useEffect(() => {
+    if (
+      !filters.taxonomyAttributeKey ||
+      !filters.taxonomyAttributeValue ||
+      filterAttributeValueOptions.length === 0 ||
+      filterAttributeValueOptions.includes(filters.taxonomyAttributeValue)
+    ) {
+      return;
+    }
+
+    setFilters((current) =>
+      current.taxonomyAttributeValue === filters.taxonomyAttributeValue
+        ? { ...current, taxonomyAttributeValue: "" }
+        : current,
+    );
+    syncQuery({ attr_value: null });
+  }, [
+    filterAttributeValueOptions,
+    filters.taxonomyAttributeKey,
+    filters.taxonomyAttributeValue,
+    searchParams,
+  ]);
+
   const applyDetailRouteState = useCallback((providerId: string) => {
     setSelectedId(providerId);
     setDetailOpen(Boolean(providerId));
@@ -3386,12 +3409,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                       className={cn(selectClassName, "h-8 w-[190px] bg-card text-[13px]")}
                     >
                       <option value="">{t.providers_all}</option>
-                      {filters.taxonomyAttributeValue &&
-                      !filterAttributeValueOptions.includes(filters.taxonomyAttributeValue) ? (
-                        <option value={filters.taxonomyAttributeValue}>
-                          {filters.taxonomyAttributeValue}
-                        </option>
-                      ) : null}
                       {filterAttributeValueOptions.map((value) => (
                         <option key={value} value={value}>
                           {value}

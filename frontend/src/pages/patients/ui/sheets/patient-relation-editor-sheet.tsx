@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import {
+  Banner,
   Field as FormField,
   checkboxClass,
   inputClass,
@@ -71,6 +72,7 @@ type RelationEditorState = {
   form: RelationFormState;
   busy: boolean;
   patientSearch: string;
+  error: string;
 };
 
 type RelationEditorPatch =
@@ -82,6 +84,7 @@ function createRelationEditorState(): RelationEditorState {
     form: blankRelationForm(),
     busy: false,
     patientSearch: "",
+    error: "",
   };
 }
 
@@ -149,7 +152,7 @@ function PatientRelationEditorSheet({
     undefined,
     createRelationEditorState,
   );
-  const { form, busy, patientSearch } = relationState;
+  const { form, busy, patientSearch, error } = relationState;
   const deferredPatientSearch = useDeferredValue(patientSearch);
   const { patientOptions, patientOptionsLoading } = usePatientLookupOptions({
     enabled: open && canManageRelations,
@@ -160,6 +163,7 @@ function PatientRelationEditorSheet({
         form: blankRelationForm(),
         busy: false,
         patientSearch: "",
+        error: "",
       });
       return;
     }
@@ -168,6 +172,7 @@ function PatientRelationEditorSheet({
       form: editingRelation ? relationToForm(editingRelation) : blankRelationForm(),
       patientSearch:
         editingRelation?.related_display_name || editingRelation?.related_name || "",
+      error: "",
     });
   }, [editingRelation, open]);
 
@@ -196,15 +201,17 @@ function PatientRelationEditorSheet({
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       if (!patientId) {
-        onError(dictionary.common_failed_create);
+        dispatchRelationState({ error: dictionary.common_failed_create });
         return;
       }
       if (!form.relatedPatientId && !form.relatedName.trim()) {
-        onError(`${t.patient_relation_name}: ${t.cf_required}`);
+        dispatchRelationState({
+          error: `${t.patient_relation_name}: ${t.cf_required}`,
+        });
         return;
       }
 
-      dispatchRelationState({ busy: true });
+      dispatchRelationState({ busy: true, error: "" });
       onError("");
       try {
         const selectedPatientName = selectedRelatedPatient
@@ -222,10 +229,13 @@ function PatientRelationEditorSheet({
         toast.success(dictionary.common_active);
         onOpenChange(false);
         onSaved();
-      } catch (error) {
-        onError(
-          error instanceof Error ? error.message : dictionary.common_failed_update,
-        );
+      } catch (submitError) {
+        dispatchRelationState({
+          error:
+            submitError instanceof Error
+              ? submitError.message
+              : dictionary.common_failed_update,
+        });
       } finally {
         dispatchRelationState({ busy: false });
       }
@@ -264,6 +274,7 @@ function PatientRelationEditorSheet({
         />
       }
     >
+      {error ? <Banner tone="error">{error}</Banner> : null}
       <FormSection title={l("patients_linked_patient")}>
         <FormField
           label={t.patient_relation_search_existing}

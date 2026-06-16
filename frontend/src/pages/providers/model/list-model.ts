@@ -1177,27 +1177,8 @@ function taxonomyAttributeFilterValueParts(key: string, raw: string | number | b
   const value = String(raw).trim();
   if (!value) return [];
   if (key !== "cuisine") return [value];
-  return completeCuisineSuffixes(
-    value
-      .replace(/\b(K(?:ue|\u00fc)che|Cuisine)\b\s+(?=\p{Lu})/gu, "$1, ")
-      .split(/(?:[,;|/\u2022]+|\.|\s{2,}|&(?=.*\b(?:K(?:ue|\u00fc)che|Cuisine)\b))/u)
-      .map((part) => part.trim())
-      .filter(Boolean),
-    /[&/]/.test(value),
-  );
-}
-
-function completeCuisineSuffixes(parts: string[], shareCuisineSuffix: boolean) {
-  if (!shareCuisineSuffix) return parts;
-  const suffix = [...parts]
-    .reverse()
-    .map((part) => part.match(/\b(K(?:ue|\u00fc)che|Cuisine)\b$/iu)?.[1] ?? "")
-    .find(Boolean);
-  if (!suffix) return parts;
-  return parts
-    .map((part) =>
-      /\b(K(?:ue|\u00fc)che|Cuisine)\b$/iu.test(part) ? part : `${part} ${suffix}`,
-    )
+  return value
+    .split(/[,./]+/u)
     .map((part) => part.trim())
     .filter(Boolean);
 }

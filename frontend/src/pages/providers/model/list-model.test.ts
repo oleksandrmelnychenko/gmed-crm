@@ -149,7 +149,7 @@ describe("taxonomyAttributeValueOptions", () => {
           {
             ...baseProvider,
             id: "provider-6",
-            taxonomy_attributes: { cuisine: "Bayerische & Mediterrane Kueche" },
+            taxonomy_attributes: { cuisine: "Bayerische Kueche/Mediterrane Kueche" },
           },
           {
             ...baseProvider,
@@ -163,7 +163,7 @@ describe("taxonomyAttributeValueOptions", () => {
       ),
     ).toEqual([
       "Amerikanische",
-      "Asiatische Kueche",
+      "Asiatische Kueche Mediterrane Kueche",
       "Bayerische Kueche",
       "Fine dining",
       "Fruehstueck",

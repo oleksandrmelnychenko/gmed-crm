@@ -176,7 +176,14 @@ export function contractActionErrorMessage(
     return messages.requiredFields;
   }
 
-  return message || fallback;
+  // Never surface a bare HTTP status (e.g. "422") or an empty message — show
+  // readable text. A server-side error code maps to the contract field hint;
+  // network/unknown failures use the caller's fallback.
+  const trimmed = message.trim();
+  if (!trimmed || /^\d{3}\b/.test(trimmed)) {
+    return errorStatus(error) !== null ? messages.requiredFields : fallback;
+  }
+  return trimmed;
 }
 
 export function validateCreateContractForm(

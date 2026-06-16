@@ -124,4 +124,24 @@ describe("contractActionErrorMessage", () => {
       ),
     ).toBe("Please fill in the required contract fields.");
   });
+
+  it("never surfaces a bare HTTP status code to the user", () => {
+    expect(contractActionErrorMessage(new Error("422"), messages, "Fallback")).toBe(
+      "Fallback",
+    );
+    expect(
+      contractActionErrorMessage(
+        Object.assign(new Error("500"), { status: 500 }),
+        messages,
+        "Fallback",
+      ),
+    ).toBe("Please fill in the required contract fields.");
+    expect(
+      contractActionErrorMessage(
+        Object.assign(new Error("Contract already exists"), { status: 409 }),
+        messages,
+        "Fallback",
+      ),
+    ).toBe("Contract already exists");
+  });
 });
