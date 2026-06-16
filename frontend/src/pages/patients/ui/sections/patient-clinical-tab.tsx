@@ -123,29 +123,6 @@ function attributionLabel(item: ClinicalAttribution): string | null {
   return [doctor || null, item.provider_name].filter(Boolean).join(" · ") || null;
 }
 
-function medicationDoseSlots(medication: ClinicalMedication, tx: Bilingual) {
-  return [
-    { label: tx("Утро", "Morg."), value: medication.dose_morgens },
-    { label: tx("День", "Mitt."), value: medication.dose_mittags },
-    { label: tx("Вечер", "Ab."), value: medication.dose_abends },
-    { label: tx("Ночь", "Nacht"), value: medication.dose_nachts },
-  ].map((slot) => ({
-    ...slot,
-    value: slot.value?.trim() || "0",
-  }));
-}
-
-function medicationDoseSchema(medication: ClinicalMedication) {
-  const values = [
-    medication.dose_morgens,
-    medication.dose_mittags,
-    medication.dose_abends,
-    medication.dose_nachts,
-  ];
-  if (values.every((value) => !value?.trim())) return "—";
-  return values.map((value) => value?.trim() || "0").join("-");
-}
-
 function groupedClinicalItems<T>(
   indexed: IndexedClinicalItem<T>[],
   groups: ClinicalSectionGroup[] | undefined,
@@ -171,7 +148,6 @@ function groupedClinicalItems<T>(
 
 export function PatientMedicationTable({
   canManage,
-  categoryLabel,
   groupOf,
   groups,
   indexed,
@@ -179,7 +155,6 @@ export function PatientMedicationTable({
   tx,
 }: {
   canManage: boolean;
-  categoryLabel: (category: ClinicalMedication["category"]) => string;
   groupOf?: (item: ClinicalMedication) => string;
   groups?: ClinicalSectionGroup[];
   indexed: IndexedClinicalItem<ClinicalMedication>[];
@@ -187,26 +162,25 @@ export function PatientMedicationTable({
   tx: Bilingual;
 }) {
   const sections = groupedClinicalItems(indexed, groups, groupOf, tx("Другое", "Weitere"));
-  const columnCount = canManage ? 6 : 5;
+  const columnCount = canManage ? 12 : 11;
+  const doseCell = (value: string | null) => (value && value.trim() ? value.trim() : "");
 
   return (
     <div className="overflow-x-auto rounded-lg border border-border/70 bg-background">
-      <table className="w-full min-w-[760px] table-fixed border-collapse text-left text-xs">
-        <colgroup>
-          <col className={canManage ? "w-[25%]" : "w-[29%]"} />
-          <col className={canManage ? "w-[20%]" : "w-[23%]"} />
-          <col className={canManage ? "w-[16%]" : "w-[18%]"} />
-          <col className={canManage ? "w-[17%]" : "w-[18%]"} />
-          <col className={canManage ? "w-[15%]" : "w-[12%]"} />
-          {canManage ? <col className="w-[7%]" /> : null}
-        </colgroup>
+      <table className="w-full min-w-[1080px] border-collapse text-left text-xs">
         <thead className="border-b border-border/70 bg-muted/40 text-[11px] uppercase text-muted-foreground">
           <tr>
-            <th scope="col" className="px-3 py-2 font-semibold">{tx("Препарат", "Medikament")}</th>
-            <th scope="col" className="px-3 py-2 font-semibold">{tx("Приём", "Einnahme")}</th>
-            <th scope="col" className="px-3 py-2 font-semibold">{tx("Категория", "Kategorie")}</th>
-            <th scope="col" className="px-3 py-2 font-semibold">{tx("Причина / заметки", "Grund / Hinweise")}</th>
-            <th scope="col" className="px-3 py-2 font-semibold">{tx("Назначил", "Verordnung")}</th>
+            <th scope="col" className="px-2.5 py-2 font-semibold">{tx("Действующее вещество", "Wirkstoff")}</th>
+            <th scope="col" className="px-2.5 py-2 font-semibold">{tx("Торговое название", "Handelsname")}</th>
+            <th scope="col" className="px-2.5 py-2 font-semibold">{tx("Дозировка", "Stärke")}</th>
+            <th scope="col" className="px-2.5 py-2 font-semibold">{tx("Форма", "Form")}</th>
+            <th scope="col" className="px-1.5 py-2 text-center font-semibold">{tx("Утро", "Morgens")}</th>
+            <th scope="col" className="px-1.5 py-2 text-center font-semibold">{tx("День", "Mittags")}</th>
+            <th scope="col" className="px-1.5 py-2 text-center font-semibold">{tx("Вечер", "Abends")}</th>
+            <th scope="col" className="px-1.5 py-2 text-center font-semibold">{tx("Ночь", "Zur Nacht")}</th>
+            <th scope="col" className="px-2.5 py-2 font-semibold">{tx("Ед.", "Einheit")}</th>
+            <th scope="col" className="px-2.5 py-2 font-semibold">{tx("Указания", "Hinweise")}</th>
+            <th scope="col" className="px-2.5 py-2 font-semibold">{tx("Показание", "Grund")}</th>
             {canManage ? (
               <th scope="col" className="px-2 py-2 text-right font-semibold">
                 <span className="sr-only">{tx("Действия", "Aktionen")}</span>
@@ -232,76 +206,29 @@ export function PatientMedicationTable({
                 </tr>
               ) : null}
               {section.rows.map(({ item, index }) => {
-                const doseSlots = medicationDoseSlots(item, tx);
                 const attribution = attributionLabel(item);
                 return (
                   <tr key={item.id ?? index} className="align-top transition-colors hover:bg-muted/25">
-                    <td className="px-3 py-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-foreground">
-                          {item.handelsname || tx("Без названия", "Ohne Namen")}
-                        </p>
-                        {item.wirkstoff ? (
-                          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.wirkstoff}</p>
-                        ) : null}
-                        {item.staerke || item.form ? (
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {item.staerke ? (
-                              <Badge variant="outline" className="rounded-md px-1.5 py-0 text-[10px]">
-                                {item.staerke}
-                              </Badge>
-                            ) : null}
-                            {item.form ? (
-                              <Badge variant="outline" className="rounded-md px-1.5 py-0 text-[10px]">
-                                {item.form}
-                              </Badge>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </div>
+                    <td className="px-2.5 py-2.5 text-foreground">{item.wirkstoff || "—"}</td>
+                    <td className="px-2.5 py-2.5 font-medium text-foreground">
+                      {item.handelsname || tx("Без названия", "Ohne Namen")}
                     </td>
-                    <td className="px-3 py-3">
-                      <div className="grid grid-cols-4 gap-1">
-                        {doseSlots.map((slot) => (
-                          <div
-                            key={slot.label}
-                            className="min-h-[38px] rounded-md border border-border/70 bg-card px-1 py-1 text-center"
-                          >
-                            <span className="block text-[10px] leading-none text-muted-foreground">
-                              {slot.label}
-                            </span>
-                            <span className="mt-1 block font-mono text-[12px] font-semibold text-foreground">
-                              {slot.value}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                      <p className="mt-1 text-[11px] text-muted-foreground">
-                        {medicationDoseSchema(item)}
-                        {item.einheit ? ` ${item.einheit}` : ""}
-                      </p>
+                    <td className="whitespace-nowrap px-2.5 py-2.5 font-mono text-foreground">
+                      {item.staerke || ""}
                     </td>
-                    <td className="px-3 py-3">
-                      <Badge
-                        variant="outline"
-                        className="h-auto max-w-full justify-start whitespace-normal rounded-md px-1.5 py-0.5 text-left text-[10px] leading-snug"
-                      >
-                        {categoryLabel(item.category)}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-3">
-                      {item.grund ? (
-                        <p className="break-words text-xs text-foreground">{item.grund}</p>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                      {item.hinweis ? (
-                        <p className="mt-1 break-words text-[11px] text-muted-foreground">{item.hinweis}</p>
+                    <td className="px-2.5 py-2.5 text-foreground">{item.form || ""}</td>
+                    <td className="px-1.5 py-2.5 text-center font-mono text-foreground">{doseCell(item.dose_morgens)}</td>
+                    <td className="px-1.5 py-2.5 text-center font-mono text-foreground">{doseCell(item.dose_mittags)}</td>
+                    <td className="px-1.5 py-2.5 text-center font-mono text-foreground">{doseCell(item.dose_abends)}</td>
+                    <td className="px-1.5 py-2.5 text-center font-mono text-foreground">{doseCell(item.dose_nachts)}</td>
+                    <td className="whitespace-nowrap px-2.5 py-2.5 text-foreground">{item.einheit || ""}</td>
+                    <td className="px-2.5 py-2.5 text-muted-foreground">
+                      {item.hinweis ? <span className="break-words">{item.hinweis}</span> : null}
+                      {attribution ? (
+                        <span className="mt-0.5 block text-[10px] text-muted-foreground/80">{attribution}</span>
                       ) : null}
                     </td>
-                    <td className="px-3 py-3">
-                      <p className="break-words text-xs text-foreground">{attribution || "—"}</p>
-                    </td>
+                    <td className="px-2.5 py-2.5 text-foreground">{item.grund || ""}</td>
                     {canManage ? (
                       <td className="px-2 py-2 text-right">
                         {renderActions(item, index)}
@@ -741,13 +668,6 @@ export function PatientClinicalTab({
     };
   }, [patientId, version]);
 
-  const categoryLabel = (category: ClinicalMedication["category"]) =>
-    category === "besondere"
-      ? tx("По особым показаниям", "Zu besonderen Zeiten")
-      : category === "selbst"
-        ? tx("Самолечение", "Selbstmedikation")
-        : tx("Постоянная", "Dauermedikation");
-
   const attributionRow = (item: ClinicalAttribution) => {
     const label = attributionLabel(item);
     return label ? (
@@ -1025,7 +945,6 @@ export function PatientClinicalTab({
             canManage={canManage}
             renderActions={renderActions}
             tx={tx}
-            categoryLabel={categoryLabel}
           />
         )}
         form={(draft, set) => (

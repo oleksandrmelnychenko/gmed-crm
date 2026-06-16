@@ -50,6 +50,7 @@ import {
   functionalLabelChipClass,
   humanizeFunctionalLabel,
 } from "../shared/patient-form-primitives";
+import { PatientOverviewCard } from "../sections/patient-overview-card";
 
 const loadPatientProfileTab = () => import("../sections/patient-profile-section");
 const loadPatientCuratorsTab = () => import("../sections/patient-curators-tab");
@@ -678,7 +679,13 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
 
         <Suspense fallback={<TabLoader />}>
           {activeTab === "profile" ? (
-            <LazyPatientProfileTab
+            <div className="space-y-4">
+              <PatientOverviewCard
+                patientId={id ?? ""}
+                allergies={detail.clinical_warnings ?? null}
+                canViewClinical={hasClinicalSurface}
+              />
+              <LazyPatientProfileTab
               profileControls={{
                 canEditPatientProfile,
                 canExportPatientCompliance,
@@ -745,6 +752,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               vitalsHistory={vitalsHistory}
               vitalsSheetOpen={vitalsSheetOpen}
             />
+            </div>
           ) : null}
 
           {activeTab === "curators" ? (

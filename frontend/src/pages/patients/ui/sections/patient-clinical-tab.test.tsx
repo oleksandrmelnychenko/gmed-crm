@@ -34,7 +34,6 @@ describe("PatientMedicationTable", () => {
     const html = renderToStaticMarkup(
       <PatientMedicationTable
         canManage
-        categoryLabel={() => "Dauermedikation"}
         groupOf={(row) => row.category}
         groups={[
           { key: "dauer", label: "Dauermedikation" },
@@ -48,15 +47,20 @@ describe("PatientMedicationTable", () => {
     );
 
     expect(html).toContain("<table");
-    expect(html).toContain("Medikament");
-    expect(html).toContain("Einnahme");
+    // BMP Medikationsplan columns
+    expect(html).toContain("Wirkstoff");
+    expect(html).toContain("Handelsname");
+    expect(html).toContain("Morgens");
+    expect(html).toContain("Zur Nacht");
+    expect(html).toContain("Einheit");
     expect(html).toContain("Dauermedikation");
     expect(html).toContain("Bisoprolol-ratiopharm");
     expect(html).toContain("Bisoprolol");
-    expect(html).toContain("Morg.");
-    expect(html).toContain("Mitt.");
-    expect(html).toContain("1-0-1-0 Stück");
+    expect(html).toContain("5 mg");
+    expect(html).toContain("Filmtabl.");
+    expect(html).toContain("Stück");
     expect(html).toContain("Bluthochdruck");
+    expect(html).toContain("Nach dem Essen");
     expect(html).toContain("Dr. Heart · Klinik München");
     expect(html).toContain("Bearb.");
   });
