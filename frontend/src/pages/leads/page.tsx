@@ -2079,7 +2079,7 @@ function useLeadsPageContent() {
             rows={filteredLeads}
             columns={leadColumns}
             rowId={(row) => row.id}
-            defaultDensity="compact"
+            defaultDensity="comfortable"
             defaultFrozenColumns={LEAD_DEFAULT_FROZEN_COLUMNS}
             dictionary={t as unknown as Record<string, string>}
             groupLabels={leadColumnGroupLabels}

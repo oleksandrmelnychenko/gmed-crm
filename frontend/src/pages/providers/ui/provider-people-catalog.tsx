@@ -1267,7 +1267,7 @@ export function ProviderPeopleCatalog({
         <DataTableSurface
           rows={rows}
           columns={columns}
-          defaultDensity="compact"
+          defaultDensity="comfortable"
           defaultFrozenColumns={DEFAULT_FROZEN_COLUMNS}
           defaultHiddenColumns={DEFAULT_HIDDEN_COLUMNS}
           dictionary={labels}

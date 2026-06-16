@@ -916,7 +916,7 @@ function useSopsPageContent() {
               rows={visibleQueue}
               columns={queueColumns}
               rowId={(row) => row.id}
-              density="compact"
+              density="comfortable"
               onRowClick={(row) => openReview(row)}
               rowActions={(row) => (
                 <Button
@@ -959,7 +959,7 @@ function useSopsPageContent() {
               rows={visibleItems}
               columns={libraryColumns}
               rowId={(row) => row.id}
-              density="compact"
+              density="comfortable"
               activeRowId={selectedItemId || null}
               onRowClick={(row) => setSelectedItemId(row.id)}
               rowActions={(row) => (

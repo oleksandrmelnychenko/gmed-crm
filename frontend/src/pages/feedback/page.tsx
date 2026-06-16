@@ -1797,7 +1797,7 @@ function useStaffFeedbackWorkspaceContent() {
             rows={feedback}
             columns={feedbackColumns}
             rowId={(row) => row.id}
-            defaultDensity="compact"
+            defaultDensity="comfortable"
             defaultFrozenColumns={FEEDBACK_DEFAULT_FROZEN_COLUMNS}
             defaultHiddenColumns={FEEDBACK_DEFAULT_HIDDEN_COLUMNS}
             dictionary={feedbackTableDictionary}

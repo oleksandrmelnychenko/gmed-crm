@@ -757,7 +757,7 @@ const STAFF_SERVICES_INITIAL_STATE: StaffServicesPageState = {
   taxonomyNodeId: "",
   filterPredicates: [],
   sortStack: [{ field: "schedule", dir: "desc" }],
-  density: "compact",
+  density: "comfortable",
   hiddenColumns: [],
   frozenColumns: DEFAULT_FROZEN_COLUMNS,
   selectedServiceId: null,

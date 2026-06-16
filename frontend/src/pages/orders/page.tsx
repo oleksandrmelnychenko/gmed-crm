@@ -2936,7 +2936,7 @@ function useOrdersPageContent() {
           rows={orders}
           columns={orderTableColumns}
           rowId={(row) => row.id}
-          defaultDensity="compact"
+          defaultDensity="comfortable"
           defaultFrozenColumns={ORDER_DEFAULT_FROZEN_COLUMNS}
           dictionary={tx}
           groupLabels={orderColumnGroupLabels}

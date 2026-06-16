@@ -115,7 +115,7 @@ export function usePatientsListViewState() {
     DEFAULT_PATIENT_FROZEN_COLUMNS,
     1,
   );
-  const [density, setDensity] = useLocalStorage<DensityLevel>("patients.density", "compact");
+  const [density, setDensity] = useLocalStorage<DensityLevel>("patients.density", "comfortable");
   const viewMode = useResponsiveViewMode();
 
   const syncQuery = useCallback((next: QueryPatch) => {

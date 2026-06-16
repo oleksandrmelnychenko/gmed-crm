@@ -117,7 +117,7 @@ function useDataTableContent<T>({
   onColumnFreezeChange,
   isColumnFreezeDisabled,
   columnHeaderContextMenuLabels,
-  density = "compact",
+  density = "comfortable",
   rowId,
   activeRowId = null,
   onRowClick,

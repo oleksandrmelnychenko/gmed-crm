@@ -2037,7 +2037,7 @@ function useContractsPageContent() {
             rows={filteredAgencyServices}
             columns={agencyServiceColumns}
             rowId={(row) => row.id}
-            defaultDensity="compact"
+            defaultDensity="comfortable"
             dictionary={t as unknown as Record<string, string>}
             loading={agencyServicesLoading}
             activeRowId={agencyServiceForm.id || null}
@@ -2148,7 +2148,7 @@ function useContractsPageContent() {
                 rows={contracts}
                 columns={contractTableColumns}
                 rowId={(row) => row.id}
-                defaultDensity="compact"
+                defaultDensity="comfortable"
                 dictionary={t as unknown as Record<string, string>}
                 loading={contractsLoading}
                 activeRowId={selectedContractId || null}
@@ -2293,7 +2293,7 @@ function useContractsPageContent() {
                 rows={quotes}
                 columns={quoteTableColumns}
                 rowId={(row) => row.id}
-                defaultDensity="compact"
+                defaultDensity="comfortable"
                 dictionary={t as unknown as Record<string, string>}
                 loading={quotesLoading}
                 activeRowId={selectedQuoteId || null}
@@ -3144,7 +3144,7 @@ function useContractsPageContent() {
                         rows={quoteLineItemRows}
                         columns={quoteLineItemColumns}
                         rowId={(row) => row.id}
-                        defaultDensity="compact"
+                        defaultDensity="comfortable"
                         dictionary={t as unknown as Record<string, string>}
                         rowAccent={(row) => (row.is_cost_passthrough ? "bg-amber-500" : null)}
                         emptyState={<EmptyState title={text.noLineItems} description={text.noLineItemsDescription} />}
@@ -3164,7 +3164,7 @@ function useContractsPageContent() {
                         rows={quoteVersions}
                         columns={quoteVersionColumns}
                         rowId={(row) => row.id}
-                        defaultDensity="compact"
+                        defaultDensity="comfortable"
                         dictionary={t as unknown as Record<string, string>}
                         loading={quoteVersionsLoading}
                         emptyState={<EmptyState title={text.noVersions} description={text.noVersionsDescription} />}

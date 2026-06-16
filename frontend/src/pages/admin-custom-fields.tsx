@@ -387,7 +387,7 @@ function AdminCustomFieldsTable({
       <DataTableSurface
         rows={activeFields}
         columns={columns}
-        defaultDensity="compact"
+        defaultDensity="comfortable"
         dictionary={t}
         rowId={(field) => field.id}
         emptyState={<EmptyCell>{t.cf_no_fields}</EmptyCell>}

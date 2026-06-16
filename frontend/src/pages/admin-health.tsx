@@ -509,7 +509,7 @@ export function AdminHealthPage() {
                 <DataTableSurface
                   rows={data.database.tables}
                   columns={databaseTableColumns}
-                  defaultDensity="compact"
+                  defaultDensity="comfortable"
                   dictionary={t as unknown as Record<string, string>}
                   rowId={(table) => table.table}
                   tableClassName="min-h-[280px]"

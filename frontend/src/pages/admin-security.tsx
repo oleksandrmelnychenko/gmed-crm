@@ -955,7 +955,7 @@ function useAdminSecurityPageContent() {
                   <DataTableSurface
                     rows={ips}
                     columns={ipColumns}
-                    defaultDensity="compact"
+                    defaultDensity="comfortable"
                     dictionary={t as unknown as Record<string, string>}
                     rowId={(ip) => ip.id}
                     tableClassName="min-h-[320px]"

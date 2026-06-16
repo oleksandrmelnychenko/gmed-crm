@@ -278,7 +278,7 @@ function AdminAnnouncementsTable({
       <DataTableSurface
         rows={items}
         columns={columns}
-        defaultDensity="compact"
+        defaultDensity="comfortable"
         dictionary={t as unknown as Record<string, string>}
         rowId={(announcement) => announcement.id}
         emptyState={<EmptyCell>{t.ann_no_announcements}</EmptyCell>}
