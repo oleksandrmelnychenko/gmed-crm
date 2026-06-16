@@ -7741,6 +7741,10 @@ fn clin_attribution(row: &sqlx::postgres::PgRow) -> Option<String> {
     .flatten()
     .collect::<Vec<_>>()
     .join(" ");
+    let fachbereich = row
+        .try_get::<Option<String>, _>("doctor_fachbereich")
+        .ok()
+        .flatten();
     let provider = row
         .try_get::<Option<String>, _>("provider_name")
         .ok()
@@ -7751,6 +7755,7 @@ fn clin_attribution(row: &sqlx::postgres::PgRow) -> Option<String> {
         } else {
             Some(doctor)
         },
+        fachbereich,
         provider,
     ]
     .into_iter()
@@ -7801,7 +7806,7 @@ async fn get_patient_clinical_pdf(
 
     let diag_rows = match sqlx::query(
         r#"SELECT d.kind, d.label, d.icd_code, d.grade, d.laterality, d.status, d.diagnosed_on,
-                  pv.name AS provider_name, dr.name AS doctor_name, dr.title AS doctor_title
+                  pv.name AS provider_name, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
            FROM patient_diagnoses d
            LEFT JOIN providers pv ON pv.id = d.provider_id
            LEFT JOIN provider_doctors dr ON dr.id = d.doctor_id
@@ -7817,7 +7822,7 @@ async fn get_patient_clinical_pdf(
 
     let proc_rows = match sqlx::query(
         r#"SELECT p2.label, p2.ops_code, p2.performed_on, p2.note,
-                  pv.name AS provider_name, dr.name AS doctor_name, dr.title AS doctor_title
+                  pv.name AS provider_name, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
            FROM patient_procedures p2
            LEFT JOIN providers pv ON pv.id = p2.provider_id
            LEFT JOIN provider_doctors dr ON dr.id = p2.doctor_id
@@ -7833,7 +7838,7 @@ async fn get_patient_clinical_pdf(
 
     let exam_rows = match sqlx::query(
         r#"SELECT e.title, e.performed_on, e.status, e.result,
-                  pv.name AS provider_name, dr.name AS doctor_name, dr.title AS doctor_title
+                  pv.name AS provider_name, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
            FROM patient_examinations e
            LEFT JOIN providers pv ON pv.id = e.provider_id
            LEFT JOIN provider_doctors dr ON dr.id = e.doctor_id
@@ -7850,7 +7855,7 @@ async fn get_patient_clinical_pdf(
     let med_rows = match sqlx::query(
         r#"SELECT m.category, m.wirkstoff, m.handelsname, m.staerke, m.form,
                   m.dose_morgens, m.dose_mittags, m.dose_abends, m.dose_nachts, m.einheit, m.hinweis, m.grund,
-                  pv.name AS provider_name, dr.name AS doctor_name, dr.title AS doctor_title
+                  pv.name AS provider_name, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
            FROM patient_medications m
            LEFT JOIN providers pv ON pv.id = m.provider_id
            LEFT JOIN provider_doctors dr ON dr.id = m.doctor_id
