@@ -279,7 +279,20 @@ export function formatScheduleConflictError(error: unknown, fallback: string) {
   }
 
   const message = error instanceof Error ? error.message : "";
-  if (message.toLowerCase().includes("appointment conflict")) {
+  const lowered = message.toLowerCase();
+  if (lowered.includes("appointment conflict")) {
+    // Conflicts without structured details (e.g. the DB exclusion-constraint
+    // fallback) still name the scope — surface a typed message instead of a
+    // fully generic one.
+    if (lowered.includes("interpreter")) {
+      return appointmentText("appointments_schedule_conflict_interpreter");
+    }
+    if (lowered.includes("doctor")) {
+      return appointmentText("appointments_schedule_conflict_doctor");
+    }
+    if (lowered.includes("patient")) {
+      return appointmentText("appointments_schedule_conflict_patient");
+    }
     return appointmentText("appointments_schedule_conflict_generic");
   }
   return message || fallback;

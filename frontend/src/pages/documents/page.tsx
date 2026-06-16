@@ -75,6 +75,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LANGUAGE_OPTIONS } from "@/components/ui/language-multi-select";
 import {
   Sheet,
   SheetContent,
@@ -219,8 +220,15 @@ function formatLanguageLabel(language?: string | null) {
       return uiText("documents_language_uk");
     case "ru":
       return uiText("documents_language_ru");
-    default:
+    default: {
+      const option = normalized
+        ? LANGUAGE_OPTIONS.find((item) => item.value === normalized)
+        : undefined;
+      if (option) {
+        return getLang() === "ru" ? option.labelRu : option.labelDe;
+      }
       return language ? formatUnknownValue(language, runtimeTranslations()) : runtimeTranslations().common_not_set;
+    }
   }
 }
 
@@ -1417,9 +1425,15 @@ function StaffDocumentsPage({
   }, [uploadForm.patientId, uploadOpen]);
 
   useEffect(() => {
+    // Seed a draft for each request, but KEEP any existing draft so unsaved
+    // edits (source language/text, translated text, notes) survive a refresh of
+    // translationRequests — realtime events, the assignee auto-save, or a reload
+    // would otherwise wipe in-progress work before "Save workspace" runs.
     const next: Record<string, TranslationWorkspaceDraft> = {};
     for (const request of translationRequests) {
-      next[request.id] = translationWorkspaceDraftFromRequest(request);
+      next[request.id] =
+        translationDraftsRef.current[request.id] ??
+        translationWorkspaceDraftFromRequest(request);
     }
     translationDraftsRef.current = next;
     setTranslationDrafts(next);
@@ -4951,9 +4965,11 @@ function StaffDocumentsPage({
                                             className={selectClassName}
                                           >
                                             <option value="">{t.common_not_set}</option>
-                                            <option value="de">{formatLanguageLabel("de")}</option>
-                                            <option value="en">{formatLanguageLabel("en")}</option>
-                                            <option value="uk">{formatLanguageLabel("uk")}</option>
+                                            {LANGUAGE_OPTIONS.map((language) => (
+                                              <option key={language.value} value={language.value}>
+                                                {formatLanguageLabel(language.value)}
+                                              </option>
+                                            ))}
                                           </NativeComboboxSelect>
                                         </Field>
                                         <Field label={t.documents_assignee}>

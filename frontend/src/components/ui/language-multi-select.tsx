@@ -12,7 +12,7 @@ type LanguageOption = {
   labelRu: string;
 };
 
-const LANGUAGE_OPTIONS: LanguageOption[] = [
+export const LANGUAGE_OPTIONS: LanguageOption[] = [
   { value: "de", labelDe: "Deutsch", labelRu: "Немецкий" },
   { value: "uk", labelDe: "Ukrainisch", labelRu: "Украинский" },
   { value: "ru", labelDe: "Russisch", labelRu: "Русский" },
