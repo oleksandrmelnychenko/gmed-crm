@@ -2186,6 +2186,27 @@ fn normalize_document_language(value: Option<&str>) -> Option<&'static str> {
     }
 }
 
+/// Source language of an uploaded document for the translation workspace. Wider
+/// than the document/template language: it accepts every language offered in the
+/// UI source-language picker (LANGUAGE_OPTIONS), since a document can arrive in
+/// any of them.
+fn normalize_translation_source_language(value: Option<&str>) -> Option<&'static str> {
+    if let Some(language) = normalize_document_language(value) {
+        return Some(language);
+    }
+    let normalized = value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_lowercase)?;
+    const EXTRA_SOURCE_LANGUAGES: &[&str] = &[
+        "ar", "pt", "fr", "es", "it", "tr", "pl", "cs", "da", "el", "lv", "zh", "ur",
+    ];
+    EXTRA_SOURCE_LANGUAGES
+        .iter()
+        .copied()
+        .find(|candidate| *candidate == normalized)
+}
+
 fn resolve_document_language(
     requested: Option<&str>,
     patient_languages: &[String],
@@ -14280,7 +14301,7 @@ async fn update_document_translation_request(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        Some(value) => match normalize_document_language(Some(value)) {
+        Some(value) => match normalize_translation_source_language(Some(value)) {
             Some(language) => Some(language),
             None => {
                 return err(
