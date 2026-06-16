@@ -32,6 +32,7 @@ export type ClinicalAttribution = {
   doctor_id: string | null;
   doctor_name: string | null;
   doctor_title: string | null;
+  doctor_fachbereich: string | null;
 };
 
 export type ClinicalDiagnosis = ClinicalAttribution & {

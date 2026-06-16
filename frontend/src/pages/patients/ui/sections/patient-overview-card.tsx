@@ -42,18 +42,43 @@ function lateralityLabel(value: ClinicalDiagnosis["laterality"], tx: Bilingual) 
 }
 
 /** A treating doctor surfaced from the patient's clinical attribution. */
-type OverviewDoctor = { name: string; title: string | null; provider: string | null };
+type OverviewDoctor = {
+  name: string;
+  title: string | null;
+  fachbereich: string | null;
+  provider: string | null;
+};
 
-function deriveDoctors(sources: { doctor_name: string | null; doctor_title: string | null; provider_name: string | null }[]): OverviewDoctor[] {
+function deriveDoctors(
+  sources: {
+    doctor_name: string | null;
+    doctor_title: string | null;
+    doctor_fachbereich: string | null;
+    provider_name: string | null;
+  }[],
+): OverviewDoctor[] {
   const seen = new Map<string, OverviewDoctor>();
   for (const source of sources) {
     const name = source.doctor_name?.trim();
     if (!name) continue;
     const key = name.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.set(key, { name, title: source.doctor_title, provider: source.provider_name });
+    const existing = seen.get(key);
+    if (existing) {
+      // Keep a specialty/provider if a later attribution fills the gap.
+      if (!existing.fachbereich && source.doctor_fachbereich) existing.fachbereich = source.doctor_fachbereich;
+      if (!existing.provider && source.provider_name) existing.provider = source.provider_name;
+      continue;
+    }
+    seen.set(key, {
+      name,
+      title: source.doctor_title,
+      fachbereich: source.doctor_fachbereich,
+      provider: source.provider_name,
+    });
   }
-  return [...seen.values()];
+  return [...seen.values()].sort((a, b) =>
+    (a.fachbereich ?? "￿").localeCompare(b.fachbereich ?? "￿"),
+  );
 }
 
 function OverviewSection({ title, count, children }: { title: string; count?: number; children: ReactNode }) {
@@ -199,12 +224,17 @@ export function PatientOverviewCard({
           {doctors.length === 0 ? (
             emptyDash
           ) : (
-            <ul className="space-y-1">
+            <ul className="space-y-2">
               {doctors.map((doctor) => (
-                <li key={doctor.name} className="text-sm leading-snug text-foreground">
-                  {[doctor.title, doctor.name].filter(Boolean).join(" ")}
+                <li key={doctor.name} className="leading-snug">
+                  {doctor.fachbereich ? (
+                    <p className="text-[11px] font-semibold text-sky-700">{doctor.fachbereich}</p>
+                  ) : null}
+                  <p className="text-sm text-foreground">
+                    {[doctor.title, doctor.name].filter(Boolean).join(" ")}
+                  </p>
                   {doctor.provider ? (
-                    <span className="block text-[11px] text-muted-foreground">{doctor.provider}</span>
+                    <p className="text-[11px] text-muted-foreground">{doctor.provider}</p>
                   ) : null}
                 </li>
               ))}

@@ -6915,7 +6915,7 @@ async fn get_patient_clinical(
     let diag_rows = sqlx::query(
         r#"SELECT d.id, d.kind, d.label, d.icd_code, d.grade, d.laterality, d.status,
                   d.diagnosed_on, d.note, d.provider_id, p.name AS provider_name,
-                  d.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title
+                  d.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
            FROM patient_diagnoses d
            LEFT JOIN providers p ON p.id = d.provider_id
            LEFT JOIN provider_doctors dr ON dr.id = d.doctor_id
@@ -6934,7 +6934,7 @@ async fn get_patient_clinical(
         r#"SELECT m.id, m.category, m.wirkstoff, m.handelsname, m.staerke, m.form,
                   m.dose_morgens, m.dose_mittags, m.dose_abends, m.dose_nachts,
                   m.einheit, m.hinweis, m.grund, m.provider_id, p.name AS provider_name,
-                  m.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title
+                  m.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
            FROM patient_medications m
            LEFT JOIN providers p ON p.id = m.provider_id
            LEFT JOIN provider_doctors dr ON dr.id = m.doctor_id
@@ -6952,7 +6952,7 @@ async fn get_patient_clinical(
     let exam_rows = sqlx::query(
         r#"SELECT e.id, e.kind, e.title, e.performed_on, e.status, e.result, e.note,
                   e.provider_id, p.name AS provider_name,
-                  e.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title
+                  e.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
            FROM patient_examinations e
            LEFT JOIN providers p ON p.id = e.provider_id
            LEFT JOIN provider_doctors dr ON dr.id = e.doctor_id
@@ -6985,6 +6985,7 @@ async fn get_patient_clinical(
                 "doctor_id": row.get::<Option<Uuid>, _>("doctor_id"),
                 "doctor_name": row.get::<Option<String>, _>("doctor_name"),
                 "doctor_title": row.get::<Option<String>, _>("doctor_title"),
+                "doctor_fachbereich": row.get::<Option<String>, _>("doctor_fachbereich"),
             })
         })
         .collect::<Vec<_>>();
@@ -7011,6 +7012,7 @@ async fn get_patient_clinical(
                 "doctor_id": row.get::<Option<Uuid>, _>("doctor_id"),
                 "doctor_name": row.get::<Option<String>, _>("doctor_name"),
                 "doctor_title": row.get::<Option<String>, _>("doctor_title"),
+                "doctor_fachbereich": row.get::<Option<String>, _>("doctor_fachbereich"),
             })
         })
         .collect::<Vec<_>>();
@@ -7031,6 +7033,7 @@ async fn get_patient_clinical(
                 "doctor_id": row.get::<Option<Uuid>, _>("doctor_id"),
                 "doctor_name": row.get::<Option<String>, _>("doctor_name"),
                 "doctor_title": row.get::<Option<String>, _>("doctor_title"),
+                "doctor_fachbereich": row.get::<Option<String>, _>("doctor_fachbereich"),
             })
         })
         .collect::<Vec<_>>();
@@ -7038,7 +7041,7 @@ async fn get_patient_clinical(
     let proc_rows = sqlx::query(
         r#"SELECT p2.id, p2.label, p2.ops_code, p2.performed_on, p2.note,
                   p2.provider_id, pv.name AS provider_name,
-                  p2.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title
+                  p2.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
            FROM patient_procedures p2
            LEFT JOIN providers pv ON pv.id = p2.provider_id
            LEFT JOIN provider_doctors dr ON dr.id = p2.doctor_id
@@ -7067,6 +7070,7 @@ async fn get_patient_clinical(
                 "doctor_id": row.get::<Option<Uuid>, _>("doctor_id"),
                 "doctor_name": row.get::<Option<String>, _>("doctor_name"),
                 "doctor_title": row.get::<Option<String>, _>("doctor_title"),
+                "doctor_fachbereich": row.get::<Option<String>, _>("doctor_fachbereich"),
             })
         })
         .collect::<Vec<_>>();
