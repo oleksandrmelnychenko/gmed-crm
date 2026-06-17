@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-import { providerTypeLabel } from "../model/list-model";
+import { formatWeeklyAvailabilityDisplay, providerTypeLabel } from "../model/list-model";
 import { specializationLabelForItem, specializationLabelForValue } from "../model/specialization-labels";
 import type { ProviderOrganizationLevel, ProviderSummary, SpecializationItem } from "../model/types";
 
@@ -424,6 +424,7 @@ function TimelineNode({
   const active = selectedProviderId === provider.id;
   const locationText = [provider.address_city, provider.address_country].filter(Boolean).join(", ");
   const specializationText = providerSpecializationText(provider, lang);
+  const availabilityText = formatWeeklyAvailabilityDisplay(provider.opening_hours, lang);
   const connectorWidth = (depth + 1) * CONNECTOR_STEP;
   const currentCenter = depth * CONNECTOR_STEP + CONNECTOR_CENTER;
   const isRootOrganization = depth === 0 && provider.organization_level === "organization";
@@ -557,6 +558,12 @@ function TimelineNode({
                 </span>
               ) : null}
             </span>
+            {availabilityText ? (
+              <span className="mt-1 block min-w-0 text-[11px] text-muted-foreground">
+                <span className="font-medium text-foreground/70">{tr.providers_opening_hours}: </span>
+                {availabilityText}
+              </span>
+            ) : null}
           </span>
           <span className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 text-[11px] text-muted-foreground">
             {hasChildren ? (

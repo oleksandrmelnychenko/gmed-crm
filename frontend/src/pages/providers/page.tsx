@@ -2885,31 +2885,16 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             </div>
           ) : detail ? (
             <div className="flex min-h-0 flex-col">
-              <div
-                className={cn(
-                  "flex flex-wrap items-start gap-3 px-4 py-3",
-                  detail.provider_type === "non_medical" ? "justify-end" : "justify-between",
-                )}
-              >
-                {detail.provider_type === "medical" ? (
+              {detail.provider_type === "medical" ? (
+                <div className="flex flex-wrap items-start gap-3 px-4 py-3">
                   <div className="min-w-0">
                     <h1 className="truncate text-xl font-semibold text-foreground">
                       {detail.name || t.providers_detail}
                     </h1>
                     <p className="mt-1 text-sm text-muted-foreground">{t.providers_subtitle}</p>
                   </div>
-                ) : null}
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-9 rounded-lg"
-                    onClick={() => staffGo(providerDetailBackPath)}
-                  >
-                    {l("providers_back_to_list")}
-                  </Button>
                 </div>
-              </div>
+              ) : null}
               <div className="space-y-3 rounded-xl p-4">
                   {detailError ? <Banner tone="error">{detailError}</Banner> : null}
                   {providerError ? <Banner tone="error">{providerError}</Banner> : null}
@@ -2923,6 +2908,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     onDelete={handleDeleteProvider}
                     onEdit={openProviderEditSheet}
                   />
+
+                  <ProviderAvailabilitySection detail={detail} />
 
                   <ProviderOverviewSection
                     detail={detail}
@@ -4048,6 +4035,41 @@ function taxonomyAttributeReadOnlyRows(detail: ProviderDetail, lang: "de" | "ru"
   });
 }
 
+function ProviderAvailabilitySection({ detail }: { detail: ProviderDetail }) {
+  const { t, lang } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+  const display = formatWeeklyAvailabilityDisplay(detail.opening_hours, lang);
+  const rows = display ? display.split("; ") : [];
+
+  return (
+    <Section
+      className={providerDetailPanelClassName}
+      showMarker={false}
+      title={
+        <span className="inline-flex min-w-0 items-center gap-2">
+          <CalendarClock className="size-4 shrink-0 text-[var(--brand)]" />
+          {l("providers_opening_hours")}
+        </span>
+      }
+    >
+      {rows.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {rows.map((row) => (
+            <span
+              key={row}
+              className="rounded-lg border border-border/60 bg-muted/30 px-3 py-1.5 text-sm font-semibold text-foreground"
+            >
+              {row}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">{t.common_not_set}</p>
+      )}
+    </Section>
+  );
+}
+
 function ProviderProfileReadOnlySection({ detail }: { detail: ProviderDetail }) {
   const { t, lang } = useLang();
   const tr = { ...t.uiText, ...t } as unknown as Record<string, string>;
@@ -4078,10 +4100,6 @@ function ProviderProfileReadOnlySection({ detail }: { detail: ProviderDetail }) 
             value={providerOrganizationLevelLabel(detail.organization_level)}
           />
           <ReadOnlyLine label={l("providers_parent_provider")} value={detail.parent_provider_name || fallback} />
-          <ReadOnlyLine
-            label={l("providers_opening_hours")}
-            value={formatWeeklyAvailabilityDisplay(detail.opening_hours, lang) || fallback}
-          />
           <ReadOnlyLine
             label={lang === "ru" ? "Внутренний рейтинг" : "Interne Bewertung"}
             value={readOnlyValue(detail.internal_rating, fallback)}

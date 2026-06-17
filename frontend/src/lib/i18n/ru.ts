@@ -262,7 +262,7 @@ export const ru = {
   providers_fachbereich: "Специализация",
   providers_min_rating: "Минимальный рейтинг",
   providers_internal_rating: "Внутренний рейтинг",
-  providers_contract: "Договор / JSON",
+  providers_contract: "Договор",
   providers_contract_with: "Только с договором",
   providers_contract_without: "Только без договора",
   providers_notes: "Заметки",

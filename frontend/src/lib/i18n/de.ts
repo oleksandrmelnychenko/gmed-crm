@@ -262,7 +262,7 @@ export const de = {
   providers_fachbereich: "Fachbereich",
   providers_min_rating: "Mindestbewertung",
   providers_internal_rating: "Interne Bewertung",
-  providers_contract: "Vertrag / JSON",
+  providers_contract: "Vertrag",
   providers_contract_with: "Nur mit Vertrag",
   providers_contract_without: "Nur ohne Vertrag",
   providers_notes: "Notizen",
