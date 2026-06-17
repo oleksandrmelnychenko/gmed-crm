@@ -51,7 +51,6 @@ import {
   humanizeFunctionalLabel,
 } from "../shared/patient-form-primitives";
 import { PatientOverviewCard } from "../sections/patient-overview-card";
-import { PatientClinicalSheet } from "../sheets/patient-clinical-sheet";
 
 const loadPatientProfileTab = () => import("../sections/patient-profile-section");
 const loadPatientCuratorsTab = () => import("../sections/patient-curators-tab");
@@ -59,6 +58,7 @@ const loadPatientRelationsTab = () => import("../sections/patient-relations-tab"
 const loadPatientCasesTab = () => import("../sections/patient-cases-tab");
 const loadPatientOrdersTab = () => import("../sections/patient-orders-tab");
 const loadPatientAppointmentsTab = () => import("../sections/patient-appointments-tab");
+const loadPatientClinicalTab = () => import("../sections/patient-clinical-tab");
 const loadPatientDocumentsTab = () => import("../sections/patient-documents-tab");
 const loadPatientContractsTab = () => import("../sections/patient-contracts-tab");
 const loadPatientInvoicesTab = () => import("../sections/patient-invoices-tab");
@@ -93,6 +93,11 @@ const LazyPatientOrdersTab = lazy(async () => {
 const LazyPatientAppointmentsTab = lazy(async () => {
   const mod = await loadPatientAppointmentsTab();
   return { default: mod.PatientAppointmentsTab };
+});
+
+const LazyPatientClinicalTab = lazy(async () => {
+  const mod = await loadPatientClinicalTab();
+  return { default: mod.PatientClinicalTab };
 });
 
 const LazyPatientDocumentsTab = lazy(async () => {
@@ -139,6 +144,9 @@ function preloadPatientWorkspaceTab(tab: string) {
       break;
     case "appointments":
       void loadPatientAppointmentsTab();
+      break;
+    case "clinical":
+      void loadPatientClinicalTab();
       break;
     case "documents":
       void loadPatientDocumentsTab();
@@ -679,9 +687,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
                 allergies={detail.clinical_warnings ?? null}
                 canViewClinical={canViewClinical}
               />
-              {canViewClinical && id ? (
-                <PatientClinicalSheet patientId={id} canManage={canManageDocuments} />
-              ) : null}
               <LazyPatientProfileTab
               profileControls={{
                 canEditPatientProfile,
@@ -832,6 +837,10 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               t={t}
               tabLoading={tabLoading}
             />
+          ) : null}
+
+          {activeTab === "clinical" && id ? (
+            <LazyPatientClinicalTab patientId={id} canManage={canManageDocuments} />
           ) : null}
 
           {activeTab === "documents" ? (

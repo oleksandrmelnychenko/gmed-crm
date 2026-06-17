@@ -1403,6 +1403,12 @@ function usePatientDetailPageContent() {
       key: "profile",
       label: t.patients_profile,
     },
+    canViewClinical
+      ? {
+          key: "clinical",
+          label: l("patients_diagnoses_medications"),
+        }
+      : null,
     canViewOperationalSurface
       ? {
           key: "relations",
