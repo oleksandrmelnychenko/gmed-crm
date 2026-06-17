@@ -85,7 +85,6 @@ type FormState = {
   scaleMax: string;
   interpretation: string;
   source: string;
-  inputsJson: string;
 };
 
 function blankForm(): FormState {
@@ -96,7 +95,6 @@ function blankForm(): FormState {
     scaleMax: "",
     interpretation: "",
     source: "",
-    inputsJson: "",
   };
 }
 
@@ -140,20 +138,6 @@ export function PatientRiskScoreSheet({
       return;
     }
 
-    let inputs: Record<string, unknown> | undefined;
-    if (form.inputsJson.trim()) {
-      try {
-        const parsed = JSON.parse(form.inputsJson);
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          throw new Error("not an object");
-        }
-        inputs = parsed as Record<string, unknown>;
-      } catch {
-        toast.error(l("patients_inputs_must_be_a_json_object"));
-        return;
-      }
-    }
-
     setBusy(true);
     try {
       await apiFetch(`/patients/${patientId}/risk-scores`, {
@@ -165,7 +149,6 @@ export function PatientRiskScoreSheet({
           scale_max: scaleMax,
           interpretation: form.interpretation.trim() || null,
           source: form.source.trim() || null,
-          inputs,
         }),
       });
       toast.success(l("patients_risk_score_saved"));
@@ -292,22 +275,6 @@ export function PatientRiskScoreSheet({
         </FormField>
       </FormSection>
 
-      <FormSection title={l("patients_additional")}>
-        <FormField
-          label={l("patients_inputs_json")}
-          htmlFor="patient-risk-score-inputs"
-        >
-          <textarea
-            id="patient-risk-score-inputs"
-            className={riskScoreTextareaClassName}
-            value={form.inputsJson}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, inputsJson: event.target.value }))
-            }
-            placeholder={l("patients_risk_score_inputs_placeholder")}
-          />
-        </FormField>
-      </FormSection>
     </PatientSheetScaffold>
   );
 }
