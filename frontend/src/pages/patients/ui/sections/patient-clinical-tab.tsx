@@ -56,6 +56,7 @@ function blankAttribution(): ClinicalAttribution {
     doctor_id: null,
     doctor_name: null,
     doctor_title: null,
+    doctor_fachbereich: null,
   };
 }
 
@@ -296,6 +297,7 @@ function ProviderDoctorFields({
             doctor_id: null,
             doctor_name: null,
             doctor_title: null,
+            doctor_fachbereich: null,
           });
         }}
       >
@@ -319,6 +321,7 @@ function ProviderDoctorFields({
             doctor_id: id,
             doctor_name: doctor?.name ?? null,
             doctor_title: doctor?.title ?? null,
+            doctor_fachbereich: doctor?.fachbereich ?? null,
           });
         }}
       >

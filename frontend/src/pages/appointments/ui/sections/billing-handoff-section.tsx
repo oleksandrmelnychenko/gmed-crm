@@ -280,6 +280,15 @@ function useAppointmentBillingHandoffSectionContentContent({
     }
   }
 
+  const noBillingStaff = billingStaff.length === 0;
+  const handoffBlockedReason = noBillingStaff
+    ? appointmentText("appointments_billing_handoff_blocked_no_staff")
+    : !form.assigneeId
+      ? appointmentText("appointments_billing_handoff_blocked_no_assignee")
+      : !form.dueAt
+        ? appointmentText("appointments_billing_handoff_blocked_no_due")
+        : null;
+
   return (
     <section className={sectionCardClass}>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -441,6 +450,7 @@ function useAppointmentBillingHandoffSectionContentContent({
                 }))
               }
               className={selectClassName}
+              disabled={noBillingStaff}
             >
               {(
                 [
@@ -469,6 +479,7 @@ function useAppointmentBillingHandoffSectionContentContent({
               }
               className={selectClassName}
               required
+              disabled={noBillingStaff}
             >
               <option value="">
                 {appointmentText("appointments_select_billing_assignee")}
@@ -492,6 +503,7 @@ function useAppointmentBillingHandoffSectionContentContent({
               }
               className={inputClassName}
               required
+              disabled={noBillingStaff}
             />
           </Field>
           <Field label={tr.appointments_title_col}>
@@ -504,6 +516,7 @@ function useAppointmentBillingHandoffSectionContentContent({
                 }))
               }
               className={selectClassName}
+              disabled={noBillingStaff}
             >
               {TASK_PRIORITY_OPTIONS.map((priority) => (
                 <option key={priority} value={priority}>
@@ -523,6 +536,7 @@ function useAppointmentBillingHandoffSectionContentContent({
               }
               className={inputClassName}
               placeholder={withEllipsis(tr.appointments_title_col)}
+              disabled={noBillingStaff}
             />
           </Field>
           <Field label={t.patients_notes}>
@@ -537,6 +551,7 @@ function useAppointmentBillingHandoffSectionContentContent({
               className={textareaClassName}
               rows={3}
               placeholder={withEllipsis(tr.patients_notes)}
+              disabled={noBillingStaff}
             />
           </Field>
           <div className="md:col-span-2 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -551,6 +566,7 @@ function useAppointmentBillingHandoffSectionContentContent({
                   }))
                 }
                 className={checkboxClass}
+                disabled={noBillingStaff}
               />
               {t.appointments_billing_mirror_task}
             </label>
@@ -577,6 +593,11 @@ function useAppointmentBillingHandoffSectionContentContent({
               </Button>
             </div>
           </div>
+          {handoffBlockedReason ? (
+            <p className="md:col-span-2 text-right text-xs text-amber-600">
+              {handoffBlockedReason}
+            </p>
+          ) : null}
         </form>
       ) : null}
     </section>
