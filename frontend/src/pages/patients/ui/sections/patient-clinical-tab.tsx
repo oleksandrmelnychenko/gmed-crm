@@ -724,15 +724,26 @@ export function PatientClinicalTab({
             )}
           </p>
         </div>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-8 rounded-lg"
-          onClick={() => void downloadApiFile(`/patients/${patientId}/clinical.pdf`, "arztbrief.pdf")}
-        >
-          {tx("Экспорт Arztbrief (PDF)", "Arztbrief (PDF)")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 rounded-lg"
+            onClick={() => void downloadApiFile(`/patients/${patientId}/medikationsplan.pdf`, "medikationsplan.pdf")}
+          >
+            {tx("Medikationsplan (PDF)", "Medikationsplan (PDF)")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 rounded-lg"
+            onClick={() => void downloadApiFile(`/patients/${patientId}/clinical.pdf`, "arztbrief.pdf")}
+          >
+            {tx("Экспорт Arztbrief (PDF)", "Arztbrief (PDF)")}
+          </Button>
+        </div>
       </div>
 
       {error ? (

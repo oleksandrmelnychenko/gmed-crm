@@ -18,7 +18,8 @@ use crate::pdf_text::{pdf_text_save_options, win_ansi_show_text_op};
 use crate::state::AppState;
 use gmed_domain::role::Role;
 use printpdf::{
-    BuiltinFont, Color, Mm, Op, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point, Pt, Rgb,
+    BuiltinFont, Color, Mm, Op, PaintMode, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point,
+    Pt, Rect, Rgb, WindingOrder,
 };
 use sqlx::types::Json as SqlxJson;
 use sqlx::{Postgres, Row, Transaction};
@@ -55,6 +56,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/patients/{patient_id}/clinical.pdf",
             get(get_patient_clinical_pdf),
+        )
+        .route(
+            "/patients/{patient_id}/medikationsplan.pdf",
+            get(get_patient_medikationsplan_pdf),
         )
         .route(
             "/patients/{patient_id}/card-entries",
@@ -8135,6 +8140,484 @@ async fn get_patient_clinical_pdf(
         "arztbrief.pdf".to_string()
     } else {
         format!("arztbrief-{slug}.pdf")
+    };
+
+    (
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                "application/pdf".to_string(),
+            ),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("inline; filename=\"{filename}\""),
+            ),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Bundeseinheitlicher Medikationsplan (BMP) — printable A4 plan with a real
+// ECC200 Data-Matrix carrier (see crate::bmp). Single page.
+// ---------------------------------------------------------------------------
+
+const MP_LEFT: f32 = 14.0;
+const MP_RIGHT: f32 = 196.0;
+const MP_TOP: f32 = 283.0;
+const MP_BOTTOM: f32 = 14.0;
+/// Column widths (mm); sum == MP_RIGHT - MP_LEFT (182).
+const MP_COLS: [f32; 11] = [
+    30.0, 28.0, 16.0, 14.0, 7.0, 7.0, 7.0, 7.0, 14.0, 30.0, 22.0,
+];
+
+fn mp_pt(mm: f32) -> Pt {
+    Pt(mm * 2.834_646)
+}
+fn mp_ink() -> Color {
+    Color::Rgb(Rgb::new(0.09, 0.12, 0.18, None))
+}
+fn mp_grid() -> Color {
+    Color::Rgb(Rgb::new(0.55, 0.57, 0.62, None))
+}
+fn mp_col_x(i: usize) -> f32 {
+    MP_LEFT + MP_COLS[..i].iter().sum::<f32>()
+}
+
+struct MedPlan {
+    ops: Vec<Op>,
+    regular: PdfFontHandle,
+    bold: PdfFontHandle,
+}
+
+impl MedPlan {
+    fn new() -> Self {
+        Self {
+            ops: Vec::new(),
+            regular: PdfFontHandle::Builtin(BuiltinFont::Helvetica),
+            bold: PdfFontHandle::Builtin(BuiltinFont::HelveticaBold),
+        }
+    }
+
+    /// Filled rectangle; (x, y) is the lower-left corner, all in mm.
+    fn fill_rect(&mut self, x: f32, y: f32, w: f32, h: f32, col: Color) {
+        let rect = Rect {
+            x: mp_pt(x),
+            y: mp_pt(y),
+            width: mp_pt(w),
+            height: mp_pt(h),
+            mode: Some(PaintMode::Fill),
+            winding_order: Some(WindingOrder::NonZero),
+        };
+        self.ops.push(Op::SetFillColor { col });
+        self.ops.push(Op::DrawPolygon {
+            polygon: rect.to_polygon(),
+        });
+    }
+
+    fn hline(&mut self, x: f32, y: f32, w: f32) {
+        self.fill_rect(x, y, w, 0.25, mp_grid());
+    }
+    fn vline(&mut self, x: f32, y: f32, h: f32) {
+        self.fill_rect(x, y, 0.25, h, mp_grid());
+    }
+
+    fn text_at(&mut self, x: f32, baseline: f32, text: &str, size: f32, bold: bool, col: Color) {
+        if text.is_empty() {
+            return;
+        }
+        let font = if bold {
+            self.bold.clone()
+        } else {
+            self.regular.clone()
+        };
+        self.ops.push(Op::SetFont {
+            font,
+            size: Pt(size),
+        });
+        self.ops.push(Op::StartTextSection);
+        self.ops.push(Op::SetTextCursor {
+            pos: Point::new(Mm(x), Mm(baseline)),
+        });
+        self.ops.push(Op::SetFillColor { col });
+        self.ops.push(win_ansi_show_text_op(text));
+        self.ops.push(Op::EndTextSection);
+    }
+
+    /// Draws the Data-Matrix as filled square modules. `y_top` is the top edge.
+    fn draw_datamatrix(
+        &mut self,
+        modules: &[(usize, usize)],
+        cols: usize,
+        rows: usize,
+        x: f32,
+        y_top: f32,
+        target_mm: f32,
+    ) {
+        let n = cols.max(rows).max(1);
+        let cell = target_mm / n as f32;
+        let black = Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None));
+        for &(mx, my) in modules {
+            let px = x + mx as f32 * cell;
+            let py = y_top - (my as f32 + 1.0) * cell;
+            self.fill_rect(px, py, cell, cell, black.clone());
+        }
+    }
+
+    fn table_header(&mut self, y_top: f32) -> f32 {
+        let labels = [
+            "Wirkstoff",
+            "Handelsname",
+            "Stärke",
+            "Form",
+            "Morgens",
+            "Mittags",
+            "Abends",
+            "Zur Nacht",
+            "Einheit",
+            "Hinweise",
+            "Grund",
+        ];
+        let row_h = 8.0;
+        let y_bottom = y_top - row_h;
+        self.fill_rect(
+            MP_LEFT,
+            y_bottom,
+            MP_RIGHT - MP_LEFT,
+            row_h,
+            Color::Rgb(Rgb::new(0.84, 0.84, 0.87, None)),
+        );
+        self.hline(MP_LEFT, y_top, MP_RIGHT - MP_LEFT);
+        for i in 0..=11 {
+            self.vline(mp_col_x(i), y_bottom, row_h);
+        }
+        for (i, label) in labels.iter().enumerate() {
+            let cx = mp_col_x(i);
+            let lines = clin_wrap(label, 7.0, (MP_COLS[i] - 1.5).max(4.0));
+            let mut ty = y_top - 3.0;
+            for line in lines.iter().take(2) {
+                self.text_at(cx + 0.9, ty, line, 7.0, true, mp_ink());
+                ty -= 2.7;
+            }
+        }
+        y_bottom
+    }
+
+    fn table_section(&mut self, label: &str, y_top: f32) -> f32 {
+        let row_h = 6.0;
+        let y_bottom = y_top - row_h;
+        self.fill_rect(
+            MP_LEFT,
+            y_bottom,
+            MP_RIGHT - MP_LEFT,
+            row_h,
+            Color::Rgb(Rgb::new(0.93, 0.93, 0.95, None)),
+        );
+        self.hline(MP_LEFT, y_top, MP_RIGHT - MP_LEFT);
+        self.vline(MP_LEFT, y_bottom, row_h);
+        self.vline(MP_RIGHT, y_bottom, row_h);
+        self.text_at(MP_LEFT + 1.5, y_top - 4.2, label, 9.0, true, mp_ink());
+        y_bottom
+    }
+
+    fn table_med(&mut self, cells: &[String; 11], y_top: f32) -> f32 {
+        let size = 8.0;
+        let lh = 3.0;
+        let pad = 1.2;
+        let mut wrapped: Vec<Vec<String>> = Vec::with_capacity(11);
+        let mut max_lines = 1usize;
+        for (i, cell) in cells.iter().enumerate() {
+            let lines = clin_wrap(cell, size, (MP_COLS[i] - 2.0 * pad).max(4.0));
+            max_lines = max_lines.max(lines.len().max(1));
+            wrapped.push(lines);
+        }
+        let row_h = max_lines as f32 * lh + 2.0 * pad;
+        let y_bottom = y_top - row_h;
+        self.hline(MP_LEFT, y_top, MP_RIGHT - MP_LEFT);
+        for i in 0..=11 {
+            self.vline(mp_col_x(i), y_bottom, row_h);
+        }
+        for (i, lines) in wrapped.iter().enumerate() {
+            let cx = mp_col_x(i);
+            let centered = (4..8).contains(&i);
+            let mut ty = y_top - pad - 2.2;
+            for line in lines {
+                let tx = if centered {
+                    cx + (MP_COLS[i] - line.chars().count() as f32 * size * 0.17) / 2.0
+                } else {
+                    cx + pad
+                };
+                self.text_at(tx.max(cx + 0.5), ty, line, size, false, mp_ink());
+                ty -= lh;
+            }
+        }
+        y_bottom
+    }
+
+    fn finish(self) -> Vec<PdfPage> {
+        vec![PdfPage::new(Mm(CLIN_PDF_W), Mm(CLIN_PDF_H), self.ops)]
+    }
+}
+
+fn mp_dose(value: Option<&str>) -> String {
+    value.map(str::trim).filter(|s| !s.is_empty()).unwrap_or("").to_string()
+}
+
+async fn get_patient_medikationsplan_pdf(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+        return e;
+    }
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let fail = || {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to build Medikationsplan PDF",
+        )
+    };
+
+    let patient = match sqlx::query(
+        "SELECT first_name, last_name, birth_date, gender, patient_id FROM patients WHERE id = $1",
+    )
+    .bind(patient_uuid)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Patient not found"),
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "load patient for Medikationsplan");
+            return fail();
+        }
+    };
+
+    let med_rows = match sqlx::query(
+        r#"SELECT category, wirkstoff, handelsname, staerke, form,
+                  dose_morgens, dose_mittags, dose_abends, dose_nachts, einheit, hinweis, grund
+           FROM patient_medications WHERE patient_id = $1 ORDER BY sort_order, created_at"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "load medications for Medikationsplan");
+            return fail();
+        }
+    };
+
+    let issuer_row = sqlx::query("SELECT name, email FROM users WHERE id = $1")
+        .bind(auth.user_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten();
+    let issuer_name = issuer_row
+        .as_ref()
+        .and_then(|r| r.try_get::<Option<String>, _>("name").ok().flatten())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "GMED CONSOLE".to_string());
+    let issuer_email = issuer_row
+        .as_ref()
+        .and_then(|r| r.try_get::<Option<String>, _>("email").ok().flatten());
+
+    let first_name: String = patient.try_get("first_name").unwrap_or_default();
+    let last_name: String = patient.try_get("last_name").unwrap_or_default();
+    let mrn: String = patient.try_get("patient_id").unwrap_or_default();
+    let dob = patient
+        .try_get::<Option<chrono::NaiveDate>, _>("birth_date")
+        .ok()
+        .flatten()
+        .map(|d| d.format("%Y-%m-%d").to_string());
+    let geschlecht = match patient
+        .try_get::<Option<String>, _>("gender")
+        .ok()
+        .flatten()
+        .as_deref()
+    {
+        Some("male") => Some("M".to_string()),
+        Some("female") => Some("W".to_string()),
+        Some("diverse") => Some("X".to_string()),
+        _ => None,
+    };
+
+    let meds: Vec<crate::bmp::BmpMed> = med_rows
+        .iter()
+        .map(|row| crate::bmp::BmpMed {
+            category: row.try_get::<String, _>("category").unwrap_or_default(),
+            wirkstoff: row.try_get("wirkstoff").ok().flatten(),
+            handelsname: row.try_get("handelsname").ok().flatten(),
+            staerke: row.try_get("staerke").ok().flatten(),
+            form: row.try_get("form").ok().flatten(),
+            dose_morgens: row.try_get("dose_morgens").ok().flatten(),
+            dose_mittags: row.try_get("dose_mittags").ok().flatten(),
+            dose_abends: row.try_get("dose_abends").ok().flatten(),
+            dose_nachts: row.try_get("dose_nachts").ok().flatten(),
+            einheit: row.try_get("einheit").ok().flatten(),
+            hinweis: row.try_get("hinweis").ok().flatten(),
+            grund: row.try_get("grund").ok().flatten(),
+        })
+        .collect();
+
+    let print_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let plan_uuid = Uuid::new_v4().simple().to_string().to_uppercase();
+    let patient_bmp = crate::bmp::BmpPatient {
+        vorname: first_name.clone(),
+        nachname: last_name.clone(),
+        geburtsdatum: dob.clone(),
+        geschlecht,
+    };
+    let issuer_bmp = crate::bmp::BmpIssuer {
+        name: issuer_name.clone(),
+        email: issuer_email.clone(),
+        ..Default::default()
+    };
+    let xml = crate::bmp::build_bmp_xml(&plan_uuid, &patient_bmp, &issuer_bmp, &print_date, &meds);
+    let datamatrix = crate::bmp::encode_datamatrix(&xml);
+
+    // ---- Render ----
+    let mut pdf = MedPlan::new();
+    let full_name = format!("{first_name} {last_name}").trim().to_string();
+
+    pdf.text_at(MP_LEFT, MP_TOP, "Medikationsplan", 17.0, true, mp_ink());
+    pdf.text_at(
+        MP_LEFT,
+        MP_TOP - 8.5,
+        &format!("Für: {full_name}"),
+        10.0,
+        true,
+        mp_ink(),
+    );
+    pdf.text_at(
+        MP_LEFT,
+        MP_TOP - 13.5,
+        &format!("Geb. am: {}", dob.as_deref().unwrap_or("—")),
+        9.0,
+        false,
+        mp_ink(),
+    );
+    pdf.text_at(
+        MP_LEFT,
+        MP_TOP - 20.0,
+        &format!("Ausgedruckt von: {issuer_name}"),
+        9.0,
+        false,
+        mp_ink(),
+    );
+    if let Some(email) = issuer_email.as_deref() {
+        pdf.text_at(MP_LEFT, MP_TOP - 24.5, email, 9.0, false, mp_ink());
+    }
+    pdf.text_at(
+        MP_LEFT,
+        MP_TOP - 29.0,
+        &format!("Ausgedruckt am: {print_date}"),
+        9.0,
+        false,
+        mp_ink(),
+    );
+
+    if let Some((modules, cols, rows)) = datamatrix.as_ref() {
+        pdf.draw_datamatrix(modules, *cols, *rows, MP_RIGHT - 26.0, MP_TOP + 2.0, 26.0);
+    }
+
+    let mut y = MP_TOP - 36.0;
+    y = pdf.table_header(y);
+
+    let sections: [(&str, Option<&str>); 3] = [
+        ("dauer", None),
+        (
+            "besondere",
+            Some("Zu besonderen Zeiten anzuwendende Medikamente"),
+        ),
+        ("selbst", Some("Selbstmedikation")),
+    ];
+    let mut truncated = false;
+    'outer: for (key, heading) in sections {
+        let rows: Vec<&crate::bmp::BmpMed> =
+            meds.iter().filter(|m| m.category == key).collect();
+        if rows.is_empty() {
+            continue;
+        }
+        if let Some(h) = heading {
+            if y - 6.0 < MP_BOTTOM {
+                truncated = true;
+                break;
+            }
+            y = pdf.table_section(h, y);
+        }
+        for m in rows {
+            let opt = |v: &Option<String>| v.clone().unwrap_or_default();
+            let cells: [String; 11] = [
+                opt(&m.wirkstoff),
+                opt(&m.handelsname),
+                opt(&m.staerke),
+                opt(&m.form),
+                mp_dose(m.dose_morgens.as_deref()),
+                mp_dose(m.dose_mittags.as_deref()),
+                mp_dose(m.dose_abends.as_deref()),
+                mp_dose(m.dose_nachts.as_deref()),
+                opt(&m.einheit),
+                opt(&m.hinweis),
+                opt(&m.grund),
+            ];
+            // Stop before overflowing the page (rough lower bound for one row).
+            if y - 14.0 < MP_BOTTOM {
+                truncated = true;
+                break 'outer;
+            }
+            y = pdf.table_med(&cells, y);
+        }
+    }
+    if truncated {
+        pdf.text_at(
+            MP_LEFT,
+            MP_BOTTOM - 2.0,
+            "… weitere Einträge nicht dargestellt (einseitig).",
+            7.0,
+            false,
+            mp_grid(),
+        );
+    }
+
+    let mut document = PdfDocument::new("Medikationsplan");
+    let mut warnings: Vec<PdfWarnMsg> = Vec::new();
+    let bytes = document
+        .with_pages(pdf.finish())
+        .save(&pdf_text_save_options(), &mut warnings);
+
+    state.audit_sender.try_send(audit::domain_event(
+        "export_patient_medikationsplan_pdf",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({ "bytes": bytes.len(), "datamatrix": datamatrix.is_some() }),
+    ));
+
+    let slug: String = mrn
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let slug = slug.trim_matches('-');
+    let filename = if slug.is_empty() {
+        "medikationsplan.pdf".to_string()
+    } else {
+        format!("medikationsplan-{slug}.pdf")
     };
 
     (

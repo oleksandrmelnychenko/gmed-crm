@@ -3,6 +3,7 @@
 pub mod access;
 pub mod audit;
 pub mod auth;
+pub(crate) mod bmp;
 pub mod business_metrics;
 pub mod config;
 pub mod crypto;
