@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { Building2, ChevronRight, MapPin, Stethoscope, UsersRound } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -283,6 +283,31 @@ type ProviderHierarchyTimelineProps = {
   tr: Record<string, string>;
 };
 
+/** Renders weekly availability text with the "(comment)" parts in bold. */
+function renderHoursWithBoldComments(text: string): ReactNode {
+  const segments: ReactNode[] = [];
+  const regex = /\(([^)]*)\)/g;
+  let lastIndex = 0;
+  let key = 0;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push(text.slice(lastIndex, match.index));
+    }
+    segments.push(
+      <strong key={key} className="font-semibold text-foreground">
+        {match[0]}
+      </strong>,
+    );
+    key += 1;
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    segments.push(text.slice(lastIndex));
+  }
+  return segments;
+}
+
 export function ProviderHierarchyTimeline({
   lang,
   onProviderClick,
@@ -561,7 +586,7 @@ function TimelineNode({
             {availabilityText ? (
               <span className="mt-1 block min-w-0 text-[11px] text-muted-foreground">
                 <span className="font-medium text-foreground/70">{tr.providers_opening_hours}: </span>
-                {availabilityText}
+                {renderHoursWithBoldComments(availabilityText)}
               </span>
             ) : null}
           </span>
