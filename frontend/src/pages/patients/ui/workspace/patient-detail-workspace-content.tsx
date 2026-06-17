@@ -51,6 +51,7 @@ import {
   humanizeFunctionalLabel,
 } from "../shared/patient-form-primitives";
 import { PatientOverviewCard } from "../sections/patient-overview-card";
+import { PatientClinicalSheet } from "../sheets/patient-clinical-sheet";
 
 const loadPatientProfileTab = () => import("../sections/patient-profile-section");
 const loadPatientCuratorsTab = () => import("../sections/patient-curators-tab");
@@ -688,7 +689,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
                 canViewClinical={canViewClinical}
               />
               {canViewClinical && id ? (
-                <LazyPatientClinicalTab patientId={id} canManage={canManageDocuments} embedded />
+                <PatientClinicalSheet patientId={id} canManage={canManageDocuments} />
               ) : null}
               <LazyPatientProfileTab
               profileControls={{
