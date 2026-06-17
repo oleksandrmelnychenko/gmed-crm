@@ -2291,6 +2291,7 @@ function usePatientDetailPageContent() {
         canOpenComplianceWorkspace={canOpenComplianceWorkspace}
         canOpenDocumentsWorkspace={canOpenDocumentsWorkspace}
         canPrintPatientLabel={canPrintPatientLabel}
+        canViewClinical={canViewClinical}
         canViewContracts={canViewContracts}
         canViewDocuments={canViewDocuments}
         canViewInvoices={canViewInvoices}

@@ -268,6 +268,8 @@ export type WeeklyAvailabilityDayCode =
 export type WeeklyAvailabilityInterval = {
   start: string;
   end: string;
+  /** Free-text note for this slot (e.g. "Mittagspause 13-14"). Optional. */
+  comment?: string;
 };
 
 export type WeeklyAvailabilityDay = {
@@ -408,12 +410,13 @@ export function normalizeAvailabilityEditorIntervals(
   intervals: readonly WeeklyAvailabilityInterval[],
 ) {
   // No validation or reformatting — keep exactly what the user picked. Drop only an
-  // interval that is missing a side. Any time can be entered.
+  // interval that is missing a side. Any time can be entered. The comment is kept raw
+  // (untrimmed) so the editor input round-trips smoothly while typing.
   return intervals.flatMap((interval) => {
     const start = interval.start.trim();
     const end = interval.end.trim();
     if (!start || !end) return [];
-    return [{ start, end }];
+    return [interval.comment ? { start, end, comment: interval.comment } : { start, end }];
   });
 }
 
@@ -459,10 +462,11 @@ function normalizeAvailabilityIntervals(
   return intervals.flatMap((interval) => {
     const start = interval.start.trim();
     const end = interval.end.trim();
-    const key = `${start}-${end}`;
+    const comment = interval.comment ?? "";
+    const key = `${start}-${end}-${comment}`;
     if (!start || !end || seen.has(key)) return [];
     seen.add(key);
-    return [{ start, end }];
+    return [comment ? { start, end, comment } : { start, end }];
   });
 }
 
@@ -491,7 +495,9 @@ function formatWeeklyAvailabilityRows(
           options.displayMidnightEndAs24 && interval.end === "00:00"
             ? "24:00"
             : interval.end;
-        return `${interval.start}-${displayEnd}`;
+        const base = `${interval.start}-${displayEnd}`;
+        const comment = interval.comment?.trim();
+        return comment ? `${base} (${comment})` : base;
       })
       .join(", ");
     const intervalsKey = hours;
@@ -564,6 +570,11 @@ export function parseWeeklyAvailability(value: string | null | undefined) {
   const source = (value ?? "").trim();
   if (!source) return Array.from(schedule.values());
 
+  if (source.startsWith("[")) {
+    const fromJson = parseWeeklyAvailabilityJson(source);
+    if (fromJson) return fromJson;
+  }
+
   let parsedAny = false;
   for (const segment of source.split(";")) {
     const trimmed = segment.trim();
@@ -598,7 +609,70 @@ export function parseWeeklyAvailability(value: string | null | undefined) {
   return parsedAny ? Array.from(schedule.values()) : blankWeeklyAvailability();
 }
 
+function weeklyAvailabilityHasComment(days: readonly WeeklyAvailabilityDay[]) {
+  return days.some(
+    (row) => row.enabled && row.intervals.some((interval) => Boolean(interval.comment?.trim())),
+  );
+}
+
+/**
+ * Lossless JSON encoding of the schedule, used only when at least one slot carries a
+ * comment (the legacy human-readable string cannot safely round-trip free text).
+ */
+function serializeWeeklyAvailabilityJson(days: readonly WeeklyAvailabilityDay[]) {
+  const payload = days
+    .filter((row) => row.enabled)
+    .map((row) => ({ day: row.day, intervals: normalizeAvailabilityIntervals(row.intervals) }))
+    .filter((row) => row.intervals.length > 0);
+  return JSON.stringify(payload);
+}
+
+function parseWeeklyAvailabilityJson(source: string): WeeklyAvailabilityDay[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+
+  const schedule = new Map<WeeklyAvailabilityDayCode, WeeklyAvailabilityDay>(
+    blankWeeklyAvailability().map((day) => [day.day, day]),
+  );
+  let parsedAny = false;
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== "object") continue;
+    const dayCode = (entry as { day?: unknown }).day;
+    if (typeof dayCode !== "string" || !WEEKLY_DAY_INDEX.has(dayCode as WeeklyAvailabilityDayCode)) {
+      continue;
+    }
+    const rawIntervals = (entry as { intervals?: unknown }).intervals;
+    if (!Array.isArray(rawIntervals)) continue;
+    const intervals = normalizeAvailabilityIntervals(
+      rawIntervals.flatMap((item) => {
+        if (!item || typeof item !== "object") return [];
+        const start = (item as { start?: unknown }).start;
+        const end = (item as { end?: unknown }).end;
+        const comment = (item as { comment?: unknown }).comment;
+        if (typeof start !== "string" || typeof end !== "string") return [];
+        return [{ start, end, comment: typeof comment === "string" ? comment : undefined }];
+      }),
+    );
+    if (intervals.length === 0) continue;
+    schedule.set(dayCode as WeeklyAvailabilityDayCode, {
+      day: dayCode as WeeklyAvailabilityDayCode,
+      enabled: true,
+      intervals,
+    });
+    parsedAny = true;
+  }
+  return parsedAny ? Array.from(schedule.values()) : null;
+}
+
 export function formatWeeklyAvailabilityValue(days: readonly WeeklyAvailabilityDay[]) {
+  if (weeklyAvailabilityHasComment(days)) {
+    return serializeWeeklyAvailabilityJson(days);
+  }
   return formatWeeklyAvailabilityRows(days, (day) => WEEKLY_DAY_CANONICAL_LABELS[day]);
 }
 

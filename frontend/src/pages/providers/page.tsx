@@ -748,6 +748,7 @@ function WeeklyAvailabilityEditor({
   const addIntervalLabel = lang === "de" ? "Zeit hinzufügen" : "Добавить время";
   const fromLabel = lang === "de" ? "Von" : "С";
   const toLabel = lang === "de" ? "Bis" : "До";
+  const commentLabel = lang === "de" ? "Kommentar" : "Комментарий";
   const copyDayLabel = lang === "de" ? "Auf alle Tage kopieren" : "Скопировать на все дни";
   const everyDayLabel = lang === "de" ? "Alle Tage" : "Все дни";
   const weekdayRangeLabel = `${weeklyAvailabilityDayLabel("mon", lang)}-${weeklyAvailabilityDayLabel("fri", lang)}`;
@@ -809,7 +810,7 @@ function WeeklyAvailabilityEditor({
   const updateInterval = (
     day: WeeklyAvailabilityRow["day"],
     index: number,
-    field: "start" | "end",
+    field: "start" | "end" | "comment",
     nextValue: string,
   ) => {
     commit(
@@ -938,50 +939,60 @@ function WeeklyAvailabilityEditor({
             <div className="flex min-w-0 flex-wrap items-end gap-2">
               {weeklyAvailabilityIntervalItems(row).map(({ interval, intervalIndex, key }) => {
                 return (
-                  <div
-                    key={key}
-                    className="grid w-full grid-cols-[minmax(0,1fr)_minmax(0,1fr)_28px] items-end gap-2 sm:w-[18rem]"
-                  >
-                    <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-medium uppercase leading-tight text-muted-foreground">
-                      {fromLabel}
-                      <Input
-                        type="time"
-                        value={interval.start}
-                        onChange={(event) =>
-                          updateInterval(row.day, intervalIndex, "start", event.target.value)
-                        }
-                        onBlur={commitCurrentDraft}
-                        className={availabilityTimeInputClassName}
+                  <div key={key} className="grid w-full gap-1.5 sm:w-[18rem]">
+                    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_28px] items-end gap-2">
+                      <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-medium uppercase leading-tight text-muted-foreground">
+                        {fromLabel}
+                        <Input
+                          type="time"
+                          value={interval.start}
+                          onChange={(event) =>
+                            updateInterval(row.day, intervalIndex, "start", event.target.value)
+                          }
+                          onBlur={commitCurrentDraft}
+                          className={availabilityTimeInputClassName}
+                          disabled={disabled}
+                          aria-label={`${weeklyAvailabilityDayLabel(row.day, lang)} ${fromLabel}`}
+                        />
+                      </label>
+                      <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-medium uppercase leading-tight text-muted-foreground">
+                        {toLabel}
+                        <Input
+                          type="time"
+                          value={interval.end}
+                          onChange={(event) =>
+                            updateInterval(row.day, intervalIndex, "end", event.target.value)
+                          }
+                          onBlur={commitCurrentDraft}
+                          className={availabilityTimeInputClassName}
+                          disabled={disabled}
+                          aria-label={`${weeklyAvailabilityDayLabel(row.day, lang)} ${toLabel}`}
+                        />
+                      </label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon-sm"
+                        className="h-9 w-7 rounded-lg bg-background"
+                        onClick={() => removeInterval(row.day, intervalIndex)}
                         disabled={disabled}
-                        aria-label={`${weeklyAvailabilityDayLabel(row.day, lang)} ${fromLabel}`}
-                      />
-                    </label>
-                    <label className="flex min-w-0 flex-col gap-0.5 text-[10px] font-medium uppercase leading-tight text-muted-foreground">
-                      {toLabel}
-                      <Input
-                        type="time"
-                        value={interval.end}
-                        onChange={(event) =>
-                          updateInterval(row.day, intervalIndex, "end", event.target.value)
-                        }
-                        onBlur={commitCurrentDraft}
-                        className={availabilityTimeInputClassName}
-                        disabled={disabled}
-                        aria-label={`${weeklyAvailabilityDayLabel(row.day, lang)} ${toLabel}`}
-                      />
-                    </label>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon-sm"
-                      className="h-9 w-7 rounded-lg bg-background"
-                      onClick={() => removeInterval(row.day, intervalIndex)}
+                        title={t.common_remove}
+                        aria-label={t.common_remove}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
+                    <Input
+                      value={interval.comment ?? ""}
+                      onChange={(event) =>
+                        updateInterval(row.day, intervalIndex, "comment", event.target.value)
+                      }
+                      onBlur={commitCurrentDraft}
+                      className="h-8 w-full rounded-lg bg-background px-2 text-xs"
                       disabled={disabled}
-                      title={t.common_remove}
-                      aria-label={t.common_remove}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </Button>
+                      placeholder={commentLabel}
+                      aria-label={`${weeklyAvailabilityDayLabel(row.day, lang)} ${commentLabel}`}
+                    />
                   </div>
                 );
               })}
@@ -7537,21 +7548,9 @@ function ProviderContractFields({
   onChange: (field: keyof ProviderFormState, value: string) => void;
 }) {
   const { t } = useLang();
-  const l = (key: string) => t.uiText[key] ?? key;
 
   return (
     <>
-      <Field label={t.providers_contract}>
-        <textarea
-          value={form.contractText}
-          onChange={(event) => onChange("contractText", event.target.value)}
-          className={textareaClassName}
-          rows={4}
-          placeholder={l("providers_plain_text_becomes_summary_automatically_json_is_accepte")}
-          disabled={disabled}
-        />
-      </Field>
-
       <Field label={t.providers_notes}>
         <textarea
           value={form.notes}

@@ -612,12 +612,35 @@ function NarrativeSection({
   );
 }
 
+/**
+ * Wraps the clinical sections either as a routed tab (`<TabsContent>`) or as a plain
+ * embedded block (used below the patient overview card on the profile screen).
+ */
+function ClinicalWrapper({
+  embedded,
+  className,
+  children,
+}: {
+  embedded: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  if (embedded) return <div className={className}>{children}</div>;
+  return (
+    <TabsContent value="clinical" className={className}>
+      {children}
+    </TabsContent>
+  );
+}
+
 export function PatientClinicalTab({
   patientId,
   canManage,
+  embedded = false,
 }: {
   patientId: string;
   canManage: boolean;
+  embedded?: boolean;
 }) {
   const { lang } = useLang();
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
@@ -680,14 +703,17 @@ export function PatientClinicalTab({
 
   if (loading) {
     return (
-      <TabsContent value="clinical" className="mt-4 min-h-[400px]">
+      <ClinicalWrapper embedded={embedded} className={embedded ? "min-h-[120px]" : "mt-4 min-h-[400px]"}>
         <p className="py-10 text-center text-sm text-muted-foreground">{tx("Загрузка…", "Laden…")}</p>
-      </TabsContent>
+      </ClinicalWrapper>
     );
   }
 
   return (
-    <TabsContent value="clinical" className="mt-4 min-h-[400px] space-y-4">
+    <ClinicalWrapper
+      embedded={embedded}
+      className={embedded ? "space-y-4" : "mt-4 min-h-[400px] space-y-4"}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-foreground">{tx("Клинический профиль", "Klinisches Profil")}</h2>
@@ -1188,6 +1214,6 @@ export function PatientClinicalTab({
           )}
         </div>
       </section>
-    </TabsContent>
+    </ClinicalWrapper>
   );
 }

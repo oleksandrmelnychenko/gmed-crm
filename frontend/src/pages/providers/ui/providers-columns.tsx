@@ -4,7 +4,11 @@ import { Badge } from "@/components/ui/badge";
 import type { ColumnDef, FilterOption } from "@/components/data-table/types";
 import { cn } from "@/lib/utils";
 
-import { compactDateTime, providerTypeLabel } from "../model/list-model";
+import {
+  compactDateTime,
+  formatWeeklyAvailabilityDisplay,
+  providerTypeLabel,
+} from "../model/list-model";
 import { specializationSummaryForItems } from "../model/specialization-labels";
 import type { ProviderOrganizationLevel, ProviderSummary, ProviderTaxonomyNode } from "../model/types";
 
@@ -539,6 +543,27 @@ export function buildProviderColumns(
       render: (provider) => (
         <span className="truncate text-xs text-muted-foreground">{provider.email || notSet}</span>
       ),
+    },
+    {
+      id: "opening_hours",
+      label: tr.providers_opening_hours ?? notSet,
+      accessor: (provider) => formatWeeklyAvailabilityDisplay(provider.opening_hours, lang),
+      filterType: "text",
+      sortable: true,
+      searchable: true,
+      width: 240,
+      group: "contact",
+      render: (provider) => {
+        const value = formatWeeklyAvailabilityDisplay(provider.opening_hours, lang);
+        return (
+          <span
+            className="block max-w-full truncate text-xs text-muted-foreground"
+            title={value || undefined}
+          >
+            {value || notSet}
+          </span>
+        );
+      },
     },
     {
       id: "tax_id",

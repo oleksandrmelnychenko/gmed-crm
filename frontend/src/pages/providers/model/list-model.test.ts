@@ -628,4 +628,42 @@ describe("weekly availability helpers", () => {
     expect(formatWeeklyAvailabilityDisplay("Mo 00:00-00:00", "de")).toBe("Mo 00:00-24:00");
   });
 
+  it("serializes slot comments as JSON and renders them in the display", () => {
+    const value = formatWeeklyAvailabilityValue([
+      {
+        day: "mon",
+        enabled: true,
+        intervals: [{ start: "09:00", end: "17:00", comment: "Mittagspause 13-14" }],
+      },
+    ]);
+    // Comments cannot ride in the legacy string, so the encoder switches to JSON.
+    expect(value.startsWith("[")).toBe(true);
+    expect(formatWeeklyAvailabilityDisplay(value, "ru")).toBe(
+      "Пн 09:00-17:00 (Mittagspause 13-14)",
+    );
+  });
+
+  it("round-trips a comment that itself contains a time range", () => {
+    const value = formatWeeklyAvailabilityValue([
+      {
+        day: "tue",
+        enabled: true,
+        intervals: [{ start: "08:00", end: "18:00", comment: "Pause 13:00-14:00" }],
+      },
+    ]);
+    const parsed = parseWeeklyAvailability(value);
+    const tue = parsed.find((row) => row.day === "tue");
+    // The inner "13:00-14:00" must NOT be mis-parsed as a second interval.
+    expect(tue?.intervals).toEqual([
+      { start: "08:00", end: "18:00", comment: "Pause 13:00-14:00" },
+    ]);
+  });
+
+  it("keeps the legacy plain-string format when no slot has a comment", () => {
+    const value = formatWeeklyAvailabilityValue([
+      { day: "mon", enabled: true, intervals: [{ start: "09:00", end: "17:00" }] },
+    ]);
+    expect(value).toBe("Mon 09:00-17:00");
+  });
+
 });

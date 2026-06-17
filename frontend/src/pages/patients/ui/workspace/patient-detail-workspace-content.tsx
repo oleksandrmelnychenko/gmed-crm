@@ -229,6 +229,7 @@ type PatientDetailWorkspaceContentProps = {
   canOpenComplianceWorkspace: boolean;
   canOpenDocumentsWorkspace: boolean;
   canPrintPatientLabel: boolean;
+  canViewClinical: boolean;
   canViewContracts: boolean;
   canViewDocuments: boolean;
   canViewInvoices: boolean;
@@ -430,6 +431,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     canOpenComplianceWorkspace,
     canOpenDocumentsWorkspace,
     canPrintPatientLabel,
+    canViewClinical,
     canViewContracts,
     canViewDocuments,
     canViewInvoices,
@@ -683,8 +685,11 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               <PatientOverviewCard
                 patientId={id ?? ""}
                 allergies={detail.clinical_warnings ?? null}
-                canViewClinical={hasClinicalSurface}
+                canViewClinical={canViewClinical}
               />
+              {canViewClinical && id ? (
+                <LazyPatientClinicalTab patientId={id} canManage={canManageDocuments} embedded />
+              ) : null}
               <LazyPatientProfileTab
               profileControls={{
                 canEditPatientProfile,
