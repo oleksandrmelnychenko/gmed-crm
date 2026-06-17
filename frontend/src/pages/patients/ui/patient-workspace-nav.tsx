@@ -1,4 +1,4 @@
-import { ArrowLeft, BadgeCheck, CalendarClock, ClipboardList, FileHeart, FileSignature, FolderOpen, History, ReceiptText, ShieldCheck, Stethoscope, type LucideIcon, UserRound, UsersRound } from "lucide-react";
+import { ArrowLeft, BadgeCheck, CalendarClock, ClipboardList, FileHeart, FileSignature, FolderOpen, History, ReceiptText, ShieldCheck, type LucideIcon, UserRound, UsersRound } from "lucide-react";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 
 import { StaffLink } from "@/components/staff-link";
@@ -89,13 +89,6 @@ export function PatientWorkspaceNav() {
           key: "appointments",
           label: l("patients_appointments"),
           icon: CalendarClock,
-        }
-      : null,
-    canViewClinical
-      ? {
-          key: "clinical",
-          label: l("patients_clinical_profile"),
-          icon: Stethoscope,
         }
       : null,
     canViewDocuments

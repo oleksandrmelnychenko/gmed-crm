@@ -1427,12 +1427,6 @@ function usePatientDetailPageContent() {
           label: t.appointments_title,
         }
       : null,
-    canViewClinical
-      ? {
-          key: "clinical",
-          label: l("patients_clinical_profile"),
-        }
-      : null,
     canViewDocuments
       ? {
           key: "documents",

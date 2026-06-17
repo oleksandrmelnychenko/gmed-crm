@@ -228,7 +228,9 @@ export function normalizePatientDetailTab(tab: string | null | undefined, access
   if (PATIENT_OPERATIONAL_TAB_KEYS.has(requestedTab) && !access.canViewOperationalSurface) {
     return "profile";
   }
-  if (requestedTab === "clinical" && !access.canViewClinical) {
+  if (requestedTab === "clinical") {
+    // The standalone clinical tab was replaced by the clinical sheet on the
+    // profile screen; any lingering ?tab=clinical link lands on the profile.
     return "profile";
   }
   if (requestedTab === "documents" && !access.canViewDocuments) {
