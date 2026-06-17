@@ -56,7 +56,6 @@ type PatientRelationEditorSheetProps = {
   canManageRelations: boolean;
   editingRelation: RelationItem | null;
   dictionary: Record<string, string>;
-  lang: string;
   textareaClassName: string;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
@@ -156,6 +155,7 @@ function PatientRelationEditorSheet({
   const deferredPatientSearch = useDeferredValue(patientSearch);
   const { patientOptions, patientOptionsLoading } = usePatientLookupOptions({
     enabled: open && canManageRelations,
+    search: deferredPatientSearch,
   });
   useEffect(() => {
     if (!open) {
@@ -170,32 +170,34 @@ function PatientRelationEditorSheet({
 
     dispatchRelationState({
       form: editingRelation ? relationToForm(editingRelation) : blankRelationForm(),
-      patientSearch:
-        editingRelation?.related_display_name || editingRelation?.related_name || "",
+      patientSearch: "",
       error: "",
     });
   }, [editingRelation, open]);
 
-  const filteredPatientOptions = useMemo(() => {
-    const normalizedSearch = deferredPatientSearch.trim().toLowerCase();
-
-    return patientOptions.filter((option) => {
-      if (option.id === selfPatientId) {
-        return false;
-      }
-
-      if (!normalizedSearch) {
-        return true;
-      }
-
-      return formatRelatedPatientOption(option).toLowerCase().includes(normalizedSearch);
-    });
-  }, [deferredPatientSearch, patientOptions, selfPatientId]);
+  // The server already filters by `search`; just drop the patient being edited.
+  const comboboxPatients = useMemo(
+    () => patientOptions.filter((option) => option.id !== selfPatientId),
+    [patientOptions, selfPatientId],
+  );
 
   const selectedRelatedPatient = useMemo(
     () => patientOptions.find((option) => option.id === form.relatedPatientId) ?? null,
     [form.relatedPatientId, patientOptions],
   );
+
+  // In edit mode the linked patient may be inactive / outside the current search
+  // results; expose its option (and label) so the selection always renders.
+  const editingLinkedOption =
+    editingRelation?.related_patient_id &&
+    !comboboxPatients.some((option) => option.id === editingRelation.related_patient_id)
+      ? {
+          id: editingRelation.related_patient_id,
+          label: editingRelation.related_patient_pid
+            ? `${editingRelation.related_patient_pid} · ${editingRelation.related_display_name || editingRelation.related_name}`
+            : editingRelation.related_display_name || editingRelation.related_name,
+        }
+      : null;
 
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
@@ -277,21 +279,6 @@ function PatientRelationEditorSheet({
       {error ? <Banner tone="error">{error}</Banner> : null}
       <FormSection title={l("patients_linked_patient")}>
         <FormField
-          label={t.patient_relation_search_existing}
-          htmlFor="relation-patient-search"
-        >
-          <Input
-            id="relation-patient-search"
-            value={patientSearch}
-            onChange={(event) =>
-              dispatchRelationState({ patientSearch: event.target.value })
-            }
-            className={inputClass}
-            placeholder={t.patient_relation_search_placeholder}
-          />
-        </FormField>
-
-        <FormField
           label={t.patient_relation_link_patient}
           htmlFor="relation-linked-patient"
         >
@@ -299,14 +286,29 @@ function PatientRelationEditorSheet({
             id="relation-linked-patient"
             className={selectClass}
             value={form.relatedPatientId}
+            searchPlaceholder={t.patient_relation_search_placeholder}
+            onSearchChange={(query) =>
+              dispatchRelationState({ patientSearch: query })
+            }
+            missingValueLabel={(value) =>
+              editingRelation && value === editingRelation.related_patient_id
+                ? editingRelation.related_display_name ||
+                  editingRelation.related_name ||
+                  value
+                : value
+            }
             onChange={(event) => {
               const nextPatientId = event.target.value;
+              if (!nextPatientId) {
+                // Unlink → standalone contact: clear the auto-filled name too.
+                dispatchRelationState((current) => ({
+                  form: { ...current.form, relatedPatientId: "", relatedName: "" },
+                }));
+                return;
+              }
               const selectedPatient =
                 patientOptions.find((option) => option.id === nextPatientId) ?? null;
               dispatchRelationState((current) => ({
-                patientSearch: selectedPatient
-                  ? formatRelatedPatientOption(selectedPatient)
-                  : "",
                 form: {
                   ...current.form,
                   relatedPatientId: nextPatientId,
@@ -316,12 +318,14 @@ function PatientRelationEditorSheet({
                 },
               }));
             }}
-            disabled={patientOptionsLoading}
           >
             <option value="">
               {t.patient_relation_standalone_contact}
             </option>
-            {filteredPatientOptions.map((option) => (
+            {editingLinkedOption ? (
+              <option value={editingLinkedOption.id}>{editingLinkedOption.label}</option>
+            ) : null}
+            {comboboxPatients.map((option) => (
               <option key={option.id} value={option.id}>
                 {formatRelatedPatientOption(option)}
               </option>
@@ -330,7 +334,7 @@ function PatientRelationEditorSheet({
           <p className="mt-1.5 text-[11.5px] leading-tight text-muted-foreground">
             {patientOptionsLoading
               ? t.patient_relation_loading_directory
-              : selectedRelatedPatient
+              : form.relatedPatientId
                 ? t.patient_relation_linked_sync_hint
                 : t.patient_relation_unlinked_hint}
           </p>

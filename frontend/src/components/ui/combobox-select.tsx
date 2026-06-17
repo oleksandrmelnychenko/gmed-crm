@@ -44,6 +44,8 @@ type ComboboxSelectProps = {
   style?: React.CSSProperties
   onBlur?: React.FocusEventHandler<HTMLButtonElement>
   onFocus?: React.FocusEventHandler<HTMLButtonElement>
+  /** Fires as the user types in the built-in search box (for server-driven lookups). */
+  onSearchChange?: (query: string) => void
 }
 
 type NativeComboboxSelectProps = Omit<
@@ -61,6 +63,7 @@ type NativeComboboxSelectProps = Omit<
   searchPlaceholder?: string
   emptyLabel?: React.ReactNode
   missingValueLabel?: React.ReactNode | ((value: string) => React.ReactNode)
+  onSearchChange?: (query: string) => void
   value?: PrimitiveValue | readonly string[] | null
 }
 
@@ -200,6 +203,7 @@ function ComboboxSelect({
   title,
   onBlur,
   onFocus,
+  onSearchChange,
   ...ariaProps
 }: ComboboxSelectProps) {
   const { t } = useLang()
@@ -279,6 +283,7 @@ function ComboboxSelect({
       disabled={disabled}
       value={selectedValue}
       onValueChange={handleValueChange}
+      onInputValueChange={onSearchChange ? (inputValue) => onSearchChange(inputValue) : undefined}
       items={listOptions.map((option) => option.value)}
       itemToStringLabel={(itemValue) =>
         textFromNode(optionsByValue.get(String(itemValue))?.label ?? t.select_missing_value)
@@ -397,6 +402,7 @@ function NativeComboboxSelect({
   style,
   onBlur,
   onFocus,
+  onSearchChange,
   "aria-label": ariaLabel,
   "aria-describedby": ariaDescribedBy,
   "aria-invalid": ariaInvalid,
@@ -429,6 +435,7 @@ function NativeComboboxSelect({
       onBlur={(event) => onBlur?.(event as unknown as React.FocusEvent<HTMLSelectElement>)}
       onFocus={(event) => onFocus?.(event as unknown as React.FocusEvent<HTMLSelectElement>)}
       onValueChange={(nextValue) => onChange?.(createSelectChangeEvent(nextValue, name))}
+      onSearchChange={onSearchChange}
     />
   )
 }

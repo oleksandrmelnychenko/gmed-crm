@@ -4858,6 +4858,14 @@ async fn list_relations(
     Ok(Json(items))
 }
 
+/// Trim free-text relation fields and treat an empty result as NULL.
+fn relation_opt_text(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+}
+
 async fn create_relation(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -4872,23 +4880,33 @@ async fn create_relation(
         ensure_related_patient_exists(&state, related_patient_id).await?;
     }
 
+    let phone = relation_opt_text(body.phone.as_deref());
+    let notes = relation_opt_text(body.notes.as_deref());
+
     let row = sqlx::query(
-        r#"INSERT INTO patient_relations (
-                patient_id, related_patient_id, related_name, relation_type,
-                is_emergency_contact, phone, notes
-           ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7
+        r#"WITH upserted AS (
+                INSERT INTO patient_relations (
+                    patient_id, related_patient_id, related_name, relation_type,
+                    is_emergency_contact, phone, notes
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING id, patient_id, related_patient_id, related_name, relation_type,
+                          is_emergency_contact, phone, notes, created_at
            )
-           RETURNING id, patient_id, related_patient_id, related_name, relation_type,
-                     is_emergency_contact, phone, notes, created_at"#,
+           SELECT u.id, u.patient_id, u.related_patient_id, u.related_name, u.relation_type,
+                  u.is_emergency_contact, u.phone, u.notes, u.created_at,
+                  rp.patient_id AS related_patient_pid,
+                  rp.first_name AS related_first_name,
+                  rp.last_name AS related_last_name
+           FROM upserted u
+           LEFT JOIN patients rp ON rp.id = u.related_patient_id"#,
     )
     .bind(patient_uuid)
     .bind(body.related_patient_id)
     .bind(body.related_name.trim())
     .bind(body.relation_type.trim())
     .bind(body.is_emergency_contact.unwrap_or(false))
-    .bind(body.phone.as_deref())
-    .bind(body.notes.as_deref())
+    .bind(phone)
+    .bind(notes)
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
@@ -4928,18 +4946,30 @@ async fn update_relation(
         ensure_related_patient_exists(&state, related_patient_id).await?;
     }
 
+    let phone = relation_opt_text(body.phone.as_deref());
+    let notes = relation_opt_text(body.notes.as_deref());
+
     let updated = sqlx::query(
-        r#"UPDATE patient_relations
-           SET related_patient_id = $3,
-               related_name = $4,
-               relation_type = $5,
-               is_emergency_contact = $6,
-               phone = $7,
-               notes = $8
-           WHERE patient_id = $1
-             AND id = $2
-           RETURNING id, patient_id, related_patient_id, related_name, relation_type,
-                     is_emergency_contact, phone, notes, created_at"#,
+        r#"WITH upserted AS (
+                UPDATE patient_relations
+                SET related_patient_id = $3,
+                    related_name = $4,
+                    relation_type = $5,
+                    is_emergency_contact = $6,
+                    phone = $7,
+                    notes = $8
+                WHERE patient_id = $1
+                  AND id = $2
+                RETURNING id, patient_id, related_patient_id, related_name, relation_type,
+                          is_emergency_contact, phone, notes, created_at
+           )
+           SELECT u.id, u.patient_id, u.related_patient_id, u.related_name, u.relation_type,
+                  u.is_emergency_contact, u.phone, u.notes, u.created_at,
+                  rp.patient_id AS related_patient_pid,
+                  rp.first_name AS related_first_name,
+                  rp.last_name AS related_last_name
+           FROM upserted u
+           LEFT JOIN patients rp ON rp.id = u.related_patient_id"#,
     )
     .bind(patient_uuid)
     .bind(relation_id)
@@ -4947,8 +4977,8 @@ async fn update_relation(
     .bind(body.related_name.trim())
     .bind(body.relation_type.trim())
     .bind(body.is_emergency_contact.unwrap_or(false))
-    .bind(body.phone.as_deref())
-    .bind(body.notes.as_deref())
+    .bind(phone)
+    .bind(notes)
     .fetch_optional(&state.db)
     .await
     .map_err(|e| {

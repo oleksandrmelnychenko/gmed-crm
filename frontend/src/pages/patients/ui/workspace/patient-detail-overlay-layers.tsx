@@ -200,7 +200,6 @@ export function PatientDetailOverlayLayers({
             canManageRelations={canManageRelations}
             editingRelation={editingRelation}
             dictionary={dictionary}
-            lang={lang}
             textareaClassName={textareaClassName}
             onOpenChange={onRelationEditorOpenChange}
             onSaved={onSaved}
