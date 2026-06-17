@@ -3910,15 +3910,22 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 function ReadOnlyLine({
   label,
   value,
+  wrap = false,
 }: {
   label: ReactNode;
   value: ReactNode;
+  wrap?: boolean;
 }) {
   return (
     <div className="flex min-w-0 items-center gap-3 py-2">
       <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
       <span className="h-px min-w-6 flex-1 bg-border/70" />
-      <span className="min-w-0 max-w-[58%] truncate text-right text-sm font-semibold text-foreground">
+      <span
+        className={cn(
+          "min-w-0 text-right text-sm font-semibold text-foreground",
+          wrap ? "max-w-[70%] break-words" : "max-w-[58%] truncate",
+        )}
+      >
         {value}
       </span>
     </div>
@@ -4140,7 +4147,7 @@ function ProviderProfileReadOnlySection({ detail }: { detail: ProviderDetail }) 
       <Section className={providerDetailSectionClassName} title={l("patients_contact")}>
         <div className="space-y-3">
           <div className="grid gap-x-8 gap-y-1 lg:grid-cols-2">
-            <ReadOnlyLine label={t.providers_website} value={detail.website || fallback} />
+            <ReadOnlyLine label={t.providers_website} value={detail.website || fallback} wrap />
             <ReadOnlyLine label={l("providers_tax_id")} value={detail.tax_id || fallback} />
           </div>
           <ReadOnlyContacts
@@ -4274,6 +4281,7 @@ function ProviderDoctorDetailSheet({
                 <ReadOnlyLine
                   label={l("providers_doctor_website")}
                   value={(doctor?.website ?? row?.website) || t.common_not_set}
+                  wrap
                 />
               ) : null}
               <ReadOnlyLine
@@ -4283,6 +4291,7 @@ function ProviderDoctorDetailSheet({
                     ? formatWeeklyAvailabilityDisplay(openingHours, lang)
                     : t.common_not_set
                 }
+                wrap
               />
             </Section>
             <Section title={l("providers_contacts")}>
@@ -4402,6 +4411,7 @@ function ProviderStaffDetailSheet({
                     ? formatWeeklyAvailabilityDisplay(openingHours, lang)
                     : t.common_not_set
                 }
+                wrap
               />
             </Section>
             <Section title={l("providers_contacts")}>
@@ -5538,14 +5548,16 @@ function ProviderOverviewSection({
 }function HeroInfoLine({
   icon: Icon,
   children,
+  wrap = false,
 }: {
   icon: typeof MapPin;
   children: ReactNode;
+  wrap?: boolean;
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-2">
+    <div className={cn("flex min-w-0 gap-2", wrap ? "items-start" : "items-center")}>
       <Icon className="size-3.5 shrink-0 text-muted-foreground/65" />
-      <span className="min-w-0 truncate">{children}</span>
+      <span className={cn("min-w-0", wrap ? "break-words" : "truncate")}>{children}</span>
     </div>
   );
 }
@@ -5655,7 +5667,7 @@ function ProviderSheetHero({
             <HeroInfoLine icon={Mail}>
               {detail.email || t.common_not_set}
             </HeroInfoLine>
-            <HeroInfoLine icon={CalendarClock}>
+            <HeroInfoLine icon={CalendarClock} wrap>
               {formatWeeklyAvailabilityDisplay(detail.opening_hours, lang) || t.common_not_set}
             </HeroInfoLine>
             <HeroInfoLine icon={BadgeCheck}>
