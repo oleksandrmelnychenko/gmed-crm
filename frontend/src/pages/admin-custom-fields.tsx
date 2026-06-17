@@ -497,18 +497,11 @@ export function AdminCustomFieldsPage() {
     setMsg(null);
     setCreateError(null);
     setCreating(true);
-    let opts: unknown = undefined;
-    if (fOptions.trim()) {
-      try {
-        opts = JSON.parse(fOptions);
-      } catch {
-        const message = t.common_error;
-        setCreateError(message);
-        setMsg(message);
-        setCreating(false);
-        return;
-      }
-    }
+    const optionValues = fOptions
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const opts = optionValues.length > 0 ? optionValues : undefined;
     try {
       await createAdminCustomField({
         entity_type: fEntity,

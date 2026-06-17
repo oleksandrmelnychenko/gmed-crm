@@ -872,8 +872,8 @@ export const ru = {
   cf_field_type: "Тип поля",
   cf_required: "Обязательное",
   cf_sort: "Порядок",
-  cf_options: "Варианты (JSON)",
-  cf_options_placeholder: "[\"opt1\",\"opt2\"]",
+  cf_options: "Варианты",
+  cf_options_placeholder: "Вариант 1, Вариант 2, Вариант 3",
   cf_no_fields: "Пользовательские поля не созданы.",
 
   ann_title: "Объявления",

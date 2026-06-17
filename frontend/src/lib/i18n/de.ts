@@ -874,8 +874,8 @@ export const de = {
   cf_field_type: "Feldtyp",
   cf_required: "Pflichtfeld",
   cf_sort: "Reihenfolge",
-  cf_options: "Optionen (JSON)",
-  cf_options_placeholder: "[\"opt1\",\"opt2\"]",
+  cf_options: "Optionen",
+  cf_options_placeholder: "Option 1, Option 2, Option 3",
   cf_no_fields: "Keine benutzerdefinierten Felder.",
 
   ann_title: "Ankündigungen",
