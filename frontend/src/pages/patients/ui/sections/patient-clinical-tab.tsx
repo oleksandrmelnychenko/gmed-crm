@@ -166,72 +166,72 @@ export function PatientMedicationTable({
   const columnCount = canManage ? 12 : 11;
   const doseCell = (value: string | null) => (value && value.trim() ? value.trim() : "");
 
+  // Rendered as a paper-like document (always light) to match the official BMP.
+  const headCell = "border border-zinc-300 px-2.5 py-2 font-bold text-zinc-900";
+  const headDoseCell = "border border-zinc-300 px-1.5 py-2 text-center font-bold text-zinc-900";
+  const bodyCell = "border border-zinc-300 px-2.5 py-1.5 align-top text-zinc-900";
+  const bodyDoseCell = "border border-zinc-300 px-1.5 py-1.5 text-center align-top font-mono text-zinc-900";
+
   return (
-    <div className="overflow-x-auto rounded-lg border border-border/70 bg-background">
+    <div className="overflow-x-auto rounded-md border border-zinc-300 bg-white">
       <table className="w-full min-w-[1080px] border-collapse text-left text-xs">
-        <thead className="border-b border-border/70 bg-muted/40 text-[11px] uppercase text-muted-foreground">
-          <tr>
-            <th scope="col" className="px-2.5 py-2 font-semibold">{tx("Действующее вещество", "Wirkstoff")}</th>
-            <th scope="col" className="px-2.5 py-2 font-semibold">{tx("Торговое название", "Handelsname")}</th>
-            <th scope="col" className="px-2.5 py-2 font-semibold">{tx("Дозировка", "Stärke")}</th>
-            <th scope="col" className="px-2.5 py-2 font-semibold">{tx("Форма", "Form")}</th>
-            <th scope="col" className="px-1.5 py-2 text-center font-semibold">{tx("Утро", "Morgens")}</th>
-            <th scope="col" className="px-1.5 py-2 text-center font-semibold">{tx("День", "Mittags")}</th>
-            <th scope="col" className="px-1.5 py-2 text-center font-semibold">{tx("Вечер", "Abends")}</th>
-            <th scope="col" className="px-1.5 py-2 text-center font-semibold">{tx("Ночь", "Zur Nacht")}</th>
-            <th scope="col" className="px-2.5 py-2 font-semibold">{tx("Ед.", "Einheit")}</th>
-            <th scope="col" className="px-2.5 py-2 font-semibold">{tx("Указания", "Hinweise")}</th>
-            <th scope="col" className="px-2.5 py-2 font-semibold">{tx("Показание", "Grund")}</th>
+        <thead>
+          <tr className="bg-zinc-200/70">
+            <th scope="col" className={headCell}>{tx("Действующее вещество", "Wirkstoff")}</th>
+            <th scope="col" className={headCell}>{tx("Торговое название", "Handelsname")}</th>
+            <th scope="col" className={headCell}>{tx("Дозировка", "Stärke")}</th>
+            <th scope="col" className={headCell}>{tx("Форма", "Form")}</th>
+            <th scope="col" className={headDoseCell}>{tx("Утро", "Morgens")}</th>
+            <th scope="col" className={headDoseCell}>{tx("День", "Mittags")}</th>
+            <th scope="col" className={headDoseCell}>{tx("Вечер", "Abends")}</th>
+            <th scope="col" className={headDoseCell}>{tx("Ночь", "Zur Nacht")}</th>
+            <th scope="col" className={headCell}>{tx("Ед.", "Einheit")}</th>
+            <th scope="col" className={headCell}>{tx("Указания", "Hinweise")}</th>
+            <th scope="col" className={headCell}>{tx("Показание", "Grund")}</th>
             {canManage ? (
-              <th scope="col" className="px-2 py-2 text-right font-semibold">
+              <th scope="col" className="border border-zinc-300 px-2 py-2 text-right font-bold">
                 <span className="sr-only">{tx("Действия", "Aktionen")}</span>
               </th>
             ) : null}
           </tr>
         </thead>
-        <tbody className="divide-y divide-border/60">
+        <tbody>
           {sections.map((section) => (
             <Fragment key={section.key}>
-              {section.label ? (
-                <tr className="bg-card/80">
-                  <td colSpan={columnCount} className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        {section.label}
-                      </span>
-                      <Badge variant="outline" className="rounded-full text-[10px]">
-                        {section.rows.length}
-                      </Badge>
-                    </div>
+              {section.label && section.key !== "dauer" ? (
+                <tr>
+                  <td
+                    colSpan={columnCount}
+                    className="border border-zinc-300 bg-zinc-100 px-2.5 py-1.5 text-[13px] font-bold text-zinc-900"
+                  >
+                    {section.label}
                   </td>
                 </tr>
               ) : null}
               {section.rows.map(({ item, index }) => {
                 const attribution = attributionLabel(item);
                 return (
-                  <tr key={item.id ?? index} className="align-top transition-colors hover:bg-muted/25">
-                    <td className="px-2.5 py-2.5 text-foreground">{item.wirkstoff || "—"}</td>
-                    <td className="px-2.5 py-2.5 font-medium text-foreground">
+                  <tr key={item.id ?? index}>
+                    <td className={cn(bodyCell, "whitespace-pre-line")}>{item.wirkstoff || "—"}</td>
+                    <td className={cn(bodyCell, "font-medium")}>
                       {item.handelsname || tx("Без названия", "Ohne Namen")}
                     </td>
-                    <td className="whitespace-nowrap px-2.5 py-2.5 font-mono text-foreground">
-                      {item.staerke || ""}
-                    </td>
-                    <td className="px-2.5 py-2.5 text-foreground">{item.form || ""}</td>
-                    <td className="px-1.5 py-2.5 text-center font-mono text-foreground">{doseCell(item.dose_morgens)}</td>
-                    <td className="px-1.5 py-2.5 text-center font-mono text-foreground">{doseCell(item.dose_mittags)}</td>
-                    <td className="px-1.5 py-2.5 text-center font-mono text-foreground">{doseCell(item.dose_abends)}</td>
-                    <td className="px-1.5 py-2.5 text-center font-mono text-foreground">{doseCell(item.dose_nachts)}</td>
-                    <td className="whitespace-nowrap px-2.5 py-2.5 text-foreground">{item.einheit || ""}</td>
-                    <td className="px-2.5 py-2.5 text-muted-foreground">
-                      {item.hinweis ? <span className="break-words">{item.hinweis}</span> : null}
+                    <td className={cn(bodyCell, "whitespace-pre-line font-mono")}>{item.staerke || ""}</td>
+                    <td className={cn(bodyCell, "whitespace-pre-line")}>{item.form || ""}</td>
+                    <td className={bodyDoseCell}>{doseCell(item.dose_morgens)}</td>
+                    <td className={bodyDoseCell}>{doseCell(item.dose_mittags)}</td>
+                    <td className={bodyDoseCell}>{doseCell(item.dose_abends)}</td>
+                    <td className={bodyDoseCell}>{doseCell(item.dose_nachts)}</td>
+                    <td className={cn(bodyCell, "whitespace-nowrap")}>{item.einheit || ""}</td>
+                    <td className={bodyCell}>
+                      {item.hinweis ? <span className="whitespace-pre-line break-words">{item.hinweis}</span> : null}
                       {attribution ? (
-                        <span className="mt-0.5 block text-[10px] text-muted-foreground/80">{attribution}</span>
+                        <span className="mt-0.5 block text-[10px] text-zinc-500">{attribution}</span>
                       ) : null}
                     </td>
-                    <td className="px-2.5 py-2.5 text-foreground">{item.grund || ""}</td>
+                    <td className={bodyCell}>{item.grund || ""}</td>
                     {canManage ? (
-                      <td className="px-2 py-2 text-right">
+                      <td className="border border-zinc-300 px-2 py-1.5 text-right align-top">
                         {renderActions(item, index)}
                       </td>
                     ) : null}
@@ -958,7 +958,7 @@ export function PatientClinicalTab({
         tx={tx}
         groups={[
           { key: "dauer", label: tx("Постоянная", "Dauermedikation") },
-          { key: "besondere", label: tx("По особым показаниям", "Zu besonderen Zeiten") },
+          { key: "besondere", label: tx("В особое время", "Zu besonderen Zeiten anzuwendende Medikamente") },
           { key: "selbst", label: tx("Самолечение", "Selbstmedikation") },
         ]}
         groupOf={(m) => m.category}

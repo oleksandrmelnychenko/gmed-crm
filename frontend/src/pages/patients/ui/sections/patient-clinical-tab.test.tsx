@@ -31,16 +31,24 @@ function medication(overrides: Partial<ClinicalMedication> = {}): ClinicalMedica
 describe("PatientMedicationTable", () => {
   it("renders patient medications as a real grouped table", () => {
     const item = medication();
+    const special = medication({
+      category: "besondere",
+      handelsname: "Artelac",
+      wirkstoff: "Hypromellose",
+    });
     const html = renderToStaticMarkup(
       <PatientMedicationTable
         canManage
         groupOf={(row) => row.category}
         groups={[
           { key: "dauer", label: "Dauermedikation" },
-          { key: "besondere", label: "Zu besonderen Zeiten" },
+          { key: "besondere", label: "Zu besonderen Zeiten anzuwendende Medikamente" },
           { key: "selbst", label: "Selbstmedikation" },
         ]}
-        indexed={[{ item, index: 0 }]}
+        indexed={[
+          { item, index: 0 },
+          { item: special, index: 1 },
+        ]}
         renderActions={() => <button type="button">Bearb.</button>}
         tx={(_ru, de) => de}
       />,
@@ -53,7 +61,10 @@ describe("PatientMedicationTable", () => {
     expect(html).toContain("Morgens");
     expect(html).toContain("Zur Nacht");
     expect(html).toContain("Einheit");
-    expect(html).toContain("Dauermedikation");
+    // Official layout: the special section shows its heading; the default
+    // Dauermedikation block is rendered without a heading (matches the BMP).
+    expect(html).toContain("Zu besonderen Zeiten anzuwendende Medikamente");
+    expect(html).not.toContain("Dauermedikation");
     expect(html).toContain("Bisoprolol-ratiopharm");
     expect(html).toContain("Bisoprolol");
     expect(html).toContain("5 mg");
