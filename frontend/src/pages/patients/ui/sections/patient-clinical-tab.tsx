@@ -16,6 +16,8 @@ import type { DoctorOption } from "@/pages/appointments/model/types";
 import { fetchProviders } from "@/pages/providers/data/provider-api";
 import type { ProviderSummary } from "@/pages/providers/model/types";
 
+import { DARREICHUNGSFORM_OPTIONS, EINNAHMEFORM_OPTIONS } from "../../data/medication-options";
+
 import {
   blankNarrative,
   fetchAllDoctors,
@@ -75,6 +77,7 @@ function blankMedication(): ClinicalMedication {
     handelsname: "",
     staerke: null,
     form: null,
+    einnahmeform: null,
     dose_morgens: null,
     dose_mittags: null,
     dose_abends: null,
@@ -82,6 +85,16 @@ function blankMedication(): ClinicalMedication {
     einheit: null,
     hinweis: null,
     grund: null,
+    verordnet_am: null,
+    einnahme_von: null,
+    einnahme_bis: null,
+    status: "aktiv",
+    apothekenpflichtig: false,
+    rezeptpflichtig: false,
+    btm: false,
+    aut_idem_sperre: false,
+    abgabebeschraenkung: false,
+    sonstige_vermerke: null,
   };
 }
 
@@ -544,6 +557,29 @@ function Field({ label, children }: { label: ReactNode; children: ReactNode }) {
   );
 }
 
+// A checkbox whose caption is its accessible name (label wraps the input).
+function CheckboxField({
+  label,
+  checked,
+  onChange,
+}: {
+  label: ReactNode;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm text-foreground">
+      <input
+        type="checkbox"
+        className="size-4 rounded border-border"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      {label}
+    </label>
+  );
+}
+
 /**
  * Wraps the clinical sections either as a routed tab (`<TabsContent>`) or as a plain
  * embedded block (used below the patient overview card on the profile screen).
@@ -603,7 +639,7 @@ export function PatientClinicalTab({
     Promise.all([
       fetchPatientClinical(patientId),
       fetchPatientRecommendations(patientId).catch(() => [] as PatientRecommendation[]),
-      fetchProviders("/providers?active_only=true").catch(() => [] as ProviderSummary[]),
+      fetchProviders("/providers?active_only=true&provider_type=medical").catch(() => [] as ProviderSummary[]),
       fetchAllDoctors().catch(() => [] as AllDoctorOption[]),
     ])
       .then(([clinical, recs, providerRows, doctorRows]) => {
@@ -614,7 +650,7 @@ export function PatientClinicalTab({
         setProcedures(clinical.procedures ?? []);
         setNarrative(clinical.narrative ?? blankNarrative());
         setRecommendations(recs ?? []);
-        setProviders(providerRows ?? []);
+        setProviders((providerRows ?? []).filter((provider) => provider.provider_type === "medical"));
         setAllDoctors(doctorRows ?? []);
         setError("");
       })
@@ -792,7 +828,7 @@ export function PatientClinicalTab({
         title={tx("Медикаменты", "Medikation")}
         items={medications}
         blank={blankMedication}
-        isValid={(m) => m.handelsname.trim() !== ""}
+        isValid={(m) => m.handelsname.trim() !== "" && Boolean(m.einnahmeform) && Boolean(m.form)}
         canManage={canManage}
         tx={tx}
         groups={[
@@ -830,13 +866,52 @@ export function PatientClinicalTab({
                   <option value="selbst">{tx("Самолечение", "Selbstmedikation")}</option>
                 </NativeComboboxSelect>
               </Field>
-              <Field label={tx("Форма", "Form")}>
-                <Input
+              <Field label={tx("Форма выпуска", "Darreichungsform")}>
+                <NativeComboboxSelect
                   value={draft.form ?? ""}
-                  onChange={(e) => set({ form: trimToNull(e.target.value) })}
+                  required
+                  aria-label={tx("Форма выпуска", "Darreichungsform")}
                   className={inputClass}
-                  placeholder="Filmtabl."
-                />
+                  onChange={(e) => set({ form: e.target.value || null })}
+                >
+                  <option value="">—</option>
+                  {DARREICHUNGSFORM_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </Field>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              <Field label={tx("Способ применения", "Einnahmeform")}>
+                <NativeComboboxSelect
+                  value={draft.einnahmeform ?? ""}
+                  required
+                  aria-label={tx("Способ применения", "Einnahmeform")}
+                  className={inputClass}
+                  onChange={(e) => set({ einnahmeform: e.target.value || null })}
+                >
+                  <option value="">—</option>
+                  {EINNAHMEFORM_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </Field>
+              <Field label={tx("Статус", "Status")}>
+                <NativeComboboxSelect
+                  value={draft.status}
+                  aria-label={tx("Статус", "Status")}
+                  className={inputClass}
+                  onChange={(e) => set({ status: e.target.value as ClinicalMedication["status"] })}
+                >
+                  <option value="aktiv">{tx("Активный", "Aktiv")}</option>
+                  <option value="pausiert">{tx("Приостановлен", "Pausiert")}</option>
+                  <option value="abgesetzt">{tx("Отменён", "Abgesetzt")}</option>
+                  <option value="geplant">{tx("Запланирован", "Geplant")}</option>
+                </NativeComboboxSelect>
               </Field>
             </div>
             <div className="grid gap-2 md:grid-cols-2">
@@ -913,6 +988,85 @@ export function PatientClinicalTab({
                 placeholder="Während oder nach den Mahlzeiten"
               />
             </Field>
+            <div className="grid gap-2 md:grid-cols-3">
+              <Field label={tx("Дата назначения", "Verordnet am")}>
+                <Input
+                  type="date"
+                  value={draft.verordnet_am ?? ""}
+                  onChange={(e) => set({ verordnet_am: trimToNull(e.target.value) })}
+                  className={inputClass}
+                />
+              </Field>
+              <Field label={tx("Приём с", "Einnahme von")}>
+                <Input
+                  type="date"
+                  value={draft.einnahme_von ?? ""}
+                  onChange={(e) => set({ einnahme_von: trimToNull(e.target.value) })}
+                  className={inputClass}
+                />
+              </Field>
+              <Field label={tx("Приём до", "Einnahme bis")}>
+                <Input
+                  type="date"
+                  value={draft.einnahme_bis ?? ""}
+                  onChange={(e) => set({ einnahme_bis: trimToNull(e.target.value) })}
+                  className={inputClass}
+                />
+              </Field>
+            </div>
+            <fieldset className="rounded-lg border border-border/60 p-2">
+              <legend className="px-1 text-[11px] font-medium text-muted-foreground">
+                {tx("Правовой статус", "Rechtlicher Status")}
+              </legend>
+              <div className="grid gap-1.5 sm:grid-cols-3">
+                <CheckboxField
+                  label={tx("Аптечный", "Apothekenpflichtig")}
+                  checked={draft.apothekenpflichtig}
+                  onChange={(checked) => set({ apothekenpflichtig: checked })}
+                />
+                <CheckboxField
+                  label={tx("Рецептурный", "Rezeptpflichtig")}
+                  checked={draft.rezeptpflichtig}
+                  onChange={(checked) => set({ rezeptpflichtig: checked })}
+                />
+                <CheckboxField
+                  label={tx("Наркотическое (BTM)", "Betäubungsmittel (BTM)")}
+                  checked={draft.btm}
+                  onChange={(checked) => set({ btm: checked })}
+                />
+              </div>
+            </fieldset>
+            <fieldset className="rounded-lg border border-border/60 p-2">
+              <legend className="px-1 text-[11px] font-medium text-muted-foreground">
+                {tx("Предупреждения", "Warnhinweise")}
+              </legend>
+              <div className="grid gap-1.5 sm:grid-cols-3">
+                <CheckboxField
+                  label={tx("Aut-Idem-блок", "Aut-Idem-Sperre")}
+                  checked={draft.aut_idem_sperre}
+                  onChange={(checked) => set({ aut_idem_sperre: checked })}
+                />
+                <CheckboxField
+                  label={tx("Огранич. отпуска", "Abgabebeschränkung")}
+                  checked={draft.abgabebeschraenkung}
+                  onChange={(checked) => set({ abgabebeschraenkung: checked })}
+                />
+                <CheckboxField
+                  label={tx("Прочие пометки", "Sonstige Vermerke")}
+                  checked={draft.sonstige_vermerke !== null}
+                  onChange={(checked) => set({ sonstige_vermerke: checked ? (draft.sonstige_vermerke ?? "") : null })}
+                />
+              </div>
+              {draft.sonstige_vermerke !== null ? (
+                <Input
+                  value={draft.sonstige_vermerke}
+                  onChange={(e) => set({ sonstige_vermerke: e.target.value })}
+                  className={cn(inputClass, "mt-2")}
+                  aria-label={tx("Прочие пометки", "Sonstige Vermerke")}
+                  placeholder={tx("Прочие пометки", "Sonstige Vermerke")}
+                />
+              ) : null}
+            </fieldset>
             <ProviderDoctorFields
               value={draft}
               providers={providers}

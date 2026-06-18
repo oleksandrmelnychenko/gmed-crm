@@ -6833,6 +6833,28 @@ struct PatientMedicationInput {
     hinweis: Option<String>,
     #[serde(default)]
     grund: Option<String>,
+    #[serde(default)]
+    einnahmeform: Option<String>,
+    #[serde(default)]
+    verordnet_am: Option<String>,
+    #[serde(default)]
+    einnahme_von: Option<String>,
+    #[serde(default)]
+    einnahme_bis: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    apothekenpflichtig: Option<bool>,
+    #[serde(default)]
+    rezeptpflichtig: Option<bool>,
+    #[serde(default)]
+    btm: Option<bool>,
+    #[serde(default)]
+    aut_idem_sperre: Option<bool>,
+    #[serde(default)]
+    abgabebeschraenkung: Option<bool>,
+    #[serde(default)]
+    sonstige_vermerke: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -6933,25 +6955,36 @@ async fn clinical_resolve_attribution(
     };
 
     if let Some(pid) = provider_id {
-        let exists: bool =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM providers WHERE id = $1)")
+        let provider_type: Option<String> =
+            sqlx::query_scalar("SELECT provider_type FROM providers WHERE id = $1")
                 .bind(pid)
-                .fetch_one(&state.db)
+                .fetch_optional(&state.db)
                 .await
                 .map_err(|e| {
                     tracing::error!(error = %e, provider_id = %pid, "validate clinical provider");
                     attribution_fail()
                 })?;
-        if !exists {
+        let Some(provider_type) = provider_type else {
             return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Unknown provider"));
+        };
+        if provider_type != "medical" {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Clinical attribution requires a medical provider",
+            ));
         }
     }
 
     if let Some(did) = doctor_id {
         // provider_doctors.provider_id is NOT NULL, so a present row always
         // yields the owning provider.
-        let doc_provider: Option<Uuid> =
-            sqlx::query_scalar("SELECT provider_id FROM provider_doctors WHERE id = $1")
+        let doc_row =
+            sqlx::query(
+                r#"SELECT d.provider_id, p.provider_type
+                   FROM provider_doctors d
+                   JOIN providers p ON p.id = d.provider_id
+                   WHERE d.id = $1"#,
+            )
                 .bind(did)
                 .fetch_optional(&state.db)
                 .await
@@ -6959,9 +6992,23 @@ async fn clinical_resolve_attribution(
                     tracing::error!(error = %e, doctor_id = %did, "validate clinical doctor");
                     attribution_fail()
                 })?;
-        let Some(doc_provider) = doc_provider else {
+        let Some(doc_row) = doc_row else {
             return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Unknown doctor"));
         };
+        let doc_provider: Uuid = doc_row.try_get("provider_id").map_err(|e| {
+            tracing::error!(error = %e, doctor_id = %did, "read clinical doctor provider");
+            attribution_fail()
+        })?;
+        let doc_provider_type: String = doc_row.try_get("provider_type").map_err(|e| {
+            tracing::error!(error = %e, doctor_id = %did, "read clinical doctor provider type");
+            attribution_fail()
+        })?;
+        if doc_provider_type != "medical" {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Clinical attribution requires a medical provider",
+            ));
+        }
         if let Some(pid) = provider_id
             && doc_provider != pid
         {
@@ -7018,7 +7065,11 @@ async fn get_patient_clinical(
     let med_rows = sqlx::query(
         r#"SELECT m.id, m.category, m.wirkstoff, m.handelsname, m.staerke, m.form,
                   m.dose_morgens, m.dose_mittags, m.dose_abends, m.dose_nachts,
-                  m.einheit, m.hinweis, m.grund, m.provider_id, p.name AS provider_name,
+                  m.einheit, m.hinweis, m.grund,
+                  m.einnahmeform, m.verordnet_am, m.einnahme_von, m.einnahme_bis, m.status,
+                  m.apothekenpflichtig, m.rezeptpflichtig, m.btm, m.aut_idem_sperre,
+                  m.abgabebeschraenkung, m.sonstige_vermerke,
+                  m.provider_id, p.name AS provider_name,
                   m.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
            FROM patient_medications m
            LEFT JOIN providers p ON p.id = m.provider_id
@@ -7106,6 +7157,17 @@ async fn get_patient_clinical(
                 "einheit": row.get::<Option<String>, _>("einheit"),
                 "hinweis": row.get::<Option<String>, _>("hinweis"),
                 "grund": row.get::<Option<String>, _>("grund"),
+                "einnahmeform": row.get::<Option<String>, _>("einnahmeform"),
+                "verordnet_am": row.get::<Option<String>, _>("verordnet_am"),
+                "einnahme_von": row.get::<Option<String>, _>("einnahme_von"),
+                "einnahme_bis": row.get::<Option<String>, _>("einnahme_bis"),
+                "status": row.get::<String, _>("status"),
+                "apothekenpflichtig": row.get::<bool, _>("apothekenpflichtig"),
+                "rezeptpflichtig": row.get::<bool, _>("rezeptpflichtig"),
+                "btm": row.get::<bool, _>("btm"),
+                "aut_idem_sperre": row.get::<bool, _>("aut_idem_sperre"),
+                "abgabebeschraenkung": row.get::<bool, _>("abgabebeschraenkung"),
+                "sonstige_vermerke": row.get::<Option<String>, _>("sonstige_vermerke"),
                 "provider_id": row.get::<Option<Uuid>, _>("provider_id"),
                 "provider_name": row.get::<Option<String>, _>("provider_name"),
                 "doctor_id": row.get::<Option<Uuid>, _>("doctor_id"),
@@ -7428,14 +7490,16 @@ async fn save_patient_medications(
         };
         let category = clinical_one_of(item.category, &["dauer", "besondere", "selbst"])
             .unwrap_or_else(|| "dauer".to_string());
+        let status = clinical_one_of(item.status, &["aktiv", "pausiert", "abgesetzt", "geplant"])
+            .unwrap_or_else(|| "aktiv".to_string());
         let (provider_id, doctor_id) =
             match clinical_resolve_attribution(&state, item.provider_id, item.doctor_id).await {
                 Ok(pair) => pair,
                 Err(resp) => return resp,
             };
         if let Err(e) = sqlx::query(
-            "INSERT INTO patient_medications (patient_id, provider_id, doctor_id, category, wirkstoff, handelsname, staerke, form, dose_morgens, dose_mittags, dose_abends, dose_nachts, einheit, hinweis, grund, sort_order)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
+            "INSERT INTO patient_medications (patient_id, provider_id, doctor_id, category, wirkstoff, handelsname, staerke, form, dose_morgens, dose_mittags, dose_abends, dose_nachts, einheit, hinweis, grund, einnahmeform, verordnet_am, einnahme_von, einnahme_bis, status, apothekenpflichtig, rezeptpflichtig, btm, aut_idem_sperre, abgabebeschraenkung, sonstige_vermerke, sort_order)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)",
         )
         .bind(patient_uuid)
         .bind(provider_id)
@@ -7452,6 +7516,17 @@ async fn save_patient_medications(
         .bind(clinical_opt_text(item.einheit))
         .bind(clinical_opt_text(item.hinweis))
         .bind(clinical_opt_text(item.grund))
+        .bind(clinical_opt_text(item.einnahmeform))
+        .bind(clinical_opt_text(item.verordnet_am))
+        .bind(clinical_opt_text(item.einnahme_von))
+        .bind(clinical_opt_text(item.einnahme_bis))
+        .bind(&status)
+        .bind(item.apothekenpflichtig.unwrap_or(false))
+        .bind(item.rezeptpflichtig.unwrap_or(false))
+        .bind(item.btm.unwrap_or(false))
+        .bind(item.aut_idem_sperre.unwrap_or(false))
+        .bind(item.abgabebeschraenkung.unwrap_or(false))
+        .bind(clinical_opt_text(item.sonstige_vermerke))
         .bind(saved)
         .execute(&mut *tx)
         .await

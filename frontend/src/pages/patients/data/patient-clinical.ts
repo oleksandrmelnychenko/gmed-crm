@@ -21,6 +21,8 @@ export type DiagnosisCertainty = "verdacht" | "bestaetigt" | "zustand_nach";
 /** Acuity / temporal course of the diagnosis. */
 export type DiagnosisChronification = "akut" | "chronisch" | "rezidivierend";
 export type MedicationCategory = "dauer" | "besondere" | "selbst";
+/** Lifecycle status of a medication on the plan. */
+export type MedicationStatus = "aktiv" | "pausiert" | "abgesetzt" | "geplant";
 export type ExaminationKind =
   | "sonography"
   | "lab"
@@ -80,7 +82,10 @@ export type ClinicalMedication = ClinicalAttribution & {
   wirkstoff: string | null;
   handelsname: string;
   staerke: string | null;
+  /** Darreichungsform (dosage form); UI relabels this to "Darreichungsform". */
   form: string | null;
+  /** Einnahmeform (route of administration); REQUIRED in the UI. */
+  einnahmeform: string | null;
   dose_morgens: string | null;
   dose_mittags: string | null;
   dose_abends: string | null;
@@ -88,6 +93,21 @@ export type ClinicalMedication = ClinicalAttribution & {
   einheit: string | null;
   hinweis: string | null;
   grund: string | null;
+  /** Prescription date (YYYY-MM-DD); the prescribing doctor is the provider/doctor attribution. */
+  verordnet_am: string | null;
+  /** Intake start date (YYYY-MM-DD). */
+  einnahme_von: string | null;
+  /** Intake end date (YYYY-MM-DD). */
+  einnahme_bis: string | null;
+  status: MedicationStatus;
+  apothekenpflichtig: boolean;
+  rezeptpflichtig: boolean;
+  /** Betäubungsmittel (narcotic). */
+  btm: boolean;
+  aut_idem_sperre: boolean;
+  abgabebeschraenkung: boolean;
+  /** Free-text notes shown when the "Sonstige Vermerke" checkbox is on. */
+  sonstige_vermerke: string | null;
 };
 
 export type ClinicalExamination = ClinicalAttribution & {
