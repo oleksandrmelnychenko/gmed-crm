@@ -19,6 +19,7 @@ import type { ProviderSummary } from "@/pages/providers/model/types";
 import {
   blankNarrative,
   fetchAllDoctors,
+  fetchNarrativeHistory,
   fetchPatientClinical,
   fetchPatientRecommendations,
   savePatientDiagnoses,
@@ -36,6 +37,7 @@ import {
   type PatientRecommendation,
 } from "@/pages/patients/data/patient-clinical";
 
+import { AnamneseSection } from "./anamnese-section";
 import { DiagnosisTreeSection } from "./diagnosis-tree";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
@@ -542,82 +544,6 @@ function Field({ label, children }: { label: ReactNode; children: ReactNode }) {
   );
 }
 
-/** Free-text Arztbrief blocks (Anamnese sub-sections, Befund, Beurteilung, Verlauf). */
-function NarrativeSection({
-  value,
-  canManage,
-  onSave,
-  tx,
-}: {
-  value: ClinicalNarrative;
-  canManage: boolean;
-  onSave: (next: ClinicalNarrative) => Promise<unknown>;
-  tx: Bilingual;
-}) {
-  const [draft, setDraft] = useState<ClinicalNarrative>(value);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    setDraft(value);
-  }, [value]);
-
-  const dirty = JSON.stringify(draft) !== JSON.stringify(value);
-
-  const fields: Array<{ key: keyof ClinicalNarrative; label: string }> = [
-    { key: "anamnese_aktuelle", label: tx("Актуальный анамнез", "Aktuelle Anamnese") },
-    { key: "anamnese_vorgeschichte", label: tx("Доп. предыстория", "Weitere Vorgeschichte") },
-    { key: "anamnese_vegetative", label: tx("Вегетативный анамнез", "Vegetative Anamnese") },
-    { key: "anamnese_sozial", label: tx("Социальный анамнез", "Sozialanamnese") },
-    { key: "untersuchungsbefund", label: tx("Объективный осмотр", "Untersuchungsbefund") },
-    { key: "beurteilung", label: tx("Оценка", "Beurteilung") },
-    { key: "verlauf", label: tx("Течение", "Verlauf") },
-  ];
-
-  async function save() {
-    setBusy(true);
-    try {
-      await onSave(draft);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : tx("Не удалось сохранить", "Speichern fehlgeschlagen"));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <section className="rounded-xl border border-border/70 bg-card">
-      <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
-        <h3 className="text-sm font-semibold text-foreground">{tx("Анамнез и заключение", "Anamnese & Beurteilung")}</h3>
-        {canManage ? (
-          <Button
-            type="button"
-            size="sm"
-            className="h-8 rounded-lg"
-            disabled={!dirty || busy}
-            onClick={() => void save()}
-          >
-            {tx("Сохранить", "Speichern")}
-          </Button>
-        ) : null}
-      </header>
-      <div className="grid gap-3 p-3 md:grid-cols-2">
-        {fields.map((field) => (
-          <Field key={field.key} label={field.label}>
-            <textarea
-              value={draft[field.key] ?? ""}
-              disabled={!canManage}
-              onChange={(e) =>
-                setDraft((current) => ({ ...current, [field.key]: e.target.value === "" ? null : e.target.value }))
-              }
-              className={cn(inputClass, "h-20 py-2")}
-            />
-          </Field>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 /**
  * Wraps the clinical sections either as a routed tab (`<TabsContent>`) or as a plain
  * embedded block (used below the patient overview card on the profile screen).
@@ -848,15 +774,17 @@ export function PatientClinicalTab({
         )}
       />
 
-      {/* ---- Anamnese / Befund / Beurteilung / Verlauf ---- */}
-      <NarrativeSection
-        value={narrative}
+      {/* ---- Anamnese (versioned) ---- */}
+      <AnamneseSection
+        active={narrative}
         canManage={canManage}
-        tx={tx}
+        lang={lang}
         onSave={async (next) => {
-          await savePatientNarrative(patientId, next);
-          setNarrative(next);
+          const saved = await savePatientNarrative(patientId, next);
+          setNarrative(saved);
+          setVersion((current) => current + 1);
         }}
+        loadHistory={() => fetchNarrativeHistory(patientId)}
       />
 
       {/* ---- Medications (Medikationsplan) ---- */}

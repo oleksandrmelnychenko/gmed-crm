@@ -91,6 +91,23 @@ Components: `CountrySelect({ value, onChange, lang, className?, ariaLabel?, incl
 - ☐ **Display: only the 1 active entry** is shown. A **"Показать историю / Verlauf anzeigen"**
   button reveals the past (inactive) entries.
 
+### Phase 2 technical contract
+- Fields kept per version: `anamnese_aktuelle`, `anamnese_vorgeschichte`, `anamnese_vegetative`,
+  `anamnese_sozial`, `beurteilung`, `verlauf`. **Dropped:** `untersuchungsbefund`.
+- Schema: `patient_clinical_narrative` becomes **multi-row per patient** — add `id UUID PK`,
+  `is_active BOOLEAN`, `updated_at`; drop the `patient_id` primary key (keep it as an FK column);
+  partial unique index `(patient_id) WHERE is_active` so only one active per patient. The existing
+  single row migrates to `is_active = true`. (Keep the `untersuchungsbefund` column; stop using it.)
+- API:
+  - `GET /patients/:id/clinical` → `narrative` = the **active** version (or null), same field names.
+  - `POST /patients/:id/narrative` body `{ id?: string|null, <6 fields>, is_active: boolean }`:
+    `id` present → update that version; absent → insert a new version; `is_active:true` → deactivate
+    all other versions for the patient (one transaction). Returns the saved version with its `id`.
+  - `GET /patients/:id/narrative/history` → all versions (id, fields, is_active, created_at,
+    updated_at), newest first.
+- FE: section renamed **"Анамнез"**; shows the active version read-only with an **Edit** (right
+  sheet) + **"Показать историю"** toggle; the edit form has the 6 fields + an **active** toggle.
+
 ---
 
 ## Phase 3 — Aktuelle Medikation  ☐  (blocked: needs "аркуш 5" lists)
@@ -99,6 +116,7 @@ Components: `CountrySelect({ value, onChange, lang, className?, ariaLabel?, incl
 - ☐ Rename **Form → Darreichungsform** (dosage form) — required, dropdown (list from sheet 5).
 - ☐ Add **prescription date** (if any) + **prescribing doctor** (if any).
 - ☐ Add **start / end date** (e.g. medication taken only for a period).
+- ☐ Add a **status** (proposed values: `aktiv` / `pausiert` / `abgesetzt` / `geplant` — confirm with Olek).
 - ☐ Checkboxes:
   - **Rechtlicher Status**: ☐ Apothekenpflichtig · ☐ Rezeptpflichtig (Verschreibungspflichtig) · ☐ Betäubungsmittel (BTM)
   - **Warnhinweise**: ☐ Aut-Idem-Sperre · ☐ Abgabebeschränkung · ☐ Sonstige Vermerke → free-text when checked

@@ -51,6 +51,10 @@ pub fn router() -> Router<AppState> {
             post(save_patient_narrative),
         )
         .route(
+            "/patients/{patient_id}/narrative/history",
+            get(list_patient_narrative_history),
+        )
+        .route(
             "/patients/{patient_id}/procedures",
             post(save_patient_procedures),
         )
@@ -6889,6 +6893,25 @@ fn clinical_parse_uuid(value: Option<String>) -> Result<Option<Uuid>, axum::resp
     }
 }
 
+/// Serialize one `patient_clinical_narrative` version row to API JSON. The row
+/// must have been selected with: id, the 6 anamnese/beurteilung/verlauf text
+/// fields, is_active, created_at and updated_at. `untersuchungsbefund` is no
+/// longer part of the contract (the column is kept in the DB but unused).
+fn narrative_version_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    json!({
+        "id": row.get::<Uuid, _>("id").to_string(),
+        "anamnese_aktuelle": row.get::<Option<String>, _>("anamnese_aktuelle"),
+        "anamnese_vorgeschichte": row.get::<Option<String>, _>("anamnese_vorgeschichte"),
+        "anamnese_vegetative": row.get::<Option<String>, _>("anamnese_vegetative"),
+        "anamnese_sozial": row.get::<Option<String>, _>("anamnese_sozial"),
+        "beurteilung": row.get::<Option<String>, _>("beurteilung"),
+        "verlauf": row.get::<Option<String>, _>("verlauf"),
+        "is_active": row.get::<bool, _>("is_active"),
+        "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+        "updated_at": row.get::<chrono::DateTime<chrono::Utc>, _>("updated_at").to_rfc3339(),
+    })
+}
+
 /// Resolve and validate a provider/doctor attribution pair against the DB.
 /// Returns 422 when a non-empty id is malformed, references a missing provider
 /// or doctor, or when the doctor does not belong to the selected provider — so
@@ -7151,11 +7174,14 @@ async fn get_patient_clinical(
         })
         .collect::<Vec<_>>();
 
+    // The active version of the patient's Anamnese (one row per patient is active).
     let narrative_row = sqlx::query(
-        r#"SELECT anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
-                  untersuchungsbefund, beurteilung, verlauf
+        r#"SELECT id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
+                  beurteilung, verlauf, is_active, created_at, updated_at
            FROM patient_clinical_narrative
-           WHERE patient_id = $1"#,
+           WHERE patient_id = $1 AND is_active
+           ORDER BY updated_at DESC
+           LIMIT 1"#,
     )
     .bind(patient_uuid)
     .fetch_optional(&state.db)
@@ -7165,17 +7191,7 @@ async fn get_patient_clinical(
         load_fail()
     })?;
 
-    let narrative = narrative_row.map(|row| {
-        json!({
-            "anamnese_aktuelle": row.get::<Option<String>, _>("anamnese_aktuelle"),
-            "anamnese_vorgeschichte": row.get::<Option<String>, _>("anamnese_vorgeschichte"),
-            "anamnese_vegetative": row.get::<Option<String>, _>("anamnese_vegetative"),
-            "anamnese_sozial": row.get::<Option<String>, _>("anamnese_sozial"),
-            "untersuchungsbefund": row.get::<Option<String>, _>("untersuchungsbefund"),
-            "beurteilung": row.get::<Option<String>, _>("beurteilung"),
-            "verlauf": row.get::<Option<String>, _>("verlauf"),
-        })
-    });
+    let narrative = narrative_row.map(|row| narrative_version_json(&row));
 
     Ok(Json(json!({
         "diagnoses": diagnoses,
@@ -7568,6 +7584,10 @@ async fn save_patient_examinations(
 
 #[derive(Deserialize)]
 struct PatientNarrativeInput {
+    /// Target version. `None`/empty → insert a new version; otherwise update the
+    /// matching row (scoped to this patient).
+    #[serde(default)]
+    id: Option<String>,
     #[serde(default)]
     anamnese_aktuelle: Option<String>,
     #[serde(default)]
@@ -7577,11 +7597,12 @@ struct PatientNarrativeInput {
     #[serde(default)]
     anamnese_sozial: Option<String>,
     #[serde(default)]
-    untersuchungsbefund: Option<String>,
-    #[serde(default)]
     beurteilung: Option<String>,
     #[serde(default)]
     verlauf: Option<String>,
+    /// Whether this version becomes the patient's active version. Defaults true.
+    #[serde(default)]
+    is_active: Option<bool>,
 }
 
 async fn save_patient_narrative(
@@ -7599,35 +7620,128 @@ async fn save_patient_narrative(
         Err(resp) => return resp,
     }
 
-    if let Err(e) = sqlx::query(
-        r#"INSERT INTO patient_clinical_narrative
-               (patient_id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative,
-                anamnese_sozial, untersuchungsbefund, beurteilung, verlauf, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
-           ON CONFLICT (patient_id) DO UPDATE SET
-               anamnese_aktuelle = EXCLUDED.anamnese_aktuelle,
-               anamnese_vorgeschichte = EXCLUDED.anamnese_vorgeschichte,
-               anamnese_vegetative = EXCLUDED.anamnese_vegetative,
-               anamnese_sozial = EXCLUDED.anamnese_sozial,
-               untersuchungsbefund = EXCLUDED.untersuchungsbefund,
-               beurteilung = EXCLUDED.beurteilung,
-               verlauf = EXCLUDED.verlauf,
-               updated_at = now()"#,
+    let target_id = match clinical_parse_uuid(body.id) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let want_active = body.is_active.unwrap_or(true);
+    let aktuelle = clinical_opt_text(body.anamnese_aktuelle);
+    let vorgeschichte = clinical_opt_text(body.anamnese_vorgeschichte);
+    let vegetative = clinical_opt_text(body.anamnese_vegetative);
+    let sozial = clinical_opt_text(body.anamnese_sozial);
+    let beurteilung = clinical_opt_text(body.beurteilung);
+    let verlauf = clinical_opt_text(body.verlauf);
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin patient narrative tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    // At most one active version per patient: deactivate the rest first.
+    if want_active {
+        if let Err(e) =
+            sqlx::query("UPDATE patient_clinical_narrative SET is_active = false WHERE patient_id = $1")
+                .bind(patient_uuid)
+                .execute(&mut *tx)
+                .await
+        {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "deactivate patient narratives");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
+
+    let saved_id = match target_id {
+        Some(id) => {
+            let updated = match sqlx::query(
+                r#"UPDATE patient_clinical_narrative SET
+                       anamnese_aktuelle = $1,
+                       anamnese_vorgeschichte = $2,
+                       anamnese_vegetative = $3,
+                       anamnese_sozial = $4,
+                       beurteilung = $5,
+                       verlauf = $6,
+                       is_active = $7,
+                       updated_at = now()
+                   WHERE id = $8 AND patient_id = $9"#,
+            )
+            .bind(&aktuelle)
+            .bind(&vorgeschichte)
+            .bind(&vegetative)
+            .bind(&sozial)
+            .bind(&beurteilung)
+            .bind(&verlauf)
+            .bind(want_active)
+            .bind(id)
+            .bind(patient_uuid)
+            .execute(&mut *tx)
+            .await
+            {
+                Ok(res) => res,
+                Err(e) => {
+                    tracing::error!(error = %e, patient_id = %patient_uuid, "update patient narrative");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            };
+            if updated.rows_affected() == 0 {
+                return err(StatusCode::NOT_FOUND, "Version not found");
+            }
+            id
+        }
+        None => {
+            let new_id = Uuid::new_v4();
+            if let Err(e) = sqlx::query(
+                r#"INSERT INTO patient_clinical_narrative
+                       (id, patient_id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative,
+                        anamnese_sozial, beurteilung, verlauf, is_active)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#,
+            )
+            .bind(new_id)
+            .bind(patient_uuid)
+            .bind(&aktuelle)
+            .bind(&vorgeschichte)
+            .bind(&vegetative)
+            .bind(&sozial)
+            .bind(&beurteilung)
+            .bind(&verlauf)
+            .bind(want_active)
+            .execute(&mut *tx)
+            .await
+            {
+                tracing::error!(error = %e, patient_id = %patient_uuid, "insert patient narrative");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+            new_id
+        }
+    };
+
+    // Re-select the saved version inside the same transaction so the response is
+    // consistent with what was committed.
+    let saved_row = match sqlx::query(
+        r#"SELECT id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
+                  beurteilung, verlauf, is_active, created_at, updated_at
+           FROM patient_clinical_narrative
+           WHERE id = $1"#,
     )
-    .bind(patient_uuid)
-    .bind(clinical_opt_text(body.anamnese_aktuelle))
-    .bind(clinical_opt_text(body.anamnese_vorgeschichte))
-    .bind(clinical_opt_text(body.anamnese_vegetative))
-    .bind(clinical_opt_text(body.anamnese_sozial))
-    .bind(clinical_opt_text(body.untersuchungsbefund))
-    .bind(clinical_opt_text(body.beurteilung))
-    .bind(clinical_opt_text(body.verlauf))
-    .execute(&state.db)
+    .bind(saved_id)
+    .fetch_one(&mut *tx)
     .await
     {
-        tracing::error!(error = %e, patient_id = %patient_uuid, "save patient narrative");
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "reload saved patient narrative");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let saved = narrative_version_json(&saved_row);
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient narrative");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+
     state.audit_sender.try_send(audit::domain_event(
         "save_patient_narrative",
         Some(auth.user_id),
@@ -7643,7 +7757,43 @@ async fn save_patient_narrative(
         json!({ "section": "narrative" }),
     )
     .await;
-    Json(json!({ "ok": true })).into_response()
+    Json(saved).into_response()
+}
+
+async fn list_patient_narrative_history(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+        return e;
+    }
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let rows = match sqlx::query(
+        r#"SELECT id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
+                  beurteilung, verlauf, is_active, created_at, updated_at
+           FROM patient_clinical_narrative
+           WHERE patient_id = $1
+           ORDER BY updated_at DESC"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "list patient narrative history");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    let versions: Vec<serde_json::Value> = rows.iter().map(narrative_version_json).collect();
+    Json(versions).into_response()
 }
 
 #[derive(Deserialize)]
@@ -8049,7 +8199,10 @@ async fn get_patient_clinical_pdf(
     let narrative = match sqlx::query(
         r#"SELECT anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
                   untersuchungsbefund, beurteilung, verlauf
-           FROM patient_clinical_narrative WHERE patient_id = $1"#,
+           FROM patient_clinical_narrative
+           WHERE patient_id = $1 AND is_active
+           ORDER BY updated_at DESC
+           LIMIT 1"#,
     )
     .bind(patient_uuid)
     .fetch_optional(&state.db)

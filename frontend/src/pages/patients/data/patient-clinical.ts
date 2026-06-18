@@ -109,13 +109,19 @@ export type ClinicalProcedure = ClinicalAttribution & {
 };
 
 export type ClinicalNarrative = {
+  /** Server uuid of this version; null/absent for a brand-new version. */
+  id?: string | null;
   anamnese_aktuelle: string | null;
   anamnese_vorgeschichte: string | null;
   anamnese_vegetative: string | null;
   anamnese_sozial: string | null;
-  untersuchungsbefund: string | null;
   beurteilung: string | null;
   verlauf: string | null;
+  /** Whether this is the active version for the patient. */
+  is_active: boolean;
+  /** Read-only timestamps returned by the server. */
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 export type PatientClinicalProfile = {
@@ -176,7 +182,20 @@ export function savePatientProcedures(patientId: string, items: ClinicalProcedur
 }
 
 export function savePatientNarrative(patientId: string, narrative: ClinicalNarrative) {
-  return postJson(`/patients/${patientId}/narrative`, { ...narrative });
+  return postJson<ClinicalNarrative>(`/patients/${patientId}/narrative`, {
+    id: narrative.id ?? null,
+    anamnese_aktuelle: narrative.anamnese_aktuelle,
+    anamnese_vorgeschichte: narrative.anamnese_vorgeschichte,
+    anamnese_vegetative: narrative.anamnese_vegetative,
+    anamnese_sozial: narrative.anamnese_sozial,
+    beurteilung: narrative.beurteilung,
+    verlauf: narrative.verlauf,
+    is_active: narrative.is_active,
+  });
+}
+
+export function fetchNarrativeHistory(patientId: string) {
+  return apiFetch<ClinicalNarrative[]>(`/patients/${patientId}/narrative/history`);
 }
 
 export function blankNarrative(): ClinicalNarrative {
@@ -185,8 +204,8 @@ export function blankNarrative(): ClinicalNarrative {
     anamnese_vorgeschichte: null,
     anamnese_vegetative: null,
     anamnese_sozial: null,
-    untersuchungsbefund: null,
     beurteilung: null,
     verlauf: null,
+    is_active: true,
   };
 }
