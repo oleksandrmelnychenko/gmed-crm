@@ -686,6 +686,10 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
                 patientId={id ?? ""}
                 allergies={detail.clinical_warnings ?? null}
                 canViewClinical={canViewClinical}
+                birthDate={detail.birth_date}
+                gender={detail.gender}
+                phone={detail.phone_primary}
+                email={detail.email}
               />
               <LazyPatientProfileTab
               profileControls={{

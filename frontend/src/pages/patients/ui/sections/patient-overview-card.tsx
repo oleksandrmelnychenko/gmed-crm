@@ -122,16 +122,65 @@ function SubBullets({ items }: { items: string[] }) {
   );
 }
 
+function computeAge(birthDate: string | null | undefined): number | null {
+  if (!birthDate) return null;
+  const born = new Date(birthDate);
+  if (Number.isNaN(born.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - born.getFullYear();
+  const monthDiff = now.getMonth() - born.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < born.getDate())) age -= 1;
+  return age >= 0 && age < 200 ? age : null;
+}
+
+function genderText(gender: string | null | undefined, tx: Bilingual): string {
+  if (gender === "male") return tx("Мужской", "Männlich");
+  if (gender === "female") return tx("Женский", "Weiblich");
+  if (gender === "diverse") return tx("Другое", "Divers");
+  return "";
+}
+
+function formatBirthDate(value: string | null | undefined, lang: string): string {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString(lang === "de" ? "de-DE" : "ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+/** One labelled demographic field in the card header. */
+function DemoItem({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground/70">{label}</p>
+      <p className="truncate text-[13px] font-semibold text-foreground">
+        {value && String(value).trim() ? value : <span className="text-muted-foreground">—</span>}
+      </p>
+    </div>
+  );
+}
+
 export function PatientOverviewCard({
   patientId,
   allergies,
   canViewClinical,
   version = 0,
+  birthDate,
+  gender,
+  phone,
+  email,
 }: {
   patientId: string;
   allergies: string | null;
   canViewClinical: boolean;
   version?: number;
+  birthDate?: string | null;
+  gender?: string | null;
+  phone?: string | null;
+  email?: string | null;
 }) {
   const { lang } = useLang();
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
@@ -163,6 +212,8 @@ export function PatientOverviewCard({
   const mainDiagnoses = diagnoses.filter((d) => d.kind === "main");
   const secondaryDiagnoses = diagnoses.filter((d) => d.kind !== "main");
   const doctors = deriveDoctors([...diagnoses, ...medications]);
+  const age = computeAge(birthDate);
+  const showDemographics = Boolean(birthDate || gender || phone || email);
 
   const renderDiagnosis = (item: ClinicalDiagnosis) => {
     const laterality = lateralityLabel(item.laterality, tx);
@@ -203,6 +254,18 @@ export function PatientOverviewCard({
 
   return (
     <section className="space-y-3 rounded-2xl border border-border/70 bg-card p-3 shadow-sm">
+      {showDemographics ? (
+        <div className="grid gap-x-5 gap-y-2 border-b border-border/60 pb-3 text-xs sm:grid-cols-3 lg:grid-cols-5">
+          <DemoItem label={tx("Дата рождения", "Geburtsdatum")} value={formatBirthDate(birthDate, lang)} />
+          <DemoItem
+            label={tx("Возраст", "Alter")}
+            value={age != null ? `${age} ${tx("лет", "J.")}` : ""}
+          />
+          <DemoItem label={tx("Пол", "Geschlecht")} value={genderText(gender, tx)} />
+          <DemoItem label={tx("Телефон", "Telefon")} value={phone ?? ""} />
+          <DemoItem label="Email" value={email ?? ""} />
+        </div>
+      ) : null}
       <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-[0.8fr_1.3fr_1.3fr_1fr]">
         <div className="min-w-0">
           <ColumnTitle count={allergyItems.length || undefined}>{tx("Аллергии", "Allergien")}</ColumnTitle>
