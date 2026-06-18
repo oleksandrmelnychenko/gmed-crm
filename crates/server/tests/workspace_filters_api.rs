@@ -9567,6 +9567,22 @@ async fn patient_timeline_includes_compliance_audit_events() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
+    support::wait_until("patient dsgvo export audit row for timeline", || async {
+        let count: i64 = sqlx::query_scalar(
+            r#"SELECT count(*)
+               FROM audit_log
+               WHERE entity_type = 'patient'
+                 AND entity_id = $1
+                 AND action = 'dsgvo_data_export'"#,
+        )
+        .bind(patient_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        count >= 1
+    })
+    .await;
+
     let (status, body) = json_request(
         &app,
         "GET",
