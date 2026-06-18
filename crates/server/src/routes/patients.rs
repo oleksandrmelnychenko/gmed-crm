@@ -59,6 +59,10 @@ pub fn router() -> Router<AppState> {
             post(save_patient_procedures),
         )
         .route(
+            "/patients/{patient_id}/clinical-warnings",
+            post(save_patient_clinical_warnings),
+        )
+        .route(
             "/patients/{patient_id}/clinical.pdf",
             get(get_patient_clinical_pdf),
         )
@@ -5506,6 +5510,7 @@ async fn get_patient_timeline(
                        WHEN 'save_patient_medications' THEN 'Medikation aktualisiert'
                        WHEN 'save_patient_examinations' THEN 'Befunde aktualisiert'
                        WHEN 'save_patient_procedures' THEN 'Therapie aktualisiert'
+                       WHEN 'save_patient_clinical_warnings' THEN 'Allergien/CAVE aktualisiert'
                        WHEN 'save_patient_narrative' THEN 'Anamnese aktualisiert'
                        ELSE 'Klinisches Profil aktualisiert'
                    END AS title,
@@ -5520,7 +5525,7 @@ async fn get_patient_timeline(
               AND al.action IN (
                   'save_patient_diagnoses', 'save_patient_medications',
                   'save_patient_examinations', 'save_patient_procedures',
-                  'save_patient_narrative'
+                  'save_patient_clinical_warnings', 'save_patient_narrative'
               )
         "#;
     let events_cte = if can_view_clinical {
@@ -7236,6 +7241,42 @@ async fn get_patient_clinical(
         })
         .collect::<Vec<_>>();
 
+    // Allergien & CAVE: two CRUD lists backed by one table, split by `kind`.
+    let warning_rows = sqlx::query(
+        r#"SELECT id, kind, label, reaction, severity, note
+           FROM patient_clinical_warnings
+           WHERE patient_id = $1
+           ORDER BY kind, sort_order, created_at"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "load patient clinical warnings");
+        load_fail()
+    })?;
+
+    let warning_json = |row: &sqlx::postgres::PgRow| {
+        json!({
+            "id": row.get::<Uuid, _>("id"),
+            "kind": row.get::<String, _>("kind"),
+            "label": row.get::<String, _>("label"),
+            "reaction": row.get::<Option<String>, _>("reaction"),
+            "severity": row.get::<Option<String>, _>("severity"),
+            "note": row.get::<Option<String>, _>("note"),
+        })
+    };
+    let allergien = warning_rows
+        .iter()
+        .filter(|row| row.get::<String, _>("kind") == "allergie")
+        .map(&warning_json)
+        .collect::<Vec<_>>();
+    let cave = warning_rows
+        .iter()
+        .filter(|row| row.get::<String, _>("kind") == "cave")
+        .map(&warning_json)
+        .collect::<Vec<_>>();
+
     // The active version of the patient's Anamnese (one row per patient is active).
     let narrative_row = sqlx::query(
         r#"SELECT id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
@@ -7260,6 +7301,8 @@ async fn get_patient_clinical(
         "medications": medications,
         "examinations": examinations,
         "procedures": procedures,
+        "allergien": allergien,
+        "cave": cave,
         "narrative": narrative,
     })))
 }
@@ -7887,6 +7930,31 @@ struct PatientProcedureInput {
     note: Option<String>,
 }
 
+/// One Allergie/CAVE entry from the replace-all clinical-warnings save. `kind`
+/// is taken from the request body (not per item); `reaction`/`severity` are
+/// allergy-only and ignored for CAVE rows.
+#[derive(Deserialize)]
+struct PatientClinicalWarningInput {
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    reaction: Option<String>,
+    #[serde(default)]
+    severity: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+/// Body for POST /patients/:id/clinical-warnings: replace-all for a single
+/// `kind` ("allergie" | "cave").
+#[derive(Deserialize)]
+struct PatientClinicalWarningsBody {
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    items: Vec<PatientClinicalWarningInput>,
+}
+
 async fn save_patient_procedures(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -7964,6 +8032,104 @@ async fn save_patient_procedures(
         "patient.clinical_updated",
         patient_uuid,
         json!({ "section": "procedures" }),
+    )
+    .await;
+    Json(json!({ "ok": true, "count": saved })).into_response()
+}
+
+/// Replace-all save for ONE clinical-warnings list (Allergien or CAVE). The
+/// request `kind` decides which list is replaced; the other kind's rows are
+/// left untouched. Mirrors save_patient_diagnoses (tx DELETE-all + per-item
+/// INSERT) but scoped to the single kind.
+async fn save_patient_clinical_warnings(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+    Json(body): Json<PatientClinicalWarningsBody>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+        return e;
+    }
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let Some(kind) = clinical_one_of(body.kind, &["allergie", "cave"]) else {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid kind");
+    };
+    let is_allergie = kind == "allergie";
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin patient clinical warnings tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(e) =
+        sqlx::query("DELETE FROM patient_clinical_warnings WHERE patient_id = $1 AND kind = $2")
+            .bind(patient_uuid)
+            .bind(&kind)
+            .execute(&mut *tx)
+            .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient clinical warnings");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    let mut saved = 0i32;
+    for item in body.items {
+        let Some(label) = clinical_opt_text(item.label) else {
+            continue;
+        };
+        // reaction/severity are allergy-only; never persist them for CAVE rows.
+        let reaction = if is_allergie {
+            clinical_opt_text(item.reaction)
+        } else {
+            None
+        };
+        let severity = if is_allergie {
+            clinical_opt_text(item.severity)
+        } else {
+            None
+        };
+        if let Err(e) = sqlx::query(
+            "INSERT INTO patient_clinical_warnings (patient_id, kind, label, reaction, severity, note, sort_order)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind(patient_uuid)
+        .bind(&kind)
+        .bind(&label)
+        .bind(reaction)
+        .bind(severity)
+        .bind(clinical_opt_text(item.note))
+        .bind(saved)
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "insert patient clinical warning");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        saved += 1;
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient clinical warnings");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    state.audit_sender.try_send(audit::domain_event(
+        "save_patient_clinical_warnings",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({ "kind": kind, "count": saved }),
+    ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.clinical_updated",
+        patient_uuid,
+        json!({ "section": "clinical_warnings", "kind": kind }),
     )
     .await;
     Json(json!({ "ok": true, "count": saved })).into_response()

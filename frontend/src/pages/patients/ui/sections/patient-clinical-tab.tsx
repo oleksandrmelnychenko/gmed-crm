@@ -24,6 +24,7 @@ import {
   fetchNarrativeHistory,
   fetchPatientClinical,
   fetchPatientRecommendations,
+  savePatientClinicalWarnings,
   savePatientDiagnoses,
   savePatientExaminations,
   savePatientMedications,
@@ -36,6 +37,8 @@ import {
   type ClinicalMedication,
   type ClinicalNarrative,
   type ClinicalProcedure,
+  type ClinicalWarning,
+  type ClinicalWarningKind,
   type PatientRecommendation,
 } from "@/pages/patients/data/patient-clinical";
 
@@ -51,7 +54,7 @@ const inputClass =
 type ClinicalSectionGroup = { key: string; label: string };
 type IndexedClinicalItem<T> = { item: T; index: number };
 
-type ClinicalSectionListViewArgs<T extends { id?: string }> = {
+type ClinicalSectionListViewArgs<T extends { id?: string | null }> = {
   indexed: IndexedClinicalItem<T>[];
   groups?: ClinicalSectionGroup[];
   groupOf?: (item: T) => string;
@@ -118,6 +121,10 @@ function blankExamination(): ClinicalExamination {
     result: null,
     note: null,
   };
+}
+
+function blankWarning(kind: ClinicalWarningKind): ClinicalWarning {
+  return { kind, label: "", reaction: null, severity: null, note: null };
 }
 
 function trimToNull(value: string): string | null {
@@ -347,7 +354,7 @@ function ProviderDoctorFields({
 }
 
 /** Generic add / edit / remove + replace-all-save list for one clinical section. */
-function ClinicalSection<T extends { id?: string }>({
+function ClinicalSection<T extends { id?: string | null }>({
   title,
   count,
   items,
@@ -613,6 +620,8 @@ export function PatientClinicalTab({
   const { lang } = useLang();
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
 
+  const [allergien, setAllergien] = useState<ClinicalWarning[]>([]);
+  const [cave, setCave] = useState<ClinicalWarning[]>([]);
   const [diagnoses, setDiagnoses] = useState<ClinicalDiagnosis[]>([]);
   const [medications, setMedications] = useState<ClinicalMedication[]>([]);
   const [examinations, setExaminations] = useState<ClinicalExamination[]>([]);
@@ -644,6 +653,8 @@ export function PatientClinicalTab({
     ])
       .then(([clinical, recs, providerRows, doctorRows]) => {
         if (!active) return;
+        setAllergien(clinical.allergien ?? []);
+        setCave(clinical.cave ?? []);
         setDiagnoses(clinical.diagnoses ?? []);
         setMedications(clinical.medications ?? []);
         setExaminations(clinical.examinations ?? []);
@@ -724,6 +735,106 @@ export function PatientClinicalTab({
           {error}
         </div>
       ) : null}
+
+      {/* ---- Allergien ---- */}
+      <ClinicalSection<ClinicalWarning>
+        title={tx("Аллергии", "Allergien")}
+        items={allergien}
+        blank={() => blankWarning("allergie")}
+        isValid={(w) => w.label.trim() !== ""}
+        canManage={canManage}
+        tx={tx}
+        onSave={async (next) => {
+          await savePatientClinicalWarnings(patientId, "allergie", next);
+          setAllergien(next);
+        }}
+        rowView={(w) => (
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-foreground">{w.label}</span>
+              {w.severity ? (
+                <span className="text-[11px] text-muted-foreground">{w.severity}</span>
+              ) : null}
+            </div>
+            {w.reaction ? <p className="text-[11px] text-muted-foreground">{w.reaction}</p> : null}
+            {w.note ? <p className="text-[11px] text-muted-foreground">{w.note}</p> : null}
+          </div>
+        )}
+        form={(draft, set) => (
+          <div className="space-y-2">
+            <Field label={tx("Аллерген", "Allergen")}>
+              <Input
+                value={draft.label}
+                onChange={(e) => set({ label: e.target.value })}
+                className={inputClass}
+                placeholder={tx("Пенициллин", "Penicillin")}
+              />
+            </Field>
+            <Field label={tx("Реакция", "Reaktion")}>
+              <Input
+                value={draft.reaction ?? ""}
+                onChange={(e) => set({ reaction: trimToNull(e.target.value) })}
+                className={inputClass}
+                placeholder={tx("Сыпь, отёк", "Hautausschlag, Schwellung")}
+              />
+            </Field>
+            <Field label={tx("Тяжесть", "Schweregrad")}>
+              <Input
+                value={draft.severity ?? ""}
+                onChange={(e) => set({ severity: trimToNull(e.target.value) })}
+                className={inputClass}
+                placeholder={tx("лёгкая / средняя / тяжёлая", "leicht / mittel / schwer")}
+              />
+            </Field>
+            <Field label={tx("Примечание", "Notiz")}>
+              <Input
+                value={draft.note ?? ""}
+                onChange={(e) => set({ note: trimToNull(e.target.value) })}
+                className={inputClass}
+              />
+            </Field>
+          </div>
+        )}
+      />
+
+      {/* ---- CAVE ---- */}
+      <ClinicalSection<ClinicalWarning>
+        title={tx("CAVE", "CAVE")}
+        items={cave}
+        blank={() => blankWarning("cave")}
+        isValid={(w) => w.label.trim() !== ""}
+        canManage={canManage}
+        tx={tx}
+        onSave={async (next) => {
+          await savePatientClinicalWarnings(patientId, "cave", next);
+          setCave(next);
+        }}
+        rowView={(w) => (
+          <div>
+            <span className="text-sm font-medium text-foreground">{w.label}</span>
+            {w.note ? <p className="text-[11px] text-muted-foreground">{w.note}</p> : null}
+          </div>
+        )}
+        form={(draft, set) => (
+          <div className="space-y-2">
+            <Field label="CAVE">
+              <Input
+                value={draft.label}
+                onChange={(e) => set({ label: e.target.value })}
+                className={inputClass}
+                placeholder={tx("Антикоагуляция", "Antikoagulation")}
+              />
+            </Field>
+            <Field label={tx("Примечание", "Notiz")}>
+              <Input
+                value={draft.note ?? ""}
+                onChange={(e) => set({ note: trimToNull(e.target.value) })}
+                className={inputClass}
+              />
+            </Field>
+          </div>
+        )}
+      />
 
       {/* ---- Diagnoses (tree) ---- */}
       <DiagnosisTreeSection

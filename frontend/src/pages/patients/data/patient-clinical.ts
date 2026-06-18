@@ -34,6 +34,22 @@ export type ExaminationKind =
   | "other";
 export type ExaminationStatus = "final" | "pending";
 
+/** Allergy vs. general CAVE warning. */
+export type ClinicalWarningKind = "allergie" | "cave";
+
+export type ClinicalWarning = {
+  /** Server uuid; null/absent for a newly added entry. */
+  id?: string | null;
+  kind: ClinicalWarningKind;
+  /** Allergen name / warning text; REQUIRED. */
+  label: string;
+  /** Allergy reaction; allergie only. */
+  reaction: string | null;
+  /** Free text severity (e.g. leicht/mittel/schwer); allergie only, optional. */
+  severity: string | null;
+  note: string | null;
+};
+
 /** Provider + doctor attribution shared by every clinical entry. */
 export type ClinicalAttribution = {
   provider_id: string | null;
@@ -150,6 +166,8 @@ export type PatientClinicalProfile = {
   examinations: ClinicalExamination[];
   procedures: ClinicalProcedure[];
   narrative: ClinicalNarrative | null;
+  allergien: ClinicalWarning[];
+  cave: ClinicalWarning[];
 };
 
 export type PatientRecommendation = {
@@ -199,6 +217,14 @@ export function savePatientExaminations(patientId: string, items: ClinicalExamin
 
 export function savePatientProcedures(patientId: string, items: ClinicalProcedure[]) {
   return postJson(`/patients/${patientId}/procedures`, { items });
+}
+
+export function savePatientClinicalWarnings(
+  patientId: string,
+  kind: ClinicalWarningKind,
+  items: ClinicalWarning[],
+) {
+  return postJson(`/patients/${patientId}/clinical-warnings`, { kind, items });
 }
 
 export function savePatientNarrative(patientId: string, narrative: ClinicalNarrative) {

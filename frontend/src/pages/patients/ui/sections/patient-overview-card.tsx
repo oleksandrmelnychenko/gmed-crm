@@ -8,6 +8,7 @@ import {
   fetchPatientRecommendations,
   type ClinicalDiagnosis,
   type ClinicalMedication,
+  type ClinicalWarning,
   type DiagnosisStatus,
   type PatientRecommendation,
 } from "../../data/patient-clinical";
@@ -192,6 +193,8 @@ export function PatientOverviewCard({
   const { lang } = useLang();
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
 
+  const [allergien, setAllergien] = useState<ClinicalWarning[]>([]);
+  const [cave, setCave] = useState<ClinicalWarning[]>([]);
   const [diagnoses, setDiagnoses] = useState<ClinicalDiagnosis[]>([]);
   const [medications, setMedications] = useState<ClinicalMedication[]>([]);
   const [recommendations, setRecommendations] = useState<PatientRecommendation[]>([]);
@@ -204,6 +207,8 @@ export function PatientOverviewCard({
       fetchPatientRecommendations(patientId).catch(() => [] as PatientRecommendation[]),
     ]).then(([clinical, recs]) => {
       if (!active) return;
+      setAllergien(clinical?.allergien ?? []);
+      setCave(clinical?.cave ?? []);
       setDiagnoses(clinical?.diagnoses ?? []);
       setMedications(clinical?.medications ?? []);
       setRecommendations(recs ?? []);
@@ -216,6 +221,7 @@ export function PatientOverviewCard({
   if (!canViewClinical) return null;
 
   const allergyItems = splitList(allergies);
+  const allergyCount = allergien.length > 0 ? allergien.length : allergyItems.length;
   // Rebuild the tree from the flat list. A node's identity is cid (falling back
   // to the server id); its parent is parent_cid (falling back to parent_id).
   const nodeKey = (d: ClinicalDiagnosis): string | null => d.cid ?? d.id ?? null;
@@ -307,16 +313,43 @@ export function PatientOverviewCard({
         <div className="min-w-0 space-y-4">
           <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-[0.8fr_1.3fr_1.3fr]">
             <div className="min-w-0">
-              <ColumnTitle count={allergyItems.length || undefined}>{tx("Аллергии", "Allergien")}</ColumnTitle>
-              {allergyItems.length === 0 ? (
-                dash
-              ) : (
+              <ColumnTitle count={allergyCount || undefined}>{tx("Аллергии", "Allergien")}</ColumnTitle>
+              {allergien.length > 0 ? (
+                <ul className="space-y-0.5 text-[13px] font-medium leading-snug text-rose-700">
+                  {allergien.map((item, index) => (
+                    <li key={item.id ?? index}>
+                      {item.label}
+                      {item.reaction ? (
+                        <span className="font-normal text-muted-foreground"> · {item.reaction}</span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : allergyItems.length > 0 ? (
                 <ul className="space-y-0.5 text-[13px] font-medium leading-snug text-rose-700">
                   {allergyItems.map((item, index) => (
                     <li key={index}>{item}</li>
                   ))}
                 </ul>
+              ) : (
+                dash
               )}
+
+              {cave.length > 0 ? (
+                <div className="mt-2.5">
+                  <ColumnTitle count={cave.length}>CAVE</ColumnTitle>
+                  <ul className="space-y-0.5 text-[13px] font-medium leading-snug text-rose-700">
+                    {cave.map((item, index) => (
+                      <li key={item.id ?? index}>
+                        {item.label}
+                        {item.note ? (
+                          <span className="font-normal text-muted-foreground"> · {item.note}</span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
 
             <div className="min-w-0">
