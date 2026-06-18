@@ -13,6 +13,13 @@ function postJson<T = unknown>(path: string, payload?: JsonPayload) {
 export type DiagnosisKind = "main" | "secondary";
 export type DiagnosisStatus = "active" | "chronic" | "resolved";
 export type DiagnosisLaterality = "left" | "right" | "bilateral";
+
+/** Node kind in the diagnosis tree. */
+export type DiagnosisNodeKind = "main" | "secondary" | "prozedur";
+/** Diagnostic certainty; drives the label prefix (V.a. / Z.n.). */
+export type DiagnosisCertainty = "verdacht" | "bestaetigt" | "zustand_nach";
+/** Acuity / temporal course of the diagnosis. */
+export type DiagnosisChronification = "akut" | "chronisch" | "rezidivierend";
 export type MedicationCategory = "dauer" | "besondere" | "selbst";
 export type ExaminationKind =
   | "sonography"
@@ -36,15 +43,35 @@ export type ClinicalAttribution = {
 };
 
 export type ClinicalDiagnosis = ClinicalAttribution & {
-  id?: string;
-  kind: DiagnosisKind;
+  /** Server uuid; null/absent for a newly added node. */
+  id?: string | null;
+  /** Client id; for existing nodes cid === id, FE-generated for new ones. */
+  cid?: string;
+  /** Client parent reference used on SAVE. */
+  parent_cid?: string | null;
+  /** Server parent uuid, read-only, returned by GET. */
+  parent_id?: string | null;
+  kind: DiagnosisNodeKind;
   label: string;
+  certainty: DiagnosisCertainty | null;
+  chronifizierung: DiagnosisChronification | null;
   icd_code: string | null;
-  grade: string | null;
-  laterality: DiagnosisLaterality | null;
-  status: DiagnosisStatus;
+  ops_code: string | null;
   diagnosed_on: string | null;
   note: string | null;
+  source_mode: "intern" | "extern";
+  /** Extern attribution; external_country is an ISO 3166-1 alpha-2 code. */
+  external_clinic: string | null;
+  external_doctor: string | null;
+  external_country: string | null;
+  treating_doctor_id: string | null;
+  treating_doctor_name: string | null;
+  treating_doctor_title: string | null;
+  treating_none: boolean;
+  /** Legacy fields, kept optional for back-compat; the new UI ignores them. */
+  status?: DiagnosisStatus;
+  grade?: string | null;
+  laterality?: DiagnosisLaterality | null;
 };
 
 export type ClinicalMedication = ClinicalAttribution & {
@@ -109,6 +136,20 @@ export type PatientRecommendation = {
   priority: string | null;
   status: string | null;
 };
+
+/** A doctor at any active provider, used for the diagnosis "treating doctor" picker. */
+export type AllDoctorOption = {
+  id: string;
+  name: string;
+  title: string | null;
+  fachbereich: string | null;
+  provider_id: string | null;
+  provider_name: string | null;
+};
+
+export function fetchAllDoctors() {
+  return apiFetch<AllDoctorOption[]>("/doctors");
+}
 
 export function fetchPatientClinical(patientId: string) {
   return apiFetch<PatientClinicalProfile>(`/patients/${patientId}/clinical`);

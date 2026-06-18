@@ -18,6 +18,7 @@ import type { ProviderSummary } from "@/pages/providers/model/types";
 
 import {
   blankNarrative,
+  fetchAllDoctors,
   fetchPatientClinical,
   fetchPatientRecommendations,
   savePatientDiagnoses,
@@ -25,6 +26,7 @@ import {
   savePatientMedications,
   savePatientNarrative,
   savePatientProcedures,
+  type AllDoctorOption,
   type ClinicalAttribution,
   type ClinicalDiagnosis,
   type ClinicalExamination,
@@ -34,6 +36,7 @@ import {
   type PatientRecommendation,
 } from "@/pages/patients/data/patient-clinical";
 
+import { DiagnosisTreeSection } from "./diagnosis-tree";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 type Bilingual = (ru: string, de: string) => string;
@@ -59,20 +62,6 @@ function blankAttribution(): ClinicalAttribution {
     doctor_name: null,
     doctor_title: null,
     doctor_fachbereich: null,
-  };
-}
-
-function blankDiagnosis(): ClinicalDiagnosis {
-  return {
-    ...blankAttribution(),
-    kind: "secondary",
-    label: "",
-    icd_code: null,
-    grade: null,
-    laterality: null,
-    status: "active",
-    diagnosed_on: null,
-    note: null,
   };
 }
 
@@ -669,6 +658,7 @@ export function PatientClinicalTab({
   const [narrative, setNarrative] = useState<ClinicalNarrative>(blankNarrative());
   const [recommendations, setRecommendations] = useState<PatientRecommendation[]>([]);
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
+  const [allDoctors, setAllDoctors] = useState<AllDoctorOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [version, setVersion] = useState(0);
@@ -688,8 +678,9 @@ export function PatientClinicalTab({
       fetchPatientClinical(patientId),
       fetchPatientRecommendations(patientId).catch(() => [] as PatientRecommendation[]),
       fetchProviders("/providers?active_only=true").catch(() => [] as ProviderSummary[]),
+      fetchAllDoctors().catch(() => [] as AllDoctorOption[]),
     ])
-      .then(([clinical, recs, providerRows]) => {
+      .then(([clinical, recs, providerRows, doctorRows]) => {
         if (!active) return;
         setDiagnoses(clinical.diagnoses ?? []);
         setMedications(clinical.medications ?? []);
@@ -698,6 +689,7 @@ export function PatientClinicalTab({
         setNarrative(clinical.narrative ?? blankNarrative());
         setRecommendations(recs ?? []);
         setProviders(providerRows ?? []);
+        setAllDoctors(doctorRows ?? []);
         setError("");
       })
       .catch((err: unknown) => {
@@ -771,128 +763,17 @@ export function PatientClinicalTab({
         </div>
       ) : null}
 
-      {/* ---- Diagnoses ---- */}
-      <ClinicalSection<ClinicalDiagnosis>
-        title={tx("Диагнозы", "Diagnosen")}
+      {/* ---- Diagnoses (tree) ---- */}
+      <DiagnosisTreeSection
         items={diagnoses}
-        blank={blankDiagnosis}
-        isValid={(d) => d.label.trim() !== ""}
+        providers={providers}
+        allDoctors={allDoctors}
         canManage={canManage}
-        tx={tx}
-        groups={[
-          { key: "main", label: tx("Основной диагноз", "Hauptdiagnose") },
-          { key: "secondary", label: tx("Сопутствующие диагнозы", "Nebendiagnosen") },
-        ]}
-        groupOf={(d) => d.kind}
+        lang={lang}
         onSave={async (next) => {
           await savePatientDiagnoses(patientId, next);
           setDiagnoses(next);
         }}
-        rowView={(d) => (
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge
-                variant="outline"
-                className={cn(
-                  "rounded-full text-[10px]",
-                  d.kind === "main" ? "border-sky-300 bg-sky-50 text-sky-700" : "border-border bg-muted/30",
-                )}
-              >
-                {d.kind === "main" ? tx("Основной", "Hauptdiagnose") : tx("Сопутств.", "Nebendiagnose")}
-              </Badge>
-              <span className="text-sm font-medium text-foreground">{d.label}</span>
-              {d.icd_code ? (
-                <span className="font-mono text-[11px] text-muted-foreground">({d.icd_code})</span>
-              ) : null}
-              {d.grade ? <span className="text-[11px] text-muted-foreground">{d.grade}</span> : null}
-            </div>
-            {attributionRow(d)}
-          </div>
-        )}
-        form={(draft, set) => (
-          <div className="space-y-2">
-            <div className="grid gap-2 md:grid-cols-2">
-              <Field label={tx("Тип", "Art")}>
-                <NativeComboboxSelect
-                  value={draft.kind}
-                  aria-label={tx("Тип", "Art")}
-                  className={inputClass}
-                  onChange={(e) => set({ kind: e.target.value as ClinicalDiagnosis["kind"] })}
-                >
-                  <option value="main">{tx("Основной", "Hauptdiagnose")}</option>
-                  <option value="secondary">{tx("Сопутствующий", "Nebendiagnose")}</option>
-                </NativeComboboxSelect>
-              </Field>
-              <Field label={tx("Статус", "Status")}>
-                <NativeComboboxSelect
-                  value={draft.status}
-                  aria-label={tx("Статус", "Status")}
-                  className={inputClass}
-                  onChange={(e) => set({ status: e.target.value as ClinicalDiagnosis["status"] })}
-                >
-                  <option value="active">{tx("Активный", "Aktiv")}</option>
-                  <option value="chronic">{tx("Хронический", "Chronisch")}</option>
-                  <option value="resolved">{tx("Разрешён", "Ausgeheilt")}</option>
-                </NativeComboboxSelect>
-              </Field>
-            </div>
-            <Field label={tx("Диагноз", "Diagnose")}>
-              <Input
-                value={draft.label}
-                onChange={(e) => set({ label: e.target.value })}
-                className={inputClass}
-                placeholder={tx("напр. Akute Appendizitis", "z. B. Akute Appendizitis")}
-              />
-            </Field>
-            <div className="grid gap-2 md:grid-cols-3">
-              <Field label="ICD-10">
-                <Input
-                  value={draft.icd_code ?? ""}
-                  onChange={(e) => set({ icd_code: trimToNull(e.target.value) })}
-                  className={inputClass}
-                  placeholder="K35.8"
-                />
-              </Field>
-              <Field label={tx("Степень", "Grad")}>
-                <Input
-                  value={draft.grade ?? ""}
-                  onChange={(e) => set({ grade: trimToNull(e.target.value) })}
-                  className={inputClass}
-                  placeholder="Grad 1"
-                />
-              </Field>
-              <Field label={tx("Сторона", "Seite")}>
-                <NativeComboboxSelect
-                  value={draft.laterality ?? ""}
-                  aria-label={tx("Сторона", "Seite")}
-                  className={inputClass}
-                  onChange={(e) =>
-                    set({ laterality: (e.target.value || null) as ClinicalDiagnosis["laterality"] })
-                  }
-                >
-                  <option value="">—</option>
-                  <option value="left">{tx("Слева", "Links")}</option>
-                  <option value="right">{tx("Справа", "Rechts")}</option>
-                  <option value="bilateral">{tx("Двусторонне", "Beidseits")}</option>
-                </NativeComboboxSelect>
-              </Field>
-            </div>
-            <Field label={tx("Дата диагноза", "Erstdiagnose")}>
-              <Input
-                type="date"
-                value={draft.diagnosed_on ?? ""}
-                onChange={(e) => set({ diagnosed_on: trimToNull(e.target.value) })}
-                className={inputClass}
-              />
-            </Field>
-            <ProviderDoctorFields
-              value={draft}
-              providers={providers}
-              tx={tx}
-              onChange={(attr) => set(attr as Partial<ClinicalDiagnosis>)}
-            />
-          </div>
-        )}
       />
 
       {/* ---- Therapie / Procedures (OPS) ---- */}

@@ -14,13 +14,13 @@ import {
 
 type Bilingual = (ru: string, de: string) => string;
 
-function diagnosisStatusLabel(status: DiagnosisStatus, tx: Bilingual) {
+function diagnosisStatusLabel(status: DiagnosisStatus | undefined, tx: Bilingual) {
   if (status === "chronic") return tx("хрон.", "chron.");
   if (status === "resolved") return tx("разрешено", "abgeheilt");
   return tx("активн.", "aktiv");
 }
 
-function diagnosisStatusClass(status: DiagnosisStatus) {
+function diagnosisStatusClass(status: DiagnosisStatus | undefined) {
   if (status === "chronic") return "text-amber-700";
   if (status === "resolved") return "text-muted-foreground";
   return "text-rose-700";
@@ -31,6 +31,13 @@ function lateralityLabel(value: ClinicalDiagnosis["laterality"], tx: Bilingual) 
   if (value === "right") return tx("справа", "rechts");
   if (value === "bilateral") return tx("двусторонне", "beidseits");
   return null;
+}
+
+/** Certainty prefix shown in front of the label: V.a. / Z.n. (bestätigt has none). */
+function certaintyPrefix(certainty: ClinicalDiagnosis["certainty"]): string {
+  if (certainty === "verdacht") return "V.a. ";
+  if (certainty === "zustand_nach") return "Z.n. ";
+  return "";
 }
 
 /** Compact M-Mi-A-N intake scheme, e.g. "1-0-1-0". Empty when no dose is set. */
@@ -209,35 +216,65 @@ export function PatientOverviewCard({
   if (!canViewClinical) return null;
 
   const allergyItems = splitList(allergies);
-  const mainDiagnoses = diagnoses.filter((d) => d.kind === "main");
-  const secondaryDiagnoses = diagnoses.filter((d) => d.kind !== "main");
+  // Rebuild the tree from the flat list. A node's identity is cid (falling back
+  // to the server id); its parent is parent_cid (falling back to parent_id).
+  const nodeKey = (d: ClinicalDiagnosis): string | null => d.cid ?? d.id ?? null;
+  const parentKey = (d: ClinicalDiagnosis): string | null => d.parent_cid ?? d.parent_id ?? null;
+  const childrenByParent = new Map<string, ClinicalDiagnosis[]>();
+  for (const d of diagnoses) {
+    const pk = parentKey(d);
+    if (pk == null) continue;
+    const bucket = childrenByParent.get(pk);
+    if (bucket) bucket.push(d);
+    else childrenByParent.set(pk, [d]);
+  }
+  const childrenOf = (d: ClinicalDiagnosis): ClinicalDiagnosis[] => {
+    const k = nodeKey(d);
+    return k == null ? [] : (childrenByParent.get(k) ?? []);
+  };
+  // Roots are nodes with no resolvable parent in this list (typically the "main"
+  // diagnoses). Anything orphaned still surfaces here so nothing is hidden.
+  const known = new Set(diagnoses.map(nodeKey).filter((k): k is string => k != null));
+  const rootDiagnoses = diagnoses.filter((d) => {
+    const pk = parentKey(d);
+    return pk == null || !known.has(pk);
+  });
   const doctors = deriveDoctors([...diagnoses, ...medications]);
   const age = computeAge(birthDate);
   const showDemographics = Boolean(birthDate || gender || phone || email);
 
   const renderDiagnosis = (item: ClinicalDiagnosis) => {
+    const isProzedur = item.kind === "prozedur";
     const laterality = lateralityLabel(item.laterality, tx);
+    const code = isProzedur ? item.ops_code : item.icd_code;
     const sub: string[] = [];
-    if (item.diagnosed_on) sub.push(`ED ${item.diagnosed_on}`);
+    if (item.diagnosed_on) sub.push(`${isProzedur ? "" : "ED "}${item.diagnosed_on}`);
     if (item.grade) sub.push(item.grade);
     sub.push(...splitLines(item.note));
+    const children = childrenOf(item);
     return (
-      <li key={item.id ?? item.label} className="leading-snug">
+      <li key={nodeKey(item) ?? item.label} className="leading-snug">
         <span className="flex flex-wrap items-baseline gap-x-1.5">
           <span className="text-[13px] font-medium text-foreground">
+            {certaintyPrefix(item.certainty)}
             {item.label}
             {laterality ? ` ${laterality}` : ""}
           </span>
-          {item.icd_code ? (
-            <span className="font-mono text-[10px] text-muted-foreground">{item.icd_code}</span>
+          {code ? (
+            <span className="font-mono text-[10px] text-muted-foreground">{code}</span>
           ) : null}
-          {item.status !== "active" ? (
+          {item.status && item.status !== "active" ? (
             <span className={cn("text-[10px] font-medium", diagnosisStatusClass(item.status))}>
               {diagnosisStatusLabel(item.status, tx)}
             </span>
           ) : null}
         </span>
         <SubBullets items={sub} />
+        {children.length > 0 ? (
+          <ul className="mt-0.5 ml-3.5 list-disc space-y-1 marker:text-muted-foreground/40">
+            {children.map((child) => renderDiagnosis(child))}
+          </ul>
+        ) : null}
       </li>
     );
   };
@@ -287,21 +324,9 @@ export function PatientOverviewCard({
               {diagnoses.length === 0 ? (
                 dash
               ) : (
-                <div className="space-y-1.5">
-                  <ul className="list-disc space-y-1 pl-3.5 marker:text-muted-foreground/50">
-                    {mainDiagnoses.map(renderDiagnosis)}
-                  </ul>
-                  {secondaryDiagnoses.length > 0 ? (
-                    <div>
-                      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">
-                        {tx("Сопутствующие", "Nebendiagnosen")}
-                      </p>
-                      <ul className="list-disc space-y-1 pl-3.5 marker:text-muted-foreground/40">
-                        {secondaryDiagnoses.map(renderDiagnosis)}
-                      </ul>
-                    </div>
-                  ) : null}
-                </div>
+                <ul className="list-disc space-y-1 pl-3.5 marker:text-muted-foreground/50">
+                  {rootDiagnoses.map((d) => renderDiagnosis(d))}
+                </ul>
               )}
             </div>
 

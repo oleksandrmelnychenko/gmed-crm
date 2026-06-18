@@ -33,6 +33,7 @@ pub fn router() -> Router<AppState> {
             get(list_patient_vitals).post(create_patient_vital_measurement),
         )
         .route("/patients/{patient_id}/clinical", get(get_patient_clinical))
+        .route("/doctors", get(list_all_doctors))
         .route(
             "/patients/{patient_id}/diagnoses",
             post(save_patient_diagnoses),
@@ -6755,6 +6756,10 @@ struct PatientClinicalItems<T> {
 #[derive(Deserialize)]
 struct PatientDiagnosisInput {
     #[serde(default)]
+    cid: Option<String>,
+    #[serde(default)]
+    parent_cid: Option<String>,
+    #[serde(default)]
     provider_id: Option<String>,
     #[serde(default)]
     doctor_id: Option<String>,
@@ -6765,6 +6770,12 @@ struct PatientDiagnosisInput {
     #[serde(default)]
     icd_code: Option<String>,
     #[serde(default)]
+    ops_code: Option<String>,
+    #[serde(default)]
+    certainty: Option<String>,
+    #[serde(default)]
+    chronifizierung: Option<String>,
+    #[serde(default)]
     grade: Option<String>,
     #[serde(default)]
     laterality: Option<String>,
@@ -6774,6 +6785,18 @@ struct PatientDiagnosisInput {
     diagnosed_on: Option<String>,
     #[serde(default)]
     note: Option<String>,
+    #[serde(default)]
+    source_mode: Option<String>,
+    #[serde(default)]
+    external_clinic: Option<String>,
+    #[serde(default)]
+    external_doctor: Option<String>,
+    #[serde(default)]
+    external_country: Option<String>,
+    #[serde(default)]
+    treating_doctor_id: Option<String>,
+    #[serde(default)]
+    treating_none: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -6948,12 +6971,16 @@ async fn get_patient_clinical(
     };
 
     let diag_rows = sqlx::query(
-        r#"SELECT d.id, d.kind, d.label, d.icd_code, d.grade, d.laterality, d.status,
-                  d.diagnosed_on, d.note, d.provider_id, p.name AS provider_name,
-                  d.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
+        r#"SELECT d.id, d.parent_id, d.kind, d.label, d.icd_code, d.ops_code, d.grade, d.laterality,
+                  d.status, d.certainty, d.chronifizierung, d.diagnosed_on, d.note,
+                  d.source_mode, d.external_clinic, d.external_doctor, d.external_country,
+                  d.provider_id, p.name AS provider_name,
+                  d.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich,
+                  d.treating_doctor_id, d.treating_none, td.name AS treating_doctor_name, td.title AS treating_doctor_title
            FROM patient_diagnoses d
            LEFT JOIN providers p ON p.id = d.provider_id
            LEFT JOIN provider_doctors dr ON dr.id = d.doctor_id
+           LEFT JOIN provider_doctors td ON td.id = d.treating_doctor_id
            WHERE d.patient_id = $1
            ORDER BY d.sort_order, d.created_at"#,
     )
@@ -7005,22 +7032,36 @@ async fn get_patient_clinical(
     let diagnoses = diag_rows
         .into_iter()
         .map(|row| {
+            let id = row.get::<Uuid, _>("id");
             json!({
-                "id": row.get::<Uuid, _>("id"),
+                "id": id,
+                "cid": id,
+                "parent_id": row.get::<Option<Uuid>, _>("parent_id"),
                 "kind": row.get::<String, _>("kind"),
                 "label": row.get::<String, _>("label"),
                 "icd_code": row.get::<Option<String>, _>("icd_code"),
+                "ops_code": row.get::<Option<String>, _>("ops_code"),
+                "certainty": row.get::<Option<String>, _>("certainty"),
+                "chronifizierung": row.get::<Option<String>, _>("chronifizierung"),
                 "grade": row.get::<Option<String>, _>("grade"),
                 "laterality": row.get::<Option<String>, _>("laterality"),
                 "status": row.get::<String, _>("status"),
                 "diagnosed_on": row.get::<Option<String>, _>("diagnosed_on"),
                 "note": row.get::<Option<String>, _>("note"),
+                "source_mode": row.get::<String, _>("source_mode"),
+                "external_clinic": row.get::<Option<String>, _>("external_clinic"),
+                "external_doctor": row.get::<Option<String>, _>("external_doctor"),
+                "external_country": row.get::<Option<String>, _>("external_country"),
                 "provider_id": row.get::<Option<Uuid>, _>("provider_id"),
                 "provider_name": row.get::<Option<String>, _>("provider_name"),
                 "doctor_id": row.get::<Option<Uuid>, _>("doctor_id"),
                 "doctor_name": row.get::<Option<String>, _>("doctor_name"),
                 "doctor_title": row.get::<Option<String>, _>("doctor_title"),
                 "doctor_fachbereich": row.get::<Option<String>, _>("doctor_fachbereich"),
+                "treating_doctor_id": row.get::<Option<Uuid>, _>("treating_doctor_id"),
+                "treating_doctor_name": row.get::<Option<String>, _>("treating_doctor_name"),
+                "treating_doctor_title": row.get::<Option<String>, _>("treating_doctor_title"),
+                "treating_none": row.get::<bool, _>("treating_none"),
             })
         })
         .collect::<Vec<_>>();
@@ -7145,6 +7186,45 @@ async fn get_patient_clinical(
     })))
 }
 
+/// All doctors at active providers. Powers the diagnosis-tree attribution picker,
+/// which needs the full cross-provider doctor list (not scoped to one provider).
+async fn list_all_doctors(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> impl IntoResponse {
+    auth.require_any_role(PATIENT_CLINICAL_ROLES)?;
+
+    let rows = sqlx::query(
+        r#"SELECT d.id, d.name, d.title, d.fachbereich, d.provider_id, p.name AS provider_name
+           FROM provider_doctors d
+           JOIN providers p ON p.id = d.provider_id
+           WHERE p.is_active = true
+           ORDER BY d.name"#,
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "load all doctors");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load doctors")
+    })?;
+
+    let doctors = rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.get::<Uuid, _>("id"),
+                "name": row.get::<String, _>("name"),
+                "title": row.get::<Option<String>, _>("title"),
+                "fachbereich": row.get::<Option<String>, _>("fachbereich"),
+                "provider_id": row.get::<Uuid, _>("provider_id"),
+                "provider_name": row.get::<Option<String>, _>("provider_name"),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    Ok::<_, axum::response::Response>(Json(json!(doctors)))
+}
+
 async fn save_patient_diagnoses(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -7175,13 +7255,51 @@ async fn save_patient_diagnoses(
         tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient diagnoses");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    // Items arrive ordered parent-before-child. We map each item's client id
+    // (cid) onto the freshly generated server uuid so a child can resolve its
+    // parent_id from parent_cid, and track each node's kind to enforce nesting.
+    let mut cid_to_id: HashMap<String, Uuid> = HashMap::new();
+    let mut cid_to_kind: HashMap<String, String> = HashMap::new();
     let mut saved = 0i32;
     for item in body.items {
         let Some(label) = clinical_opt_text(item.label) else {
             continue;
         };
-        let kind = clinical_one_of(item.kind, &["main", "secondary"])
+        let kind = clinical_one_of(item.kind, &["main", "secondary", "prozedur"])
             .unwrap_or_else(|| "secondary".to_string());
+
+        // Resolve parent. A parent_cid that we have not already inserted means
+        // the parent was skipped (e.g. empty label) or arrived out of order;
+        // drop the orphan rather than persist a dangling reference.
+        let parent_id = match item.parent_cid.as_ref().map(|c| c.trim()).filter(|c| !c.is_empty()) {
+            None => None,
+            Some(parent_cid) => {
+                let Some(pid) = cid_to_id.get(parent_cid).copied() else {
+                    continue;
+                };
+                // Nesting: a prozedur node may only parent further prozedur nodes.
+                if (kind == "main" || kind == "secondary")
+                    && cid_to_kind.get(parent_cid).map(String::as_str) == Some("prozedur")
+                {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "A procedure node cannot parent a diagnosis",
+                    );
+                }
+                Some(pid)
+            }
+        };
+
+        let certainty = clinical_one_of(
+            item.certainty,
+            &["verdacht", "bestaetigt", "zustand_nach"],
+        );
+        let chronifizierung = clinical_one_of(
+            item.chronifizierung,
+            &["akut", "chronisch", "rezidivierend"],
+        );
+        let source_mode = clinical_one_of(item.source_mode, &["intern", "extern"])
+            .unwrap_or_else(|| "intern".to_string());
         let status = clinical_one_of(item.status, &["active", "chronic", "resolved"])
             .unwrap_or_else(|| "active".to_string());
         let laterality = clinical_one_of(item.laterality, &["left", "right", "bilateral"]);
@@ -7190,27 +7308,48 @@ async fn save_patient_diagnoses(
                 Ok(pair) => pair,
                 Err(resp) => return resp,
             };
+        let treating_doctor_id = match clinical_parse_uuid(item.treating_doctor_id) {
+            Ok(v) => v,
+            Err(resp) => return resp,
+        };
+        let treating_none = item.treating_none.unwrap_or(false);
+        let new_id = Uuid::new_v4();
         if let Err(e) = sqlx::query(
-            "INSERT INTO patient_diagnoses (patient_id, provider_id, doctor_id, kind, label, icd_code, grade, laterality, status, diagnosed_on, note, sort_order)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+            "INSERT INTO patient_diagnoses (id, patient_id, parent_id, provider_id, doctor_id, kind, label, icd_code, ops_code, certainty, chronifizierung, grade, laterality, status, diagnosed_on, note, sort_order, source_mode, external_clinic, external_doctor, external_country, treating_doctor_id, treating_none)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)",
         )
+        .bind(new_id)
         .bind(patient_uuid)
+        .bind(parent_id)
         .bind(provider_id)
         .bind(doctor_id)
         .bind(&kind)
         .bind(&label)
         .bind(clinical_opt_text(item.icd_code))
+        .bind(clinical_opt_text(item.ops_code))
+        .bind(certainty)
+        .bind(chronifizierung)
         .bind(clinical_opt_text(item.grade))
         .bind(laterality)
         .bind(&status)
         .bind(clinical_opt_text(item.diagnosed_on))
         .bind(clinical_opt_text(item.note))
         .bind(saved)
+        .bind(&source_mode)
+        .bind(clinical_opt_text(item.external_clinic))
+        .bind(clinical_opt_text(item.external_doctor))
+        .bind(clinical_opt_text(item.external_country))
+        .bind(treating_doctor_id)
+        .bind(treating_none)
         .execute(&mut *tx)
         .await
         {
             tracing::error!(error = %e, patient_id = %patient_uuid, "insert patient diagnosis");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        if let Some(cid) = item.cid.as_ref().map(|c| c.trim()).filter(|c| !c.is_empty()) {
+            cid_to_id.insert(cid.to_string(), new_id);
+            cid_to_kind.insert(cid.to_string(), kind);
         }
         saved += 1;
     }
