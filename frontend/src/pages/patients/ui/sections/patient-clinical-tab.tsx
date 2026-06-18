@@ -34,6 +34,8 @@ import {
   type PatientRecommendation,
 } from "@/pages/patients/data/patient-clinical";
 
+import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
+
 type Bilingual = (ru: string, de: string) => string;
 
 const inputClass =
@@ -451,7 +453,7 @@ function ClinicalSection<T extends { id?: string }>({
           <h3 className="text-sm font-semibold text-foreground">{title}</h3>
           {count ?? <Badge variant="outline" className="rounded-full text-[11px]">{list.length}</Badge>}
         </div>
-        {canManage && !editing ? (
+        {canManage ? (
           <Button
             type="button"
             size="sm"
@@ -466,7 +468,7 @@ function ClinicalSection<T extends { id?: string }>({
       </header>
 
       <div className="space-y-2 p-3">
-        {list.length === 0 && !editing ? (
+        {list.length === 0 ? (
           <p className="px-1 py-4 text-center text-xs text-muted-foreground">
             {tx("Пока нет записей", "Noch keine Einträge")}
           </p>
@@ -491,14 +493,23 @@ function ClinicalSection<T extends { id?: string }>({
               : indexed.map(({ item, index }) => renderRow(item, index))
         ) : null}
 
-        {editing ? (
-          <div className="space-y-3 rounded-lg border border-primary/40 bg-primary/[0.03] p-3">
-            {form(editing.draft, set)}
-            <div className="flex justify-end gap-2 pt-1">
+        <PatientSheetScaffold
+          open={Boolean(editing)}
+          onOpenChange={(open) => {
+            if (!open) setEditing(null);
+          }}
+          width="form-heavy"
+          title={
+            editing?.index === null
+              ? `${tx("Добавить", "Hinzufügen")}: ${title}`
+              : `${tx("Редактировать", "Bearbeiten")}: ${title}`
+          }
+          footer={
+            <>
               <Button
                 type="button"
                 size="sm"
-                variant="ghost"
+                variant="outline"
                 className="h-8 rounded-lg"
                 onClick={() => setEditing(null)}
               >
@@ -508,14 +519,16 @@ function ClinicalSection<T extends { id?: string }>({
                 type="button"
                 size="sm"
                 className="h-8 rounded-lg"
-                disabled={busy || !isValid(editing.draft)}
+                disabled={busy || !editing || !isValid(editing.draft)}
                 onClick={submitDraft}
               >
                 {tx("Сохранить", "Speichern")}
               </Button>
-            </div>
-          </div>
-        ) : null}
+            </>
+          }
+        >
+          {editing ? form(editing.draft, set) : null}
+        </PatientSheetScaffold>
       </div>
     </section>
   );
