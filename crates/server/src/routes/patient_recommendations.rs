@@ -1163,7 +1163,9 @@ fn validate_optional_date(value: Option<&str>) -> Result<Option<String>, axum::r
         && bytes[7] == b'-'
         && raw
             .char_indices()
-            .all(|(i, c)| if i == 4 || i == 7 { c == '-' } else { c.is_ascii_digit() });
+            .all(|(i, c)| if i == 4 || i == 7 { c == '-' } else { c.is_ascii_digit() })
+        // Reject shape-valid but impossible calendar dates (e.g. 2025-13-99).
+        && chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d").is_ok();
     if well_formed {
         Ok(Some(raw.to_string()))
     } else {
