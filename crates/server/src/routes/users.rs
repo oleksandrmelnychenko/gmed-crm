@@ -76,6 +76,26 @@ const VALID_ROLES: &[&str] = &[
     "patient",
 ];
 
+const PASSWORD_POLICY_MESSAGE: &str =
+    "Password must contain uppercase and lowercase letters, a number, and a symbol";
+
+fn validate_password_policy(password: &str) -> Result<(), &'static str> {
+    if password.len() < 8 || password.len() > 256 {
+        return Err("Password must be 8-256 characters");
+    }
+
+    let has_lowercase = password.chars().any(|ch| ch.is_ascii_lowercase());
+    let has_uppercase = password.chars().any(|ch| ch.is_ascii_uppercase());
+    let has_digit = password.chars().any(|ch| ch.is_ascii_digit());
+    let has_symbol = password.chars().any(|ch| !ch.is_ascii_alphanumeric());
+
+    if !(has_lowercase && has_uppercase && has_digit && has_symbol) {
+        return Err(PASSWORD_POLICY_MESSAGE);
+    }
+
+    Ok(())
+}
+
 fn validate_create(req: &CreateUserRequest) -> Result<(), &'static str> {
     if req.email.is_empty() || req.email.len() > 320 || !req.email.contains('@') {
         return Err("Invalid email");
@@ -83,9 +103,7 @@ fn validate_create(req: &CreateUserRequest) -> Result<(), &'static str> {
     if req.name.is_empty() || req.name.len() > 200 {
         return Err("Name must be 1-200 characters");
     }
-    if req.password.len() < 8 || req.password.len() > 256 {
-        return Err("Password must be 8-256 characters");
-    }
+    validate_password_policy(&req.password)?;
     if !VALID_ROLES.contains(&req.role.as_str()) {
         return Err("Invalid role");
     }
@@ -471,11 +489,8 @@ async fn reset_password(
 ) -> impl IntoResponse {
     auth.require_exact_role(&[Role::Ceo, Role::ItAdmin])?;
 
-    if body.new_password.len() < 8 || body.new_password.len() > 256 {
-        return Err(err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Password must be 8-256 characters",
-        ));
+    if let Err(msg) = validate_password_policy(&body.new_password) {
+        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, msg));
     }
 
     let hash = match password::hash_password(&body.new_password) {

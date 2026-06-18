@@ -43,6 +43,11 @@ import {
   setAdminUserActive,
   updateAdminUser,
 } from "@/pages/admin/data/admin-api";
+import {
+  getOptionalAdminPasswordError,
+  getRequiredAdminPasswordError,
+  isPasswordConfirmationMismatch,
+} from "@/pages/admin-users.helpers";
 
 interface User {
   id: string;
@@ -276,6 +281,20 @@ function useAdminUsersPageContent() {
     [t, tr],
   );
   const closeUnsavedConfirmMessage = t.common_discard_unsaved_confirm;
+  const newPasswordError = newPassword
+    ? getRequiredAdminPasswordError(newPassword, t)
+    : null;
+  const newPasswordMismatch = isPasswordConfirmationMismatch(
+    newPassword,
+    newPasswordConfirm,
+  );
+  const euPasswordError = getOptionalAdminPasswordError(euPassword, t);
+  const editProfileDirty = Boolean(
+    editUser &&
+      (euName !== editUser.name ||
+        euEmail !== editUser.email ||
+        euRole !== editUser.role),
+  );
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -423,7 +442,12 @@ function useAdminUsersPageContent() {
 
   const onSubmitCreate = async (ev: FormEvent) => {
     ev.preventDefault();
-    if (newPassword !== newPasswordConfirm) {
+    const passwordError = getRequiredAdminPasswordError(newPassword, t);
+    if (passwordError) {
+      setCreateError(passwordError);
+      return;
+    }
+    if (isPasswordConfirmationMismatch(newPassword, newPasswordConfirm)) {
       setCreateError(t.users_password_mismatch);
       return;
     }
@@ -480,13 +504,7 @@ function useAdminUsersPageContent() {
     newPasswordConfirm.length > 0 ||
     newRole !== "patient_manager";
 
-  const editDirty = Boolean(
-    editUser &&
-      (euName !== editUser.name ||
-        euEmail !== editUser.email ||
-        euRole !== editUser.role ||
-        euPassword.length > 0),
-  );
+  const editDirty = editProfileDirty || euPassword.length > 0;
 
   const handleCreateSheetOpenChange = useSheetDirtyGuard({
     isDirty: createDirty,
@@ -502,10 +520,20 @@ function useAdminUsersPageContent() {
 
   const saveUser = async () => {
     if (!editUser) return;
+    const passwordError = getOptionalAdminPasswordError(euPassword, t);
+    if (passwordError) {
+      setEditError(passwordError);
+      return;
+    }
     setEuSaving(true);
     setEditError(null);
     try {
-      await updateAdminUser(editUser.id, { name: euName, email: euEmail, role: euRole });
+      if (editProfileDirty) {
+        await updateAdminUser(editUser.id, { name: euName, email: euEmail, role: euRole });
+      }
+      if (euPassword.length > 0) {
+        await resetAdminUserPassword(editUser.id, { new_password: euPassword });
+      }
       closeEditSheet();
       void loadUsers();
     } catch (e) {
@@ -516,7 +544,12 @@ function useAdminUsersPageContent() {
   };
 
   const resetPassword = async () => {
-    if (!editUser || euPassword.length < 8) return;
+    if (!editUser) return;
+    const passwordError = getOptionalAdminPasswordError(euPassword, t);
+    if (passwordError || euPassword.length === 0) {
+      setEditError(passwordError);
+      return;
+    }
     setEuSaving(true);
     setEditError(null);
     try {
@@ -631,7 +664,7 @@ function useAdminUsersPageContent() {
                   submitLabel={t.users_create_btn}
                   submittingLabel={t.users_creating}
                   submitting={creating}
-                  submitDisabled={Boolean(newPasswordConfirm && newPassword !== newPasswordConfirm)}
+                  submitDisabled={Boolean(newPasswordError || newPasswordMismatch)}
                   onCancel={closeCreateSheet}
                 />
               )}
@@ -660,7 +693,28 @@ function useAdminUsersPageContent() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_password}</Label>
-                    <Input type="password" required minLength={8} placeholder={t.users_password_hint} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="h-9 rounded-lg bg-card" />
+                    <Input
+                      type="password"
+                      required
+                      minLength={8}
+                      maxLength={256}
+                      placeholder={t.users_password_policy_hint}
+                      value={newPassword}
+                      onChange={(e) => {
+                        setNewPassword(e.target.value);
+                        setCreateError(null);
+                      }}
+                      className={cn("h-9 rounded-lg bg-card", newPasswordError && "border-rose-400 ring-2 ring-rose-100")}
+                    />
+                    {newPasswordError ? (
+                      <p className="text-xs text-rose-600">
+                        {newPasswordError}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        {t.users_password_policy_hint}
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">
@@ -670,12 +724,16 @@ function useAdminUsersPageContent() {
                       type="password"
                       required
                       minLength={8}
-                      placeholder={t.users_password_hint}
+                      maxLength={256}
+                      placeholder={t.users_password_policy_hint}
                       value={newPasswordConfirm}
-                      onChange={(e) => setNewPasswordConfirm(e.target.value)}
-                      className={cn("h-9 rounded-lg bg-card", newPasswordConfirm && newPassword !== newPasswordConfirm && "border-rose-400 ring-2 ring-rose-100")}
+                      onChange={(e) => {
+                        setNewPasswordConfirm(e.target.value);
+                        setCreateError(null);
+                      }}
+                      className={cn("h-9 rounded-lg bg-card", newPasswordMismatch && "border-rose-400 ring-2 ring-rose-100")}
                     />
-                    {newPasswordConfirm && newPassword !== newPasswordConfirm ? (
+                    {newPasswordMismatch ? (
                       <p className="text-xs text-rose-600">
                         {t.users_password_mismatch}
                       </p>
@@ -705,6 +763,7 @@ function useAdminUsersPageContent() {
                   cancelLabel={t.common_cancel}
                   submitLabel={t.common_save}
                   submitting={euSaving}
+                  submitDisabled={Boolean(euPasswordError)}
                   onCancel={closeEditSheet}
                   onSubmit={() => void saveUser()}
                 />
@@ -736,11 +795,31 @@ function useAdminUsersPageContent() {
                     {t.users_reset_password}
                   </Label>
                   <div className="flex gap-3">
-                    <Input type="password" placeholder={t.users_password_hint} value={euPassword} onChange={(e) => setEuPassword(e.target.value)} className="h-9 rounded-lg bg-card" />
-                    <Button type="button" variant="outline" className="h-9 px-3.5 rounded-lg" disabled={euPassword.length < 8 || euSaving} onClick={resetPassword}>
+                    <Input
+                      type="password"
+                      minLength={8}
+                      maxLength={256}
+                      placeholder={t.users_password_policy_hint}
+                      value={euPassword}
+                      onChange={(e) => {
+                        setEuPassword(e.target.value);
+                        setEditError(null);
+                      }}
+                      className={cn("h-9 rounded-lg bg-card", euPasswordError && "border-rose-400 ring-2 ring-rose-100")}
+                    />
+                    <Button type="button" variant="outline" className="h-9 px-3.5 rounded-lg" disabled={Boolean(euPasswordError) || euPassword.length === 0 || euSaving} onClick={resetPassword}>
                       {t.users_reset_button}
                     </Button>
                   </div>
+                  {euPasswordError ? (
+                    <p className="text-xs text-rose-600">
+                      {euPasswordError}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      {t.users_password_policy_hint}
+                    </p>
+                  )}
                 </div>
               </DotSection>
             </AdminSheetScaffold>

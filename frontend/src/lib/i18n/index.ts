@@ -86,6 +86,8 @@ export interface Translations
   users_active: string;
   users_inactive: string;
   users_password_hint: string;
+  users_password_policy_hint: string;
+  users_password_policy_complexity: string;
   users_confirm_password: string;
   users_password_mismatch: string;
   users_admins: string;

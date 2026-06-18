@@ -81,6 +81,10 @@ export const ru = {
   users_active: "Активен",
   users_inactive: "Неактивен",
   users_password_hint: "Мин. 8 символов",
+  users_password_policy_hint:
+    "Мин. 8 символов: строчная и заглавная буква, цифра и символ",
+  users_password_policy_complexity:
+    "Пароль должен содержать строчную и заглавную букву, цифру и символ",
   users_confirm_password: "Подтвердите пароль",
   users_password_mismatch: "Пароли не совпадают",
   users_admins: "Администраторы",

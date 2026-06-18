@@ -81,6 +81,10 @@ export const de = {
   users_active: "Aktiv",
   users_inactive: "Inaktiv",
   users_password_hint: "Min. 8 Zeichen",
+  users_password_policy_hint:
+    "Min. 8 Zeichen: Klein-/Grossbuchstabe, Zahl und Sonderzeichen",
+  users_password_policy_complexity:
+    "Passwort muss Klein-/Grossbuchstaben, Zahl und Sonderzeichen enthalten",
   users_confirm_password: "Passwort bestätigen",
   users_password_mismatch: "Passwörter stimmen nicht überein",
   users_admins: "Administratoren",
