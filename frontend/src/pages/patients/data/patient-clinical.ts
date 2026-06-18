@@ -124,6 +124,9 @@ export type ClinicalMedication = ClinicalAttribution & {
   abgabebeschraenkung: boolean;
   /** Free-text notes shown when the "Sonstige Vermerke" checkbox is on. */
   sonstige_vermerke: string | null;
+  on_hold: boolean;
+  hold_until: string | null;
+  hold_note: string | null;
 };
 
 export type ClinicalExamination = ClinicalAttribution & {

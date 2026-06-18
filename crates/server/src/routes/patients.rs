@@ -6860,6 +6860,12 @@ struct PatientMedicationInput {
     abgabebeschraenkung: Option<bool>,
     #[serde(default)]
     sonstige_vermerke: Option<String>,
+    #[serde(default)]
+    on_hold: Option<bool>,
+    #[serde(default)]
+    hold_until: Option<String>,
+    #[serde(default)]
+    hold_note: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -7074,6 +7080,7 @@ async fn get_patient_clinical(
                   m.einnahmeform, m.verordnet_am, m.einnahme_von, m.einnahme_bis, m.status,
                   m.apothekenpflichtig, m.rezeptpflichtig, m.btm, m.aut_idem_sperre,
                   m.abgabebeschraenkung, m.sonstige_vermerke,
+                  m.on_hold, m.hold_until, m.hold_note,
                   m.provider_id, p.name AS provider_name,
                   m.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
            FROM patient_medications m
@@ -7173,6 +7180,9 @@ async fn get_patient_clinical(
                 "aut_idem_sperre": row.get::<bool, _>("aut_idem_sperre"),
                 "abgabebeschraenkung": row.get::<bool, _>("abgabebeschraenkung"),
                 "sonstige_vermerke": row.get::<Option<String>, _>("sonstige_vermerke"),
+                "on_hold": row.get::<bool, _>("on_hold"),
+                "hold_until": row.get::<Option<String>, _>("hold_until"),
+                "hold_note": row.get::<Option<String>, _>("hold_note"),
                 "provider_id": row.get::<Option<Uuid>, _>("provider_id"),
                 "provider_name": row.get::<Option<String>, _>("provider_name"),
                 "doctor_id": row.get::<Option<Uuid>, _>("doctor_id"),
@@ -7541,8 +7551,8 @@ async fn save_patient_medications(
                 Err(resp) => return resp,
             };
         if let Err(e) = sqlx::query(
-            "INSERT INTO patient_medications (patient_id, provider_id, doctor_id, category, wirkstoff, handelsname, staerke, form, dose_morgens, dose_mittags, dose_abends, dose_nachts, einheit, hinweis, grund, einnahmeform, verordnet_am, einnahme_von, einnahme_bis, status, apothekenpflichtig, rezeptpflichtig, btm, aut_idem_sperre, abgabebeschraenkung, sonstige_vermerke, sort_order)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)",
+            "INSERT INTO patient_medications (patient_id, provider_id, doctor_id, category, wirkstoff, handelsname, staerke, form, dose_morgens, dose_mittags, dose_abends, dose_nachts, einheit, hinweis, grund, einnahmeform, verordnet_am, einnahme_von, einnahme_bis, status, apothekenpflichtig, rezeptpflichtig, btm, aut_idem_sperre, abgabebeschraenkung, sonstige_vermerke, on_hold, hold_until, hold_note, sort_order)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)",
         )
         .bind(patient_uuid)
         .bind(provider_id)
@@ -7570,6 +7580,9 @@ async fn save_patient_medications(
         .bind(item.aut_idem_sperre.unwrap_or(false))
         .bind(item.abgabebeschraenkung.unwrap_or(false))
         .bind(clinical_opt_text(item.sonstige_vermerke))
+        .bind(item.on_hold.unwrap_or(false))
+        .bind(clinical_opt_text(item.hold_until))
+        .bind(clinical_opt_text(item.hold_note))
         .bind(saved)
         .execute(&mut *tx)
         .await

@@ -102,6 +102,9 @@ function blankMedication(): ClinicalMedication {
     aut_idem_sperre: false,
     abgabebeschraenkung: false,
     sonstige_vermerke: null,
+    on_hold: false,
+    hold_until: null,
+    hold_note: null,
   };
 }
 
@@ -1667,6 +1670,39 @@ export function PatientClinicalTab({
                   aria-label={tx("Прочие пометки", "Sonstige Vermerke")}
                   placeholder={tx("Прочие пометки", "Sonstige Vermerke")}
                 />
+              ) : null}
+            </fieldset>
+            <fieldset className="rounded-lg border border-amber-300/70 bg-amber-50/40 p-2">
+              <CheckboxField
+                label={tx("На холд (пациент не принимает)", "Auf Hold (Patient nimmt es nicht)")}
+                checked={draft.on_hold}
+                onChange={(checked) =>
+                  set({
+                    on_hold: checked,
+                    hold_until: checked ? draft.hold_until : null,
+                    hold_note: checked ? draft.hold_note : null,
+                  })
+                }
+              />
+              {draft.on_hold ? (
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <Field label={tx("До какого числа", "Bis wann")}>
+                    <Input
+                      type="date"
+                      value={draft.hold_until ?? ""}
+                      onChange={(e) => set({ hold_until: e.target.value || null })}
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field label={tx("Заметка", "Notiz")}>
+                    <Input
+                      value={draft.hold_note ?? ""}
+                      onChange={(e) => set({ hold_note: e.target.value || null })}
+                      className={inputClass}
+                      placeholder={tx("Причина паузы", "Grund der Pause")}
+                    />
+                  </Field>
+                </div>
               ) : null}
             </fieldset>
             <ProviderDoctorFields
