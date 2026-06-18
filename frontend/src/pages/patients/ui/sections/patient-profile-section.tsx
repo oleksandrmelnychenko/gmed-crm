@@ -367,10 +367,8 @@ function usePatientProfileTabContent({
   detail,
   docsPreviewOpen,
   fieldValue,
-  formatDate,
   formatDateTime,
   formatVitalNumber,
-  genderLabel,
   handleExportPatientCompliance,
   handleUpdatePatientMedicalOrderStatus,
   id,
@@ -481,8 +479,6 @@ function usePatientProfileTabContent({
           title={t.patient_profile_personal_data}
           contentClassName="md:grid-cols-2"
         >
-          <ProfileSummaryLine label={t.patients_birth_date} value={formatDate(detail.birth_date, t.common_not_set)} />
-          <ProfileSummaryLine label={t.patients_gender} value={genderLabel(detail.gender, tr)} />
           <ProfileSummaryLine
             label={t.patients_nationality}
             value={fieldValue(detail.nationality, t.common_not_set)}

@@ -266,66 +266,108 @@ export function PatientOverviewCard({
           <DemoItem label="Email" value={email ?? ""} />
         </div>
       ) : null}
-      <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-[0.8fr_1.3fr_1.3fr_1fr]">
-        <div className="min-w-0">
-          <ColumnTitle count={allergyItems.length || undefined}>{tx("Аллергии", "Allergien")}</ColumnTitle>
-          {allergyItems.length === 0 ? (
-            dash
-          ) : (
-            <ul className="space-y-0.5 text-[13px] font-medium leading-snug text-rose-700">
-              {allergyItems.map((item, index) => (
-                <li key={index}>{item}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <div className="min-w-0">
-          <ColumnTitle count={diagnoses.length || undefined}>{tx("Диагнозы", "Diagnosen")}</ColumnTitle>
-          {diagnoses.length === 0 ? (
-            dash
-          ) : (
-            <div className="space-y-1.5">
-              <ul className="list-disc space-y-1 pl-3.5 marker:text-muted-foreground/50">
-                {mainDiagnoses.map(renderDiagnosis)}
-              </ul>
-              {secondaryDiagnoses.length > 0 ? (
-                <div>
-                  <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">
-                    {tx("Сопутствующие", "Nebendiagnosen")}
-                  </p>
-                  <ul className="list-disc space-y-1 pl-3.5 marker:text-muted-foreground/40">
-                    {secondaryDiagnoses.map(renderDiagnosis)}
-                  </ul>
-                </div>
-              ) : null}
+      <div className="grid gap-x-5 gap-y-4 lg:grid-cols-[minmax(0,1fr)_14rem]">
+        <div className="min-w-0 space-y-4">
+          <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-[0.8fr_1.3fr_1.3fr]">
+            <div className="min-w-0">
+              <ColumnTitle count={allergyItems.length || undefined}>{tx("Аллергии", "Allergien")}</ColumnTitle>
+              {allergyItems.length === 0 ? (
+                dash
+              ) : (
+                <ul className="space-y-0.5 text-[13px] font-medium leading-snug text-rose-700">
+                  {allergyItems.map((item, index) => (
+                    <li key={index}>{item}</li>
+                  ))}
+                </ul>
+              )}
             </div>
-          )}
+
+            <div className="min-w-0">
+              <ColumnTitle count={diagnoses.length || undefined}>{tx("Диагнозы", "Diagnosen")}</ColumnTitle>
+              {diagnoses.length === 0 ? (
+                dash
+              ) : (
+                <div className="space-y-1.5">
+                  <ul className="list-disc space-y-1 pl-3.5 marker:text-muted-foreground/50">
+                    {mainDiagnoses.map(renderDiagnosis)}
+                  </ul>
+                  {secondaryDiagnoses.length > 0 ? (
+                    <div>
+                      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">
+                        {tx("Сопутствующие", "Nebendiagnosen")}
+                      </p>
+                      <ul className="list-disc space-y-1 pl-3.5 marker:text-muted-foreground/40">
+                        {secondaryDiagnoses.map(renderDiagnosis)}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+
+            <div className="min-w-0">
+              <ColumnTitle count={recommendations.length || undefined}>{tx("Рекомендации", "Empfehlungen")}</ColumnTitle>
+              {recommendations.length === 0 ? (
+                dash
+              ) : (
+                <ul className="list-disc space-y-1 pl-3.5 marker:text-muted-foreground/50">
+                  {recommendations.map((rec) => {
+                    const sub: string[] = [];
+                    if (rec.recommendation_type) sub.push(rec.recommendation_type);
+                    sub.push(...splitLines(rec.description));
+                    if (rec.due_at) sub.push(rec.due_at);
+                    return (
+                      <li key={rec.id} className="leading-snug">
+                        <span className="text-[13px] font-medium text-foreground">{rec.title}</span>
+                        <SubBullets items={sub} />
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <ColumnTitle count={medications.length || undefined}>
+              {tx("Назначенные препараты", "Verordnete Medikamente")}
+            </ColumnTitle>
+            {medications.length === 0 ? (
+              dash
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-border/70 bg-background">
+                <table className="w-full min-w-[720px] border-collapse text-left text-xs">
+                  <thead className="border-b border-border/70 bg-muted/40 text-[10px] uppercase text-muted-foreground">
+                    <tr>
+                      {medColumns.map((column) => (
+                        <th key={column} scope="col" className="px-2.5 py-1.5 font-semibold">
+                          {column}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {medications.map((item, index) => (
+                      <tr key={item.id ?? index} className="align-top">
+                        <td className="px-2.5 py-1.5 text-foreground">{item.wirkstoff || "—"}</td>
+                        <td className="px-2.5 py-1.5 font-medium text-foreground">
+                          {item.handelsname || tx("Без названия", "Ohne Namen")}
+                        </td>
+                        <td className="whitespace-nowrap px-2.5 py-1.5 font-mono text-foreground">{item.staerke || ""}</td>
+                        <td className="px-2.5 py-1.5 text-foreground">{item.form || ""}</td>
+                        <td className="whitespace-nowrap px-2.5 py-1.5 font-mono text-foreground">{intakeScheme(item) || "—"}</td>
+                        <td className="px-2.5 py-1.5 text-muted-foreground">{item.hinweis || ""}</td>
+                        <td className="px-2.5 py-1.5 text-foreground">{item.grund || ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="min-w-0">
-          <ColumnTitle count={recommendations.length || undefined}>{tx("Рекомендации", "Empfehlungen")}</ColumnTitle>
-          {recommendations.length === 0 ? (
-            dash
-          ) : (
-            <ul className="list-disc space-y-1 pl-3.5 marker:text-muted-foreground/50">
-              {recommendations.map((rec) => {
-                const sub: string[] = [];
-                if (rec.recommendation_type) sub.push(rec.recommendation_type);
-                sub.push(...splitLines(rec.description));
-                if (rec.due_at) sub.push(rec.due_at);
-                return (
-                  <li key={rec.id} className="leading-snug">
-                    <span className="text-[13px] font-medium text-foreground">{rec.title}</span>
-                    <SubBullets items={sub} />
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-
-        <div className="min-w-0 lg:border-l lg:border-border/60 lg:pl-4">
+        <aside className="min-w-0 border-t border-border/60 pt-3 lg:-my-3 lg:-mr-3 lg:self-stretch lg:rounded-r-2xl lg:border-l lg:border-t-0 lg:border-border/60 lg:bg-muted/30 lg:p-3">
           <ColumnTitle count={doctors.length || undefined}>{tx("Лечащие врачи", "Behandelnde Ärzte")}</ColumnTitle>
           {doctors.length === 0 ? (
             dash
@@ -343,45 +385,7 @@ export function PatientOverviewCard({
               ))}
             </ul>
           )}
-        </div>
-      </div>
-
-      <div>
-        <ColumnTitle count={medications.length || undefined}>
-          {tx("Назначенные препараты", "Verordnete Medikamente")}
-        </ColumnTitle>
-        {medications.length === 0 ? (
-          dash
-        ) : (
-          <div className="overflow-x-auto rounded-lg border border-border/70 bg-background">
-            <table className="w-full min-w-[720px] border-collapse text-left text-xs">
-              <thead className="border-b border-border/70 bg-muted/40 text-[10px] uppercase text-muted-foreground">
-                <tr>
-                  {medColumns.map((column) => (
-                    <th key={column} scope="col" className="px-2.5 py-1.5 font-semibold">
-                      {column}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/60">
-                {medications.map((item, index) => (
-                  <tr key={item.id ?? index} className="align-top">
-                    <td className="px-2.5 py-1.5 text-foreground">{item.wirkstoff || "—"}</td>
-                    <td className="px-2.5 py-1.5 font-medium text-foreground">
-                      {item.handelsname || tx("Без названия", "Ohne Namen")}
-                    </td>
-                    <td className="whitespace-nowrap px-2.5 py-1.5 font-mono text-foreground">{item.staerke || ""}</td>
-                    <td className="px-2.5 py-1.5 text-foreground">{item.form || ""}</td>
-                    <td className="whitespace-nowrap px-2.5 py-1.5 font-mono text-foreground">{intakeScheme(item) || "—"}</td>
-                    <td className="px-2.5 py-1.5 text-muted-foreground">{item.hinweis || ""}</td>
-                    <td className="px-2.5 py-1.5 text-foreground">{item.grund || ""}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        </aside>
       </div>
     </section>
   );
