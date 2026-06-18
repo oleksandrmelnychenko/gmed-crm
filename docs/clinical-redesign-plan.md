@@ -7,7 +7,7 @@ Status legend: ☐ todo · ◐ in progress · ☑ done
 
 ---
 
-## Phase 1 — Diagnosen as a tree  ◐
+## Phase 1 — Diagnosen as a tree  ☑ (shipped)
 
 Turn the flat diagnoses list into a **tree** (`patient_diagnoses` gets a self-referential
 `parent_id`). Arbitrary depth.
@@ -78,7 +78,7 @@ Components: `CountrySelect({ value, onChange, lang, className?, ariaLabel?, incl
 
 ---
 
-## Phase 2 — Anamnese (was "Анамнез и заключение")  ☐
+## Phase 2 — Anamnese (was "Анамнез и заключение")  ☑ (shipped)
 
 - ☐ Rename section **"Анамнез и заключение" → "Анамнез"**.
 - ☐ **Remove** the **"Объективный осмотр" (Untersuchungsbefund)** field.
@@ -110,13 +110,17 @@ Components: `CountrySelect({ value, onChange, lang, className?, ariaLabel?, incl
 
 ---
 
-## Phase 3 — Aktuelle Medikation  ☐  (blocked: needs "аркуш 5" lists)
+## Phase 3 — Aktuelle Medikation  ☑ (shipped; lists from "аркуш 5" wired; ON HOLD shipped)
 
 - ☐ **Einnahmeform** (route of administration) — required, dropdown (list from sheet 5).
 - ☐ Rename **Form → Darreichungsform** (dosage form) — required, dropdown (list from sheet 5).
 - ☐ Add **prescription date** (if any) + **prescribing doctor** (if any).
 - ☐ Add **start / end date** (e.g. medication taken only for a period).
 - ☐ Add a **status** (proposed values: `aktiv` / `pausiert` / `abgesetzt` / `geplant` — confirm with Olek).
+- ☐ **ON HOLD** (follow-up, after Phase-3 audit): a checkbox / "Na Hold" action meaning the patient is
+  temporarily NOT taking the medication. Clicking it opens a **modal** capturing a **"bis wann / до коли"**
+  date (`hold_until`) and a **note** (`hold_note`). New columns `on_hold` (bool), `hold_until` (date),
+  `hold_note` (text); the medication row shows a hold badge with the until-date.
 - ☐ Checkboxes:
   - **Rechtlicher Status**: ☐ Apothekenpflichtig · ☐ Rezeptpflichtig (Verschreibungspflichtig) · ☐ Betäubungsmittel (BTM)
   - **Warnhinweise**: ☐ Aut-Idem-Sperre · ☐ Abgabebeschränkung · ☐ Sonstige Vermerke → free-text when checked
@@ -125,7 +129,7 @@ Components: `CountrySelect({ value, onChange, lang, className?, ariaLabel?, incl
 
 ---
 
-## Phase 4 — Empfehlungen (lifecycle)  ☐
+## Phase 4 — Empfehlungen (lifecycle)  ☑ (shipped)
 
 - ☐ Recommendation text
 - ☐ Recommendation date
@@ -138,7 +142,7 @@ Components: `CountrySelect({ value, onChange, lang, className?, ariaLabel?, incl
 
 ---
 
-## Phase 5 — Allergien & CAVE as multi-entry CRUD  ☐
+## Phase 5 — Allergien & CAVE as multi-entry CRUD  ☑ (shipped)
 
 Today this is a single free-text field (`patients.clinical_warnings`, surfaced as "Аллергии"/CAVE
 in the overview card). Make both **multi-entry lists with full CRUD** (add many / edit / delete).
