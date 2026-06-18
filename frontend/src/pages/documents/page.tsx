@@ -234,6 +234,17 @@ function formatLanguageLabel(language?: string | null) {
 
 const TRANSLATION_LANGUAGE_OPTIONS = ["de"] as const;
 
+// Roles the backend accepts as a translation assignee (validate_translation_assignee).
+// The shared /documents/meta/staff list also returns billing/it_admin, who would be
+// rejected with a 422 if offered here — so the assignee dropdown is filtered to these.
+const TRANSLATION_ASSIGNEE_ROLES = [
+  "ceo",
+  "patient_manager",
+  "teamlead_interpreter",
+  "interpreter",
+  "concierge",
+] as const;
+
 const TEMPLATE_GROUP_ORDER = [
   "contract",
   "finance",
@@ -2108,11 +2119,19 @@ function StaffDocumentsPage({
   async function handleSaveTranslationWorkspace(requestId: string) {
     const request = translationRequests.find((item) => item.id === requestId);
     if (!request) return;
+    // Send the current assignee explicitly: when omitted, the backend
+    // auto-assigns an in_progress request to whoever clicked Save, clobbering
+    // the existing исполнитель.
+    const currentAssignee =
+      translationDraftsRef.current[requestId]?.assignedTo ??
+      request.assigned_to ??
+      null;
     await handleUpdateTranslationRequest(
       requestId,
       request.status,
       undefined,
       t.documents_translation_workspace_saved,
+      { assignedTo: currentAssignee },
     );
   }
 
@@ -5027,11 +5046,19 @@ function StaffDocumentsPage({
                                             disabled={translationBusy}
                                           >
                                             <option value="">{t.documents_unassigned}</option>
-                                            {staff.map((member) => (
-                                              <option key={member.id} value={member.id}>
-                                                {member.name} / {formatRoleLabel(member.role)}
-                                              </option>
-                                            ))}
+                                            {staff
+                                              .filter(
+                                                (member) =>
+                                                  (
+                                                    TRANSLATION_ASSIGNEE_ROLES as readonly string[]
+                                                  ).includes(member.role) ||
+                                                  member.id === draft.assignedTo,
+                                              )
+                                              .map((member) => (
+                                                <option key={member.id} value={member.id}>
+                                                  {member.name} / {formatRoleLabel(member.role)}
+                                                </option>
+                                              ))}
                                           </NativeComboboxSelect>
                                         </Field>
                                       </div>
