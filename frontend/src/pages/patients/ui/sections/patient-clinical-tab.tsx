@@ -20,6 +20,8 @@ import { DARREICHUNGSFORM_OPTIONS, EINNAHMEFORM_OPTIONS } from "../../data/medic
 
 import {
   blankNarrative,
+  createPatientRecommendation,
+  deletePatientRecommendation,
   fetchAllDoctors,
   fetchNarrativeHistory,
   fetchPatientClinical,
@@ -30,6 +32,7 @@ import {
   savePatientMedications,
   savePatientNarrative,
   savePatientProcedures,
+  updatePatientRecommendation,
   type AllDoctorOption,
   type ClinicalAttribution,
   type ClinicalDiagnosis,
@@ -40,6 +43,7 @@ import {
   type ClinicalWarning,
   type ClinicalWarningKind,
   type PatientRecommendation,
+  type RecommendationLifecycleStatus,
 } from "@/pages/patients/data/patient-clinical";
 
 import { AnamneseSection } from "./anamnese-section";
@@ -584,6 +588,493 @@ function CheckboxField({
       />
       {label}
     </label>
+  );
+}
+
+/** Empfehlungstyp options (value matches the DB `recommendation_type` check). */
+const RECOMMENDATION_TYPE_OPTIONS: { value: string; ru: string; de: string }[] = [
+  { value: "follow_up", ru: "Контрольный визит", de: "Kontrolltermin" },
+  { value: "consultation", ru: "Консультация", de: "Konsultation" },
+  { value: "lab_test", ru: "Лабораторный анализ", de: "Laboruntersuchung" },
+  { value: "imaging", ru: "Визуализация", de: "Bildgebung" },
+  { value: "document", ru: "Документ", de: "Dokument" },
+  { value: "medication_review", ru: "Проверка медикаментов", de: "Medikationsprüfung" },
+  { value: "other", ru: "Другое", de: "Sonstiges" },
+];
+
+const RECOMMENDATION_PRIORITY_OPTIONS: { value: string; ru: string; de: string }[] = [
+  { value: "low", ru: "Низкий", de: "Niedrig" },
+  { value: "normal", ru: "Обычный", de: "Normal" },
+  { value: "high", ru: "Высокий", de: "Hoch" },
+  { value: "urgent", ru: "Срочный", de: "Dringend" },
+];
+
+const LIFECYCLE_OPTIONS: { value: RecommendationLifecycleStatus; ru: string; de: string }[] = [
+  { value: "aktiv", ru: "Активна", de: "Aktiv" },
+  { value: "erfolg", ru: "Выполнена", de: "Erfolg" },
+  { value: "nicht_erfolgt", ru: "Не выполнена", de: "Nicht erfolgt" },
+  { value: "unbekannt", ru: "Неизвестно", de: "Unbekannt" },
+];
+
+/** Draft used by the create/edit form; `id` absent means "create". */
+type RecommendationDraft = {
+  id?: string;
+  title: string;
+  description: string | null;
+  recommendation_type: string | null;
+  source_doctor_id: string | null;
+  recommended_on: string | null;
+  priority: string | null;
+  valid_from: string | null;
+  valid_to: string | null;
+  reminder_lead_days: number | null;
+  reminder_at: string | null;
+  lifecycle_status: RecommendationLifecycleStatus;
+  outcome_note: string | null;
+  outcome_at: string | null;
+  note_intern: string | null;
+};
+
+function blankRecommendationDraft(): RecommendationDraft {
+  return {
+    title: "",
+    description: null,
+    recommendation_type: null,
+    source_doctor_id: null,
+    recommended_on: null,
+    priority: "normal",
+    valid_from: null,
+    valid_to: null,
+    reminder_lead_days: null,
+    reminder_at: null,
+    lifecycle_status: "aktiv",
+    outcome_note: null,
+    outcome_at: null,
+    note_intern: null,
+  };
+}
+
+function recommendationToDraft(rec: PatientRecommendation): RecommendationDraft {
+  return {
+    id: rec.id,
+    title: rec.title,
+    description: rec.description,
+    recommendation_type: rec.recommendation_type,
+    source_doctor_id: rec.source_doctor_id,
+    recommended_on: rec.recommended_on,
+    priority: rec.priority,
+    valid_from: rec.valid_from,
+    valid_to: rec.valid_to,
+    reminder_lead_days: rec.reminder_lead_days,
+    reminder_at: rec.reminder_at,
+    lifecycle_status: rec.lifecycle_status,
+    outcome_note: rec.outcome_note,
+    outcome_at: rec.outcome_at,
+    note_intern: rec.note_intern,
+  };
+}
+
+function lifecycleBadgeClass(status: RecommendationLifecycleStatus): string {
+  switch (status) {
+    case "erfolg":
+      return "border-emerald-300 bg-emerald-50 text-emerald-700";
+    case "nicht_erfolgt":
+      return "border-rose-300 bg-rose-50 text-rose-700";
+    case "unbekannt":
+      return "border-zinc-300 bg-zinc-50 text-zinc-600";
+    default:
+      return "border-sky-300 bg-sky-50 text-sky-700";
+  }
+}
+
+/** Admin CRUD for patient recommendations (Empfehlungen). Replaces the old read-only block. */
+function PatientRecommendationsSection({
+  recommendations,
+  allDoctors,
+  patientId,
+  canManage,
+  onReload,
+  tx,
+}: {
+  recommendations: PatientRecommendation[];
+  allDoctors: AllDoctorOption[];
+  patientId: string;
+  canManage: boolean;
+  onReload: () => void;
+  tx: Bilingual;
+}) {
+  const [editing, setEditing] = useState<RecommendationDraft | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [showDone, setShowDone] = useState(false);
+
+  const set = (patch: Partial<RecommendationDraft>) =>
+    setEditing((current) => (current ? { ...current, ...patch } : current));
+
+  const typeLabel = (value: string | null) => {
+    const option = RECOMMENDATION_TYPE_OPTIONS.find((o) => o.value === value);
+    return option ? tx(option.ru, option.de) : null;
+  };
+  const lifecycleLabel = (value: RecommendationLifecycleStatus) => {
+    const option = LIFECYCLE_OPTIONS.find((o) => o.value === value);
+    return option ? tx(option.ru, option.de) : value;
+  };
+  const doctorName = (rec: PatientRecommendation) => {
+    if (rec.source_doctor_name) return rec.source_doctor_name;
+    const doctor = allDoctors.find((d) => d.id === rec.source_doctor_id);
+    return doctor ? [doctor.title, doctor.name].filter(Boolean).join(" ") : null;
+  };
+  const validityLabel = (rec: PatientRecommendation) =>
+    [rec.valid_from, rec.valid_to].some(Boolean)
+      ? `${rec.valid_from ?? "…"} – ${rec.valid_to ?? "…"}`
+      : null;
+
+  const isValid = (draft: RecommendationDraft) => draft.title.trim() !== "";
+
+  async function submitDraft() {
+    if (!editing || !isValid(editing)) return;
+    setBusy(true);
+    try {
+      const payload = {
+        title: editing.title.trim(),
+        description: editing.description,
+        recommendation_type: editing.recommendation_type,
+        source_doctor_id: editing.source_doctor_id,
+        recommended_on: editing.recommended_on,
+        priority: editing.priority,
+        valid_from: editing.valid_from,
+        valid_to: editing.valid_to,
+        reminder_lead_days: editing.reminder_lead_days,
+        reminder_at: editing.reminder_at,
+        lifecycle_status: editing.lifecycle_status,
+        outcome_note: editing.lifecycle_status === "aktiv" ? null : editing.outcome_note,
+        outcome_at: editing.lifecycle_status === "erfolg" ? editing.outcome_at : null,
+        note_intern: editing.note_intern,
+      };
+      if (editing.id) {
+        await updatePatientRecommendation(patientId, editing.id, payload);
+      } else {
+        await createPatientRecommendation(patientId, payload);
+      }
+      setEditing(null);
+      onReload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : tx("Не удалось сохранить", "Speichern fehlgeschlagen"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeRecommendation(rec: PatientRecommendation) {
+    setBusy(true);
+    try {
+      await deletePatientRecommendation(patientId, rec.id);
+      onReload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : tx("Не удалось удалить", "Löschen fehlgeschlagen"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const activeRecs = recommendations.filter((rec) => rec.lifecycle_status !== "erfolg");
+  const doneRecs = recommendations.filter((rec) => rec.lifecycle_status === "erfolg");
+
+  const renderRow = (rec: PatientRecommendation, muted: boolean) => (
+    <div
+      key={rec.id}
+      className={cn(
+        "flex items-start justify-between gap-3 rounded-lg border border-border/50 px-3 py-2",
+        muted ? "bg-muted/40" : "bg-background",
+      )}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-foreground">{rec.title}</span>
+          {typeLabel(rec.recommendation_type) ? (
+            <Badge variant="outline" className="rounded-full text-[10px]">
+              {typeLabel(rec.recommendation_type)}
+            </Badge>
+          ) : null}
+          <Badge variant="outline" className={cn("rounded-full text-[10px]", lifecycleBadgeClass(rec.lifecycle_status))}>
+            {lifecycleLabel(rec.lifecycle_status)}
+          </Badge>
+        </div>
+        {rec.description ? <p className="text-[11px] text-muted-foreground">{rec.description}</p> : null}
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+          {doctorName(rec) ? <span>{doctorName(rec)}</span> : null}
+          {validityLabel(rec) ? <span>{validityLabel(rec)}</span> : null}
+        </div>
+      </div>
+      {canManage ? (
+        <div className="flex shrink-0 gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="size-7 rounded-md p-0"
+            aria-label={tx("Редактировать", "Bearbeiten")}
+            title={tx("Редактировать", "Bearbeiten")}
+            onClick={() => setEditing(recommendationToDraft(rec))}
+          >
+            <Pencil className="size-3.5" />
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="size-7 rounded-md p-0 text-destructive"
+            aria-label={tx("Удалить", "Löschen")}
+            title={tx("Удалить", "Löschen")}
+            disabled={busy}
+            onClick={() => void removeRecommendation(rec)}
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <section className="rounded-xl border border-border/70 bg-card">
+      <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-foreground">{tx("Рекомендации", "Empfehlungen")}</h3>
+          <Badge variant="outline" className="rounded-full text-[11px]">{recommendations.length}</Badge>
+        </div>
+        {canManage ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 rounded-lg"
+            onClick={() => setEditing(blankRecommendationDraft())}
+          >
+            <Plus className="size-3.5" />
+            {tx("Empfehlung", "Empfehlung")}
+          </Button>
+        ) : null}
+      </header>
+
+      <div className="space-y-2 p-3">
+        {recommendations.length === 0 ? (
+          <p className="px-1 py-4 text-center text-xs text-muted-foreground">
+            {tx("Рекомендаций нет", "Keine Empfehlungen")}
+          </p>
+        ) : null}
+
+        {activeRecs.map((rec) => renderRow(rec, false))}
+
+        {doneRecs.length > 0 ? (
+          <div className="space-y-2">
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+              onClick={() => setShowDone((current) => !current)}
+            >
+              <span>{tx("Выполнено", "Erledigt")}</span>
+              <Badge variant="outline" className="rounded-full text-[10px]">{doneRecs.length}</Badge>
+              <span className="ml-auto text-[10px]">{showDone ? tx("Скрыть", "Ausblenden") : tx("Показать", "Anzeigen")}</span>
+            </button>
+            {showDone ? doneRecs.map((rec) => renderRow(rec, true)) : null}
+          </div>
+        ) : null}
+
+        <PatientSheetScaffold
+          open={Boolean(editing)}
+          onOpenChange={(open) => {
+            if (!open) setEditing(null);
+          }}
+          width="form-heavy"
+          title={
+            editing?.id
+              ? `${tx("Редактировать", "Bearbeiten")}: ${tx("Рекомендация", "Empfehlung")}`
+              : `${tx("Добавить", "Hinzufügen")}: ${tx("Рекомендация", "Empfehlung")}`
+          }
+          footer={
+            <>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 rounded-lg"
+                onClick={() => setEditing(null)}
+              >
+                {tx("Отмена", "Abbrechen")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 rounded-lg"
+                disabled={busy || !editing || !isValid(editing)}
+                onClick={submitDraft}
+              >
+                {tx("Сохранить", "Speichern")}
+              </Button>
+            </>
+          }
+        >
+          {editing ? (
+            <div className="space-y-2">
+              <Field label={tx("Заголовок", "Titel")}>
+                <Input
+                  value={editing.title}
+                  onChange={(e) => set({ title: e.target.value })}
+                  className={inputClass}
+                  placeholder={tx("Контроль через 3 месяца", "Kontrolle in 3 Monaten")}
+                />
+              </Field>
+              <Field label={tx("Описание", "Beschreibung")}>
+                <textarea
+                  value={editing.description ?? ""}
+                  onChange={(e) => set({ description: trimToNull(e.target.value) })}
+                  className={cn(inputClass, "h-20 py-2")}
+                />
+              </Field>
+              <div className="grid gap-2 md:grid-cols-2">
+                <Field label={tx("Тип", "Typ")}>
+                  <NativeComboboxSelect
+                    value={editing.recommendation_type ?? ""}
+                    aria-label={tx("Тип", "Typ")}
+                    className={inputClass}
+                    onChange={(e) => set({ recommendation_type: e.target.value || null })}
+                  >
+                    <option value="">—</option>
+                    {RECOMMENDATION_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {tx(option.ru, option.de)}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                </Field>
+                <Field label={tx("Рекомендующий врач", "Empfehlender Arzt")}>
+                  <NativeComboboxSelect
+                    value={editing.source_doctor_id ?? ""}
+                    aria-label={tx("Рекомендующий врач", "Empfehlender Arzt")}
+                    className={inputClass}
+                    onChange={(e) => set({ source_doctor_id: e.target.value || null })}
+                  >
+                    <option value="">—</option>
+                    {allDoctors.map((doctor) => (
+                      <option key={doctor.id} value={doctor.id}>
+                        {[doctor.title, doctor.name].filter(Boolean).join(" ")}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                </Field>
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                <Field label={tx("Дата рекомендации", "Empfohlen am")}>
+                  <Input
+                    type="date"
+                    value={editing.recommended_on ?? ""}
+                    onChange={(e) => set({ recommended_on: trimToNull(e.target.value) })}
+                    className={inputClass}
+                  />
+                </Field>
+                <Field label={tx("Приоритет", "Priorität")}>
+                  <NativeComboboxSelect
+                    value={editing.priority ?? ""}
+                    aria-label={tx("Приоритет", "Priorität")}
+                    className={inputClass}
+                    onChange={(e) => set({ priority: e.target.value || null })}
+                  >
+                    <option value="">—</option>
+                    {RECOMMENDATION_PRIORITY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {tx(option.ru, option.de)}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                </Field>
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                <Field label={tx("Действует с", "Gültig ab")}>
+                  <Input
+                    type="date"
+                    value={editing.valid_from ?? ""}
+                    onChange={(e) => set({ valid_from: trimToNull(e.target.value) })}
+                    className={inputClass}
+                  />
+                </Field>
+                <Field label={tx("Действует до", "Gültig bis")}>
+                  <Input
+                    type="date"
+                    value={editing.valid_to ?? ""}
+                    onChange={(e) => set({ valid_to: trimToNull(e.target.value) })}
+                    className={inputClass}
+                  />
+                </Field>
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                <Field label={tx("Напомнить за (дней)", "Erinnerung (Tage vorher)")}>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={editing.reminder_lead_days ?? ""}
+                    onChange={(e) => {
+                      const raw = e.target.value.trim();
+                      set({ reminder_lead_days: raw === "" ? null : Number(raw) });
+                    }}
+                    className={inputClass}
+                  />
+                </Field>
+                <Field label={tx("Дата напоминания", "Erinnerungsdatum")}>
+                  <Input
+                    type="date"
+                    value={editing.reminder_at ?? ""}
+                    onChange={(e) => set({ reminder_at: trimToNull(e.target.value) })}
+                    className={inputClass}
+                  />
+                </Field>
+              </div>
+              <Field label={tx("Статус выполнения", "Status")}>
+                <NativeComboboxSelect
+                  value={editing.lifecycle_status}
+                  aria-label={tx("Статус выполнения", "Status")}
+                  className={inputClass}
+                  onChange={(e) => set({ lifecycle_status: e.target.value as RecommendationLifecycleStatus })}
+                >
+                  {LIFECYCLE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {tx(option.ru, option.de)}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </Field>
+              {editing.lifecycle_status !== "aktiv" ? (
+                <div className="grid gap-2 md:grid-cols-2">
+                  <Field label={tx("Примечание к результату", "Ergebnisnotiz")}>
+                    <Input
+                      value={editing.outcome_note ?? ""}
+                      onChange={(e) => set({ outcome_note: trimToNull(e.target.value) })}
+                      className={inputClass}
+                    />
+                  </Field>
+                  {editing.lifecycle_status === "erfolg" ? (
+                    <Field label={tx("Дата выполнения", "Erledigt am")}>
+                      <Input
+                        type="date"
+                        value={editing.outcome_at ?? ""}
+                        onChange={(e) => set({ outcome_at: trimToNull(e.target.value) })}
+                        className={inputClass}
+                      />
+                    </Field>
+                  ) : null}
+                </div>
+              ) : null}
+              <Field label={tx("Внутренняя заметка", "Interne Notiz")}>
+                <textarea
+                  value={editing.note_intern ?? ""}
+                  onChange={(e) => set({ note_intern: trimToNull(e.target.value) })}
+                  className={cn(inputClass, "h-20 py-2")}
+                />
+              </Field>
+            </div>
+          ) : null}
+        </PatientSheetScaffold>
+      </div>
+    </section>
   );
 }
 
@@ -1286,38 +1777,19 @@ export function PatientClinicalTab({
         )}
       />
 
-      {/* ---- Recommendations (read-only, existing feature) ---- */}
-      <section className="rounded-xl border border-border/70 bg-card">
-        <header className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
-          <h3 className="text-sm font-semibold text-foreground">{tx("Рекомендации", "Empfehlungen")}</h3>
-          <Badge variant="outline" className="rounded-full text-[11px]">{recommendations.length}</Badge>
-        </header>
-        <div className="space-y-2 p-3">
-          {recommendations.length === 0 ? (
-            <p className="px-1 py-4 text-center text-xs text-muted-foreground">
-              {tx("Рекомендаций нет", "Keine Empfehlungen")}
-            </p>
-          ) : (
-            recommendations.map((rec) => (
-              <div key={rec.id} className="rounded-lg border border-border/50 bg-background px-3 py-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-foreground">{rec.title}</span>
-                  {rec.due_at ? <span className="text-[11px] text-muted-foreground">{rec.due_at}</span> : null}
-                  {rec.status ? (
-                    <Badge variant="outline" className="rounded-full text-[10px]">{rec.status}</Badge>
-                  ) : null}
-                </div>
-                {rec.description ? (
-                  <p className="text-[11px] text-muted-foreground">{rec.description}</p>
-                ) : null}
-                {rec.source_doctor_name ? (
-                  <p className="mt-0.5 text-[11px] text-muted-foreground">{rec.source_doctor_name}</p>
-                ) : null}
-              </div>
-            ))
-          )}
-        </div>
-      </section>
+      {/* ---- Recommendations (Empfehlungen) — admin CRUD ---- */}
+      <PatientRecommendationsSection
+        recommendations={recommendations}
+        allDoctors={allDoctors}
+        patientId={patientId}
+        canManage={canManage}
+        tx={tx}
+        onReload={() => {
+          fetchPatientRecommendations(patientId)
+            .then((recs) => setRecommendations(recs ?? []))
+            .catch(() => setVersion((current) => current + 1));
+        }}
+      />
     </ClinicalWrapper>
   );
 }

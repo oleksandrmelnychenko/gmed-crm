@@ -170,16 +170,62 @@ export type PatientClinicalProfile = {
   cave: ClinicalWarning[];
 };
 
+/** Empfehlung outcome lifecycle, independent of the existing `status` field. */
+export type RecommendationLifecycleStatus =
+  | "aktiv"
+  | "erfolg"
+  | "nicht_erfolgt"
+  | "unbekannt";
+
 export type PatientRecommendation = {
   id: string;
   title: string;
   description: string | null;
   recommendation_type: string | null;
+  source_doctor_id: string | null;
   source_doctor_name: string | null;
   due_at: string | null;
   priority: string | null;
   status: string | null;
+  /** Date the recommendation was made (YYYY-MM-DD). */
+  recommended_on: string | null;
+  /** Validity period start/end (YYYY-MM-DD). */
+  valid_from: string | null;
+  valid_to: string | null;
+  /** Remind this many days before `valid_to` when only an end date is set. */
+  reminder_lead_days: number | null;
+  /** Explicit reminder date (YYYY-MM-DD). */
+  reminder_at: string | null;
+  lifecycle_status: RecommendationLifecycleStatus;
+  /** Note for erfolg / nicht_erfolgt / unbekannt outcomes. */
+  outcome_note: string | null;
+  /** Completion date for the erfolg outcome (YYYY-MM-DD). */
+  outcome_at: string | null;
+  /** Internal staff-only note. */
+  note_intern: string | null;
 };
+
+/** Writable fields accepted by create/update; all optional on update. */
+export type PatientRecommendationInput = Partial<
+  Pick<
+    PatientRecommendation,
+    | "title"
+    | "description"
+    | "recommendation_type"
+    | "source_doctor_id"
+    | "due_at"
+    | "priority"
+    | "recommended_on"
+    | "valid_from"
+    | "valid_to"
+    | "reminder_lead_days"
+    | "reminder_at"
+    | "lifecycle_status"
+    | "outcome_note"
+    | "outcome_at"
+    | "note_intern"
+  >
+>;
 
 /** A doctor at any active provider, used for the diagnosis "treating doctor" picker. */
 export type AllDoctorOption = {
@@ -201,6 +247,36 @@ export function fetchPatientClinical(patientId: string) {
 
 export function fetchPatientRecommendations(patientId: string) {
   return apiFetch<PatientRecommendation[]>(`/patients/${patientId}/recommendations`);
+}
+
+export function createPatientRecommendation(
+  patientId: string,
+  payload: PatientRecommendationInput,
+) {
+  return postJson<PatientRecommendation>(
+    "/patients/" + patientId + "/recommendations",
+    payload,
+  );
+}
+
+export function updatePatientRecommendation(
+  patientId: string,
+  recommendationId: string,
+  payload: PatientRecommendationInput,
+) {
+  return postJson<PatientRecommendation>(
+    "/patients/" + patientId + "/recommendations/" + recommendationId + "/update",
+    payload,
+  );
+}
+
+export function deletePatientRecommendation(
+  patientId: string,
+  recommendationId: string,
+) {
+  return postJson(
+    "/patients/" + patientId + "/recommendations/" + recommendationId + "/delete",
+  );
 }
 
 export function savePatientDiagnoses(patientId: string, items: ClinicalDiagnosis[]) {

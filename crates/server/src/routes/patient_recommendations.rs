@@ -39,6 +39,10 @@ pub fn router() -> Router<AppState> {
             "/patients/{patient_id}/recommendations/{recommendation_id}/update",
             post(update_patient_recommendation),
         )
+        .route(
+            "/patients/{patient_id}/recommendations/{recommendation_id}/delete",
+            post(delete_patient_recommendation),
+        )
 }
 
 #[derive(Deserialize)]
@@ -53,6 +57,15 @@ struct CreateRecommendationRequest {
     due_at: Option<String>,
     priority: Option<String>,
     portal_visible: Option<bool>,
+    recommended_on: Option<String>,
+    valid_from: Option<String>,
+    valid_to: Option<String>,
+    reminder_lead_days: Option<i32>,
+    reminder_at: Option<String>,
+    lifecycle_status: Option<String>,
+    outcome_note: Option<String>,
+    outcome_at: Option<String>,
+    note_intern: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -68,6 +81,15 @@ struct UpdateRecommendationRequest {
     priority: Option<String>,
     status: Option<String>,
     portal_visible: Option<bool>,
+    recommended_on: Option<String>,
+    valid_from: Option<String>,
+    valid_to: Option<String>,
+    reminder_lead_days: Option<i32>,
+    reminder_at: Option<String>,
+    lifecycle_status: Option<String>,
+    outcome_note: Option<String>,
+    outcome_at: Option<String>,
+    note_intern: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -151,6 +173,20 @@ async fn create_patient_recommendation(
     };
     let description = normalize_optional_text(body.description.as_deref());
     let portal_visible = body.portal_visible.unwrap_or(true);
+    let lifecycle_status = match body.lifecycle_status.as_deref() {
+        Some(value) => match normalize_lifecycle_status(value) {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        },
+        None => "aktiv",
+    };
+    let recommended_on = normalize_optional_text(body.recommended_on.as_deref());
+    let valid_from = normalize_optional_text(body.valid_from.as_deref());
+    let valid_to = normalize_optional_text(body.valid_to.as_deref());
+    let reminder_at = normalize_optional_text(body.reminder_at.as_deref());
+    let outcome_note = normalize_optional_text(body.outcome_note.as_deref());
+    let outcome_at = normalize_optional_text(body.outcome_at.as_deref());
+    let note_intern = normalize_optional_text(body.note_intern.as_deref());
 
     if let Err(resp) = validate_sources(
         &state,
@@ -169,11 +205,17 @@ async fn create_patient_recommendation(
         r#"INSERT INTO patient_recommendations (
                 patient_id, title, description, recommendation_type,
                 source_doctor_id, source_appointment_id, source_document_id, source_order_id,
-                due_at, priority, status, portal_visible, created_by, updated_by
+                due_at, priority, status, portal_visible,
+                recommended_on, valid_from, valid_to, reminder_lead_days, reminder_at,
+                lifecycle_status, outcome_note, outcome_at, note_intern,
+                created_by, updated_by
            ) VALUES (
                 $1, $2, $3, $4,
                 $5, $6, $7, $8,
-                $9, $10, 'active', $11, $12, $12
+                $9, $10, 'active', $11,
+                $12, $13, $14, $15, $16,
+                $17, $18, $19, $20,
+                $21, $21
            )
            RETURNING id"#,
     )
@@ -188,6 +230,15 @@ async fn create_patient_recommendation(
     .bind(due_at)
     .bind(&priority)
     .bind(portal_visible)
+    .bind(recommended_on.as_deref())
+    .bind(valid_from.as_deref())
+    .bind(valid_to.as_deref())
+    .bind(body.reminder_lead_days)
+    .bind(reminder_at.as_deref())
+    .bind(lifecycle_status)
+    .bind(outcome_note.as_deref())
+    .bind(outcome_at.as_deref())
+    .bind(note_intern.as_deref())
     .bind(auth.user_id)
     .fetch_one(&state.db)
     .await
@@ -314,6 +365,13 @@ async fn update_patient_recommendation(
         },
         None => None,
     };
+    let lifecycle_status = match body.lifecycle_status.as_deref() {
+        Some(value) => match normalize_lifecycle_status(value) {
+            Ok(value) => Some(value),
+            Err(resp) => return resp,
+        },
+        None => None,
+    };
     let due_at = match body.due_at {
         Some(value) => match parse_due_at(Some(value)) {
             Ok(value) => value,
@@ -321,6 +379,41 @@ async fn update_patient_recommendation(
         },
         None => None,
     };
+    let recommended_on = body
+        .recommended_on
+        .as_deref()
+        .map(str::trim)
+        .map(|value| value.to_string());
+    let valid_from = body
+        .valid_from
+        .as_deref()
+        .map(str::trim)
+        .map(|value| value.to_string());
+    let valid_to = body
+        .valid_to
+        .as_deref()
+        .map(str::trim)
+        .map(|value| value.to_string());
+    let reminder_at = body
+        .reminder_at
+        .as_deref()
+        .map(str::trim)
+        .map(|value| value.to_string());
+    let outcome_note = body
+        .outcome_note
+        .as_deref()
+        .map(str::trim)
+        .map(|value| value.to_string());
+    let outcome_at = body
+        .outcome_at
+        .as_deref()
+        .map(str::trim)
+        .map(|value| value.to_string());
+    let note_intern = body
+        .note_intern
+        .as_deref()
+        .map(str::trim)
+        .map(|value| value.to_string());
 
     if let Err(e) = sqlx::query(
         r#"UPDATE patient_recommendations
@@ -335,7 +428,16 @@ async fn update_patient_recommendation(
                priority = COALESCE($11, priority),
                status = COALESCE($12, status),
                portal_visible = COALESCE($13, portal_visible),
-               updated_by = $14
+               recommended_on = COALESCE($14, recommended_on),
+               valid_from = COALESCE($15, valid_from),
+               valid_to = COALESCE($16, valid_to),
+               reminder_lead_days = COALESCE($17, reminder_lead_days),
+               reminder_at = COALESCE($18, reminder_at),
+               lifecycle_status = COALESCE($19, lifecycle_status),
+               outcome_note = COALESCE($20, outcome_note),
+               outcome_at = COALESCE($21, outcome_at),
+               note_intern = COALESCE($22, note_intern),
+               updated_by = $23
            WHERE id = $1 AND patient_id = $2"#,
     )
     .bind(recommendation_id)
@@ -351,6 +453,15 @@ async fn update_patient_recommendation(
     .bind(priority.as_deref())
     .bind(status)
     .bind(body.portal_visible)
+    .bind(recommended_on.as_deref())
+    .bind(valid_from.as_deref())
+    .bind(valid_to.as_deref())
+    .bind(body.reminder_lead_days)
+    .bind(reminder_at.as_deref())
+    .bind(lifecycle_status)
+    .bind(outcome_note.as_deref())
+    .bind(outcome_at.as_deref())
+    .bind(note_intern.as_deref())
     .bind(auth.user_id)
     .execute(&state.db)
     .await
@@ -384,6 +495,60 @@ async fn update_patient_recommendation(
         Ok(None) => err(StatusCode::NOT_FOUND, "Recommendation not found"),
         Err(resp) => resp,
     }
+}
+
+async fn delete_patient_recommendation(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((patient_id, recommendation_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return resp;
+    }
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+
+    let result = match sqlx::query(
+        "DELETE FROM patient_recommendations WHERE id = $1 AND patient_id = $2",
+    )
+    .bind(recommendation_id)
+    .bind(patient_id)
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) => result,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, recommendation_id = %recommendation_id, "delete recommendation");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete recommendation",
+            );
+        }
+    };
+
+    if result.rows_affected() == 0 {
+        return err(StatusCode::NOT_FOUND, "Recommendation not found");
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "recommendation_deleted",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_id),
+        json!({ "recommendation_id": recommendation_id }),
+    ));
+
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "recommendation.deleted",
+        patient_id,
+        json!({ "recommendation_id": recommendation_id }),
+    )
+    .await;
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 async fn list_my_recommendations(
@@ -844,6 +1009,9 @@ fn recommendation_select_sql(where_clause: &str) -> String {
                   pr.source_doctor_id, pr.source_appointment_id, pr.source_document_id,
                   pr.source_order_id,
                   pr.due_at, pr.priority, pr.status, pr.portal_visible,
+                  pr.recommended_on, pr.valid_from, pr.valid_to,
+                  pr.reminder_lead_days, pr.reminder_at,
+                  pr.lifecycle_status, pr.outcome_note, pr.outcome_at, pr.note_intern,
                   pr.patient_decision, pr.decision_note, pr.decided_at,
                   pr.appointment_request_id, pr.created_by, pr.updated_by,
                   pr.created_at, pr.updated_at,
@@ -927,6 +1095,20 @@ fn recommendation_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "priority": row.try_get::<String, _>("priority").unwrap_or_default(),
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
         "portal_visible": row.try_get::<bool, _>("portal_visible").unwrap_or(false),
+        "recommended_on": row.try_get::<Option<String>, _>("recommended_on").unwrap_or_default(),
+        "valid_from": row.try_get::<Option<String>, _>("valid_from").unwrap_or_default(),
+        "valid_to": row.try_get::<Option<String>, _>("valid_to").unwrap_or_default(),
+        "reminder_lead_days": row.try_get::<Option<i32>, _>("reminder_lead_days").unwrap_or_default(),
+        "reminder_at": row.try_get::<Option<String>, _>("reminder_at").unwrap_or_default(),
+        "lifecycle_status": match row.try_get::<String, _>("lifecycle_status").unwrap_or_default().as_str() {
+            "erfolg" => "erfolg",
+            "nicht_erfolgt" => "nicht_erfolgt",
+            "unbekannt" => "unbekannt",
+            _ => "aktiv",
+        },
+        "outcome_note": row.try_get::<Option<String>, _>("outcome_note").unwrap_or_default(),
+        "outcome_at": row.try_get::<Option<String>, _>("outcome_at").unwrap_or_default(),
+        "note_intern": row.try_get::<Option<String>, _>("note_intern").unwrap_or_default(),
         "patient_decision": row.try_get::<Option<String>, _>("patient_decision").unwrap_or_default(),
         "decision_note": row.try_get::<Option<String>, _>("decision_note").unwrap_or_default(),
         "decided_at": row.try_get::<Option<DateTime<Utc>>, _>("decided_at").unwrap_or_default().map(|value| value.to_rfc3339()),
@@ -999,6 +1181,19 @@ fn normalize_status(value: &str) -> Result<&'static str, axum::response::Respons
         _ => Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Invalid recommendation status",
+        )),
+    }
+}
+
+fn normalize_lifecycle_status(value: &str) -> Result<&'static str, axum::response::Response> {
+    match value.trim().to_lowercase().as_str() {
+        "aktiv" => Ok("aktiv"),
+        "erfolg" => Ok("erfolg"),
+        "nicht_erfolgt" => Ok("nicht_erfolgt"),
+        "unbekannt" => Ok("unbekannt"),
+        _ => Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid lifecycle status",
         )),
     }
 }
