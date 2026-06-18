@@ -6,7 +6,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { TabsContent } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
-import { downloadApiFile } from "@/lib/api";
+// import { downloadApiFile } from "@/lib/api"; // PDF-Export (Medikationsplan / Arztbrief) тимчасово вимкнено
 import { useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
@@ -286,54 +286,58 @@ function ProviderDoctorFields({
 
   return (
     <div className="grid gap-2 md:grid-cols-2">
-      <NativeComboboxSelect
-        value={value.provider_id ?? ""}
-        aria-label={tx("Провайдер", "Anbieter")}
-        className={inputClass}
-        onChange={(event) => {
-          const id = event.target.value || null;
-          const name = providers.find((p) => p.id === id)?.name ?? null;
-          onChange({
-            provider_id: id,
-            provider_name: name,
-            doctor_id: null,
-            doctor_name: null,
-            doctor_title: null,
-            doctor_fachbereich: null,
-          });
-        }}
-      >
-        <option value="">{tx("Провайдер", "Anbieter")}</option>
-        {providers.map((provider) => (
-          <option key={provider.id} value={provider.id}>
-            {provider.name}
-          </option>
-        ))}
-      </NativeComboboxSelect>
-      <NativeComboboxSelect
-        value={value.doctor_id ?? ""}
-        disabled={!value.provider_id}
-        aria-label={tx("Врач", "Arzt")}
-        className={inputClass}
-        onChange={(event) => {
-          const id = event.target.value || null;
-          const doctor = doctors.find((d) => d.id === id);
-          onChange({
-            ...value,
-            doctor_id: id,
-            doctor_name: doctor?.name ?? null,
-            doctor_title: doctor?.title ?? null,
-            doctor_fachbereich: doctor?.fachbereich ?? null,
-          });
-        }}
-      >
-        <option value="">{tx("Врач", "Arzt")}</option>
-        {doctors.map((doctor) => (
-          <option key={doctor.id} value={doctor.id}>
-            {[doctor.title, doctor.name].filter(Boolean).join(" ")}
-          </option>
-        ))}
-      </NativeComboboxSelect>
+      <Field label={tx("Провайдер", "Anbieter")}>
+        <NativeComboboxSelect
+          value={value.provider_id ?? ""}
+          aria-label={tx("Провайдер", "Anbieter")}
+          className={inputClass}
+          onChange={(event) => {
+            const id = event.target.value || null;
+            const name = providers.find((p) => p.id === id)?.name ?? null;
+            onChange({
+              provider_id: id,
+              provider_name: name,
+              doctor_id: null,
+              doctor_name: null,
+              doctor_title: null,
+              doctor_fachbereich: null,
+            });
+          }}
+        >
+          <option value="">{tx("Провайдер", "Anbieter")}</option>
+          {providers.map((provider) => (
+            <option key={provider.id} value={provider.id}>
+              {provider.name}
+            </option>
+          ))}
+        </NativeComboboxSelect>
+      </Field>
+      <Field label={tx("Врач", "Arzt")}>
+        <NativeComboboxSelect
+          value={value.doctor_id ?? ""}
+          disabled={!value.provider_id}
+          aria-label={tx("Врач", "Arzt")}
+          className={inputClass}
+          onChange={(event) => {
+            const id = event.target.value || null;
+            const doctor = doctors.find((d) => d.id === id);
+            onChange({
+              ...value,
+              doctor_id: id,
+              doctor_name: doctor?.name ?? null,
+              doctor_title: doctor?.title ?? null,
+              doctor_fachbereich: doctor?.fachbereich ?? null,
+            });
+          }}
+        >
+          <option value="">{tx("Врач", "Arzt")}</option>
+          {doctors.map((doctor) => (
+            <option key={doctor.id} value={doctor.id}>
+              {[doctor.title, doctor.name].filter(Boolean).join(" ")}
+            </option>
+          ))}
+        </NativeComboboxSelect>
+      </Field>
     </div>
   );
 }
@@ -737,6 +741,7 @@ export function PatientClinicalTab({
             )}
           </p>
         </div>
+        {/* PDF-Export (Medikationsplan / Arztbrief) — тимчасово вимкнено.
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
@@ -757,6 +762,7 @@ export function PatientClinicalTab({
             {tx("Экспорт Arztbrief (PDF)", "Arztbrief (PDF)")}
           </Button>
         </div>
+        */}
       </div>
 
       {error ? (
@@ -873,10 +879,10 @@ export function PatientClinicalTab({
             </div>
             <Field label={tx("Дата диагноза", "Erstdiagnose")}>
               <Input
+                type="date"
                 value={draft.diagnosed_on ?? ""}
                 onChange={(e) => set({ diagnosed_on: trimToNull(e.target.value) })}
                 className={inputClass}
-                placeholder="ED 08/2022"
               />
             </Field>
             <ProviderDoctorFields
@@ -937,10 +943,10 @@ export function PatientClinicalTab({
               </Field>
               <Field label={tx("Дата", "Datum")}>
                 <Input
+                  type="date"
                   value={draft.performed_on ?? ""}
                   onChange={(e) => set({ performed_on: trimToNull(e.target.value) })}
                   className={inputClass}
-                  placeholder="31.07.2016"
                 />
               </Field>
             </div>
