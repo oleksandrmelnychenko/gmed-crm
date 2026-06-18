@@ -7758,6 +7758,19 @@ async fn save_patient_narrative(
         }
     };
 
+    // Serialize concurrent narrative saves for this patient: without this, two
+    // simultaneous "set active" saves could each deactivate-then-insert and both
+    // commit an active row, violating the partial unique index (500). The
+    // transaction-scoped advisory lock releases on commit/rollback.
+    if let Err(e) = sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
+        .bind(patient_uuid.to_string())
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "lock patient narrative");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
     // At most one active version per patient: deactivate the rest first.
     if want_active {
         if let Err(e) =
