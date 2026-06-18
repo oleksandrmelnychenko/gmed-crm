@@ -231,10 +231,16 @@ export function PatientMedicationTable({
               {section.rows.map(({ item, index }) => {
                 const attribution = attributionLabel(item);
                 return (
-                  <tr key={item.id ?? index}>
+                  <tr key={item.id ?? index} className={item.on_hold ? "bg-amber-50" : undefined}>
                     <td className={cn(bodyCell, "whitespace-pre-line")}>{item.wirkstoff || "—"}</td>
                     <td className={cn(bodyCell, "font-medium")}>
                       {item.handelsname || tx("Без названия", "Ohne Namen")}
+                      {item.on_hold ? (
+                        <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                          {tx("На холд", "Auf Hold")}
+                          {item.hold_until ? ` ${tx("до", "bis")} ${item.hold_until}` : ""}
+                        </span>
+                      ) : null}
                     </td>
                     <td className={cn(bodyCell, "whitespace-pre-line font-mono")}>{item.staerke || ""}</td>
                     <td className={cn(bodyCell, "whitespace-pre-line")}>{item.form || ""}</td>
@@ -1788,10 +1794,10 @@ export function PatientClinicalTab({
               </Field>
               <Field label={tx("Дата", "Datum")}>
                 <Input
+                  type="date"
                   value={draft.performed_on ?? ""}
                   onChange={(e) => set({ performed_on: trimToNull(e.target.value) })}
                   className={inputClass}
-                  placeholder="01.03.2017"
                 />
               </Field>
             </div>

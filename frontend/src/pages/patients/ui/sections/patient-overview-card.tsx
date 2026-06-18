@@ -248,6 +248,8 @@ export function PatientOverviewCard({
   const doctors = deriveDoctors([...diagnoses, ...medications]);
   const age = computeAge(birthDate);
   const showDemographics = Boolean(birthDate || gender || phone || email);
+  // Completed ("erfolg") recommendations drop off the overview list.
+  const activeRecommendations = recommendations.filter((rec) => rec.lifecycle_status !== "erfolg");
 
   const renderDiagnosis = (item: ClinicalDiagnosis) => {
     const isProzedur = item.kind === "prozedur";
@@ -364,12 +366,12 @@ export function PatientOverviewCard({
             </div>
 
             <div className="min-w-0">
-              <ColumnTitle count={recommendations.length || undefined}>{tx("Рекомендации", "Empfehlungen")}</ColumnTitle>
-              {recommendations.length === 0 ? (
+              <ColumnTitle count={activeRecommendations.length || undefined}>{tx("Рекомендации", "Empfehlungen")}</ColumnTitle>
+              {activeRecommendations.length === 0 ? (
                 dash
               ) : (
                 <ul className="list-disc space-y-1 pl-3.5 marker:text-muted-foreground/50">
-                  {recommendations.map((rec) => {
+                  {activeRecommendations.map((rec) => {
                     const sub: string[] = [];
                     if (rec.recommendation_type) sub.push(rec.recommendation_type);
                     sub.push(...splitLines(rec.description));
@@ -377,6 +379,15 @@ export function PatientOverviewCard({
                     return (
                       <li key={rec.id} className="leading-snug">
                         <span className="text-[13px] font-medium text-foreground">{rec.title}</span>
+                        {rec.lifecycle_status === "nicht_erfolgt" ? (
+                          <span className="ml-1 text-[10px] font-medium text-rose-600">
+                            ({tx("не выполнено", "nicht erfolgt")})
+                          </span>
+                        ) : rec.lifecycle_status === "unbekannt" ? (
+                          <span className="ml-1 text-[10px] text-muted-foreground">
+                            ({tx("статус неизвестен", "unbekannt")})
+                          </span>
+                        ) : null}
                         <SubBullets items={sub} />
                       </li>
                     );
