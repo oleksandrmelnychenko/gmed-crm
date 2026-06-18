@@ -378,6 +378,24 @@ async fn login_validation_rejects_empty_password() {
 }
 
 #[tokio::test]
+async fn login_validation_rejects_short_password() {
+    let Some((app, _pool)) = test_context().await else {
+        return;
+    };
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": "a@b.co", "password": "short" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"], "validation_error");
+}
+
+#[tokio::test]
 async fn login_rejects_inactive_user() {
     let Some((app, pool)) = test_context().await else {
         return;
@@ -465,7 +483,7 @@ async fn login_locks_after_max_failed_password_attempts() {
             "POST",
             "/api/v1/auth/login",
             None,
-            Some(json!({ "email": email.clone(), "password": "bad" })),
+            Some(json!({ "email": email.clone(), "password": "bad-pass" })),
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -477,7 +495,7 @@ async fn login_locks_after_max_failed_password_attempts() {
         "POST",
         "/api/v1/auth/login",
         None,
-        Some(json!({ "email": email.clone(), "password": "bad" })),
+        Some(json!({ "email": email.clone(), "password": "bad-pass" })),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);

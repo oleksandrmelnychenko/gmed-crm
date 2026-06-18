@@ -160,6 +160,10 @@ async function tryRefreshAccessToken(timeoutMs = DEFAULT_API_TIMEOUT_MS): Promis
         jsonCache.clear();
         return null;
       }
+      if (getRefreshToken() !== refreshToken) {
+        jsonCache.clear();
+        return getAccessToken();
+      }
       localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
       localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
       jsonCache.clear();

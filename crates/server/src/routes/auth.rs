@@ -72,7 +72,7 @@ fn validate_login(req: &LoginRequest) -> Result<(), &'static str> {
     if req.email.is_empty() || req.email.len() > 320 || !req.email.contains('@') {
         return Err("Invalid email");
     }
-    if req.password.is_empty() || req.password.len() > 256 {
+    if req.password.len() < 8 || req.password.len() > 256 {
         return Err("Invalid password");
     }
     Ok(())

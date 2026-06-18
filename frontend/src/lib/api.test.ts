@@ -189,6 +189,32 @@ describe("API auth session refresh", () => {
     expect(localStorage.setItem).toHaveBeenCalledWith("gmed_refresh_token", "refresh-b");
   });
 
+  it("does not restore tokens when logout clears storage during refresh", async () => {
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage("stale-access", "refresh-a");
+    const fetchMock = vi.fn().mockImplementation(async () => {
+      localStorage.removeItem("gmed_access_token");
+      localStorage.removeItem("gmed_refresh_token");
+      return new Response(
+        JSON.stringify({ access_token: "access-b", refresh_token: "refresh-b" }),
+        { status: 200 },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { refreshAuthSession } = await loadApiModule();
+
+    await expect(refreshAuthSession()).resolves.toBeNull();
+    expect(localStorage.setItem).not.toHaveBeenCalledWith(
+      "gmed_access_token",
+      "access-b",
+    );
+    expect(localStorage.setItem).not.toHaveBeenCalledWith(
+      "gmed_refresh_token",
+      "refresh-b",
+    );
+  });
+
   it("refreshes an expiring access token before sending a protected request", async () => {
     setWindowOrigin("http://app.local:4173");
     setTokenStorage(jwtWithExp(Math.floor(Date.now() / 1000) + 10), "refresh-a");
