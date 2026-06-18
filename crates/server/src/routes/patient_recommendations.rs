@@ -1374,3 +1374,178 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
     )
         .into_response()
 }
+
+/// How often the reminder scheduler scans for due Empfehlungen reminders.
+/// Hourly, matching the cadence of the other background schedulers
+/// (e.g. invoices::spawn_auto_dunning_scheduler). Reminders operate on
+/// day-granularity dates, so a sub-hour cadence would add noise without
+/// firing anything sooner.
+const RECOMMENDATION_REMINDER_CHECK_INTERVAL_SECS: u64 = 60 * 60;
+
+/// Notify a single staff user directly by `user_id`, reusing the exact
+/// `user_notifications` insert + realtime publish path used elsewhere in
+/// this module. Used for the recommendation's `created_by` author (a
+/// `users(id)`); guarded so an inactive/non-staff/deleted account simply
+/// inserts nothing rather than erroring.
+async fn notify_staff_user(
+    state: &AppState,
+    user_id: Uuid,
+    recommendation_id: Uuid,
+    kind: &str,
+    title: &str,
+    body: &str,
+) {
+    if let Ok(rows) = sqlx::query(
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+           SELECT u.id, $2, $3, $4, 'recommendation', $5
+           FROM users u
+           WHERE u.id = $1
+             AND u.is_active = true
+             AND u.role <> 'patient'
+           RETURNING id, user_id"#,
+    )
+    .bind(user_id)
+    .bind(kind)
+    .bind(title)
+    .bind(body)
+    .bind(recommendation_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        publish_notification_rows(state, rows).await;
+    }
+}
+
+/// One pass of the reminder scheduler: deliver every due, not-yet-sent
+/// reminder exactly once. Returns the number of reminders delivered.
+///
+/// A reminder is due when the recommendation is still `aktiv`, has not been
+/// sent yet (`reminder_sent_at IS NULL`), and either its explicit
+/// `reminder_at` date has arrived or its `valid_to` is within
+/// `reminder_lead_days` of today. Each row is processed independently and a
+/// per-row failure is logged without aborting the rest of the batch.
+async fn run_recommendation_reminder_scheduler_once(state: &AppState) -> i64 {
+    let due = match sqlx::query(
+        r#"SELECT id, patient_id, title, created_by, source_doctor_id
+           FROM patient_recommendations
+           WHERE lifecycle_status = 'aktiv' AND reminder_sent_at IS NULL
+             AND (
+               (reminder_at IS NOT NULL AND reminder_at <= to_char((now() AT TIME ZONE 'utc'), 'YYYY-MM-DD'))
+               OR (valid_to IS NOT NULL AND reminder_lead_days IS NOT NULL
+                   AND (valid_to::date - reminder_lead_days) <= (now() AT TIME ZONE 'utc')::date)
+             )"#,
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(error = %error, "Recommendation reminder scheduler query failed");
+            return 0;
+        }
+    };
+
+    let mut delivered = 0_i64;
+    for row in due {
+        let id = match row.try_get::<Uuid, _>("id") {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::warn!(error = %error, "Skipping recommendation reminder with unreadable id");
+                continue;
+            }
+        };
+        let patient_id = match row.try_get::<Uuid, _>("patient_id") {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    recommendation_id = %id,
+                    "Skipping recommendation reminder with unreadable patient_id"
+                );
+                continue;
+            }
+        };
+        let title: String = row.try_get("title").unwrap_or_default();
+        let created_by: Option<Uuid> = row.try_get("created_by").ok().flatten();
+
+        let reminder_title = "Erinnerung an Empfehlung";
+        let reminder_body = format!("Erinnerung: {title}");
+
+        // (a) Patient side — the patient's linked portal users.
+        notify_patient_users(
+            state,
+            patient_id,
+            id,
+            "recommendation_reminder",
+            reminder_title,
+            &reminder_body,
+        )
+        .await;
+
+        // (b) Staff side — the author (created_by) directly, plus the
+        //     patient's assigned managers/CEO. source_doctor_id references
+        //     provider_doctors, which has no linked login account, so there
+        //     is no staff user to resolve from it.
+        if let Some(author) = created_by {
+            notify_staff_user(
+                state,
+                author,
+                id,
+                "recommendation_reminder",
+                reminder_title,
+                &reminder_body,
+            )
+            .await;
+        }
+        notify_assigned_staff(
+            state,
+            patient_id,
+            id,
+            "recommendation_reminder",
+            reminder_title,
+            &reminder_body,
+        )
+        .await;
+
+        // Stamp so this reminder never re-fires on the next tick.
+        match sqlx::query("UPDATE patient_recommendations SET reminder_sent_at = now() WHERE id = $1")
+            .bind(id)
+            .execute(&state.db)
+            .await
+        {
+            Ok(_) => delivered += 1,
+            Err(error) => {
+                tracing::error!(
+                    error = %error,
+                    recommendation_id = %id,
+                    "Failed to mark recommendation reminder as sent"
+                );
+            }
+        }
+    }
+
+    delivered
+}
+
+/// Spawns the background scheduler that delivers Empfehlungen reminders.
+/// Fail-safe by construction: a query or row error is logged and the loop
+/// keeps running, so one bad tick never silences future reminders.
+pub fn spawn_recommendation_reminder_scheduler(state: AppState) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(
+            RECOMMENDATION_REMINDER_CHECK_INTERVAL_SECS,
+        ));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        loop {
+            interval.tick().await;
+            let delivered = run_recommendation_reminder_scheduler_once(&state).await;
+            if delivered > 0 {
+                tracing::info!(
+                    delivered,
+                    "Recommendation reminder scheduler delivered reminders"
+                );
+            }
+        }
+    });
+}
