@@ -180,12 +180,31 @@ async fn create_patient_recommendation(
         },
         None => "aktiv",
     };
-    let recommended_on = normalize_optional_text(body.recommended_on.as_deref());
-    let valid_from = normalize_optional_text(body.valid_from.as_deref());
-    let valid_to = normalize_optional_text(body.valid_to.as_deref());
-    let reminder_at = normalize_optional_text(body.reminder_at.as_deref());
+    let recommended_on = match validate_optional_date(body.recommended_on.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let valid_from = match validate_optional_date(body.valid_from.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let valid_to = match validate_optional_date(body.valid_to.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let reminder_at = match validate_optional_date(body.reminder_at.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let outcome_at = match validate_optional_date(body.outcome_at.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let reminder_lead_days = match validate_lead_days(body.reminder_lead_days) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
     let outcome_note = normalize_optional_text(body.outcome_note.as_deref());
-    let outcome_at = normalize_optional_text(body.outcome_at.as_deref());
     let note_intern = normalize_optional_text(body.note_intern.as_deref());
 
     if let Err(resp) = validate_sources(
@@ -233,7 +252,7 @@ async fn create_patient_recommendation(
     .bind(recommended_on.as_deref())
     .bind(valid_from.as_deref())
     .bind(valid_to.as_deref())
-    .bind(body.reminder_lead_days)
+    .bind(reminder_lead_days)
     .bind(reminder_at.as_deref())
     .bind(lifecycle_status)
     .bind(outcome_note.as_deref())
@@ -379,41 +398,32 @@ async fn update_patient_recommendation(
         },
         None => None,
     };
-    let recommended_on = body
-        .recommended_on
-        .as_deref()
-        .map(str::trim)
-        .map(|value| value.to_string());
-    let valid_from = body
-        .valid_from
-        .as_deref()
-        .map(str::trim)
-        .map(|value| value.to_string());
-    let valid_to = body
-        .valid_to
-        .as_deref()
-        .map(str::trim)
-        .map(|value| value.to_string());
-    let reminder_at = body
-        .reminder_at
-        .as_deref()
-        .map(str::trim)
-        .map(|value| value.to_string());
-    let outcome_note = body
-        .outcome_note
-        .as_deref()
-        .map(str::trim)
-        .map(|value| value.to_string());
-    let outcome_at = body
-        .outcome_at
-        .as_deref()
-        .map(str::trim)
-        .map(|value| value.to_string());
-    let note_intern = body
-        .note_intern
-        .as_deref()
-        .map(str::trim)
-        .map(|value| value.to_string());
+    let recommended_on = match validate_optional_date(body.recommended_on.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let valid_from = match validate_optional_date(body.valid_from.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let valid_to = match validate_optional_date(body.valid_to.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let reminder_at = match validate_optional_date(body.reminder_at.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let outcome_at = match validate_optional_date(body.outcome_at.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let reminder_lead_days = match validate_lead_days(body.reminder_lead_days) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let outcome_note = normalize_optional_text(body.outcome_note.as_deref());
+    let note_intern = normalize_optional_text(body.note_intern.as_deref());
 
     if let Err(e) = sqlx::query(
         r#"UPDATE patient_recommendations
@@ -456,7 +466,7 @@ async fn update_patient_recommendation(
     .bind(recommended_on.as_deref())
     .bind(valid_from.as_deref())
     .bind(valid_to.as_deref())
-    .bind(body.reminder_lead_days)
+    .bind(reminder_lead_days)
     .bind(reminder_at.as_deref())
     .bind(lifecycle_status)
     .bind(outcome_note.as_deref())
@@ -1138,6 +1148,40 @@ fn normalize_optional_text(value: Option<&str>) -> Option<String> {
         None
     } else {
         Some(trimmed.to_string())
+    }
+}
+
+/// Optional date field stored as TEXT: trims, treats empty as NULL, and rejects
+/// anything that is not a plain `YYYY-MM-DD` calendar date.
+fn validate_optional_date(value: Option<&str>) -> Result<Option<String>, axum::response::Response> {
+    let Some(raw) = value.map(str::trim).filter(|v| !v.is_empty()) else {
+        return Ok(None);
+    };
+    let bytes = raw.as_bytes();
+    let well_formed = raw.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && raw
+            .char_indices()
+            .all(|(i, c)| if i == 4 || i == 7 { c == '-' } else { c.is_ascii_digit() });
+    if well_formed {
+        Ok(Some(raw.to_string()))
+    } else {
+        Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid date, expected YYYY-MM-DD",
+        ))
+    }
+}
+
+/// Reminder lead time in days must be a sane non-negative span.
+fn validate_lead_days(value: Option<i32>) -> Result<Option<i32>, axum::response::Response> {
+    match value {
+        Some(v) if !(0..=365).contains(&v) => Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "reminder_lead_days must be between 0 and 365",
+        )),
+        other => Ok(other),
     }
 }
 
