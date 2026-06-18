@@ -10,6 +10,7 @@ import {
   providerTypeLabel,
 } from "../model/list-model";
 import { specializationSummaryForItems } from "../model/specialization-labels";
+import { ProviderCategoryIcon } from "./provider-category-icon";
 import type { ProviderOrganizationLevel, ProviderSummary, ProviderTaxonomyNode } from "../model/types";
 
 export type ProviderTreeMeta = {
@@ -236,6 +237,11 @@ function ProviderTypeBadge({
           : "border-violet-200 bg-violet-50 text-violet-700",
       )}
     >
+      <ProviderCategoryIcon
+        providerType={provider.provider_type}
+        categoryKey={provider.taxonomy_node?.code ?? null}
+        className="mr-1 inline size-3 align-[-2px]"
+      />
       {providerTypeLabel(provider.provider_type, tr)}
     </Badge>
   );
