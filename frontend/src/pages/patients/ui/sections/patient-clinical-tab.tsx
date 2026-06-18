@@ -1021,7 +1021,7 @@ export function PatientClinicalTab({
                   <option value="selbst">{tx("Самолечение", "Selbstmedikation")}</option>
                 </NativeComboboxSelect>
               </Field>
-              <Field label="Form">
+              <Field label={tx("Форма", "Form")}>
                 <Input
                   value={draft.form ?? ""}
                   onChange={(e) => set({ form: trimToNull(e.target.value) })}
@@ -1031,7 +1031,7 @@ export function PatientClinicalTab({
               </Field>
             </div>
             <div className="grid gap-2 md:grid-cols-2">
-              <Field label="Handelsname">
+              <Field label={tx("Торговое название", "Handelsname")}>
                 <Input
                   value={draft.handelsname}
                   onChange={(e) => set({ handelsname: e.target.value })}
@@ -1039,7 +1039,7 @@ export function PatientClinicalTab({
                   placeholder="Bisoprolol-ratiopharm"
                 />
               </Field>
-              <Field label="Wirkstoff">
+              <Field label={tx("Действующее вещество", "Wirkstoff")}>
                 <Input
                   value={draft.wirkstoff ?? ""}
                   onChange={(e) => set({ wirkstoff: trimToNull(e.target.value) })}
@@ -1049,7 +1049,7 @@ export function PatientClinicalTab({
               </Field>
             </div>
             <div className="grid gap-2 md:grid-cols-2">
-              <Field label="Stärke">
+              <Field label={tx("Дозировка", "Stärke")}>
                 <Input
                   value={draft.staerke ?? ""}
                   onChange={(e) => set({ staerke: trimToNull(e.target.value) })}
@@ -1057,7 +1057,7 @@ export function PatientClinicalTab({
                   placeholder="5 mg"
                 />
               </Field>
-              <Field label="Einheit">
+              <Field label={tx("Единица", "Einheit")}>
                 <Input
                   value={draft.einheit ?? ""}
                   onChange={(e) => set({ einheit: trimToNull(e.target.value) })}
@@ -1088,7 +1088,7 @@ export function PatientClinicalTab({
                 ))}
               </div>
             </div>
-            <Field label="Grund">
+            <Field label={tx("Причина", "Grund")}>
               <Input
                 value={draft.grund ?? ""}
                 onChange={(e) => set({ grund: trimToNull(e.target.value) })}
@@ -1096,7 +1096,7 @@ export function PatientClinicalTab({
                 placeholder="Bluthochdruck"
               />
             </Field>
-            <Field label="Hinweise">
+            <Field label={tx("Указания", "Hinweise")}>
               <Input
                 value={draft.hinweis ?? ""}
                 onChange={(e) => set({ hinweis: trimToNull(e.target.value) })}
