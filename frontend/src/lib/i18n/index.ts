@@ -1142,6 +1142,7 @@ export interface Translations
   documents_delete_file_confirm: string;
   documents_deleting: string;
   documents_file_deleted_notice: string;
+  documents_file_removed: string;
   documents_file_deleted_banner: string;
   documents_file_deleted_by: string;
   documents_failed_delete_file: string;

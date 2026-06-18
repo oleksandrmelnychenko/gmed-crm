@@ -2384,11 +2384,23 @@ function StaffDocumentsPage({
       setNotice(t.documents_file_deleted_notice);
       refresh();
     } catch (nextError) {
-      setDeleteError(
-        nextError instanceof Error
-          ? nextError.message
-          : t.documents_failed_delete_file,
-      );
+      // The file may already be removed (409 Conflict). Reconcile to the real
+      // state: if the stored file is already gone, treat it as success.
+      const fresh = await fetchDocument(detail.id).catch(() => null);
+      if (fresh && !fresh.has_stored_file) {
+        setDetail(fresh);
+        setEditForm(detailToEditForm(fresh));
+        setDeleteOpen(false);
+        setDeleteReason("");
+        setNotice(t.documents_file_deleted_notice);
+        refresh();
+      } else {
+        setDeleteError(
+          nextError instanceof Error
+            ? nextError.message
+            : t.documents_failed_delete_file,
+        );
+      }
     } finally {
       setDeleteBusy(false);
     }
@@ -5665,8 +5677,15 @@ function DocumentIntakeQueueTable({
         width: 160,
         render: (item) => (
           <div className="min-w-0">
-            <div className="truncate font-medium text-foreground">
-              {localizeDocumentCode(item.auto_name, l)}
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate font-medium text-foreground">
+                {localizeDocumentCode(item.auto_name, l)}
+              </span>
+              {!item.has_stored_file && item.file_deleted_at ? (
+                <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  {t.documents_file_removed}
+                </span>
+              ) : null}
             </div>
             <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
               {item.original_filename ?? t.documents_unlinked_document}

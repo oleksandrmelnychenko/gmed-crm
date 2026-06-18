@@ -1188,6 +1188,7 @@ export const de = {
   documents_delete_file_confirm: "Datei endgültig löschen",
   documents_deleting: "Lösche…",
   documents_file_deleted_notice: "Die gespeicherte Datei wurde entfernt.",
+  documents_file_removed: "Datei entfernt",
   documents_file_deleted_banner: "Gespeicherte Datei entfernt {datetime}",
   documents_file_deleted_by: "durch {name}",
   documents_failed_delete_file: "Datei konnte nicht gelöscht werden.",

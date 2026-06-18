@@ -1186,6 +1186,7 @@ export const ru = {
   documents_delete_file_confirm: "Удалить файл окончательно",
   documents_deleting: "Удаление…",
   documents_file_deleted_notice: "Сохранённый файл удалён.",
+  documents_file_removed: "Файл удалён",
   documents_file_deleted_banner: "Сохранённый файл удалён {datetime}",
   documents_file_deleted_by: "пользователем {name}",
   documents_failed_delete_file: "Не удалось удалить файл.",
