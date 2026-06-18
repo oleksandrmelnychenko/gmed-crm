@@ -6104,9 +6104,9 @@ function DoctorCardSummary({
           <div className="mt-2 flex flex-wrap gap-1.5">
             <Badge
               variant="outline"
-              className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+              className="max-w-full rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
             >
-              {specializations || t.common_not_set}
+              <span className="truncate">{specializations || t.common_not_set}</span>
             </Badge>
             {roleLabel ? (
               <Badge

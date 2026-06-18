@@ -112,6 +112,24 @@ struct UpsertAnnouncement {
     ends_at: Option<String>,
 }
 
+/// Parses a datetime from the admin UI, accepting both RFC3339 and the naive
+/// `datetime-local` format ("YYYY-MM-DDTHH:MM" / with seconds) sent by the form.
+fn parse_admin_datetime(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(value) {
+        return Some(dt.with_timezone(&chrono::Utc));
+    }
+    for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"] {
+        if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(value, fmt) {
+            return Some(naive.and_utc());
+        }
+    }
+    None
+}
+
 async fn create_announcement(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -124,9 +142,11 @@ async fn create_announcement(
     let variant = body.variant.as_deref().unwrap_or("info");
     let starts: chrono::DateTime<chrono::Utc> = body
         .starts_at
-        .and_then(|s| s.parse().ok())
+        .as_deref()
+        .and_then(parse_admin_datetime)
         .unwrap_or_else(chrono::Utc::now);
-    let ends: Option<chrono::DateTime<chrono::Utc>> = body.ends_at.and_then(|s| s.parse().ok());
+    let ends: Option<chrono::DateTime<chrono::Utc>> =
+        body.ends_at.as_deref().and_then(parse_admin_datetime);
 
     match sqlx::query!(
         "INSERT INTO announcements (title, message, variant, is_active, starts_at, ends_at, created_by)
@@ -169,7 +189,8 @@ async fn update_announcement(
     }
 
     let variant = body.variant.as_deref().unwrap_or("info");
-    let ends: Option<chrono::DateTime<chrono::Utc>> = body.ends_at.and_then(|s| s.parse().ok());
+    let ends: Option<chrono::DateTime<chrono::Utc>> =
+        body.ends_at.as_deref().and_then(parse_admin_datetime);
 
     match sqlx::query!(
         "UPDATE announcements SET title=$2, message=$3, variant=$4, is_active=$5, ends_at=$6 WHERE id=$1",

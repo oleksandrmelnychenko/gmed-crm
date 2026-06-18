@@ -2020,9 +2020,31 @@ function StaffDocumentsPage({
           request.id === updatedRequest.id ? updatedRequest : request,
         );
       });
+      // Preserve any field the user kept editing while this (often fire-and-forget,
+      // e.g. assignee change) save was in flight: only fields unchanged since the
+      // request was dispatched take the freshly-saved server value.
+      const serverDraft = translationWorkspaceDraftFromRequest(updatedRequest);
+      const liveDraft = translationDraftsRef.current[updatedRequest.id];
       updateTranslationDraft(
         updatedRequest.id,
-        translationWorkspaceDraftFromRequest(updatedRequest),
+        liveDraft
+          ? {
+              assignedTo: serverDraft.assignedTo,
+              note: liveDraft.note !== draft.note ? liveDraft.note : serverDraft.note,
+              sourceLanguage:
+                liveDraft.sourceLanguage !== draft.sourceLanguage
+                  ? liveDraft.sourceLanguage
+                  : serverDraft.sourceLanguage,
+              sourceText:
+                liveDraft.sourceText !== draft.sourceText
+                  ? liveDraft.sourceText
+                  : serverDraft.sourceText,
+              translatedText:
+                liveDraft.translatedText !== draft.translatedText
+                  ? liveDraft.translatedText
+                  : serverDraft.translatedText,
+            }
+          : serverDraft,
       );
       clearApiCache("/documents/translation-requests");
       clearApiCache("/documents/translation-requests?status=pending,in_progress");
