@@ -35,6 +35,7 @@ import {
 } from "../model/people-types";
 import { specializationLabelForItem, specializationLabelForValue } from "../model/specialization-labels";
 import type {
+  InsuranceProviderItem,
   ProviderPersonGender,
   ProviderStaffRoleItem,
   ProviderSummary,
@@ -49,6 +50,7 @@ type ProviderPeopleCatalogProps = {
   forceNonMedical?: boolean;
   filters: ProviderPeopleFilters;
   loading?: boolean;
+  insuranceProviders?: readonly InsuranceProviderItem[];
   patients?: readonly ProviderPeoplePatientOption[];
   providers?: readonly ProviderSummary[];
   taxonomyNodes?: readonly ProviderTaxonomyNode[];
@@ -72,6 +74,7 @@ const DEFAULT_FROZEN_COLUMNS = ["person"];
 const EMPTY_PATIENT_OPTIONS: readonly ProviderPeoplePatientOption[] = [];
 const EMPTY_PROVIDER_OPTIONS: readonly ProviderSummary[] = [];
 const EMPTY_SPECIALIZATION_OPTIONS: readonly SpecializationItem[] = [];
+const EMPTY_INSURANCE_PROVIDER_OPTIONS: readonly InsuranceProviderItem[] = [];
 const EMPTY_STAFF_ROLE_OPTIONS: readonly ProviderStaffRoleItem[] = [];
 
 const STAFF_ROLE_LABEL_KEYS: Record<string, string> = {
@@ -754,6 +757,7 @@ function FiltersBar({
   patients,
   providerOptions,
   providers,
+  insuranceProviders,
   taxonomyNodes,
   specializations,
   staffRoles,
@@ -768,6 +772,7 @@ function FiltersBar({
   patients: readonly ProviderPeoplePatientOption[];
   providerOptions: ProviderOption[];
   providers: readonly ProviderSummary[];
+  insuranceProviders: readonly InsuranceProviderItem[];
   taxonomyNodes: readonly ProviderTaxonomyNode[];
   specializations: readonly SpecializationItem[];
   staffRoles: readonly ProviderStaffRoleItem[];
@@ -807,6 +812,11 @@ function FiltersBar({
       value: item.code || item.name_en,
     }];
   });
+  const activeInsuranceProviderOptions = insuranceProviders.flatMap((item) => {
+    const label = item.name.trim();
+    if (!label || item.is_active === false) return [];
+    return [{ id: item.id || label, label, value: label }];
+  });
   const setFilter = <K extends keyof ProviderPeopleFilters>(
     key: K,
     value: ProviderPeopleFilters[K],
@@ -830,6 +840,7 @@ function FiltersBar({
       patch.fachbereich = "";
       patch.specialization = "";
       patch.patientId = "";
+      patch.insuranceProvider = "";
     }
     if (forceNonMedical) patch.providerType = "non_medical";
     onFiltersChange({ ...filters, ...patch });
@@ -842,6 +853,7 @@ function FiltersBar({
         fachbereich: "",
         specialization: "",
         patientId: "",
+        insuranceProvider: "",
       });
       return;
     }
@@ -863,6 +875,7 @@ function FiltersBar({
       patch.fachbereich = "";
       patch.specialization = "";
       patch.patientId = "";
+      patch.insuranceProvider = "";
     }
     onFiltersChange({ ...filters, ...patch });
   };
@@ -885,6 +898,7 @@ function FiltersBar({
       patch.fachbereich = "";
       patch.specialization = "";
       patch.patientId = "";
+      patch.insuranceProvider = "";
     }
     onFiltersChange({ ...filters, ...patch });
   };
@@ -982,7 +996,7 @@ function FiltersBar({
         </Button>
       </div>
 
-      <div className={cn("grid gap-1.5", showClinicalFilters ? "md:grid-cols-4" : "md:grid-cols-1")}>
+      <div className={cn("grid gap-1.5", showClinicalFilters ? "md:grid-cols-5" : "md:grid-cols-1")}>
         {showClinicalFilters ? (
           <>
             <TextFilterField
@@ -998,6 +1012,18 @@ function FiltersBar({
             >
               <option value="">{allLabel}</option>
               {activeSpecializationOptions.map((option) => (
+                <option key={option.id} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </SelectField>
+            <SelectField
+              label={localizedFallback(lang, "Versicherungen", "Страховые")}
+              value={filters.insuranceProvider}
+              onChange={(value) => setFilter("insuranceProvider", value)}
+            >
+              <option value="">{allLabel}</option>
+              {activeInsuranceProviderOptions.map((option) => (
                 <option key={option.id} value={option.value}>
                   {option.label}
                 </option>
@@ -1204,6 +1230,7 @@ export function ProviderPeopleCatalog({
   error,
   forceNonMedical = false,
   filters,
+  insuranceProviders = EMPTY_INSURANCE_PROVIDER_OPTIONS,
   loading = false,
   patients = EMPTY_PATIENT_OPTIONS,
   providers = EMPTY_PROVIDER_OPTIONS,
@@ -1248,6 +1275,7 @@ export function ProviderPeopleCatalog({
       <FiltersBar
         forceNonMedical={forceNonMedical}
         filters={filters}
+        insuranceProviders={insuranceProviders}
         lang={lang}
         labels={labels}
         patients={patients}

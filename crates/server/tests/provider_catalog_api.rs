@@ -73,6 +73,20 @@ async fn seed_provider_with_type(
     .unwrap()
 }
 
+async fn seed_insurance_provider(pool: &PgPool, name: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO insurance_providers (name)
+           VALUES ($1)
+           ON CONFLICT (normalized_name)
+           DO UPDATE SET name = EXCLUDED.name
+           RETURNING id"#,
+    )
+    .bind(name)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO patients (
@@ -88,6 +102,130 @@ async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     .fetch_one(pool)
     .await
     .unwrap()
+}
+
+#[tokio::test]
+async fn insurance_provider_options_include_patient_insurance_names() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("provider-insurance-options");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let insurance_name = format!("Patient Insurance {tag}");
+    sqlx::query("UPDATE patients SET insurance_provider = $2 WHERE id = $1")
+        .bind(patient_id)
+        .bind(&insurance_name)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/providers/insurance-providers?include_inactive=true",
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().expect("insurance providers array");
+    assert!(
+        items.iter().any(|row| row["name"] == insurance_name),
+        "patient insurance provider should be available as a provider/doctor option"
+    );
+}
+
+#[tokio::test]
+async fn providers_list_supports_provider_and_doctor_insurance_filters() {
+    let Some((app, pool, _admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("provider-insurance-filter");
+    let provider_id =
+        seed_provider_with_type(&pool, &format!("{tag}-provider"), "medical", "Germany").await;
+    let doctor_provider_id = seed_provider_with_type(
+        &pool,
+        &format!("{tag}-doctor-provider"),
+        "medical",
+        "Germany",
+    )
+    .await;
+    let decoy_id =
+        seed_provider_with_type(&pool, &format!("{tag}-decoy"), "medical", "Germany").await;
+    let provider_insurance =
+        seed_insurance_provider(&pool, &format!("Provider Insurance {tag}")).await;
+    let doctor_insurance = seed_insurance_provider(&pool, &format!("Doctor Insurance {tag}")).await;
+
+    sqlx::query(
+        r#"INSERT INTO provider_insurances (provider_id, insurance_provider_id)
+           VALUES ($1, $2)"#,
+    )
+    .bind(provider_id)
+    .bind(provider_insurance)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let doctor_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO provider_doctors (provider_id, name)
+           VALUES ($1, $2)
+           RETURNING id"#,
+    )
+    .bind(doctor_provider_id)
+    .bind(format!("Insurance Doctor {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO provider_doctor_insurances (doctor_id, insurance_provider_id)
+           VALUES ($1, $2)"#,
+    )
+    .bind(doctor_id)
+    .bind(doctor_insurance)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers?search={tag}&insurance_provider=Provider%20Insurance"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().expect("providers array");
+    assert!(items.iter().any(|row| row["id"] == provider_id.to_string()));
+    assert!(!items.iter().any(|row| row["id"] == decoy_id.to_string()));
+    let row = items
+        .iter()
+        .find(|row| row["id"] == provider_id.to_string())
+        .expect("provider row must be present");
+    assert_eq!(
+        row["insurance_providers"][0]["name"],
+        format!("Provider Insurance {tag}")
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers?search={tag}&insurance_provider=Doctor%20Insurance"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().expect("providers array");
+    assert!(
+        items
+            .iter()
+            .any(|row| row["id"] == doctor_provider_id.to_string())
+    );
+    assert!(!items.iter().any(|row| row["id"] == provider_id.to_string()));
+    assert!(!items.iter().any(|row| row["id"] == decoy_id.to_string()));
 }
 
 #[tokio::test]

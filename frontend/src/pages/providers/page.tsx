@@ -69,6 +69,7 @@ import {
   deleteProviderStaff,
   deleteSpecialization,
   fetchProviderDetail,
+  fetchInsuranceProviders,
   fetchProviderStaffRoles,
   fetchProviderTaxonomy,
   fetchProviders,
@@ -93,11 +94,14 @@ import {
   blankServiceForm,
   blankStaffForm,
   applyDoctorFieldChange,
+  applyStaffFieldChange,
   buildProviderAttributeValueOptionsQuery,
   buildProvidersQuery,
   compactDate,
   compactDateTime,
   composeDoctorDisplayName,
+  composeStaffDisplayName,
+  formatWeeklyAvailabilityDisplayItems,
   doctorToForm,
   doctorListDisplayName,
   doctorRelationshipTypeLabel,
@@ -148,6 +152,7 @@ import type {
   DoctorRoleCode,
   DoctorRelationship,
   DoctorSummary,
+  InsuranceProviderItem,
   ProviderContactFormState,
   ProviderDetail,
   ProviderFilters,
@@ -211,6 +216,7 @@ function countAdvancedProviderFilters(filters: ProviderFilters, forceNonMedical:
   if (filters.hasContract !== DEFAULT_FILTERS.hasContract) count += 1;
   if (filters.internalRatingGte.trim()) count += 1;
   if (filters.specializations.trim()) count += 1;
+  if (filters.insuranceProvider.trim()) count += 1;
   if (filters.taxonomyNodeId.trim()) count += 1;
   if (filters.taxonomyAttributeKey.trim() || filters.taxonomyAttributeValue.trim()) count += 1;
   return count;
@@ -357,6 +363,33 @@ function joinSpecializationValue(values: string[]) {
 
 function firstSpecializationValue(value: string) {
   return splitSpecializationValue(value)[0] ?? "";
+}
+
+function normalizeInsuranceProviderKey(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+function splitInsuranceProviderValue(value: string) {
+  const seen = new Set<string>();
+  return value.split(",").flatMap((part) => {
+    const trimmed = part.trim();
+    const key = normalizeInsuranceProviderKey(trimmed);
+    if (!trimmed || seen.has(key)) return [];
+    seen.add(key);
+    return [trimmed];
+  });
+}
+
+function joinInsuranceProviderValue(values: string[]) {
+  return values.join(", ");
+}
+
+function insuranceProviderFieldLabel(lang: "de" | "ru") {
+  return lang === "de" ? "Versicherungen" : "Страховые";
+}
+
+function insuranceProviderPlaceholder(lang: "de" | "ru") {
+  return lang === "de" ? "Versicherung auswählen" : "Выбрать страховую";
 }
 
 function specializationRuLabel(item: SpecializationItem) {
@@ -556,6 +589,158 @@ function SpecializationMultiSelect({
   );
 }
 
+function InsuranceProviderMultiSelect({
+  value,
+  items,
+  disabled,
+  compact = false,
+  onChange,
+}: {
+  value: string;
+  items: InsuranceProviderItem[];
+  disabled?: boolean;
+  compact?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const { t, lang } = useLang();
+  const selected = useMemo(() => splitInsuranceProviderValue(value), [value]);
+  const selectedKeys = useMemo(
+    () => new Set(selected.map(normalizeInsuranceProviderKey)),
+    [selected],
+  );
+  const options = useMemo(() => {
+    const seen = new Set<string>();
+    return items.flatMap((item) => {
+      const label = item.name.trim();
+      const key = normalizeInsuranceProviderKey(label);
+      if (!label || seen.has(key)) return [];
+      if (item.is_active === false && !selectedKeys.has(key)) return [];
+      seen.add(key);
+      return [{ key: item.id || key, value: label, label }];
+    });
+  }, [items, selectedKeys]);
+  const availableOptions = options.filter(
+    (option) => !selectedKeys.has(normalizeInsuranceProviderKey(option.value)),
+  );
+  const selectPlaceholder = insuranceProviderPlaceholder(lang);
+  const selectedTitle = selected.join(", ");
+  const compactPlaceholder =
+    selected.length === 0
+      ? selectPlaceholder
+      : selected.length === 1
+        ? selected[0] ?? selectPlaceholder
+        : `${insuranceProviderFieldLabel(lang)}: ${selected.length}`;
+  const compactSelectedOptionValues = useMemo(
+    () =>
+      options
+        .filter((option) => selectedKeys.has(normalizeInsuranceProviderKey(option.value)))
+        .map((option) => option.value),
+    [options, selectedKeys],
+  );
+
+  const commit = (next: string[]) => onChange(joinInsuranceProviderValue(next));
+  const addInsuranceProvider = (nextValue: string) => {
+    const trimmed = nextValue.trim();
+    const key = normalizeInsuranceProviderKey(trimmed);
+    if (!trimmed || selectedKeys.has(key)) return;
+    commit([...selected, trimmed]);
+  };
+  const removeInsuranceProvider = (target: string) => {
+    const targetKey = normalizeInsuranceProviderKey(target);
+    commit(selected.filter((item) => normalizeInsuranceProviderKey(item) !== targetKey));
+  };
+  const toggleInsuranceProvider = (nextValue: string) => {
+    const trimmed = nextValue.trim();
+    if (!trimmed) return;
+    if (selectedKeys.has(normalizeInsuranceProviderKey(trimmed))) {
+      removeInsuranceProvider(trimmed);
+      return;
+    }
+    addInsuranceProvider(trimmed);
+  };
+
+  if (compact) {
+    return (
+      <div className="flex h-8 min-w-0 items-center gap-1.5">
+        <NativeComboboxSelect
+          value=""
+          onChange={(event) => toggleInsuranceProvider(event.target.value)}
+          className={cn(formSelectClassName, "h-8 min-w-0 flex-1 bg-card text-[13px]")}
+          disabled={disabled || options.length === 0}
+          selectedValues={compactSelectedOptionValues}
+          showValueIndicator={false}
+          hidePlaceholderOption
+          title={selectedTitle || selectPlaceholder}
+        >
+          <option value="">{compactPlaceholder}</option>
+          {options.map((option) => (
+            <option key={option.key} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </NativeComboboxSelect>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className={cn(
+            "h-8 w-8 shrink-0 !bg-card hover:!bg-card",
+            selected.length === 0 && "invisible",
+          )}
+          disabled={disabled || selected.length === 0}
+          title={t.common_clear}
+          aria-label={t.common_clear}
+          onClick={() => commit([])}
+        >
+          <X className="size-3.5" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <NativeComboboxSelect
+        value=""
+        onChange={(event) => addInsuranceProvider(event.target.value)}
+        className={formSelectClassName}
+        disabled={disabled || availableOptions.length === 0}
+      >
+        <option value="">{selectPlaceholder}</option>
+        {availableOptions.map((option) => (
+          <option key={option.key} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </NativeComboboxSelect>
+      {selected.length > 0 ? (
+        <div className="flex min-h-8 flex-wrap gap-1.5 rounded-lg border border-border/70 bg-muted/20 p-1.5">
+          {selected.map((item) => (
+            <Badge
+              key={item}
+              variant="secondary"
+              className="h-7 max-w-full gap-1.5 rounded-full px-2.5 text-[12px] font-medium"
+            >
+              <span className="min-w-0 truncate">{item}</span>
+              {!disabled ? (
+                <button
+                  type="button"
+                  onClick={() => removeInsuranceProvider(item)}
+                  className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
+                  aria-label={`${t.common_remove}: ${item}`}
+                  title={`${t.common_remove}: ${item}`}
+                >
+                  <X className="size-3" />
+                </button>
+              ) : null}
+            </Badge>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function taxonomyNodeLabel(node: ProviderTaxonomyNode | null | undefined, lang: "de" | "ru") {
   if (!node) return "";
   if (lang === "ru") {
@@ -583,6 +768,14 @@ function taxonomyPathLabel(
       ? path.slice(1)
       : path;
   return visiblePath.map((item) => taxonomyNodeLabel(item, lang)).join(" / ");
+}
+
+function taxonomyLeafLabel(
+  taxonomyNode: ProviderTaxonomyNode | null | undefined,
+  taxonomyPath: ProviderTaxonomyNode[] | null | undefined,
+  lang: "de" | "ru",
+) {
+  return taxonomyNodeLabel(taxonomyPath?.at(-1) ?? taxonomyNode, lang);
 }
 
 const GENERIC_TAXONOMY_FILTER_KEYS = new Set([
@@ -1140,6 +1333,15 @@ function providerPeopleSpecializationsToText(row: ProviderPeopleRow) {
   return labels.length > 0 ? labels.join(", ") : row.fachbereich ?? "";
 }
 
+function providerPeopleInsuranceProvidersToText(row: ProviderPeopleRow) {
+  return row.insurance_providers
+    .flatMap((item) => {
+      const label = item.name.trim();
+      return label ? [label] : [];
+    })
+    .join(", ");
+}
+
 function providerPeopleContactsToForm(row: ProviderPeopleRow): DoctorFormState["contacts"] {
   const contacts = row.contacts.flatMap((contact, index): DoctorFormState["contacts"] => {
     const value = contact.value.trim();
@@ -1202,6 +1404,7 @@ function providerPeopleDoctorToForm(row: ProviderPeopleRow): DoctorFormState {
     openingHours: row.opening_hours ?? "",
     fachbereich: row.fachbereich ?? "",
     specializations: providerPeopleSpecializationsToText(row),
+    insuranceProviders: providerPeopleInsuranceProvidersToText(row),
     languages: row.languages.join(", "),
     phone: row.phone ?? "",
     email: row.email ?? "",
@@ -1211,6 +1414,23 @@ function providerPeopleDoctorToForm(row: ProviderPeopleRow): DoctorFormState {
     licensingValidUntil: row.licensing_valid_until ?? "",
     notes: row.notes ?? "",
   };
+}
+
+function providerPeopleDoctorToNewProviderForm(row: ProviderPeopleRow): DoctorFormState {
+  return {
+    ...providerPeopleDoctorToForm(row),
+    id: "",
+  };
+}
+
+function providerPeopleDoctorOptionLabel(row: ProviderPeopleRow) {
+  const name =
+    doctorListDisplayName({
+      name: row.display_name ?? row.name,
+      title: row.title,
+      gender: row.gender,
+    }) || row.name;
+  return [name, row.provider_name].filter(Boolean).join(" - ");
 }
 
 function providerDoctorFormForPayload(
@@ -1227,6 +1447,7 @@ function providerDoctorFormForPayload(
     fachbereich: "",
     schwerpunkt: "",
     specializations: "",
+    insuranceProviders: "",
     licenseNumber: "",
     licensingCountry: "",
     licensingValidUntil: "",
@@ -1235,15 +1456,18 @@ function providerDoctorFormForPayload(
 
 function providerPeopleStaffToForm(row: ProviderPeopleRow): StaffFormState {
   const contacts = providerPeopleContactsToForm(row);
+  const firstName = row.first_name ?? "";
+  const lastName = row.last_name ?? "";
+  const gender = row.gender;
   return {
     ...blankStaffForm(),
     id: row.person_id,
-    firstName: row.first_name ?? "",
-    lastName: row.last_name ?? "",
-    displayName: row.display_name ?? row.name,
+    firstName,
+    lastName,
+    displayName: composeStaffDisplayName(firstName, lastName, gender) || row.display_name || row.name,
     role: row.role_code ?? "staff",
     department: row.department ?? "",
-    gender: row.gender,
+    gender,
     openingHours: row.opening_hours ?? "",
     status: row.status,
     phone: row.phone ?? "",
@@ -1261,6 +1485,7 @@ type ProvidersPageState = {
   listVersion: number;
   taxonomyNodes: ProviderTaxonomyNode[];
   specializations: SpecializationItem[];
+  insuranceProviders: InsuranceProviderItem[];
   specializationDialogOpen: boolean;
   specializationBusy: boolean;
   specializationError: string;
@@ -1361,6 +1586,7 @@ function normalizeProviderPeopleFiltersForScope(
     fachbereich: "",
     specialization: "",
     patientId: "",
+    insuranceProvider: "",
   };
 }
 
@@ -1451,6 +1677,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         specialization: searchParams.get("people_specialization") ?? "",
         role: searchParams.get("people_role") ?? "",
         patientId: searchParams.get("people_patient") ?? "",
+        insuranceProvider: searchParams.get("people_insurance") ?? "",
       },
       permissions.forceNonMedical,
     ),
@@ -1500,6 +1727,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     const internalRatingGte = params.get("internal_rating");
     const taxonomyAttributeKey = params.get("attr_key");
     const taxonomyAttributeValue = params.get("attr_value");
+    const insuranceProvider = params.get("insurance");
 
     return {
       ...base,
@@ -1520,6 +1748,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       taxonomyAttributeKey: taxonomyAttributeKey ?? base.taxonomyAttributeKey,
       taxonomyAttributeValue: taxonomyAttributeValue ?? base.taxonomyAttributeValue,
       internalRatingGte: internalRatingGte ?? base.internalRatingGte,
+      insuranceProvider: insuranceProvider ?? base.insuranceProvider,
     };
   });
   const [providerFiltersOpen, setProviderFiltersOpen] = useState(
@@ -1554,6 +1783,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         listVersion: 0,
         taxonomyNodes: [],
         specializations: [],
+        insuranceProviders: [],
         specializationDialogOpen: false,
         specializationBusy: false,
         specializationError: "",
@@ -1609,6 +1839,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     listVersion,
     taxonomyNodes,
     specializations,
+    insuranceProviders,
     specializationDialogOpen,
     specializationBusy,
     specializationError,
@@ -1655,6 +1886,9 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     staffError,
   } = pageState;
   const [attributeOptionProviders, setAttributeOptionProviders] = useState<ProviderSummary[]>([]);
+  const [existingDoctorOptions, setExistingDoctorOptions] = useState<ProviderPeopleRow[]>([]);
+  const [existingDoctorOptionsBusy, setExistingDoctorOptionsBusy] = useState(false);
+  const [existingDoctorOptionsError, setExistingDoctorOptionsError] = useState("");
   const setProvidersPageField = <K extends keyof ProvidersPageState>(
     field: K,
     value: SetStateAction<ProvidersPageState[K]>,
@@ -1669,6 +1903,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     setProvidersPageField("listVersion", value);
   const setSpecializations = (value: SetStateAction<SpecializationItem[]>) =>
     setProvidersPageField("specializations", value);
+  const setInsuranceProviders = (value: SetStateAction<InsuranceProviderItem[]>) =>
+    setProvidersPageField("insuranceProviders", value);
   const setSpecializationDialogOpen = (value: SetStateAction<boolean>) =>
     setProvidersPageField("specializationDialogOpen", value);
   const setSpecializationBusy = (value: SetStateAction<boolean>) =>
@@ -1801,6 +2037,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       taxonomy_path: detail.taxonomy_path,
       taxonomy_attributes: detail.taxonomy_attributes,
       specializations: detail.specializations,
+      insurance_providers: detail.insurance_providers,
       is_active: detail.is_active,
       has_contract: detail.kooperationsvertrag !== null && detail.kooperationsvertrag !== undefined,
       doctor_count: detail.doctors.length,
@@ -1871,6 +2108,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       people_specialization: nextFilters.specialization || null,
       people_role: nextFilters.role || null,
       people_patient: nextFilters.patientId || null,
+      people_insurance: nextFilters.insuranceProvider || null,
     });
   }
 
@@ -2104,19 +2342,78 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   ]);
 
   useEffect(() => {
+    const providerId = catalogPersonContext?.providerId ?? detail?.id ?? "";
+    const providerType = catalogPersonContext?.providerType ?? detail?.provider_type ?? "medical";
+    const shouldLoad =
+      permissions.canViewPage &&
+      doctorDialogOpen &&
+      !doctorForm.id &&
+      providerType === "medical" &&
+      Boolean(providerId);
+
+    if (!shouldLoad) {
+      setExistingDoctorOptions([]);
+      setExistingDoctorOptionsBusy(false);
+      setExistingDoctorOptionsError("");
+      return;
+    }
+
+    let cancelled = false;
+    setExistingDoctorOptionsBusy(true);
+    setExistingDoctorOptionsError("");
+
+    void fetchProviderPeople({ personType: "doctor", providerType: "medical" })
+      .then((rows) => {
+        if (cancelled) return;
+        setExistingDoctorOptions(
+          rows.filter(
+            (row) =>
+              row.person_type === "doctor" &&
+              row.provider_type === "medical" &&
+              row.provider_id !== providerId,
+          ),
+        );
+        setExistingDoctorOptionsBusy(false);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setExistingDoctorOptions([]);
+        setExistingDoctorOptionsBusy(false);
+        setExistingDoctorOptionsError(
+          error instanceof Error ? error.message : t.common_failed_load,
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    catalogPersonContext?.providerId,
+    catalogPersonContext?.providerType,
+    detail?.id,
+    detail?.provider_type,
+    doctorDialogOpen,
+    doctorForm.id,
+    permissions.canViewPage,
+    t.common_failed_load,
+  ]);
+
+  useEffect(() => {
     if (!permissions.canViewPage) return;
     let cancelled = false;
     void Promise.all([
       fetchSpecializationsForAdmin(),
+      fetchInsuranceProviders(true),
       fetchProviders("/providers?active_only=true"),
       fetchProviderStaffRoles(true),
       fetchProviderPeoplePatients(),
       fetchProviderTaxonomy(),
     ])
-      .then(([specializationItems, providerItems, roleItems, patientItems, taxonomy]) => {
+      .then(([specializationItems, insuranceProviderItems, providerItems, roleItems, patientItems, taxonomy]) => {
         if (cancelled) return;
         dispatchPageState({
           specializations: specializationItems,
+          insuranceProviders: insuranceProviderItems,
           parentProviderOptions: providerItems,
           staffRoles: roleItems,
           peoplePatientOptions: patientItems,
@@ -2127,6 +2424,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         if (cancelled) return;
         dispatchPageState({
           specializations: [],
+          insuranceProviders: [],
           parentProviderOptions: [],
           staffRoles: [],
           peoplePatientOptions: [],
@@ -2215,6 +2513,14 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     setDetailVersion((current) => current + 1);
   }
 
+  function refreshInsuranceProviderOptions() {
+    void fetchInsuranceProviders(true)
+      .then((items) => setInsuranceProviders(items))
+      .catch(() => {
+        // The saved provider/doctor remains valid even if the option cache refresh fails.
+      });
+  }
+
   useDebouncedRealtimeSubscription(PROVIDER_REALTIME_EVENTS, (_event, events) => {
     if (!permissions.canViewPage) return;
     clearApiCache("/providers");
@@ -2251,6 +2557,13 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       return;
     }
     setStaffDetailView({ source: "catalog", row });
+  }
+
+  function handleExistingDoctorSelect(doctorId: string) {
+    const doctor = existingDoctorOptions.find((row) => row.person_id === doctorId);
+    if (!doctor) return;
+    setDoctorError("");
+    setDoctorForm(providerPeopleDoctorToNewProviderForm(doctor));
   }
 
   function editDoctorFromDetailView(view: DoctorDetailView) {
@@ -2303,6 +2616,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     try {
       const payload = toProviderPayload(createForm, permissions.forceNonMedical);
       const created = await createProvider(payload);
+      refreshInsuranceProviderOptions();
       setCreateOpen(false);
       staffGo(`/providers/${created.id}`);
     } catch (error) {
@@ -2322,6 +2636,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     try {
       const payload = toProviderPayload(providerForm, permissions.forceNonMedical);
       await updateProvider(detail.id, payload);
+      refreshInsuranceProviderOptions();
       if (providerEditOpen) {
         setProviderEditOpen(false);
       }
@@ -2423,6 +2738,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
     try {
       await saveProviderDoctor(providerId, doctorForm.id, payload);
+      refreshInsuranceProviderOptions();
       setDoctorDialogOpen(false);
       setDoctorForm(blankDoctorForm());
       setCatalogPersonContext(null);
@@ -3030,9 +3346,14 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             form={doctorForm}
             providerType={catalogPersonContext?.providerType ?? detail?.provider_type ?? "medical"}
             specializations={specializations}
+            insuranceProviders={insuranceProviders}
+            existingDoctorOptions={existingDoctorOptions}
+            existingDoctorOptionsBusy={existingDoctorOptionsBusy}
+            existingDoctorOptionsError={existingDoctorOptionsError}
             busy={doctorBusy}
             error={doctorError}
             onSubmit={handleDoctorSubmit}
+            onSelectExistingDoctor={handleExistingDoctorSelect}
             onChange={(field, value) =>
               setDoctorForm((current) => applyDoctorFieldChange(current, field, value))
             }
@@ -3088,7 +3409,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             error={staffError}
             onSubmit={handleStaffSubmit}
             onChange={(field, value) =>
-              setStaffForm((current) => ({ ...current, [field]: value }))
+              setStaffForm((current) => applyStaffFieldChange(current, field, value))
             }
             onContactsChange={(contacts) =>
               setStaffForm((current) => ({ ...current, contacts }))
@@ -3103,6 +3424,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             form={providerForm}
             detail={detail}
             specializations={specializations}
+            insuranceProviders={insuranceProviders}
             taxonomyNodes={taxonomyNodes}
             parentProviderOptions={parentProviderOptions}
             permissions={permissions}
@@ -3320,6 +3642,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     ...current,
                     providerType: nextType,
                     specializations: nextType === "non_medical" ? "" : current.specializations,
+                    insuranceProvider: nextType === "non_medical" ? "" : current.insuranceProvider,
                     taxonomyNodeId: "",
                     taxonomyAttributeKey: "",
                     taxonomyAttributeValue: "",
@@ -3327,6 +3650,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   syncQuery({
                     provider_type: nextType || null,
                     specializations: nextType === "non_medical" ? null : filters.specializations || null,
+                    insurance: nextType === "non_medical" ? null : filters.insuranceProvider || null,
                     taxonomy: null,
                     attr_key: null,
                     attr_value: null,
@@ -3469,6 +3793,15 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   onChange={(nextValue) => setServerFilter("specializations", nextValue, "specializations")}
                 />
               </div>
+              <div className="min-w-[220px] max-w-sm flex-1 sm:flex-none">
+                <InsuranceProviderMultiSelect
+                  value={filters.insuranceProvider}
+                  items={insuranceProviders}
+                  compact
+                  disabled={permissions.forceNonMedical || filters.providerType === "non_medical"}
+                  onChange={(nextValue) => setServerFilter("insuranceProvider", nextValue, "insurance")}
+                />
+              </div>
             </div>
           ) : null}
         </div>
@@ -3506,6 +3839,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             rows={peopleRows}
             forceNonMedical={permissions.forceNonMedical}
             filters={peopleFilters}
+            insuranceProviders={insuranceProviders}
             patients={peoplePatientOptions}
             providers={parentProviderOptions}
             taxonomyNodes={taxonomyNodes}
@@ -3543,6 +3877,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                 <ProviderFormFields
                   form={createForm}
                   specializations={specializations}
+                  insuranceProviders={insuranceProviders}
                   taxonomyNodes={taxonomyNodes}
                   parentProviderOptions={parentProviderOptions}
                   onChange={(field, value) =>
@@ -3651,6 +3986,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     <ProviderFormFields
                       form={providerForm}
                       specializations={specializations}
+                      insuranceProviders={insuranceProviders}
                       taxonomyNodes={taxonomyNodes}
                       parentProviderOptions={parentProviderOptions}
                       currentProviderId={detail.id}
@@ -3811,9 +4147,14 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           form={doctorForm}
           providerType={catalogPersonContext?.providerType ?? detail?.provider_type ?? "medical"}
           specializations={specializations}
+          insuranceProviders={insuranceProviders}
+          existingDoctorOptions={existingDoctorOptions}
+          existingDoctorOptionsBusy={existingDoctorOptionsBusy}
+          existingDoctorOptionsError={existingDoctorOptionsError}
           busy={doctorBusy}
           error={doctorError}
           onSubmit={handleDoctorSubmit}
+          onSelectExistingDoctor={handleExistingDoctorSelect}
           onChange={(field, value) =>
             setDoctorForm((current) => applyDoctorFieldChange(current, field, value))
           }
@@ -3868,13 +4209,13 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           busy={staffBusy}
           error={staffError}
           onSubmit={handleStaffSubmit}
-        onChange={(field, value) =>
-          setStaffForm((current) => ({ ...current, [field]: value }))
-        }
-        onContactsChange={(contacts) =>
-          setStaffForm((current) => ({ ...current, contacts }))
-        }
-      />
+          onChange={(field, value) =>
+            setStaffForm((current) => applyStaffFieldChange(current, field, value))
+          }
+          onContactsChange={(contacts) =>
+            setStaffForm((current) => ({ ...current, contacts }))
+          }
+        />
       ) : null}
 
       {permissions.canManageRegistry ? (
@@ -3928,6 +4269,58 @@ function ReadOnlyLine({
       >
         {value}
       </span>
+    </div>
+  );
+}
+
+function weeklyAvailabilityBadgeClass(closed: boolean) {
+  return closed
+    ? "border-orange-200 bg-orange-50 text-orange-800"
+    : "border-border/60 bg-muted/30 text-foreground";
+}
+
+function WeeklyAvailabilityBadgeList({
+  value,
+  compact = false,
+}: {
+  value: string | null | undefined;
+  compact?: boolean;
+}) {
+  const { lang } = useLang();
+  const rows = formatWeeklyAvailabilityDisplayItems(value, lang);
+
+  return (
+    <div className={cn("grid gap-2", compact ? "grid-cols-1" : "sm:grid-cols-2 lg:grid-cols-4")}>
+      {rows.map((row, index) => (
+        <span
+          key={`${row.day ?? "custom"}-${index}`}
+          className={cn(
+            "rounded-lg border px-3 py-1.5 text-sm font-semibold",
+            weeklyAvailabilityBadgeClass(row.closed),
+            row.freeText && !compact ? "sm:col-span-2 lg:col-span-4" : null,
+          )}
+        >
+          {row.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ReadOnlyAvailabilityLine({
+  label,
+  value,
+}: {
+  label: ReactNode;
+  value: string | null | undefined;
+}) {
+  return (
+    <div className="flex min-w-0 items-start gap-3 py-2">
+      <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
+      <span className="mt-3 h-px min-w-6 flex-1 bg-border/70" />
+      <div className="min-w-0 max-w-[70%] flex-1">
+        <WeeklyAvailabilityBadgeList value={value} compact />
+      </div>
     </div>
   );
 }
@@ -4043,10 +4436,8 @@ function taxonomyAttributeReadOnlyRows(detail: ProviderDetail, lang: "de" | "ru"
 }
 
 function ProviderAvailabilitySection({ detail }: { detail: ProviderDetail }) {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
-  const display = formatWeeklyAvailabilityDisplay(detail.opening_hours, lang);
-  const rows = display ? display.split("; ") : [];
 
   return (
     <Section
@@ -4059,20 +4450,7 @@ function ProviderAvailabilitySection({ detail }: { detail: ProviderDetail }) {
         </span>
       }
     >
-      {rows.length > 0 ? (
-        <div className="flex flex-wrap gap-2">
-          {rows.map((row) => (
-            <span
-              key={row}
-              className="rounded-lg border border-border/60 bg-muted/30 px-3 py-1.5 text-sm font-semibold text-foreground"
-            >
-              {row}
-            </span>
-          ))}
-        </div>
-      ) : (
-        <p className="text-sm text-muted-foreground">{t.common_not_set}</p>
-      )}
+      <WeeklyAvailabilityBadgeList value={detail.opening_hours} />
     </Section>
   );
 }
@@ -4082,10 +4460,9 @@ function ProviderProfileReadOnlySection({ detail }: { detail: ProviderDetail }) 
   const tr = { ...t.uiText, ...t } as unknown as Record<string, string>;
   const l = (key: string) => t.uiText[key] ?? key;
   const fallback = t.common_not_set;
-  const taxonomyLine = detail.taxonomy_path?.length
-    ? detail.taxonomy_path.map((node) => taxonomyNodeLabel(node, lang)).join(" / ")
-    : taxonomyNodeLabel(detail.taxonomy_node, lang);
+  const taxonomyLine = taxonomyLeafLabel(detail.taxonomy_node, detail.taxonomy_path, lang);
   const specializationLine = specializationText(detail.specializations, detail.fachbereich, lang);
+  const insuranceLine = insuranceProviderText(detail.insurance_providers);
   const addressLine = [
     detail.address_street,
     detail.address_zip,
@@ -4098,10 +4475,10 @@ function ProviderProfileReadOnlySection({ detail }: { detail: ProviderDetail }) 
     <div className="space-y-3">
       <Section className={providerDetailSectionClassName} title={l("providers_provider_profile")}>
         <div className="grid gap-x-8 gap-y-1 lg:grid-cols-2">
-          <ReadOnlyLine label={l("patients_display_name")} value={detail.name || fallback} />
+          <ReadOnlyLine label={l("patients_display_name")} value={detail.name || fallback} wrap />
           <ReadOnlyLine label={l("providers_legal_name")} value={detail.legal_name || fallback} />
           <ReadOnlyLine label={t.providers_type} value={providerTypeLabel(detail.provider_type, tr)} />
-          <ReadOnlyLine label={t.providers_category} value={taxonomyLine || fallback} />
+          <ReadOnlyLine label={t.providers_category} value={taxonomyLine || fallback} wrap />
           <ReadOnlyLine
             label={l("providers_organization_level")}
             value={providerOrganizationLevelLabel(detail.organization_level)}
@@ -4117,6 +4494,9 @@ function ProviderProfileReadOnlySection({ detail }: { detail: ProviderDetail }) 
           />
           {detail.provider_type === "medical" ? (
             <ReadOnlyLine label={t.providers_fachbereich} value={specializationLine || fallback} />
+          ) : null}
+          {detail.provider_type === "medical" ? (
+            <ReadOnlyLine label={insuranceProviderFieldLabel(lang)} value={insuranceLine || fallback} wrap />
           ) : null}
         </div>
       </Section>
@@ -4210,6 +4590,9 @@ function ProviderDoctorDetailSheet({
   const specializations = doctor
     ? specializationText(doctor.specializations, doctor.fachbereich, lang)
     : specializationText(row?.specializations, row?.fachbereich, lang);
+  const insuranceProviders = doctor
+    ? insuranceProviderText(doctor.insurance_providers)
+    : insuranceProviderText(row?.insurance_providers);
   const contacts = doctor?.contacts ?? row?.contacts;
   const phone = doctor?.phone ?? row?.phone;
   const email = doctor?.email ?? row?.email;
@@ -4272,6 +4655,9 @@ function ProviderDoctorDetailSheet({
                 <ReadOnlyLine label={l("providers_doctor_specializations")} value={specializations || t.common_not_set} />
               ) : null}
               {isMedicalProvider ? (
+                <ReadOnlyLine label={insuranceProviderFieldLabel(lang)} value={insuranceProviders || t.common_not_set} wrap />
+              ) : null}
+              {isMedicalProvider ? (
                 <ReadOnlyLine
                   label={l("providers_doctor_schwerpunkt")}
                   value={(doctor?.schwerpunkt ?? row?.schwerpunkt) || t.common_not_set}
@@ -4284,14 +4670,9 @@ function ProviderDoctorDetailSheet({
                   wrap
                 />
               ) : null}
-              <ReadOnlyLine
+              <ReadOnlyAvailabilityLine
                 label={l("providers_opening_hours")}
-                value={
-                  openingHours
-                    ? formatWeeklyAvailabilityDisplay(openingHours, lang)
-                    : t.common_not_set
-                }
-                wrap
+                value={openingHours}
               />
             </Section>
             <Section title={l("providers_contacts")}>
@@ -4404,14 +4785,9 @@ function ProviderStaffDetailSheet({
               <ReadOnlyLine label={l("providers_staff_department")} value={(staff?.department ?? row?.department) || t.common_not_set} />
               <ReadOnlyLine label={t.patients_gender} value={personGenderLabel(staff?.gender ?? row?.gender ?? "unknown")} />
               <ReadOnlyLine label={t.users_status} value={humanizeCode(staff?.status ?? row?.status ?? "unknown")} />
-              <ReadOnlyLine
+              <ReadOnlyAvailabilityLine
                 label={l("providers_opening_hours")}
-                value={
-                  openingHours
-                    ? formatWeeklyAvailabilityDisplay(openingHours, lang)
-                    : t.common_not_set
-                }
-                wrap
+                value={openingHours}
               />
             </Section>
             <Section title={l("providers_contacts")}>
@@ -4435,6 +4811,7 @@ function ProviderEditFormSheet({
   form,
   detail,
   specializations,
+  insuranceProviders,
   taxonomyNodes,
   parentProviderOptions,
   permissions,
@@ -4450,6 +4827,7 @@ function ProviderEditFormSheet({
   form: ProviderFormState;
   detail: ProviderDetail;
   specializations: SpecializationItem[];
+  insuranceProviders: InsuranceProviderItem[];
   taxonomyNodes: ProviderTaxonomyNode[];
   parentProviderOptions: ProviderSummary[];
   permissions: ProviderPermissions;
@@ -4484,6 +4862,7 @@ function ProviderEditFormSheet({
               <ProviderFormFields
                 form={form}
                 specializations={specializations}
+                insuranceProviders={insuranceProviders}
                 taxonomyNodes={taxonomyNodes}
                 parentProviderOptions={parentProviderOptions}
                 currentProviderId={detail.id}
@@ -4508,9 +4887,14 @@ function ProviderDoctorFormSheet({
   form,
   providerType,
   specializations,
+  insuranceProviders,
+  existingDoctorOptions,
+  existingDoctorOptionsBusy,
+  existingDoctorOptionsError,
   busy,
   error,
   onSubmit,
+  onSelectExistingDoctor,
   onChange,
   onContactsChange,
 }: {
@@ -4519,13 +4903,19 @@ function ProviderDoctorFormSheet({
   form: DoctorFormState;
   providerType: ProviderType;
   specializations: SpecializationItem[];
+  insuranceProviders: InsuranceProviderItem[];
+  existingDoctorOptions: ProviderPeopleRow[];
+  existingDoctorOptionsBusy: boolean;
+  existingDoctorOptionsError: string;
   busy: boolean;
   error: string;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onSelectExistingDoctor: (doctorId: string) => void;
   onChange: (field: keyof DoctorFormState, value: string) => void;
   onContactsChange: (contacts: DoctorFormState["contacts"]) => void;
 }) {
   const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
   const isMedicalProvider = providerType === "medical";
   const createLabel = isMedicalProvider
     ? t.providers_doctor_new
@@ -4553,10 +4943,48 @@ function ProviderDoctorFormSheet({
           >
             <div className="space-y-3 rounded-xl p-4">
               {error ? <Banner tone="error">{error}</Banner> : null}
+              {isMedicalProvider && !form.id ? (
+                <Section title={l("providers_existing_doctor_section")}>
+                  <Field label={l("providers_existing_doctor_select")}>
+                    <NativeComboboxSelect
+                      value=""
+                      onChange={(event) => {
+                        const doctorId = event.target.value;
+                        if (doctorId) onSelectExistingDoctor(doctorId);
+                      }}
+                      className={formSelectClassName}
+                      disabled={busy || existingDoctorOptionsBusy}
+                    >
+                      <option value="">
+                        {existingDoctorOptionsBusy
+                          ? l("providers_existing_doctor_loading")
+                          : l("providers_existing_doctor_placeholder")}
+                      </option>
+                      {existingDoctorOptions.map((doctor) => (
+                        <option key={`${doctor.provider_id}:${doctor.person_id}`} value={doctor.person_id}>
+                          {providerPeopleDoctorOptionLabel(doctor)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  {existingDoctorOptionsError ? (
+                    <p className="text-xs text-destructive">{existingDoctorOptionsError}</p>
+                  ) : existingDoctorOptionsBusy ? null : existingDoctorOptions.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      {l("providers_existing_doctor_empty")}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      {l("providers_existing_doctor_hint")}
+                    </p>
+                  )}
+                </Section>
+              ) : null}
               {isMedicalProvider ? (
                 <DoctorFormFields
                   form={form}
                   specializations={specializations}
+                  insuranceProviders={insuranceProviders}
                   onChange={onChange}
                   onContactsChange={onContactsChange}
                 />
@@ -5588,9 +6016,7 @@ function ProviderSheetHero({
     providerMeta(detail),
   ].filter(Boolean).join(" - ");
   const specializationLine = specializationText(detail.specializations, detail.fachbereich, lang);
-  const taxonomyLine = detail.taxonomy_path?.length
-    ? detail.taxonomy_path.map((node) => taxonomyNodeLabel(node, lang)).join(" / ")
-    : taxonomyNodeLabel(detail.taxonomy_node, lang);
+  const taxonomyLine = taxonomyLeafLabel(detail.taxonomy_node, detail.taxonomy_path, lang);
 
   return (
     <section className="relative overflow-hidden rounded-xl border border-border bg-card px-7 py-4">
@@ -5616,7 +6042,7 @@ function ProviderSheetHero({
               {detail.is_active ? t.common_active : t.common_inactive}
             </Badge>
           </div>
-          <h2 className="truncate text-xl font-semibold leading-tight text-foreground">
+          <h2 className="break-words text-xl font-semibold leading-tight text-foreground">
             {detail.name}
           </h2>
           <p className="mt-2 line-clamp-1 text-sm text-muted-foreground">
@@ -5645,7 +6071,7 @@ function ProviderSheetHero({
                 variant="outline"
                 className="max-w-full rounded-full border-border bg-muted/30 px-2 py-0.5 text-xs font-medium text-muted-foreground"
               >
-                <span className="truncate">{taxonomyLine}</span>
+                <span className="break-words">{taxonomyLine}</span>
               </Badge>
             ) : null}
             {detail.parent_provider_name ? (
@@ -5764,6 +6190,15 @@ function specializationText(
   }
   if (labels.length) return labels.join(", ");
   return fallback ? specializationLabelForValue(fallback, specializations ?? [], lang) : "";
+}
+
+function insuranceProviderText(items: { name?: string | null }[] | undefined) {
+  return (items ?? [])
+    .flatMap((item) => {
+      const label = item.name?.trim();
+      return label ? [label] : [];
+    })
+    .join(", ");
 }
 
 function contactSummary(
@@ -6024,6 +6459,7 @@ function DoctorCard({
 }) {
   const { lang } = useLang();
   const specializations = specializationText(doctor.specializations, doctor.fachbereich, lang);
+  const insuranceProviders = insuranceProviderText(doctor.insurance_providers);
   const contacts = contactSummary(doctor.contacts, doctor.phone, doctor.email);
   const roleLabel = doctor.role_label || (doctor.role_code ? doctorRoleLabel(doctor.role_code) : "");
   const subrole = doctor.subrole?.trim() ?? "";
@@ -6037,13 +6473,18 @@ function DoctorCard({
         doctor={doctor}
         roleLabel={roleLabel}
         specializations={specializations}
+        insuranceProviders={insuranceProviders}
         subrole={subrole}
         onOpen={onOpen}
         onDelete={onDelete}
         onEdit={onEdit}
         onNewRelationship={onNewRelationship}
       />
-      <DoctorMetrics doctor={doctor} specializations={specializations} />
+      <DoctorMetrics
+        doctor={doctor}
+        specializations={specializations}
+        insuranceProviders={insuranceProviders}
+      />
       <DoctorRelationships
         canManage={canManage}
         doctor={doctor}
@@ -6063,6 +6504,7 @@ function DoctorCardSummary({
   doctor,
   roleLabel,
   specializations,
+  insuranceProviders,
   subrole,
   onOpen,
   onDelete,
@@ -6075,6 +6517,7 @@ function DoctorCardSummary({
   doctor: DoctorSummary;
   roleLabel: string;
   specializations: string;
+  insuranceProviders: string;
   subrole: string;
   onOpen: (doctor: DoctorSummary) => void;
   onDelete: (doctorId: string, doctorName: string) => void;
@@ -6114,6 +6557,14 @@ function DoctorCardSummary({
                 className="rounded-full border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700"
               >
                 {roleLabel}
+              </Badge>
+            ) : null}
+            {insuranceProviders ? (
+              <Badge
+                variant="outline"
+                className="max-w-full rounded-full border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"
+              >
+                <span className="truncate">{insuranceProviders}</span>
               </Badge>
             ) : null}
             {subrole ? (
@@ -6238,19 +6689,27 @@ function DoctorSummaryActions({
 function DoctorMetrics({
   doctor,
   specializations,
+  insuranceProviders,
 }: {
   doctor: DoctorSummary;
   specializations: string;
+  insuranceProviders: string;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
 
   return (
-    <div className="grid border-t border-border bg-muted/10 sm:grid-cols-2 lg:grid-cols-[1.1fr_1fr_1fr_0.5fr_0.5fr]">
+    <div className="grid border-t border-border bg-muted/10 sm:grid-cols-2 lg:grid-cols-[1.1fr_1fr_1fr_1fr_0.5fr_0.5fr]">
       <div className="border-b border-border px-4 py-3 sm:border-r lg:border-b-0">
         <p className="text-xs text-muted-foreground">{l("providers_doctor_specializations")}</p>
         <p className="mt-1 text-sm font-semibold text-foreground">
           {specializations || t.common_not_set}
+        </p>
+      </div>
+      <div className="border-b border-border px-4 py-3 sm:border-r lg:border-b-0">
+        <p className="text-xs text-muted-foreground">{insuranceProviderFieldLabel(lang)}</p>
+        <p className="mt-1 text-sm font-semibold text-foreground">
+          {insuranceProviders || t.common_not_set}
         </p>
       </div>
       <div className="border-b border-border px-4 py-3 sm:border-r lg:border-b-0">
@@ -6979,6 +7438,7 @@ function InteractionHistorySection({
 function ProviderFormFields({
   form,
   specializations,
+  insuranceProviders,
   taxonomyNodes,
   parentProviderOptions,
   currentProviderId,
@@ -6991,6 +7451,7 @@ function ProviderFormFields({
 }: {
   form: ProviderFormState;
   specializations: SpecializationItem[];
+  insuranceProviders: InsuranceProviderItem[];
   taxonomyNodes: ProviderTaxonomyNode[];
   parentProviderOptions: ProviderSummary[];
   currentProviderId?: string;
@@ -7050,6 +7511,7 @@ function ProviderFormFields({
       parentOptions={parentOptions}
       providerType={providerType}
       specializations={specializations}
+      insuranceProviders={insuranceProviders}
       taxonomyNodes={taxonomyNodes}
       onChange={onChange}
       onManageSpecializations={onManageSpecializations}
@@ -7109,6 +7571,7 @@ function ProviderProfileFields({
   parentOptions,
   providerType,
   specializations,
+  insuranceProviders,
   taxonomyNodes,
   onChange,
   onManageSpecializations,
@@ -7121,6 +7584,7 @@ function ProviderProfileFields({
   parentOptions: ProviderSummary[];
   providerType: ProviderFormState["providerType"];
   specializations: SpecializationItem[];
+  insuranceProviders: InsuranceProviderItem[];
   taxonomyNodes: ProviderTaxonomyNode[];
   onChange: (field: keyof ProviderFormState, value: string) => void;
   onManageSpecializations?: () => void;
@@ -7173,6 +7637,7 @@ function ProviderProfileFields({
               if (nextProviderType !== "medical") {
                 onChange("specializations", "");
                 onChange("fachbereich", "");
+                onChange("insuranceProviders", "");
               }
             }}
             disabled={disabled || forceNonMedical}
@@ -7338,6 +7803,14 @@ function ProviderProfileFields({
               </Button>
             </div>
           ) : null}
+          <Field label={insuranceProviderFieldLabel(lang)}>
+            <InsuranceProviderMultiSelect
+              value={form.insuranceProviders}
+              items={insuranceProviders}
+              disabled={disabled}
+              onChange={(nextValue) => onChange("insuranceProviders", nextValue)}
+            />
+          </Field>
         </div>
       ) : null}
     </>
@@ -7598,11 +8071,13 @@ function ProviderContractFields({
 function DoctorFormFields({
   form,
   specializations,
+  insuranceProviders,
   onChange,
   onContactsChange,
 }: {
   form: DoctorFormState;
   specializations: SpecializationItem[];
+  insuranceProviders: InsuranceProviderItem[];
   onChange: (field: keyof DoctorFormState, value: string) => void;
   onContactsChange: (contacts: DoctorFormState["contacts"]) => void;
 }) {
@@ -7633,7 +8108,12 @@ function DoctorFormFields({
 
   return (
     <div className="space-y-3">
-      <DoctorProfileFields form={form} specializations={specializations} onChange={onChange} />
+      <DoctorProfileFields
+        form={form}
+        specializations={specializations}
+        insuranceProviders={insuranceProviders}
+        onChange={onChange}
+      />
       <DoctorContactFields
         contacts={form.contacts}
         onAdd={addContact}
@@ -7780,13 +8260,15 @@ function ContactPersonProfileFields({
 function DoctorProfileFields({
   form,
   specializations,
+  insuranceProviders,
   onChange,
 }: {
   form: DoctorFormState;
   specializations: SpecializationItem[];
+  insuranceProviders: InsuranceProviderItem[];
   onChange: (field: keyof DoctorFormState, value: string) => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   const doctorRoleOptions: Array<{ value: Exclude<DoctorFormState["roleCode"], "">; label: string }> = [
     { value: "clinical_director", label: l("providers_doctor_role_clinical_director") },
@@ -7895,6 +8377,13 @@ function DoctorProfileFields({
             onChange={(event) => onChange("schwerpunkt", event.target.value)}
             className={shellInputClassName}
             placeholder={l("providers_doctor_schwerpunkt_placeholder")}
+          />
+        </Field>
+        <Field label={insuranceProviderFieldLabel(lang)}>
+          <InsuranceProviderMultiSelect
+            value={form.insuranceProviders}
+            items={insuranceProviders}
+            onChange={(nextValue) => onChange("insuranceProviders", nextValue)}
           />
         </Field>
         <Field label={l("providers_doctor_website")}>
@@ -8217,9 +8706,12 @@ function StaffFormFields({
           </Field>
           <Field label={l("patients_display_name")}>
             <Input
-              value={form.displayName}
-              onChange={(event) => onChange("displayName", event.target.value)}
-              className={shellInputClassName}
+              value={composeStaffDisplayName(form.firstName, form.lastName, form.gender) || form.displayName}
+              readOnly
+              tabIndex={-1}
+              aria-readonly
+              className={cn(shellInputClassName, "bg-muted/40 text-muted-foreground")}
+              placeholder={l("patients_display_name")}
             />
           </Field>
           <Field label={l("providers_staff_role")} required>

@@ -38,6 +38,10 @@ pub fn router() -> Router<AppState> {
             "/providers/specializations/{specialization_id}/delete",
             post(delete_specialization),
         )
+        .route(
+            "/providers/insurance-providers",
+            get(list_insurance_providers),
+        )
         .route("/providers/taxonomy", get(list_provider_taxonomy))
         .route(
             "/providers/staff-roles",
@@ -158,10 +162,16 @@ struct ListProvidersQuery {
     taxonomy_attribute_value: Option<String>,
     internal_rating_gte: Option<f64>,
     linked_patient_id: Option<Uuid>,
+    insurance_provider: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct ListSpecializationsQuery {
+    include_inactive: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct ListInsuranceProvidersQuery {
     include_inactive: Option<bool>,
 }
 
@@ -193,6 +203,7 @@ struct UpsertProviderRequest {
     opening_hours: Option<String>,
     fachbereich: Option<String>,
     specializations: Option<Vec<String>>,
+    insurance_providers: Option<Vec<String>>,
     parent_provider_id: Option<Uuid>,
     organization_level: Option<String>,
     taxonomy_node_id: Option<Uuid>,
@@ -221,6 +232,7 @@ struct UpsertDoctorRequest {
     opening_hours: Option<String>,
     fachbereich: Option<String>,
     specializations: Option<Vec<String>>,
+    insurance_providers: Option<Vec<String>>,
     languages: Option<Vec<String>>,
     phone: Option<String>,
     email: Option<String>,
@@ -365,6 +377,7 @@ async fn list_providers(
     let taxonomy_attribute_value = normalize_optional(query.taxonomy_attribute_value);
     let internal_rating_gte = query.internal_rating_gte;
     let linked_patient_id = query.linked_patient_id;
+    let insurance_provider_pattern = format!("%{}%", query.insurance_provider.unwrap_or_default());
 
     if let Some(ref provider_type) = requested_provider_type
         && !is_valid_provider_type(provider_type)
@@ -495,6 +508,21 @@ async fn list_providers(
                     JOIN medical_specializations ms ON ms.id = ps.specialization_id
                     WHERE ps.provider_id = p.id
                       AND de_normalize(concat_ws(' ', ms.name_en, ms.name_de, ms.name_ru, ms.code)) LIKE de_normalize($3)
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM provider_insurances pi
+                    JOIN insurance_providers ip ON ip.id = pi.insurance_provider_id
+                    WHERE pi.provider_id = p.id
+                      AND de_normalize(ip.name) LIKE de_normalize($3)
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM provider_doctors d
+                    JOIN provider_doctor_insurances di ON di.doctor_id = d.id
+                    JOIN insurance_providers ip ON ip.id = di.insurance_provider_id
+                    WHERE d.provider_id = p.id
+                      AND de_normalize(ip.name) LIKE de_normalize($3)
                 )
                 OR EXISTS (
                     WITH RECURSIVE assigned_taxonomy AS (
@@ -723,8 +751,8 @@ async fn list_providers(
                     )
                  )
               )
-              AND (
-                 $18::uuid IS NULL
+	              AND (
+	                 $18::uuid IS NULL
                  OR EXISTS (
                     SELECT 1
                     FROM appointments a
@@ -743,9 +771,27 @@ async fn list_providers(
                     FROM concierge_services cs
                     WHERE cs.provider_id = p.id
                       AND cs.patient_id = $18
-                 )
-              )
-            ORDER BY
+	                 )
+	              )
+	              AND (
+	                 $21::text = '%%'
+	                 OR EXISTS (
+	                     SELECT 1
+	                     FROM provider_insurances pi
+	                     JOIN insurance_providers ip ON ip.id = pi.insurance_provider_id
+	                     WHERE pi.provider_id = p.id
+	                       AND ip.name ILIKE $21
+	                 )
+	                 OR EXISTS (
+	                     SELECT 1
+	                     FROM provider_doctors d
+	                     JOIN provider_doctor_insurances di ON di.doctor_id = d.id
+	                     JOIN insurance_providers ip ON ip.id = di.insurance_provider_id
+	                     WHERE d.provider_id = p.id
+	                       AND ip.name ILIKE $21
+	                 )
+	              )
+	            ORDER BY
               CASE
                 WHEN $19::text IS NULL THEN 100
                 WHEN lower(p.name) = lower($19) THEN 0
@@ -821,6 +867,7 @@ async fn list_providers(
     .bind(linked_patient_id)
     .bind(search_term)
     .bind(is_active_filter)
+    .bind(insurance_provider_pattern)
     .fetch_all(&state.db)
     .await
     {
@@ -872,15 +919,20 @@ async fn list_providers(
                 );
             }
         };
-        let (specializations, taxonomy) = tokio::join!(
+        let (specializations, taxonomy, insurance_providers) = tokio::join!(
             load_provider_specializations_json(&state, id),
             load_provider_taxonomy_json(&state, id),
+            load_provider_insurances_json(&state, id),
         );
         let specializations = match specializations {
             Ok(items) => items,
             Err(resp) => return resp,
         };
         let taxonomy = match taxonomy {
+            Ok(items) => items,
+            Err(resp) => return resp,
+        };
+        let insurance_providers = match insurance_providers {
             Ok(items) => items,
             Err(resp) => return resp,
         };
@@ -908,6 +960,7 @@ async fn list_providers(
             "taxonomy_filter_ids": taxonomy.get("taxonomy_filter_ids").cloned().unwrap_or_else(|| json!([])),
             "taxonomy_attributes": row.try_get::<Value, _>("taxonomy_attributes").unwrap_or_else(|_| json!({})),
             "specializations": specializations,
+            "insurance_providers": insurance_providers,
             "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
             "has_contract": row.try_get::<bool, _>("has_contract").unwrap_or(false),
             "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
@@ -946,6 +999,29 @@ async fn list_specializations(
     }
 
     match load_specializations_json(&state, query.include_inactive.unwrap_or(false)).await {
+        Ok(items) => Json(items).into_response(),
+        Err(resp) => resp,
+    }
+}
+
+async fn list_insurance_providers(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<ListInsuranceProvidersQuery>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::Concierge,
+        Role::Billing,
+        Role::Sales,
+        Role::Patient,
+        Role::ItAdmin,
+    ]) {
+        return e;
+    }
+
+    match load_insurance_providers_json(&state, query.include_inactive.unwrap_or(false)).await {
         Ok(items) => Json(items).into_response(),
         Err(resp) => resp,
     }
@@ -1360,6 +1436,7 @@ async fn create_provider(
         return resp;
     }
     let specializations = provider.specializations.clone();
+    let insurance_providers = provider.insurance_providers.clone();
     let contacts = provider.contacts.clone();
     let taxonomy_node_ids = provider.taxonomy_node_ids.clone();
     let primary_taxonomy_node_id = provider.primary_taxonomy_node_id;
@@ -1442,6 +1519,12 @@ async fn create_provider(
     if let Some(values) = specializations
         && let Err(resp) =
             sync_provider_specializations_tx(&mut tx, provider_id, &provider_type, &values).await
+    {
+        return resp;
+    }
+    if let Some(values) = insurance_providers
+        && let Err(resp) =
+            sync_provider_insurances_tx(&mut tx, provider_id, &provider_type, &values).await
     {
         return resp;
     }
@@ -1552,6 +1635,7 @@ async fn get_provider(
         interactions,
         templates,
         specializations,
+        insurance_providers,
         provider_contacts,
         staff,
         children,
@@ -1563,6 +1647,7 @@ async fn get_provider(
         load_provider_interactions_json(&state, provider_id, None),
         load_provider_templates_json(&state, provider_id),
         load_provider_specializations_json(&state, provider_id),
+        load_provider_insurances_json(&state, provider_id),
         load_provider_contacts_json(
             &state,
             provider_id,
@@ -1602,6 +1687,10 @@ async fn get_provider(
         Ok(items) => items,
         Err(resp) => return resp,
     };
+    let insurance_providers = match insurance_providers {
+        Ok(items) => items,
+        Err(resp) => return resp,
+    };
     let provider_contacts = match provider_contacts {
         Ok(items) => items,
         Err(resp) => return resp,
@@ -1636,6 +1725,7 @@ async fn get_provider(
         "opening_hours": provider.try_get::<Option<String>, _>("opening_hours").unwrap_or_default(),
         "fachbereich": provider.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
         "specializations": specializations,
+        "insurance_providers": insurance_providers,
         "parent_provider_id": provider.try_get::<Option<Uuid>, _>("parent_provider_id").unwrap_or_default(),
         "parent_provider_name": provider.try_get::<Option<String>, _>("parent_provider_name").unwrap_or_default(),
         "organization_level": provider.try_get::<String, _>("organization_level").unwrap_or_else(|_| "organization".to_string()),
@@ -1683,6 +1773,7 @@ async fn update_provider(
         return resp;
     }
     let specializations = provider.specializations.clone();
+    let insurance_providers = provider.insurance_providers.clone();
     let contacts = provider.contacts.clone();
     let taxonomy_node_ids = provider.taxonomy_node_ids.clone();
     let primary_taxonomy_node_id = provider.primary_taxonomy_node_id;
@@ -1780,12 +1871,27 @@ async fn update_provider(
         {
             return resp;
         }
+        if let Err(resp) =
+            sync_provider_insurances_tx(&mut tx, updated_id, &provider_type, &[]).await
+        {
+            return resp;
+        }
         if let Err(resp) = clear_provider_doctor_specializations_tx(&mut tx, updated_id).await {
+            return resp;
+        }
+        if let Err(resp) = clear_provider_doctor_insurances_tx(&mut tx, updated_id).await {
             return resp;
         }
     } else if let Some(values) = specializations
         && let Err(resp) =
             sync_provider_specializations_tx(&mut tx, updated_id, &provider_type, &values).await
+    {
+        return resp;
+    }
+    if provider_type != "non_medical"
+        && let Some(values) = insurance_providers
+        && let Err(resp) =
+            sync_provider_insurances_tx(&mut tx, updated_id, &provider_type, &values).await
     {
         return resp;
     }
@@ -2224,7 +2330,7 @@ async fn create_doctor_relationship(
         Ok(payload) => payload,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
-    if let Err(resp) = ensure_doctor_relationship_target(
+    let target_provider_id = match ensure_doctor_relationship_target(
         &state,
         doctor_id,
         relationship.target_doctor_id,
@@ -2232,33 +2338,25 @@ async fn create_doctor_relationship(
     )
     .await
     {
-        return resp;
-    }
+        Ok(target_provider_id) => target_provider_id,
+        Err(resp) => return resp,
+    };
 
-    let row = match sqlx::query(
-        r#"INSERT INTO provider_doctor_relationships (
-                source_doctor_id, target_doctor_id, relationship_type,
-                description, notes, is_active
-           ) VALUES ($1, $2, $3, $4, $5, $6)
-           ON CONFLICT (source_doctor_id, target_doctor_id, relationship_type)
-               WHERE is_active
-           DO UPDATE SET
-               description = EXCLUDED.description,
-               notes = EXCLUDED.notes,
-               is_active = EXCLUDED.is_active,
-               updated_at = now()
-           RETURNING id"#,
-    )
-    .bind(doctor_id)
-    .bind(relationship.target_doctor_id)
-    .bind(&relationship.relationship_type)
-    .bind(&relationship.description)
-    .bind(&relationship.notes)
-    .bind(relationship.is_active)
-    .fetch_one(&state.db)
-    .await
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, "Failed to begin doctor relationship create");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create doctor relationship",
+            );
+        }
+    };
+
+    let relationship_id = match sync_doctor_relationship_row(&mut tx, doctor_id, &relationship)
+        .await
     {
-        Ok(row) => row,
+        Ok(id) => id,
         Err(e) => {
             tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, "Failed to create doctor relationship");
             return err(
@@ -2267,8 +2365,26 @@ async fn create_doctor_relationship(
             );
         }
     };
+    let reciprocal = relationship.reciprocal(doctor_id);
+    if let Err(e) =
+        sync_doctor_relationship_row(&mut tx, relationship.target_doctor_id, &reciprocal).await
+    {
+        tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, target_doctor_id = %relationship.target_doctor_id, "Failed to create reciprocal doctor relationship");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create doctor relationship",
+        );
+    }
 
-    let relationship_id = row.try_get::<Uuid, _>("id").ok();
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, "Failed to commit doctor relationship create");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create doctor relationship",
+        );
+    }
+
+    let relationship_id = Some(relationship_id);
     let _ = audit(
         &state,
         auth.user_id,
@@ -2290,6 +2406,16 @@ async fn create_doctor_relationship(
         json!({ "provider_id": provider_id, "doctor_id": doctor_id }),
     )
     .await;
+    if target_provider_id != provider_id {
+        crate::realtime::publish_provider_event(
+            &state,
+            Some(auth.user_id),
+            "provider.doctor_relationship_created",
+            target_provider_id,
+            json!({ "provider_id": target_provider_id, "doctor_id": relationship.target_doctor_id }),
+        )
+        .await;
+    }
 
     (StatusCode::CREATED, Json(json!({ "id": relationship_id }))).into_response()
 }
@@ -2311,7 +2437,7 @@ async fn update_doctor_relationship(
         Ok(payload) => payload,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
-    if let Err(resp) = ensure_doctor_relationship_target(
+    let target_provider_id = match ensure_doctor_relationship_target(
         &state,
         doctor_id,
         relationship.target_doctor_id,
@@ -2319,8 +2445,47 @@ async fn update_doctor_relationship(
     )
     .await
     {
-        return resp;
-    }
+        Ok(target_provider_id) => target_provider_id,
+        Err(resp) => return resp,
+    };
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, relationship_id = %relationship_id, "Failed to begin doctor relationship update");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update doctor relationship",
+            );
+        }
+    };
+    let previous = match sqlx::query(
+        r#"SELECT target_doctor_id, relationship_type
+           FROM provider_doctor_relationships
+           WHERE source_doctor_id = $1 AND id = $2
+           FOR UPDATE"#,
+    )
+    .bind(doctor_id)
+    .bind(relationship_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Doctor relationship not found"),
+        Err(e) => {
+            tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, relationship_id = %relationship_id, "Failed to load doctor relationship for update");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update doctor relationship",
+            );
+        }
+    };
+    let previous_target_doctor_id = previous
+        .try_get::<Uuid, _>("target_doctor_id")
+        .unwrap_or(relationship.target_doctor_id);
+    let previous_relationship_type = previous
+        .try_get::<String, _>("relationship_type")
+        .unwrap_or_else(|_| relationship.relationship_type.clone());
 
     match sqlx::query(
         r#"UPDATE provider_doctor_relationships
@@ -2339,7 +2504,7 @@ async fn update_doctor_relationship(
     .bind(&relationship.description)
     .bind(&relationship.notes)
     .bind(relationship.is_active)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {}
@@ -2354,6 +2519,49 @@ async fn update_doctor_relationship(
                 "Failed to update doctor relationship",
             );
         }
+    }
+    if previous_target_doctor_id != relationship.target_doctor_id
+        || previous_relationship_type != relationship.relationship_type
+    {
+        if let Err(e) = sqlx::query(
+            r#"DELETE FROM provider_doctor_relationships
+               WHERE source_doctor_id = $1
+                 AND target_doctor_id = $2
+                 AND relationship_type = $3"#,
+        )
+        .bind(previous_target_doctor_id)
+        .bind(doctor_id)
+        .bind(previous_relationship_type)
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, relationship_id = %relationship_id, "Failed to delete stale reciprocal doctor relationship");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update doctor relationship",
+            );
+        }
+    }
+    let reciprocal = relationship.reciprocal(doctor_id);
+    if let Err(e) =
+        sync_doctor_relationship_row(&mut tx, relationship.target_doctor_id, &reciprocal).await
+    {
+        if is_unique_violation(&e) {
+            return err(StatusCode::CONFLICT, "Doctor relationship already exists");
+        }
+        tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, relationship_id = %relationship_id, "Failed to update reciprocal doctor relationship");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update doctor relationship",
+        );
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, relationship_id = %relationship_id, "Failed to commit doctor relationship update");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update doctor relationship",
+        );
     }
 
     let _ = audit(
@@ -2373,6 +2581,16 @@ async fn update_doctor_relationship(
         json!({ "provider_id": provider_id, "doctor_id": doctor_id }),
     )
     .await;
+    if target_provider_id != provider_id {
+        crate::realtime::publish_provider_event(
+            &state,
+            Some(auth.user_id),
+            "provider.doctor_relationship_updated",
+            target_provider_id,
+            json!({ "provider_id": target_provider_id, "doctor_id": relationship.target_doctor_id }),
+        )
+        .await;
+    }
 
     Json(json!({ "ok": true })).into_response()
 }
@@ -2390,16 +2608,31 @@ async fn delete_doctor_relationship(
         return resp;
     }
 
-    match sqlx::query(
-        "DELETE FROM provider_doctor_relationships WHERE source_doctor_id = $1 AND id = $2",
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, relationship_id = %relationship_id, "Failed to begin doctor relationship delete");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete doctor relationship",
+            );
+        }
+    };
+    let deleted = match sqlx::query(
+        r#"DELETE FROM provider_doctor_relationships r
+           USING provider_doctors target
+           WHERE r.source_doctor_id = $1
+             AND r.id = $2
+             AND target.id = r.target_doctor_id
+           RETURNING r.target_doctor_id, r.relationship_type, target.provider_id AS target_provider_id"#,
     )
     .bind(doctor_id)
     .bind(relationship_id)
-    .execute(&state.db)
+    .fetch_optional(&mut *tx)
     .await
     {
-        Ok(result) if result.rows_affected() > 0 => {}
-        Ok(_) => return err(StatusCode::NOT_FOUND, "Doctor relationship not found"),
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Doctor relationship not found"),
         Err(e) => {
             tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, relationship_id = %relationship_id, "Failed to delete doctor relationship");
             return err(
@@ -2407,6 +2640,40 @@ async fn delete_doctor_relationship(
                 "Failed to delete doctor relationship",
             );
         }
+    };
+    let target_doctor_id = deleted
+        .try_get::<Uuid, _>("target_doctor_id")
+        .unwrap_or_default();
+    let target_provider_id = deleted
+        .try_get::<Uuid, _>("target_provider_id")
+        .unwrap_or(provider_id);
+    let relationship_type = deleted
+        .try_get::<String, _>("relationship_type")
+        .unwrap_or_else(|_| "professional".to_string());
+    if let Err(e) = sqlx::query(
+        r#"DELETE FROM provider_doctor_relationships
+           WHERE source_doctor_id = $1
+             AND target_doctor_id = $2
+             AND relationship_type = $3"#,
+    )
+    .bind(target_doctor_id)
+    .bind(doctor_id)
+    .bind(relationship_type)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, relationship_id = %relationship_id, "Failed to delete reciprocal doctor relationship");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to delete doctor relationship",
+        );
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, relationship_id = %relationship_id, "Failed to commit doctor relationship delete");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to delete doctor relationship",
+        );
     }
 
     let _ = audit(
@@ -2426,6 +2693,16 @@ async fn delete_doctor_relationship(
         json!({ "provider_id": provider_id, "doctor_id": doctor_id }),
     )
     .await;
+    if target_provider_id != provider_id {
+        crate::realtime::publish_provider_event(
+            &state,
+            Some(auth.user_id),
+            "provider.doctor_relationship_deleted",
+            target_provider_id,
+            json!({ "provider_id": target_provider_id, "doctor_id": target_doctor_id }),
+        )
+        .await;
+    }
 
     StatusCode::NO_CONTENT.into_response()
 }
@@ -2495,7 +2772,15 @@ async fn get_doctor(
     .await
     {
         Ok(Some(row)) => {
-            let specializations = match load_doctor_specializations_json(&state, doctor_id).await {
+            let (specializations, insurance_providers) = tokio::join!(
+                load_doctor_specializations_json(&state, doctor_id),
+                load_doctor_insurances_json(&state, doctor_id),
+            );
+            let specializations = match specializations {
+                Ok(items) => items,
+                Err(resp) => return resp,
+            };
+            let insurance_providers = match insurance_providers {
                 Ok(items) => items,
                 Err(resp) => return resp,
             };
@@ -2546,6 +2831,7 @@ async fn get_doctor(
                 "opening_hours": row.try_get::<Option<String>, _>("opening_hours").unwrap_or_default(),
                 "fachbereich": row.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
                 "specializations": specializations,
+                "insurance_providers": insurance_providers,
                 "languages": row.try_get::<Vec<String>, _>("languages").unwrap_or_default(),
                 "phone": row.try_get::<Option<String>, _>("phone").unwrap_or_default(),
                 "email": row.try_get::<Option<String>, _>("email").unwrap_or_default(),
@@ -2594,6 +2880,7 @@ async fn create_doctor(
         return err(StatusCode::UNPROCESSABLE_ENTITY, message);
     }
     let specializations = doctor.specializations.clone();
+    let insurance_providers = doctor.insurance_providers.clone();
     let contacts = doctor.contacts.clone();
     if provider_type == "non_medical"
         && specializations
@@ -2603,6 +2890,16 @@ async fn create_doctor(
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Doctor specializations are only allowed for medical providers",
+        );
+    }
+    if provider_type == "non_medical"
+        && insurance_providers
+            .as_ref()
+            .is_some_and(|values| !values.is_empty())
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Doctor insurance providers are only allowed for medical providers",
         );
     }
 
@@ -2664,6 +2961,12 @@ async fn create_doctor(
     if let Some(values) = specializations
         && let Err(resp) =
             sync_doctor_specializations_tx(&mut tx, doctor_id, &provider_type, &values).await
+    {
+        return resp;
+    }
+    if let Some(values) = insurance_providers
+        && let Err(resp) =
+            sync_doctor_insurances_tx(&mut tx, doctor_id, &provider_type, &values).await
     {
         return resp;
     }
@@ -2748,6 +3051,7 @@ async fn update_doctor(
         return err(StatusCode::UNPROCESSABLE_ENTITY, message);
     }
     let specializations = doctor.specializations.clone();
+    let insurance_providers = doctor.insurance_providers.clone();
     let contacts = doctor.contacts.clone();
     if provider_type == "non_medical"
         && specializations
@@ -2757,6 +3061,16 @@ async fn update_doctor(
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Doctor specializations are only allowed for medical providers",
+        );
+    }
+    if provider_type == "non_medical"
+        && insurance_providers
+            .as_ref()
+            .is_some_and(|values| !values.is_empty())
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Doctor insurance providers are only allowed for medical providers",
         );
     }
 
@@ -2830,9 +3144,20 @@ async fn update_doctor(
         {
             return resp;
         }
+        if let Err(resp) = sync_doctor_insurances_tx(&mut tx, doctor_id, &provider_type, &[]).await
+        {
+            return resp;
+        }
     } else if let Some(values) = specializations
         && let Err(resp) =
             sync_doctor_specializations_tx(&mut tx, doctor_id, &provider_type, &values).await
+    {
+        return resp;
+    }
+    if provider_type != "non_medical"
+        && let Some(values) = insurance_providers
+        && let Err(resp) =
+            sync_doctor_insurances_tx(&mut tx, doctor_id, &provider_type, &values).await
     {
         return resp;
     }
@@ -3550,6 +3875,7 @@ struct ProviderPayload {
     opening_hours: Option<String>,
     fachbereich: Option<String>,
     specializations: Option<Vec<String>>,
+    insurance_providers: Option<Vec<String>>,
     parent_provider_id: Option<Uuid>,
     organization_level: String,
     taxonomy_node_ids: Option<Vec<Uuid>>,
@@ -3576,6 +3902,7 @@ struct DoctorPayload {
     opening_hours: Option<String>,
     fachbereich: Option<String>,
     specializations: Option<Vec<String>>,
+    insurance_providers: Option<Vec<String>>,
     languages: Vec<String>,
     phone: Option<String>,
     email: Option<String>,
@@ -3644,6 +3971,19 @@ struct DoctorRelationshipPayload {
     is_active: bool,
 }
 
+impl DoctorRelationshipPayload {
+    fn reciprocal(&self, target_doctor_id: Uuid) -> Self {
+        Self {
+            target_doctor_id,
+            target_provider_id: None,
+            relationship_type: self.relationship_type.clone(),
+            description: self.description.clone(),
+            notes: self.notes.clone(),
+            is_active: self.is_active,
+        }
+    }
+}
+
 struct ProviderStaffRolePayload {
     code: Option<String>,
     name_en: String,
@@ -3700,6 +4040,7 @@ fn normalize_provider_payload(
     }
     let explicit_specializations = body.specializations.is_some();
     let mut specializations = normalize_string_list(body.specializations);
+    let insurance_providers = normalize_insurance_provider_list(body.insurance_providers)?;
     let fachbereich = normalize_optional(body.fachbereich);
     if specializations.is_empty()
         && let Some(value) = fachbereich.clone()
@@ -3709,6 +4050,13 @@ fn normalize_provider_payload(
     let fachbereich = fachbereich.or_else(|| specializations.first().cloned());
     if provider_type == "non_medical" && !specializations.is_empty() {
         return Err("Specializations are only allowed for medical providers");
+    }
+    if provider_type == "non_medical"
+        && insurance_providers
+            .as_ref()
+            .is_some_and(|values| !values.is_empty())
+    {
+        return Err("Insurance providers are only allowed for medical providers");
     }
 
     let organization_level =
@@ -3769,6 +4117,7 @@ fn normalize_provider_payload(
         } else {
             None
         },
+        insurance_providers,
         parent_provider_id: body.parent_provider_id,
         organization_level,
         taxonomy_node_ids,
@@ -3841,6 +4190,7 @@ fn normalize_doctor_payload(body: UpsertDoctorRequest) -> Result<DoctorPayload, 
     }
     let explicit_specializations = body.specializations.is_some();
     let mut specializations = normalize_string_list(body.specializations);
+    let insurance_providers = normalize_insurance_provider_list(body.insurance_providers)?;
     let fachbereich = normalize_optional(body.fachbereich);
     if specializations.is_empty()
         && let Some(value) = fachbereich.clone()
@@ -3875,6 +4225,7 @@ fn normalize_doctor_payload(body: UpsertDoctorRequest) -> Result<DoctorPayload, 
         } else {
             None
         },
+        insurance_providers,
         languages,
         phone,
         email,
@@ -4276,6 +4627,68 @@ fn normalize_doctor_relationship_payload(
     })
 }
 
+async fn sync_doctor_relationship_row(
+    tx: &mut Transaction<'_, Postgres>,
+    source_doctor_id: Uuid,
+    relationship: &DoctorRelationshipPayload,
+) -> Result<Uuid, sqlx::Error> {
+    if let Some(row) = sqlx::query(
+        r#"WITH existing AS (
+               SELECT id
+               FROM provider_doctor_relationships
+               WHERE source_doctor_id = $1
+                 AND target_doctor_id = $2
+                 AND relationship_type = $3
+               ORDER BY is_active DESC, updated_at DESC
+               LIMIT 1
+               FOR UPDATE
+           )
+           UPDATE provider_doctor_relationships relationships
+           SET description = $4,
+               notes = $5,
+               is_active = $6,
+               updated_at = now()
+           FROM existing
+           WHERE relationships.id = existing.id
+           RETURNING relationships.id"#,
+    )
+    .bind(source_doctor_id)
+    .bind(relationship.target_doctor_id)
+    .bind(&relationship.relationship_type)
+    .bind(&relationship.description)
+    .bind(&relationship.notes)
+    .bind(relationship.is_active)
+    .fetch_optional(&mut **tx)
+    .await?
+    {
+        return row.try_get("id");
+    }
+
+    sqlx::query(
+        r#"INSERT INTO provider_doctor_relationships (
+                source_doctor_id, target_doctor_id, relationship_type,
+                description, notes, is_active
+           ) VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (source_doctor_id, target_doctor_id, relationship_type)
+               WHERE is_active
+           DO UPDATE SET
+               description = EXCLUDED.description,
+               notes = EXCLUDED.notes,
+               is_active = EXCLUDED.is_active,
+               updated_at = now()
+           RETURNING id"#,
+    )
+    .bind(source_doctor_id)
+    .bind(relationship.target_doctor_id)
+    .bind(&relationship.relationship_type)
+    .bind(&relationship.description)
+    .bind(&relationship.notes)
+    .bind(relationship.is_active)
+    .fetch_one(&mut **tx)
+    .await?
+    .try_get("id")
+}
+
 fn legacy_contacts_from_fields(
     phone: Option<String>,
     email: Option<String>,
@@ -4576,6 +4989,36 @@ fn normalize_string_list(value: Option<Vec<String>>) -> Vec<String> {
         .collect()
 }
 
+fn normalize_insurance_provider_list(
+    value: Option<Vec<String>>,
+) -> Result<Option<Vec<String>>, &'static str> {
+    let Some(raw_items) = value else {
+        return Ok(None);
+    };
+    let mut normalized = Vec::new();
+    for item in raw_items {
+        let trimmed = item.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.len() > 255 {
+            return Err("Insurance provider name is too long");
+        }
+        let key = trimmed.to_lowercase();
+        if normalized
+            .iter()
+            .any(|existing: &String| existing.to_lowercase() == key)
+        {
+            continue;
+        }
+        normalized.push(trimmed.to_string());
+        if normalized.len() > 50 {
+            return Err("Too many insurance providers");
+        }
+    }
+    Ok(Some(normalized))
+}
+
 fn normalize_csv_list(value: Option<String>) -> Vec<String> {
     let mut items = Vec::new();
     for item in value.unwrap_or_default().split(',') {
@@ -4756,7 +5199,7 @@ async fn ensure_doctor_relationship_target(
     source_doctor_id: Uuid,
     target_doctor_id: Uuid,
     expected_target_provider_id: Option<Uuid>,
-) -> Result<(), axum::response::Response> {
+) -> Result<Uuid, axum::response::Response> {
     if source_doctor_id == target_doctor_id {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -4792,7 +5235,7 @@ async fn ensure_doctor_relationship_target(
                     "Doctor relationship target provider is inactive",
                 ));
             }
-            Ok(())
+            Ok(target_provider_id)
         }
         Ok(None) => Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -5003,6 +5446,82 @@ async fn load_provider_staff_roles_json(
         .collect())
 }
 
+async fn load_insurance_providers_json(
+    state: &AppState,
+    include_inactive: bool,
+) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"WITH patient_insurance_options AS (
+               SELECT
+                   NULL::uuid AS id,
+                   btrim(p.insurance_provider) AS name,
+                   TRUE AS is_active,
+                   NULL::timestamptz AS created_at,
+                   NULL::timestamptz AS updated_at,
+                   1 AS source_rank
+               FROM patients p
+               WHERE p.insurance_provider IS NOT NULL
+                 AND btrim(p.insurance_provider) <> ''
+                 AND NOT EXISTS (
+                     SELECT 1
+                     FROM insurance_providers ip
+                     WHERE ip.normalized_name = lower(regexp_replace(btrim(p.insurance_provider), '[[:space:]]+', ' ', 'g'))
+                 )
+           ),
+           registry_options AS (
+               SELECT id, name, is_active, created_at, updated_at, 0 AS source_rank
+               FROM insurance_providers
+               WHERE $1 OR is_active = TRUE
+           ),
+           ranked_options AS (
+               SELECT DISTINCT ON (lower(regexp_replace(btrim(name), '[[:space:]]+', ' ', 'g')))
+                   id, name, is_active, created_at, updated_at
+               FROM (
+                   SELECT * FROM registry_options
+                   UNION ALL
+                   SELECT * FROM patient_insurance_options
+               ) options
+               ORDER BY lower(regexp_replace(btrim(name), '[[:space:]]+', ' ', 'g')),
+                        source_rank,
+                        is_active DESC,
+                        name
+           )
+           SELECT id, name, is_active, created_at, updated_at
+           FROM ranked_options
+           ORDER BY is_active DESC, name"#,
+    )
+    .bind(include_inactive)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to load insurance providers");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load insurance providers",
+        )
+    })?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let name = row.try_get::<String, _>("name").unwrap_or_default();
+            let id = row
+                .try_get::<Option<Uuid>, _>("id")
+                .ok()
+                .flatten()
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| format!("patient-insurance:{name}"));
+            json!({
+                "id": id,
+                "name": name,
+                "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+                "created_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at").ok().flatten().map(|v| v.to_rfc3339()).unwrap_or_default(),
+                "updated_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at").ok().flatten().map(|v| v.to_rfc3339()).unwrap_or_default(),
+            })
+        })
+        .collect())
+}
+
 async fn ensure_provider_staff_role_exists(
     state: &AppState,
     code: &str,
@@ -5114,6 +5633,40 @@ async fn load_provider_specializations_json(
                 "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
                 "sort_order": row.try_get::<i32, _>("sort_order").unwrap_or_default(),
                 "is_primary": row.try_get::<bool, _>("is_primary").unwrap_or(false),
+            })
+        })
+        .collect())
+}
+
+async fn load_provider_insurances_json(
+    state: &AppState,
+    provider_id: Uuid,
+) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT ip.id, ip.name, ip.is_active
+           FROM provider_insurances pi
+           JOIN insurance_providers ip ON ip.id = pi.insurance_provider_id
+           WHERE pi.provider_id = $1
+           ORDER BY ip.name"#,
+    )
+    .bind(provider_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, provider_id = %provider_id, "Failed to load provider insurance providers");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load provider insurance providers",
+        )
+    })?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "name": row.try_get::<String, _>("name").unwrap_or_default(),
+                "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
             })
         })
         .collect())
@@ -5375,6 +5928,40 @@ async fn load_doctor_specializations_json(
         .collect())
 }
 
+async fn load_doctor_insurances_json(
+    state: &AppState,
+    doctor_id: Uuid,
+) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT ip.id, ip.name, ip.is_active
+           FROM provider_doctor_insurances di
+           JOIN insurance_providers ip ON ip.id = di.insurance_provider_id
+           WHERE di.doctor_id = $1
+           ORDER BY ip.name"#,
+    )
+    .bind(doctor_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, doctor_id = %doctor_id, "Failed to load doctor insurance providers");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load doctor insurance providers",
+        )
+    })?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "name": row.try_get::<String, _>("name").unwrap_or_default(),
+                "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+            })
+        })
+        .collect())
+}
+
 async fn sync_provider_specializations_tx(
     tx: &mut Transaction<'_, Postgres>,
     provider_id: Uuid,
@@ -5417,6 +6004,52 @@ async fn sync_provider_specializations_tx(
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to update provider specializations",
+            )
+        })?;
+    }
+    Ok(())
+}
+
+async fn sync_provider_insurances_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    provider_id: Uuid,
+    provider_type: &str,
+    values: &[String],
+) -> Result<(), axum::response::Response> {
+    if provider_type == "non_medical" && !values.is_empty() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Insurance providers are only allowed for medical providers",
+        ));
+    }
+
+    let insurance_provider_ids = upsert_insurance_provider_ids_tx(tx, values).await?;
+    sqlx::query("DELETE FROM provider_insurances WHERE provider_id = $1")
+        .bind(provider_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, provider_id = %provider_id, "Failed to replace provider insurance providers");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update provider insurance providers",
+            )
+        })?;
+    for insurance_provider_id in insurance_provider_ids {
+        sqlx::query(
+            r#"INSERT INTO provider_insurances (provider_id, insurance_provider_id)
+               VALUES ($1, $2)
+               ON CONFLICT (provider_id, insurance_provider_id) DO NOTHING"#,
+        )
+        .bind(provider_id)
+        .bind(insurance_provider_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, provider_id = %provider_id, insurance_provider_id = %insurance_provider_id, "Failed to insert provider insurance provider");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update provider insurance providers",
             )
         })?;
     }
@@ -5634,6 +6267,29 @@ async fn clear_provider_doctor_specializations_tx(
     Ok(())
 }
 
+async fn clear_provider_doctor_insurances_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    provider_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    sqlx::query(
+        r#"DELETE FROM provider_doctor_insurances
+           WHERE doctor_id IN (
+               SELECT id FROM provider_doctors WHERE provider_id = $1
+           )"#,
+    )
+    .bind(provider_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, provider_id = %provider_id, "Failed to clear provider doctor insurance providers");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update doctor insurance providers",
+        )
+    })?;
+    Ok(())
+}
+
 async fn sync_doctor_specializations_tx(
     tx: &mut Transaction<'_, Postgres>,
     doctor_id: Uuid,
@@ -5676,6 +6332,52 @@ async fn sync_doctor_specializations_tx(
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to update doctor specializations",
+            )
+        })?;
+    }
+    Ok(())
+}
+
+async fn sync_doctor_insurances_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    doctor_id: Uuid,
+    provider_type: &str,
+    values: &[String],
+) -> Result<(), axum::response::Response> {
+    if provider_type == "non_medical" && !values.is_empty() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Doctor insurance providers are only allowed for medical providers",
+        ));
+    }
+
+    let insurance_provider_ids = upsert_insurance_provider_ids_tx(tx, values).await?;
+    sqlx::query("DELETE FROM provider_doctor_insurances WHERE doctor_id = $1")
+        .bind(doctor_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, doctor_id = %doctor_id, "Failed to replace doctor insurance providers");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update doctor insurance providers",
+            )
+        })?;
+    for insurance_provider_id in insurance_provider_ids {
+        sqlx::query(
+            r#"INSERT INTO provider_doctor_insurances (doctor_id, insurance_provider_id)
+               VALUES ($1, $2)
+               ON CONFLICT (doctor_id, insurance_provider_id) DO NOTHING"#,
+        )
+        .bind(doctor_id)
+        .bind(insurance_provider_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, doctor_id = %doctor_id, insurance_provider_id = %insurance_provider_id, "Failed to insert doctor insurance provider");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update doctor insurance providers",
             )
         })?;
     }
@@ -5751,6 +6453,48 @@ async fn upsert_specialization_ids_tx(
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to decode specialization",
+            )
+        })?;
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
+async fn upsert_insurance_provider_ids_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    values: &[String],
+) -> Result<Vec<Uuid>, axum::response::Response> {
+    let mut ids = Vec::new();
+    for value in values {
+        let label = value.trim();
+        if label.is_empty() {
+            continue;
+        }
+        let row = sqlx::query(
+            r#"INSERT INTO insurance_providers (name)
+               VALUES ($1)
+               ON CONFLICT (normalized_name) DO UPDATE
+               SET name = EXCLUDED.name,
+                   is_active = TRUE,
+                   updated_at = now()
+               RETURNING id"#,
+        )
+        .bind(label)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, insurance_provider = %label, "Failed to upsert insurance provider");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update insurance providers",
+            )
+        })?;
+        let id: Uuid = row.try_get("id").map_err(|_| {
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to decode insurance provider",
             )
         })?;
         if !ids.contains(&id) {
@@ -6207,7 +6951,12 @@ async fn load_doctors_json(
     let mut doctors = Vec::with_capacity(rows.len());
     for row in rows {
         let doctor_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
-        let specializations = load_doctor_specializations_json(state, doctor_id).await?;
+        let (specializations, insurance_providers) = tokio::join!(
+            load_doctor_specializations_json(state, doctor_id),
+            load_doctor_insurances_json(state, doctor_id),
+        );
+        let specializations = specializations?;
+        let insurance_providers = insurance_providers?;
         let phone = row
             .try_get::<Option<String>, _>("phone")
             .unwrap_or_default();
@@ -6241,6 +6990,7 @@ async fn load_doctors_json(
             "opening_hours": row.try_get::<Option<String>, _>("opening_hours").unwrap_or_default(),
             "fachbereich": row.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
             "specializations": specializations,
+            "insurance_providers": insurance_providers,
             "languages": row.try_get::<Vec<String>, _>("languages").unwrap_or_default(),
             "phone": phone,
             "email": email,

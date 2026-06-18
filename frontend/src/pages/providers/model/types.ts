@@ -35,6 +35,14 @@ export type ProviderStaffRoleItem = {
   updated_at?: string;
 };
 
+export type InsuranceProviderItem = {
+  id: string;
+  name: string;
+  is_active?: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type ProviderTaxonomyNode = {
   id: string;
   parent_id: string | null;
@@ -139,6 +147,7 @@ export type ProviderSummary = {
   taxonomy_path?: ProviderTaxonomyNode[];
   taxonomy_attributes?: Record<string, unknown>;
   specializations: SpecializationItem[];
+  insurance_providers: InsuranceProviderItem[];
   is_active: boolean;
   has_contract: boolean;
   doctor_count: number;
@@ -196,6 +205,7 @@ export type DoctorSummary = {
   title: string | null;
   fachbereich: string | null;
   specializations: SpecializationItem[];
+  insurance_providers: InsuranceProviderItem[];
   languages: string[];
   phone: string | null;
   email: string | null;
@@ -281,6 +291,7 @@ export type ProviderDetail = {
   website: string | null;
   fachbereich: string | null;
   specializations: SpecializationItem[];
+  insurance_providers: InsuranceProviderItem[];
   parent_provider_id: string | null;
   parent_provider_name: string | null;
   organization_level: ProviderOrganizationLevel;
@@ -327,6 +338,7 @@ export type ProviderFilters = {
   taxonomyAttributeKey: string;
   taxonomyAttributeValue: string;
   internalRatingGte: string;
+  insuranceProvider: string;
 };
 
 export type ProviderFormState = {
@@ -345,6 +357,7 @@ export type ProviderFormState = {
   openingHours: string;
   fachbereich: string;
   specializations: string;
+  insuranceProviders: string;
   parentProviderId: string;
   organizationLevel: ProviderOrganizationLevel;
   taxonomyNodeId: string;
@@ -370,6 +383,7 @@ export type DoctorFormState = {
   openingHours: string;
   fachbereich: string;
   specializations: string;
+  insuranceProviders: string;
   languages: string;
   phone: string;
   email: string;

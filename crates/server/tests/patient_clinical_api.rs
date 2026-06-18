@@ -658,12 +658,17 @@ async fn billing_cannot_access_patient_risk_scores_routes() {
 }
 
 async fn seed_provider(pool: &PgPool, tag: &str) -> Uuid {
+    seed_provider_with_type(pool, tag, "medical").await
+}
+
+async fn seed_provider_with_type(pool: &PgPool, tag: &str, provider_type: &str) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO providers (name, provider_type)
-           VALUES ($1, 'medical')
+           VALUES ($1, $2)
            RETURNING id"#,
     )
     .bind(format!("Provider {tag}"))
+    .bind(provider_type)
     .fetch_one(pool)
     .await
     .unwrap()
@@ -918,6 +923,74 @@ async fn patient_clinical_rejects_invalid_provider_doctor_attribution() {
 }
 
 #[tokio::test]
+async fn patient_medications_reject_non_medical_provider_attribution() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-med-non-med-provider");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let non_medical_provider_id =
+        seed_provider_with_type(&pool, &format!("{tag}-travel"), "non_medical").await;
+    let non_medical_doctor_id =
+        seed_provider_doctor(&pool, non_medical_provider_id, &format!("{tag}-guide")).await;
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/medications"),
+        &pm_bearer,
+        Some(json!({
+            "items": [
+                {
+                    "category": "dauer",
+                    "handelsname": "Ibuprofen",
+                    "provider_id": non_medical_provider_id.to_string(),
+                },
+            ],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/medications"),
+        &pm_bearer,
+        Some(json!({
+            "items": [
+                {
+                    "category": "dauer",
+                    "handelsname": "Paracetamol",
+                    "doctor_id": non_medical_doctor_id.to_string(),
+                },
+            ],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["medications"].as_array().expect("medications").len(),
+        0
+    );
+}
+
+#[tokio::test]
 async fn billing_cannot_access_patient_clinical_routes() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
@@ -1047,7 +1120,9 @@ async fn patient_clinical_narrative_upserts() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(count, 1);
+    // Anamnese is now versioned: the second save keeps the old (inactive) row
+    // and adds a new active one, so two rows remain (not one upsert).
+    assert_eq!(count, 2);
 }
 
 #[tokio::test]

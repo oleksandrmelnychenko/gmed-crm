@@ -2,6 +2,7 @@ import { apiFetch } from "@/lib/api";
 
 import type {
   CreateResponse,
+  InsuranceProviderItem,
   ProviderDetail,
   ProviderStaffRoleItem,
   ProviderSummary,
@@ -28,6 +29,14 @@ function normalizeSpecializationItem<T extends SpecializationItem>(item: T): T {
     ...item,
     is_active: item.is_active ?? true,
     sort_order: item.sort_order ?? 1000,
+  };
+}
+
+function normalizeInsuranceProviderItem(item: InsuranceProviderItem): InsuranceProviderItem {
+  return {
+    ...item,
+    name: item.name ?? "",
+    is_active: item.is_active ?? true,
   };
 }
 
@@ -70,6 +79,7 @@ function normalizeProviderDetail(raw: ProviderDetail): ProviderDetail {
     internal_rating: raw.internal_rating ?? null,
     internal_rating_note: raw.internal_rating_note ?? null,
     specializations: arrayOrEmpty<ProviderDetail["specializations"][number]>(raw.specializations).map(normalizeSpecializationItem),
+    insurance_providers: arrayOrEmpty<ProviderDetail["insurance_providers"][number]>(raw.insurance_providers).map(normalizeInsuranceProviderItem),
     contacts: arrayOrEmpty<ProviderDetail["contacts"][number]>(raw.contacts),
     doctors: arrayOrEmpty<ProviderDetail["doctors"][number]>(raw.doctors).map((doctor) => ({
       ...doctor,
@@ -82,6 +92,7 @@ function normalizeProviderDetail(raw: ProviderDetail): ProviderDetail {
       gender: doctor.gender === "male" || doctor.gender === "female" ? doctor.gender : "unknown",
       opening_hours: doctor.opening_hours ?? null,
       specializations: arrayOrEmpty<ProviderDetail["doctors"][number]["specializations"][number]>(doctor.specializations).map(normalizeSpecializationItem),
+      insurance_providers: arrayOrEmpty<ProviderDetail["doctors"][number]["insurance_providers"][number]>(doctor.insurance_providers).map(normalizeInsuranceProviderItem),
       contacts: arrayOrEmpty<ProviderDetail["doctors"][number]["contacts"][number]>(doctor.contacts),
       relationships: arrayOrEmpty<ProviderDetail["doctors"][number]["relationships"][number]>(doctor.relationships),
     })),
@@ -142,6 +153,7 @@ export function fetchProviders(path: string) {
       internal_rating: provider.internal_rating ?? null,
       internal_rating_note: provider.internal_rating_note ?? null,
       specializations: arrayOrEmpty<ProviderSummary["specializations"][number]>(provider.specializations).map(normalizeSpecializationItem),
+      insurance_providers: arrayOrEmpty<ProviderSummary["insurance_providers"][number]>(provider.insurance_providers).map(normalizeInsuranceProviderItem),
     }));
   });
 }
@@ -149,6 +161,15 @@ export function fetchProviders(path: string) {
 export function fetchSpecializationsForAdmin() {
   return apiFetch<SpecializationItem[]>("/providers/specializations?include_inactive=true").then((items) =>
     items.map(normalizeSpecializationItem),
+  );
+}
+
+export function fetchInsuranceProviders(includeInactive = false) {
+  const path = includeInactive
+    ? "/providers/insurance-providers?include_inactive=true"
+    : "/providers/insurance-providers";
+  return apiFetch<InsuranceProviderItem[]>(path).then((items) =>
+    items.map(normalizeInsuranceProviderItem),
   );
 }
 

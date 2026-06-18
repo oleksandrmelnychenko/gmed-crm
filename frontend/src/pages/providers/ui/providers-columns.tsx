@@ -111,7 +111,7 @@ function taxonomyNodeLabel(
 
 function taxonomyProviderLabel(provider: ProviderSummary, lang: "de" | "ru", notSet: string) {
   if (provider.taxonomy_path?.length) {
-    return provider.taxonomy_path.map((node) => taxonomyNodeLabel(node, lang, notSet)).join(" / ");
+    return taxonomyNodeLabel(provider.taxonomy_path.at(-1), lang, notSet);
   }
   return taxonomyNodeLabel(provider.taxonomy_node, lang, notSet);
 }

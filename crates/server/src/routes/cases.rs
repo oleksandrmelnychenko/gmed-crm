@@ -1153,6 +1153,7 @@ async fn list_case_doctors(
            FROM provider_doctors d
            JOIN providers p ON p.id = d.provider_id
            WHERE p.is_active = true
+             AND p.provider_type = 'medical'
            ORDER BY p.name,
                     CASE d.role_code
                       WHEN 'clinical_director' THEN 1

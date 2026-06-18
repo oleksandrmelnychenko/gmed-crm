@@ -22,6 +22,15 @@ export type InterpreterLanguageForm = {
   specialization: string;
 };
 
+export type InterpreterAccountEligibility = {
+  contractType?: string;
+  employmentKind?: string;
+};
+
+export type InterpreterAccountDraft = InterpreterAccountEligibility & {
+  createUserAccount: boolean;
+};
+
 export function buildInterpreterListPath(filters: InterpreterListFilters = {}) {
   const params = new URLSearchParams();
   const search = filters.search?.trim();
@@ -33,6 +42,19 @@ export function buildInterpreterListPath(filters: InterpreterListFilters = {}) {
 
   const query = params.toString();
   return `/interpreters${query ? `?${query}` : ""}`;
+}
+
+export function canCreateInterpreterUserAccount(
+  draft: InterpreterAccountEligibility,
+) {
+  return draft.employmentKind === "internal";
+}
+
+export function normalizeInterpreterAccountDraft<T extends InterpreterAccountDraft>(
+  draft: T,
+): T {
+  if (canCreateInterpreterUserAccount(draft)) return draft;
+  return { ...draft, createUserAccount: false };
 }
 
 export function buildInterpreterLanguagesPath(interpreterId: string) {

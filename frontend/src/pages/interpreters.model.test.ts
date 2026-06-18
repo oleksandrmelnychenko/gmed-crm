@@ -5,7 +5,9 @@ import {
   buildInterpreterListPath,
   buildInterpreterProfileDocumentDownloadPath,
   buildInterpreterProfileDocumentsPath,
+  canCreateInterpreterUserAccount,
   interpreterLanguagesToPayload,
+  normalizeInterpreterAccountDraft,
 } from "./interpreters.model";
 
 describe("buildInterpreterListPath", () => {
@@ -29,6 +31,49 @@ describe("buildInterpreterListPath", () => {
     ).toBe(
       "/interpreters?search=Daniela+Tutas&status=active&contract_type=freelancer",
     );
+  });
+});
+
+describe("interpreter account eligibility", () => {
+  it("allows user-account creation only for internal interpreters", () => {
+    expect(
+      canCreateInterpreterUserAccount({
+        employmentKind: "internal",
+        contractType: "employee",
+      }),
+    ).toBe(true);
+    expect(
+      canCreateInterpreterUserAccount({
+        employmentKind: "internal",
+        contractType: "freelancer",
+      }),
+    ).toBe(true);
+    expect(
+      canCreateInterpreterUserAccount({
+        employmentKind: "external",
+        contractType: "employee",
+      }),
+    ).toBe(false);
+    expect(
+      canCreateInterpreterUserAccount({
+        employmentKind: "external",
+        contractType: "freelancer",
+      }),
+    ).toBe(false);
+  });
+
+  it("clears the create-account checkbox for external translator drafts", () => {
+    expect(
+      normalizeInterpreterAccountDraft({
+        employmentKind: "external",
+        contractType: "freelancer",
+        createUserAccount: true,
+      }),
+    ).toEqual({
+      employmentKind: "external",
+      contractType: "freelancer",
+      createUserAccount: false,
+    });
   });
 });
 

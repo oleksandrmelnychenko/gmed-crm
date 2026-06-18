@@ -111,6 +111,20 @@ async fn taxonomy_node_id(pool: &PgPool, code: &str) -> Uuid {
         .unwrap()
 }
 
+async fn seed_insurance_provider(pool: &PgPool, name: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO insurance_providers (name)
+           VALUES ($1)
+           ON CONFLICT (normalized_name)
+           DO UPDATE SET name = EXCLUDED.name
+           RETURNING id"#,
+    )
+    .bind(name)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 #[tokio::test]
 async fn provider_people_returns_doctors_staff_counts_and_patient_filter() {
     let Some((app, pool, admin_id)) = test_context().await else {
@@ -517,6 +531,90 @@ async fn concierge_provider_people_is_scoped_to_non_medical_providers() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(non_medical_detail["provider_type"], "non_medical");
+}
+
+#[tokio::test]
+async fn provider_people_filters_doctors_by_insurance_provider() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("provider-people-insurance");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let bearer = auth_header_for(pm_id, "patient_manager");
+
+    let provider_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO providers (name, provider_type, address_city, address_country, fachbereich)
+           VALUES ($1, 'medical', 'Berlin', 'Germany', 'Cardiology')
+           RETURNING id"#,
+    )
+    .bind(format!("Insurance People Clinic {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let matching_doctor_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO provider_doctors (provider_id, name, display_name)
+           VALUES ($1, $2, $2)
+           RETURNING id"#,
+    )
+    .bind(provider_id)
+    .bind(format!("Insurance Match Doctor {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let decoy_doctor_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO provider_doctors (provider_id, name, display_name)
+           VALUES ($1, $2, $2)
+           RETURNING id"#,
+    )
+    .bind(provider_id)
+    .bind(format!("Insurance Decoy Doctor {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let insurance_id = seed_insurance_provider(&pool, &format!("People Insurance {tag}")).await;
+    sqlx::query(
+        r#"INSERT INTO provider_doctor_insurances (doctor_id, insurance_provider_id)
+           VALUES ($1, $2)"#,
+    )
+    .bind(matching_doctor_id)
+    .bind(insurance_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!(
+            "/api/v1/provider-people?search={tag}&person_type=doctor&insurance_provider=People%20Insurance"
+        ),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().expect("provider people array");
+    assert!(
+        items
+            .iter()
+            .any(|row| row["person_id"] == matching_doctor_id.to_string())
+    );
+    assert!(
+        !items
+            .iter()
+            .any(|row| row["person_id"] == decoy_doctor_id.to_string())
+    );
+    let row = items
+        .iter()
+        .find(|row| row["person_id"] == matching_doctor_id.to_string())
+        .expect("matching doctor row must be present");
+    assert_eq!(
+        row["insurance_providers"][0]["name"],
+        format!("People Insurance {tag}")
+    );
 }
 
 #[tokio::test]

@@ -40,6 +40,7 @@ import {
 } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import {
+  agencyServiceDescriptionLabel,
   agencyServiceNameLabel,
   agencyServiceUnitLabel,
 } from "@/lib/agency-service-labels";
@@ -50,6 +51,16 @@ import {
   useLang,
   type TranslationKey,
 } from "@/lib/i18n";
+import {
+  agencyServiceToForm,
+  blankAgencyServiceForm,
+  toOptional,
+  valueToInput,
+} from "@/pages/contracts/model/contracts-model";
+import type {
+  AgencyServiceFormState,
+  AgencyServiceItem,
+} from "@/pages/contracts/model/types";
 import { cn } from "@/lib/utils";
 
 type TaxProfile = {
@@ -100,6 +111,9 @@ type ServicePackageItem = {
   id: string;
   agency_service_id?: string | null;
   agency_service_name?: string | null;
+  agency_service_unit_price?: string | null;
+  agency_service_currency?: string | null;
+  agency_service_vat_rate?: string | null;
   service_key?: string | null;
   description: string;
   included_quantity: string;
@@ -139,6 +153,7 @@ const BLANK_TAX_PROFILE_FORM: TaxProfileForm = {
 
 type ServicePackageItemForm = {
   formKey: string;
+  agencyServiceId: string;
   description: string;
   serviceKey: string;
   includedQuantity: string;
@@ -171,6 +186,7 @@ function nextPackageItemFormKey() {
 
 const BLANK_PACKAGE_ITEM_FORM: ServicePackageItemForm = {
   formKey: "package-item-form-template",
+  agencyServiceId: "",
   description: "",
   serviceKey: "",
   includedQuantity: "1",
@@ -200,6 +216,19 @@ function createBlankPackageItem(unitLabel: string): ServicePackageItemForm {
 
 function createBlankPackageForm(unitLabel: string): ServicePackageForm {
   return { ...BLANK_PACKAGE_FORM, items: [createBlankPackageItem(unitLabel)] };
+}
+
+function todayInputDate() {
+  const now = new Date();
+  const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return localDate.toISOString().slice(0, 10);
+}
+
+function createBlankAgencyServiceForm(unitLabel: string): AgencyServiceFormState {
+  return {
+    ...blankAgencyServiceForm(unitLabel),
+    validFrom: todayInputDate(),
+  };
 }
 
 const VAT_CATEGORIES = [
@@ -269,6 +298,7 @@ function packageItemToForm(
 ): ServicePackageItemForm {
   return {
     formKey: item.id || nextPackageItemFormKey(),
+    agencyServiceId: item.agency_service_id ?? "",
     description: item.description,
     serviceKey: item.service_key ?? "",
     includedQuantity: item.included_quantity,
@@ -315,6 +345,7 @@ function decimalInputIsValid(value: string) {
 type FinanceCatalogState = {
   taxProfiles: TaxProfile[];
   catalogRows: CatalogTaxProfile[];
+  agencyServices: AgencyServiceItem[];
   servicePackages: ServicePackage[];
   loading: boolean;
   error: string;
@@ -330,6 +361,10 @@ type FinanceCatalogState = {
   packageBusy: boolean;
   packageError: string;
   packageForm: ServicePackageForm;
+  agencyServiceFormOpen: boolean;
+  agencyServiceBusy: boolean;
+  agencyServiceError: string;
+  agencyServiceForm: AgencyServiceFormState;
 };
 
 type FinanceCatalogPatch =
@@ -398,6 +433,7 @@ function useFinanceCatalogPageContent() {
     (): FinanceCatalogState => ({
       taxProfiles: [],
       catalogRows: [],
+      agencyServices: [],
       servicePackages: [],
       loading: true,
       error: "",
@@ -413,9 +449,18 @@ function useFinanceCatalogPageContent() {
       packageBusy: false,
       packageError: "",
       packageForm: createBlankPackageForm(t.finance_catalog_unit_default),
+      agencyServiceFormOpen: false,
+      agencyServiceBusy: false,
+      agencyServiceError: "",
+      agencyServiceForm: createBlankAgencyServiceForm(t.finance_catalog_unit_default),
     }),
   );
   const {
+    agencyServiceBusy,
+    agencyServiceError,
+    agencyServiceForm,
+    agencyServiceFormOpen,
+    agencyServices,
     catalogRows,
     createBusy,
     createError,
@@ -445,6 +490,8 @@ function useFinanceCatalogPageContent() {
     setFinanceCatalogField("taxProfiles", nextValue);
   const setCatalogRows = (nextValue: SetStateAction<CatalogTaxProfile[]>) =>
     setFinanceCatalogField("catalogRows", nextValue);
+  const setAgencyServices = (nextValue: SetStateAction<AgencyServiceItem[]>) =>
+    setFinanceCatalogField("agencyServices", nextValue);
   const setServicePackages = (nextValue: SetStateAction<ServicePackage[]>) =>
     setFinanceCatalogField("servicePackages", nextValue);
   const setLoading = (nextValue: SetStateAction<boolean>) =>
@@ -475,10 +522,22 @@ function useFinanceCatalogPageContent() {
     setFinanceCatalogField("packageError", nextValue);
   const setPackageForm = (nextValue: SetStateAction<ServicePackageForm>) =>
     setFinanceCatalogField("packageForm", nextValue);
+  const setAgencyServiceFormOpen = (nextValue: SetStateAction<boolean>) =>
+    setFinanceCatalogField("agencyServiceFormOpen", nextValue);
+  const setAgencyServiceBusy = (nextValue: SetStateAction<boolean>) =>
+    setFinanceCatalogField("agencyServiceBusy", nextValue);
+  const setAgencyServiceError = (nextValue: SetStateAction<string>) =>
+    setFinanceCatalogField("agencyServiceError", nextValue);
+  const setAgencyServiceForm = (nextValue: SetStateAction<AgencyServiceFormState>) =>
+    setFinanceCatalogField("agencyServiceForm", nextValue);
 
   const activeTaxProfiles = useMemo(
     () => taxProfiles.filter((item) => item.is_active).length,
     [taxProfiles],
+  );
+  const activeAgencyServices = useMemo(
+    () => agencyServices.filter((item) => item.is_active).length,
+    [agencyServices],
   );
   const activePackages = useMemo(
     () => servicePackages.filter((item) => item.is_active).length,
@@ -503,8 +562,8 @@ function useFinanceCatalogPageContent() {
     },
     {
       label: t.finance_catalog_catalog_services,
-      value: catalogRows.length,
-      description: t.finance_catalog_vat_mapping_rows,
+      value: activeAgencyServices,
+      description: totalCountLabel(agencyServices.length),
     },
   ];
 
@@ -512,14 +571,16 @@ function useFinanceCatalogPageContent() {
     setLoading(true);
     setError("");
     try {
-      const [taxResult, catalogResult, packageResult] = await Promise.all([
+      const [taxResult, catalogResult, packageResult, agencyServiceResult] = await Promise.all([
         apiFetch<TaxProfile[]>("/tax-profiles"),
         apiFetch<CatalogTaxProfile[]>("/tax-profiles/catalog"),
         apiFetch<ServicePackage[]>("/service-packages"),
+        apiFetch<AgencyServiceItem[]>("/agency-services"),
       ]);
       setTaxProfiles(taxResult);
       setCatalogRows(catalogResult);
       setServicePackages(packageResult);
+      setAgencyServices(agencyServiceResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : t.finance_catalog_error_load);
     } finally {
@@ -623,6 +684,7 @@ function useFinanceCatalogPageContent() {
     setCreateError("");
     setEditingTaxProfileId("");
     setPackageFormOpen(false);
+    setAgencyServiceFormOpen(false);
     setCreateOpen(true);
   }
 
@@ -638,6 +700,8 @@ function useFinanceCatalogPageContent() {
     setCreateError("");
     setPackageFormOpen(false);
     setPackageError("");
+    setAgencyServiceFormOpen(false);
+    setAgencyServiceError("");
     setEditingTaxProfileId(profile.id);
     setTaxEditForm(taxProfileToForm(profile));
     setTaxEditError("");
@@ -652,6 +716,8 @@ function useFinanceCatalogPageContent() {
   function openCreatePackage() {
     setCreateOpen(false);
     setEditingTaxProfileId("");
+    setAgencyServiceFormOpen(false);
+    setAgencyServiceError("");
     setPackageForm(blankPackageForm());
     setPackageError("");
     setPackageFormOpen(true);
@@ -660,6 +726,8 @@ function useFinanceCatalogPageContent() {
   function openEditPackage(item: ServicePackage) {
     setCreateOpen(false);
     setEditingTaxProfileId("");
+    setAgencyServiceFormOpen(false);
+    setAgencyServiceError("");
     setPackageForm(packageToForm(item, t.finance_catalog_unit_default));
     setPackageError("");
     setPackageFormOpen(true);
@@ -672,6 +740,31 @@ function useFinanceCatalogPageContent() {
     setPackageForm(blankPackageForm());
   }
 
+  function openCreateAgencyService() {
+    setCreateOpen(false);
+    setEditingTaxProfileId("");
+    setPackageFormOpen(false);
+    setAgencyServiceError("");
+    setAgencyServiceForm(createBlankAgencyServiceForm(t.finance_catalog_unit_default));
+    setAgencyServiceFormOpen(true);
+  }
+
+  function openEditAgencyService(item: AgencyServiceItem) {
+    setCreateOpen(false);
+    setEditingTaxProfileId("");
+    setPackageFormOpen(false);
+    setAgencyServiceError("");
+    setAgencyServiceForm(agencyServiceToForm(item));
+    setAgencyServiceFormOpen(true);
+  }
+
+  function closeAgencyServiceForm() {
+    if (agencyServiceBusy) return;
+    setAgencyServiceFormOpen(false);
+    setAgencyServiceError("");
+    setAgencyServiceForm(createBlankAgencyServiceForm(t.finance_catalog_unit_default));
+  }
+
   function updatePackageItem(index: number, patch: Partial<ServicePackageItemForm>) {
     setPackageForm((current) => ({
       ...current,
@@ -679,6 +772,22 @@ function useFinanceCatalogPageContent() {
         itemIndex === index ? { ...item, ...patch } : item,
       ),
     }));
+  }
+
+  function applyAgencyServiceToPackageItem(index: number, serviceId: string) {
+    const service = agencyServices.find((item) => item.id === serviceId);
+    if (!service) {
+      updatePackageItem(index, { agencyServiceId: "" });
+      return;
+    }
+
+    updatePackageItem(index, {
+      agencyServiceId: service.id,
+      description: service.description?.trim() || service.service_name,
+      serviceKey: service.service_key,
+      unitLabel: service.unit_label || t.finance_catalog_unit_default,
+      overageUnitPriceNet: valueToInput(service.unit_price),
+    });
   }
 
   function removePackageItem(index: number) {
@@ -734,6 +843,7 @@ function useFinanceCatalogPageContent() {
         valid_from: packageForm.validFrom || null,
         valid_to: packageForm.validTo || null,
         items: packageForm.items.map((item) => ({
+          agency_service_id: item.agencyServiceId || null,
           description: item.description.trim(),
           service_key: item.serviceKey.trim() || null,
           included_quantity: decimalPayload(item.includedQuantity, 1),
@@ -763,6 +873,46 @@ function useFinanceCatalogPageContent() {
       );
     } finally {
       setPackageBusy(false);
+    }
+  }
+
+  async function handleSaveAgencyService(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAgencyServiceError("");
+    setAgencyServiceBusy(true);
+    try {
+      await apiFetch(
+        agencyServiceForm.id
+          ? `/agency-services/${agencyServiceForm.id}/update`
+          : "/agency-services",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            service_key: agencyServiceForm.serviceKey,
+            service_name: agencyServiceForm.serviceName,
+            description: toOptional(agencyServiceForm.description),
+            unit_label: toOptional(agencyServiceForm.unitLabel),
+            unit_price: Number(agencyServiceForm.unitPrice || 0),
+            currency: toOptional(agencyServiceForm.currency),
+            vat_rate: toOptional(agencyServiceForm.vatRate)
+              ? Number(agencyServiceForm.vatRate)
+              : null,
+            is_active: agencyServiceForm.isActive,
+            valid_from: agencyServiceForm.validFrom || todayInputDate(),
+            valid_to: toOptional(agencyServiceForm.validTo),
+          }),
+        },
+      );
+      clearApiCache("/agency-services");
+      setAgencyServiceForm(createBlankAgencyServiceForm(t.finance_catalog_unit_default));
+      setAgencyServiceFormOpen(false);
+      await load();
+    } catch (err) {
+      setAgencyServiceError(
+        err instanceof Error ? err.message : t.finance_catalog_error_load,
+      );
+    } finally {
+      setAgencyServiceBusy(false);
     }
   }
 
@@ -883,6 +1033,101 @@ function useFinanceCatalogPageContent() {
                   {profile.description ? ` / ${profile.description}` : ""}
                 </p>
               </article>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      <Section
+        title={t.revenue_agency_service_catalog_items}
+        accessory={
+          <div className="flex items-center gap-2">
+            <CountBadge>{agencyServices.length}</CountBadge>
+            {canManageTaxProfiles ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 rounded-lg"
+                onClick={openCreateAgencyService}
+              >
+                <Plus className="size-4" />
+                {t.revenue_agency_service_new_title}
+              </Button>
+            ) : null}
+          </div>
+        }
+      >
+        {loading ? (
+          <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-8 text-center text-sm text-muted-foreground">
+            {t.finance_catalog_loading_mapping}
+          </div>
+        ) : agencyServices.length === 0 ? (
+          <EmptyCell>{t.revenue_agency_service_empty_title}</EmptyCell>
+        ) : (
+          <div className="overflow-hidden rounded-xl border border-border/50 bg-card">
+            <div className="grid grid-cols-[minmax(0,1.4fr)_140px_110px_90px_100px_44px] gap-3 border-b border-border/50 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              <span>{t.finance_catalog_service}</span>
+              <span>{t.revenue_agency_service_unit_price}</span>
+              <span>{t.revenue_agency_service_unit}</span>
+              <span>{t.finance_catalog_vat_label}</span>
+              <span>{t.users_status}</span>
+              <span />
+            </div>
+            {agencyServices.map((item) => (
+              <div
+                key={item.id}
+                className="grid grid-cols-[minmax(0,1.4fr)_140px_110px_90px_100px_44px] items-center gap-3 border-b border-border/40 px-4 py-3 text-sm last:border-b-0"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-medium text-foreground">
+                    {agencyServiceNameLabel(item.service_key, item.service_name, t)}
+                  </p>
+                  <p className="font-mono text-xs text-muted-foreground">
+                    {item.service_key}
+                  </p>
+                  {item.description ? (
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                      {agencyServiceDescriptionLabel(item.service_key, item.description, t)}
+                    </p>
+                  ) : null}
+                </div>
+                <span className="font-medium tabular-nums text-foreground">
+                  {formatMoney(item.unit_price as string | number, item.currency)}
+                </span>
+                <span className="text-muted-foreground">
+                  {agencyServiceUnitLabel(item.unit_label, t)}
+                </span>
+                <span className="tabular-nums text-foreground">
+                  {valueToInput(item.vat_rate) || "0"}%
+                </span>
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "w-fit rounded-full",
+                    item.is_active
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-slate-200 bg-slate-50 text-slate-600",
+                  )}
+                >
+                  {item.is_active ? t.common_active : t.common_inactive}
+                </Badge>
+                {canManageTaxProfiles ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                    onClick={() => openEditAgencyService(item)}
+                    aria-label={t.finance_catalog_edit}
+                    title={t.finance_catalog_edit}
+                  >
+                    <Pencil className="size-3.5" />
+                  </Button>
+                ) : (
+                  <span />
+                )}
+              </div>
             ))}
           </div>
         )}
@@ -1080,6 +1325,16 @@ function useFinanceCatalogPageContent() {
                                     packageItem.overage_unit_price_net,
                                     item.currency,
                                   )}
+                                </span>
+                              </span>
+                            ) : null}
+                            {packageItem.agency_service_vat_rate || packageItem.tax_profile_vat_rate ? (
+                              <span>
+                                {t.finance_catalog_vat_label}: {" "}
+                                <span className="font-medium text-foreground">
+                                  {packageItem.tax_profile_vat_rate ??
+                                    packageItem.agency_service_vat_rate}
+                                  %
                                 </span>
                               </span>
                             ) : null}
@@ -1501,6 +1756,209 @@ function useFinanceCatalogPageContent() {
       </Sheet>
 
       <Sheet
+        open={agencyServiceFormOpen && canManageTaxProfiles}
+        onOpenChange={(open) => {
+          if (!open) closeAgencyServiceForm();
+        }}
+      >
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
+          <form className="flex h-full min-h-0 flex-col" onSubmit={handleSaveAgencyService}>
+            <AdminSheetScaffold
+              title={
+                agencyServiceForm.id
+                  ? t.revenue_agency_service_edit_title
+                  : t.revenue_agency_service_new_title
+              }
+              footer={
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={
+                    agencyServiceForm.id
+                      ? t.revenue_agency_service_save
+                      : t.revenue_agency_service_create
+                  }
+                  submitting={agencyServiceBusy}
+                  onCancel={closeAgencyServiceForm}
+                />
+              }
+            >
+              <div className="space-y-3 rounded-xl p-4">
+                {agencyServiceError ? (
+                  <Banner tone="error" withIcon>
+                    {agencyServiceError}
+                  </Banner>
+                ) : null}
+
+                <Section title={t.revenue_common_basic_data}>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label={t.revenue_agency_service_service_key}>
+                      <Input
+                        required
+                        value={agencyServiceForm.serviceKey}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({
+                            ...current,
+                            serviceKey: event.target.value,
+                          }))
+                        }
+                        className={inputClass}
+                        disabled={agencyServiceBusy}
+                        placeholder={t.uiText.finance_catalog_service_key_placeholder}
+                      />
+                    </Field>
+                    <Field label={t.revenue_agency_service_service_name}>
+                      <Input
+                        required
+                        value={agencyServiceForm.serviceName}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({
+                            ...current,
+                            serviceName: event.target.value,
+                          }))
+                        }
+                        className={inputClass}
+                        disabled={agencyServiceBusy}
+                      />
+                    </Field>
+                    <Field label={t.revenue_agency_service_unit_label}>
+                      <Input
+                        value={agencyServiceForm.unitLabel}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({
+                            ...current,
+                            unitLabel: event.target.value,
+                          }))
+                        }
+                        className={inputClass}
+                        disabled={agencyServiceBusy}
+                      />
+                    </Field>
+                    <Field label={t.revenue_agency_service_currency}>
+                      <Input
+                        value={agencyServiceForm.currency}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({
+                            ...current,
+                            currency: event.target.value,
+                          }))
+                        }
+                        className={inputClass}
+                        disabled={agencyServiceBusy}
+                      />
+                    </Field>
+                  </div>
+                </Section>
+
+                <Section title={t.finance_catalog_package_pricing}>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label={t.revenue_agency_service_unit_price}>
+                      <Input
+                        required
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={agencyServiceForm.unitPrice}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({
+                            ...current,
+                            unitPrice: event.target.value,
+                          }))
+                        }
+                        className={inputClass}
+                        disabled={agencyServiceBusy}
+                      />
+                    </Field>
+                    <Field label={t.revenue_agency_service_vat_percent}>
+                      <Input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={agencyServiceForm.vatRate}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({
+                            ...current,
+                            vatRate: event.target.value,
+                          }))
+                        }
+                        className={inputClass}
+                        disabled={agencyServiceBusy}
+                      />
+                    </Field>
+                  </div>
+                </Section>
+
+                <Section title={t.revenue_common_validity_period}>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label={t.finance_catalog_valid_from}>
+                      <Input
+                        required
+                        type="date"
+                        value={agencyServiceForm.validFrom}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({
+                            ...current,
+                            validFrom: event.target.value,
+                          }))
+                        }
+                        className={inputClass}
+                        disabled={agencyServiceBusy}
+                      />
+                    </Field>
+                    <Field label={t.finance_catalog_valid_to}>
+                      <Input
+                        type="date"
+                        value={agencyServiceForm.validTo}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({
+                            ...current,
+                            validTo: event.target.value,
+                          }))
+                        }
+                        className={inputClass}
+                        disabled={agencyServiceBusy}
+                      />
+                    </Field>
+                    <label className="flex items-center gap-2 rounded-lg bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={agencyServiceForm.isActive}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({
+                            ...current,
+                            isActive: event.target.checked,
+                          }))
+                        }
+                        disabled={agencyServiceBusy}
+                      />
+                      {t.revenue_agency_service_active_hint}
+                    </label>
+                  </div>
+                </Section>
+
+                <Section title={t.revenue_agency_service_description_status}>
+                  <Field label={t.revenue_agency_service_description_label}>
+                    <textarea
+                      value={agencyServiceForm.description}
+                      onChange={(event) =>
+                        setAgencyServiceForm((current) => ({
+                          ...current,
+                          description: event.target.value,
+                        }))
+                      }
+                      className={textareaClass}
+                      rows={3}
+                      disabled={agencyServiceBusy}
+                    />
+                  </Field>
+                </Section>
+              </div>
+            </AdminSheetScaffold>
+          </form>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet
         open={packageFormOpen && canManageTaxProfiles}
         onOpenChange={(open) => {
           if (!open) closePackageForm();
@@ -1719,6 +2177,33 @@ function useFinanceCatalogPageContent() {
                         className="rounded-xl border border-border/50 bg-muted/20 p-3"
                       >
                         <div className="grid gap-3 sm:grid-cols-2">
+                          <Field label={t.revenue_agency_service_catalog_items}>
+                            <NativeComboboxSelect
+                              value={item.agencyServiceId || "__manual__"}
+                              onChange={(event) =>
+                                applyAgencyServiceToPackageItem(
+                                  index,
+                                  event.target.value === "__manual__"
+                                    ? ""
+                                    : event.target.value,
+                                )
+                              }
+                              className={selectClass}
+                              disabled={packageBusy}
+                            >
+                              <option value="__manual__">{t.common_not_set}</option>
+                              {agencyServices.map((service) => (
+                                <option key={service.id} value={service.id}>
+                                  {agencyServiceNameLabel(
+                                    service.service_key,
+                                    service.service_name,
+                                    t,
+                                  )}{" "}
+                                  / {valueToInput(service.vat_rate) || "0"}%
+                                </option>
+                              ))}
+                            </NativeComboboxSelect>
+                          </Field>
                           <Field label={t.finance_catalog_description_label}>
                             <Input
                               value={item.description}

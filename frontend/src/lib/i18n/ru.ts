@@ -36,7 +36,7 @@ export const ru = {
   nav_feedback: "Отзывы",
   nav_reports: "Отчеты",
   nav_learning: "SOP и обучение",
-  nav_interpreters: "Переводчики",
+  nav_interpreters: "Сотрудники",
 
   login_title: "Вход в систему",
   login_email: "Электронная почта",
@@ -279,6 +279,13 @@ export const ru = {
   providers_doctor_new: "Новый врач",
   providers_doctor_detail: "Детали врача",
   providers_doctor_title: "Звание",
+  providers_existing_doctor_section: "Добавить существующего врача",
+  providers_existing_doctor_select: "Существующий врач",
+  providers_existing_doctor_placeholder: "Выберите врача из другого провайдера",
+  providers_existing_doctor_loading: "Врачи загружаются...",
+  providers_existing_doctor_empty: "В других медицинских провайдерах врачи не найдены.",
+  providers_existing_doctor_hint:
+    "Выбор скопирует профиль в этого провайдера; приёмы и документы останутся привязаны к конкретному провайдеру.",
   providers_contact_person_new: "Новый контакт",
   providers_contact_person_detail: "Детали контакта",
   providers_contact_profile: "Профиль контакта",

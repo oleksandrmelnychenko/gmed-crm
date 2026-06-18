@@ -11,6 +11,7 @@ import {
 } from "../model/people-types";
 import type {
   PersonContact,
+  InsuranceProviderItem,
   ProviderPersonGender,
   ProviderType,
   SpecializationItem,
@@ -120,6 +121,23 @@ function normalizeSpecialization(value: unknown): SpecializationItem | null {
   };
 }
 
+function normalizeInsuranceProvider(value: unknown): InsuranceProviderItem | null {
+  if (typeof value === "string") {
+    const name = value.trim();
+    return name ? { id: name, name, is_active: true } : null;
+  }
+
+  const raw = objectOrEmpty(value);
+  const name = nullableString(raw.name);
+  const id = nullableString(raw.id) ?? name;
+  if (!id || !name) return null;
+  return {
+    id,
+    name,
+    is_active: raw.is_active === undefined ? true : Boolean(raw.is_active),
+  };
+}
+
 function normalizeCounts(rawCounts: unknown, row: Record<string, unknown>): ProviderPeopleCounts {
   const source = objectOrEmpty(rawCounts);
   const counts: ProviderPeopleCounts = {};
@@ -165,12 +183,18 @@ function normalizeProviderPeopleRow(value: unknown): ProviderPeopleRow {
     role_name_de: nullableString(raw.role_name_de),
     role_name_ru: nullableString(raw.role_name_ru),
     subrole: nullableString(raw.subrole),
+    website: nullableString(raw.website),
+    schwerpunkt: nullableString(raw.schwerpunkt),
     gender: normalizeGender(raw.gender),
     opening_hours: nullableString(raw.opening_hours),
     fachbereich: nullableString(raw.fachbereich),
     specializations: arrayOrEmpty(raw.specializations).flatMap((item) => {
       const specialization = normalizeSpecialization(item);
       return specialization ? [specialization] : [];
+    }),
+    insurance_providers: arrayOrEmpty(raw.insurance_providers).flatMap((item) => {
+      const insuranceProvider = normalizeInsuranceProvider(item);
+      return insuranceProvider ? [insuranceProvider] : [];
     }),
     languages: arrayOrEmpty(raw.languages).flatMap((item) => {
       const language = nullableString(item);
@@ -240,6 +264,7 @@ export function buildProviderPeopleQuery(filters: Partial<ProviderPeopleFilters>
   setQueryParam(params, "specialization", next.specialization);
   setQueryParam(params, "role", next.role);
   setQueryParam(params, "patient_id", next.patientId);
+  setQueryParam(params, "insurance_provider", next.insuranceProvider);
 
   const query = params.toString();
   return query ? `/provider-people?${query}` : "/provider-people";

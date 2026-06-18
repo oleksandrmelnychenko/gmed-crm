@@ -16,6 +16,7 @@ describe("buildProviderPeopleQuery", () => {
         gender: "male",
         fachbereich: "Urologie",
         specialization: "urologie",
+        insuranceProvider: "Techniker Krankenkasse",
         role: "chefarzt",
         patientId: "9d3f7b6a-7d79-4f23-9dc0-2f4cc3435b3a",
       }),
@@ -27,6 +28,7 @@ describe("buildProviderPeopleQuery", () => {
     expect(params.get("gender")).toBe("male");
     expect(params.get("fachbereich")).toBe("Urologie");
     expect(params.get("specialization")).toBe("urologie");
+    expect(params.get("insurance_provider")).toBe("Techniker Krankenkasse");
     expect(params.get("role")).toBe("chefarzt");
     expect(params.get("patient_id")).toBe("9d3f7b6a-7d79-4f23-9dc0-2f4cc3435b3a");
   });

@@ -27,9 +27,11 @@ import {
   buildInterpreterListPath,
   buildInterpreterProfileDocumentDownloadPath,
   buildInterpreterProfileDocumentsPath,
+  canCreateInterpreterUserAccount,
   emptyInterpreterLanguage,
   interpreterLanguageRecordToForm,
   interpreterLanguagesToPayload,
+  normalizeInterpreterAccountDraft,
   type InterpreterLanguageForm,
   type InterpreterLanguageRecord,
 } from "./interpreters.model";
@@ -45,6 +47,14 @@ type InterpreterRecord = {
 };
 
 type InterpreterProfile = Record<string, unknown>;
+
+type CreatedInterpreterUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  is_active: boolean;
+};
 
 type InterpreterOperations = {
   summary: Record<string, unknown>;
@@ -120,6 +130,17 @@ type InterpreterProfileForm = {
   erasureRequestStatus: string;
 };
 
+type CreateInterpreterAccountForm = {
+  name: string;
+  email: string;
+  password: string;
+  role: "interpreter" | "teamlead_interpreter";
+  status: string;
+  contractType: string;
+  employmentKind: string;
+  createUserAccount: boolean;
+};
+
 const inputClass =
   "h-9 rounded-lg border border-input bg-background px-3 text-sm";
 const selectClass =
@@ -186,6 +207,19 @@ function emptyCredential(): CredentialForm {
     documentId: "",
     documentName: "",
     notes: "",
+  };
+}
+
+function emptyCreateInterpreterAccountForm(): CreateInterpreterAccountForm {
+  return {
+    name: "",
+    email: "",
+    password: "",
+    role: "interpreter",
+    status: "active",
+    contractType: "employee",
+    employmentKind: "internal",
+    createUserAccount: true,
   };
 }
 
@@ -451,9 +485,18 @@ export function InterpretersPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [contractFilter, setContractFilter] = useState("");
+  const [createAccountOpen, setCreateAccountOpen] = useState(false);
+  const [createAccountSaving, setCreateAccountSaving] = useState(false);
+  const [createAccountError, setCreateAccountError] = useState("");
+  const [createAccountForm, setCreateAccountForm] =
+    useState<CreateInterpreterAccountForm>(() =>
+      emptyCreateInterpreterAccountForm(),
+    );
   const deferredSearch = useDeferredValue(search);
   const filtersActive =
     search.trim() !== "" || statusFilter !== "" || contractFilter !== "";
+  const createUserAccountAllowed =
+    canCreateInterpreterUserAccount(createAccountForm);
 
   const selected = useMemo(
     () => items.find((item) => item.id === selectedId) ?? items[0] ?? null,
@@ -542,6 +585,18 @@ export function InterpretersPage() {
 
   function patchForm(patch: Partial<InterpreterProfileForm>) {
     setForm((current) => ({ ...current, ...patch }));
+  }
+
+  function patchCreateAccountForm(patch: Partial<CreateInterpreterAccountForm>) {
+    setCreateAccountForm((current) =>
+      normalizeInterpreterAccountDraft({ ...current, ...patch }),
+    );
+  }
+
+  function closeCreateAccountForm() {
+    setCreateAccountOpen(false);
+    setCreateAccountError("");
+    setCreateAccountForm(emptyCreateInterpreterAccountForm());
   }
 
   function patchCredential(index: number, patch: Partial<CredentialForm>) {
@@ -669,27 +724,110 @@ export function InterpretersPage() {
     }
   }
 
+  async function handleCreateInterpreterAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const accountDraft = normalizeInterpreterAccountDraft(createAccountForm);
+    if (!accountDraft.createUserAccount || !canCreateInterpreterUserAccount(accountDraft)) {
+      setCreateAccountError(
+        "Only internal employees can be created as user accounts.",
+      );
+      return;
+    }
+    if (!accountDraft.name.trim() || !accountDraft.email.trim()) {
+      setCreateAccountError("Name and email are required.");
+      return;
+    }
+    if (accountDraft.password.length < 8) {
+      setCreateAccountError("Password must contain at least 8 characters.");
+      return;
+    }
+
+    setCreateAccountSaving(true);
+    setCreateAccountError("");
+    setError("");
+    setNotice("");
+    try {
+      const created = await apiFetch<CreatedInterpreterUser>("/users", {
+        method: "POST",
+        body: JSON.stringify({
+          name: accountDraft.name.trim(),
+          email: accountDraft.email.trim(),
+          password: accountDraft.password,
+          role: accountDraft.role,
+        }),
+      });
+      const result = await apiFetch<{ profile: InterpreterProfile }>(
+        `/interpreters/${created.id}/profile`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            status: accountDraft.status,
+            contractType: accountDraft.contractType || "employee",
+            employmentKind: accountDraft.employmentKind,
+            access: {
+              level: "appointment_only",
+              autoBlockPolicy: "manual",
+            },
+          }),
+        },
+      );
+      setItems((current) => [
+        {
+          id: created.id,
+          name: created.name,
+          email: created.email,
+          role: created.role,
+          is_active: created.is_active,
+          profile: result.profile,
+          profile_updated_at: null,
+        },
+        ...current.filter((item) => item.id !== created.id),
+      ]);
+      setSelectedId(created.id);
+      closeCreateAccountForm();
+      setNotice("Interpreter user account created");
+    } catch (createError) {
+      setCreateAccountError(
+        createError instanceof Error
+          ? createError.message
+          : "Failed to create employee account",
+      );
+    } finally {
+      setCreateAccountSaving(false);
+    }
+  }
+
   return (
     <main className="min-h-[calc(100vh-3rem)] bg-background">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-5 py-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold text-foreground">
-              Interpreter Profiles
+              Staff Profiles
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Contract, compliance, availability and internal interpreter data.
+              Contract, compliance, availability and internal employee data.
             </p>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => void loadItems()}
-            disabled={loading}
-          >
-            <RefreshCcw className="size-4" />
-            Refresh
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCreateAccountOpen(true)}
+            >
+              <Plus className="size-4" />
+              New internal employee
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void loadItems()}
+              disabled={loading}
+            >
+              <RefreshCcw className="size-4" />
+              Refresh
+            </Button>
+          </div>
         </div>
 
         {error ? (
@@ -703,11 +841,149 @@ export function InterpretersPage() {
           </div>
         ) : null}
 
+        {createAccountOpen ? (
+          <form
+            onSubmit={handleCreateInterpreterAccount}
+            className="space-y-4 rounded-lg border border-border bg-card p-4"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">
+                  Create employee user account
+                </h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Internal employees can receive a user account. External
+                  contractors stay outside Users.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                className="h-8 px-2"
+                onClick={closeCreateAccountForm}
+              >
+                <X className="size-4" />
+              </Button>
+            </div>
+            {createAccountError ? (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {createAccountError}
+              </div>
+            ) : null}
+            <div className="grid gap-3 md:grid-cols-3">
+              <Field label="Name">
+                <Input
+                  className={inputClass}
+                  value={createAccountForm.name}
+                  onChange={(event) =>
+                    patchCreateAccountForm({ name: event.target.value })
+                  }
+                  required
+                />
+              </Field>
+              <Field label="Email">
+                <Input
+                  type="email"
+                  className={inputClass}
+                  value={createAccountForm.email}
+                  onChange={(event) =>
+                    patchCreateAccountForm({ email: event.target.value })
+                  }
+                  required
+                />
+              </Field>
+              <Field label="Temporary password">
+                <Input
+                  type="password"
+                  className={inputClass}
+                  value={createAccountForm.password}
+                  onChange={(event) =>
+                    patchCreateAccountForm({ password: event.target.value })
+                  }
+                  required
+                />
+              </Field>
+              <Field label="Role">
+                <select
+                  className={selectClass}
+                  value={createAccountForm.role}
+                  onChange={(event) =>
+                    patchCreateAccountForm({
+                      role: event.target.value as CreateInterpreterAccountForm["role"],
+                    })
+                  }
+                >
+                  <option value="interpreter">Interpreter</option>
+                  <option value="teamlead_interpreter">Teamlead interpreter</option>
+                </select>
+              </Field>
+              <Field label="Contract type">
+                <select
+                  className={selectClass}
+                  value={createAccountForm.contractType}
+                  onChange={(event) =>
+                    patchCreateAccountForm({ contractType: event.target.value })
+                  }
+                >
+                  <option value="employee">Employee</option>
+                  <option value="freelancer">Freelancer</option>
+                  <option value="hourly">Hourly</option>
+                </select>
+              </Field>
+              <Field label="Internal / external">
+                <select
+                  className={selectClass}
+                  value={createAccountForm.employmentKind}
+                  onChange={(event) =>
+                    patchCreateAccountForm({
+                      employmentKind: event.target.value,
+                    })
+                  }
+                >
+                  <option value="internal">Internal</option>
+                  <option value="external">External</option>
+                </select>
+              </Field>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
+              <label className="flex items-center gap-2 text-sm text-foreground">
+                <input
+                  type="checkbox"
+                  checked={createAccountForm.createUserAccount}
+                  disabled={!createUserAccountAllowed}
+                  onChange={(event) =>
+                    patchCreateAccountForm({
+                      createUserAccount: event.target.checked,
+                    })
+                  }
+                />
+                Create account in Users
+              </label>
+              {!createUserAccountAllowed ? (
+                <p className="text-xs text-amber-700">
+                  External contractors cannot be created as user accounts.
+                </p>
+              ) : null}
+              <Button
+                type="submit"
+                disabled={
+                  createAccountSaving ||
+                  !createAccountForm.createUserAccount ||
+                  !createUserAccountAllowed
+                }
+              >
+                <Plus className="size-4" />
+                {createAccountSaving ? "Creating..." : "Create account"}
+              </Button>
+            </div>
+          </form>
+        ) : null}
+
         <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
           <aside className="space-y-3">
             <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
               <UsersRound className="size-4 text-primary" />
-              Team
+              Employees
             </div>
             <div className="space-y-2 rounded-lg border border-border bg-card p-3">
               <div className="relative">
@@ -780,7 +1056,7 @@ export function InterpretersPage() {
               ))}
               {!loading && items.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
-                  No interpreters found.
+                  No employees found.
                 </div>
               ) : null}
             </div>
@@ -851,6 +1127,20 @@ export function InterpretersPage() {
                       <option value="internal">Internal</option>
                       <option value="external">External</option>
                     </select>
+                  </Field>
+                  <Field label="User account">
+                    <div className="flex min-h-9 flex-col justify-center gap-1 rounded-lg border border-border bg-muted/30 px-3 py-2">
+                      <label className="flex items-center gap-2 text-sm text-foreground">
+                        <input type="checkbox" checked readOnly disabled />
+                        Exists in Users
+                      </label>
+                      {form.employmentKind === "external" ? (
+                        <span className="text-xs text-amber-700">
+                          External contractors should not receive new user
+                          accounts.
+                        </span>
+                      ) : null}
+                    </div>
                   </Field>
                   <Field label="Gender">
                     <Input

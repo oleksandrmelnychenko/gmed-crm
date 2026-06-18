@@ -269,6 +269,12 @@ export interface Translations
   providers_doctor_new: string;
   providers_doctor_detail: string;
   providers_doctor_title: string;
+  providers_existing_doctor_section: string;
+  providers_existing_doctor_select: string;
+  providers_existing_doctor_placeholder: string;
+  providers_existing_doctor_loading: string;
+  providers_existing_doctor_empty: string;
+  providers_existing_doctor_hint: string;
   providers_contact_person_new: string;
   providers_contact_person_detail: string;
   providers_contact_profile: string;

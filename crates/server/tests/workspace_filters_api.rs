@@ -1973,6 +1973,10 @@ async fn case_doctor_registry_metadata_and_fk_round_trip_work() {
 
     let provider_id = seed_provider(&pool, &tag).await;
     let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let non_medical_provider_id =
+        seed_provider_with_type(&pool, &format!("{tag}-travel"), "non_medical", "Austria").await;
+    let non_medical_doctor_id =
+        seed_doctor(&pool, non_medical_provider_id, &format!("{tag}-guide")).await;
 
     let (status, doctors_body) =
         json_request(&app, "GET", "/api/v1/cases/meta/doctors", &pm_bearer, None).await;
@@ -1983,6 +1987,12 @@ async fn case_doctor_registry_metadata_and_fk_round_trip_work() {
             item["id"] == doctor_id.to_string() && item["provider_id"] == provider_id.to_string()
         }),
         "expected seeded doctor in case doctor registry metadata"
+    );
+    assert!(
+        doctors
+            .iter()
+            .all(|item| item["id"] != non_medical_doctor_id.to_string()),
+        "case doctor registry metadata must not include non-medical provider staff"
     );
 
     let (status, created_body) = json_request(
@@ -10198,6 +10208,27 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
+
+    let (status, target_relationships_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}/doctors/{target_doctor_id}/relationships"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let target_relationships = target_relationships_body
+        .as_array()
+        .expect("target doctor relationships array");
+    assert!(
+        target_relationships.iter().any(|row| {
+            row["target_doctor_id"] == doctor_id.to_string()
+                && row["target_provider_id"] == provider_id.to_string()
+                && row["relationship_type"] == "referral"
+        }),
+        "doctor relationships must be reciprocal"
+    );
 
     let long_relationship_notes = "x".repeat(2001);
     let (status, relationship_notes_error) = json_request(

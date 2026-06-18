@@ -203,7 +203,7 @@ export function formatDoctorTitleValue(value: string | null | undefined) {
   return joinDoctorTitleValue(splitDoctorTitleValue(value));
 }
 
-function doctorGermanSalutation(gender: ProviderPersonGender) {
+function germanPersonSalutation(gender: ProviderPersonGender) {
   if (gender === "male") return "Herr";
   if (gender === "female") return "Frau";
   return "";
@@ -237,11 +237,27 @@ export function composeDoctorDisplayName(
   lastName: string,
   gender: ProviderPersonGender,
 ): string {
+  return composeGenderedPersonDisplayName(firstName, lastName, gender);
+}
+
+export function composeStaffDisplayName(
+  firstName: string,
+  lastName: string,
+  gender: ProviderPersonGender,
+): string {
+  return composeGenderedPersonDisplayName(firstName, lastName, gender);
+}
+
+function composeGenderedPersonDisplayName(
+  firstName: string,
+  lastName: string,
+  gender: ProviderPersonGender,
+): string {
   const parts = [firstName.trim(), lastName.trim()].filter(Boolean);
   // A salutation on its own is not a name — without any name part there is
   // nothing to display, so callers can fall back to a stored value.
   if (parts.length === 0) return "";
-  return [doctorGermanSalutation(gender), ...parts].filter(Boolean).join(" ");
+  return [germanPersonSalutation(gender), ...parts].filter(Boolean).join(" ");
 }
 
 export function doctorListDisplayName(doctor: {
@@ -252,7 +268,7 @@ export function doctorListDisplayName(doctor: {
   const { salutation: baked, rest } = splitLeadingDoctorSalutation(doctor.name);
   // Prefer a salutation already baked into the name; otherwise derive it from
   // gender. Shown in every locale (incl. Russian), not only German lists.
-  const salutation = baked || (doctor.gender ? doctorGermanSalutation(doctor.gender) : "");
+  const salutation = baked || (doctor.gender ? germanPersonSalutation(doctor.gender) : "");
   return [salutation, formatDoctorTitleValue(doctor.title), rest].filter(Boolean).join(" ");
 }
 
@@ -276,6 +292,13 @@ export type WeeklyAvailabilityDay = {
   day: WeeklyAvailabilityDayCode;
   enabled: boolean;
   intervals: WeeklyAvailabilityInterval[];
+};
+
+export type WeeklyAvailabilityDisplayItem = {
+  day?: WeeklyAvailabilityDayCode;
+  label: string;
+  closed: boolean;
+  freeText?: boolean;
 };
 
 const WEEKLY_AVAILABILITY_DAYS: readonly WeeklyAvailabilityDayCode[] = [
@@ -470,6 +493,27 @@ function normalizeAvailabilityIntervals(
   });
 }
 
+function weeklyAvailabilityClosedLabel(lang: Lang) {
+  return lang === "de" ? "Geschlossen" : "Вихідний";
+}
+
+function formatWeeklyAvailabilityIntervalList(
+  intervals: readonly WeeklyAvailabilityInterval[],
+  options: { displayMidnightEndAs24?: boolean } = {},
+) {
+  return intervals
+    .map((interval) => {
+      const displayEnd =
+        options.displayMidnightEndAs24 && interval.end === "00:00"
+          ? "24:00"
+          : interval.end;
+      const base = `${interval.start}-${displayEnd}`;
+      const comment = interval.comment?.trim();
+      return comment ? `${base} (${comment})` : base;
+    })
+    .join(", ");
+}
+
 function formatWeeklyAvailabilityRows(
   days: readonly WeeklyAvailabilityDay[],
   dayLabel: (day: WeeklyAvailabilityDayCode) => string,
@@ -489,17 +533,7 @@ function formatWeeklyAvailabilityRows(
       continue;
     }
 
-    const hours = intervals
-      .map((interval) => {
-        const displayEnd =
-          options.displayMidnightEndAs24 && interval.end === "00:00"
-            ? "24:00"
-            : interval.end;
-        const base = `${interval.start}-${displayEnd}`;
-        const comment = interval.comment?.trim();
-        return comment ? `${base} (${comment})` : base;
-      })
-      .join(", ");
+    const hours = formatWeeklyAvailabilityIntervalList(intervals, options);
     const intervalsKey = hours;
     const previous = groups.at(-1);
     const previousEndIndex = previous ? WEEKLY_DAY_INDEX.get(previous.endDay) : undefined;
@@ -690,6 +724,44 @@ export function formatWeeklyAvailabilityDisplay(
   return formatted || source;
 }
 
+export function formatWeeklyAvailabilityDisplayItems(
+  value: string | null | undefined,
+  lang: Lang,
+): WeeklyAvailabilityDisplayItem[] {
+  const source = (value ?? "").trim();
+  const schedule = parseWeeklyAvailability(source);
+  const hasStructuredHours = schedule.some((row) => {
+    const intervals = row.enabled ? normalizeAvailabilityIntervals(row.intervals) : [];
+    return intervals.length > 0;
+  });
+
+  if (source && !hasStructuredHours) {
+    return [{ label: source, closed: false, freeText: true }];
+  }
+
+  const closedLabel = weeklyAvailabilityClosedLabel(lang);
+  return WEEKLY_AVAILABILITY_DAYS.map((day) => {
+    const row = schedule.find((item) => item.day === day);
+    const dayLabel = weeklyAvailabilityDayLabel(day, lang);
+    const intervals = row?.enabled ? normalizeAvailabilityIntervals(row.intervals) : [];
+    if (intervals.length === 0) {
+      return {
+        day,
+        label: `${dayLabel} (${closedLabel})`,
+        closed: true,
+      };
+    }
+
+    return {
+      day,
+      label: `${dayLabel} ${formatWeeklyAvailabilityIntervalList(intervals, {
+        displayMidnightEndAs24: true,
+      })}`,
+      closed: false,
+    };
+  });
+}
+
 const COMPACT_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-GB", {
   day: "2-digit",
   month: "short",
@@ -737,6 +809,7 @@ export const DEFAULT_FILTERS: ProviderFilters = {
   taxonomyAttributeKey: "",
   taxonomyAttributeValue: "",
   internalRatingGte: "",
+  insuranceProvider: "",
 };
 
 export function providerPermissions(role?: string): ProviderPermissions {
@@ -771,6 +844,7 @@ export function blankProviderForm(providerType: ProviderType = "medical"): Provi
     openingHours: "",
     fachbereich: "",
     specializations: "",
+    insuranceProviders: "",
     parentProviderId: "",
     organizationLevel: "organization",
     taxonomyNodeId: "",
@@ -798,6 +872,7 @@ export function blankDoctorForm(): DoctorFormState {
     openingHours: "",
     fachbereich: "",
     specializations: "",
+    insuranceProviders: "",
     languages: "",
     phone: "",
     email: "",
@@ -861,6 +936,18 @@ function parseCommaList(value: string) {
   });
 }
 
+function parseUniqueCommaList(value: string) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of parseCommaList(value)) {
+    const key = item.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  return result;
+}
+
 function specializationsToText(items?: { name_en?: string | null; code?: string }[], fallback = "") {
   const labels: string[] = [];
   for (const item of items ?? []) {
@@ -868,6 +955,20 @@ function specializationsToText(items?: { name_en?: string | null; code?: string 
     if (label) labels.push(label);
   }
   return labels.length ? labels.join(", ") : fallback;
+}
+
+function insuranceProvidersToText(items?: { name?: string | null }[]) {
+  const seen = new Set<string>();
+  const labels: string[] = [];
+  for (const item of items ?? []) {
+    const label = item.name?.trim();
+    if (!label) continue;
+    const key = label.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    labels.push(label);
+  }
+  return labels.join(", ");
 }
 
 function contactValue(
@@ -1325,6 +1426,9 @@ export function buildProvidersQuery(filters: ProviderFilters, forceNonMedical: b
     params.set("taxonomy_attribute_value", filters.taxonomyAttributeValue.trim());
   }
   if (filters.internalRatingGte) params.set("internal_rating_gte", filters.internalRatingGte);
+  if (filters.insuranceProvider.trim()) {
+    params.set("insurance_provider", filters.insuranceProvider.trim());
+  }
   const query = params.toString();
   return query ? `/providers?${query}` : "/providers";
 }
@@ -1360,6 +1464,7 @@ export function providerToForm(detail: ProviderDetail): ProviderFormState {
     openingHours: detail.opening_hours ?? "",
     fachbereich: detail.fachbereich ?? "",
     specializations: specializationsToText(detail.specializations, detail.fachbereich ?? ""),
+    insuranceProviders: insuranceProvidersToText(detail.insurance_providers),
     parentProviderId: detail.parent_provider_id ?? "",
     organizationLevel: detail.organization_level ?? "organization",
     taxonomyNodeId: detail.taxonomy_node_id ?? detail.taxonomy_node?.id ?? "",
@@ -1387,6 +1492,7 @@ export function doctorToForm(doctor: DoctorSummary): DoctorFormState {
     openingHours: doctor.opening_hours ?? "",
     fachbereich: doctor.fachbereich ?? "",
     specializations: specializationsToText(doctor.specializations, doctor.fachbereich ?? ""),
+    insuranceProviders: insuranceProvidersToText(doctor.insurance_providers),
     languages: doctor.languages?.join(", ") ?? "",
     phone: contactValue(doctor.contacts, "phone", "work", doctor.phone ?? ""),
     email: contactValue(doctor.contacts, "email", "work", doctor.email ?? ""),
@@ -1453,14 +1559,17 @@ export function staffToForm(staff: {
   notes: string | null;
 }): StaffFormState {
   const contacts = toContactForms(staff.contacts, staff.phone ?? "", staff.email ?? "");
+  const firstName = staff.first_name ?? "";
+  const lastName = staff.last_name ?? "";
+  const gender = normalizeGender(staff.gender);
   return {
     id: staff.id,
-    firstName: staff.first_name ?? "",
-    lastName: staff.last_name ?? "",
-    displayName: staff.display_name ?? "",
+    firstName,
+    lastName,
+    displayName: composeStaffDisplayName(firstName, lastName, gender) || staff.display_name || "",
     role: staff.role ?? "staff",
     department: staff.department ?? "",
-    gender: normalizeGender(staff.gender),
+    gender,
     openingHours: staff.opening_hours ?? "",
     status: staff.status ?? "active",
     phone: contactValue(staff.contacts, "phone", "work", staff.phone ?? ""),
@@ -1470,6 +1579,19 @@ export function staffToForm(staff: {
     contacts,
     notes: staff.notes ?? "",
   };
+}
+
+export function applyStaffFieldChange(
+  current: StaffFormState,
+  field: keyof StaffFormState,
+  value: string,
+): StaffFormState {
+  const next: StaffFormState = { ...current, [field]: value };
+  if (field === "firstName" || field === "lastName" || field === "gender") {
+    next.displayName =
+      composeStaffDisplayName(next.firstName, next.lastName, next.gender) || next.displayName;
+  }
+  return next;
 }
 
 export function toProviderPayload(form: ProviderFormState, forceNonMedical: boolean) {
@@ -1492,6 +1614,7 @@ export function toProviderPayload(form: ProviderFormState, forceNonMedical: bool
     opening_hours: toOptional(form.openingHours),
     fachbereich: isMedical ? toOptional(form.fachbereich) : null,
     specializations: isMedical ? parseCommaList(form.specializations || form.fachbereich) : [],
+    insurance_providers: isMedical ? parseUniqueCommaList(form.insuranceProviders) : [],
     parent_provider_id: toOptional(form.parentProviderId),
     organization_level: form.organizationLevel,
     taxonomy_node_id: toOptional(form.taxonomyNodeId),
@@ -1524,6 +1647,7 @@ export function toDoctorPayload(form: DoctorFormState) {
     opening_hours: toOptional(form.openingHours),
     fachbereich: toOptional(form.fachbereich),
     specializations: parseCommaList(form.specializations || form.fachbereich),
+    insurance_providers: parseUniqueCommaList(form.insuranceProviders),
     languages: parseCommaList(form.languages),
     phone: primaryContact(contacts, "phone"),
     email: primaryContact(contacts, "email"),
@@ -1558,8 +1682,7 @@ export function toServicePayload(form: ServiceFormState) {
 
 export function toStaffPayload(form: StaffFormState) {
   const displayName =
-    form.displayName.trim() ||
-    [form.firstName.trim(), form.lastName.trim()].filter(Boolean).join(" ");
+    composeStaffDisplayName(form.firstName, form.lastName, form.gender) || form.displayName.trim();
   return {
     first_name: toOptional(form.firstName),
     last_name: toOptional(form.lastName),

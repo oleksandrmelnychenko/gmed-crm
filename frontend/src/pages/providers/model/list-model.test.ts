@@ -3,16 +3,20 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_FILTERS,
   applyDoctorFieldChange,
+  applyStaffFieldChange,
   blankDoctorForm,
   blankProviderForm,
   blankServiceForm,
+  blankStaffForm,
   buildProviderAttributeValueOptionsQuery,
   buildProvidersQuery,
   composeDoctorDisplayName,
+  composeStaffDisplayName,
   doctorListDisplayName,
   doctorToForm,
   formatDoctorTitleValue,
   formatWeeklyAvailabilityDisplay,
+  formatWeeklyAvailabilityDisplayItems,
   formatWeeklyAvailabilityValue,
   normalizeAvailabilityEditorIntervals,
   parseWeeklyAvailability,
@@ -22,6 +26,7 @@ import {
   toDoctorPayload,
   toProviderPayload,
   toServicePayload,
+  toStaffPayload,
   updateTaxonomyAttributeValue,
   updateWeeklyAvailabilityIntervalValue,
 } from "./list-model";
@@ -62,6 +67,22 @@ describe("buildProvidersQuery", () => {
     const params = paramsFromPath(buildProvidersQuery(filters, false));
 
     expect(params.get("specializations")).toBe("cardiology,neurology");
+  });
+
+  it("serializes insurance providers as a backend filter", () => {
+    const params = paramsFromPath(
+      buildProvidersQuery(
+        {
+          ...DEFAULT_FILTERS,
+          activeOnly: "",
+          providerType: "medical",
+          insuranceProvider: "Techniker Krankenkasse, AXA",
+        },
+        false,
+      ),
+    );
+
+    expect(params.get("insurance_provider")).toBe("Techniker Krankenkasse, AXA");
   });
 
   it("serializes provider category filters to the backend taxonomy key", () => {
@@ -116,6 +137,7 @@ describe("taxonomyAttributeValueOptions", () => {
       organization_level: "organization" as const,
       taxonomy_attributes: {},
       specializations: [],
+      insurance_providers: [],
       is_active: true,
       has_contract: false,
       doctor_count: 0,
@@ -187,6 +209,31 @@ describe("toProviderPayload", () => {
 
     expect(payload.specializations).toEqual(["cardiology", "neurology", "oncology"]);
     expect(payload.opening_hours).toBe("Mo-Fr 08:00-17:00");
+  });
+
+  it("sends insurance providers for medical providers", () => {
+    const form = {
+      ...blankProviderForm("medical"),
+      name: "Clinic Versicherungen",
+      insuranceProviders: "Techniker Krankenkasse, AXA, Techniker Krankenkasse",
+    };
+
+    const payload = toProviderPayload(form, false);
+
+    expect(payload.insurance_providers).toEqual(["Techniker Krankenkasse", "AXA"]);
+  });
+
+  it("clears insurance providers for non-medical providers", () => {
+    const form = {
+      ...blankProviderForm("non_medical"),
+      name: "Transfer Service",
+      insuranceProviders: "Techniker Krankenkasse",
+    };
+
+    const payload = toProviderPayload(form, false);
+
+    expect(payload.provider_type).toBe("non_medical");
+    expect(payload.insurance_providers).toEqual([]);
   });
 
   it("sends provider country and primary phone/email from structured contacts", () => {
@@ -296,6 +343,18 @@ describe("toDoctorPayload", () => {
     expect(payload.specializations).toEqual(["cardiology", "electrophysiology", "intensive care"]);
   });
 
+  it("sends multiple doctor insurance providers", () => {
+    const form = {
+      ...blankDoctorForm(),
+      name: "Dr. Sofia Weber",
+      insuranceProviders: "Techniker Krankenkasse, AXA, AXA",
+    };
+
+    const payload = toDoctorPayload(form);
+
+    expect(payload.insurance_providers).toEqual(["Techniker Krankenkasse", "AXA"]);
+  });
+
   it("sorts multiple doctor titles before sending the payload", () => {
     const form = {
       ...blankDoctorForm(),
@@ -357,6 +416,7 @@ describe("doctorToForm", () => {
       title: null,
       fachbereich: "Innere Medizin",
       specializations: [],
+      insurance_providers: [{ id: "ins-1", name: "Techniker Krankenkasse", is_active: true }],
       languages: [],
       phone: null,
       email: null,
@@ -380,6 +440,7 @@ describe("doctorToForm", () => {
 
     expect(form.website).toBe("https://praxis-mustermann.de");
     expect(form.schwerpunkt).toBe("Interventionelle Kardiologie");
+    expect(form.insuranceProviders).toBe("Techniker Krankenkasse");
   });
 });
 
@@ -495,6 +556,57 @@ describe("applyDoctorFieldChange", () => {
   });
 });
 
+describe("staff display names", () => {
+  const base = {
+    ...blankStaffForm(),
+    firstName: "",
+    lastName: "",
+    displayName: "",
+    gender: "unknown" as const,
+  };
+
+  it("prefixes Herr/Frau by gender and omits it when unknown", () => {
+    expect(composeStaffDisplayName("Max", "Mustermann", "male")).toBe("Herr Max Mustermann");
+    expect(composeStaffDisplayName("Anna", "Keller", "female")).toBe("Frau Anna Keller");
+    expect(composeStaffDisplayName("Sam", "Doe", "unknown")).toBe("Sam Doe");
+  });
+
+  it("returns empty when there is no name part", () => {
+    expect(composeStaffDisplayName("", "", "male")).toBe("");
+    expect(composeStaffDisplayName("  ", "", "female")).toBe("");
+  });
+
+  it("recomposes the staff display name when name parts or gender change", () => {
+    let form = applyStaffFieldChange(base, "firstName", "Marta");
+    form = applyStaffFieldChange(form, "lastName", "Secretary");
+    expect(form.displayName).toBe("Marta Secretary");
+
+    form = applyStaffFieldChange(form, "gender", "female");
+    expect(form.displayName).toBe("Frau Marta Secretary");
+
+    form = applyStaffFieldChange(form, "gender", "male");
+    expect(form.displayName).toBe("Herr Marta Secretary");
+  });
+
+  it("keeps an existing free-form display name when there are no name parts", () => {
+    const legacy = { ...base, displayName: "Front Desk" };
+    const afterGender = applyStaffFieldChange(legacy, "gender", "female");
+    expect(afterGender.displayName).toBe("Front Desk");
+  });
+
+  it("sends the gendered staff display name in the payload", () => {
+    const payload = toStaffPayload({
+      ...base,
+      firstName: "Marta",
+      lastName: "Secretary",
+      gender: "female",
+      role: "staff",
+    });
+
+    expect(payload.display_name).toBe("Frau Marta Secretary");
+  });
+});
+
 describe("taxonomy attribute drafts", () => {
   it("keeps trailing spaces while editing taxonomy attributes", () => {
     const draft = updateTaxonomyAttributeValue("{}", "cuisine", "Asian ");
@@ -563,6 +675,40 @@ describe("weekly availability helpers", () => {
     expect(formatWeeklyAvailabilityDisplay(value, "ru")).toBe(
       "Пн 08:00-20:00; Вт-Сб 08:00-22:00",
     );
+  });
+
+  it("builds seven read-only availability items and marks unchecked days as closed", () => {
+    const items = formatWeeklyAvailabilityDisplayItems("Mo-Di 09:00-18:00", "ru");
+
+    expect(items).toHaveLength(7);
+    expect(items.map((item) => item.label)).toEqual([
+      "Пн 09:00-18:00",
+      "Вт 09:00-18:00",
+      "Ср (Вихідний)",
+      "Чт (Вихідний)",
+      "Пт (Вихідний)",
+      "Сб (Вихідний)",
+      "Вс (Вихідний)",
+    ]);
+    expect(items.filter((item) => item.closed).map((item) => item.day)).toEqual([
+      "wed",
+      "thu",
+      "fri",
+      "sat",
+      "sun",
+    ]);
+  });
+
+  it("shows every day as closed when no availability was selected", () => {
+    expect(formatWeeklyAvailabilityDisplayItems("", "ru").map((item) => item.label)).toEqual([
+      "Пн (Вихідний)",
+      "Вт (Вихідний)",
+      "Ср (Вихідний)",
+      "Чт (Вихідний)",
+      "Пт (Вихідний)",
+      "Сб (Вихідний)",
+      "Вс (Вихідний)",
+    ]);
   });
 
   it("keeps midnight as an end-of-day closing time and displays it as 24:00", () => {

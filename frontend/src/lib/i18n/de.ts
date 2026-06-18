@@ -36,7 +36,7 @@ export const de = {
   nav_feedback: "Feedback",
   nav_reports: "Berichte",
   nav_learning: "SOP & Lernen",
-  nav_interpreters: "Dolmetscher",
+  nav_interpreters: "Mitarbeiter",
 
   login_title: "Anmeldung",
   login_email: "E-Mail",
@@ -279,6 +279,13 @@ export const de = {
   providers_doctor_new: "Neuer Arzt",
   providers_doctor_detail: "Arzt-Details",
   providers_doctor_title: "Titel",
+  providers_existing_doctor_section: "Bestehenden Arzt übernehmen",
+  providers_existing_doctor_select: "Vorhandener Arzt",
+  providers_existing_doctor_placeholder: "Arzt aus anderem Provider auswählen",
+  providers_existing_doctor_loading: "Ärzte werden geladen...",
+  providers_existing_doctor_empty: "Keine Ärzte in anderen medizinischen Providern gefunden.",
+  providers_existing_doctor_hint:
+    "Auswahl kopiert das Profil in diesen Provider; Termine und Dokumente bleiben providerspezifisch.",
   providers_contact_person_new: "Neuer Kontakt",
   providers_contact_person_detail: "Kontakt-Details",
   providers_contact_profile: "Kontaktprofil",

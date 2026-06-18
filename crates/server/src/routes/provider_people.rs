@@ -34,6 +34,7 @@ struct ProviderPeopleQuery {
     gender: Option<String>,
     patient_id: Option<Uuid>,
     active_only: Option<bool>,
+    insurance_provider: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -96,6 +97,8 @@ async fn list_provider_people(
         .map(|value| format!("%{value}%"))
         .unwrap_or_else(|| "%%".to_string());
     let active_only = query.active_only.unwrap_or(true);
+    let insurance_provider_pattern = format!("%{}%", query.insurance_provider.unwrap_or_default());
+    let has_insurance_provider_filter = insurance_provider_pattern != "%%";
 
     let mut items = Vec::new();
     if matches!(
@@ -114,6 +117,7 @@ async fn list_provider_people(
             role.as_deref(),
             &role_pattern,
             gender.as_deref(),
+            &insurance_provider_pattern,
         )
         .await
         {
@@ -125,6 +129,7 @@ async fn list_provider_people(
     if matches!(person_type, PersonTypeFilter::Staff | PersonTypeFilter::All)
         && patient_id.is_none()
         && specialization_terms.is_empty()
+        && !has_insurance_provider_filter
     {
         match load_staff_people(
             &state,
@@ -166,6 +171,7 @@ async fn load_doctor_people(
     role: Option<&str>,
     role_pattern: &str,
     gender: Option<&str>,
+    insurance_provider_pattern: &str,
 ) -> Result<Vec<Value>, axum::response::Response> {
     let rows = sqlx::query(
         r#"SELECT d.id, d.provider_id, d.name, d.first_name, d.last_name, d.display_name,
@@ -206,6 +212,19 @@ async fn load_doctor_people(
                       JOIN medical_specializations ms ON ms.id = ds.specialization_id
                       WHERE ds.doctor_id = d.id
                   ), '[]'::jsonb) AS specializations,
+                  COALESCE((
+                      SELECT jsonb_agg(
+                          jsonb_build_object(
+                              'id', ip.id,
+                              'name', ip.name,
+                              'is_active', ip.is_active
+                          )
+                          ORDER BY ip.name
+                      )
+                      FROM provider_doctor_insurances di
+                      JOIN insurance_providers ip ON ip.id = di.insurance_provider_id
+                      WHERE di.doctor_id = d.id
+                  ), '[]'::jsonb) AS insurance_providers,
                   COALESCE((
                       SELECT jsonb_agg(
                           jsonb_build_object(
@@ -254,12 +273,19 @@ async fn load_doctor_people(
                  )
                  OR EXISTS (
                      SELECT 1
-                     FROM provider_doctor_specializations ds
-                     JOIN medical_specializations ms ON ms.id = ds.specialization_id
-                     WHERE ds.doctor_id = d.id
-                       AND de_normalize(concat_ws(' ', ms.code, ms.name_en, ms.name_de, ms.name_ru)) LIKE de_normalize($4)
-                 )
-             )
+	                     FROM provider_doctor_specializations ds
+	                     JOIN medical_specializations ms ON ms.id = ds.specialization_id
+	                     WHERE ds.doctor_id = d.id
+	                       AND de_normalize(concat_ws(' ', ms.code, ms.name_en, ms.name_de, ms.name_ru)) LIKE de_normalize($4)
+	                 )
+	                 OR EXISTS (
+	                     SELECT 1
+	                     FROM provider_doctor_insurances di
+	                     JOIN insurance_providers ip ON ip.id = di.insurance_provider_id
+	                     WHERE di.doctor_id = d.id
+	                       AND de_normalize(ip.name) LIKE de_normalize($4)
+	                 )
+	             )
              AND (
                  cardinality($5::text[]) = 0
                  OR EXISTS (
@@ -300,8 +326,8 @@ async fn load_doctor_people(
                        AND a.patient_id = $9
                  )
              )
-             AND (
-                 $10::uuid IS NULL
+	             AND (
+	                 $10::uuid IS NULL
                  OR EXISTS (
                     WITH RECURSIVE assigned_taxonomy AS (
                         SELECT ptn.id, ptn.parent_id
@@ -318,9 +344,19 @@ async fn load_doctor_people(
                     SELECT 1
                     FROM assigned_taxonomy
                     WHERE id = $10
-                 )
-             )
-           ORDER BY p.name, d.name"#,
+	                 )
+	             )
+	             AND (
+	                 $11::text = '%%'
+	                 OR EXISTS (
+	                     SELECT 1
+	                     FROM provider_doctor_insurances di
+	                     JOIN insurance_providers ip ON ip.id = di.insurance_provider_id
+	                     WHERE di.doctor_id = d.id
+	                       AND ip.name ILIKE $11
+	                 )
+	             )
+	           ORDER BY p.name, d.name"#,
     )
     .bind(active_only)
     .bind(provider_id)
@@ -332,6 +368,7 @@ async fn load_doctor_people(
     .bind(gender)
     .bind(patient_id)
     .bind(provider_taxonomy_node_id)
+    .bind(insurance_provider_pattern)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
@@ -390,6 +427,7 @@ async fn load_doctor_people(
                 "opening_hours": row.try_get::<Option<String>, _>("opening_hours").unwrap_or_default(),
                 "fachbereich": row.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
                 "specializations": row.try_get::<Value, _>("specializations").unwrap_or_else(|_| json!([])),
+                "insurance_providers": row.try_get::<Value, _>("insurance_providers").unwrap_or_else(|_| json!([])),
                 "languages": row.try_get::<Vec<String>, _>("languages").unwrap_or_default(),
                 "phone": phone,
                 "email": email,

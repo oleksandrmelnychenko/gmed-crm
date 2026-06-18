@@ -1,5 +1,6 @@
 import type {
   PersonContact,
+  InsuranceProviderItem,
   ProviderPersonGender,
   ProviderType,
   SpecializationItem,
@@ -41,6 +42,7 @@ export type ProviderPeopleRow = {
   opening_hours: string | null;
   fachbereich: string | null;
   specializations: SpecializationItem[];
+  insurance_providers: InsuranceProviderItem[];
   languages: string[];
   phone: string | null;
   email: string | null;
@@ -68,6 +70,7 @@ export type ProviderPeopleFilters = {
   specialization: string;
   role: string;
   patientId: string;
+  insuranceProvider: string;
 };
 
 export const DEFAULT_PROVIDER_PEOPLE_FILTERS: ProviderPeopleFilters = {
@@ -81,6 +84,7 @@ export const DEFAULT_PROVIDER_PEOPLE_FILTERS: ProviderPeopleFilters = {
   specialization: "",
   role: "",
   patientId: "",
+  insuranceProvider: "",
 };
 
 export type ProviderPeoplePatientOption = {
