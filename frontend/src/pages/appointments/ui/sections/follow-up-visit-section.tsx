@@ -245,10 +245,12 @@ function useAppointmentFollowUpVisitSectionContent({
       form.timeStart,
       form.timeEnd,
       form.interpreterId,
+      form.doctorId,
     );
   }, [
     detail.patient_id,
     form.date,
+    form.doctorId,
     form.interpreterId,
     form.timeEnd,
     form.timeStart,

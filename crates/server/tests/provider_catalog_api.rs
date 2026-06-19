@@ -226,6 +226,26 @@ async fn providers_list_supports_provider_and_doctor_insurance_filters() {
     );
     assert!(!items.iter().any(|row| row["id"] == provider_id.to_string()));
     assert!(!items.iter().any(|row| row["id"] == decoy_id.to_string()));
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!(
+            "/api/v1/providers?search={tag}&insurance_provider=Provider%20Insurance%2C%20Doctor%20Insurance"
+        ),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().expect("providers array");
+    assert!(items.iter().any(|row| row["id"] == provider_id.to_string()));
+    assert!(
+        items
+            .iter()
+            .any(|row| row["id"] == doctor_provider_id.to_string())
+    );
+    assert!(!items.iter().any(|row| row["id"] == decoy_id.to_string()));
 }
 
 #[tokio::test]

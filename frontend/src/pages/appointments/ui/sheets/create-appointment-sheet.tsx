@@ -347,6 +347,7 @@ function useCreateAppointmentSheetContent({
       form.timeStart,
       form.timeEnd,
       form.interpreterId,
+      form.doctorId,
     );
   }, [
     open,
@@ -355,6 +356,7 @@ function useCreateAppointmentSheetContent({
     form.timeStart,
     form.timeEnd,
     form.interpreterId,
+    form.doctorId,
   ]);
   const debouncedConflictQuery = useDebouncedValue(conflictQuery);
 

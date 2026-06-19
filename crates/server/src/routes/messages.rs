@@ -1704,12 +1704,25 @@ async fn download_file(
     )
     .await;
 
-    axum::response::Response::builder()
+    match axum::response::Response::builder()
         .header("content-type", &mime)
         .header("content-disposition", &disposition)
         .body(body)
-        .unwrap()
-        .into_response()
+    {
+        Ok(response) => response.into_response(),
+        Err(error) => {
+            tracing::error!(
+                error = %error,
+                message_id = %message_id,
+                attachment_filename = filename.as_str(),
+                "build message attachment download response"
+            );
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build attachment download",
+            )
+        }
+    }
 }
 
 async fn mark_conversation_read(

@@ -2,8 +2,47 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { ClinicalMedication } from "@/pages/patients/data/patient-clinical";
+import type { ProviderSummary } from "@/pages/providers/model/types";
 
-import { PatientMedicationTable } from "./patient-clinical-tab";
+import {
+  CLINICAL_PROVIDER_QUERY,
+  PatientMedicationTable,
+  clinicalMedicalProviderRows,
+} from "./patient-clinical-tab";
+
+function provider(overrides: Partial<ProviderSummary> = {}): ProviderSummary {
+  return {
+    address_city: null,
+    address_country: null,
+    appointment_count: 0,
+    avg_rating: null,
+    concierge_service_count: 0,
+    created_at: "2026-06-19T00:00:00Z",
+    doctor_count: 0,
+    email: null,
+    fachbereich: null,
+    has_contract: false,
+    id: "provider-1",
+    insurance_providers: [],
+    is_active: true,
+    last_interaction_at: null,
+    legal_name: null,
+    name: "Klinik München",
+    open_concierge_service_count: 0,
+    opening_hours: null,
+    organization_level: "clinic",
+    parent_provider_id: null,
+    parent_provider_name: null,
+    patient_count: 0,
+    phone: null,
+    provider_type: "medical",
+    rating_count: 0,
+    service_count: 0,
+    specializations: [],
+    tax_id: null,
+    ...overrides,
+  };
+}
 
 function medication(overrides: Partial<ClinicalMedication> = {}): ClinicalMedication {
   return {
@@ -29,6 +68,18 @@ function medication(overrides: Partial<ClinicalMedication> = {}): ClinicalMedica
 }
 
 describe("PatientMedicationTable", () => {
+  it("loads and keeps only medical providers for clinical attribution fields", () => {
+    expect(CLINICAL_PROVIDER_QUERY).toContain("provider_type=medical");
+    expect(CLINICAL_PROVIDER_QUERY).toContain("active_only=true");
+
+    expect(
+      clinicalMedicalProviderRows([
+        provider({ id: "medical-1", name: "Klinik", provider_type: "medical" }),
+        provider({ id: "restaurant-1", name: "Restaurant", provider_type: "non_medical" }),
+      ]).map((row) => row.id),
+    ).toEqual(["medical-1"]);
+  });
+
   it("renders patient medications as a real grouped table", () => {
     const item = medication();
     const special = medication({

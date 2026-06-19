@@ -126,4 +126,28 @@ describe("buildProviderTreeRows", () => {
       isMatched: true,
     });
   });
+
+  it("keeps an inactive matched child visible when its parent is not in the server result", () => {
+    const inactiveDepartment = {
+      ...provider("department", "Inactive Cardiology", "department", "missing-parent"),
+      is_active: false,
+    };
+    const rows = [inactiveDepartment];
+
+    const result = buildProviderTreeRows({
+      accessors,
+      collapsedProviderIds: new Set(),
+      hasActiveTableQuery: true,
+      matchedProviders: rows,
+      providers: rows,
+      sortStack: providerSort,
+    });
+
+    expect(result.rows.map((row) => row.id)).toEqual(["department"]);
+    expect(result.treeMetaById.get("department")).toMatchObject({
+      childCount: 0,
+      depth: 0,
+      isMatched: true,
+    });
+  });
 });

@@ -278,6 +278,15 @@ function formatMoney(value: string | number | null | undefined, currency = "EUR"
   return financeMoneyFormatter(currency).format(numeric);
 }
 
+export function packageItemVatRate(item: ServicePackageItem, servicePackage: ServicePackage) {
+  return (
+    item.tax_profile_vat_rate ??
+    item.agency_service_vat_rate ??
+    servicePackage.tax_profile_vat_rate ??
+    "0"
+  );
+}
+
 function taxProfileToForm(profile: TaxProfile): TaxProfileForm {
   return {
     profileKey: profile.profile_key,
@@ -333,6 +342,22 @@ function packageToForm(
   };
 }
 
+export function packageItemPatchFromAgencyService(
+  service: Pick<
+    AgencyServiceItem,
+    "id" | "description" | "service_key" | "service_name" | "unit_label" | "unit_price"
+  >,
+  defaultUnitLabel: string,
+) {
+  return {
+    agencyServiceId: service.id,
+    description: service.description?.trim() || service.service_name,
+    serviceKey: service.service_key,
+    unitLabel: service.unit_label || defaultUnitLabel,
+    overageUnitPriceNet: valueToInput(service.unit_price),
+  };
+}
+
 function decimalPayload(value: string, fallback = 0) {
   const parsed = Number(value.replace(",", "."));
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -340,6 +365,38 @@ function decimalPayload(value: string, fallback = 0) {
 
 function decimalInputIsValid(value: string) {
   return Number.isFinite(Number(value.replace(",", ".")));
+}
+
+type AgencyServiceValidationMessages = {
+  required: string;
+  unitPrice: string;
+  vatRate: string;
+};
+
+export function validateAgencyServiceForm(
+  form: Pick<
+    AgencyServiceFormState,
+    "serviceKey" | "serviceName" | "unitPrice" | "vatRate" | "validFrom"
+  >,
+  messages: AgencyServiceValidationMessages,
+) {
+  if (!form.serviceKey.trim() || !form.serviceName.trim() || !form.validFrom) {
+    return messages.required;
+  }
+  if (
+    !form.unitPrice.trim() ||
+    !decimalInputIsValid(form.unitPrice) ||
+    decimalPayload(form.unitPrice) < 0
+  ) {
+    return messages.unitPrice;
+  }
+  if (form.vatRate.trim()) {
+    const vatRate = decimalPayload(form.vatRate);
+    if (!decimalInputIsValid(form.vatRate) || vatRate < 0 || vatRate > 100) {
+      return messages.vatRate;
+    }
+  }
+  return "";
 }
 
 type FinanceCatalogState = {
@@ -782,11 +839,10 @@ function useFinanceCatalogPageContent() {
     }
 
     updatePackageItem(index, {
-      agencyServiceId: service.id,
-      description: service.description?.trim() || service.service_name,
-      serviceKey: service.service_key,
-      unitLabel: service.unit_label || t.finance_catalog_unit_default,
-      overageUnitPriceNet: valueToInput(service.unit_price),
+      ...packageItemPatchFromAgencyService(
+        service,
+        t.finance_catalog_unit_default,
+      ),
     });
   }
 
@@ -879,6 +935,15 @@ function useFinanceCatalogPageContent() {
   async function handleSaveAgencyService(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setAgencyServiceError("");
+    const validationError = validateAgencyServiceForm(agencyServiceForm, {
+      required: t.finance_catalog_error_agency_service_required,
+      unitPrice: t.finance_catalog_error_agency_service_unit_price,
+      vatRate: t.finance_catalog_error_agency_service_vat_rate,
+    });
+    if (validationError) {
+      setAgencyServiceError(validationError);
+      return;
+    }
     setAgencyServiceBusy(true);
     try {
       await apiFetch(
@@ -888,14 +953,14 @@ function useFinanceCatalogPageContent() {
         {
           method: "POST",
           body: JSON.stringify({
-            service_key: agencyServiceForm.serviceKey,
-            service_name: agencyServiceForm.serviceName,
+            service_key: agencyServiceForm.serviceKey.trim(),
+            service_name: agencyServiceForm.serviceName.trim(),
             description: toOptional(agencyServiceForm.description),
             unit_label: toOptional(agencyServiceForm.unitLabel),
-            unit_price: Number(agencyServiceForm.unitPrice || 0),
+            unit_price: decimalPayload(agencyServiceForm.unitPrice),
             currency: toOptional(agencyServiceForm.currency),
-            vat_rate: toOptional(agencyServiceForm.vatRate)
-              ? Number(agencyServiceForm.vatRate)
+            vat_rate: agencyServiceForm.vatRate.trim()
+              ? decimalPayload(agencyServiceForm.vatRate)
               : null,
             is_active: agencyServiceForm.isActive,
             valid_from: agencyServiceForm.validFrom || todayInputDate(),
@@ -909,7 +974,9 @@ function useFinanceCatalogPageContent() {
       await load();
     } catch (err) {
       setAgencyServiceError(
-        err instanceof Error ? err.message : t.finance_catalog_error_load,
+        err instanceof Error
+          ? err.message
+          : t.finance_catalog_error_save_agency_service,
       );
     } finally {
       setAgencyServiceBusy(false);
@@ -1328,16 +1395,12 @@ function useFinanceCatalogPageContent() {
                                 </span>
                               </span>
                             ) : null}
-                            {packageItem.agency_service_vat_rate || packageItem.tax_profile_vat_rate ? (
-                              <span>
-                                {t.finance_catalog_vat_label}: {" "}
-                                <span className="font-medium text-foreground">
-                                  {packageItem.tax_profile_vat_rate ??
-                                    packageItem.agency_service_vat_rate}
-                                  %
-                                </span>
+                            <span>
+                              {t.finance_catalog_vat_label}: {" "}
+                              <span className="font-medium text-foreground">
+                                {packageItemVatRate(packageItem, item)}%
                               </span>
-                            ) : null}
+                            </span>
                             {packageItem.requires_patient_approval ? (
                               <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700">
                                 {t.finance_catalog_approval_suffix}

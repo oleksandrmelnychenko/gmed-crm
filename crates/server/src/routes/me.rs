@@ -546,12 +546,20 @@ async fn download_my_document(
 
     let disposition = format!("attachment; filename=\"{}\"", filename.replace('"', ""));
 
-    axum::response::Response::builder()
+    match axum::response::Response::builder()
         .header("content-type", mime_type)
         .header("content-disposition", disposition)
         .body(Body::from(data))
-        .unwrap()
-        .into_response()
+    {
+        Ok(response) => response.into_response(),
+        Err(error) => {
+            tracing::error!(error = %error, document_id = %id, "build patient document download response");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build document download",
+            )
+        }
+    }
 }
 
 async fn confirm_my_document_release(

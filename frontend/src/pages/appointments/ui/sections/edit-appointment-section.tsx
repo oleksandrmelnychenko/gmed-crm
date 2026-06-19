@@ -514,6 +514,7 @@ function useEditAppointmentSectionContentContent({
       form.timeStart,
       form.timeEnd,
       form.interpreterId,
+      form.doctorId,
     );
   }, [
     detail.id,
@@ -522,6 +523,7 @@ function useEditAppointmentSectionContentContent({
     form.timeStart,
     form.timeEnd,
     form.interpreterId,
+    form.doctorId,
   ]);
   const debouncedConflictQuery = useDebouncedValue(conflictQuery);
 

@@ -1608,12 +1608,20 @@ async fn download_attachment(
             let mime = content_type.unwrap_or_else(|| "application/octet-stream".to_string());
             let disposition = format!("attachment; filename=\"{}\"", file_name.replace('"', "'"));
 
-            axum::response::Response::builder()
+            match axum::response::Response::builder()
                 .header("content-type", mime)
                 .header("content-disposition", disposition)
                 .body(Body::from(data))
-                .unwrap()
-                .into_response()
+            {
+                Ok(response) => response.into_response(),
+                Err(error) => {
+                    tracing::error!(error = %error, "build lead attachment download response");
+                    err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to build attachment download",
+                    )
+                }
+            }
         }
         Ok(None) => err(StatusCode::NOT_FOUND, "Attachment not found"),
         Err(e) => {

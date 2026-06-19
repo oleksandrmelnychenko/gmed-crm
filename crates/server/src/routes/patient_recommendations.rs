@@ -1510,10 +1510,12 @@ async fn run_recommendation_reminder_scheduler_once(state: &AppState) -> i64 {
         .await;
 
         // Stamp so this reminder never re-fires on the next tick.
-        match sqlx::query("UPDATE patient_recommendations SET reminder_sent_at = now() WHERE id = $1")
-            .bind(id)
-            .execute(&state.db)
-            .await
+        match sqlx::query(
+            "UPDATE patient_recommendations SET reminder_sent_at = now() WHERE id = $1",
+        )
+        .bind(id)
+        .execute(&state.db)
+        .await
         {
             Ok(_) => delivered += 1,
             Err(error) => {

@@ -70,8 +70,12 @@ export interface RevenueTranslations {
   finance_catalog_error_load: string;
   finance_catalog_error_create_tax_profile: string;
   finance_catalog_error_update_tax_profile: string;
+  finance_catalog_error_save_agency_service: string;
   finance_catalog_error_save_package: string;
   finance_catalog_error_profile_required: string;
+  finance_catalog_error_agency_service_required: string;
+  finance_catalog_error_agency_service_unit_price: string;
+  finance_catalog_error_agency_service_vat_rate: string;
   finance_catalog_error_vat_rate: string;
   finance_catalog_error_package_required: string;
   finance_catalog_error_package_item_description: string;
@@ -836,8 +840,16 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_error_load: "Не удалось загрузить финансовый каталог",
   finance_catalog_error_create_tax_profile: "Не удалось создать налоговый профиль",
   finance_catalog_error_update_tax_profile: "Не удалось обновить налоговый профиль",
+  finance_catalog_error_save_agency_service:
+    "Не удалось сохранить позицию каталога",
   finance_catalog_error_save_package: "Не удалось сохранить сервисный пакет",
   finance_catalog_error_profile_required: "Укажите ключ профиля и название.",
+  finance_catalog_error_agency_service_required:
+    "Укажите ключ услуги, название и дату начала действия.",
+  finance_catalog_error_agency_service_unit_price:
+    "Цена за единицу должна быть неотрицательным числом.",
+  finance_catalog_error_agency_service_vat_rate:
+    "НДС позиции должен быть числом от 0 до 100.",
   finance_catalog_error_vat_rate: "Ставка НДС должна быть неотрицательным числом.",
   finance_catalog_error_package_required: "Укажите ключ пакета и название.",
   finance_catalog_error_package_item_description:
@@ -1154,8 +1166,16 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_error_create_tax_profile: "Steuerprofil konnte nicht erstellt werden",
   finance_catalog_error_update_tax_profile:
     "Steuerprofil konnte nicht aktualisiert werden",
+  finance_catalog_error_save_agency_service:
+    "Katalogposition konnte nicht gespeichert werden",
   finance_catalog_error_save_package: "Servicepaket konnte nicht gespeichert werden",
   finance_catalog_error_profile_required: "Profilschlüssel und Name sind erforderlich.",
+  finance_catalog_error_agency_service_required:
+    "Service-Key, Leistungsname und Gültig-ab-Datum sind erforderlich.",
+  finance_catalog_error_agency_service_unit_price:
+    "Der Einzelpreis muss eine nicht negative Zahl sein.",
+  finance_catalog_error_agency_service_vat_rate:
+    "Die USt. der Position muss eine Zahl zwischen 0 und 100 sein.",
   finance_catalog_error_vat_rate:
     "Der USt.-Satz muss eine nicht negative Zahl sein.",
   finance_catalog_error_package_required: "Paketschlüssel und Name sind erforderlich.",

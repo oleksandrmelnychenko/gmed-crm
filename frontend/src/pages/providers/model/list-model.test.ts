@@ -355,6 +355,18 @@ describe("toDoctorPayload", () => {
     expect(payload.insurance_providers).toEqual(["Techniker Krankenkasse", "AXA"]);
   });
 
+  it("sends an existing shared doctor identity when linking a doctor to another provider", () => {
+    const form = {
+      ...blankDoctorForm(),
+      name: "Dr. Sofia Weber",
+      sharedIdentityId: "11111111-1111-4111-8111-111111111111",
+    };
+
+    const payload = toDoctorPayload(form);
+
+    expect(payload.shared_identity_id).toBe("11111111-1111-4111-8111-111111111111");
+  });
+
   it("sorts multiple doctor titles before sending the payload", () => {
     const form = {
       ...blankDoctorForm(),

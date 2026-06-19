@@ -55,6 +55,12 @@ type Bilingual = (ru: string, de: string) => string;
 const inputClass =
   "h-9 w-full rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
 
+export const CLINICAL_PROVIDER_QUERY = "/providers?active_only=true&provider_type=medical";
+
+export function clinicalMedicalProviderRows(providers: ProviderSummary[]): ProviderSummary[] {
+  return providers.filter((provider) => provider.provider_type === "medical");
+}
+
 type ClinicalSectionGroup = { key: string; label: string };
 type IndexedClinicalItem<T> = { item: T; index: number };
 
@@ -1148,7 +1154,7 @@ export function PatientClinicalTab({
     Promise.all([
       fetchPatientClinical(patientId),
       fetchPatientRecommendations(patientId).catch(() => [] as PatientRecommendation[]),
-      fetchProviders("/providers?active_only=true&provider_type=medical").catch(() => [] as ProviderSummary[]),
+      fetchProviders(CLINICAL_PROVIDER_QUERY).catch(() => [] as ProviderSummary[]),
       fetchAllDoctors().catch(() => [] as AllDoctorOption[]),
     ])
       .then(([clinical, recs, providerRows, doctorRows]) => {
@@ -1161,7 +1167,7 @@ export function PatientClinicalTab({
         setProcedures(clinical.procedures ?? []);
         setNarrative(clinical.narrative ?? blankNarrative());
         setRecommendations(recs ?? []);
-        setProviders((providerRows ?? []).filter((provider) => provider.provider_type === "medical"));
+        setProviders(clinicalMedicalProviderRows(providerRows ?? []));
         setAllDoctors(doctorRows ?? []);
         setError("");
       })

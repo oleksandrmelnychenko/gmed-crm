@@ -27,12 +27,14 @@ export function buildConflictQuery(
   timeStart: string,
   timeEnd: string,
   interpreterId: string,
+  doctorId = "",
 ): string {
   const params = new URLSearchParams({ patient_id: patientId, date });
   if (appointmentId) params.set("appointment_id", appointmentId);
   if (timeStart) params.set("time_start", timeStart);
   if (timeEnd) params.set("time_end", timeEnd);
   if (interpreterId) params.set("interpreter_id", interpreterId);
+  if (doctorId) params.set("doctor_id", doctorId);
   return `/appointments/meta/conflicts?${params.toString()}`;
 }
 

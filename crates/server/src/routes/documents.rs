@@ -732,6 +732,19 @@ pub(crate) struct NewStoredDocument<'a> {
     pub(crate) klinik: Option<&'a str>,
     pub(crate) ursprung: Option<&'a str>,
     pub(crate) notes: Option<&'a str>,
+    pub(crate) document_direction: Option<&'a str>,
+    pub(crate) document_variant: Option<&'a str>,
+    pub(crate) document_language: Option<&'a str>,
+    pub(crate) access_category: Option<&'a str>,
+    pub(crate) document_date: Option<NaiveDate>,
+    pub(crate) source_person: Option<&'a str>,
+    pub(crate) source_institution: Option<&'a str>,
+    pub(crate) addressee_person: Option<&'a str>,
+    pub(crate) addressee_institution: Option<&'a str>,
+    pub(crate) financial_status: Option<&'a str>,
+    pub(crate) payment_due_date: Option<NaiveDate>,
+    pub(crate) payment_date: Option<NaiveDate>,
+    pub(crate) payment_method: Option<&'a str>,
     pub(crate) generated_template_id: Option<&'a str>,
     pub(crate) version_root_document_id: Option<Uuid>,
     pub(crate) replaces_document_id: Option<Uuid>,
@@ -1137,6 +1150,10 @@ struct DocumentListQuery {
     date_to: Option<String>,
     klinik: Option<String>,
     ursprung: Option<String>,
+    document_direction: Option<String>,
+    document_variant: Option<String>,
+    access_category: Option<String>,
+    financial_status: Option<String>,
 }
 
 fn normalized_query_value(value: Option<&str>) -> Option<String> {
@@ -1188,6 +1205,32 @@ struct UpdateDocumentRequest {
     klinik: Option<String>,
     ursprung: Option<String>,
     notes: Option<String>,
+    #[serde(default)]
+    document_direction: NullableJsonField,
+    #[serde(default)]
+    document_variant: NullableJsonField,
+    #[serde(default)]
+    document_language: NullableJsonField,
+    #[serde(default)]
+    access_category: NullableJsonField,
+    #[serde(default)]
+    document_date: NullableJsonField,
+    #[serde(default)]
+    source_person: NullableJsonField,
+    #[serde(default)]
+    source_institution: NullableJsonField,
+    #[serde(default)]
+    addressee_person: NullableJsonField,
+    #[serde(default)]
+    addressee_institution: NullableJsonField,
+    #[serde(default)]
+    financial_status: NullableJsonField,
+    #[serde(default)]
+    payment_due_date: NullableJsonField,
+    #[serde(default)]
+    payment_date: NullableJsonField,
+    #[serde(default)]
+    payment_method: NullableJsonField,
 }
 
 #[derive(Deserialize)]
@@ -1231,10 +1274,14 @@ struct UpdateDocumentTranslationRequest {
     status: String,
     #[serde(default)]
     assigned_to: NullableJsonField,
-    note: Option<String>,
-    source_language: Option<String>,
-    source_text: Option<String>,
-    translated_text: Option<String>,
+    #[serde(default)]
+    note: NullableJsonField,
+    #[serde(default)]
+    source_language: NullableJsonField,
+    #[serde(default)]
+    source_text: NullableJsonField,
+    #[serde(default)]
+    translated_text: NullableJsonField,
     create_translated_document: Option<bool>,
     translated_document_auto_name: Option<String>,
 }
@@ -1260,6 +1307,95 @@ impl<'de> Deserialize<'de> for NullableJsonField {
     }
 }
 
+fn nullable_trimmed_text(
+    field: &NullableJsonField,
+    invalid_message: &'static str,
+) -> Result<Option<Option<String>>, axum::response::Response> {
+    match field {
+        NullableJsonField::Missing => Ok(None),
+        NullableJsonField::Null => Ok(Some(None)),
+        NullableJsonField::Value(serde_json::Value::String(raw)) => {
+            let value = raw.trim();
+            Ok(Some(if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }))
+        }
+        NullableJsonField::Value(_) => Err(err(StatusCode::UNPROCESSABLE_ENTITY, invalid_message)),
+    }
+}
+
+fn nullable_translation_source_language(
+    field: &NullableJsonField,
+) -> Result<Option<Option<String>>, axum::response::Response> {
+    let Some(value) = nullable_trimmed_text(field, "Unknown translation source language")? else {
+        return Ok(None);
+    };
+    let Some(raw_language) = value else {
+        return Ok(Some(None));
+    };
+    match normalize_translation_source_language(Some(raw_language.as_str())) {
+        Some(language) => Ok(Some(Some(language.to_string()))),
+        None => Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Unknown translation source language",
+        )),
+    }
+}
+
+fn nullable_document_enum(
+    field: &NullableJsonField,
+    allowed: &[&str],
+    invalid_message: &'static str,
+) -> Result<Option<Option<String>>, axum::response::Response> {
+    let Some(value) = nullable_trimmed_text(field, invalid_message)? else {
+        return Ok(None);
+    };
+    let Some(raw_value) = value else {
+        return Ok(Some(None));
+    };
+    let normalized = raw_value.to_lowercase().replace('-', "_");
+    if allowed.contains(&normalized.as_str()) {
+        Ok(Some(Some(normalized)))
+    } else {
+        Err(err(StatusCode::UNPROCESSABLE_ENTITY, invalid_message))
+    }
+}
+
+fn nullable_document_language(
+    field: &NullableJsonField,
+) -> Result<Option<Option<String>>, axum::response::Response> {
+    let Some(value) = nullable_trimmed_text(field, "Unknown document language")? else {
+        return Ok(None);
+    };
+    let Some(raw_language) = value else {
+        return Ok(Some(None));
+    };
+    match normalize_document_language(Some(raw_language.as_str())) {
+        Some(language) => Ok(Some(Some(language.to_string()))),
+        None => Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Unknown document language",
+        )),
+    }
+}
+
+fn nullable_document_date(
+    field: &NullableJsonField,
+    invalid_message: &'static str,
+) -> Result<Option<Option<NaiveDate>>, axum::response::Response> {
+    let Some(value) = nullable_trimmed_text(field, invalid_message)? else {
+        return Ok(None);
+    };
+    let Some(raw_date) = value else {
+        return Ok(Some(None));
+    };
+    NaiveDate::parse_from_str(raw_date.as_str(), "%Y-%m-%d")
+        .map(|value| Some(Some(value)))
+        .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, invalid_message))
+}
+
 struct ShareableDocumentContext {
     document_id: Uuid,
     patient_id: Option<Uuid>,
@@ -1282,6 +1418,19 @@ struct GenerateDocumentRequest {
     klinik: Option<String>,
     ursprung: Option<String>,
     notes: Option<String>,
+    document_direction: Option<String>,
+    document_variant: Option<String>,
+    document_language: Option<String>,
+    access_category: Option<String>,
+    document_date: Option<NaiveDate>,
+    source_person: Option<String>,
+    source_institution: Option<String>,
+    addressee_person: Option<String>,
+    addressee_institution: Option<String>,
+    financial_status: Option<String>,
+    payment_due_date: Option<NaiveDate>,
+    payment_date: Option<NaiveDate>,
+    payment_method: Option<String>,
     language: Option<String>,
     title_override: Option<String>,
     introduction: Option<String>,
@@ -8170,6 +8319,214 @@ async fn parse_optional_text_field(field: axum::extract::multipart::Field<'_>) -
         .filter(|value| !value.is_empty())
 }
 
+async fn parse_optional_date_field(
+    field: axum::extract::multipart::Field<'_>,
+) -> Result<Option<NaiveDate>, axum::response::Response> {
+    let Some(value) = parse_optional_text_field(field).await else {
+        return Ok(None);
+    };
+    NaiveDate::parse_from_str(value.as_str(), "%Y-%m-%d")
+        .map(Some)
+        .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid document date"))
+}
+
+fn normalized_optional_owned(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn normalized_document_enum(
+    value: Option<&str>,
+    allowed: &[&str],
+    message: &'static str,
+) -> Result<Option<String>, axum::response::Response> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let normalized = value.to_lowercase().replace('-', "_");
+    if allowed.contains(&normalized.as_str()) {
+        Ok(Some(normalized))
+    } else {
+        Err(err(StatusCode::UNPROCESSABLE_ENTITY, message))
+    }
+}
+
+fn normalize_document_direction(
+    value: Option<&str>,
+) -> Result<Option<String>, axum::response::Response> {
+    normalized_document_enum(
+        value,
+        &["incoming", "outgoing"],
+        "Invalid document direction",
+    )
+}
+
+fn normalize_document_variant(
+    value: Option<&str>,
+) -> Result<Option<String>, axum::response::Response> {
+    normalized_document_enum(
+        value,
+        &["original", "translation"],
+        "Invalid document variant",
+    )
+}
+
+fn normalize_document_access_category(
+    value: Option<&str>,
+) -> Result<Option<String>, axum::response::Response> {
+    normalized_document_enum(
+        value,
+        &[
+            "internal",
+            "patient",
+            "provider",
+            "authority",
+            "financial",
+            "medical",
+            "other",
+        ],
+        "Invalid document access category",
+    )
+}
+
+fn normalize_document_financial_status(
+    value: Option<&str>,
+) -> Result<Option<String>, axum::response::Response> {
+    normalized_document_enum(
+        value,
+        &[
+            "open",
+            "in_progress",
+            "paid",
+            "overdue",
+            "billed_to_patient",
+            "reimbursed",
+        ],
+        "Invalid document financial status",
+    )
+}
+
+fn normalize_document_payment_method(
+    value: Option<&str>,
+) -> Result<Option<String>, axum::response::Response> {
+    normalized_document_enum(
+        value,
+        &["cash", "bank_transfer", "card", "other"],
+        "Invalid document payment method",
+    )
+}
+
+fn infer_document_access_category(
+    category: Option<&str>,
+    art: &str,
+    is_medical: bool,
+    visibility: &str,
+) -> &'static str {
+    if is_medical {
+        return "medical";
+    }
+    let haystack = format!(
+        "{} {}",
+        category.unwrap_or_default().to_lowercase(),
+        art.to_lowercase()
+    );
+    if [
+        "finance",
+        "financial",
+        "invoice",
+        "rechnung",
+        "kosten",
+        "payment",
+    ]
+    .iter()
+    .any(|needle| haystack.contains(needle))
+    {
+        return "financial";
+    }
+    if ["official", "agency", "authority"]
+        .iter()
+        .any(|needle| haystack.contains(needle))
+    {
+        return "authority";
+    }
+    if visibility == "patient_visible" {
+        return "patient";
+    }
+    "internal"
+}
+
+fn infer_document_direction(
+    generated_template_id: Option<&str>,
+    ursprung: Option<&str>,
+) -> &'static str {
+    if generated_template_id.is_some()
+        || ursprung
+            .map(|value| value.starts_with("template:"))
+            .unwrap_or(false)
+    {
+        "outgoing"
+    } else {
+        "incoming"
+    }
+}
+
+#[derive(Default)]
+struct NormalizedDocumentRequestMetadata {
+    document_direction: Option<String>,
+    document_variant: Option<String>,
+    document_language: Option<String>,
+    access_category: Option<String>,
+    document_date: Option<NaiveDate>,
+    source_person: Option<String>,
+    source_institution: Option<String>,
+    addressee_person: Option<String>,
+    addressee_institution: Option<String>,
+    financial_status: Option<String>,
+    payment_due_date: Option<NaiveDate>,
+    payment_date: Option<NaiveDate>,
+    payment_method: Option<String>,
+}
+
+fn normalize_generate_document_metadata(
+    body: &GenerateDocumentRequest,
+) -> Result<NormalizedDocumentRequestMetadata, axum::response::Response> {
+    let document_language = match body
+        .document_language
+        .as_deref()
+        .or(body.language.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => match normalize_document_language(Some(value)) {
+            Some(language) => Some(language.to_string()),
+            None => {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Unknown document language",
+                ));
+            }
+        },
+        None => None,
+    };
+
+    Ok(NormalizedDocumentRequestMetadata {
+        document_direction: normalize_document_direction(body.document_direction.as_deref())?,
+        document_variant: normalize_document_variant(body.document_variant.as_deref())?,
+        document_language,
+        access_category: normalize_document_access_category(body.access_category.as_deref())?,
+        document_date: body.document_date,
+        source_person: normalized_optional_owned(body.source_person.clone()),
+        source_institution: normalized_optional_owned(body.source_institution.clone()),
+        addressee_person: normalized_optional_owned(body.addressee_person.clone()),
+        addressee_institution: normalized_optional_owned(body.addressee_institution.clone()),
+        financial_status: normalize_document_financial_status(body.financial_status.as_deref())?,
+        payment_due_date: body.payment_due_date,
+        payment_date: body.payment_date,
+        payment_method: normalize_document_payment_method(body.payment_method.as_deref())?,
+    })
+}
+
 fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
     let visibility = row
         .try_get::<String, _>("visibility")
@@ -8234,6 +8591,19 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
             .unwrap_or(false),
         "klinik": row.try_get::<Option<String>, _>("klinik").unwrap_or_default(),
         "ursprung": ursprung,
+        "document_direction": row.try_get::<Option<String>, _>("document_direction").unwrap_or_default(),
+        "document_variant": row.try_get::<Option<String>, _>("document_variant").unwrap_or_default(),
+        "document_language": row.try_get::<Option<String>, _>("document_language").unwrap_or_default(),
+        "access_category": row.try_get::<Option<String>, _>("access_category").unwrap_or_default(),
+        "document_date": row.try_get::<Option<NaiveDate>, _>("document_date").unwrap_or_default(),
+        "source_person": row.try_get::<Option<String>, _>("source_person").unwrap_or_default(),
+        "source_institution": row.try_get::<Option<String>, _>("source_institution").unwrap_or_default(),
+        "addressee_person": row.try_get::<Option<String>, _>("addressee_person").unwrap_or_default(),
+        "addressee_institution": row.try_get::<Option<String>, _>("addressee_institution").unwrap_or_default(),
+        "financial_status": row.try_get::<Option<String>, _>("financial_status").unwrap_or_default(),
+        "payment_due_date": row.try_get::<Option<NaiveDate>, _>("payment_due_date").unwrap_or_default(),
+        "payment_date": row.try_get::<Option<NaiveDate>, _>("payment_date").unwrap_or_default(),
+        "payment_method": row.try_get::<Option<String>, _>("payment_method").unwrap_or_default(),
         "generated_template_id": generated_template_id,
         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
         "uploaded_by": row.try_get::<Uuid, _>("uploaded_by").unwrap_or_else(|_| Uuid::nil()),
@@ -8402,7 +8772,10 @@ async fn fetch_document_row(
         r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
-                  d.generated_template_id,
+                  d.document_direction, d.document_variant, d.document_language, d.access_category,
+                  d.document_date, d.source_person, d.source_institution, d.addressee_person,
+                  d.addressee_institution, d.financial_status, d.payment_due_date, d.payment_date,
+                  d.payment_method, d.generated_template_id,
                   d.notes, d.extracted_text, d.text_extraction_status, d.text_extraction_method,
                   d.text_extracted_at, d.text_extracted_by, d.version_root_document_id, d.replaces_document_id,
                   d.version_number, d.uploaded_by, d.created_at, d.updated_at,
@@ -9105,12 +9478,19 @@ pub(crate) async fn persist_document_file(
                 id, patient_id, order_id, appointment_id, auto_name, original_filename,
                 art, category, status, visibility, is_medical, mime_type, file_size,
                 storage_key, klinik, ursprung, notes, generated_template_id,
-                version_root_document_id, replaces_document_id, version_number, uploaded_by
+                document_direction, document_variant, document_language, access_category,
+                document_date, source_person, source_institution, addressee_person,
+                addressee_institution, financial_status, payment_due_date, payment_date,
+                payment_method, version_root_document_id, replaces_document_id,
+                version_number, uploaded_by
            ) VALUES (
                 $1, $2, $3, $4, $5, $6,
                 $7, $8, $9, $10, $11, $12, $13,
                 $14, $15, $16, $17, $18,
-                $19, $20, $21, $22
+                $19, $20, $21, $22,
+                $23, $24, $25, $26,
+                $27, $28, $29, $30,
+                $31, $32, $33, $34, $35
            )"#,
     )
     .bind(document_id)
@@ -9131,6 +9511,19 @@ pub(crate) async fn persist_document_file(
     .bind(input.ursprung)
     .bind(input.notes)
     .bind(input.generated_template_id)
+    .bind(input.document_direction)
+    .bind(input.document_variant)
+    .bind(input.document_language)
+    .bind(input.access_category)
+    .bind(input.document_date)
+    .bind(input.source_person)
+    .bind(input.source_institution)
+    .bind(input.addressee_person)
+    .bind(input.addressee_institution)
+    .bind(input.financial_status)
+    .bind(input.payment_due_date)
+    .bind(input.payment_date)
+    .bind(input.payment_method)
     .bind(input.version_root_document_id.unwrap_or(document_id))
     .bind(input.replaces_document_id)
     .bind(input.version_number)
@@ -9600,6 +9993,7 @@ async fn generate_provider_document_from_template_internal(
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| template.provider_name.clone());
+    let metadata = normalize_generate_document_metadata(body)?;
 
     let replacement = if let Some(replace_document_id) = body.replace_document_id {
         match load_replacement_document_version(
@@ -9642,6 +10036,42 @@ async fn generate_provider_document_from_template_internal(
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty()),
+        document_direction: metadata.document_direction.as_deref().or(Some(
+            infer_document_direction(
+                Some(generated_template_id.as_str()),
+                Some(ursprung.as_str()),
+            ),
+        )),
+        document_variant: metadata.document_variant.as_deref().or(Some("original")),
+        document_language: metadata
+            .document_language
+            .as_deref()
+            .or(Some(language.as_str())),
+        access_category: metadata.access_category.as_deref().or(Some(
+            infer_document_access_category(
+                Some(template.category.as_str()),
+                template.art.as_str(),
+                template.is_medical,
+                visibility,
+            ),
+        )),
+        document_date: metadata
+            .document_date
+            .or_else(|| Some(chrono::Utc::now().date_naive())),
+        source_person: metadata.source_person.as_deref(),
+        source_institution: metadata
+            .source_institution
+            .as_deref()
+            .or(Some(klinik.as_str())),
+        addressee_person: metadata
+            .addressee_person
+            .as_deref()
+            .or(Some(patient_name.as_str())),
+        addressee_institution: metadata.addressee_institution.as_deref(),
+        financial_status: metadata.financial_status.as_deref(),
+        payment_due_date: metadata.payment_due_date,
+        payment_date: metadata.payment_date,
+        payment_method: metadata.payment_method.as_deref(),
         generated_template_id: Some(generated_template_id.as_str()),
         version_root_document_id: replacement
             .as_ref()
@@ -11076,6 +11506,10 @@ async fn generate_document(
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| format!("template:{}", template.id));
+    let metadata = match normalize_generate_document_metadata(&body) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
 
     let persist_input = NewStoredDocument {
         document_id: Some(generated_document_id),
@@ -11101,6 +11535,37 @@ async fn generate_document(
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty()),
+        document_direction: metadata.document_direction.as_deref().or(Some(
+            infer_document_direction(Some(template.id), Some(ursprung.as_str())),
+        )),
+        document_variant: metadata.document_variant.as_deref().or(Some("original")),
+        document_language: metadata.document_language.as_deref().or(Some(language)),
+        access_category: metadata.access_category.as_deref().or(Some(
+            infer_document_access_category(
+                Some(template.category),
+                template.art,
+                template.is_medical,
+                visibility,
+            ),
+        )),
+        document_date: metadata
+            .document_date
+            .or_else(|| Some(chrono::Utc::now().date_naive())),
+        source_person: metadata.source_person.as_deref(),
+        source_institution: metadata.source_institution.as_deref().or(body
+            .klinik
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())),
+        addressee_person: metadata
+            .addressee_person
+            .as_deref()
+            .or(Some(patient_name.as_str())),
+        addressee_institution: metadata.addressee_institution.as_deref(),
+        financial_status: metadata.financial_status.as_deref(),
+        payment_due_date: metadata.payment_due_date,
+        payment_date: metadata.payment_date,
+        payment_method: metadata.payment_method.as_deref(),
         generated_template_id: Some(template.id),
         version_root_document_id: replacement
             .as_ref()
@@ -13410,12 +13875,34 @@ async fn list_documents(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    let document_direction = match normalize_document_direction(query.document_direction.as_deref())
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let document_variant = match normalize_document_variant(query.document_variant.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let access_category = match normalize_document_access_category(query.access_category.as_deref())
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let financial_status =
+        match normalize_document_financial_status(query.financial_status.as_deref()) {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
 
     let rows = match sqlx::query(
         r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
-                  d.generated_template_id,
+                  d.document_direction, d.document_variant, d.document_language, d.access_category,
+                  d.document_date, d.source_person, d.source_institution, d.addressee_person,
+                  d.addressee_institution, d.financial_status, d.payment_due_date, d.payment_date,
+                  d.payment_method, d.generated_template_id,
                   d.notes, d.version_root_document_id, d.replaces_document_id,
                   d.version_number, d.uploaded_by, d.created_at, d.updated_at,
                   d.file_deleted_at, d.file_deleted_by, d.file_delete_reason,
@@ -13483,6 +13970,9 @@ async fn list_documents(
                   OR de_normalize(concat_ws(' ',
                        d.auto_name, d.original_filename, d.category, d.art,
                        d.generated_template_id, d.notes, d.klinik, d.mime_type,
+                       d.document_direction, d.document_variant, d.document_language,
+                       d.access_category, d.source_person, d.source_institution,
+                       d.addressee_person, d.addressee_institution, d.financial_status,
                        p.patient_id, p.first_name, p.last_name,
                        o.order_number, a.title,
                        u.name, deleter.name
@@ -13500,6 +13990,10 @@ async fn list_documents(
              AND ($12::text IS NULL OR COALESCE(d.ursprung, '') ILIKE '%' || $12 || '%')
              AND ($14::text IS NULL OR COALESCE(o.order_number, '') ILIKE '%' || $14 || '%')
              AND ($15::text IS NULL OR COALESCE(a.title, '') ILIKE '%' || $15 || '%')
+             AND ($16::text IS NULL OR d.document_direction = $16)
+             AND ($17::text IS NULL OR d.document_variant = $17)
+             AND ($18::text IS NULL OR d.access_category = $18)
+             AND ($19::text IS NULL OR d.financial_status = $19)
            ORDER BY d.created_at DESC
            LIMIT 300"#,
     )
@@ -13518,6 +14012,10 @@ async fn list_documents(
     .bind(auth.user_id)
     .bind(order_lookup)
     .bind(appointment_lookup)
+    .bind(document_direction.as_deref())
+    .bind(document_variant.as_deref())
+    .bind(access_category.as_deref())
+    .bind(financial_status.as_deref())
     .fetch_all(&state.db)
     .await
     {
@@ -13559,7 +14057,10 @@ async fn list_document_intake_queue(
         r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
-                  d.generated_template_id,
+                  d.document_direction, d.document_variant, d.document_language, d.access_category,
+                  d.document_date, d.source_person, d.source_institution, d.addressee_person,
+                  d.addressee_institution, d.financial_status, d.payment_due_date, d.payment_date,
+                  d.payment_method, d.generated_template_id,
                   d.notes, d.version_root_document_id, d.replaces_document_id,
                   d.version_number, d.uploaded_by, d.created_at, d.updated_at,
                   d.file_deleted_at, d.file_deleted_by, d.file_delete_reason,
@@ -13828,7 +14329,10 @@ async fn list_document_versions(
         r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
-                  d.generated_template_id,
+                  d.document_direction, d.document_variant, d.document_language, d.access_category,
+                  d.document_date, d.source_person, d.source_institution, d.addressee_person,
+                  d.addressee_institution, d.financial_status, d.payment_due_date, d.payment_date,
+                  d.payment_method, d.generated_template_id,
                   d.notes, d.version_root_document_id, d.replaces_document_id,
                   d.version_number, d.uploaded_by, d.created_at, d.updated_at,
                   d.file_deleted_at, d.file_deleted_by, d.file_delete_reason,
@@ -14252,7 +14756,7 @@ async fn update_document_translation_request(
     };
 
     let request_row = match sqlx::query(
-        r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
+        r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.status, dtr.requested_language,
                   dtr.source_text, dtr.translated_text, dtr.assigned_to,
                   dtr.translated_document_id, dtr.request_source
            FROM document_translation_requests dtr
@@ -14290,44 +14794,39 @@ async fn update_document_translation_request(
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let note = body
-        .note
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let source_language = match body
-        .source_language
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        Some(value) => match normalize_translation_source_language(Some(value)) {
-            Some(language) => Some(language),
-            None => {
-                return err(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "Unknown translation source language",
-                );
-            }
-        },
-        None => None,
+    let note_update = match nullable_trimmed_text(&body.note, "Invalid translation note") {
+        Ok(value) => value,
+        Err(resp) => return resp,
     };
-    let source_text = body
-        .source_text
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let translated_text = body
-        .translated_text
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
+    let source_language_update = match nullable_translation_source_language(&body.source_language) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let source_text_update =
+        match nullable_trimmed_text(&body.source_text, "Invalid translation source text") {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+    let translated_text_update =
+        match nullable_trimmed_text(&body.translated_text, "Invalid translation translated text") {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+    let note = note_update.clone().flatten();
+    let source_language = source_language_update.clone().flatten();
+    let source_text = source_text_update.clone().flatten();
+    let translated_text = translated_text_update.clone().flatten();
     let current_translated_text = request_row
         .try_get::<Option<String>, _>("translated_text")
         .unwrap_or_default();
+    let next_translated_text = translated_text_update
+        .clone()
+        .unwrap_or_else(|| current_translated_text.clone());
+    let current_status = request_row
+        .try_get::<String, _>("status")
+        .unwrap_or_else(|_| "pending".to_string());
     if next_status == "completed"
-        && translated_text.is_none()
-        && current_translated_text
+        && next_translated_text
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
@@ -14368,7 +14867,11 @@ async fn update_document_translation_request(
                 "Invalid translation assignee",
             );
         }
-        NullableJsonField::Missing if next_status == "in_progress" => Some(Some(auth.user_id)),
+        NullableJsonField::Missing
+            if next_status == "in_progress" && current_status != "in_progress" =>
+        {
+            Some(Some(auth.user_id))
+        }
         NullableJsonField::Missing => None,
     };
     let assigned_to_provided = assigned_to_update.is_some();
@@ -14388,10 +14891,7 @@ async fn update_document_translation_request(
             match current_translated_document_id {
                 Some(id) => Some(id),
                 None => {
-                    let translated_body = translated_text
-                        .map(ToOwned::to_owned)
-                        .or_else(|| current_translated_text.clone())
-                        .unwrap_or_default();
+                    let translated_body = next_translated_text.clone().unwrap_or_default();
                     match create_translated_document_from_request(
                         &state,
                         auth.user_id,
@@ -14416,10 +14916,10 @@ async fn update_document_translation_request(
     if let Err(e) = sqlx::query(
         r#"UPDATE document_translation_requests
            SET status = $2,
-               note = COALESCE($3, note),
-               source_language = COALESCE($4, source_language),
-               source_text = COALESCE($5, source_text),
-               translated_text = COALESCE($6, translated_text),
+               note = CASE WHEN $11 THEN $3 ELSE note END,
+               source_language = CASE WHEN $12 THEN $4 ELSE source_language END,
+               source_text = CASE WHEN $13 THEN $5 ELSE source_text END,
+               translated_text = CASE WHEN $14 THEN $6 ELSE translated_text END,
                translated_document_id = COALESCE($8, translated_document_id),
                assigned_to = CASE WHEN $10 THEN $9 ELSE assigned_to END,
                assigned_at = CASE
@@ -14428,12 +14928,12 @@ async fn update_document_translation_request(
                    ELSE assigned_at
                END,
                translated_by = CASE
-                   WHEN $4 IS NOT NULL OR $5 IS NOT NULL OR $6 IS NOT NULL OR $2 = 'completed'
+                   WHEN $12 OR $13 OR $14 OR $2 = 'completed'
                        THEN $7
                    ELSE translated_by
                END,
                translated_at = CASE
-                   WHEN $4 IS NOT NULL OR $5 IS NOT NULL OR $6 IS NOT NULL OR $2 = 'completed'
+                   WHEN $12 OR $13 OR $14 OR $2 = 'completed'
                        THEN now()
                    ELSE translated_at
                END,
@@ -14450,6 +14950,10 @@ async fn update_document_translation_request(
     .bind(translated_document_id)
     .bind(assigned_to)
     .bind(assigned_to_provided)
+    .bind(note_update.is_some())
+    .bind(source_language_update.is_some())
+    .bind(source_text_update.is_some())
+    .bind(translated_text_update.is_some())
     .execute(&state.db)
     .await
     {
@@ -14625,6 +15129,24 @@ async fn create_translated_document_from_request(
         klinik: None,
         ursprung: Some("translation_request"),
         notes: Some(notes.as_str()),
+        document_direction: Some("outgoing"),
+        document_variant: Some("translation"),
+        document_language: Some(requested_language),
+        access_category: Some(infer_document_access_category(
+            Some("translation"),
+            "translated_document",
+            is_medical,
+            "internal",
+        )),
+        document_date: Some(chrono::Utc::now().date_naive()),
+        source_person: Some("translation_request"),
+        source_institution: None,
+        addressee_person: None,
+        addressee_institution: None,
+        financial_status: None,
+        payment_due_date: None,
+        payment_date: None,
+        payment_method: None,
         generated_template_id: None,
         version_root_document_id: None,
         replaces_document_id: None,
@@ -15056,6 +15578,32 @@ async fn upload_my_document(
         klinik: None,
         ursprung: Some("patient_portal"),
         notes: notes.as_deref(),
+        document_direction: Some("incoming"),
+        document_variant: Some("original"),
+        document_language: None,
+        access_category: Some(if preset.kind == "payment_proof" {
+            "financial"
+        } else {
+            infer_document_access_category(
+                Some(preset.category),
+                preset.art,
+                preset.is_medical,
+                "internal",
+            )
+        }),
+        document_date: Some(chrono::Utc::now().date_naive()),
+        source_person: Some("patient_portal"),
+        source_institution: None,
+        addressee_person: None,
+        addressee_institution: Some("GMED"),
+        financial_status: if preset.kind == "payment_proof" {
+            Some("open")
+        } else {
+            None
+        },
+        payment_due_date: None,
+        payment_date: None,
+        payment_method: None,
         generated_template_id: None,
         version_root_document_id: None,
         replaces_document_id: None,
@@ -15269,6 +15817,19 @@ async fn upload_document(
     let mut klinik: Option<String> = None;
     let mut ursprung: Option<String> = None;
     let mut notes: Option<String> = None;
+    let mut document_direction: Option<String> = None;
+    let mut document_variant: Option<String> = None;
+    let mut document_language: Option<String> = None;
+    let mut access_category: Option<String> = None;
+    let mut document_date: Option<NaiveDate> = None;
+    let mut source_person: Option<String> = None;
+    let mut source_institution: Option<String> = None;
+    let mut addressee_person: Option<String> = None;
+    let mut addressee_institution: Option<String> = None;
+    let mut financial_status: Option<String> = None;
+    let mut payment_due_date: Option<NaiveDate> = None;
+    let mut payment_date: Option<NaiveDate> = None;
+    let mut payment_method: Option<String> = None;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or_default().to_string();
@@ -15331,6 +15892,84 @@ async fn upload_document(
             "klinik" => klinik = parse_optional_text_field(field).await,
             "ursprung" => ursprung = parse_optional_text_field(field).await,
             "notes" => notes = parse_optional_text_field(field).await,
+            "document_direction" => {
+                document_direction = match normalize_document_direction(
+                    parse_optional_text_field(field).await.as_deref(),
+                ) {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                }
+            }
+            "document_variant" => {
+                document_variant = match normalize_document_variant(
+                    parse_optional_text_field(field).await.as_deref(),
+                ) {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                }
+            }
+            "document_language" => {
+                document_language = match parse_optional_text_field(field).await {
+                    Some(value) => match normalize_document_language(Some(value.as_str())) {
+                        Some(language) => Some(language.to_string()),
+                        None => {
+                            return err(
+                                StatusCode::UNPROCESSABLE_ENTITY,
+                                "Unknown document language",
+                            );
+                        }
+                    },
+                    None => None,
+                }
+            }
+            "access_category" => {
+                access_category = match normalize_document_access_category(
+                    parse_optional_text_field(field).await.as_deref(),
+                ) {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                }
+            }
+            "document_date" => {
+                document_date = match parse_optional_date_field(field).await {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                }
+            }
+            "source_person" => source_person = parse_optional_text_field(field).await,
+            "source_institution" => source_institution = parse_optional_text_field(field).await,
+            "addressee_person" => addressee_person = parse_optional_text_field(field).await,
+            "addressee_institution" => {
+                addressee_institution = parse_optional_text_field(field).await
+            }
+            "financial_status" => {
+                financial_status = match normalize_document_financial_status(
+                    parse_optional_text_field(field).await.as_deref(),
+                ) {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                }
+            }
+            "payment_due_date" => {
+                payment_due_date = match parse_optional_date_field(field).await {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                }
+            }
+            "payment_date" => {
+                payment_date = match parse_optional_date_field(field).await {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                }
+            }
+            "payment_method" => {
+                payment_method = match normalize_document_payment_method(
+                    parse_optional_text_field(field).await.as_deref(),
+                ) {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                }
+            }
             _ => {}
         }
     }
@@ -15463,6 +16102,28 @@ async fn upload_document(
         klinik: klinik.as_deref(),
         ursprung: ursprung.as_deref(),
         notes: notes.as_deref(),
+        document_direction: document_direction
+            .as_deref()
+            .or(Some(infer_document_direction(None, ursprung.as_deref()))),
+        document_variant: document_variant.as_deref().or(Some("original")),
+        document_language: document_language.as_deref(),
+        access_category: access_category
+            .as_deref()
+            .or(Some(infer_document_access_category(
+                resolved_category.as_deref(),
+                resolved_art.as_str(),
+                resolved_is_medical,
+                visibility.as_str(),
+            ))),
+        document_date: document_date.or_else(|| Some(chrono::Utc::now().date_naive())),
+        source_person: source_person.as_deref().or(ursprung.as_deref()),
+        source_institution: source_institution.as_deref().or(klinik.as_deref()),
+        addressee_person: addressee_person.as_deref(),
+        addressee_institution: addressee_institution.as_deref(),
+        financial_status: financial_status.as_deref(),
+        payment_due_date,
+        payment_date,
+        payment_method: payment_method.as_deref(),
         generated_template_id: None,
         version_root_document_id: None,
         replaces_document_id: None,
@@ -15705,6 +16366,136 @@ async fn update_document(
             .try_get::<Option<String>, _>("notes")
             .unwrap_or_default()
     });
+    let document_direction = match nullable_document_enum(
+        &body.document_direction,
+        &["incoming", "outgoing"],
+        "Invalid document direction",
+    ) {
+        Ok(Some(value)) => value,
+        Ok(None) => current
+            .try_get::<Option<String>, _>("document_direction")
+            .unwrap_or_default(),
+        Err(resp) => return resp,
+    };
+    let document_variant = match nullable_document_enum(
+        &body.document_variant,
+        &["original", "translation"],
+        "Invalid document variant",
+    ) {
+        Ok(Some(value)) => value,
+        Ok(None) => current
+            .try_get::<Option<String>, _>("document_variant")
+            .unwrap_or_default(),
+        Err(resp) => return resp,
+    };
+    let document_language = match nullable_document_language(&body.document_language) {
+        Ok(Some(value)) => value,
+        Ok(None) => current
+            .try_get::<Option<String>, _>("document_language")
+            .unwrap_or_default(),
+        Err(resp) => return resp,
+    };
+    let access_category = match nullable_document_enum(
+        &body.access_category,
+        &[
+            "internal",
+            "patient",
+            "provider",
+            "authority",
+            "financial",
+            "medical",
+            "other",
+        ],
+        "Invalid document access category",
+    ) {
+        Ok(Some(value)) => value,
+        Ok(None) => current
+            .try_get::<Option<String>, _>("access_category")
+            .unwrap_or_default(),
+        Err(resp) => return resp,
+    };
+    let document_date = match nullable_document_date(&body.document_date, "Invalid document date") {
+        Ok(Some(value)) => value,
+        Ok(None) => current
+            .try_get::<Option<NaiveDate>, _>("document_date")
+            .unwrap_or_default(),
+        Err(resp) => return resp,
+    };
+    let source_person = match nullable_trimmed_text(&body.source_person, "Invalid source person") {
+        Ok(Some(value)) => value,
+        Ok(None) => current
+            .try_get::<Option<String>, _>("source_person")
+            .unwrap_or_default(),
+        Err(resp) => return resp,
+    };
+    let source_institution =
+        match nullable_trimmed_text(&body.source_institution, "Invalid source institution") {
+            Ok(Some(value)) => value,
+            Ok(None) => current
+                .try_get::<Option<String>, _>("source_institution")
+                .unwrap_or_default(),
+            Err(resp) => return resp,
+        };
+    let addressee_person =
+        match nullable_trimmed_text(&body.addressee_person, "Invalid addressee person") {
+            Ok(Some(value)) => value,
+            Ok(None) => current
+                .try_get::<Option<String>, _>("addressee_person")
+                .unwrap_or_default(),
+            Err(resp) => return resp,
+        };
+    let addressee_institution =
+        match nullable_trimmed_text(&body.addressee_institution, "Invalid addressee institution") {
+            Ok(Some(value)) => value,
+            Ok(None) => current
+                .try_get::<Option<String>, _>("addressee_institution")
+                .unwrap_or_default(),
+            Err(resp) => return resp,
+        };
+    let financial_status = match nullable_document_enum(
+        &body.financial_status,
+        &[
+            "open",
+            "in_progress",
+            "paid",
+            "overdue",
+            "billed_to_patient",
+            "reimbursed",
+        ],
+        "Invalid document financial status",
+    ) {
+        Ok(Some(value)) => value,
+        Ok(None) => current
+            .try_get::<Option<String>, _>("financial_status")
+            .unwrap_or_default(),
+        Err(resp) => return resp,
+    };
+    let payment_due_date =
+        match nullable_document_date(&body.payment_due_date, "Invalid payment due date") {
+            Ok(Some(value)) => value,
+            Ok(None) => current
+                .try_get::<Option<NaiveDate>, _>("payment_due_date")
+                .unwrap_or_default(),
+            Err(resp) => return resp,
+        };
+    let payment_date = match nullable_document_date(&body.payment_date, "Invalid payment date") {
+        Ok(Some(value)) => value,
+        Ok(None) => current
+            .try_get::<Option<NaiveDate>, _>("payment_date")
+            .unwrap_or_default(),
+        Err(resp) => return resp,
+    };
+    let payment_method = match nullable_document_enum(
+        &body.payment_method,
+        &["cash", "bank_transfer", "card", "other"],
+        "Invalid document payment method",
+    ) {
+        Ok(Some(value)) => value,
+        Ok(None) => current
+            .try_get::<Option<String>, _>("payment_method")
+            .unwrap_or_default(),
+        Err(resp) => return resp,
+    };
 
     if auth.role == Role::TeamleadInterpreter && visibility != "internal" {
         return err(
@@ -15755,7 +16546,20 @@ async fn update_document(
                is_medical = $10,
                klinik = $11,
                ursprung = $12,
-               notes = $13
+               notes = $13,
+               document_direction = $14,
+               document_variant = $15,
+               document_language = $16,
+               access_category = $17,
+               document_date = $18,
+               source_person = $19,
+               source_institution = $20,
+               addressee_person = $21,
+               addressee_institution = $22,
+               financial_status = $23,
+               payment_due_date = $24,
+               payment_date = $25,
+               payment_method = $26
            WHERE id = $1"#,
     )
     .bind(id)
@@ -15771,6 +16575,19 @@ async fn update_document(
     .bind(klinik.as_deref())
     .bind(ursprung.as_deref())
     .bind(notes.as_deref())
+    .bind(document_direction.as_deref())
+    .bind(document_variant.as_deref())
+    .bind(document_language.as_deref())
+    .bind(access_category.as_deref())
+    .bind(document_date)
+    .bind(source_person.as_deref())
+    .bind(source_institution.as_deref())
+    .bind(addressee_person.as_deref())
+    .bind(addressee_institution.as_deref())
+    .bind(financial_status.as_deref())
+    .bind(payment_due_date)
+    .bind(payment_date)
+    .bind(payment_method.as_deref())
     .execute(&state.db)
     .await
     {

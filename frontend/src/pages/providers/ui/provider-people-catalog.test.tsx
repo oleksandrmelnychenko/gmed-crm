@@ -29,6 +29,7 @@ function contactRow(overrides: Partial<ProviderPeopleRow> = {}): ProviderPeopleR
     provider_id: "provider-1",
     provider_name: "Alois Dallmayr Fine Dining",
     provider_type: "non_medical",
+    shared_identity_id: null,
     role_code: null,
     role_label: "Operations",
     specializations: [],

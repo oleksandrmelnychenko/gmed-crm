@@ -22,6 +22,7 @@ import { useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiFetch, downloadApiFile } from "@/lib/api";
+import { useLang } from "@/lib/i18n";
 import {
   buildInterpreterLanguagesPath,
   buildInterpreterListPath,
@@ -42,6 +43,7 @@ type InterpreterRecord = {
   email: string;
   role: string;
   is_active: boolean;
+  profile_source?: "user" | "standalone";
   profile: InterpreterProfile;
   profile_updated_at: string | null;
 };
@@ -190,6 +192,383 @@ function displayValue(value: unknown, fallback = "-") {
 function displayNumber(value: unknown, suffix = "") {
   const textValue = displayValue(value, "0");
   return suffix ? `${textValue}${suffix}` : textValue;
+}
+
+type StaffPageCopy = ReturnType<typeof staffPageCopy>;
+
+function staffPageCopy(lang: "de" | "ru") {
+  if (lang === "de") {
+    return {
+      title: "Mitarbeitende",
+      subtitle: "Verträge, Compliance, Verfügbarkeit und interne Mitarbeiterdaten.",
+      newInternalEmployee: "Neue Mitarbeitende",
+      refresh: "Aktualisieren",
+      createAccountTitle: "Mitarbeiterkonto erstellen",
+      createAccountDescription:
+        "Interne Mitarbeitende können ein Benutzerkonto erhalten. Externe Auftragnehmer bleiben außerhalb der Benutzerverwaltung.",
+      createAccountInUsers: "Konto in Benutzer erstellen",
+      externalAccountBlocked: "Externe Auftragnehmer können nicht als Benutzerkonto erstellt werden.",
+      createAccount: "Konto erstellen",
+      createStaffProfile: "Profil erstellen",
+      creating: "Wird erstellt...",
+      employees: "Mitarbeitende",
+      search: "Suchen",
+      allStatuses: "Alle Status",
+      allContractTypes: "Alle Vertragsarten",
+      clearFilters: "Filter zurücksetzen",
+      noEmployees: "Keine Mitarbeitenden gefunden.",
+      save: "Speichern",
+      saving: "Speichert...",
+      coreData: "A. Kerndaten",
+      status: "Status",
+      contractType: "Vertragsart",
+      employmentKind: "Intern / extern",
+      userAccount: "Benutzerkonto",
+      existsInUsers: "Existiert in Benutzer",
+      noUserAccount: "Kein Benutzerkonto",
+      noStatus: "kein Status",
+      notSet: "Nicht gesetzt",
+      name: "Name",
+      email: "E-Mail",
+      temporaryPassword: "Temporäres Passwort",
+      role: "Rolle",
+      loadFailed: "Laden fehlgeschlagen",
+      saveFailed: "Speichern fehlgeschlagen",
+      uploadSavedNotice: "Dokument hochgeladen. Speichern Sie das Profil, um den Link zu behalten.",
+      uploadFailed: "Upload fehlgeschlagen",
+      downloadFailed: "Download fehlgeschlagen",
+      profileSaved: "Profil gespeichert",
+      internalOnlyError: "Nur interne Mitarbeitende können als Benutzerkonto erstellt werden.",
+      nameRequired: "Name ist erforderlich.",
+      nameEmailRequired: "Name und E-Mail sind für Benutzerkonten erforderlich.",
+      passwordLengthError: "Das Passwort muss mindestens 8 Zeichen enthalten.",
+      accountCreated: "Mitarbeiterkonto erstellt",
+      staffProfileCreated: "Mitarbeiterprofil erstellt",
+      createAccountFailed: "Mitarbeiterkonto konnte nicht erstellt werden",
+      createStaffProfileFailed: "Mitarbeiterprofil konnte nicht erstellt werden",
+      roles: {
+        interpreter: "Mitarbeiter",
+        teamlead_interpreter: "Teamlead Mitarbeiter",
+        external_staff: "Externe Mitarbeitende",
+        standalone_staff: "Mitarbeiterprofil",
+      },
+      statuses: {
+        active: "Aktiv",
+        vacation: "Urlaub",
+        sick: "Krank",
+        training: "Training",
+        blocked: "Gesperrt",
+        terminated: "Beendet",
+      },
+      contractTypes: {
+        employee: "Mitarbeiter",
+        freelancer: "Freelancer",
+        hourly: "Stundenbasis",
+      },
+      employmentKinds: {
+        internal: "Intern",
+        external: "Extern",
+      },
+      profile: {
+        gender: "Geschlecht",
+        birthDate: "Geburtsdatum",
+        contractDates: "Vertragsbeginn / -ende",
+        contactAvailability: "B. Kontakt und Verfügbarkeit",
+        phone: "Telefon",
+        emailSecurity: "E-Mail-Sicherheit",
+        secureEmailVerified: "Sichere E-Mail bestätigt",
+        address: "Adresse",
+        emergencyContact: "Notfallkontakt",
+        workCountries: "Einsatzländer",
+        workLocations: "Einsatzorte",
+        qualificationLanguages: "C. Qualifikation und Sprachen",
+        structuredLanguages: "Strukturierte Sprachen",
+        addLanguage: "Sprache hinzufügen",
+        loadingLanguages: "Sprachen werden geladen...",
+        languageCode: "Code",
+        languageLabel: "Bezeichnung",
+        cefr: "GER",
+        notSet: "Nicht gesetzt",
+        proficiency: "Niveau",
+        native: "Muttersprache",
+        fluent: "Fließend",
+        working: "Arbeitssicher",
+        basic: "Basis",
+        unknown: "Unbekannt",
+        specialization: "Spezialisierung",
+        remove: "Entfernen",
+        noLanguages: "Noch keine strukturierten Sprachen.",
+        certificates: "Zertifikate",
+        medicalKnowledge: "Medizinisches Wissen",
+        trainingHistory: "Schulungshistorie",
+        structuredCredentials: "Strukturierte Nachweise",
+        addCredential: "Nachweis hinzufügen",
+        type: "Typ",
+        certificate: "Zertifikat",
+        swornInterpreter: "Vereidigter Dolmetscher",
+        medicalTranslation: "Medizinische Übersetzung",
+        training: "Schulung",
+        title: "Titel",
+        issuer: "Aussteller",
+        validDates: "Gültigkeitsdaten",
+        document: "Dokument",
+        downloadDocument: "Dokument herunterladen",
+        notes: "Notizen",
+        noCredentials: "Noch keine strukturierten Nachweise.",
+        legalCompliance: "D. Rechtliches und Compliance",
+        confidentiality: "Vertraulichkeit",
+        signedAt: "Unterzeichnet am",
+        signed: "Unterzeichnet",
+        missing: "Fehlt",
+        avvWorkContract: "AVV / Arbeitsvertrag",
+        pending: "Ausstehend",
+        avvSignedAt: "AVV unterzeichnet am",
+        avvDocument: "AVV-Dokument",
+        gdprTraining: "DSGVO-Schulung",
+        workPermitValidUntil: "Arbeitserlaubnis gültig bis",
+        financeAccess: "E. Finanzen und Zugriff",
+        hourlyRate: "Stundensatz",
+        salaryClass: "Gehaltsklasse",
+        billingStatus: "Abrechnungsstatus",
+        unpaid: "Offen",
+        paid: "Bezahlt",
+        overdue: "Überfällig",
+        bankDetails: "Bankdaten",
+        taxNumber: "Steuernummer",
+        ustIdnr: "USt-IdNr.",
+        accessLevel: "Zugriffsstufe",
+        appointmentOnly: "Nur Termine",
+        medicalDataShared: "Medizinische Daten freigegeben",
+        fullAccess: "Voller Zugriff",
+        autoBlockPolicy: "Automatische Sperre",
+        immediate: "Sofort",
+        afterOneHour: "Nach einer Stunde",
+        performanceWorkload: "F. Leistung und Live-Auslastung",
+        weeklyCapacityHours: "Wochenkapazität (Stunden)",
+        bookedThisWeek: "Diese Woche gebucht",
+        capacity: "Kapazität",
+        utilization: "Auslastung",
+        averageScore: "Durchschnittsbewertung",
+        feedback: "Feedback",
+        next30Days: "Nächste 30 Tage",
+        activeTasks: "Aktive Aufgaben",
+        noActiveTasks: "Keine aktiven Aufgaben",
+        overdueTasks: "Überfällige Aufgaben",
+        loadingWorkload: "Auslastung wird geladen...",
+        assignedPatients: "Zugewiesene Patienten",
+        noAssignedPatients: "Keine zugewiesenen Patienten",
+        appointments: "Termine",
+        next: "nächster",
+        upcomingAppointments: "Kommende Termine",
+        noUpcomingAppointments: "Keine kommenden Termine",
+        due: "fällig",
+        recentReports: "Aktuelle Berichte",
+        noReports: "Keine Berichte",
+        billing: "Abrechnung",
+        billingLines: "Abrechnungspositionen",
+        noBillingLines: "Keine synchronisierten Abrechnungspositionen",
+        internalManagement: "I. Internes Management",
+        internalNotes: "Interne Notizen",
+        equipment: "Ausstattung",
+        retentionDeleteAt: "Löschdatum",
+        erasureRequestStatus: "Löschanfrage-Status",
+        loadingProfiles: "Mitarbeiterprofile werden geladen...",
+      },
+    };
+  }
+
+  return {
+    title: "Сотрудники",
+    subtitle: "Договоры, комплаенс, доступность и данные внутренних сотрудников.",
+    newInternalEmployee: "Новый сотрудник",
+    refresh: "Обновить",
+    createAccountTitle: "Создать аккаунт сотрудника",
+    createAccountDescription:
+      "Внутренним сотрудникам можно создать аккаунт пользователя. Внешние подрядчики остаются вне Users.",
+    createAccountInUsers: "Создать аккаунт в Users",
+    externalAccountBlocked: "Внешних подрядчиков нельзя создавать как аккаунты пользователей.",
+    createAccount: "Создать аккаунт",
+    createStaffProfile: "Создать профиль",
+    creating: "Создаётся...",
+    employees: "Сотрудники",
+    search: "Поиск",
+    allStatuses: "Все статусы",
+    allContractTypes: "Все типы договора",
+    clearFilters: "Сбросить фильтры",
+    noEmployees: "Сотрудники не найдены.",
+    save: "Сохранить",
+    saving: "Сохранение...",
+    coreData: "A. Основные данные",
+    status: "Статус",
+    contractType: "Тип договора",
+    employmentKind: "Внутренний / внешний",
+    userAccount: "Аккаунт пользователя",
+    existsInUsers: "Есть в Users",
+    noUserAccount: "Без аккаунта в Users",
+    noStatus: "нет статуса",
+    notSet: "Не указано",
+    name: "Имя",
+    email: "Email",
+    temporaryPassword: "Временный пароль",
+    role: "Роль",
+    loadFailed: "Не удалось загрузить",
+    saveFailed: "Не удалось сохранить",
+    uploadSavedNotice: "Документ загружен. Сохраните профиль, чтобы закрепить ссылку.",
+    uploadFailed: "Не удалось загрузить документ",
+    downloadFailed: "Не удалось скачать документ",
+    profileSaved: "Профиль сохранён",
+    internalOnlyError: "Только внутренним сотрудникам можно создать аккаунт пользователя.",
+    nameRequired: "Имя обязательно.",
+    nameEmailRequired: "Имя и email обязательны для аккаунта пользователя.",
+    passwordLengthError: "Пароль должен содержать минимум 8 символов.",
+    accountCreated: "Аккаунт сотрудника создан",
+    staffProfileCreated: "Профиль сотрудника создан",
+    createAccountFailed: "Не удалось создать аккаунт сотрудника",
+    createStaffProfileFailed: "Не удалось создать профиль сотрудника",
+    roles: {
+      interpreter: "Сотрудник",
+      teamlead_interpreter: "Тимлид сотрудников",
+      external_staff: "Внешний сотрудник",
+      standalone_staff: "Профиль сотрудника",
+    },
+    statuses: {
+      active: "Активен",
+      vacation: "Отпуск",
+      sick: "Больничный",
+      training: "Обучение",
+      blocked: "Заблокирован",
+      terminated: "Уволен",
+    },
+    contractTypes: {
+      employee: "Сотрудник",
+      freelancer: "Фрилансер",
+      hourly: "Почасовой",
+    },
+    employmentKinds: {
+      internal: "Внутренний",
+      external: "Внешний",
+    },
+    profile: {
+      gender: "Пол",
+      birthDate: "Дата рождения",
+      contractDates: "Начало / конец договора",
+      contactAvailability: "B. Контакты и доступность",
+      phone: "Телефон",
+      emailSecurity: "Безопасность email",
+      secureEmailVerified: "Защищённый email подтверждён",
+      address: "Адрес",
+      emergencyContact: "Экстренный контакт",
+      workCountries: "Страны работы",
+      workLocations: "Локации работы",
+      qualificationLanguages: "C. Квалификация и языки",
+      structuredLanguages: "Структурированные языки",
+      addLanguage: "Добавить язык",
+      loadingLanguages: "Языки загружаются...",
+      languageCode: "Код",
+      languageLabel: "Название",
+      cefr: "CEFR",
+      notSet: "Не указано",
+      proficiency: "Уровень",
+      native: "Родной",
+      fluent: "Свободно",
+      working: "Рабочий",
+      basic: "Базовый",
+      unknown: "Неизвестно",
+      specialization: "Специализация",
+      remove: "Удалить",
+      noLanguages: "Структурированные языки ещё не добавлены.",
+      certificates: "Сертификаты",
+      medicalKnowledge: "Медицинские знания",
+      trainingHistory: "История обучения",
+      structuredCredentials: "Структурированные документы",
+      addCredential: "Добавить документ",
+      type: "Тип",
+      certificate: "Сертификат",
+      swornInterpreter: "Присяжный переводчик",
+      medicalTranslation: "Медицинский перевод",
+      training: "Обучение",
+      title: "Название",
+      issuer: "Кем выдано",
+      validDates: "Даты действия",
+      document: "Документ",
+      downloadDocument: "Скачать документ",
+      notes: "Заметки",
+      noCredentials: "Структурированные документы ещё не добавлены.",
+      legalCompliance: "D. Юридические данные и комплаенс",
+      confidentiality: "Конфиденциальность",
+      signedAt: "Подписано",
+      signed: "Подписано",
+      missing: "Отсутствует",
+      avvWorkContract: "AVV / трудовой договор",
+      pending: "Ожидает",
+      avvSignedAt: "AVV подписан",
+      avvDocument: "Документ AVV",
+      gdprTraining: "Обучение GDPR",
+      workPermitValidUntil: "Разрешение на работу до",
+      financeAccess: "E. Финансы и доступ",
+      hourlyRate: "Почасовая ставка",
+      salaryClass: "Класс оплаты",
+      billingStatus: "Статус оплаты",
+      unpaid: "Не оплачено",
+      paid: "Оплачено",
+      overdue: "Просрочено",
+      bankDetails: "Банковские данные",
+      taxNumber: "Налоговый номер",
+      ustIdnr: "USt-IdNr.",
+      accessLevel: "Уровень доступа",
+      appointmentOnly: "Только приёмы",
+      medicalDataShared: "Медицинские данные доступны",
+      fullAccess: "Полный доступ",
+      autoBlockPolicy: "Автоблокировка",
+      immediate: "Сразу",
+      afterOneHour: "Через час",
+      performanceWorkload: "F. Производительность и текущая нагрузка",
+      weeklyCapacityHours: "Недельная ёмкость (часы)",
+      bookedThisWeek: "Забронировано на этой неделе",
+      capacity: "Ёмкость",
+      utilization: "Загрузка",
+      averageScore: "Средняя оценка",
+      feedback: "Отзывы",
+      next30Days: "Следующие 30 дней",
+      activeTasks: "Активные задачи",
+      noActiveTasks: "Нет активных задач",
+      overdueTasks: "Просроченные задачи",
+      loadingWorkload: "Нагрузка загружается...",
+      assignedPatients: "Привязанные пациенты",
+      noAssignedPatients: "Нет привязанных пациентов",
+      appointments: "приёмов",
+      next: "следующий",
+      upcomingAppointments: "Ближайшие приёмы",
+      noUpcomingAppointments: "Нет ближайших приёмов",
+      due: "срок",
+      recentReports: "Последние отчёты",
+      noReports: "Нет отчётов",
+      billing: "биллинг",
+      billingLines: "Строки биллинга",
+      noBillingLines: "Нет синхронизированных строк биллинга",
+      internalManagement: "I. Внутреннее управление",
+      internalNotes: "Внутренние заметки",
+      equipment: "Оборудование",
+      retentionDeleteAt: "Дата удаления",
+      erasureRequestStatus: "Статус запроса на удаление",
+      loadingProfiles: "Профили сотрудников загружаются...",
+    },
+  };
+}
+
+function staffRoleLabel(role: string, copy: StaffPageCopy) {
+  switch (role) {
+    case "teamlead_interpreter":
+      return copy.roles.teamlead_interpreter;
+    case "interpreter":
+      return copy.roles.interpreter;
+    case "external_staff":
+      return copy.roles.external_staff;
+    case "standalone_staff":
+      return copy.roles.standalone_staff;
+    default:
+      return role;
+  }
 }
 
 function compactDate(value: unknown) {
@@ -468,6 +847,9 @@ function OperationsList({
 }
 
 export function InterpretersPage() {
+  const { lang } = useLang();
+  const copy = useMemo(() => staffPageCopy(lang), [lang]);
+  const profileCopy = copy.profile;
   const { interpreterId } = useParams();
   const [items, setItems] = useState<InterpreterRecord[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -528,11 +910,11 @@ export function InterpretersPage() {
         return data[0]?.id || "";
       });
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Load failed");
+      setError(loadError instanceof Error ? loadError.message : copy.loadFailed);
     } finally {
       setLoading(false);
     }
-  }, [contractFilter, deferredSearch, interpreterId, statusFilter]);
+  }, [contractFilter, copy.loadFailed, deferredSearch, interpreterId, statusFilter]);
 
   const loadOperations = useCallback(async (id: string) => {
     setOperationsLoading(true);
@@ -542,11 +924,11 @@ export function InterpretersPage() {
       );
       setOperations(data);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Load failed");
+      setError(loadError instanceof Error ? loadError.message : copy.loadFailed);
     } finally {
       setOperationsLoading(false);
     }
-  }, []);
+  }, [copy.loadFailed]);
 
   const loadLanguages = useCallback(async (id: string) => {
     setLanguagesLoading(true);
@@ -560,12 +942,12 @@ export function InterpretersPage() {
           .map(interpreterLanguageRecordToForm),
       );
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Load failed");
+      setError(loadError instanceof Error ? loadError.message : copy.loadFailed);
       setLanguages([]);
     } finally {
       setLanguagesLoading(false);
     }
-  }, []);
+  }, [copy.loadFailed]);
 
   useEffect(() => {
     void loadItems();
@@ -663,10 +1045,10 @@ export function InterpretersPage() {
         },
       );
       onUploaded(document);
-      setNotice("Document uploaded. Save the profile to keep the link.");
+      setNotice(copy.uploadSavedNotice);
     } catch (uploadError) {
       setError(
-        uploadError instanceof Error ? uploadError.message : "Upload failed",
+        uploadError instanceof Error ? uploadError.message : copy.uploadFailed,
       );
     } finally {
       setUploadingDocumentKey("");
@@ -684,7 +1066,7 @@ export function InterpretersPage() {
       );
     } catch (downloadError) {
       setError(
-        downloadError instanceof Error ? downloadError.message : "Download failed",
+        downloadError instanceof Error ? downloadError.message : copy.downloadFailed,
       );
     }
   }
@@ -716,9 +1098,9 @@ export function InterpretersPage() {
       });
       await loadLanguages(selected.id);
       await loadOperations(selected.id);
-      setNotice("Profile saved");
+      setNotice(copy.profileSaved);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Save failed");
+      setError(saveError instanceof Error ? saveError.message : copy.saveFailed);
     } finally {
       setSaving(false);
     }
@@ -727,18 +1109,18 @@ export function InterpretersPage() {
   async function handleCreateInterpreterAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const accountDraft = normalizeInterpreterAccountDraft(createAccountForm);
-    if (!accountDraft.createUserAccount || !canCreateInterpreterUserAccount(accountDraft)) {
-      setCreateAccountError(
-        "Only internal employees can be created as user accounts.",
-      );
+    const shouldCreateUserAccount =
+      accountDraft.createUserAccount && canCreateInterpreterUserAccount(accountDraft);
+    if (!accountDraft.name.trim()) {
+      setCreateAccountError(copy.nameRequired);
       return;
     }
-    if (!accountDraft.name.trim() || !accountDraft.email.trim()) {
-      setCreateAccountError("Name and email are required.");
+    if (shouldCreateUserAccount && !accountDraft.email.trim()) {
+      setCreateAccountError(copy.nameEmailRequired);
       return;
     }
-    if (accountDraft.password.length < 8) {
-      setCreateAccountError("Password must contain at least 8 characters.");
+    if (shouldCreateUserAccount && accountDraft.password.length < 8) {
+      setCreateAccountError(copy.passwordLengthError);
       return;
     }
 
@@ -747,6 +1129,35 @@ export function InterpretersPage() {
     setError("");
     setNotice("");
     try {
+      const profile = {
+        status: accountDraft.status,
+        contractType: accountDraft.contractType || "employee",
+        employmentKind: accountDraft.employmentKind,
+        access: {
+          level: "appointment_only",
+          autoBlockPolicy: "manual",
+        },
+      };
+
+      if (!shouldCreateUserAccount) {
+        const created = await apiFetch<InterpreterRecord>("/interpreters", {
+          method: "POST",
+          body: JSON.stringify({
+            name: accountDraft.name.trim(),
+            email: accountDraft.email.trim() || null,
+            profile,
+          }),
+        });
+        setItems((current) => [
+          created,
+          ...current.filter((item) => item.id !== created.id),
+        ]);
+        setSelectedId(created.id);
+        closeCreateAccountForm();
+        setNotice(copy.staffProfileCreated);
+        return;
+      }
+
       const created = await apiFetch<CreatedInterpreterUser>("/users", {
         method: "POST",
         body: JSON.stringify({
@@ -760,15 +1171,7 @@ export function InterpretersPage() {
         `/interpreters/${created.id}/profile`,
         {
           method: "PUT",
-          body: JSON.stringify({
-            status: accountDraft.status,
-            contractType: accountDraft.contractType || "employee",
-            employmentKind: accountDraft.employmentKind,
-            access: {
-              level: "appointment_only",
-              autoBlockPolicy: "manual",
-            },
-          }),
+          body: JSON.stringify(profile),
         },
       );
       setItems((current) => [
@@ -778,6 +1181,7 @@ export function InterpretersPage() {
           email: created.email,
           role: created.role,
           is_active: created.is_active,
+          profile_source: "user",
           profile: result.profile,
           profile_updated_at: null,
         },
@@ -785,12 +1189,14 @@ export function InterpretersPage() {
       ]);
       setSelectedId(created.id);
       closeCreateAccountForm();
-      setNotice("Interpreter user account created");
+      setNotice(copy.accountCreated);
     } catch (createError) {
       setCreateAccountError(
         createError instanceof Error
           ? createError.message
-          : "Failed to create employee account",
+          : shouldCreateUserAccount
+            ? copy.createAccountFailed
+            : copy.createStaffProfileFailed,
       );
     } finally {
       setCreateAccountSaving(false);
@@ -801,32 +1207,32 @@ export function InterpretersPage() {
     <main className="min-h-[calc(100vh-3rem)] bg-background">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-5 py-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-foreground">
-              Staff Profiles
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Contract, compliance, availability and internal employee data.
-            </p>
-          </div>
+	          <div>
+	            <h1 className="text-2xl font-semibold text-foreground">
+	              {copy.title}
+	            </h1>
+	            <p className="mt-1 text-sm text-muted-foreground">
+	              {copy.subtitle}
+	            </p>
+	          </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
               variant="outline"
               onClick={() => setCreateAccountOpen(true)}
-            >
-              <Plus className="size-4" />
-              New internal employee
-            </Button>
+	            >
+	              <Plus className="size-4" />
+	              {copy.newInternalEmployee}
+	            </Button>
             <Button
               type="button"
               variant="outline"
               onClick={() => void loadItems()}
               disabled={loading}
-            >
-              <RefreshCcw className="size-4" />
-              Refresh
-            </Button>
+	            >
+	              <RefreshCcw className="size-4" />
+	              {copy.refresh}
+	            </Button>
           </div>
         </div>
 
@@ -847,15 +1253,14 @@ export function InterpretersPage() {
             className="space-y-4 rounded-lg border border-border bg-card p-4"
           >
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold text-foreground">
-                  Create employee user account
-                </h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Internal employees can receive a user account. External
-                  contractors stay outside Users.
-                </p>
-              </div>
+	              <div>
+	                <h2 className="text-sm font-semibold text-foreground">
+	                  {copy.createAccountTitle}
+	                </h2>
+	                <p className="mt-1 text-xs text-muted-foreground">
+	                  {copy.createAccountDescription}
+	                </p>
+	              </div>
               <Button
                 type="button"
                 variant="ghost"
@@ -871,7 +1276,7 @@ export function InterpretersPage() {
               </div>
             ) : null}
             <div className="grid gap-3 md:grid-cols-3">
-              <Field label="Name">
+	              <Field label={copy.name}>
                 <Input
                   className={inputClass}
                   value={createAccountForm.name}
@@ -881,7 +1286,7 @@ export function InterpretersPage() {
                   required
                 />
               </Field>
-              <Field label="Email">
+	              <Field label={copy.email}>
                 <Input
                   type="email"
                   className={inputClass}
@@ -889,35 +1294,37 @@ export function InterpretersPage() {
                   onChange={(event) =>
                     patchCreateAccountForm({ email: event.target.value })
                   }
-                  required
+                  required={createAccountForm.createUserAccount}
                 />
               </Field>
-              <Field label="Temporary password">
+	              <Field label={copy.temporaryPassword}>
                 <Input
                   type="password"
                   className={inputClass}
                   value={createAccountForm.password}
+                  disabled={!createAccountForm.createUserAccount}
                   onChange={(event) =>
                     patchCreateAccountForm({ password: event.target.value })
                   }
-                  required
+                  required={createAccountForm.createUserAccount}
                 />
               </Field>
-              <Field label="Role">
+	              <Field label={copy.role}>
                 <select
                   className={selectClass}
                   value={createAccountForm.role}
+                  disabled={!createAccountForm.createUserAccount}
                   onChange={(event) =>
                     patchCreateAccountForm({
                       role: event.target.value as CreateInterpreterAccountForm["role"],
                     })
                   }
                 >
-                  <option value="interpreter">Interpreter</option>
-                  <option value="teamlead_interpreter">Teamlead interpreter</option>
-                </select>
-              </Field>
-              <Field label="Contract type">
+	                  <option value="interpreter">{copy.roles.interpreter}</option>
+	                  <option value="teamlead_interpreter">{copy.roles.teamlead_interpreter}</option>
+	                </select>
+	              </Field>
+	              <Field label={copy.contractType}>
                 <select
                   className={selectClass}
                   value={createAccountForm.contractType}
@@ -925,12 +1332,12 @@ export function InterpretersPage() {
                     patchCreateAccountForm({ contractType: event.target.value })
                   }
                 >
-                  <option value="employee">Employee</option>
-                  <option value="freelancer">Freelancer</option>
-                  <option value="hourly">Hourly</option>
-                </select>
-              </Field>
-              <Field label="Internal / external">
+	                  <option value="employee">{copy.contractTypes.employee}</option>
+	                  <option value="freelancer">{copy.contractTypes.freelancer}</option>
+	                  <option value="hourly">{copy.contractTypes.hourly}</option>
+	                </select>
+	              </Field>
+	              <Field label={copy.employmentKind}>
                 <select
                   className={selectClass}
                   value={createAccountForm.employmentKind}
@@ -940,10 +1347,10 @@ export function InterpretersPage() {
                     })
                   }
                 >
-                  <option value="internal">Internal</option>
-                  <option value="external">External</option>
-                </select>
-              </Field>
+	                  <option value="internal">{copy.employmentKinds.internal}</option>
+	                  <option value="external">{copy.employmentKinds.external}</option>
+	                </select>
+	              </Field>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
               <label className="flex items-center gap-2 text-sm text-foreground">
@@ -957,34 +1364,34 @@ export function InterpretersPage() {
                     })
                   }
                 />
-                Create account in Users
-              </label>
-              {!createUserAccountAllowed ? (
-                <p className="text-xs text-amber-700">
-                  External contractors cannot be created as user accounts.
-                </p>
-              ) : null}
+	                {copy.createAccountInUsers}
+	              </label>
+	              {!createUserAccountAllowed ? (
+	                <p className="text-xs text-amber-700">
+	                  {copy.externalAccountBlocked}
+	                </p>
+	              ) : null}
               <Button
                 type="submit"
-                disabled={
-                  createAccountSaving ||
-                  !createAccountForm.createUserAccount ||
-                  !createUserAccountAllowed
-                }
-              >
-                <Plus className="size-4" />
-                {createAccountSaving ? "Creating..." : "Create account"}
-              </Button>
+                disabled={createAccountSaving}
+	              >
+	                <Plus className="size-4" />
+	                {createAccountSaving
+                    ? copy.creating
+                    : createAccountForm.createUserAccount
+                      ? copy.createAccount
+                      : copy.createStaffProfile}
+	              </Button>
             </div>
           </form>
         ) : null}
 
         <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-          <aside className="space-y-3">
-            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <UsersRound className="size-4 text-primary" />
-              Employees
-            </div>
+	          <aside className="space-y-3">
+	            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+	              <UsersRound className="size-4 text-primary" />
+	              {copy.employees}
+	            </div>
             <div className="space-y-2 rounded-lg border border-border bg-card p-3">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -992,32 +1399,32 @@ export function InterpretersPage() {
                   className={`${inputClass} w-full pl-8`}
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search"
-                />
-              </div>
+	                  placeholder={copy.search}
+	                />
+	              </div>
               <select
                 className={selectClass}
                 value={statusFilter}
                 onChange={(event) => setStatusFilter(event.target.value)}
               >
-                <option value="">All statuses</option>
-                <option value="active">Active</option>
-                <option value="vacation">Vacation</option>
-                <option value="sick">Sick</option>
-                <option value="training">Training</option>
-                <option value="blocked">Blocked</option>
-                <option value="terminated">Terminated</option>
-              </select>
+	                <option value="">{copy.allStatuses}</option>
+	                <option value="active">{copy.statuses.active}</option>
+	                <option value="vacation">{copy.statuses.vacation}</option>
+	                <option value="sick">{copy.statuses.sick}</option>
+	                <option value="training">{copy.statuses.training}</option>
+	                <option value="blocked">{copy.statuses.blocked}</option>
+	                <option value="terminated">{copy.statuses.terminated}</option>
+	              </select>
               <select
                 className={selectClass}
                 value={contractFilter}
                 onChange={(event) => setContractFilter(event.target.value)}
               >
-                <option value="">All contract types</option>
-                <option value="employee">Employee</option>
-                <option value="freelancer">Freelancer</option>
-                <option value="hourly">Hourly</option>
-              </select>
+	                <option value="">{copy.allContractTypes}</option>
+	                <option value="employee">{copy.contractTypes.employee}</option>
+	                <option value="freelancer">{copy.contractTypes.freelancer}</option>
+	                <option value="hourly">{copy.contractTypes.hourly}</option>
+	              </select>
               {filtersActive ? (
                 <Button
                   type="button"
@@ -1029,9 +1436,9 @@ export function InterpretersPage() {
                     setContractFilter("");
                   }}
                 >
-                  <X className="size-3.5" />
-                  Clear filters
-                </Button>
+	                  <X className="size-3.5" />
+	                  {copy.clearFilters}
+	                </Button>
               ) : null}
             </div>
             <div className="space-y-2">
@@ -1050,14 +1457,15 @@ export function InterpretersPage() {
                     {item.name}
                   </span>
                   <span className="mt-1 block text-xs text-muted-foreground">
-                    {item.role} · {text(item.profile.status) || "no status"}
-                  </span>
+	                    {staffRoleLabel(item.role, copy)} ·{" "}
+	                    {text(item.profile.status) || copy.noStatus}
+	                  </span>
                 </button>
               ))}
               {!loading && items.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
-                  No employees found.
-                </div>
+	                  {copy.noEmployees}
+	                </div>
               ) : null}
             </div>
           </aside>
@@ -1079,29 +1487,29 @@ export function InterpretersPage() {
                     {selected.email} · {selected.id}
                   </p>
                 </div>
-                <Button type="submit" disabled={saving}>
-                  <Save className="size-4" />
-                  {saving ? "Saving..." : "Save"}
-                </Button>
-              </div>
+	                <Button type="submit" disabled={saving}>
+	                  <Save className="size-4" />
+	                  {saving ? copy.saving : copy.save}
+	                </Button>
+	              </div>
 
-              <Section title="A. Core data">
-                <div className="grid gap-3 md:grid-cols-3">
-                  <Field label="Status">
+	              <Section title={copy.coreData}>
+	                <div className="grid gap-3 md:grid-cols-3">
+	                  <Field label={copy.status}>
                     <select
                       className={selectClass}
                       value={form.status}
                       onChange={(event) => patchForm({ status: event.target.value })}
                     >
-                      <option value="active">Active</option>
-                      <option value="vacation">Vacation</option>
-                      <option value="sick">Sick</option>
-                      <option value="training">Training</option>
-                      <option value="blocked">Blocked</option>
-                      <option value="terminated">Terminated</option>
-                    </select>
-                  </Field>
-                  <Field label="Contract type">
+	                      <option value="active">{copy.statuses.active}</option>
+	                      <option value="vacation">{copy.statuses.vacation}</option>
+	                      <option value="sick">{copy.statuses.sick}</option>
+	                      <option value="training">{copy.statuses.training}</option>
+	                      <option value="blocked">{copy.statuses.blocked}</option>
+	                      <option value="terminated">{copy.statuses.terminated}</option>
+	                    </select>
+	                  </Field>
+	                  <Field label={copy.contractType}>
                     <select
                       className={selectClass}
                       value={form.contractType}
@@ -1109,13 +1517,13 @@ export function InterpretersPage() {
                         patchForm({ contractType: event.target.value })
                       }
                     >
-                      <option value="">Not set</option>
-                      <option value="employee">Employee</option>
-                      <option value="freelancer">Freelancer</option>
-                      <option value="hourly">Hourly</option>
-                    </select>
-                  </Field>
-                  <Field label="Internal / external">
+	                      <option value="">{copy.notSet}</option>
+	                      <option value="employee">{copy.contractTypes.employee}</option>
+	                      <option value="freelancer">{copy.contractTypes.freelancer}</option>
+	                      <option value="hourly">{copy.contractTypes.hourly}</option>
+	                    </select>
+	                  </Field>
+	                  <Field label={copy.employmentKind}>
                     <select
                       className={selectClass}
                       value={form.employmentKind}
@@ -1123,33 +1531,42 @@ export function InterpretersPage() {
                         patchForm({ employmentKind: event.target.value })
                       }
                     >
-                      <option value="">Not set</option>
-                      <option value="internal">Internal</option>
-                      <option value="external">External</option>
-                    </select>
-                  </Field>
-                  <Field label="User account">
+	                      <option value="">{copy.notSet}</option>
+	                      <option value="internal">{copy.employmentKinds.internal}</option>
+	                      <option value="external">{copy.employmentKinds.external}</option>
+	                    </select>
+	                  </Field>
+	                  <Field label={copy.userAccount}>
                     <div className="flex min-h-9 flex-col justify-center gap-1 rounded-lg border border-border bg-muted/30 px-3 py-2">
                       <label className="flex items-center gap-2 text-sm text-foreground">
-                        <input type="checkbox" checked readOnly disabled />
-                        Exists in Users
-                      </label>
-                      {form.employmentKind === "external" ? (
-                        <span className="text-xs text-amber-700">
-                          External contractors should not receive new user
-                          accounts.
-                        </span>
-                      ) : null}
+                        <input
+                          type="checkbox"
+                          checked={selected.profile_source !== "standalone"}
+                          readOnly
+                          disabled
+                        />
+	                        {selected.profile_source !== "standalone"
+                          ? copy.existsInUsers
+                          : form.employmentKind === "external"
+                            ? copy.externalAccountBlocked
+                            : copy.noUserAccount}
+	                      </label>
+	                      {form.employmentKind === "external" &&
+                        selected.profile_source !== "standalone" ? (
+	                        <span className="text-xs text-amber-700">
+	                          {copy.externalAccountBlocked}
+	                        </span>
+	                      ) : null}
                     </div>
                   </Field>
-                  <Field label="Gender">
+                  <Field label={profileCopy.gender}>
                     <Input
                       className={inputClass}
                       value={form.gender}
                       onChange={(event) => patchForm({ gender: event.target.value })}
                     />
                   </Field>
-                  <Field label="Birth date">
+                  <Field label={profileCopy.birthDate}>
                     <Input
                       type="date"
                       className={inputClass}
@@ -1159,7 +1576,7 @@ export function InterpretersPage() {
                       }
                     />
                   </Field>
-                  <Field label="Contract start / end">
+                  <Field label={profileCopy.contractDates}>
                     <div className="grid grid-cols-2 gap-2">
                       <Input
                         type="date"
@@ -1182,16 +1599,16 @@ export function InterpretersPage() {
                 </div>
               </Section>
 
-              <Section title="B. Contact and availability">
+              <Section title={profileCopy.contactAvailability}>
                 <div className="grid gap-3 md:grid-cols-2">
-                  <Field label="Phone">
+                  <Field label={profileCopy.phone}>
                     <Input
                       className={inputClass}
                       value={form.phone}
                       onChange={(event) => patchForm({ phone: event.target.value })}
                     />
                   </Field>
-                  <Field label="Email security">
+                  <Field label={profileCopy.emailSecurity}>
                     <label className="flex h-9 items-center gap-2 text-sm">
                       <input
                         type="checkbox"
@@ -1200,17 +1617,17 @@ export function InterpretersPage() {
                           patchForm({ emailSecure: event.target.checked })
                         }
                       />
-                      Secure email verified
+                      {profileCopy.secureEmailVerified}
                     </label>
                   </Field>
-                  <Field label="Address">
+                  <Field label={profileCopy.address}>
                     <Input
                       className={inputClass}
                       value={form.address}
                       onChange={(event) => patchForm({ address: event.target.value })}
                     />
                   </Field>
-                  <Field label="Emergency contact">
+                  <Field label={profileCopy.emergencyContact}>
                     <Input
                       className={inputClass}
                       value={form.emergencyContact}
@@ -1219,7 +1636,7 @@ export function InterpretersPage() {
                       }
                     />
                   </Field>
-                  <Field label="Work countries">
+                  <Field label={profileCopy.workCountries}>
                     <Input
                       className={inputClass}
                       value={form.workCountries}
@@ -1228,7 +1645,7 @@ export function InterpretersPage() {
                       }
                     />
                   </Field>
-                  <Field label="Work locations">
+                  <Field label={profileCopy.workLocations}>
                     <Input
                       className={inputClass}
                       value={form.workLocations}
@@ -1240,11 +1657,11 @@ export function InterpretersPage() {
                 </div>
               </Section>
 
-              <Section title="C. Qualification and languages">
+              <Section title={profileCopy.qualificationLanguages}>
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Structured languages
+                      {profileCopy.structuredLanguages}
                     </h3>
                     <Button
                       type="button"
@@ -1253,12 +1670,12 @@ export function InterpretersPage() {
                       onClick={addLanguage}
                     >
                       <Plus className="size-3.5" />
-                      Add language
+                      {profileCopy.addLanguage}
                     </Button>
                   </div>
                   {languagesLoading ? (
                     <p className="border-t border-border pt-3 text-xs text-muted-foreground">
-                      Loading languages...
+                      {profileCopy.loadingLanguages}
                     </p>
                   ) : languages.length > 0 ? (
                     languages.map((language, index) => (
@@ -1266,7 +1683,7 @@ export function InterpretersPage() {
                         key={index}
                         className="grid gap-3 border-t border-border pt-3 md:grid-cols-2 xl:grid-cols-[minmax(80px,0.7fr)_minmax(0,1.1fr)_minmax(90px,0.7fr)_minmax(120px,0.9fr)_minmax(0,1.2fr)_auto]"
                       >
-                        <Field label="Code">
+                        <Field label={profileCopy.languageCode}>
                           <Input
                             className={inputClass}
                             value={language.languageCode}
@@ -1277,7 +1694,7 @@ export function InterpretersPage() {
                             }
                           />
                         </Field>
-                        <Field label="Label">
+                        <Field label={profileCopy.languageLabel}>
                           <Input
                             className={inputClass}
                             value={language.languageLabel}
@@ -1288,7 +1705,7 @@ export function InterpretersPage() {
                             }
                           />
                         </Field>
-                        <Field label="CEFR">
+                        <Field label={profileCopy.cefr}>
                           <select
                             className={selectClass}
                             value={language.cefrLevel}
@@ -1298,7 +1715,7 @@ export function InterpretersPage() {
                               })
                             }
                           >
-                            <option value="">Not set</option>
+                            <option value="">{profileCopy.notSet}</option>
                             <option value="A1">A1</option>
                             <option value="A2">A2</option>
                             <option value="B1">B1</option>
@@ -1307,7 +1724,7 @@ export function InterpretersPage() {
                             <option value="C2">C2</option>
                           </select>
                         </Field>
-                        <Field label="Proficiency">
+                        <Field label={profileCopy.proficiency}>
                           <select
                             className={selectClass}
                             value={language.proficiency}
@@ -1317,14 +1734,14 @@ export function InterpretersPage() {
                               })
                             }
                           >
-                            <option value="native">Native</option>
-                            <option value="fluent">Fluent</option>
-                            <option value="working">Working</option>
-                            <option value="basic">Basic</option>
-                            <option value="unknown">Unknown</option>
+                            <option value="native">{profileCopy.native}</option>
+                            <option value="fluent">{profileCopy.fluent}</option>
+                            <option value="working">{profileCopy.working}</option>
+                            <option value="basic">{profileCopy.basic}</option>
+                            <option value="unknown">{profileCopy.unknown}</option>
                           </select>
                         </Field>
-                        <Field label="Specialization">
+                        <Field label={profileCopy.specialization}>
                           <Input
                             className={inputClass}
                             value={language.specialization}
@@ -1343,20 +1760,20 @@ export function InterpretersPage() {
                             onClick={() => removeLanguage(index)}
                           >
                             <Trash2 className="size-3.5" />
-                            Remove
+                            {profileCopy.remove}
                           </Button>
                         </div>
                       </div>
                     ))
                   ) : (
                     <p className="border-t border-border pt-3 text-xs text-muted-foreground">
-                      No structured languages yet.
+                      {profileCopy.noLanguages}
                     </p>
                   )}
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">
-                  <Field label="Certificates">
+                  <Field label={profileCopy.certificates}>
                     <textarea
                       className={textareaClass}
                       value={form.certificates}
@@ -1365,7 +1782,7 @@ export function InterpretersPage() {
                       }
                     />
                   </Field>
-                  <Field label="Medical knowledge">
+                  <Field label={profileCopy.medicalKnowledge}>
                     <Input
                       className={inputClass}
                       value={form.medicalKnowledge}
@@ -1374,7 +1791,7 @@ export function InterpretersPage() {
                       }
                     />
                   </Field>
-                  <Field label="Training history">
+                  <Field label={profileCopy.trainingHistory}>
                     <Input
                       className={inputClass}
                       value={form.trainingHistory}
@@ -1388,7 +1805,7 @@ export function InterpretersPage() {
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Structured credentials
+                      {profileCopy.structuredCredentials}
                     </h3>
                     <Button
                       type="button"
@@ -1397,7 +1814,7 @@ export function InterpretersPage() {
                       onClick={addCredential}
                     >
                       <Plus className="size-3.5" />
-                      Add credential
+                      {profileCopy.addCredential}
                     </Button>
                   </div>
                   {form.credentials.length > 0 ? (
@@ -1406,7 +1823,7 @@ export function InterpretersPage() {
                         key={index}
                         className="grid gap-3 border-t border-border pt-3 md:grid-cols-4"
                       >
-                        <Field label="Type">
+                        <Field label={profileCopy.type}>
                           <select
                             className={selectClass}
                             value={credential.credentialType}
@@ -1416,17 +1833,17 @@ export function InterpretersPage() {
                               })
                             }
                           >
-                            <option value="certificate">Certificate</option>
+                            <option value="certificate">{profileCopy.certificate}</option>
                             <option value="sworn_interpreter">
-                              Sworn interpreter
+                              {profileCopy.swornInterpreter}
                             </option>
                             <option value="medical_translation">
-                              Medical translation
+                              {profileCopy.medicalTranslation}
                             </option>
-                            <option value="training">Training</option>
+                            <option value="training">{profileCopy.training}</option>
                           </select>
                         </Field>
-                        <Field label="Title">
+                        <Field label={profileCopy.title}>
                           <Input
                             className={inputClass}
                             value={credential.title}
@@ -1437,7 +1854,7 @@ export function InterpretersPage() {
                             }
                           />
                         </Field>
-                        <Field label="Issuer">
+                        <Field label={profileCopy.issuer}>
                           <Input
                             className={inputClass}
                             value={credential.issuer}
@@ -1448,7 +1865,7 @@ export function InterpretersPage() {
                             }
                           />
                         </Field>
-                        <Field label="Valid dates">
+                        <Field label={profileCopy.validDates}>
                           <div className="grid grid-cols-2 gap-2">
                             <Input
                               type="date"
@@ -1472,7 +1889,7 @@ export function InterpretersPage() {
                             />
                           </div>
                         </Field>
-                        <Field label="Document">
+                        <Field label={profileCopy.document}>
                           <div className="grid gap-2">
                             {credential.documentId ? (
                               <Button
@@ -1486,7 +1903,7 @@ export function InterpretersPage() {
                                   )
                                 }
                               >
-                                {credential.documentName || "Download document"}
+                                {credential.documentName || profileCopy.downloadDocument}
                               </Button>
                             ) : null}
                             <Input
@@ -1512,7 +1929,7 @@ export function InterpretersPage() {
                             />
                           </div>
                         </Field>
-                        <Field label="Notes">
+                        <Field label={profileCopy.notes}>
                           <Input
                             className={inputClass}
                             value={credential.notes}
@@ -1531,22 +1948,22 @@ export function InterpretersPage() {
                             onClick={() => removeCredential(index)}
                           >
                             <Trash2 className="size-3.5" />
-                            Remove
+                            {profileCopy.remove}
                           </Button>
                         </div>
                       </div>
                     ))
                   ) : (
                     <p className="border-t border-border pt-3 text-xs text-muted-foreground">
-                      No structured credentials yet.
+                      {profileCopy.noCredentials}
                     </p>
                   )}
                 </div>
               </Section>
 
-              <Section title="D. Legal and compliance">
+              <Section title={profileCopy.legalCompliance}>
                 <div className="grid gap-3 md:grid-cols-3">
-                  <Field label="Confidentiality">
+                  <Field label={profileCopy.confidentiality}>
                     <select
                       className={selectClass}
                       value={form.confidentialityStatus}
@@ -1554,12 +1971,12 @@ export function InterpretersPage() {
                         patchForm({ confidentialityStatus: event.target.value })
                       }
                     >
-                      <option value="">Not set</option>
-                      <option value="signed">Signed</option>
-                      <option value="missing">Missing</option>
+                      <option value="">{profileCopy.notSet}</option>
+                      <option value="signed">{profileCopy.signed}</option>
+                      <option value="missing">{profileCopy.missing}</option>
                     </select>
                   </Field>
-                  <Field label="Signed at">
+                  <Field label={profileCopy.signedAt}>
                     <Input
                       type="date"
                       className={inputClass}
@@ -1569,7 +1986,7 @@ export function InterpretersPage() {
                       }
                     />
                   </Field>
-                  <Field label="Document">
+                  <Field label={profileCopy.document}>
                     <div className="grid gap-2">
                       {form.confidentialityDocumentId ? (
                         <Button
@@ -1585,7 +2002,7 @@ export function InterpretersPage() {
                           }
                         >
                           {form.confidentialityDocumentName ||
-                            "Download document"}
+                            profileCopy.downloadDocument}
                         </Button>
                       ) : null}
                       <Input
@@ -1612,7 +2029,7 @@ export function InterpretersPage() {
                       />
                     </div>
                   </Field>
-                  <Field label="AVV / work contract">
+                  <Field label={profileCopy.avvWorkContract}>
                     <select
                       className={selectClass}
                       value={form.avvStatus}
@@ -1620,12 +2037,12 @@ export function InterpretersPage() {
                         patchForm({ avvStatus: event.target.value })
                       }
                     >
-                      <option value="">Not set</option>
-                      <option value="signed">Signed</option>
-                      <option value="pending">Pending</option>
+                      <option value="">{profileCopy.notSet}</option>
+                      <option value="signed">{profileCopy.signed}</option>
+                      <option value="pending">{profileCopy.pending}</option>
                     </select>
                   </Field>
-                  <Field label="AVV signed at">
+                  <Field label={profileCopy.avvSignedAt}>
                     <Input
                       type="date"
                       className={inputClass}
@@ -1635,7 +2052,7 @@ export function InterpretersPage() {
                       }
                     />
                   </Field>
-                  <Field label="AVV document">
+                  <Field label={profileCopy.avvDocument}>
                     <div className="grid gap-2">
                       {form.avvDocumentId ? (
                         <Button
@@ -1649,7 +2066,7 @@ export function InterpretersPage() {
                             )
                           }
                         >
-                          {form.avvDocumentName || "Download document"}
+                          {form.avvDocumentName || profileCopy.downloadDocument}
                         </Button>
                       ) : null}
                       <Input
@@ -1673,7 +2090,7 @@ export function InterpretersPage() {
                       />
                     </div>
                   </Field>
-                  <Field label="GDPR training">
+                  <Field label={profileCopy.gdprTraining}>
                     <Input
                       type="date"
                       className={inputClass}
@@ -1683,7 +2100,7 @@ export function InterpretersPage() {
                       }
                     />
                   </Field>
-                  <Field label="Work permit valid until">
+                  <Field label={profileCopy.workPermitValidUntil}>
                     <Input
                       type="date"
                       className={inputClass}
@@ -1696,9 +2113,9 @@ export function InterpretersPage() {
                 </div>
               </Section>
 
-              <Section title="E. Finance and access">
+              <Section title={profileCopy.financeAccess}>
                 <div className="grid gap-3 md:grid-cols-3">
-                  <Field label="Hourly rate">
+                  <Field label={profileCopy.hourlyRate}>
                     <Input
                       type="number"
                       className={inputClass}
@@ -1708,7 +2125,7 @@ export function InterpretersPage() {
                       }
                     />
                   </Field>
-                  <Field label="Salary class">
+                  <Field label={profileCopy.salaryClass}>
                     <Input
                       className={inputClass}
                       value={form.salaryClass}
@@ -1717,7 +2134,7 @@ export function InterpretersPage() {
                       }
                     />
                   </Field>
-                  <Field label="Billing status">
+                  <Field label={profileCopy.billingStatus}>
                     <select
                       className={selectClass}
                       value={form.billingStatus}
@@ -1725,13 +2142,13 @@ export function InterpretersPage() {
                         patchForm({ billingStatus: event.target.value })
                       }
                     >
-                      <option value="">Not set</option>
-                      <option value="unpaid">Unpaid</option>
-                      <option value="paid">Paid</option>
-                      <option value="overdue">Overdue</option>
+                      <option value="">{profileCopy.notSet}</option>
+                      <option value="unpaid">{profileCopy.unpaid}</option>
+                      <option value="paid">{profileCopy.paid}</option>
+                      <option value="overdue">{profileCopy.overdue}</option>
                     </select>
                   </Field>
-                  <Field label="Bank details">
+                  <Field label={profileCopy.bankDetails}>
                     <Input
                       className={inputClass}
                       value={form.bankDetails}
@@ -1740,7 +2157,7 @@ export function InterpretersPage() {
                       }
                     />
                   </Field>
-                  <Field label="Tax number">
+                  <Field label={profileCopy.taxNumber}>
                     <Input
                       className={inputClass}
                       value={form.taxNumber}
@@ -1749,14 +2166,14 @@ export function InterpretersPage() {
                       }
                     />
                   </Field>
-                  <Field label="USt-IdNr.">
+                  <Field label={profileCopy.ustIdnr}>
                     <Input
                       className={inputClass}
                       value={form.ustIdnr}
                       onChange={(event) => patchForm({ ustIdnr: event.target.value })}
                     />
                   </Field>
-                  <Field label="Access level">
+                  <Field label={profileCopy.accessLevel}>
                     <select
                       className={selectClass}
                       value={form.accessLevel}
@@ -1764,13 +2181,13 @@ export function InterpretersPage() {
                         patchForm({ accessLevel: event.target.value })
                       }
                     >
-                      <option value="">Not set</option>
-                      <option value="appointment_only">Appointment only</option>
-                      <option value="medical_shared">Medical data shared</option>
-                      <option value="full">Full access</option>
+                      <option value="">{profileCopy.notSet}</option>
+                      <option value="appointment_only">{profileCopy.appointmentOnly}</option>
+                      <option value="medical_shared">{profileCopy.medicalDataShared}</option>
+                      <option value="full">{profileCopy.fullAccess}</option>
                     </select>
                   </Field>
-                  <Field label="Auto block policy">
+                  <Field label={profileCopy.autoBlockPolicy}>
                     <select
                       className={selectClass}
                       value={form.autoBlockPolicy}
@@ -1778,17 +2195,17 @@ export function InterpretersPage() {
                         patchForm({ autoBlockPolicy: event.target.value })
                       }
                     >
-                      <option value="">Not set</option>
-                      <option value="immediate">Immediate</option>
-                      <option value="after_one_hour">After one hour</option>
+                      <option value="">{profileCopy.notSet}</option>
+                      <option value="immediate">{profileCopy.immediate}</option>
+                      <option value="after_one_hour">{profileCopy.afterOneHour}</option>
                     </select>
                   </Field>
                 </div>
               </Section>
 
-              <Section title="F. Performance and live workload">
+              <Section title={profileCopy.performanceWorkload}>
                 <div className="grid gap-3 md:grid-cols-4">
-                  <Field label="Weekly capacity hours">
+                  <Field label={profileCopy.weeklyCapacityHours}>
                     <Input
                       type="number"
                       className={inputClass}
@@ -1799,62 +2216,62 @@ export function InterpretersPage() {
                     />
                   </Field>
                   <Metric
-                    label="Booked this week"
+                    label={profileCopy.bookedThisWeek}
                     value={displayNumber(
                       operations?.summary.booked_hours_week,
                       " h",
                     )}
                   />
                   <Metric
-                    label="Capacity"
+                    label={profileCopy.capacity}
                     value={displayNumber(
                       operations?.summary.capacity_hours_week,
                       " h",
                     )}
                   />
                   <Metric
-                    label="Utilization"
+                    label={profileCopy.utilization}
                     value={displayNumber(
                       operations?.summary.utilization_percent,
                       "%",
                     )}
                   />
                   <Metric
-                    label="Average score"
+                    label={profileCopy.averageScore}
                     value={`${displayNumber(
                       operations?.summary.average_feedback_score,
                     )}/5`}
                   />
                   <Metric
-                    label="Feedback"
+                    label={profileCopy.feedback}
                     value={displayNumber(operations?.summary.feedback_count)}
                   />
                   <Metric
-                    label="Next 30 days"
+                    label={profileCopy.next30Days}
                     value={displayNumber(
                       operations?.summary.appointments_next_30_days,
                     )}
                   />
                   <Metric
-                    label="Active tasks"
+                    label={profileCopy.activeTasks}
                     value={displayNumber(operations?.summary.active_tasks)}
                   />
                   <Metric
-                    label="Overdue tasks"
+                    label={profileCopy.overdueTasks}
                     value={displayNumber(operations?.summary.overdue_tasks)}
                   />
                 </div>
 
                 {operationsLoading ? (
                   <div className="rounded-lg border border-border bg-background px-4 py-3 text-sm text-muted-foreground">
-                    Loading workload...
+                    {profileCopy.loadingWorkload}
                   </div>
                 ) : operations ? (
                   <div className="grid gap-3 xl:grid-cols-2">
                     <OperationsList
-                      title="Assigned patients"
+                      title={profileCopy.assignedPatients}
                       items={operations.patients}
-                      empty="No assigned patients"
+                      empty={profileCopy.noAssignedPatients}
                       renderItem={(item) => (
                         <div>
                           <span className="font-medium">
@@ -1862,16 +2279,16 @@ export function InterpretersPage() {
                             {displayValue(item.patient_name)}
                           </span>
                           <span className="mt-1 block text-muted-foreground">
-                            {displayValue(item.appointment_count)} appointments ·
-                            next {compactDate(item.next_appointment_date)}
+                            {displayValue(item.appointment_count)} {profileCopy.appointments} ·
+                            {profileCopy.next} {compactDate(item.next_appointment_date)}
                           </span>
                         </div>
                       )}
                     />
                     <OperationsList
-                      title="Upcoming appointments"
+                      title={profileCopy.upcomingAppointments}
                       items={operations.upcoming_appointments}
-                      empty="No upcoming appointments"
+                      empty={profileCopy.noUpcomingAppointments}
                       renderItem={(item) => (
                         <div>
                           <span className="font-medium">
@@ -1887,9 +2304,9 @@ export function InterpretersPage() {
                       )}
                     />
                     <OperationsList
-                      title="Active tasks"
+                      title={profileCopy.activeTasks}
                       items={operations.active_tasks}
-                      empty="No active tasks"
+                      empty={profileCopy.noActiveTasks}
                       renderItem={(item) => (
                         <div>
                           <span className="font-medium">
@@ -1897,16 +2314,16 @@ export function InterpretersPage() {
                             {displayValue(item.title)}
                           </span>
                           <span className="mt-1 block text-muted-foreground">
-                            due {compactDate(item.due_date)} ·{" "}
+                            {profileCopy.due} {compactDate(item.due_date)} ·{" "}
                             {displayValue(item.order_number)}
                           </span>
                         </div>
                       )}
                     />
                     <OperationsList
-                      title="Recent reports"
+                      title={profileCopy.recentReports}
                       items={operations.recent_reports}
-                      empty="No reports"
+                      empty={profileCopy.noReports}
                       renderItem={(item) => (
                         <div>
                           <span className="font-medium">
@@ -1915,16 +2332,16 @@ export function InterpretersPage() {
                           </span>
                           <span className="mt-1 block text-muted-foreground">
                             {compactDate(item.appointment_date)} ·{" "}
-                            {displayValue(item.patient_code)} · billing{" "}
+                            {displayValue(item.patient_code)} · {profileCopy.billing}{" "}
                             {displayValue(item.billing_status)}
                           </span>
                         </div>
                       )}
                     />
                     <OperationsList
-                      title="Billing lines"
+                      title={profileCopy.billingLines}
                       items={operations.billing_lines}
-                      empty="No synced billing lines"
+                      empty={profileCopy.noBillingLines}
                       renderItem={(item) => (
                         <div>
                           <span className="font-medium">
@@ -1943,9 +2360,9 @@ export function InterpretersPage() {
                 ) : null}
               </Section>
 
-              <Section title="I. Internal management">
+              <Section title={profileCopy.internalManagement}>
                 <div className="grid gap-3 md:grid-cols-2">
-                  <Field label="Internal notes">
+                  <Field label={profileCopy.internalNotes}>
                     <textarea
                       className={textareaClass}
                       value={form.internalNotes}
@@ -1954,14 +2371,14 @@ export function InterpretersPage() {
                       }
                     />
                   </Field>
-                  <Field label="Equipment">
+                  <Field label={profileCopy.equipment}>
                     <Input
                       className={inputClass}
                       value={form.equipment}
                       onChange={(event) => patchForm({ equipment: event.target.value })}
                     />
                   </Field>
-                  <Field label="Retention delete at">
+                  <Field label={profileCopy.retentionDeleteAt}>
                     <Input
                       type="date"
                       className={inputClass}
@@ -1971,7 +2388,7 @@ export function InterpretersPage() {
                       }
                     />
                   </Field>
-                  <Field label="Erasure request status">
+                  <Field label={profileCopy.erasureRequestStatus}>
                     <Input
                       className={inputClass}
                       value={form.erasureRequestStatus}
@@ -1985,7 +2402,7 @@ export function InterpretersPage() {
             </form>
           ) : loading ? (
             <div className="rounded-lg border border-border bg-card p-6 text-sm text-muted-foreground">
-              Loading interpreter profiles...
+              {profileCopy.loadingProfiles}
             </div>
           ) : null}
         </div>

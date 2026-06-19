@@ -97,8 +97,8 @@ async fn list_provider_people(
         .map(|value| format!("%{value}%"))
         .unwrap_or_else(|| "%%".to_string());
     let active_only = query.active_only.unwrap_or(true);
-    let insurance_provider_pattern = format!("%{}%", query.insurance_provider.unwrap_or_default());
-    let has_insurance_provider_filter = insurance_provider_pattern != "%%";
+    let insurance_provider_terms = normalize_filter_terms([query.insurance_provider]);
+    let has_insurance_provider_filter = !insurance_provider_terms.is_empty();
 
     let mut items = Vec::new();
     if matches!(
@@ -117,7 +117,7 @@ async fn list_provider_people(
             role.as_deref(),
             &role_pattern,
             gender.as_deref(),
-            &insurance_provider_pattern,
+            &insurance_provider_terms,
         )
         .await
         {
@@ -171,10 +171,10 @@ async fn load_doctor_people(
     role: Option<&str>,
     role_pattern: &str,
     gender: Option<&str>,
-    insurance_provider_pattern: &str,
+    insurance_provider_terms: &[String],
 ) -> Result<Vec<Value>, axum::response::Response> {
     let rows = sqlx::query(
-        r#"SELECT d.id, d.provider_id, d.name, d.first_name, d.last_name, d.display_name,
+        r#"SELECT d.id, d.provider_id, d.shared_identity_id, d.name, d.first_name, d.last_name, d.display_name,
                   d.title, d.role_code, d.role_label, to_jsonb(d)->>'subrole' AS subrole,
                   to_jsonb(d)->>'website' AS website, to_jsonb(d)->>'schwerpunkt' AS schwerpunkt,
                   d.gender, d.opening_hours, d.fachbereich, d.languages, d.phone, d.email,
@@ -347,13 +347,17 @@ async fn load_doctor_people(
 	                 )
 	             )
 	             AND (
-	                 $11::text = '%%'
+	                 cardinality($11::text[]) = 0
 	                 OR EXISTS (
 	                     SELECT 1
 	                     FROM provider_doctor_insurances di
 	                     JOIN insurance_providers ip ON ip.id = di.insurance_provider_id
 	                     WHERE di.doctor_id = d.id
-	                       AND ip.name ILIKE $11
+	                       AND EXISTS (
+	                           SELECT 1
+	                           FROM unnest($11::text[]) AS wanted(value)
+	                           WHERE de_normalize(ip.name) LIKE '%' || de_normalize(wanted.value) || '%'
+	                       )
 	                 )
 	             )
 	           ORDER BY p.name, d.name"#,
@@ -368,7 +372,7 @@ async fn load_doctor_people(
     .bind(gender)
     .bind(patient_id)
     .bind(provider_taxonomy_node_id)
-    .bind(insurance_provider_pattern)
+    .bind(insurance_provider_terms)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
@@ -407,6 +411,7 @@ async fn load_doctor_people(
                 "id": doctor_id,
                 "person_type": "doctor",
                 "doctor_id": doctor_id,
+                "shared_identity_id": row.try_get::<Uuid, _>("shared_identity_id").unwrap_or(doctor_id),
                 "staff_id": Value::Null,
                 "provider_id": provider_id,
                 "provider_name": row.try_get::<String, _>("provider_name").unwrap_or_default(),

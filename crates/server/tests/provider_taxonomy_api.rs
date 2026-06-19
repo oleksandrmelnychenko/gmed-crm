@@ -375,6 +375,74 @@ async fn providers_list_filters_by_taxonomy_internal_rating_and_linked_patient()
 }
 
 #[tokio::test]
+async fn providers_list_filters_cuisine_attribute_by_split_values() {
+    let Some((app, _pool, _admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("provider-cuisine-filter");
+    let restaurant_leaf_id = taxonomy_leaf_id(&app, &bearer, RESTAURANT_LEAF_CODE).await;
+
+    let mediterranean_id = create_provider_with_payload(
+        &app,
+        &bearer,
+        json!({
+            "name": format!("Mediterranean Split Cuisine {tag}"),
+            "provider_type": "non_medical",
+            "address_city": "Munich",
+            "address_country": "Germany",
+            "taxonomy_node_id": restaurant_leaf_id.clone(),
+            "taxonomy_attributes": {
+                "cuisine": "Fine Dining / Mediterrane Kueche"
+            },
+            "internal_rating": 4
+        }),
+    )
+    .await;
+
+    let bavarian_id = create_provider_with_payload(
+        &app,
+        &bearer,
+        json!({
+            "name": format!("Bavarian Split Cuisine {tag}"),
+            "provider_type": "non_medical",
+            "address_city": "Munich",
+            "address_country": "Germany",
+            "taxonomy_node_id": restaurant_leaf_id,
+            "taxonomy_attributes": {
+                "cuisine": "Bayerische Kueche"
+            },
+            "internal_rating": 4
+        }),
+    )
+    .await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!(
+            "/api/v1/providers?provider_type=non_medical&search={tag}&taxonomy_attribute_key=cuisine&taxonomy_attribute_value={}",
+            query_encode("Mediterrane Kueche")
+        ),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body.as_array().expect("providers array");
+    assert_provider_present(
+        items,
+        mediterranean_id,
+        "cuisine filter must match a slash-separated cuisine segment",
+    );
+    assert_provider_absent(
+        items,
+        bavarian_id,
+        "cuisine filter must not include providers from another cuisine segment",
+    );
+}
+
+#[tokio::test]
 async fn providers_universal_search_matches_taxonomy_attributes_and_ancestor_labels_first() {
     let Some((app, _pool, _admin_id, bearer)) = test_context().await else {
         return;

@@ -102,16 +102,38 @@ async fn seed_patient_assignment(
 
 /// Seed a patient assigned to a fresh patient_manager and return the pieces a
 /// clinical round-trip needs: the patient id and that manager's bearer token.
-async fn seed_clinical_patient(
-    pool: &PgPool,
-    admin_id: Uuid,
-    tag: &str,
-) -> (Uuid, String) {
+async fn seed_clinical_patient(pool: &PgPool, admin_id: Uuid, tag: &str) -> (Uuid, String) {
     let patient_id = seed_patient(pool, admin_id, tag).await;
     let pm_id = seed_user(pool, &format!("{tag}-pm"), "patient_manager").await;
     seed_patient_assignment(pool, patient_id, pm_id, admin_id).await;
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
     (patient_id, pm_bearer)
+}
+
+async fn seed_provider_with_type(pool: &PgPool, tag: &str, provider_type: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO providers (name, provider_type)
+           VALUES ($1, $2)
+           RETURNING id"#,
+    )
+    .bind(format!("Provider {tag}"))
+    .bind(provider_type)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn seed_provider_doctor(pool: &PgPool, provider_id: Uuid, tag: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO provider_doctors (provider_id, name, title)
+           VALUES ($1, $2, 'Dr. med.')
+           RETURNING id"#,
+    )
+    .bind(provider_id)
+    .bind(format!("Doctor {tag}"))
+    .fetch_one(pool)
+    .await
+    .unwrap()
 }
 
 // ---------------------------------------------------------------------------
@@ -223,7 +245,13 @@ async fn patient_diagnoses_reject_diagnosis_nested_under_procedure() {
         Some(json!({
             "items": [
                 {
+                    "cid": "h1",
+                    "kind": "main",
+                    "label": "Appendizitis",
+                },
+                {
                     "cid": "p1",
+                    "parent_cid": "h1",
                     "kind": "prozedur",
                     "label": "Appendektomie",
                     "ops_code": "5-470.10",
@@ -251,6 +279,164 @@ async fn patient_diagnoses_reject_diagnosis_nested_under_procedure() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["diagnoses"].as_array().expect("diagnoses").len(), 0);
+}
+
+#[tokio::test]
+async fn patient_diagnoses_reject_invalid_tree_shapes() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("diagnoses-tree-shape");
+    let (patient_id, pm_bearer) = seed_clinical_patient(&pool, admin_id, &tag).await;
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/diagnoses"),
+        &pm_bearer,
+        Some(json!({
+            "items": [
+                {
+                    "cid": "p1",
+                    "kind": "prozedur",
+                    "label": "Root procedure should not be a diagnosis-tree root",
+                    "ops_code": "5-470.10"
+                }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/diagnoses"),
+        &pm_bearer,
+        Some(json!({
+            "items": [
+                {
+                    "cid": "h1",
+                    "kind": "main",
+                    "label": "Main diagnosis"
+                },
+                {
+                    "cid": "h2",
+                    "parent_cid": "h1",
+                    "kind": "main",
+                    "label": "Nested main diagnosis"
+                }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn patient_diagnoses_external_source_requires_country_and_clears_internal_attribution() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("diagnoses-external-source");
+    let (patient_id, pm_bearer) = seed_clinical_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider_with_type(&pool, &tag, "medical").await;
+    let doctor_id = seed_provider_doctor(&pool, provider_id, &tag).await;
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/diagnoses"),
+        &pm_bearer,
+        Some(json!({
+            "items": [
+                {
+                    "cid": "h1",
+                    "kind": "main",
+                    "label": "Extern without country",
+                    "source_mode": "extern",
+                    "external_clinic": "Outside Clinic"
+                }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/diagnoses"),
+        &pm_bearer,
+        Some(json!({
+            "items": [
+                {
+                    "cid": "h1",
+                    "kind": "main",
+                    "label": "Extern diagnosed asthma",
+                    "source_mode": "extern",
+                    "external_clinic": "Outside Clinic",
+                    "external_doctor": "Dr. Outside",
+                    "external_country": "DE",
+                    "provider_id": provider_id.to_string(),
+                    "doctor_id": doctor_id.to_string()
+                }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let diagnoses = body["diagnoses"].as_array().expect("diagnoses array");
+    assert_eq!(diagnoses.len(), 1);
+    assert_eq!(diagnoses[0]["source_mode"], "extern");
+    assert_eq!(diagnoses[0]["external_country"], "DE");
+    assert!(diagnoses[0]["provider_id"].is_null());
+    assert!(diagnoses[0]["doctor_id"].is_null());
+}
+
+#[tokio::test]
+async fn patient_diagnoses_validate_treating_doctor() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("diagnoses-treating-doctor");
+    let (patient_id, pm_bearer) = seed_clinical_patient(&pool, admin_id, &tag).await;
+    let non_medical_provider_id =
+        seed_provider_with_type(&pool, &format!("{tag}-restaurant"), "non_medical").await;
+    let non_medical_doctor_id =
+        seed_provider_doctor(&pool, non_medical_provider_id, &format!("{tag}-contact")).await;
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/diagnoses"),
+        &pm_bearer,
+        Some(json!({
+            "items": [
+                {
+                    "cid": "h1",
+                    "kind": "main",
+                    "label": "Main diagnosis",
+                    "treating_doctor_id": non_medical_doctor_id.to_string()
+                }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 // ---------------------------------------------------------------------------

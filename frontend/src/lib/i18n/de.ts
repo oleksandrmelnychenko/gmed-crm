@@ -36,7 +36,7 @@ export const de = {
   nav_feedback: "Feedback",
   nav_reports: "Berichte",
   nav_learning: "SOP & Lernen",
-  nav_interpreters: "Mitarbeiter",
+  nav_interpreters: "Mitarbeitende",
 
   login_title: "Anmeldung",
   login_email: "E-Mail",
@@ -96,8 +96,8 @@ export const de = {
   role_ceo: "CEO",
   role_ceo_assistant: "CEO-Assistent",
   role_patient_manager: "Patientenmanager",
-  role_teamlead_interpreter: "Teamlead Dolmetscher",
-  role_interpreter: "Dolmetscher",
+  role_teamlead_interpreter: "Teamlead Mitarbeitende",
+  role_interpreter: "Mitarbeitender",
   role_concierge: "Concierge",
   role_billing: "Abrechnung",
   role_sales: "Vertrieb",
@@ -220,7 +220,7 @@ export const de = {
   patients_create: "Patient anlegen",
   patients_edit: "Bearbeiten",
   providers_title: "Kliniken & Provider",
-  providers_subtitle: "Partnerkliniken, Ärzte und Leistungskatalog verwalten",
+  providers_subtitle: "Provider, Mitarbeitende und Leistungskatalog verwalten",
   providers_new: "Neuer Provider",
   providers_detail: "Provider-Details",
   providers_select_hint:

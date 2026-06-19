@@ -859,6 +859,7 @@ export function blankProviderForm(providerType: ProviderType = "medical"): Provi
 export function blankDoctorForm(): DoctorFormState {
   return {
     id: "",
+    sharedIdentityId: "",
     name: "",
     firstName: "",
     lastName: "",
@@ -1479,6 +1480,7 @@ export function providerToForm(detail: ProviderDetail): ProviderFormState {
 export function doctorToForm(doctor: DoctorSummary): DoctorFormState {
   return {
     id: doctor.id,
+    sharedIdentityId: doctor.shared_identity_id ?? doctor.id,
     name: doctor.name,
     firstName: doctor.first_name ?? "",
     lastName: doctor.last_name ?? "",
@@ -1634,6 +1636,7 @@ export function toDoctorPayload(form: DoctorFormState) {
   const contacts = buildDoctorContacts(form);
   return {
     name,
+    shared_identity_id: toOptional(form.sharedIdentityId),
     first_name: toOptional(form.firstName),
     last_name: toOptional(form.lastName),
     display_name: name,

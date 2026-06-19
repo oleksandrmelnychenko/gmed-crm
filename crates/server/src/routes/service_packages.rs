@@ -12,7 +12,7 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::Value;
 use sqlx::Row;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::access;
@@ -433,6 +433,68 @@ fn validate_package_items(
     Ok(())
 }
 
+async fn validate_package_item_references(
+    state: &AppState,
+    items: &[ServicePackageItemInput],
+) -> Result<(), axum::response::Response> {
+    let tax_profile_ids = items
+        .iter()
+        .filter_map(|item| item.tax_profile_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if !tax_profile_ids.is_empty() {
+        let found =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tax_profiles WHERE id = ANY($1)")
+                .bind(&tax_profile_ids)
+                .fetch_one(&state.db)
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e, "validate service package item tax profiles");
+                    err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to validate package item tax profiles",
+                    )
+                })?;
+        if found != tax_profile_ids.len() as i64 {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Package item tax profile not found",
+            ));
+        }
+    }
+
+    let agency_service_ids = items
+        .iter()
+        .filter_map(|item| item.agency_service_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if !agency_service_ids.is_empty() {
+        let found = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM agency_service_catalog WHERE id = ANY($1)",
+        )
+        .bind(&agency_service_ids)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "validate service package item agency services");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate package item agency services",
+            )
+        })?;
+        if found != agency_service_ids.len() as i64 {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Package item agency service not found",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 async fn list_service_packages(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -474,6 +536,9 @@ async fn create_service_package(
     };
     let items = body.items.unwrap_or_default();
     if let Err(resp) = validate_package_items(&items) {
+        return resp;
+    }
+    if let Err(resp) = validate_package_item_references(&state, &items).await {
         return resp;
     }
     let base_price_net = body.base_price_net.unwrap_or(Decimal::ZERO);
@@ -596,6 +661,9 @@ async fn update_service_package(
     };
     let items = body.items.unwrap_or_default();
     if let Err(resp) = validate_package_items(&items) {
+        return resp;
+    }
+    if let Err(resp) = validate_package_item_references(&state, &items).await {
         return resp;
     }
     let base_price_net = body.base_price_net.unwrap_or(Decimal::ZERO);

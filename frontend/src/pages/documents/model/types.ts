@@ -4,6 +4,28 @@ export type DocumentVisibility =
   | "released_internal"
   | "released_external"
   | "patient_visible";
+export type DocumentDirection = "incoming" | "outgoing";
+export type DocumentVariant = "original" | "translation";
+export type DocumentAccessCategory =
+  | "internal"
+  | "patient"
+  | "provider"
+  | "authority"
+  | "financial"
+  | "medical"
+  | "other";
+export type DocumentFinancialStatus =
+  | "open"
+  | "in_progress"
+  | "paid"
+  | "overdue"
+  | "billed_to_patient"
+  | "reimbursed";
+export type DocumentPaymentMethod =
+  | "cash"
+  | "bank_transfer"
+  | "card"
+  | "other";
 
 type DocumentClassificationSuggestion = {
   art: string;
@@ -36,6 +58,19 @@ export type DocumentItem = {
   has_stored_file: boolean;
   klinik: string | null;
   ursprung: string | null;
+  document_direction: DocumentDirection | null;
+  document_variant: DocumentVariant | null;
+  document_language: string | null;
+  access_category: DocumentAccessCategory | null;
+  document_date: string | null;
+  source_person: string | null;
+  source_institution: string | null;
+  addressee_person: string | null;
+  addressee_institution: string | null;
+  financial_status: DocumentFinancialStatus | null;
+  payment_due_date: string | null;
+  payment_date: string | null;
+  payment_method: DocumentPaymentMethod | null;
   generated_template_id: string | null;
   notes: string | null;
   uploaded_by_name: string | null;
@@ -187,6 +222,10 @@ export type FiltersState = {
   dateTo: string;
   klinik: string;
   ursprung: string;
+  documentDirection: string;
+  documentVariant: string;
+  accessCategory: string;
+  financialStatus: string;
 };
 
 export type UploadFormState = {
@@ -202,6 +241,19 @@ export type UploadFormState = {
   isMedical: boolean;
   klinik: string;
   ursprung: string;
+  documentDirection: DocumentDirection;
+  documentVariant: DocumentVariant;
+  documentLanguage: string;
+  accessCategory: DocumentAccessCategory;
+  documentDate: string;
+  sourcePerson: string;
+  sourceInstitution: string;
+  addresseePerson: string;
+  addresseeInstitution: string;
+  financialStatus: DocumentFinancialStatus | "";
+  paymentDueDate: string;
+  paymentDate: string;
+  paymentMethod: DocumentPaymentMethod | "";
   notes: string;
 };
 
@@ -217,6 +269,19 @@ export type EditFormState = {
   isMedical: boolean;
   klinik: string;
   ursprung: string;
+  documentDirection: DocumentDirection;
+  documentVariant: DocumentVariant;
+  documentLanguage: string;
+  accessCategory: DocumentAccessCategory;
+  documentDate: string;
+  sourcePerson: string;
+  sourceInstitution: string;
+  addresseePerson: string;
+  addresseeInstitution: string;
+  financialStatus: DocumentFinancialStatus | "";
+  paymentDueDate: string;
+  paymentDate: string;
+  paymentMethod: DocumentPaymentMethod | "";
   notes: string;
 };
 
@@ -281,6 +346,19 @@ export type GenerateFormState = {
   closingNote: string;
   klinik: string;
   ursprung: string;
+  documentDirection: DocumentDirection;
+  documentVariant: DocumentVariant;
+  documentLanguage: string;
+  accessCategory: DocumentAccessCategory;
+  documentDate: string;
+  sourcePerson: string;
+  sourceInstitution: string;
+  addresseePerson: string;
+  addresseeInstitution: string;
+  financialStatus: DocumentFinancialStatus | "";
+  paymentDueDate: string;
+  paymentDate: string;
+  paymentMethod: DocumentPaymentMethod | "";
   notes: string;
   textBlockKeys: string[];
   bindings: DocumentBindingForm;

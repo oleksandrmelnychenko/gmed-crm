@@ -532,11 +532,17 @@ pub(crate) async fn export_patient_data_response(
                 "attachment; filename=\"{}\"",
                 patient_export_archive_name(&payload).replace('"', "")
             );
-            Ok(axum::response::Response::builder()
+            axum::response::Response::builder()
                 .header("content-type", "application/zip")
                 .header("content-disposition", disposition)
                 .body(Body::from(zip_bytes))
-                .unwrap())
+                .map_err(|error| {
+                    tracing::error!(error = %error, "build patient export zip response");
+                    err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to build patient export",
+                    )
+                })
         }
     }
 }

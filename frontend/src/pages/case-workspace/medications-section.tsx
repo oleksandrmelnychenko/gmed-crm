@@ -28,6 +28,7 @@ import {
   CASE_MEDICATION_TYPE_LABEL_KEYS,
   CASE_MEDICATION_TYPE_VALUES,
 } from "@/lib/i18n/catalogs/cases-clinical";
+import { DARREICHUNGSFORM_OPTIONS } from "@/pages/patients/data/medication-options";
 import { doctorSpecialtyLabel, type SpecializationLabelLang } from "@/pages/providers/model/specialization-labels";
 
 import { CaseItemList } from "./case-item-list";
@@ -349,12 +350,25 @@ function MedicationFormContent({
       <Panel title={t.cases_medications_group_form_validity}>
         <div className="grid gap-4 md:grid-cols-3">
           <Field label={t.cases_medications_form}>
-            <Input
+            <NativeComboboxSelect
               value={form.darreichungsform ?? ""}
               onChange={(event) => updateField("darreichungsform", event.target.value)}
-              className={inputBaseClassName}
+              className={nativeSelectClassName}
               disabled={disabled}
-            />
+            >
+              <option value="">{t.common_not_set}</option>
+              {DARREICHUNGSFORM_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+              {form.darreichungsform &&
+              !DARREICHUNGSFORM_OPTIONS.some((option) => option.value === form.darreichungsform) ? (
+                <option value={form.darreichungsform}>
+                  {form.darreichungsform}
+                </option>
+              ) : null}
+            </NativeComboboxSelect>
           </Field>
           <Field label={t.cases_medications_type}>
             <NativeComboboxSelect

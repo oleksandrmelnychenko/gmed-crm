@@ -659,6 +659,55 @@ async fn package_consumption_tracks_overage_approval_and_invoice_linkage() {
 }
 
 #[tokio::test]
+async fn service_package_rejects_unknown_item_references() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("package-item-references");
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/service-packages",
+        &billing_bearer,
+        Some(json!({
+            "package_key": format!("pkg_tax_{tag}"),
+            "name": "Package with missing item tax profile",
+            "items": [{
+                "description": "Custom item",
+                "included_quantity": 1,
+                "tax_profile_id": Uuid::new_v4()
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["message"], "Package item tax profile not found");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/service-packages",
+        &billing_bearer,
+        Some(json!({
+            "package_key": format!("pkg_service_{tag}"),
+            "name": "Package with missing agency service",
+            "items": [{
+                "description": "Catalog-backed item",
+                "included_quantity": 1,
+                "agency_service_id": Uuid::new_v4()
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["message"], "Package item agency service not found");
+}
+
+#[tokio::test]
 async fn invoice_detail_explains_mixed_vat_sources() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
@@ -1003,6 +1052,91 @@ async fn invoice_detail_includes_supporting_documents_for_cost_passthrough_line_
     assert_eq!(supporting_documents[0]["original_filename"], "receipt.pdf");
     assert_eq!(supporting_documents[0]["art"], "receipt");
     assert_eq!(supporting_documents[0]["category"], "payment");
+}
+
+#[tokio::test]
+async fn paid_invoice_marks_linked_financial_supporting_documents_reimbursed() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("invoice-doc-reimbursed");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let supporting_document_id = Uuid::new_v4();
+    seed_supporting_document(
+        &pool,
+        supporting_document_id,
+        patient_id,
+        order_id,
+        admin_id,
+        "Clinic paid receipt",
+        "paid-receipt.pdf",
+    )
+    .await;
+
+    let leistung_id = seed_order_leistung_finance(
+        &pool,
+        order_id,
+        "Clinic passthrough with receipt",
+        80.0,
+        0.0,
+        true,
+        "approved",
+    )
+    .await;
+    sqlx::query("UPDATE order_leistungen SET external_document_id = $2 WHERE id = $1")
+        .bind(leistung_id)
+        .bind(supporting_document_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let quote = create_quote(&app, &pm_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+    let invoice = create_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-31").await;
+    let invoice_id = invoice["id"].as_str().unwrap();
+    let total_gross: f64 = invoice["total_gross"].as_str().unwrap().parse().unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        &billing_bearer,
+        Some(json!({
+            "status": "paid",
+            "paid_amount": total_gross,
+            "notes": "Patient invoice settled"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "invoice status body: {:?}", body);
+    assert_eq!(body["status"], "paid");
+
+    let row = sqlx::query(
+        "SELECT financial_status, access_category, payment_date, payment_method
+         FROM documents
+         WHERE id = $1",
+    )
+    .bind(supporting_document_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let financial_status: Option<String> = row.try_get("financial_status").unwrap();
+    let access_category: Option<String> = row.try_get("access_category").unwrap();
+    let payment_date: Option<chrono::NaiveDate> = row.try_get("payment_date").unwrap();
+    let payment_method: Option<String> = row.try_get("payment_method").unwrap();
+
+    assert_eq!(financial_status.as_deref(), Some("reimbursed"));
+    assert_eq!(access_category.as_deref(), Some("financial"));
+    assert!(payment_date.is_some());
+    assert_eq!(payment_method.as_deref(), Some("bank_transfer"));
 }
 
 #[tokio::test]

@@ -573,14 +573,35 @@ async fn provider_people_filters_doctors_by_insurance_provider() {
     .fetch_one(&pool)
     .await
     .unwrap();
+    let second_matching_doctor_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO provider_doctors (provider_id, name, display_name)
+           VALUES ($1, $2, $2)
+           RETURNING id"#,
+    )
+    .bind(provider_id)
+    .bind(format!("Insurance Second Match Doctor {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
 
     let insurance_id = seed_insurance_provider(&pool, &format!("People Insurance {tag}")).await;
+    let second_insurance_id =
+        seed_insurance_provider(&pool, &format!("Second People Insurance {tag}")).await;
     sqlx::query(
         r#"INSERT INTO provider_doctor_insurances (doctor_id, insurance_provider_id)
            VALUES ($1, $2)"#,
     )
     .bind(matching_doctor_id)
     .bind(insurance_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO provider_doctor_insurances (doctor_id, insurance_provider_id)
+           VALUES ($1, $2)"#,
+    )
+    .bind(second_matching_doctor_id)
+    .bind(second_insurance_id)
     .execute(&pool)
     .await
     .unwrap();
@@ -614,6 +635,347 @@ async fn provider_people_filters_doctors_by_insurance_provider() {
     assert_eq!(
         row["insurance_providers"][0]["name"],
         format!("People Insurance {tag}")
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!(
+            "/api/v1/provider-people?search={tag}&person_type=doctor&insurance_provider=People%20Insurance%2C%20Second%20People%20Insurance"
+        ),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().expect("provider people array");
+    assert!(
+        items
+            .iter()
+            .any(|row| row["person_id"] == matching_doctor_id.to_string())
+    );
+    assert!(
+        items
+            .iter()
+            .any(|row| row["person_id"] == second_matching_doctor_id.to_string())
+    );
+    assert!(
+        !items
+            .iter()
+            .any(|row| row["person_id"] == decoy_doctor_id.to_string())
+    );
+}
+
+#[tokio::test]
+async fn existing_doctor_can_be_linked_to_another_provider_with_shared_identity() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("provider-doctor-identity");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let bearer = auth_header_for(pm_id, "patient_manager");
+
+    let source_provider_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO providers (name, provider_type, address_city, address_country, fachbereich)
+           VALUES ($1, 'medical', 'Berlin', 'Germany', 'Cardiology')
+           RETURNING id"#,
+    )
+    .bind(format!("Source Clinic {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let target_provider_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO providers (name, provider_type, address_city, address_country, fachbereich)
+           VALUES ($1, 'medical', 'Munich', 'Germany', 'Cardiology')
+           RETURNING id"#,
+    )
+    .bind(format!("Target Clinic {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let (status, source_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{source_provider_id}/doctors"),
+        &bearer,
+        Some(json!({
+            "name": format!("Dr Shared {tag}"),
+            "first_name": "Shared",
+            "last_name": tag,
+            "display_name": format!("Dr Shared {tag}"),
+            "title": "Dr.",
+            "gender": "female",
+            "fachbereich": "Cardiology"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let source_doctor_id = source_body["id"].as_str().expect("source doctor id");
+    let shared_identity_id = source_body["shared_identity_id"]
+        .as_str()
+        .expect("source shared identity id");
+
+    let (status, people_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/provider-people?provider_id={source_provider_id}&person_type=doctor&search={tag}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let source_people = people_body.as_array().expect("provider people array");
+    assert!(source_people.iter().any(|row| {
+        row["doctor_id"] == source_doctor_id && row["shared_identity_id"] == shared_identity_id
+    }));
+
+    let (status, linked_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{target_provider_id}/doctors"),
+        &bearer,
+        Some(json!({
+            "shared_identity_id": shared_identity_id,
+            "name": format!("Dr Shared {tag}"),
+            "first_name": "Shared",
+            "last_name": tag,
+            "display_name": format!("Dr Shared {tag}"),
+            "title": "Dr.",
+            "gender": "female",
+            "fachbereich": "Cardiology"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_ne!(linked_body["id"], source_doctor_id);
+    assert_eq!(linked_body["shared_identity_id"], shared_identity_id);
+
+    let linked_doctor_id = linked_body["id"].as_str().expect("linked doctor id");
+    let linked_identity_id: Uuid =
+        sqlx::query_scalar("SELECT shared_identity_id FROM provider_doctors WHERE id = $1")
+            .bind(Uuid::parse_str(linked_doctor_id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(linked_identity_id.to_string(), shared_identity_id);
+
+    let (status, duplicate_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{target_provider_id}/doctors"),
+        &bearer,
+        Some(json!({
+            "shared_identity_id": shared_identity_id,
+            "name": format!("Dr Shared Duplicate {tag}"),
+            "title": "Dr.",
+            "gender": "female"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        duplicate_body["message"],
+        "Doctor is already linked to this provider"
+    );
+}
+
+#[tokio::test]
+async fn doctor_relationship_creation_adds_reciprocal_link() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("provider-doctor-reciprocal");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let bearer = auth_header_for(pm_id, "patient_manager");
+
+    let provider_a_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO providers (name, provider_type, address_city, address_country)
+           VALUES ($1, 'medical', 'Berlin', 'Germany')
+           RETURNING id"#,
+    )
+    .bind(format!("Relationship Source Clinic {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let provider_b_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO providers (name, provider_type, address_city, address_country)
+           VALUES ($1, 'medical', 'Munich', 'Germany')
+           RETURNING id"#,
+    )
+    .bind(format!("Relationship Target Clinic {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let doctor_a_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO provider_doctors (provider_id, name, display_name, title)
+           VALUES ($1, $2, $2, 'Dr.')
+           RETURNING id"#,
+    )
+    .bind(provider_a_id)
+    .bind(format!("Doctor A {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let doctor_b_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO provider_doctors (provider_id, name, display_name, title)
+           VALUES ($1, $2, $2, 'Dr.')
+           RETURNING id"#,
+    )
+    .bind(provider_b_id)
+    .bind(format!("Doctor B {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{provider_a_id}/doctors/{doctor_a_id}/relationships"),
+        &bearer,
+        Some(json!({
+            "target_doctor_id": doctor_b_id,
+            "target_provider_id": provider_b_id,
+            "relationship_type": "referral",
+            "description": "works together",
+            "notes": "mirror expected"
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "create relationship: {created:?}"
+    );
+    let relationship_id = created["id"].as_str().expect("relationship id");
+
+    let (status, source_relationships) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_a_id}/doctors/{doctor_a_id}/relationships"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let source_items = source_relationships
+        .as_array()
+        .expect("source relationships array");
+    assert!(source_items.iter().any(|relationship| {
+        relationship["id"] == relationship_id
+            && relationship["source_doctor_id"] == doctor_a_id.to_string()
+            && relationship["target_doctor_id"] == doctor_b_id.to_string()
+            && relationship["relationship_type"] == "referral"
+    }));
+
+    let (status, reciprocal_relationships) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_b_id}/doctors/{doctor_b_id}/relationships"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let reciprocal_items = reciprocal_relationships
+        .as_array()
+        .expect("reciprocal relationships array");
+    assert!(reciprocal_items.iter().any(|relationship| {
+        relationship["source_doctor_id"] == doctor_b_id.to_string()
+            && relationship["target_doctor_id"] == doctor_a_id.to_string()
+            && relationship["target_provider_id"] == provider_a_id.to_string()
+            && relationship["relationship_type"] == "referral"
+            && relationship["description"] == "works together"
+            && relationship["notes"] == "mirror expected"
+    }));
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/providers/{provider_a_id}/doctors/{doctor_a_id}/relationships/{relationship_id}/update"
+        ),
+        &bearer,
+        Some(json!({
+            "target_doctor_id": doctor_b_id,
+            "target_provider_id": provider_b_id,
+            "relationship_type": "approach_via",
+            "description": "updated route",
+            "notes": "updated mirror"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "update relationship: {body:?}");
+
+    let (status, reciprocal_relationships) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_b_id}/doctors/{doctor_b_id}/relationships"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let reciprocal_items = reciprocal_relationships
+        .as_array()
+        .expect("reciprocal relationships array");
+    assert!(!reciprocal_items.iter().any(|relationship| {
+        relationship["target_doctor_id"] == doctor_a_id.to_string()
+            && relationship["relationship_type"] == "referral"
+    }));
+    assert!(reciprocal_items.iter().any(|relationship| {
+        relationship["source_doctor_id"] == doctor_b_id.to_string()
+            && relationship["target_doctor_id"] == doctor_a_id.to_string()
+            && relationship["relationship_type"] == "approach_via"
+            && relationship["description"] == "updated route"
+            && relationship["notes"] == "updated mirror"
+    }));
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/providers/{provider_a_id}/doctors/{doctor_a_id}/relationships/{relationship_id}/delete"
+        ),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "delete relationship: {body:?}");
+
+    let (status, source_relationships) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_a_id}/doctors/{doctor_a_id}/relationships"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        source_relationships
+            .as_array()
+            .expect("source relationships array")
+            .is_empty()
+    );
+
+    let (status, reciprocal_relationships) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_b_id}/doctors/{doctor_b_id}/relationships"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        reciprocal_relationships
+            .as_array()
+            .expect("reciprocal relationships array")
+            .is_empty()
     );
 }
 

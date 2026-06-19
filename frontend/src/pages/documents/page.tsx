@@ -126,6 +126,7 @@ import {
 import {
   STATUS_OPTIONS,
   VISIBILITY_OPTIONS,
+  buildStandardDocumentName,
   buildDocumentsPath,
   canManageDocumentIntake,
   canManageDocuments,
@@ -139,18 +140,28 @@ import {
   emptyUploadForm,
   formatConfidenceLabel,
   normalizeTemplateLanguage,
+  patientDocumentAddresseeLabel,
   patientOptionLabel,
   resolveTemplateLanguage,
   templateForDocument,
 } from "./model/document-model";
+import {
+  reconcileTranslationWorkspaceDraftAfterSave,
+  translationWorkspaceDraftFromRequest,
+} from "./model/translation-workspace";
 import type {
   AppointmentOption,
   CategoryOption,
+  DocumentAccessCategory,
+  DocumentDirection,
+  DocumentFinancialStatus,
   DocumentItem,
+  DocumentPaymentMethod,
   DocumentShare,
   DocumentStatus,
   DocumentTemplate,
   DocumentTextExtraction,
+  DocumentVariant,
   DocumentVisibility,
   EditFormState,
   FiltersState,
@@ -186,20 +197,22 @@ function runtimeTranslations() {
   return translateCatalog(getLang());
 }
 
-function runtimeLocale() {
-  return getLang() === "ru" ? "ru-RU" : "de-DE";
+function compactDocumentParty(...parts: Array<string | null | undefined>) {
+  const seen = new Set<string>();
+  return parts
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .filter((part) => {
+      const key = part.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(", ");
 }
 
-function translationWorkspaceDraftFromRequest(
-  request: TranslationRequest,
-): TranslationWorkspaceDraft {
-  return {
-    assignedTo: request.assigned_to ?? null,
-    note: request.note ?? "",
-    sourceLanguage: request.source_language ?? "",
-    sourceText: request.source_text ?? "",
-    translatedText: request.translated_text ?? "",
-  };
+function runtimeLocale() {
+  return getLang() === "ru" ? "ru-RU" : "de-DE";
 }
 
 function formatRoleLabel(role?: string | null) {
@@ -232,7 +245,77 @@ function formatLanguageLabel(language?: string | null) {
   }
 }
 
+function optionLabel(
+  option: { labelRu: string; labelDe: string },
+) {
+  return getLang() === "ru" ? option.labelRu : option.labelDe;
+}
+
+function labelFromOptions<T extends string>(
+  value: T | "" | null | undefined,
+  options: Array<{ value: T; labelRu: string; labelDe: string }>,
+) {
+  if (!value) return runtimeTranslations().common_not_set;
+  const option = options.find((item) => item.value === value);
+  return option ? optionLabel(option) : formatUnknownValue(value, runtimeTranslations());
+}
+
 const TRANSLATION_LANGUAGE_OPTIONS = ["de"] as const;
+const DOCUMENT_DIRECTION_OPTIONS: Array<{
+  value: DocumentDirection;
+  labelRu: string;
+  labelDe: string;
+}> = [
+  { value: "incoming", labelRu: "Входящий", labelDe: "Eingehend" },
+  { value: "outgoing", labelRu: "Исходящий", labelDe: "Ausgehend" },
+];
+const DOCUMENT_VARIANT_OPTIONS: Array<{
+  value: DocumentVariant;
+  labelRu: string;
+  labelDe: string;
+}> = [
+  { value: "original", labelRu: "Оригинал", labelDe: "Original" },
+  { value: "translation", labelRu: "Перевод", labelDe: "Uebersetzung" },
+];
+const DOCUMENT_ACCESS_CATEGORY_OPTIONS: Array<{
+  value: DocumentAccessCategory;
+  labelRu: string;
+  labelDe: string;
+}> = [
+  { value: "internal", labelRu: "Внутренний", labelDe: "Intern" },
+  { value: "patient", labelRu: "Пациент", labelDe: "Patient" },
+  { value: "provider", labelRu: "Провайдер", labelDe: "Provider" },
+  { value: "authority", labelRu: "Ведомство", labelDe: "Behoerde" },
+  { value: "financial", labelRu: "Финансовый", labelDe: "Finanziell" },
+  { value: "medical", labelRu: "Медицинский", labelDe: "Medizinisch" },
+  { value: "other", labelRu: "Другое", labelDe: "Sonstiges" },
+];
+const DOCUMENT_FINANCIAL_STATUS_OPTIONS: Array<{
+  value: DocumentFinancialStatus;
+  labelRu: string;
+  labelDe: string;
+}> = [
+  { value: "open", labelRu: "Открыт", labelDe: "Offen" },
+  { value: "in_progress", labelRu: "В работе", labelDe: "In Bearbeitung" },
+  { value: "paid", labelRu: "Оплачен", labelDe: "Bezahlt" },
+  { value: "overdue", labelRu: "Просрочен", labelDe: "Ueberfaellig" },
+  {
+    value: "billed_to_patient",
+    labelRu: "Выставлен пациенту",
+    labelDe: "An Patient berechnet",
+  },
+  { value: "reimbursed", labelRu: "Возмещен", labelDe: "Erstattet" },
+];
+const DOCUMENT_PAYMENT_METHOD_OPTIONS: Array<{
+  value: DocumentPaymentMethod;
+  labelRu: string;
+  labelDe: string;
+}> = [
+  { value: "cash", labelRu: "Наличные", labelDe: "Bar" },
+  { value: "bank_transfer", labelRu: "Перевод", labelDe: "Ueberweisung" },
+  { value: "card", labelRu: "Карта", labelDe: "Karte" },
+  { value: "other", labelRu: "Другое", labelDe: "Sonstiges" },
+];
 
 // Roles the backend accepts as a translation assignee (validate_translation_assignee).
 // The shared /documents/meta/staff list also returns billing/it_admin, who would be
@@ -752,6 +835,7 @@ const STAFF_DOCUMENT_REALTIME_EVENTS = [
 type TranslationUpdateOptions = {
   assignedTo?: string | null;
   createTranslatedDocument?: boolean;
+  includeWorkspaceFields?: boolean;
   translatedDocumentAutoName?: string | null;
 };
 
@@ -829,6 +913,36 @@ function StaffDocumentsPage({
         .replace("{total}", String(total)),
     visibilityHeader: l("documents_visibility_header"),
   };
+  const metaText = {
+    operationalMetadata:
+      lang === "ru" ? "Операционные данные" : "Operative Daten",
+    direction: lang === "ru" ? "Направление" : "Richtung",
+    variant: lang === "ru" ? "Вариант" : "Variante",
+    documentLanguage: lang === "ru" ? "Язык документа" : "Dokumentsprache",
+    accessCategory:
+      lang === "ru" ? "Категория доступа" : "Zugriffskategorie",
+    documentDate: lang === "ru" ? "Дата документа" : "Dokumentdatum",
+    sourcePerson: lang === "ru" ? "Источник: персона" : "Quelle: Person",
+    sourceInstitution:
+      lang === "ru" ? "Источник: учреждение" : "Quelle: Institution",
+    addresseePerson:
+      lang === "ru" ? "Адресат: персона" : "Adressat: Person",
+    addresseeInstitution:
+      lang === "ru" ? "Адресат: учреждение" : "Adressat: Institution",
+    financialStatus:
+      lang === "ru" ? "Финансовый статус" : "Finanzstatus",
+    allDirections: lang === "ru" ? "Все направления" : "Alle Richtungen",
+    allVariants: lang === "ru" ? "Все варианты" : "Alle Varianten",
+    allAccessCategories:
+      lang === "ru" ? "Все категории доступа" : "Alle Zugriffskategorien",
+    allFinancialStatuses:
+      lang === "ru" ? "Все фин. статусы" : "Alle Finanzstatus",
+    paymentDueDate: lang === "ru" ? "Срок оплаты" : "Faellig am",
+    paymentDate: lang === "ru" ? "Дата оплаты" : "Zahlungsdatum",
+    paymentMethod: lang === "ru" ? "Метод оплаты" : "Zahlungsart",
+    notFinancial: lang === "ru" ? "Не финансовый" : "Nicht finanziell",
+    noPaymentMethod: lang === "ru" ? "Не указано" : "Nicht angegeben",
+  };
   const documentsFailedLoadDocumentsText = t.documents_failed_load_documents;
   const documentsFailedLoadIntakeQueueText = t.documents_failed_load_intake_queue;
   const documentsFailedLoadDocumentText = t.documents_failed_load_document;
@@ -857,6 +971,10 @@ function StaffDocumentsPage({
     dateTo: searchParams.get("date_to") ?? "",
     klinik: searchParams.get("klinik") ?? "",
     ursprung: searchParams.get("ursprung") ?? "",
+    documentDirection: searchParams.get("document_direction") ?? "",
+    documentVariant: searchParams.get("document_variant") ?? "",
+    accessCategory: searchParams.get("access_category") ?? "",
+    financialStatus: searchParams.get("financial_status") ?? "",
   }));
   const deferredSearch = useDeferredValue(filters.search);
   const legacyQueryDocumentId = searchParams.get("document") ?? "";
@@ -1472,6 +1590,16 @@ function StaffDocumentsPage({
         language: current.templateId
           ? current.language
           : resolveTemplateLanguage(current.patientId, nextTemplate, patients),
+        documentLanguage: current.templateId
+          ? current.documentLanguage
+          : resolveTemplateLanguage(current.patientId, nextTemplate, patients),
+        accessCategory: current.templateId
+          ? current.accessCategory
+          : nextTemplate.is_medical
+            ? "medical"
+            : nextTemplate.default_visibility === "patient_visible"
+              ? "patient"
+              : current.accessCategory,
         autoName: current.autoName || nextTemplate.default_auto_name,
         textBlockKeys: current.textBlockKeys.filter((key) =>
           allowedBlocks.has(key),
@@ -1623,8 +1751,20 @@ function StaffDocumentsPage({
       if (uploadForm.orderId) formData.append("order_id", uploadForm.orderId);
       if (uploadForm.appointmentId)
         formData.append("appointment_id", uploadForm.appointmentId);
-      if (uploadForm.autoName.trim())
-        formData.append("auto_name", uploadForm.autoName.trim());
+      const uploadAutoName =
+        uploadForm.autoName.trim() ||
+        buildStandardDocumentName({
+          category: uploadForm.category,
+          art: uploadForm.art,
+          isMedical: uploadForm.isMedical,
+          documentDate: new Date(),
+          source: compactDocumentParty(uploadForm.ursprung, uploadForm.klinik),
+          addressee: patientDocumentAddresseeLabel(
+            uploadForm.patientId,
+            patients,
+          ),
+        });
+      if (uploadAutoName) formData.append("auto_name", uploadAutoName);
       if (uploadForm.art.trim()) formData.append("art", uploadForm.art.trim());
       if (uploadForm.category) formData.append("category", uploadForm.category);
       formData.append(
@@ -1642,6 +1782,32 @@ function StaffDocumentsPage({
         formData.append("klinik", uploadForm.klinik.trim());
       if (!constrainedUpload && uploadForm.ursprung.trim())
         formData.append("ursprung", uploadForm.ursprung.trim());
+      formData.append("document_direction", uploadForm.documentDirection);
+      formData.append("document_variant", uploadForm.documentVariant);
+      if (uploadForm.documentLanguage.trim())
+        formData.append("document_language", uploadForm.documentLanguage.trim());
+      formData.append("access_category", uploadForm.accessCategory);
+      if (uploadForm.documentDate)
+        formData.append("document_date", uploadForm.documentDate);
+      if (uploadForm.sourcePerson.trim())
+        formData.append("source_person", uploadForm.sourcePerson.trim());
+      if (uploadForm.sourceInstitution.trim())
+        formData.append("source_institution", uploadForm.sourceInstitution.trim());
+      if (uploadForm.addresseePerson.trim())
+        formData.append("addressee_person", uploadForm.addresseePerson.trim());
+      if (uploadForm.addresseeInstitution.trim())
+        formData.append(
+          "addressee_institution",
+          uploadForm.addresseeInstitution.trim(),
+        );
+      if (uploadForm.financialStatus)
+        formData.append("financial_status", uploadForm.financialStatus);
+      if (uploadForm.paymentDueDate)
+        formData.append("payment_due_date", uploadForm.paymentDueDate);
+      if (uploadForm.paymentDate)
+        formData.append("payment_date", uploadForm.paymentDate);
+      if (uploadForm.paymentMethod)
+        formData.append("payment_method", uploadForm.paymentMethod);
       if (uploadForm.notes.trim())
         formData.append("notes", uploadForm.notes.trim());
       const response = await uploadDocument(formData);
@@ -1739,6 +1905,16 @@ function StaffDocumentsPage({
         language: template.supported_languages.includes(current.language)
           ? current.language
           : nextLanguage,
+        documentLanguage: template.supported_languages.includes(
+          current.documentLanguage,
+        )
+          ? current.documentLanguage
+          : nextLanguage,
+        accessCategory: template.is_medical
+          ? "medical"
+          : template.default_visibility === "patient_visible"
+            ? "patient"
+            : current.accessCategory,
         replaceDocumentId:
           detail &&
           current.replaceDocumentId === detail.id &&
@@ -1804,6 +1980,29 @@ function StaffDocumentsPage({
       closingNote: "",
       klinik: document.klinik ?? "",
       ursprung: document.ursprung ?? "",
+      documentDirection: document.document_direction ?? "outgoing",
+      documentVariant: document.document_variant ?? "original",
+      documentLanguage:
+        document.document_language ??
+        resolveTemplateLanguage(document.patient_id, template, patients),
+      accessCategory:
+        document.access_category ??
+        (template.is_medical
+          ? "medical"
+          : template.default_visibility === "patient_visible"
+            ? "patient"
+            : "internal"),
+      documentDate: document.document_date ?? new Date().toISOString().slice(0, 10),
+      sourcePerson: document.source_person ?? "",
+      sourceInstitution: document.source_institution ?? document.klinik ?? "GMED",
+      addresseePerson:
+        document.addressee_person ??
+        patientDocumentAddresseeLabel(document.patient_id, patients),
+      addresseeInstitution: document.addressee_institution ?? "",
+      financialStatus: document.financial_status ?? "",
+      paymentDueDate: document.payment_due_date ?? "",
+      paymentDate: document.payment_date ?? "",
+      paymentMethod: document.payment_method ?? "",
       notes: document.notes ?? "",
       textBlockKeys: [],
       bindings: prefillDocumentBindingsFromText(template.id, extractedText),
@@ -1830,12 +2029,29 @@ function StaffDocumentsPage({
     setGenerateBusy(true);
     setGenerateError("");
     try {
+      const generatedStandardName = buildStandardDocumentName({
+        category: selectedTemplate.category,
+        art: selectedTemplate.default_auto_name || selectedTemplate.art,
+        isMedical: selectedTemplate.is_medical,
+        documentDate: new Date(),
+        source:
+          compactDocumentParty(generateForm.ursprung, generateForm.klinik) ||
+          selectedTemplate.provider_name ||
+          "GMED",
+        addressee: patientDocumentAddresseeLabel(generateForm.patientId, patients),
+      });
+      const explicitAutoName = generateForm.autoName.trim();
+      const defaultAutoName = selectedTemplate.default_auto_name.trim();
+      const generatedAutoName =
+        !explicitAutoName || explicitAutoName === defaultAutoName
+          ? generatedStandardName || explicitAutoName
+          : explicitAutoName;
       const response = await generateDocument({
         template_id: selectedTemplate.id,
         patient_id: generateForm.patientId,
         order_id: generateForm.orderId || null,
         appointment_id: generateForm.appointmentId || null,
-        auto_name: generateForm.autoName.trim() || null,
+        auto_name: generatedAutoName || null,
         status: generateForm.status,
         visibility: generateForm.visibility,
         language: generateForm.language || null,
@@ -1845,6 +2061,19 @@ function StaffDocumentsPage({
         closing_note: generateForm.closingNote.trim() || null,
         klinik: generateForm.klinik.trim() || null,
         ursprung: generateForm.ursprung.trim() || null,
+        document_direction: generateForm.documentDirection,
+        document_variant: generateForm.documentVariant,
+        document_language: generateForm.documentLanguage || generateForm.language || null,
+        access_category: generateForm.accessCategory,
+        document_date: generateForm.documentDate || null,
+        source_person: generateForm.sourcePerson.trim() || null,
+        source_institution: generateForm.sourceInstitution.trim() || null,
+        addressee_person: generateForm.addresseePerson.trim() || null,
+        addressee_institution: generateForm.addresseeInstitution.trim() || null,
+        financial_status: generateForm.financialStatus || null,
+        payment_due_date: generateForm.paymentDueDate || null,
+        payment_date: generateForm.paymentDate || null,
+        payment_method: generateForm.paymentMethod || null,
         notes: generateForm.notes.trim() || null,
         text_block_keys: generateForm.textBlockKeys,
         bindings: buildBindingsPayload(selectedTemplate.id, generateForm.bindings),
@@ -2010,12 +2239,18 @@ function StaffDocumentsPage({
           currentRequest?.translated_text ??
           "",
       };
+      const shouldSendWorkspaceFields =
+        options?.includeWorkspaceFields === true || status === "completed";
       const updatedRequest = await updateTranslationRequest(requestId, {
         status,
-        note: draft.note.trim() || null,
-        source_language: draft.sourceLanguage || null,
-        source_text: draft.sourceText.trim() || null,
-        translated_text: draft.translatedText.trim() || null,
+        ...(shouldSendWorkspaceFields
+          ? {
+              note: draft.note.trim() || null,
+              source_language: draft.sourceLanguage || null,
+              source_text: draft.sourceText.trim() || null,
+              translated_text: draft.translatedText.trim() || null,
+            }
+          : {}),
         assigned_to: assignedToProvided ? draft.assignedTo : undefined,
         create_translated_document: options?.createTranslatedDocument || undefined,
         translated_document_auto_name: options?.translatedDocumentAutoName || undefined,
@@ -2031,31 +2266,21 @@ function StaffDocumentsPage({
           request.id === updatedRequest.id ? updatedRequest : request,
         );
       });
-      // Preserve any field the user kept editing while this (often fire-and-forget,
-      // e.g. assignee change) save was in flight: only fields unchanged since the
-      // request was dispatched take the freshly-saved server value.
+      // Preserve any field the user kept editing while this save was in flight:
+      // only fields unchanged since dispatch take the freshly-saved server value.
+      // Assignee-only actions intentionally do not send workspace text, so they
+      // must not hydrate those local draft fields back from the server response.
       const serverDraft = translationWorkspaceDraftFromRequest(updatedRequest);
       const liveDraft = translationDraftsRef.current[updatedRequest.id];
+      const nextDraft = reconcileTranslationWorkspaceDraftAfterSave({
+        draftAtDispatch: draft,
+        liveDraft,
+        serverDraft,
+        includeWorkspaceFields: shouldSendWorkspaceFields,
+      });
       updateTranslationDraft(
         updatedRequest.id,
-        liveDraft
-          ? {
-              assignedTo: serverDraft.assignedTo,
-              note: liveDraft.note !== draft.note ? liveDraft.note : serverDraft.note,
-              sourceLanguage:
-                liveDraft.sourceLanguage !== draft.sourceLanguage
-                  ? liveDraft.sourceLanguage
-                  : serverDraft.sourceLanguage,
-              sourceText:
-                liveDraft.sourceText !== draft.sourceText
-                  ? liveDraft.sourceText
-                  : serverDraft.sourceText,
-              translatedText:
-                liveDraft.translatedText !== draft.translatedText
-                  ? liveDraft.translatedText
-                  : serverDraft.translatedText,
-            }
-          : serverDraft,
+        nextDraft,
       );
       clearApiCache("/documents/translation-requests");
       clearApiCache("/documents/translation-requests?status=pending,in_progress");
@@ -2119,19 +2344,12 @@ function StaffDocumentsPage({
   async function handleSaveTranslationWorkspace(requestId: string) {
     const request = translationRequests.find((item) => item.id === requestId);
     if (!request) return;
-    // Send the current assignee explicitly: when omitted, the backend
-    // auto-assigns an in_progress request to whoever clicked Save, clobbering
-    // the existing исполнитель.
-    const currentAssignee =
-      translationDraftsRef.current[requestId]?.assignedTo ??
-      request.assigned_to ??
-      null;
     await handleUpdateTranslationRequest(
       requestId,
       request.status,
       undefined,
       t.documents_translation_workspace_saved,
-      { assignedTo: currentAssignee },
+      { includeWorkspaceFields: true },
     );
   }
 
@@ -2176,6 +2394,19 @@ function StaffDocumentsPage({
             is_medical: editForm.isMedical,
             klinik: editForm.klinik.trim() || null,
             ursprung: editForm.ursprung.trim() || null,
+            document_direction: editForm.documentDirection,
+            document_variant: editForm.documentVariant,
+            document_language: editForm.documentLanguage.trim() || null,
+            access_category: editForm.accessCategory,
+            document_date: editForm.documentDate || null,
+            source_person: editForm.sourcePerson.trim() || null,
+            source_institution: editForm.sourceInstitution.trim() || null,
+            addressee_person: editForm.addresseePerson.trim() || null,
+            addressee_institution: editForm.addresseeInstitution.trim() || null,
+            financial_status: editForm.financialStatus || null,
+            payment_due_date: editForm.paymentDueDate || null,
+            payment_date: editForm.paymentDate || null,
+            payment_method: editForm.paymentMethod || null,
             notes: editForm.notes.trim() || null,
           }
         : {
@@ -2722,6 +2953,74 @@ function StaffDocumentsPage({
               className="h-8 rounded-lg bg-background text-[13px]"
               placeholder={t.documents_source}
             />
+            <NativeComboboxSelect
+              value={filters.documentDirection}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  documentDirection: event.target.value,
+                }))
+              }
+              className={cn(selectClassName, "h-8 bg-background text-[13px]")}
+            >
+              <option value="">{metaText.allDirections}</option>
+              {DOCUMENT_DIRECTION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {optionLabel(option)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+            <NativeComboboxSelect
+              value={filters.documentVariant}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  documentVariant: event.target.value,
+                }))
+              }
+              className={cn(selectClassName, "h-8 bg-background text-[13px]")}
+            >
+              <option value="">{metaText.allVariants}</option>
+              {DOCUMENT_VARIANT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {optionLabel(option)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+            <NativeComboboxSelect
+              value={filters.accessCategory}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  accessCategory: event.target.value,
+                }))
+              }
+              className={cn(selectClassName, "h-8 bg-background text-[13px]")}
+            >
+              <option value="">{metaText.allAccessCategories}</option>
+              {DOCUMENT_ACCESS_CATEGORY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {optionLabel(option)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+            <NativeComboboxSelect
+              value={filters.financialStatus}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  financialStatus: event.target.value,
+                }))
+              }
+              className={cn(selectClassName, "h-8 bg-background text-[13px]")}
+            >
+              <option value="">{metaText.allFinancialStatuses}</option>
+              {DOCUMENT_FINANCIAL_STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {optionLabel(option)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
             <Button
               variant="outline"
               size="sm"
@@ -2740,6 +3039,10 @@ function StaffDocumentsPage({
                   dateTo: "",
                   klinik: "",
                   ursprung: "",
+                  documentDirection: "",
+                  documentVariant: "",
+                  accessCategory: "",
+                  financialStatus: "",
                 })
               }
             >
@@ -3120,6 +3423,203 @@ function StaffDocumentsPage({
                   )}
                 />
               </Field>
+              <Field label={metaText.direction}>
+                <NativeComboboxSelect
+                  value={generateForm.documentDirection}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      documentDirection: event.target.value as DocumentDirection,
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  {DOCUMENT_DIRECTION_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {optionLabel(option)}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </Field>
+              <Field label={metaText.variant}>
+                <NativeComboboxSelect
+                  value={generateForm.documentVariant}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      documentVariant: event.target.value as DocumentVariant,
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  {DOCUMENT_VARIANT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {optionLabel(option)}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </Field>
+              <Field label={metaText.documentLanguage}>
+                <NativeComboboxSelect
+                  value={generateForm.documentLanguage}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      documentLanguage: event.target.value,
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  {["de", "en", "uk", "ru"].map((language) => (
+                    <option key={language} value={language}>
+                      {formatLanguageLabel(language)}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </Field>
+              <Field label={metaText.accessCategory}>
+                <NativeComboboxSelect
+                  value={generateForm.accessCategory}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      accessCategory: event.target.value as DocumentAccessCategory,
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  {DOCUMENT_ACCESS_CATEGORY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {optionLabel(option)}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </Field>
+              <Field label={metaText.documentDate}>
+                <Input
+                  type="date"
+                  value={generateForm.documentDate}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      documentDate: event.target.value,
+                    }))
+                  }
+                  className={shellInputClassName}
+                />
+              </Field>
+              <Field label={metaText.sourcePerson}>
+                <Input
+                  value={generateForm.sourcePerson}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      sourcePerson: event.target.value,
+                    }))
+                  }
+                  className={shellInputClassName}
+                />
+              </Field>
+              <Field label={metaText.sourceInstitution}>
+                <Input
+                  value={generateForm.sourceInstitution}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      sourceInstitution: event.target.value,
+                    }))
+                  }
+                  className={shellInputClassName}
+                />
+              </Field>
+              <Field label={metaText.addresseePerson}>
+                <Input
+                  value={generateForm.addresseePerson}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      addresseePerson: event.target.value,
+                    }))
+                  }
+                  className={shellInputClassName}
+                />
+              </Field>
+              <Field label={metaText.addresseeInstitution}>
+                <Input
+                  value={generateForm.addresseeInstitution}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      addresseeInstitution: event.target.value,
+                    }))
+                  }
+                  className={shellInputClassName}
+                />
+              </Field>
+              <Field label={metaText.financialStatus}>
+                <NativeComboboxSelect
+                  value={generateForm.financialStatus}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      financialStatus: event.target.value as DocumentFinancialStatus | "",
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  <option value="">{metaText.notFinancial}</option>
+                  {DOCUMENT_FINANCIAL_STATUS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {optionLabel(option)}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </Field>
+              <Field label={metaText.paymentDueDate}>
+                <Input
+                  type="date"
+                  value={generateForm.paymentDueDate}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      paymentDueDate: event.target.value,
+                    }))
+                  }
+                  className={shellInputClassName}
+                />
+              </Field>
+              <Field label={metaText.paymentDate}>
+                <Input
+                  type="date"
+                  value={generateForm.paymentDate}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      paymentDate: event.target.value,
+                    }))
+                  }
+                  className={shellInputClassName}
+                />
+              </Field>
+              <Field label={metaText.paymentMethod}>
+                <NativeComboboxSelect
+                  value={generateForm.paymentMethod}
+                  onChange={(event) =>
+                    setGenerateForm((current) => ({
+                      ...current,
+                      paymentMethod: event.target.value as DocumentPaymentMethod | "",
+                    }))
+                  }
+                  className={selectClassName}
+                >
+                  <option value="">{metaText.noPaymentMethod}</option>
+                  {DOCUMENT_PAYMENT_METHOD_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {optionLabel(option)}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </Field>
                   </div>
                 </DocumentSheetSection>
                 {selectedTemplate && DOCUMENT_BINDING_FIELDS[selectedTemplate.id] ? (
@@ -3483,6 +3983,204 @@ function StaffDocumentsPage({
                         />
                       </Field>
                     ) : null}
+                    <Field label={metaText.direction}>
+                      <NativeComboboxSelect
+                        value={uploadForm.documentDirection}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            documentDirection: event.target.value as DocumentDirection,
+                          }))
+                        }
+                        className={selectClassName}
+                      >
+                        {DOCUMENT_DIRECTION_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {optionLabel(option)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
+                    <Field label={metaText.variant}>
+                      <NativeComboboxSelect
+                        value={uploadForm.documentVariant}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            documentVariant: event.target.value as DocumentVariant,
+                          }))
+                        }
+                        className={selectClassName}
+                      >
+                        {DOCUMENT_VARIANT_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {optionLabel(option)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
+                    <Field label={metaText.documentLanguage}>
+                      <NativeComboboxSelect
+                        value={uploadForm.documentLanguage}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            documentLanguage: event.target.value,
+                          }))
+                        }
+                        className={selectClassName}
+                      >
+                        <option value="">{t.common_not_set}</option>
+                        {["de", "en", "uk", "ru"].map((language) => (
+                          <option key={language} value={language}>
+                            {formatLanguageLabel(language)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
+                    <Field label={metaText.accessCategory}>
+                      <NativeComboboxSelect
+                        value={uploadForm.accessCategory}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            accessCategory: event.target.value as DocumentAccessCategory,
+                          }))
+                        }
+                        className={selectClassName}
+                      >
+                        {DOCUMENT_ACCESS_CATEGORY_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {optionLabel(option)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
+                    <Field label={metaText.documentDate}>
+                      <Input
+                        type="date"
+                        value={uploadForm.documentDate}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            documentDate: event.target.value,
+                          }))
+                        }
+                        className={shellInputClassName}
+                      />
+                    </Field>
+                    <Field label={metaText.sourcePerson}>
+                      <Input
+                        value={uploadForm.sourcePerson}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            sourcePerson: event.target.value,
+                          }))
+                        }
+                        className={shellInputClassName}
+                      />
+                    </Field>
+                    <Field label={metaText.sourceInstitution}>
+                      <Input
+                        value={uploadForm.sourceInstitution}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            sourceInstitution: event.target.value,
+                          }))
+                        }
+                        className={shellInputClassName}
+                      />
+                    </Field>
+                    <Field label={metaText.addresseePerson}>
+                      <Input
+                        value={uploadForm.addresseePerson}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            addresseePerson: event.target.value,
+                          }))
+                        }
+                        className={shellInputClassName}
+                      />
+                    </Field>
+                    <Field label={metaText.addresseeInstitution}>
+                      <Input
+                        value={uploadForm.addresseeInstitution}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            addresseeInstitution: event.target.value,
+                          }))
+                        }
+                        className={shellInputClassName}
+                      />
+                    </Field>
+                    <Field label={metaText.financialStatus}>
+                      <NativeComboboxSelect
+                        value={uploadForm.financialStatus}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            financialStatus: event.target.value as DocumentFinancialStatus | "",
+                          }))
+                        }
+                        className={selectClassName}
+                      >
+                        <option value="">{metaText.notFinancial}</option>
+                        {DOCUMENT_FINANCIAL_STATUS_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {optionLabel(option)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
+                    <Field label={metaText.paymentDueDate}>
+                      <Input
+                        type="date"
+                        value={uploadForm.paymentDueDate}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            paymentDueDate: event.target.value,
+                          }))
+                        }
+                        className={shellInputClassName}
+                      />
+                    </Field>
+                    <Field label={metaText.paymentDate}>
+                      <Input
+                        type="date"
+                        value={uploadForm.paymentDate}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            paymentDate: event.target.value,
+                          }))
+                        }
+                        className={shellInputClassName}
+                      />
+                    </Field>
+                    <Field label={metaText.paymentMethod}>
+                      <NativeComboboxSelect
+                        value={uploadForm.paymentMethod}
+                        onChange={(event) =>
+                          setUploadForm((current) => ({
+                            ...current,
+                            paymentMethod: event.target.value as DocumentPaymentMethod | "",
+                          }))
+                        }
+                        className={selectClassName}
+                      >
+                        <option value="">{metaText.noPaymentMethod}</option>
+                        {DOCUMENT_PAYMENT_METHOD_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {optionLabel(option)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
                   </div>
                   <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
                     <input
@@ -4023,6 +4721,235 @@ function StaffDocumentsPage({
                       className={shellInputClassName}
                     />
                   </Field>
+                  <Field label={metaText.direction}>
+                    <NativeComboboxSelect
+                      value={editForm.documentDirection}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? {
+                                ...current,
+                                documentDirection: event.target.value as DocumentDirection,
+                              }
+                            : current,
+                        )
+                      }
+                      className={selectClassName}
+                    >
+                      {DOCUMENT_DIRECTION_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {optionLabel(option)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  <Field label={metaText.variant}>
+                    <NativeComboboxSelect
+                      value={editForm.documentVariant}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? {
+                                ...current,
+                                documentVariant: event.target.value as DocumentVariant,
+                              }
+                            : current,
+                        )
+                      }
+                      className={selectClassName}
+                    >
+                      {DOCUMENT_VARIANT_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {optionLabel(option)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  <Field label={metaText.documentLanguage}>
+                    <NativeComboboxSelect
+                      value={editForm.documentLanguage}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? { ...current, documentLanguage: event.target.value }
+                            : current,
+                        )
+                      }
+                      className={selectClassName}
+                    >
+                      <option value="">{t.common_not_set}</option>
+                      {["de", "en", "uk", "ru"].map((language) => (
+                        <option key={language} value={language}>
+                          {formatLanguageLabel(language)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  <Field label={metaText.accessCategory}>
+                    <NativeComboboxSelect
+                      value={editForm.accessCategory}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? {
+                                ...current,
+                                accessCategory: event.target.value as DocumentAccessCategory,
+                              }
+                            : current,
+                        )
+                      }
+                      className={selectClassName}
+                    >
+                      {DOCUMENT_ACCESS_CATEGORY_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {optionLabel(option)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  <Field label={metaText.documentDate}>
+                    <Input
+                      type="date"
+                      value={editForm.documentDate}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? { ...current, documentDate: event.target.value }
+                            : current,
+                        )
+                      }
+                      className={shellInputClassName}
+                    />
+                  </Field>
+                  <Field label={metaText.sourcePerson}>
+                    <Input
+                      value={editForm.sourcePerson}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? { ...current, sourcePerson: event.target.value }
+                            : current,
+                        )
+                      }
+                      className={shellInputClassName}
+                    />
+                  </Field>
+                  <Field label={metaText.sourceInstitution}>
+                    <Input
+                      value={editForm.sourceInstitution}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? { ...current, sourceInstitution: event.target.value }
+                            : current,
+                        )
+                      }
+                      className={shellInputClassName}
+                    />
+                  </Field>
+                  <Field label={metaText.addresseePerson}>
+                    <Input
+                      value={editForm.addresseePerson}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? { ...current, addresseePerson: event.target.value }
+                            : current,
+                        )
+                      }
+                      className={shellInputClassName}
+                    />
+                  </Field>
+                  <Field label={metaText.addresseeInstitution}>
+                    <Input
+                      value={editForm.addresseeInstitution}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? {
+                                ...current,
+                                addresseeInstitution: event.target.value,
+                              }
+                            : current,
+                        )
+                      }
+                      className={shellInputClassName}
+                    />
+                  </Field>
+                  <Field label={metaText.financialStatus}>
+                    <NativeComboboxSelect
+                      value={editForm.financialStatus}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? {
+                                ...current,
+                                financialStatus: event.target.value as DocumentFinancialStatus | "",
+                              }
+                            : current,
+                        )
+                      }
+                      className={selectClassName}
+                    >
+                      <option value="">{metaText.notFinancial}</option>
+                      {DOCUMENT_FINANCIAL_STATUS_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {optionLabel(option)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  <Field label={metaText.paymentDueDate}>
+                    <Input
+                      type="date"
+                      value={editForm.paymentDueDate}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? { ...current, paymentDueDate: event.target.value }
+                            : current,
+                        )
+                      }
+                      className={shellInputClassName}
+                    />
+                  </Field>
+                  <Field label={metaText.paymentDate}>
+                    <Input
+                      type="date"
+                      value={editForm.paymentDate}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? { ...current, paymentDate: event.target.value }
+                            : current,
+                        )
+                      }
+                      className={shellInputClassName}
+                    />
+                  </Field>
+                  <Field label={metaText.paymentMethod}>
+                    <NativeComboboxSelect
+                      value={editForm.paymentMethod}
+                      onChange={(event) =>
+                        setEditForm((current) =>
+                          current
+                            ? {
+                                ...current,
+                                paymentMethod: event.target.value as DocumentPaymentMethod | "",
+                              }
+                            : current,
+                        )
+                      }
+                      className={selectClassName}
+                    >
+                      <option value="">{metaText.noPaymentMethod}</option>
+                      {DOCUMENT_PAYMENT_METHOD_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {optionLabel(option)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
                     </div>
                     <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
                       <input
@@ -4389,6 +5316,73 @@ function StaffDocumentsPage({
                           <DocumentMetaFact
                             label={t.documents_source}
                             value={formatDocumentSourceLabel(detail.ursprung, t)}
+                          />
+                          <DocumentMetaFact
+                            label={metaText.direction}
+                            value={labelFromOptions(
+                              detail.document_direction,
+                              DOCUMENT_DIRECTION_OPTIONS,
+                            )}
+                          />
+                          <DocumentMetaFact
+                            label={metaText.variant}
+                            value={labelFromOptions(
+                              detail.document_variant,
+                              DOCUMENT_VARIANT_OPTIONS,
+                            )}
+                          />
+                          <DocumentMetaFact
+                            label={metaText.documentLanguage}
+                            value={formatLanguageLabel(detail.document_language)}
+                          />
+                          <DocumentMetaFact
+                            label={metaText.accessCategory}
+                            value={labelFromOptions(
+                              detail.access_category,
+                              DOCUMENT_ACCESS_CATEGORY_OPTIONS,
+                            )}
+                          />
+                          <DocumentMetaFact
+                            label={metaText.documentDate}
+                            value={formatDate(detail.document_date)}
+                          />
+                          <DocumentMetaFact
+                            label={metaText.sourcePerson}
+                            value={detail.source_person || t.common_not_set}
+                          />
+                          <DocumentMetaFact
+                            label={metaText.sourceInstitution}
+                            value={detail.source_institution || t.common_not_set}
+                          />
+                          <DocumentMetaFact
+                            label={metaText.addresseePerson}
+                            value={detail.addressee_person || t.common_not_set}
+                          />
+                          <DocumentMetaFact
+                            label={metaText.addresseeInstitution}
+                            value={detail.addressee_institution || t.common_not_set}
+                          />
+                          <DocumentMetaFact
+                            label={metaText.financialStatus}
+                            value={labelFromOptions(
+                              detail.financial_status,
+                              DOCUMENT_FINANCIAL_STATUS_OPTIONS,
+                            )}
+                          />
+                          <DocumentMetaFact
+                            label={metaText.paymentDueDate}
+                            value={formatDate(detail.payment_due_date)}
+                          />
+                          <DocumentMetaFact
+                            label={metaText.paymentDate}
+                            value={formatDate(detail.payment_date)}
+                          />
+                          <DocumentMetaFact
+                            label={metaText.paymentMethod}
+                            value={labelFromOptions(
+                              detail.payment_method,
+                              DOCUMENT_PAYMENT_METHOD_OPTIONS,
+                            )}
                           />
                         </div>
                       </DocumentMetaHighlight>

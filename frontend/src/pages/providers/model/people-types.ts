@@ -22,6 +22,7 @@ export type ProviderPeopleCounts = {
 export type ProviderPeopleRow = {
   person_type: ProviderPeoplePersonType;
   person_id: string;
+  shared_identity_id: string | null;
   provider_id: string;
   provider_name: string;
   provider_type: ProviderType;

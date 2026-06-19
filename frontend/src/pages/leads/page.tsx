@@ -1990,7 +1990,7 @@ function useLeadsPageContent() {
         >
           <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b border-border/70 bg-card px-3 py-2">
             <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -tranzinc-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 className={cn(shellInputClassName, "h-8 rounded-lg bg-background pl-8 text-[13px]")}
                 placeholder={t.common_search}

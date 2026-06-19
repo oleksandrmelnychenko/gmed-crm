@@ -169,6 +169,7 @@ function normalizeProviderPeopleRow(value: unknown): ProviderPeopleRow {
   return {
     person_type: normalizePersonType(raw.person_type),
     person_id: personId,
+    shared_identity_id: nullableString(raw.shared_identity_id),
     provider_id: stringValue(raw.provider_id ?? provider.id),
     provider_name: stringValue(raw.provider_name ?? provider.name),
     provider_type: normalizeProviderType(raw.provider_type ?? provider.provider_type),

@@ -8339,7 +8339,7 @@ async fn appointment_conflicts_endpoint_reports_patient_and_interpreter_overlaps
         &app,
         "GET",
         &format!(
-            "/api/v1/appointments/meta/conflicts?patient_id={patient_id}&interpreter_id={interpreter_id}&date=2026-04-28&time_start=10:15&time_end=10:45"
+            "/api/v1/appointments/meta/conflicts?patient_id={patient_id}&interpreter_id={interpreter_id}&doctor_id={doctor_id}&date=2026-04-28&time_start=10:15&time_end=10:45"
         ),
         &bearer,
         None,
@@ -8349,7 +8349,9 @@ async fn appointment_conflicts_endpoint_reports_patient_and_interpreter_overlaps
     assert_eq!(body["has_conflicts"], true);
     assert_eq!(body["patient_conflict_count"], 1);
     assert_eq!(body["interpreter_conflict_count"], 1);
+    assert_eq!(body["doctor_conflict_count"], 1);
     assert_eq!(body["patient_conflicts"][0]["title"], "Patient overlap");
+    assert_eq!(body["doctor_conflicts"][0]["title"], "Patient overlap");
 }
 
 #[tokio::test]

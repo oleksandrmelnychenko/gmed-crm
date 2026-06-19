@@ -1676,6 +1676,142 @@ fn extract_external_document_ids(line_items: &Value) -> Vec<Uuid> {
     ids
 }
 
+async fn sync_reimbursed_financial_documents_for_paid_invoice(
+    state: &AppState,
+    invoice_id: Uuid,
+    actor_user_id: Uuid,
+    paid_at: DateTime<Utc>,
+) -> Result<Vec<Uuid>, axum::response::Response> {
+    let row = sqlx::query(
+        r#"SELECT order_id, patient_id, status, total_gross, paid_amount, line_items
+           FROM invoices
+           WHERE id = $1"#,
+    )
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, invoice_id = %invoice_id, "load paid invoice document sync context");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to sync invoice document status",
+        )
+    })?;
+
+    let Some(row) = row else {
+        return Ok(Vec::new());
+    };
+
+    let status = row.try_get::<String, _>("status").unwrap_or_default();
+    let total_gross = row
+        .try_get::<Decimal, _>("total_gross")
+        .unwrap_or(Decimal::ZERO);
+    let paid_amount = row
+        .try_get::<Decimal, _>("paid_amount")
+        .unwrap_or(Decimal::ZERO);
+    if status != "paid" || total_gross <= Decimal::ZERO || paid_amount < total_gross {
+        return Ok(Vec::new());
+    }
+
+    let order_id = row.try_get::<Uuid, _>("order_id").unwrap_or_default();
+    let patient_id = row.try_get::<Uuid, _>("patient_id").unwrap_or_default();
+    let line_items = row
+        .try_get::<Value, _>("line_items")
+        .unwrap_or_else(|_| serde_json::json!([]));
+    let direct_document_ids = extract_external_document_ids(&line_items);
+    let source_line_ids = extract_source_line_ids(&line_items);
+    let payment_date = paid_at.date_naive();
+
+    let updated_rows = sqlx::query(
+        r#"WITH explicit_documents AS (
+                SELECT unnest($1::uuid[]) AS document_id
+                UNION
+                SELECT ol.external_document_id AS document_id
+                FROM order_leistungen ol
+                WHERE ol.external_document_id IS NOT NULL
+                  AND ol.id = ANY($2)
+           )
+           UPDATE documents d
+           SET financial_status = 'reimbursed',
+               access_category = COALESCE(d.access_category, 'financial'),
+               payment_date = COALESCE(d.payment_date, $5),
+               payment_method = COALESCE(d.payment_method, 'bank_transfer')
+           WHERE d.patient_id = $3
+             AND d.status <> 'archived'
+             AND COALESCE(d.financial_status, '') <> 'reimbursed'
+             AND (
+                    d.id IN (
+                        SELECT document_id
+                        FROM explicit_documents
+                        WHERE document_id IS NOT NULL
+                    )
+                 OR (
+                        d.order_id = $4
+                    AND d.financial_status IN (
+                        'open',
+                        'in_progress',
+                        'paid',
+                        'overdue',
+                        'billed_to_patient'
+                    )
+                 )
+             )
+           RETURNING d.id"#,
+    )
+    .bind(&direct_document_ids)
+    .bind(&source_line_ids)
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(payment_date)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, invoice_id = %invoice_id, "sync reimbursed financial documents");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to sync invoice document status",
+        )
+    })?;
+
+    let updated_document_ids = updated_rows
+        .into_iter()
+        .filter_map(|row| row.try_get::<Uuid, _>("id").ok())
+        .collect::<Vec<_>>();
+
+    if !updated_document_ids.is_empty() {
+        state.audit_sender.try_send(audit::domain_event(
+            "sync_reimbursed_financial_documents",
+            Some(actor_user_id),
+            "invoice",
+            Some(invoice_id),
+            serde_json::json!({
+                "order_id": order_id,
+                "patient_id": patient_id,
+                "document_ids": updated_document_ids,
+                "payment_date": payment_date.to_string(),
+            }),
+        ));
+
+        for document_id in &updated_document_ids {
+            crate::realtime::publish_document_event(
+                state,
+                Some(actor_user_id),
+                "document.updated",
+                *document_id,
+                serde_json::json!({
+                    "patient_id": patient_id,
+                    "order_id": order_id,
+                    "financial_status": "reimbursed",
+                    "source_invoice_id": invoice_id,
+                }),
+            )
+            .await;
+        }
+    }
+
+    Ok(updated_document_ids)
+}
+
 fn vat_source_explanation(
     vat_source: &str,
     tax_profile_name: Option<&str>,
@@ -3634,11 +3770,7 @@ async fn download_invoice_pdf(
         invoice_pdf_filename(&context).replace('"', "")
     );
 
-    axum::response::Response::builder()
-        .header("content-type", "application/pdf")
-        .header("content-disposition", disposition)
-        .body(Body::from(pdf_bytes))
-        .unwrap()
+    invoice_pdf_response(pdf_bytes, disposition)
 }
 
 async fn download_my_invoice_pdf(
@@ -3693,11 +3825,24 @@ async fn download_my_invoice_pdf(
         invoice_pdf_filename(&context).replace('"', "")
     );
 
-    axum::response::Response::builder()
+    invoice_pdf_response(pdf_bytes, disposition)
+}
+
+fn invoice_pdf_response(pdf_bytes: Vec<u8>, disposition: String) -> axum::response::Response {
+    match axum::response::Response::builder()
         .header("content-type", "application/pdf")
         .header("content-disposition", disposition)
         .body(Body::from(pdf_bytes))
-        .unwrap()
+    {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::error!(error = %error, "build invoice pdf response");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build invoice PDF response",
+            )
+        }
+    }
 }
 
 async fn list_dunning_events(
@@ -4276,6 +4421,17 @@ async fn update_invoice_status(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to update invoice accounting ledger",
                 );
+            }
+            if let Some(paid_at) = paid_at
+                && let Err(resp) = sync_reimbursed_financial_documents_for_paid_invoice(
+                    &state,
+                    invoice_id,
+                    auth.user_id,
+                    paid_at,
+                )
+                .await
+            {
+                return resp;
             }
 
             state.audit_sender.try_send(audit::domain_event(

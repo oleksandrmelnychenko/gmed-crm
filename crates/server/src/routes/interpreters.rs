@@ -6,7 +6,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -27,7 +27,10 @@ use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/interpreters", get(list_interpreter_profiles))
+        .route(
+            "/interpreters",
+            get(list_interpreter_profiles).post(create_standalone_interpreter_profile),
+        )
         .route(
             "/interpreters/{interpreter_id}/profile",
             get(get_interpreter_profile).put(update_interpreter_profile),
@@ -62,6 +65,13 @@ struct ListInterpreterProfilesQuery {
 }
 
 #[derive(Deserialize)]
+struct CreateStandaloneInterpreterProfile {
+    name: String,
+    email: Option<String>,
+    profile: Option<Value>,
+}
+
+#[derive(Deserialize)]
 struct ReplaceInterpreterLanguages {
     languages: Vec<InterpreterLanguageInput>,
 }
@@ -76,6 +86,12 @@ struct InterpreterLanguageInput {
     #[serde(alias = "cefrLevel", alias = "level")]
     cefr_level: Option<String>,
     specialization: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum InterpreterProfileKind {
+    User,
+    Standalone,
 }
 
 async fn list_interpreter_profiles(
@@ -120,7 +136,7 @@ async fn list_interpreter_profiles(
         normalize_optional_text(query.search).unwrap_or_default()
     );
 
-    match sqlx::query(
+    let user_rows = match sqlx::query(
         r#"SELECT u.id, u.name, u.email, u.role, u.is_active,
                   COALESCE(p.profile, '{}'::jsonb) AS raw_profile,
                   p.updated_at AS profile_updated_at,
@@ -188,23 +204,119 @@ async fn list_interpreter_profiles(
                              AND de_normalize(concat_ws(' ', il.language_code, il.language_label)) LIKE de_normalize($3)))
            ORDER BY u.is_active DESC, u.name"#,
     )
+    .bind(status.clone())
+    .bind(contract_type.clone())
+    .bind(search_pattern.clone())
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(error = %error, "list interpreter profiles");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load interpreter profiles",
+            );
+        }
+    };
+
+    let standalone_rows = match sqlx::query(
+        r#"SELECT id, name, email, role, is_active,
+                  COALESCE(profile, '{}'::jsonb) AS raw_profile,
+                  updated_at AS profile_updated_at
+           FROM interpreter_standalone_profiles
+           WHERE ($1::text IS NULL OR COALESCE(profile->>'status', 'active') = $1)
+             AND ($2::text IS NULL OR profile->>'contractType' = $2)
+             AND ($3::text = '%%'
+                  OR de_normalize(concat_ws(' ',
+                       name, email, profile->>'phone',
+                       profile->'finance'->>'taxNumber',
+                       profile->'finance'->>'ustIdnr'
+                     )) LIKE de_normalize($3)
+                  OR EXISTS (
+                       SELECT 1
+                       FROM interpreter_standalone_languages il
+                       WHERE il.standalone_profile_id = interpreter_standalone_profiles.id
+                         AND de_normalize(concat_ws(' ', il.language_code, il.language_label)) LIKE de_normalize($3)
+                  ))
+           ORDER BY is_active DESC, name"#,
+    )
     .bind(status)
     .bind(contract_type)
     .bind(search_pattern)
     .fetch_all(&state.db)
     .await
     {
-        Ok(rows) => Json(
-            rows.into_iter()
-                .map(interpreter_profile_row_json)
-                .collect::<Vec<_>>(),
-        )
-        .into_response(),
+        Ok(rows) => rows,
         Err(error) => {
-            tracing::error!(error = %error, "list interpreter profiles");
-            err(
+            tracing::error!(error = %error, "list standalone staff profiles");
+            return err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to load interpreter profiles",
+            );
+        }
+    };
+
+    let mut payload = user_rows
+        .into_iter()
+        .map(interpreter_profile_row_json)
+        .chain(
+            standalone_rows
+                .into_iter()
+                .map(standalone_interpreter_profile_row_json),
+        )
+        .collect::<Vec<_>>();
+    sort_interpreter_profile_payloads(&mut payload);
+    Json(payload).into_response()
+}
+
+async fn create_standalone_interpreter_profile(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Json(body): Json<CreateStandaloneInterpreterProfile>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::ItAdmin,
+    ]) {
+        return resp;
+    }
+
+    let name = body.name.trim().to_string();
+    if name.is_empty() {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Name is required");
+    }
+    let email = normalize_optional_text(body.email);
+    let profile = match body.profile {
+        Some(value) => match normalize_profile_payload(value) {
+            Ok(value) => normalize_standalone_profile_defaults(value),
+            Err(resp) => return resp,
+        },
+        None => normalize_standalone_profile_defaults(json!({})),
+    };
+
+    match sqlx::query(
+        r#"INSERT INTO interpreter_standalone_profiles (name, email, profile, updated_by)
+           VALUES ($1, $2, $3, $4)
+           RETURNING id, name, email, role, is_active,
+                     COALESCE(profile, '{}'::jsonb) AS raw_profile,
+                     updated_at AS profile_updated_at"#,
+    )
+    .bind(name)
+    .bind(email)
+    .bind(&profile)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => Json(standalone_interpreter_profile_row_json(row)).into_response(),
+        Err(error) => {
+            tracing::error!(error = %error, "create standalone staff profile");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create staff profile",
             )
         }
     }
@@ -220,71 +332,13 @@ async fn get_interpreter_profile(
         return resp;
     }
 
-    match sqlx::query(
-        r#"SELECT u.id, u.name, u.email, u.role, u.is_active,
-                  COALESCE(p.profile, '{}'::jsonb) AS raw_profile,
-                  p.updated_at AS profile_updated_at,
-                  d.gender, d.birth_date, COALESCE(d.status, 'active') AS typed_status,
-                  d.contract_type, d.contract_start_date, d.contract_end_date,
-                  d.employment_kind, d.phone, d.email_secure, d.address, d.emergency_contact,
-                  d.medical_knowledge, d.training_history, d.work_permit_valid_until AS detail_work_permit_valid_until,
-                  d.internal_notes, d.retention_delete_at, d.erasure_request_status,
-                  c.confidentiality_status, c.confidentiality_signed_at, c.confidentiality_document_url,
-                  c.confidentiality_document_id, confidentiality_doc.original_filename AS confidentiality_document_name,
-                  c.avv_status, c.avv_signed_at, c.avv_document_url, c.avv_document_id,
-                  avv_doc.original_filename AS avv_document_name, c.gdpr_training_at,
-                  c.work_permit_valid_until AS compliance_work_permit_valid_until,
-                  f.hourly_rate, f.salary_class, f.bank_details, f.tax_number, f.ust_idnr, f.billing_status,
-                  a.access_level, a.auto_block_policy,
-                  COALESCE((
-                    SELECT jsonb_agg(w.value ORDER BY w.sort_order, w.value)
-                    FROM interpreter_work_zones w
-                    WHERE w.interpreter_id = u.id AND w.zone_type = 'country'
-                  ), '[]'::jsonb) AS work_countries,
-                  COALESCE((
-                    SELECT jsonb_agg(w.value ORDER BY w.sort_order, w.value)
-                    FROM interpreter_work_zones w
-                    WHERE w.interpreter_id = u.id AND w.zone_type = 'location'
-                  ), '[]'::jsonb) AS work_locations,
-                  COALESCE((
-                    SELECT jsonb_agg(e.label ORDER BY e.sort_order, e.label)
-                    FROM interpreter_equipment e
-                    WHERE e.interpreter_id = u.id
-                  ), '[]'::jsonb) AS equipment,
-                  COALESCE((
-                    SELECT jsonb_agg(jsonb_build_object(
-                        'id', cr.id,
-                        'credentialType', cr.credential_type,
-                        'title', cr.title,
-                        'issuer', cr.issuer,
-                        'issuedAt', cr.issued_at,
-                        'expiresAt', cr.expires_at,
-                        'documentUrl', cr.document_url,
-                        'documentId', cr.document_id,
-                        'documentName', credential_doc.original_filename,
-                        'documentMimeType', credential_doc.mime_type,
-                        'notes', cr.notes
-                    ) ORDER BY cr.credential_type, cr.expires_at NULLS LAST, cr.title)
-                    FROM interpreter_credentials cr
-                    LEFT JOIN documents credential_doc ON credential_doc.id = cr.document_id
-                    WHERE cr.interpreter_id = u.id
-                  ), '[]'::jsonb) AS credentials
-           FROM users u
-           LEFT JOIN interpreter_profiles p ON p.user_id = u.id
-           LEFT JOIN interpreter_profile_details d ON d.user_id = u.id
-           LEFT JOIN interpreter_compliance_profiles c ON c.user_id = u.id
-           LEFT JOIN documents confidentiality_doc ON confidentiality_doc.id = c.confidentiality_document_id
-           LEFT JOIN documents avv_doc ON avv_doc.id = c.avv_document_id
-           LEFT JOIN interpreter_finance_profiles f ON f.user_id = u.id
-           LEFT JOIN interpreter_access_profiles a ON a.user_id = u.id
-           WHERE u.id = $1
-             AND u.role IN ('interpreter', 'teamlead_interpreter')"#,
-    )
-    .bind(interpreter_id)
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(row)) => Json(interpreter_profile_row_json_for_auth(row, &auth)).into_response(),
+    match load_interpreter_profile_payload(&state, interpreter_id).await {
+        Ok(Some(mut payload)) => {
+            if auth.role == Role::Interpreter {
+                redact_interpreter_self_profile(&mut payload);
+            }
+            Json(payload).into_response()
+        }
         Ok(None) => err(StatusCode::NOT_FOUND, "Interpreter not found"),
         Err(error) => {
             tracing::error!(error = %error, interpreter_id = %interpreter_id, "get interpreter profile");
@@ -302,16 +356,17 @@ async fn update_interpreter_profile(
     Path(interpreter_id): Path<Uuid>,
     Json(body): Json<Value>,
 ) -> axum::response::Response {
-    if let Err(resp) = ensure_interpreter_profile_access(&state, &auth, interpreter_id, true).await
-    {
-        return resp;
-    }
+    let profile_kind =
+        match ensure_interpreter_profile_access(&state, &auth, interpreter_id, true).await {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
 
     let incoming_profile = match normalize_profile_payload(body) {
         Ok(value) => value,
         Err(resp) => return resp,
     };
-    let profile = match load_interpreter_profile_payload(&state, interpreter_id).await {
+    let mut profile = match load_interpreter_profile_payload(&state, interpreter_id).await {
         Ok(Some(payload)) => merge_profile_payload(
             payload
                 .get("profile")
@@ -328,6 +383,41 @@ async fn update_interpreter_profile(
             );
         }
     };
+
+    if profile_kind == InterpreterProfileKind::Standalone {
+        profile = normalize_standalone_profile_defaults(profile);
+        if let Err(error) = sqlx::query(
+            r#"UPDATE interpreter_standalone_profiles
+               SET profile = $2,
+                   updated_by = $3,
+                   updated_at = now()
+               WHERE id = $1"#,
+        )
+        .bind(interpreter_id)
+        .bind(&profile)
+        .bind(auth.user_id)
+        .execute(&state.db)
+        .await
+        {
+            tracing::error!(error = %error, interpreter_id = %interpreter_id, "update standalone staff profile");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to save interpreter profile",
+            );
+        }
+
+        return match load_interpreter_profile_payload(&state, interpreter_id).await {
+            Ok(Some(payload)) => Json(payload).into_response(),
+            Ok(None) => err(StatusCode::NOT_FOUND, "Interpreter not found"),
+            Err(error) => {
+                tracing::error!(error = %error, interpreter_id = %interpreter_id, "load saved standalone staff profile");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load interpreter profile",
+                )
+            }
+        };
+    }
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -416,10 +506,11 @@ async fn upload_interpreter_profile_document(
     Path(interpreter_id): Path<Uuid>,
     mut multipart: Multipart,
 ) -> axum::response::Response {
-    if let Err(resp) = ensure_interpreter_profile_access(&state, &auth, interpreter_id, true).await
-    {
-        return resp;
-    }
+    let profile_kind =
+        match ensure_interpreter_profile_access(&state, &auth, interpreter_id, true).await {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
 
     let mut file_data: Option<Vec<u8>> = None;
     let mut file_name: Option<String> = None;
@@ -506,6 +597,19 @@ async fn upload_interpreter_profile_document(
         klinik: None,
         ursprung: Some("interpreter_profile"),
         notes: notes.as_deref(),
+        document_direction: Some("incoming"),
+        document_variant: Some("original"),
+        document_language: None,
+        access_category: Some("internal"),
+        document_date: Some(Utc::now().date_naive()),
+        source_person: Some("interpreter_profile"),
+        source_institution: None,
+        addressee_person: None,
+        addressee_institution: Some("GMED"),
+        financial_status: None,
+        payment_due_date: None,
+        payment_date: None,
+        payment_method: None,
         generated_template_id: None,
         version_root_document_id: None,
         replaces_document_id: None,
@@ -518,22 +622,44 @@ async fn upload_interpreter_profile_document(
             Err(resp) => return resp,
         };
 
-    if let Err(error) = sqlx::query(
-        r#"INSERT INTO interpreter_profile_documents (
-                document_id, interpreter_id, document_kind, uploaded_by
-           ) VALUES ($1, $2, $3, $4)
-           ON CONFLICT (document_id)
-           DO UPDATE SET interpreter_id = EXCLUDED.interpreter_id,
-                         document_kind = EXCLUDED.document_kind,
-                         uploaded_by = EXCLUDED.uploaded_by"#,
-    )
-    .bind(document_id)
-    .bind(interpreter_id)
-    .bind(document_kind)
-    .bind(auth.user_id)
-    .execute(&state.db)
-    .await
-    {
+    let link_result = match profile_kind {
+        InterpreterProfileKind::User => {
+            sqlx::query(
+                r#"INSERT INTO interpreter_profile_documents (
+                        document_id, interpreter_id, document_kind, uploaded_by
+                   ) VALUES ($1, $2, $3, $4)
+                   ON CONFLICT (document_id)
+                   DO UPDATE SET interpreter_id = EXCLUDED.interpreter_id,
+                                 document_kind = EXCLUDED.document_kind,
+                                 uploaded_by = EXCLUDED.uploaded_by"#,
+            )
+            .bind(document_id)
+            .bind(interpreter_id)
+            .bind(document_kind)
+            .bind(auth.user_id)
+            .execute(&state.db)
+            .await
+        }
+        InterpreterProfileKind::Standalone => {
+            sqlx::query(
+                r#"INSERT INTO interpreter_standalone_profile_documents (
+                        document_id, standalone_profile_id, document_kind, uploaded_by
+                   ) VALUES ($1, $2, $3, $4)
+                   ON CONFLICT (document_id)
+                   DO UPDATE SET standalone_profile_id = EXCLUDED.standalone_profile_id,
+                                 document_kind = EXCLUDED.document_kind,
+                                 uploaded_by = EXCLUDED.uploaded_by"#,
+            )
+            .bind(document_id)
+            .bind(interpreter_id)
+            .bind(document_kind)
+            .bind(auth.user_id)
+            .execute(&state.db)
+            .await
+        }
+    };
+
+    if let Err(error) = link_result {
         tracing::error!(error = %error, interpreter_id = %interpreter_id, document_id = %document_id, "link interpreter profile document");
         return err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -548,6 +674,10 @@ async fn upload_interpreter_profile_document(
         Some(document_id),
         json!({
             "interpreter_id": interpreter_id,
+            "profile_kind": match profile_kind {
+                InterpreterProfileKind::User => "user",
+                InterpreterProfileKind::Standalone => "external",
+            },
             "document_kind": document_kind,
             "mime_type": mime_type.as_str(),
             "file_size": file_size,
@@ -572,24 +702,44 @@ async fn download_interpreter_profile_document(
     Extension(auth): Extension<AuthUser>,
     Path((interpreter_id, document_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(resp) = ensure_interpreter_profile_access(&state, &auth, interpreter_id, false).await
-    {
-        return resp;
-    }
+    let profile_kind =
+        match ensure_interpreter_profile_access(&state, &auth, interpreter_id, false).await {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
 
-    let row = match sqlx::query(
-        r#"SELECT d.auto_name, d.original_filename, d.mime_type, d.storage_key,
-                  d.file_deleted_at, ipd.document_kind
-           FROM interpreter_profile_documents ipd
-           JOIN documents d ON d.id = ipd.document_id
-           WHERE ipd.interpreter_id = $1
-             AND ipd.document_id = $2"#,
-    )
-    .bind(interpreter_id)
-    .bind(document_id)
-    .fetch_optional(&state.db)
-    .await
-    {
+    let document_result = match profile_kind {
+        InterpreterProfileKind::User => {
+            sqlx::query(
+                r#"SELECT d.auto_name, d.original_filename, d.mime_type, d.storage_key,
+                          d.file_deleted_at, ipd.document_kind
+                   FROM interpreter_profile_documents ipd
+                   JOIN documents d ON d.id = ipd.document_id
+                   WHERE ipd.interpreter_id = $1
+                     AND ipd.document_id = $2"#,
+            )
+            .bind(interpreter_id)
+            .bind(document_id)
+            .fetch_optional(&state.db)
+            .await
+        }
+        InterpreterProfileKind::Standalone => {
+            sqlx::query(
+                r#"SELECT d.auto_name, d.original_filename, d.mime_type, d.storage_key,
+                          d.file_deleted_at, ipd.document_kind
+                   FROM interpreter_standalone_profile_documents ipd
+                   JOIN documents d ON d.id = ipd.document_id
+                   WHERE ipd.standalone_profile_id = $1
+                     AND ipd.document_id = $2"#,
+            )
+            .bind(interpreter_id)
+            .bind(document_id)
+            .fetch_optional(&state.db)
+            .await
+        }
+    };
+
+    let row = match document_result {
         Ok(Some(row)) => row,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
         Err(error) => {
@@ -638,13 +788,23 @@ async fn download_interpreter_profile_document(
         Err(_) => return err(StatusCode::NOT_FOUND, "Document file not found on disk"),
     };
 
-    let disposition = format!("attachment; filename=\"{}\"", filename.replace('"', ""));
-    axum::response::Response::builder()
-        .header("content-type", mime_type)
+    let safe_mime_type = sanitize_download_header_value(&mime_type, "application/octet-stream");
+    let safe_filename = sanitize_download_filename(&filename);
+    let disposition = format!("attachment; filename=\"{safe_filename}\"");
+    match axum::response::Response::builder()
+        .header("content-type", safe_mime_type)
         .header("content-disposition", disposition)
         .body(Body::from(data))
-        .unwrap()
-        .into_response()
+    {
+        Ok(response) => response.into_response(),
+        Err(error) => {
+            tracing::error!(error = %error, interpreter_id = %interpreter_id, document_id = %document_id, "build interpreter profile document download response");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build document download",
+            )
+        }
+    }
 }
 
 async fn get_interpreter_suggestions(
@@ -708,35 +868,43 @@ async fn list_interpreter_languages(
     Extension(auth): Extension<AuthUser>,
     Path(interpreter_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(resp) = ensure_interpreter_profile_access(&state, &auth, interpreter_id, false).await
-    {
-        return resp;
-    }
+    let profile_kind =
+        match ensure_interpreter_profile_access(&state, &auth, interpreter_id, false).await {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
 
-    match sqlx::query(
-        r#"SELECT id, language_code, language_label, proficiency, cefr_level,
-                  specialization, is_active
-           FROM interpreter_languages
-           WHERE interpreter_id = $1
-           ORDER BY is_active DESC, language_code"#,
-    )
-    .bind(interpreter_id)
-    .fetch_all(&state.db)
-    .await
-    {
+    let result = match profile_kind {
+        InterpreterProfileKind::User => {
+            sqlx::query(
+                r#"SELECT id, language_code, language_label, proficiency, cefr_level,
+                          specialization, is_active
+                   FROM interpreter_languages
+                   WHERE interpreter_id = $1
+                   ORDER BY is_active DESC, language_code"#,
+            )
+            .bind(interpreter_id)
+            .fetch_all(&state.db)
+            .await
+        }
+        InterpreterProfileKind::Standalone => {
+            sqlx::query(
+                r#"SELECT id, language_code, language_label, proficiency, cefr_level,
+                          specialization, is_active
+                   FROM interpreter_standalone_languages
+                   WHERE standalone_profile_id = $1
+                   ORDER BY is_active DESC, sort_order, language_code"#,
+            )
+            .bind(interpreter_id)
+            .fetch_all(&state.db)
+            .await
+        }
+    };
+
+    match result {
         Ok(rows) => Json(
             rows.into_iter()
-                .map(|row| {
-                    serde_json::json!({
-                        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
-                        "language_code": row.try_get::<String, _>("language_code").unwrap_or_default(),
-                        "language_label": row.try_get::<Option<String>, _>("language_label").unwrap_or_default(),
-                        "proficiency": row.try_get::<String, _>("proficiency").unwrap_or_else(|_| "working".to_string()),
-                        "cefr_level": row.try_get::<Option<String>, _>("cefr_level").unwrap_or_default(),
-                        "specialization": row.try_get::<Option<String>, _>("specialization").unwrap_or_default(),
-                        "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
-                    })
-                })
+                .map(interpreter_language_row_json)
                 .collect::<Vec<_>>(),
         )
         .into_response(),
@@ -756,10 +924,11 @@ async fn replace_interpreter_languages(
     Path(interpreter_id): Path<Uuid>,
     Json(body): Json<ReplaceInterpreterLanguages>,
 ) -> axum::response::Response {
-    if let Err(resp) = ensure_interpreter_profile_access(&state, &auth, interpreter_id, true).await
-    {
-        return resp;
-    }
+    let profile_kind =
+        match ensure_interpreter_profile_access(&state, &auth, interpreter_id, true).await {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
     if body.languages.len() > 20 {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -819,11 +988,24 @@ async fn replace_interpreter_languages(
         }
     };
 
-    if let Err(error) = sqlx::query("DELETE FROM interpreter_languages WHERE interpreter_id = $1")
-        .bind(interpreter_id)
-        .execute(&mut *tx)
-        .await
-    {
+    let delete_result = match profile_kind {
+        InterpreterProfileKind::User => {
+            sqlx::query("DELETE FROM interpreter_languages WHERE interpreter_id = $1")
+                .bind(interpreter_id)
+                .execute(&mut *tx)
+                .await
+        }
+        InterpreterProfileKind::Standalone => {
+            sqlx::query(
+                "DELETE FROM interpreter_standalone_languages WHERE standalone_profile_id = $1",
+            )
+            .bind(interpreter_id)
+            .execute(&mut *tx)
+            .await
+        }
+    };
+
+    if let Err(error) = delete_result {
         tracing::error!(error = %error, interpreter_id = %interpreter_id, "clear interpreter languages");
         return err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -831,22 +1013,46 @@ async fn replace_interpreter_languages(
         );
     }
 
-    for (language_code, language_label, proficiency, cefr_level, specialization) in languages {
-        if let Err(error) = sqlx::query(
-            r#"INSERT INTO interpreter_languages (
-                    interpreter_id, language_code, language_label, proficiency,
-                    cefr_level, specialization
-               ) VALUES ($1, $2, $3, $4, $5, $6)"#,
-        )
-        .bind(interpreter_id)
-        .bind(language_code)
-        .bind(language_label)
-        .bind(proficiency)
-        .bind(cefr_level)
-        .bind(specialization)
-        .execute(&mut *tx)
-        .await
-        {
+    for (sort_order, (language_code, language_label, proficiency, cefr_level, specialization)) in
+        languages.into_iter().enumerate()
+    {
+        let insert_result = match profile_kind {
+            InterpreterProfileKind::User => {
+                sqlx::query(
+                    r#"INSERT INTO interpreter_languages (
+                            interpreter_id, language_code, language_label, proficiency,
+                            cefr_level, specialization
+                       ) VALUES ($1, $2, $3, $4, $5, $6)"#,
+                )
+                .bind(interpreter_id)
+                .bind(language_code)
+                .bind(language_label)
+                .bind(proficiency)
+                .bind(cefr_level)
+                .bind(specialization)
+                .execute(&mut *tx)
+                .await
+            }
+            InterpreterProfileKind::Standalone => {
+                sqlx::query(
+                    r#"INSERT INTO interpreter_standalone_languages (
+                            standalone_profile_id, language_code, language_label, proficiency,
+                            cefr_level, specialization, sort_order
+                       ) VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
+                )
+                .bind(interpreter_id)
+                .bind(language_code)
+                .bind(language_label)
+                .bind(proficiency)
+                .bind(cefr_level)
+                .bind(specialization)
+                .bind(sort_order as i32)
+                .execute(&mut *tx)
+                .await
+            }
+        };
+
+        if let Err(error) = insert_result {
             tracing::error!(error = %error, interpreter_id = %interpreter_id, "insert interpreter language");
             return err(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1170,7 +1376,7 @@ async fn ensure_interpreter_profile_access(
     auth: &AuthUser,
     interpreter_id: Uuid,
     write: bool,
-) -> Result<(), axum::response::Response> {
+) -> Result<InterpreterProfileKind, axum::response::Response> {
     let allowed = if write {
         matches!(
             auth.role,
@@ -1191,7 +1397,7 @@ async fn ensure_interpreter_profile_access(
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
     }
 
-    let exists = sqlx::query_scalar::<_, bool>(
+    let user_exists = sqlx::query_scalar::<_, bool>(
         r#"SELECT EXISTS(
                 SELECT 1
                 FROM users
@@ -1210,11 +1416,36 @@ async fn ensure_interpreter_profile_access(
         )
     })?;
 
-    if exists {
-        Ok(())
-    } else {
-        Err(err(StatusCode::NOT_FOUND, "Interpreter not found"))
+    if user_exists {
+        return Ok(InterpreterProfileKind::User);
     }
+
+    let standalone_exists = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+                SELECT 1
+                FROM interpreter_standalone_profiles
+                WHERE id = $1
+           )"#,
+    )
+    .bind(interpreter_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, interpreter_id = %interpreter_id, "validate standalone staff profile access");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate interpreter",
+        )
+    })?;
+
+    if standalone_exists {
+        if auth.role == Role::Interpreter {
+            return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+        }
+        return Ok(InterpreterProfileKind::Standalone);
+    }
+
+    Err(err(StatusCode::NOT_FOUND, "Interpreter not found"))
 }
 
 fn interpreter_profile_row_json(row: sqlx::postgres::PgRow) -> Value {
@@ -1226,6 +1457,7 @@ fn interpreter_profile_row_json(row: sqlx::postgres::PgRow) -> Value {
         "email": row.try_get::<String, _>("email").unwrap_or_default(),
         "role": row.try_get::<String, _>("role").unwrap_or_default(),
         "is_active": row.try_get::<bool, _>("is_active").unwrap_or(false),
+        "profile_source": "user",
         "profile": profile,
         "profile_updated_at": row
             .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("profile_updated_at")
@@ -1234,12 +1466,78 @@ fn interpreter_profile_row_json(row: sqlx::postgres::PgRow) -> Value {
     })
 }
 
-fn interpreter_profile_row_json_for_auth(row: sqlx::postgres::PgRow, auth: &AuthUser) -> Value {
-    let mut payload = interpreter_profile_row_json(row);
-    if auth.role == Role::Interpreter {
-        redact_interpreter_self_profile(&mut payload);
-    }
-    payload
+fn standalone_interpreter_profile_row_json(row: sqlx::postgres::PgRow) -> Value {
+    let raw_profile = row
+        .try_get::<Value, _>("raw_profile")
+        .unwrap_or_else(|_| json!({}));
+    let profile = normalize_standalone_profile_defaults(raw_profile);
+
+    json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+        "name": row.try_get::<String, _>("name").unwrap_or_default(),
+        "email": row.try_get::<Option<String>, _>("email").unwrap_or_default().unwrap_or_default(),
+        "role": row.try_get::<String, _>("role").unwrap_or_else(|_| "standalone_staff".to_string()),
+        "is_active": row.try_get::<bool, _>("is_active").unwrap_or(false),
+        "profile_source": "standalone",
+        "profile": profile,
+        "profile_updated_at": row
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("profile_updated_at")
+            .unwrap_or_default()
+            .map(|value| value.to_rfc3339()),
+    })
+}
+
+fn sort_interpreter_profile_payloads(items: &mut [Value]) {
+    items.sort_by(|left, right| {
+        let left_active = left
+            .get("is_active")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let right_active = right
+            .get("is_active")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        right_active.cmp(&left_active).then_with(|| {
+            let left_name = left
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_lowercase();
+            let right_name = right
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_lowercase();
+            left_name.cmp(&right_name)
+        })
+    });
+}
+
+fn normalize_standalone_profile_defaults(profile: Value) -> Value {
+    let mut profile = value_object(profile);
+    profile
+        .entry("status".to_string())
+        .or_insert_with(|| Value::String("active".to_string()));
+    let employment_kind = profile
+        .get("employmentKind")
+        .and_then(Value::as_str)
+        .filter(|value| matches!(*value, "internal" | "external"))
+        .unwrap_or("external")
+        .to_string();
+    profile.insert("employmentKind".to_string(), Value::String(employment_kind));
+    Value::Object(profile)
+}
+
+fn interpreter_language_row_json(row: sqlx::postgres::PgRow) -> Value {
+    json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+        "language_code": row.try_get::<String, _>("language_code").unwrap_or_default(),
+        "language_label": row.try_get::<Option<String>, _>("language_label").unwrap_or_default(),
+        "proficiency": row.try_get::<String, _>("proficiency").unwrap_or_else(|_| "working".to_string()),
+        "cefr_level": row.try_get::<Option<String>, _>("cefr_level").unwrap_or_default(),
+        "specialization": row.try_get::<Option<String>, _>("specialization").unwrap_or_default(),
+        "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+    })
 }
 
 fn redact_interpreter_self_profile(payload: &mut Value) {
@@ -1257,7 +1555,7 @@ async fn load_interpreter_profile_payload(
     state: &AppState,
     interpreter_id: Uuid,
 ) -> Result<Option<Value>, sqlx::Error> {
-    sqlx::query(
+    if let Some(row) = sqlx::query(
         r#"SELECT u.id, u.name, u.email, u.role, u.is_active,
                   COALESCE(p.profile, '{}'::jsonb) AS raw_profile,
                   p.updated_at AS profile_updated_at,
@@ -1319,8 +1617,22 @@ async fn load_interpreter_profile_payload(
     )
     .bind(interpreter_id)
     .fetch_optional(&state.db)
+    .await?
+    {
+        return Ok(Some(interpreter_profile_row_json(row)));
+    }
+
+    sqlx::query(
+        r#"SELECT id, name, email, role, is_active,
+                  COALESCE(profile, '{}'::jsonb) AS raw_profile,
+                  updated_at AS profile_updated_at
+           FROM interpreter_standalone_profiles
+           WHERE id = $1"#,
+    )
+    .bind(interpreter_id)
+    .fetch_optional(&state.db)
     .await
-    .map(|row| row.map(interpreter_profile_row_json))
+    .map(|row| row.map(standalone_interpreter_profile_row_json))
 }
 
 fn build_structured_profile(row: &sqlx::postgres::PgRow) -> Value {
@@ -2476,6 +2788,38 @@ fn interpreter_profile_document_kind_label(kind: &str) -> &'static str {
         "gdpr_training" => "GDPR training",
         "work_permit" => "Work permit",
         _ => "Interpreter profile document",
+    }
+}
+
+fn sanitize_download_header_value(value: &str, fallback: &str) -> String {
+    let sanitized = value
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .collect::<String>()
+        .trim()
+        .to_string();
+    if sanitized.is_empty() {
+        fallback.to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn sanitize_download_filename(value: &str) -> String {
+    let sanitized = value
+        .chars()
+        .map(|ch| match ch {
+            '"' | '\\' => '_',
+            _ if ch.is_control() => '_',
+            _ => ch,
+        })
+        .collect::<String>()
+        .trim()
+        .to_string();
+    if sanitized.is_empty() {
+        "document".to_string()
+    } else {
+        sanitized
     }
 }
 

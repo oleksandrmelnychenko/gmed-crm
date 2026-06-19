@@ -198,6 +198,7 @@ type InteractionItem = {
 export type DoctorSummary = {
   id: string;
   provider_id: string;
+  shared_identity_id: string | null;
   name: string;
   first_name: string | null;
   last_name: string | null;
@@ -370,6 +371,7 @@ export type ProviderFormState = {
 
 export type DoctorFormState = {
   id: string;
+  sharedIdentityId: string;
   name: string;
   firstName: string;
   lastName: string;

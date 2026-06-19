@@ -169,14 +169,20 @@ pub fn build_bmp_xml(
     }
     // Anything with an unrecognised category goes into a trailing default block.
     let known = BMP_SECTIONS.map(|(k, _)| k);
-    let other = meds.iter().filter(|m| !known.contains(&m.category.as_str()));
+    let other = meds
+        .iter()
+        .filter(|m| !known.contains(&m.category.as_str()));
     push_section(&mut out, None, other);
 
     out.push_str("</MP>");
     out
 }
 
-fn push_section<'a>(out: &mut String, heading: Option<&str>, rows: impl Iterator<Item = &'a BmpMed>) {
+fn push_section<'a>(
+    out: &mut String,
+    heading: Option<&str>,
+    rows: impl Iterator<Item = &'a BmpMed>,
+) {
     let rows: Vec<&BmpMed> = rows.collect();
     if rows.is_empty() {
         return;
@@ -262,7 +268,9 @@ mod tests {
             &sample_meds(),
         );
 
-        assert!(xml.starts_with("<MP U=\"ABCDEF0123456789ABCDEF0123456789\" v=\"022\" l=\"de-DE\">"));
+        assert!(
+            xml.starts_with("<MP U=\"ABCDEF0123456789ABCDEF0123456789\" v=\"022\" l=\"de-DE\">")
+        );
         assert!(xml.contains("<P g=\"Maxi\" f=\"Mustermann\" b=\"1960-01-01\" s=\"X\"/>"));
         assert!(xml.contains(
             "<A n=\"Praxis Dr. Anton\" s=\"Gallenweg 6\" z=\"10115\" c=\"Berlin\" p=\"030-123456\" t=\"2026-06-17\"/>"
@@ -272,7 +280,9 @@ mod tests {
             "<S><M a=\"Metformin Atid\" fd=\"Filmtabl.\" m=\"1\" v=\"1\" dud=\"Stück\" i=\"nach den Mahlzeiten\" r=\"Blutzucker\"><W w=\"Metformin\" s=\"500 mg\"/></M></S>"
         ));
         // Selbstmedikation: free-text heading, PZN-less medication without <W>.
-        assert!(xml.contains("<S t=\"Selbstmedikation\"><M a=\"Roter Reis\" r=\"Blutfette\"/></S>"));
+        assert!(
+            xml.contains("<S t=\"Selbstmedikation\"><M a=\"Roter Reis\" r=\"Blutfette\"/></S>")
+        );
         assert!(xml.ends_with("</MP>"));
         // No empty "Zu besonderen Zeiten" section is emitted.
         assert!(!xml.contains("Zu besonderen Zeiten"));

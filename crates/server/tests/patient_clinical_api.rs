@@ -688,6 +688,40 @@ async fn seed_provider_doctor(pool: &PgPool, provider_id: Uuid, tag: &str) -> Uu
 }
 
 #[tokio::test]
+async fn all_doctors_list_excludes_non_medical_contact_people() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("clinical-doctors-medical-only");
+    let medical_provider_id = seed_provider(&pool, &format!("{tag}-clinic")).await;
+    let medical_doctor_id =
+        seed_provider_doctor(&pool, medical_provider_id, &format!("{tag}-clinic")).await;
+    let non_medical_provider_id =
+        seed_provider_with_type(&pool, &format!("{tag}-restaurant"), "non_medical").await;
+    let non_medical_contact_id =
+        seed_provider_doctor(&pool, non_medical_provider_id, &format!("{tag}-restaurant")).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(&app, "GET", "/api/v1/doctors", &pm_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let rows = body.as_array().expect("doctors array");
+    assert!(
+        rows.iter()
+            .any(|row| row["id"] == medical_doctor_id.to_string()),
+        "medical provider doctor must be available for clinical attribution"
+    );
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row["id"] == non_medical_contact_id.to_string()),
+        "non-medical provider contacts must not be available for clinical attribution"
+    );
+}
+
+#[tokio::test]
 async fn patient_clinical_master_round_trip_with_provider_doctor() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;

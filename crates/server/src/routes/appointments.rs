@@ -349,6 +349,7 @@ struct ConvertAppointmentRequest {
 struct AppointmentConflictsQuery {
     patient_id: Uuid,
     interpreter_id: Option<Uuid>,
+    doctor_id: Option<Uuid>,
     appointment_id: Option<Uuid>,
     date: String,
     time_start: Option<String>,
@@ -2095,6 +2096,7 @@ async fn get_conflicts(
         &auth,
         query.patient_id,
         query.interpreter_id,
+        query.doctor_id,
         date,
         time_start,
         time_end,
@@ -2427,6 +2429,7 @@ async fn create_appointment(
             &auth,
             patient_id,
             interpreter_id,
+            doctor_id,
             *occurrence_date,
             time_start,
             time_end,
@@ -3167,8 +3170,10 @@ fn merge_conflict_items(
 fn merge_conflicts_payload(payloads: &[serde_json::Value]) -> serde_json::Value {
     let mut patient_conflicts = Vec::new();
     let mut interpreter_conflicts = Vec::new();
+    let mut doctor_conflicts = Vec::new();
     let mut patient_seen = HashSet::new();
     let mut interpreter_seen = HashSet::new();
+    let mut doctor_seen = HashSet::new();
 
     for payload in payloads {
         merge_conflict_items(
@@ -3181,17 +3186,27 @@ fn merge_conflicts_payload(payloads: &[serde_json::Value]) -> serde_json::Value 
             &mut interpreter_seen,
             &payload["interpreter_conflicts"],
         );
+        merge_conflict_items(
+            &mut doctor_conflicts,
+            &mut doctor_seen,
+            &payload["doctor_conflicts"],
+        );
     }
 
     let patient_conflict_count = patient_conflicts.len();
     let interpreter_conflict_count = interpreter_conflicts.len();
+    let doctor_conflict_count = doctor_conflicts.len();
 
     serde_json::json!({
         "patient_conflict_count": patient_conflict_count,
         "interpreter_conflict_count": interpreter_conflict_count,
-        "has_conflicts": patient_conflict_count > 0 || interpreter_conflict_count > 0,
+        "doctor_conflict_count": doctor_conflict_count,
+        "has_conflicts": patient_conflict_count > 0
+            || interpreter_conflict_count > 0
+            || doctor_conflict_count > 0,
         "patient_conflicts": patient_conflicts,
         "interpreter_conflicts": interpreter_conflicts,
+        "doctor_conflicts": doctor_conflicts,
     })
 }
 
@@ -4168,6 +4183,7 @@ async fn update_appointment(
             &auth,
             *target_patient_id,
             body.interpreter_id,
+            body.doctor_id,
             *target_date,
             time_start,
             time_end,
@@ -4440,8 +4456,15 @@ async fn update_status(
             }
         }
     } else {
-        let series_id =
-            effective_series_id.expect("effective series id is set for recurring scope");
+        let series_id = match effective_series_id {
+            Some(value) => value,
+            None => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Appointment is not recurring",
+                );
+            }
+        };
         match sqlx::query(
             r#"UPDATE appointments
                SET status = $2
@@ -6268,8 +6291,8 @@ fn appointment_due_at(
     time_start: Option<chrono::NaiveTime>,
     fallback_hour: u32,
 ) -> chrono::DateTime<chrono::Utc> {
-    let default_time = chrono::NaiveTime::from_hms_opt(fallback_hour, 0, 0)
-        .unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(9, 0, 0).expect("valid fallback"));
+    let default_hour = if fallback_hour < 24 { fallback_hour } else { 9 };
+    let default_time = chrono::NaiveTime::from_hms_opt(default_hour, 0, 0).unwrap_or_default();
     chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
         date.and_time(time_start.unwrap_or(default_time)),
         chrono::Utc,
@@ -6989,12 +7012,13 @@ async fn load_conflicts_for_scope(
     auth: &AuthUser,
     patient_id: Option<Uuid>,
     interpreter_id: Option<Uuid>,
+    doctor_id: Option<Uuid>,
     date: chrono::NaiveDate,
     time_start: Option<chrono::NaiveTime>,
     time_end: Option<chrono::NaiveTime>,
     exclude_appointment_id: Option<Uuid>,
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
-    if patient_id.is_none() && interpreter_id.is_none() {
+    if patient_id.is_none() && interpreter_id.is_none() && doctor_id.is_none() {
         return Ok(Vec::new());
     }
 
@@ -7018,12 +7042,14 @@ async fn load_conflicts_for_scope(
              AND a.status <> 'cancelled'
              AND ($2::uuid IS NULL OR a.patient_id = $2)
              AND ($3::uuid IS NULL OR a.interpreter_id = $3)
-             AND ($4::uuid IS NULL OR a.id <> $4)
+             AND ($4::uuid IS NULL OR a.doctor_id = $4)
+             AND ($5::uuid IS NULL OR a.id <> $5)
            ORDER BY a.time_start NULLS FIRST, a.created_at"#,
     )
     .bind(date)
     .bind(patient_id)
     .bind(interpreter_id)
+    .bind(doctor_id)
     .bind(exclude_appointment_id)
     .fetch_all(&state.db)
     .await
@@ -7032,6 +7058,7 @@ async fn load_conflicts_for_scope(
             error = %e,
             patient_id = ?patient_id,
             interpreter_id = ?interpreter_id,
+            doctor_id = ?doctor_id,
             date = %date,
             "Failed to load appointment conflicts"
         );
@@ -7083,6 +7110,7 @@ async fn build_conflicts_payload(
     auth: &AuthUser,
     patient_id: Uuid,
     interpreter_id: Option<Uuid>,
+    doctor_id: Option<Uuid>,
     date: chrono::NaiveDate,
     time_start: Option<chrono::NaiveTime>,
     time_end: Option<chrono::NaiveTime>,
@@ -7092,6 +7120,7 @@ async fn build_conflicts_payload(
         state,
         auth,
         Some(patient_id),
+        None,
         None,
         date,
         time_start,
@@ -7107,6 +7136,25 @@ async fn build_conflicts_payload(
                 auth,
                 None,
                 Some(interpreter_id),
+                None,
+                date,
+                time_start,
+                time_end,
+                exclude_appointment_id,
+            )
+            .await?
+        }
+        None => Vec::new(),
+    };
+
+    let doctor_conflicts = match doctor_id {
+        Some(doctor_id) => {
+            load_conflicts_for_scope(
+                state,
+                auth,
+                None,
+                None,
+                Some(doctor_id),
                 date,
                 time_start,
                 time_end,
@@ -7119,13 +7167,18 @@ async fn build_conflicts_payload(
 
     let patient_conflict_count = patient_conflicts.len();
     let interpreter_conflict_count = interpreter_conflicts.len();
+    let doctor_conflict_count = doctor_conflicts.len();
 
     Ok(serde_json::json!({
         "patient_conflict_count": patient_conflict_count,
         "interpreter_conflict_count": interpreter_conflict_count,
-        "has_conflicts": patient_conflict_count > 0 || interpreter_conflict_count > 0,
+        "doctor_conflict_count": doctor_conflict_count,
+        "has_conflicts": patient_conflict_count > 0
+            || interpreter_conflict_count > 0
+            || doctor_conflict_count > 0,
         "patient_conflicts": patient_conflicts,
         "interpreter_conflicts": interpreter_conflicts,
+        "doctor_conflicts": doctor_conflicts,
     }))
 }
 

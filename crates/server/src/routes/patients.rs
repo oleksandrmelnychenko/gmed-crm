@@ -6989,20 +6989,19 @@ async fn clinical_resolve_attribution(
     if let Some(did) = doctor_id {
         // provider_doctors.provider_id is NOT NULL, so a present row always
         // yields the owning provider.
-        let doc_row =
-            sqlx::query(
-                r#"SELECT d.provider_id, p.provider_type
+        let doc_row = sqlx::query(
+            r#"SELECT d.provider_id, p.provider_type
                    FROM provider_doctors d
                    JOIN providers p ON p.id = d.provider_id
                    WHERE d.id = $1"#,
-            )
-                .bind(did)
-                .fetch_optional(&state.db)
-                .await
-                .map_err(|e| {
-                    tracing::error!(error = %e, doctor_id = %did, "validate clinical doctor");
-                    attribution_fail()
-                })?;
+        )
+        .bind(did)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, doctor_id = %did, "validate clinical doctor");
+            attribution_fail()
+        })?;
         let Some(doc_row) = doc_row else {
             return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Unknown doctor"));
         };
@@ -7031,6 +7030,55 @@ async fn clinical_resolve_attribution(
     }
 
     Ok((provider_id, doctor_id))
+}
+
+async fn clinical_resolve_treating_doctor(
+    state: &AppState,
+    doctor_raw: Option<String>,
+) -> Result<Option<Uuid>, axum::response::Response> {
+    let doctor_id = clinical_parse_uuid(doctor_raw)?;
+    let Some(did) = doctor_id else {
+        return Ok(None);
+    };
+
+    let row = sqlx::query(
+        r#"SELECT p.provider_type
+           FROM provider_doctors d
+           JOIN providers p ON p.id = d.provider_id
+           WHERE d.id = $1"#,
+    )
+    .bind(did)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, doctor_id = %did, "validate treating doctor");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate treating doctor",
+        )
+    })?;
+
+    let Some(row) = row else {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Unknown treating doctor",
+        ));
+    };
+    let provider_type: String = row.try_get("provider_type").map_err(|e| {
+        tracing::error!(error = %e, doctor_id = %did, "read treating doctor provider type");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate treating doctor",
+        )
+    })?;
+    if provider_type != "medical" {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Treating doctor must belong to a medical provider",
+        ));
+    }
+
+    Ok(Some(did))
 }
 
 async fn get_patient_clinical(
@@ -7317,8 +7365,10 @@ async fn get_patient_clinical(
     })))
 }
 
-/// All doctors at active providers. Powers the diagnosis-tree attribution picker,
-/// which needs the full cross-provider doctor list (not scoped to one provider).
+/// All doctors at active medical providers. Powers the diagnosis-tree attribution
+/// picker, which needs the full cross-provider doctor list (not scoped to one
+/// provider), but must not include non-medical contact persons stored in the same
+/// table.
 async fn list_all_doctors(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -7330,6 +7380,7 @@ async fn list_all_doctors(
            FROM provider_doctors d
            JOIN providers p ON p.id = d.provider_id
            WHERE p.is_active = true
+             AND p.provider_type = 'medical'
            ORDER BY d.name"#,
     )
     .fetch_all(&state.db)
@@ -7399,10 +7450,28 @@ async fn save_patient_diagnoses(
         let kind = clinical_one_of(item.kind, &["main", "secondary", "prozedur"])
             .unwrap_or_else(|| "secondary".to_string());
 
+        let parent_cid = item
+            .parent_cid
+            .as_ref()
+            .map(|c| c.trim())
+            .filter(|c| !c.is_empty());
+        if kind == "main" && parent_cid.is_some() {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Main diagnosis cannot be nested under another diagnosis",
+            );
+        }
+        if kind == "prozedur" && parent_cid.is_none() {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Procedure diagnosis requires a parent diagnosis",
+            );
+        }
+
         // Resolve parent. A parent_cid that we have not already inserted means
         // the parent was skipped (e.g. empty label) or arrived out of order;
         // drop the orphan rather than persist a dangling reference.
-        let parent_id = match item.parent_cid.as_ref().map(|c| c.trim()).filter(|c| !c.is_empty()) {
+        let parent_id = match parent_cid {
             None => None,
             Some(parent_cid) => {
                 let Some(pid) = cid_to_id.get(parent_cid).copied() else {
@@ -7421,29 +7490,43 @@ async fn save_patient_diagnoses(
             }
         };
 
-        let certainty = clinical_one_of(
-            item.certainty,
-            &["verdacht", "bestaetigt", "zustand_nach"],
-        );
+        let certainty =
+            clinical_one_of(item.certainty, &["verdacht", "bestaetigt", "zustand_nach"]);
         let chronifizierung = clinical_one_of(
             item.chronifizierung,
             &["akut", "chronisch", "rezidivierend"],
         );
         let source_mode = clinical_one_of(item.source_mode, &["intern", "extern"])
             .unwrap_or_else(|| "intern".to_string());
+        let external_clinic = clinical_opt_text(item.external_clinic);
+        let external_doctor = clinical_opt_text(item.external_doctor);
+        let external_country = clinical_opt_text(item.external_country);
+        if source_mode == "extern" && external_country.is_none() {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "External diagnoses require a country",
+            );
+        }
         let status = clinical_one_of(item.status, &["active", "chronic", "resolved"])
             .unwrap_or_else(|| "active".to_string());
         let laterality = clinical_one_of(item.laterality, &["left", "right", "bilateral"]);
-        let (provider_id, doctor_id) =
+        let (provider_id, doctor_id) = if source_mode == "extern" {
+            (None, None)
+        } else {
             match clinical_resolve_attribution(&state, item.provider_id, item.doctor_id).await {
                 Ok(pair) => pair,
                 Err(resp) => return resp,
-            };
-        let treating_doctor_id = match clinical_parse_uuid(item.treating_doctor_id) {
-            Ok(v) => v,
-            Err(resp) => return resp,
+            }
         };
         let treating_none = item.treating_none.unwrap_or(false);
+        let treating_doctor_id = if treating_none {
+            None
+        } else {
+            match clinical_resolve_treating_doctor(&state, item.treating_doctor_id).await {
+                Ok(v) => v,
+                Err(resp) => return resp,
+            }
+        };
         let new_id = Uuid::new_v4();
         if let Err(e) = sqlx::query(
             "INSERT INTO patient_diagnoses (id, patient_id, parent_id, provider_id, doctor_id, kind, label, icd_code, ops_code, certainty, chronifizierung, grade, laterality, status, diagnosed_on, note, sort_order, source_mode, external_clinic, external_doctor, external_country, treating_doctor_id, treating_none)
@@ -7467,9 +7550,9 @@ async fn save_patient_diagnoses(
         .bind(clinical_opt_text(item.note))
         .bind(saved)
         .bind(&source_mode)
-        .bind(clinical_opt_text(item.external_clinic))
-        .bind(clinical_opt_text(item.external_doctor))
-        .bind(clinical_opt_text(item.external_country))
+        .bind(if source_mode == "extern" { external_clinic } else { None })
+        .bind(if source_mode == "extern" { external_doctor } else { None })
+        .bind(if source_mode == "extern" { external_country } else { None })
         .bind(treating_doctor_id)
         .bind(treating_none)
         .execute(&mut *tx)
@@ -7478,7 +7561,12 @@ async fn save_patient_diagnoses(
             tracing::error!(error = %e, patient_id = %patient_uuid, "insert patient diagnosis");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
-        if let Some(cid) = item.cid.as_ref().map(|c| c.trim()).filter(|c| !c.is_empty()) {
+        if let Some(cid) = item
+            .cid
+            .as_ref()
+            .map(|c| c.trim())
+            .filter(|c| !c.is_empty())
+        {
             cid_to_id.insert(cid.to_string(), new_id);
             cid_to_kind.insert(cid.to_string(), kind);
         }
@@ -7786,11 +7874,12 @@ async fn save_patient_narrative(
 
     // At most one active version per patient: deactivate the rest first.
     if want_active {
-        if let Err(e) =
-            sqlx::query("UPDATE patient_clinical_narrative SET is_active = false WHERE patient_id = $1")
-                .bind(patient_uuid)
-                .execute(&mut *tx)
-                .await
+        if let Err(e) = sqlx::query(
+            "UPDATE patient_clinical_narrative SET is_active = false WHERE patient_id = $1",
+        )
+        .bind(patient_uuid)
+        .execute(&mut *tx)
+        .await
         {
             tracing::error!(error = %e, patient_id = %patient_uuid, "deactivate patient narratives");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
@@ -8757,9 +8846,7 @@ const MP_RIGHT: f32 = 196.0;
 const MP_TOP: f32 = 283.0;
 const MP_BOTTOM: f32 = 14.0;
 /// Column widths (mm); sum == MP_RIGHT - MP_LEFT (182).
-const MP_COLS: [f32; 11] = [
-    30.0, 28.0, 16.0, 14.0, 7.0, 7.0, 7.0, 7.0, 14.0, 30.0, 22.0,
-];
+const MP_COLS: [f32; 11] = [30.0, 28.0, 16.0, 14.0, 7.0, 7.0, 7.0, 7.0, 14.0, 30.0, 22.0];
 
 fn mp_pt(mm: f32) -> Pt {
     Pt(mm * 2.834_646)
@@ -8950,7 +9037,11 @@ impl MedPlan {
 }
 
 fn mp_dose(value: Option<&str>) -> String {
-    value.map(str::trim).filter(|s| !s.is_empty()).unwrap_or("").to_string()
+    value
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("")
+        .to_string()
 }
 
 async fn get_patient_medikationsplan_pdf(
@@ -9132,8 +9223,7 @@ async fn get_patient_medikationsplan_pdf(
     ];
     let mut truncated = false;
     'outer: for (key, heading) in sections {
-        let rows: Vec<&crate::bmp::BmpMed> =
-            meds.iter().filter(|m| m.category == key).collect();
+        let rows: Vec<&crate::bmp::BmpMed> = meds.iter().filter(|m| m.category == key).collect();
         if rows.is_empty() {
             continue;
         }

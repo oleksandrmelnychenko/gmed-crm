@@ -1391,6 +1391,7 @@ function providerPeopleDoctorToForm(row: ProviderPeopleRow): DoctorFormState {
   return {
     ...blankDoctorForm(),
     id: row.person_id,
+    sharedIdentityId: row.shared_identity_id ?? row.person_id,
     name: row.display_name ?? row.name,
     firstName: row.first_name ?? "",
     lastName: row.last_name ?? "",
@@ -2359,6 +2360,10 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     }
 
     let cancelled = false;
+    const linkedDoctorIdentityIds =
+      providerId === detail?.id
+        ? new Set((detail.doctors ?? []).map((doctor) => doctor.shared_identity_id ?? doctor.id))
+        : new Set<string>();
     setExistingDoctorOptionsBusy(true);
     setExistingDoctorOptionsError("");
 
@@ -2370,7 +2375,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             (row) =>
               row.person_type === "doctor" &&
               row.provider_type === "medical" &&
-              row.provider_id !== providerId,
+              row.provider_id !== providerId &&
+              !linkedDoctorIdentityIds.has(row.shared_identity_id ?? row.person_id),
           ),
         );
         setExistingDoctorOptionsBusy(false);
@@ -2390,6 +2396,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   }, [
     catalogPersonContext?.providerId,
     catalogPersonContext?.providerType,
+    detail?.doctors,
     detail?.id,
     detail?.provider_type,
     doctorDialogOpen,
@@ -2404,7 +2411,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     void Promise.all([
       fetchSpecializationsForAdmin(),
       fetchInsuranceProviders(true),
-      fetchProviders("/providers?active_only=true"),
+      fetchProviders("/providers?active_only=false"),
       fetchProviderStaffRoles(true),
       fetchProviderPeoplePatients(),
       fetchProviderTaxonomy(),
@@ -4290,12 +4297,13 @@ function WeeklyAvailabilityBadgeList({
   const rows = formatWeeklyAvailabilityDisplayItems(value, lang);
 
   return (
-    <div className={cn("grid gap-2", compact ? "grid-cols-1" : "sm:grid-cols-2 lg:grid-cols-4")}>
+    <div className={cn("grid gap-2", compact ? "grid-cols-1 sm:grid-cols-2" : "sm:grid-cols-2 lg:grid-cols-4")}>
       {rows.map((row, index) => (
         <span
           key={`${row.day ?? "custom"}-${index}`}
           className={cn(
-            "rounded-lg border px-3 py-1.5 text-sm font-semibold",
+            "rounded-lg border font-semibold",
+            compact ? "px-2 py-1 text-[11px]" : "px-3 py-1.5 text-sm",
             weeklyAvailabilityBadgeClass(row.closed),
             row.freeText && !compact ? "sm:col-span-2 lg:col-span-4" : null,
           )}
@@ -4642,7 +4650,7 @@ function ProviderDoctorDetailSheet({
         >
           <div className="space-y-3 rounded-xl p-4">
             <Section title={isMedicalProvider ? l("providers_doctor_profile") : t.providers_contact_profile}>
-              <ReadOnlyLine label={l("patients_display_name")} value={displayName || t.common_not_set} />
+              <ReadOnlyLine label={l("patients_display_name")} value={displayName || t.common_not_set} wrap />
               {isMedicalProvider ? (
                 <ReadOnlyLine label={l("providers_doctor_role")} value={role || t.common_not_set} />
               ) : null}
@@ -4780,7 +4788,7 @@ function ProviderStaffDetailSheet({
         >
           <div className="space-y-3 rounded-xl p-4">
             <Section title={l("providers_staff_detail")}>
-              <ReadOnlyLine label={l("patients_display_name")} value={displayName} />
+              <ReadOnlyLine label={l("patients_display_name")} value={displayName} wrap />
               <ReadOnlyLine label={l("providers_people_role")} value={role || t.common_not_set} />
               <ReadOnlyLine label={l("providers_staff_department")} value={(staff?.department ?? row?.department) || t.common_not_set} />
               <ReadOnlyLine label={t.patients_gender} value={personGenderLabel(staff?.gender ?? row?.gender ?? "unknown")} />
@@ -5941,7 +5949,7 @@ function ProviderOverviewSection({
         <div className="grid h-full gap-3 sm:grid-cols-2">
           <button
             type="button"
-            className="group relative h-full min-h-0 overflow-hidden rounded-xl border border-border/70 bg-muted/20 p-4 pr-14 text-left transition-all duration-200 hover:-tranzinc-y-0.5 hover:border-orange-200 hover:bg-orange-50/30"
+            className="group relative h-full min-h-0 overflow-hidden rounded-xl border border-border/70 bg-muted/20 p-4 pr-14 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:bg-orange-50/30"
             onClick={onOpenPatients}
           >
             <span className="block text-sm font-semibold text-foreground">
@@ -5951,12 +5959,12 @@ function ProviderOverviewSection({
               {l("providers_open_patients_linked_to_this_provider")}
             </span>
             <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-              <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
+              <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
             </span>
           </button>
           <button
             type="button"
-            className="group relative h-full min-h-0 overflow-hidden rounded-xl border border-border/70 bg-muted/20 p-4 pr-14 text-left transition-all duration-200 hover:-tranzinc-y-0.5 hover:border-orange-200 hover:bg-orange-50/30"
+            className="group relative h-full min-h-0 overflow-hidden rounded-xl border border-border/70 bg-muted/20 p-4 pr-14 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:bg-orange-50/30"
             onClick={onOpenAppointments}
           >
             <span className="block text-sm font-semibold text-foreground">
@@ -5966,7 +5974,7 @@ function ProviderOverviewSection({
               {l("providers_open_appointments_for_this_provider")}
             </span>
             <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-              <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-tranzinc-y-0.5 group-hover:tranzinc-x-0.5" />
+              <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
             </span>
           </button>
         </div>
@@ -6399,8 +6407,11 @@ function ContactPersonCard({
               {contacts || t.common_not_set}
             </span>
             {contact.opening_hours ? (
-              <span className="mt-1 block text-xs leading-snug text-muted-foreground">
-                {formatWeeklyAvailabilityDisplay(contact.opening_hours, lang)}
+              <span className="mt-2 block">
+                <span className="mb-1 block text-[11px] font-medium leading-tight text-muted-foreground">
+                  {l("providers_opening_hours")}
+                </span>
+                <WeeklyAvailabilityBadgeList value={contact.opening_hours} compact />
               </span>
             ) : null}
           </span>
@@ -6595,12 +6606,12 @@ function DoctorCardSummary({
             {contacts || t.common_not_set}
           </p>
           {doctor.opening_hours ? (
-            <p className="mt-1 text-xs leading-snug text-muted-foreground">
-              {l("providers_opening_hours")}:{" "}
-              <span className="font-medium text-foreground">
-                {formatWeeklyAvailabilityDisplay(doctor.opening_hours, lang)}
-              </span>
-            </p>
+            <div className="mt-2">
+              <p className="mb-1 text-[11px] font-medium leading-tight text-muted-foreground">
+                {l("providers_opening_hours")}
+              </p>
+              <WeeklyAvailabilityBadgeList value={doctor.opening_hours} compact />
+            </div>
           ) : null}
         </div>
       </div>
@@ -7012,12 +7023,12 @@ function StaffSection({
                       {contacts || t.common_not_set}
                     </p>
                     {staff.opening_hours ? (
-                      <p className="mt-1 text-xs leading-snug text-muted-foreground">
-                        {l("providers_opening_hours")}:{" "}
-                        <span className="font-medium text-foreground">
-                          {formatWeeklyAvailabilityDisplay(staff.opening_hours, lang)}
-                        </span>
-                      </p>
+                      <div className="mt-2">
+                        <p className="mb-1 text-[11px] font-medium leading-tight text-muted-foreground">
+                          {l("providers_opening_hours")}
+                        </p>
+                        <WeeklyAvailabilityBadgeList value={staff.opening_hours} compact />
+                      </div>
                     ) : null}
                   </div>
 

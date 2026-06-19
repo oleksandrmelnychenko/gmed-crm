@@ -592,6 +592,181 @@ async fn partial_interpreter_profile_update_preserves_omitted_structured_fields(
 }
 
 #[tokio::test]
+async fn manager_can_create_standalone_staff_profiles_without_user_account() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("standalone-staff-profile");
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/interpreters",
+        &pm_bearer,
+        Some(json!({
+            "name": format!("Standalone Staff {tag}"),
+            "email": format!("{tag}@example.com"),
+            "profile": {
+                "status": "active",
+                "contractType": "freelancer",
+                "employmentKind": "external",
+                "phone": "+49 170 111111"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let standalone_id =
+        Uuid::parse_str(body["id"].as_str().expect("standalone profile id")).unwrap();
+    assert_eq!(body["role"], "standalone_staff");
+    assert_eq!(body["profile_source"], "standalone");
+    assert_eq!(body["profile"]["employmentKind"], "external");
+
+    let users_count: i64 = sqlx::query_scalar("SELECT count(*) FROM users WHERE id = $1")
+        .bind(standalone_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(users_count, 0);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/interpreters?contract_type=freelancer&search={tag}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert!(
+        body.as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == standalone_id.to_string()
+                && item["profile_source"] == "standalone")
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/interpreters/{standalone_id}/profile"),
+        &interpreter_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "Insufficient permissions");
+
+    let (status, body) = json_request(
+        &app,
+        "PUT",
+        &format!("/api/v1/interpreters/{standalone_id}/profile"),
+        &pm_bearer,
+        Some(json!({
+            "status": "vacation",
+            "employmentKind": "internal",
+            "phone": "+49 170 222222"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["profile"]["status"], "vacation");
+    assert_eq!(body["profile"]["employmentKind"], "internal");
+    assert_eq!(body["profile"]["phone"], "+49 170 222222");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/interpreters",
+        &pm_bearer,
+        Some(json!({
+            "name": format!("Internal Staff Profile {tag}"),
+            "profile": {
+                "status": "active",
+                "contractType": "employee",
+                "employmentKind": "internal"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let internal_id =
+        Uuid::parse_str(body["id"].as_str().expect("internal standalone profile id")).unwrap();
+    assert_eq!(body["role"], "standalone_staff");
+    assert_eq!(body["profile_source"], "standalone");
+    assert_eq!(body["profile"]["employmentKind"], "internal");
+    let internal_users_count: i64 = sqlx::query_scalar("SELECT count(*) FROM users WHERE id = $1")
+        .bind(internal_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(internal_users_count, 0);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/interpreters/{standalone_id}/languages"),
+        &pm_bearer,
+        Some(json!({
+            "languages": [
+                {
+                    "languageCode": "de",
+                    "languageLabel": "Deutsch",
+                    "proficiency": "fluent"
+                }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+
+    let standalone_language_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM interpreter_standalone_languages WHERE standalone_profile_id = $1",
+    )
+    .bind(standalone_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(standalone_language_count, 1);
+
+    let (status, body) = multipart_upload(
+        &app,
+        &format!("/api/v1/interpreters/{standalone_id}/profile/documents"),
+        &pm_bearer,
+        &[("documentKind", "confidentiality".to_string())],
+        "external-confidentiality.pdf",
+        "application/pdf",
+        b"%PDF-external-staff-confidentiality%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let document_id = Uuid::parse_str(body["id"].as_str().expect("uploaded document id")).unwrap();
+
+    let standalone_document_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM interpreter_standalone_profile_documents WHERE standalone_profile_id = $1",
+    )
+    .bind(standalone_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(standalone_document_count, 1);
+
+    let (status, bytes) = download_request(
+        &app,
+        &format!("/api/v1/interpreters/{standalone_id}/profile/documents/{document_id}/download"),
+        &pm_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(bytes, b"%PDF-external-staff-confidentiality%");
+}
+
+#[tokio::test]
 async fn managers_can_manage_interpreter_languages_and_interpreters_can_read_self() {
     let Some((app, pool, _admin_id)) = test_context().await else {
         return;

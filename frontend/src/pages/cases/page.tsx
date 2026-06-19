@@ -67,6 +67,7 @@ import {
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
+import { DARREICHUNGSFORM_OPTIONS } from "@/pages/patients/data/medication-options";
 import { doctorSpecialtyLabel, type SpecializationLabelLang } from "@/pages/providers/model/specialization-labels";
 import type { SpecializationItem } from "@/pages/providers/model/types";
 import {
@@ -3206,7 +3207,34 @@ function useCasesPageContent({
                         <Field label={t.cases_medications}><Input value={item.dosis ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { dosis: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_medications}><Input value={item.dosis_einheit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { dosis_einheit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_medications}><Input value={item.einnahmeschema ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { einnahmeschema: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.documents_category}><Input value={item.darreichungsform ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { darreichungsform: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_medications_form}>
+                          <NativeComboboxSelect
+                            value={item.darreichungsform ?? ""}
+                            onChange={(event) =>
+                              setMedikamente((current) =>
+                                updateItemAtIndex(current, index, {
+                                  darreichungsform: event.target.value,
+                                }),
+                              )
+                            }
+                            className={selectClassName}
+                          >
+                            <option value="">{t.common_not_set}</option>
+                            {DARREICHUNGSFORM_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                            {item.darreichungsform &&
+                            !DARREICHUNGSFORM_OPTIONS.some(
+                              (option) => option.value === item.darreichungsform,
+                            ) ? (
+                              <option value={item.darreichungsform}>
+                                {item.darreichungsform}
+                              </option>
+                            ) : null}
+                          </NativeComboboxSelect>
+                        </Field>
                         <Field label={t.cases_medications}><Input value={item.einheit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { einheit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.providers_service_valid_from}><Input value={item.seit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { seit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_reason}><Input value={item.grund ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
@@ -4122,11 +4150,11 @@ function useCasesPageContent({
                   <form onSubmit={handleSaveVegetative} className="space-y-4">
                     {sectionErrors.vegetative ? <Banner tone="error">{sectionErrors.vegetative}</Banner> : null}
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label={t.cases_symptoms}><Input value={vegetative.appetit_durst} onChange={(event) => setVegetative((current) => ({ ...current, appetit_durst: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
-                      <Field label={t.cases_symptoms}><Input value={vegetative.koerpergroesse} onChange={(event) => setVegetative((current) => ({ ...current, koerpergroesse: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
-                      <Field label={t.cases_symptoms}><Input value={vegetative.gewicht} onChange={(event) => setVegetative((current) => ({ ...current, gewicht: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
-                      <Field label={t.cases_symptoms}><Input value={vegetative.gewichtsveraenderung} onChange={(event) => setVegetative((current) => ({ ...current, gewichtsveraenderung: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
-                      <Field label={t.cases_reason}><Input value={vegetative.grund} onChange={(event) => setVegetative((current) => ({ ...current, grund: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
+                      <Field label={caseText("case_ws_appetite_thirst")}><Input value={vegetative.appetit_durst} onChange={(event) => setVegetative((current) => ({ ...current, appetit_durst: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
+                      <Field label={caseText("case_ws_height_cm")}><Input value={vegetative.koerpergroesse} onChange={(event) => setVegetative((current) => ({ ...current, koerpergroesse: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
+                      <Field label={caseText("case_ws_weight_kg")}><Input value={vegetative.gewicht} onChange={(event) => setVegetative((current) => ({ ...current, gewicht: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
+                      <Field label={caseText("case_ws_weight_change")}><Input value={vegetative.gewichtsveraenderung} onChange={(event) => setVegetative((current) => ({ ...current, gewichtsveraenderung: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
+                      <Field label={caseText("case_ws_reason_context")}><Input value={vegetative.grund} onChange={(event) => setVegetative((current) => ({ ...current, grund: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
                     </div>
                     <div className="flex justify-end border-t border-border/70 pt-4">
                       <Button type="submit" className="h-9 rounded-lg px-3.5" disabled={sectionBusy === "vegetative" || !permissions.canEdit}>

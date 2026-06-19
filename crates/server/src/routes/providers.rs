@@ -219,6 +219,7 @@ struct UpsertProviderRequest {
 #[derive(Deserialize)]
 struct UpsertDoctorRequest {
     name: Option<String>,
+    shared_identity_id: Option<Uuid>,
     first_name: Option<String>,
     last_name: Option<String>,
     display_name: Option<String>,
@@ -377,7 +378,7 @@ async fn list_providers(
     let taxonomy_attribute_value = normalize_optional(query.taxonomy_attribute_value);
     let internal_rating_gte = query.internal_rating_gte;
     let linked_patient_id = query.linked_patient_id;
-    let insurance_provider_pattern = format!("%{}%", query.insurance_provider.unwrap_or_default());
+    let insurance_provider_filters = normalize_csv_list(query.insurance_provider);
 
     if let Some(ref provider_type) = requested_provider_type
         && !is_valid_provider_type(provider_type)
@@ -747,7 +748,21 @@ async fn list_providers(
                     p.taxonomy_attributes ? $16
                     AND (
                         $17::text IS NULL
-                        OR COALESCE(p.taxonomy_attributes ->> $16, '') ILIKE ('%' || $17 || '%')
+                        OR (
+                            $16::text = 'cuisine'
+                            AND EXISTS (
+                                SELECT 1
+                                FROM regexp_split_to_table(
+                                    COALESCE(p.taxonomy_attributes ->> $16, ''),
+                                    '[,./]+'
+                                ) AS cuisine_part(value)
+                                WHERE de_normalize(btrim(cuisine_part.value)) LIKE de_normalize('%' || $17 || '%')
+                            )
+                        )
+                        OR (
+                            $16::text <> 'cuisine'
+                            AND COALESCE(p.taxonomy_attributes ->> $16, '') ILIKE ('%' || $17 || '%')
+                        )
                     )
                  )
               )
@@ -774,13 +789,17 @@ async fn list_providers(
 	                 )
 	              )
 	              AND (
-	                 $21::text = '%%'
+	                 cardinality($21::text[]) = 0
 	                 OR EXISTS (
 	                     SELECT 1
 	                     FROM provider_insurances pi
 	                     JOIN insurance_providers ip ON ip.id = pi.insurance_provider_id
 	                     WHERE pi.provider_id = p.id
-	                       AND ip.name ILIKE $21
+	                       AND EXISTS (
+	                           SELECT 1
+	                           FROM unnest($21::text[]) AS wanted(value)
+	                           WHERE de_normalize(ip.name) LIKE '%' || de_normalize(wanted.value) || '%'
+	                       )
 	                 )
 	                 OR EXISTS (
 	                     SELECT 1
@@ -788,7 +807,11 @@ async fn list_providers(
 	                     JOIN provider_doctor_insurances di ON di.doctor_id = d.id
 	                     JOIN insurance_providers ip ON ip.id = di.insurance_provider_id
 	                     WHERE d.provider_id = p.id
-	                       AND ip.name ILIKE $21
+	                       AND EXISTS (
+	                           SELECT 1
+	                           FROM unnest($21::text[]) AS wanted(value)
+	                           WHERE de_normalize(ip.name) LIKE '%' || de_normalize(wanted.value) || '%'
+	                       )
 	                 )
 	              )
 	            ORDER BY
@@ -867,7 +890,7 @@ async fn list_providers(
     .bind(linked_patient_id)
     .bind(search_term)
     .bind(is_active_filter)
-    .bind(insurance_provider_pattern)
+    .bind(insurance_provider_filters)
     .fetch_all(&state.db)
     .await
     {
@@ -2748,7 +2771,7 @@ async fn get_doctor(
     }
 
     match sqlx::query(
-        r#"SELECT d.id, d.provider_id, d.name, d.first_name, d.last_name, d.display_name,
+        r#"SELECT d.id, d.provider_id, d.shared_identity_id, d.name, d.first_name, d.last_name, d.display_name,
                   d.title, d.role_code, d.role_label, d.subrole, d.website, d.schwerpunkt, d.gender, d.opening_hours,
                   d.fachbereich, d.languages,
                   d.phone, d.email, d.license_number, d.licensing_country,
@@ -2817,6 +2840,7 @@ async fn get_doctor(
             Json(json!({
                 "id": row.try_get::<Uuid, _>("id").unwrap_or(doctor_id),
                 "provider_id": row.try_get::<Uuid, _>("provider_id").unwrap_or(provider_id),
+                "shared_identity_id": row.try_get::<Uuid, _>("shared_identity_id").unwrap_or(doctor_id),
                 "name": row.try_get::<String, _>("name").unwrap_or_default(),
                 "first_name": row.try_get::<Option<String>, _>("first_name").unwrap_or_default(),
                 "last_name": row.try_get::<Option<String>, _>("last_name").unwrap_or_default(),
@@ -2853,6 +2877,71 @@ async fn get_doctor(
         Err(e) => {
             tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, "Failed to get doctor");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to get doctor")
+        }
+    }
+}
+
+async fn resolve_doctor_shared_identity(
+    state: &AppState,
+    requested_identity_id: Option<Uuid>,
+) -> Result<Uuid, axum::response::Response> {
+    let Some(requested_identity_id) = requested_identity_id else {
+        return Ok(Uuid::new_v4());
+    };
+
+    match sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT shared_identity_id
+           FROM provider_doctors
+           WHERE id = $1 OR shared_identity_id = $1
+           ORDER BY CASE WHEN id = $1 THEN 0 ELSE 1 END
+           LIMIT 1"#,
+    )
+    .bind(requested_identity_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(shared_identity_id)) => Ok(shared_identity_id),
+        Ok(None) => Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Shared doctor identity not found",
+        )),
+        Err(e) => {
+            tracing::error!(error = %e, shared_identity_id = %requested_identity_id, "Failed to resolve doctor shared identity");
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to resolve doctor shared identity",
+            ))
+        }
+    }
+}
+
+async fn ensure_doctor_identity_not_linked_to_provider(
+    state: &AppState,
+    provider_id: Uuid,
+    shared_identity_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    match sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT id
+           FROM provider_doctors
+           WHERE provider_id = $1 AND shared_identity_id = $2
+           LIMIT 1"#,
+    )
+    .bind(provider_id)
+    .bind(shared_identity_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(_)) => Err(err(
+            StatusCode::CONFLICT,
+            "Doctor is already linked to this provider",
+        )),
+        Ok(None) => Ok(()),
+        Err(e) => {
+            tracing::error!(error = %e, provider_id = %provider_id, shared_identity_id = %shared_identity_id, "Failed to validate doctor shared identity");
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate doctor shared identity",
+            ))
         }
     }
 }
@@ -2902,6 +2991,16 @@ async fn create_doctor(
             "Doctor insurance providers are only allowed for medical providers",
         );
     }
+    let shared_identity_id =
+        match resolve_doctor_shared_identity(&state, doctor.shared_identity_id).await {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+    if let Err(resp) =
+        ensure_doctor_identity_not_linked_to_provider(&state, provider_id, shared_identity_id).await
+    {
+        return resp;
+    }
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -2913,17 +3012,18 @@ async fn create_doctor(
 
     let row = match sqlx::query(
         r#"INSERT INTO provider_doctors (
-                provider_id, name, first_name, last_name, display_name,
+                provider_id, shared_identity_id, name, first_name, last_name, display_name,
                 title, role_code, role_label, subrole, website, schwerpunkt, gender, opening_hours, fachbereich, languages,
                 phone, email, license_number, licensing_country, licensing_valid_until, notes
            ) VALUES (
-                $1, $2, $3, $4, $5,
-                $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                $16, $17, $18, $19, $20, $21
+                $1, $2, $3, $4, $5, $6,
+                $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+                $17, $18, $19, $20, $21, $22
            )
            RETURNING id, created_at"#,
     )
     .bind(provider_id)
+    .bind(shared_identity_id)
     .bind(doctor.name)
     .bind(doctor.first_name)
     .bind(doctor.last_name)
@@ -2948,6 +3048,12 @@ async fn create_doctor(
     .await
     {
         Ok(row) => row,
+        Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23505") => {
+            return err(
+                StatusCode::CONFLICT,
+                "Doctor is already linked to this provider",
+            );
+        }
         Err(e) => {
             tracing::error!(error = %e, provider_id = %provider_id, "Failed to create doctor");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create doctor");
@@ -3003,6 +3109,7 @@ async fn create_doctor(
         StatusCode::CREATED,
         Json(json!({
             "id": doctor_id,
+            "shared_identity_id": shared_identity_id,
             "created_at": row
                 .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
                 .map(|v| v.to_rfc3339())
@@ -3889,6 +3996,7 @@ struct ProviderPayload {
 
 struct DoctorPayload {
     name: String,
+    shared_identity_id: Option<Uuid>,
     first_name: Option<String>,
     last_name: Option<String>,
     display_name: Option<String>,
@@ -4208,6 +4316,7 @@ fn normalize_doctor_payload(body: UpsertDoctorRequest) -> Result<DoctorPayload, 
 
     Ok(DoctorPayload {
         name,
+        shared_identity_id: body.shared_identity_id,
         first_name,
         last_name,
         display_name,
@@ -6910,7 +7019,7 @@ async fn load_doctors_json(
     provider_id: Uuid,
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
     let rows = sqlx::query(
-        r#"SELECT d.id, d.provider_id, d.name, d.first_name, d.last_name, d.display_name,
+        r#"SELECT d.id, d.provider_id, d.shared_identity_id, d.name, d.first_name, d.last_name, d.display_name,
                   d.title, d.role_code, d.role_label, d.subrole, d.website, d.schwerpunkt, d.gender, d.opening_hours,
                   d.fachbereich, d.languages,
                   d.phone, d.email, d.license_number, d.licensing_country,
@@ -6976,6 +7085,7 @@ async fn load_doctors_json(
         doctors.push(json!({
             "id": doctor_id,
             "provider_id": row.try_get::<Uuid, _>("provider_id").unwrap_or(provider_id),
+            "shared_identity_id": row.try_get::<Uuid, _>("shared_identity_id").unwrap_or(doctor_id),
             "name": row.try_get::<String, _>("name").unwrap_or_default(),
             "first_name": row.try_get::<Option<String>, _>("first_name").unwrap_or_default(),
             "last_name": row.try_get::<Option<String>, _>("last_name").unwrap_or_default(),
