@@ -409,6 +409,7 @@ async fn load_doctor_people(
 
             json!({
                 "id": doctor_id,
+                "person_id": doctor_id,
                 "person_type": "doctor",
                 "doctor_id": doctor_id,
                 "shared_identity_id": row.try_get::<Uuid, _>("shared_identity_id").unwrap_or(doctor_id),
@@ -587,6 +588,7 @@ async fn load_staff_people(
 
             json!({
                 "id": staff_id,
+                "person_id": staff_id,
                 "person_type": "staff",
                 "doctor_id": Value::Null,
                 "staff_id": staff_id,

@@ -2727,7 +2727,7 @@ async fn delete_doctor_relationship(
         .await;
     }
 
-    StatusCode::NO_CONTENT.into_response()
+    Json(json!({ "ok": true })).into_response()
 }
 
 async fn list_doctors(
