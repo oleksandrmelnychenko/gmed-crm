@@ -1,9 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { ClinicalMedication } from "@/pages/patients/data/patient-clinical";
+import type { ClinicalDiagnosis, ClinicalMedication } from "@/pages/patients/data/patient-clinical";
 import type { ProviderSummary } from "@/pages/providers/model/types";
 
+import { DiagnosisTreeSection } from "./diagnosis-tree";
 import {
   CLINICAL_PROVIDER_QUERY,
   PatientMedicationTable,
@@ -67,6 +68,36 @@ function medication(overrides: Partial<ClinicalMedication> = {}): ClinicalMedica
   };
 }
 
+function diagnosis(overrides: Partial<ClinicalDiagnosis> = {}): ClinicalDiagnosis {
+  return {
+    certainty: "bestaetigt",
+    chronifizierung: null,
+    diagnosed_on: null,
+    doctor_fachbereich: null,
+    doctor_id: null,
+    doctor_name: null,
+    doctor_title: null,
+    external_clinic: null,
+    external_country: null,
+    external_doctor: null,
+    icd_code: null,
+    id: "diagnosis-1",
+    kind: "main",
+    label: "Hypertonie",
+    note: null,
+    ops_code: null,
+    parent_id: null,
+    provider_id: null,
+    provider_name: null,
+    source_mode: "intern",
+    treating_doctor_id: null,
+    treating_doctor_name: null,
+    treating_doctor_title: null,
+    treating_none: false,
+    ...overrides,
+  };
+}
+
 describe("PatientMedicationTable", () => {
   it("loads and keeps only medical providers for clinical attribution fields", () => {
     expect(CLINICAL_PROVIDER_QUERY).toContain("provider_type=medical");
@@ -125,5 +156,33 @@ describe("PatientMedicationTable", () => {
     expect(html).toContain("Nach dem Essen");
     expect(html).toContain("Dr. Heart · Klinik München");
     expect(html).toContain("Bearb.");
+  });
+});
+
+describe("DiagnosisTreeSection", () => {
+  it("keeps long diagnosis values out of the action column", () => {
+    const longValue = "A".repeat(80);
+    const html = renderToStaticMarkup(
+      <DiagnosisTreeSection
+        allDoctors={[]}
+        canManage
+        items={[
+          diagnosis({
+            icd_code: longValue,
+            label: longValue,
+            note: longValue,
+            provider_name: longValue,
+          }),
+        ]}
+        lang="ru"
+        onSave={async () => undefined}
+        providers={[]}
+      />,
+    );
+
+    expect(html).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(html).toContain("break-words text-sm font-medium");
+    expect(html).toContain("break-words font-mono");
+    expect(html).toContain("break-words text-[11px] text-muted-foreground");
   });
 });

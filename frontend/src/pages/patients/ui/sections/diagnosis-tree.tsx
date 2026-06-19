@@ -334,11 +334,11 @@ function DiagnosisRow({
   return (
     <div>
       <div
-        className="flex items-start justify-between gap-3 rounded-lg border border-border/50 bg-background px-3 py-2"
+        className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-lg border border-border/50 bg-background px-3 py-2"
         style={{ marginLeft: depth * 20 }}
       >
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-0 space-y-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span
               className={cn(
                 "rounded-full border px-2 py-0.5 text-[10px]",
@@ -351,16 +351,30 @@ function DiagnosisRow({
             >
               {kindLabel(node.kind, tx)}
             </span>
-            <span className="text-sm font-medium text-foreground">{displayLabel(node)}</span>
-            {code ? <span className="font-mono text-[11px] text-muted-foreground">({code})</span> : null}
-            {chron ? <span className="text-[11px] text-muted-foreground">{chron}</span> : null}
+            <span className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
+              {displayLabel(node)}
+            </span>
+            {code ? (
+              <span className="min-w-0 max-w-full break-words font-mono text-[11px] text-muted-foreground">
+                ({code})
+              </span>
+            ) : null}
+            {chron ? (
+              <span className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">
+                {chron}
+              </span>
+            ) : null}
             {node.diagnosed_on ? (
-              <span className="text-[11px] text-muted-foreground">{node.diagnosed_on}</span>
+              <span className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">
+                {node.diagnosed_on}
+              </span>
             ) : null}
           </div>
-          {node.note ? <p className="text-[11px] text-muted-foreground">{node.note}</p> : null}
+          {node.note ? (
+            <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{node.note}</p>
+          ) : null}
           {attribution ? (
-            <p className="mt-0.5 text-[11px] text-muted-foreground">
+            <p className="mt-0.5 min-w-0 max-w-full break-words text-[11px] text-muted-foreground">
               {tx("Назначил", "Verordnet von")}: {attribution}
             </p>
           ) : null}

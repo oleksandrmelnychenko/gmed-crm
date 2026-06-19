@@ -195,7 +195,7 @@ export function PatientMedicationTable({
   // Rendered as a paper-like document (always light) to match the official BMP.
   const headCell = "border border-zinc-300 px-2.5 py-2 font-bold text-zinc-900";
   const headDoseCell = "border border-zinc-300 px-1.5 py-2 text-center font-bold text-zinc-900";
-  const bodyCell = "border border-zinc-300 px-2.5 py-1.5 align-top text-zinc-900";
+  const bodyCell = "break-words border border-zinc-300 px-2.5 py-1.5 align-top text-zinc-900";
   const bodyDoseCell = "border border-zinc-300 px-1.5 py-1.5 text-center align-top font-mono text-zinc-900";
 
   return (
@@ -258,7 +258,7 @@ export function PatientMedicationTable({
                     <td className={bodyCell}>
                       {item.hinweis ? <span className="whitespace-pre-line break-words">{item.hinweis}</span> : null}
                       {attribution ? (
-                        <span className="mt-0.5 block text-[10px] text-zinc-500">{attribution}</span>
+                        <span className="mt-0.5 block break-words text-[10px] text-zinc-500">{attribution}</span>
                       ) : null}
                     </td>
                     <td className={bodyCell}>{item.grund || ""}</td>
@@ -798,13 +798,13 @@ function PatientRecommendationsSection({
     <div
       key={rec.id}
       className={cn(
-        "flex items-start justify-between gap-3 rounded-lg border border-border/50 px-3 py-2",
+        "grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-lg border border-border/50 px-3 py-2",
         muted ? "bg-muted/40" : "bg-background",
       )}
     >
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium text-foreground">{rec.title}</span>
+      <div className="min-w-0 space-y-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">{rec.title}</span>
           {typeLabel(rec.recommendation_type) ? (
             <Badge variant="outline" className="rounded-full text-[10px]">
               {typeLabel(rec.recommendation_type)}
@@ -814,10 +814,12 @@ function PatientRecommendationsSection({
             {lifecycleLabel(rec.lifecycle_status)}
           </Badge>
         </div>
-        {rec.description ? <p className="text-[11px] text-muted-foreground">{rec.description}</p> : null}
+        {rec.description ? (
+          <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{rec.description}</p>
+        ) : null}
         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
-          {doctorName(rec) ? <span>{doctorName(rec)}</span> : null}
-          {validityLabel(rec) ? <span>{validityLabel(rec)}</span> : null}
+          {doctorName(rec) ? <span className="min-w-0 max-w-full break-words">{doctorName(rec)}</span> : null}
+          {validityLabel(rec) ? <span className="min-w-0 max-w-full break-words">{validityLabel(rec)}</span> : null}
         </div>
       </div>
       {canManage ? (
@@ -1185,7 +1187,9 @@ export function PatientClinicalTab({
   const attributionRow = (item: ClinicalAttribution) => {
     const label = attributionLabel(item);
     return label ? (
-      <p className="mt-0.5 text-[11px] text-muted-foreground">{tx("Назначил", "Verordnet von")}: {label}</p>
+      <p className="mt-0.5 min-w-0 max-w-full break-words text-[11px] text-muted-foreground">
+        {tx("Назначил", "Verordnet von")}: {label}
+      </p>
     ) : null;
   };
 
@@ -1255,15 +1259,21 @@ export function PatientClinicalTab({
           setAllergien(next);
         }}
         rowView={(w) => (
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium text-foreground">{w.label}</span>
+          <div className="min-w-0 space-y-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">{w.label}</span>
               {w.severity ? (
-                <span className="text-[11px] text-muted-foreground">{w.severity}</span>
+                <span className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">
+                  {w.severity}
+                </span>
               ) : null}
             </div>
-            {w.reaction ? <p className="text-[11px] text-muted-foreground">{w.reaction}</p> : null}
-            {w.note ? <p className="text-[11px] text-muted-foreground">{w.note}</p> : null}
+            {w.reaction ? (
+              <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{w.reaction}</p>
+            ) : null}
+            {w.note ? (
+              <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{w.note}</p>
+            ) : null}
           </div>
         )}
         form={(draft, set) => (
@@ -1316,9 +1326,11 @@ export function PatientClinicalTab({
           setCave(next);
         }}
         rowView={(w) => (
-          <div>
-            <span className="text-sm font-medium text-foreground">{w.label}</span>
-            {w.note ? <p className="text-[11px] text-muted-foreground">{w.note}</p> : null}
+          <div className="min-w-0 space-y-1">
+            <span className="block min-w-0 max-w-full break-words text-sm font-medium text-foreground">{w.label}</span>
+            {w.note ? (
+              <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{w.note}</p>
+            ) : null}
           </div>
         )}
         form={(draft, set) => (
@@ -1368,17 +1380,23 @@ export function PatientClinicalTab({
           setProcedures(next);
         }}
         rowView={(p) => (
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-0 space-y-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               {p.performed_on ? (
-                <span className="text-[11px] text-muted-foreground">{p.performed_on}</span>
+                <span className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">
+                  {p.performed_on}
+                </span>
               ) : null}
-              <span className="text-sm font-medium text-foreground">{p.label}</span>
+              <span className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">{p.label}</span>
               {p.ops_code ? (
-                <span className="font-mono text-[11px] text-muted-foreground">({p.ops_code})</span>
+                <span className="min-w-0 max-w-full break-words font-mono text-[11px] text-muted-foreground">
+                  ({p.ops_code})
+                </span>
               ) : null}
             </div>
-            {p.note ? <p className="text-[11px] text-muted-foreground">{p.note}</p> : null}
+            {p.note ? (
+              <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{p.note}</p>
+            ) : null}
             {attributionRow(p)}
           </div>
         )}
