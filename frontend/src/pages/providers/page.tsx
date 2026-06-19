@@ -106,7 +106,6 @@ import {
   doctorListDisplayName,
   doctorRelationshipTypeLabel,
   doctorRoleLabel,
-  formatWeeklyAvailabilityDisplay,
   formatWeeklyAvailabilityValue,
   humanizeCode,
   joinDoctorTitleValue,
@@ -5993,7 +5992,7 @@ function ProviderOverviewSection({
   return (
     <div className={cn("flex min-w-0 gap-2", wrap ? "items-start" : "items-center")}>
       <Icon className="size-3.5 shrink-0 text-muted-foreground/65" />
-      <span className={cn("min-w-0", wrap ? "break-words" : "truncate")}>{children}</span>
+      <div className={cn("min-w-0", wrap ? "break-words" : "truncate")}>{children}</div>
     </div>
   );
 }
@@ -6102,7 +6101,7 @@ function ProviderSheetHero({
               {detail.email || t.common_not_set}
             </HeroInfoLine>
             <HeroInfoLine icon={CalendarClock} wrap>
-              {formatWeeklyAvailabilityDisplay(detail.opening_hours, lang) || t.common_not_set}
+              <WeeklyAvailabilityBadgeList value={detail.opening_hours} compact />
             </HeroInfoLine>
             <HeroInfoLine icon={BadgeCheck}>
               {detail.tax_id || t.common_not_set}

@@ -1,11 +1,11 @@
-import { Fragment, useMemo, useState, type ReactNode } from "react";
-import { Building2, ChevronRight, MapPin, Stethoscope, UsersRound } from "lucide-react";
+import { Fragment, useMemo, useState } from "react";
+import { Building2, CalendarClock, ChevronRight, MapPin, Stethoscope, UsersRound } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-import { formatWeeklyAvailabilityDisplay, providerTypeLabel } from "../model/list-model";
+import { formatWeeklyAvailabilityDisplayItems, providerTypeLabel } from "../model/list-model";
 import { specializationLabelForItem, specializationLabelForValue } from "../model/specialization-labels";
 import type { ProviderOrganizationLevel, ProviderSummary, SpecializationItem } from "../model/types";
 
@@ -283,29 +283,46 @@ type ProviderHierarchyTimelineProps = {
   tr: Record<string, string>;
 };
 
-/** Renders weekly availability text with the "(comment)" parts in bold. */
-function renderHoursWithBoldComments(text: string): ReactNode {
-  const segments: ReactNode[] = [];
-  const regex = /\(([^)]*)\)/g;
-  let lastIndex = 0;
-  let key = 0;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      segments.push(text.slice(lastIndex, match.index));
-    }
-    segments.push(
-      <strong key={key} className="font-semibold text-foreground">
-        {match[0]}
-      </strong>,
-    );
-    key += 1;
-    lastIndex = regex.lastIndex;
-  }
-  if (lastIndex < text.length) {
-    segments.push(text.slice(lastIndex));
-  }
-  return segments;
+function availabilityBadgeClass(closed: boolean) {
+  return closed
+    ? "border-orange-200 bg-orange-50 text-orange-800"
+    : "border-border/60 bg-muted/30 text-foreground";
+}
+
+function TimelineAvailabilityBlock({
+  lang,
+  label,
+  value,
+}: {
+  lang: Lang;
+  label: string;
+  value: string | null | undefined;
+}) {
+  const rows = formatWeeklyAvailabilityDisplayItems(value, lang);
+
+  return (
+    <span className="mt-3 block min-w-0 rounded-xl border border-border/70 bg-white/80 p-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+      <span className="mb-2 flex items-center gap-2 text-xs font-semibold text-foreground">
+        <CalendarClock className="size-3.5 text-orange-600" />
+        {label}
+      </span>
+      <span className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        {rows.map((row, index) => (
+          <span
+            key={`${row.day ?? "custom"}-${index}`}
+            className={cn(
+              "min-w-0 rounded-lg border px-3 py-2 text-sm font-semibold leading-tight",
+              availabilityBadgeClass(row.closed),
+              row.freeText ? "break-words sm:col-span-2 xl:col-span-4" : "truncate",
+            )}
+            title={row.label}
+          >
+            {row.label}
+          </span>
+        ))}
+      </span>
+    </span>
+  );
 }
 
 export function ProviderHierarchyTimeline({
@@ -449,7 +466,6 @@ function TimelineNode({
   const active = selectedProviderId === provider.id;
   const locationText = [provider.address_city, provider.address_country].filter(Boolean).join(", ");
   const specializationText = providerSpecializationText(provider, lang);
-  const availabilityText = formatWeeklyAvailabilityDisplay(provider.opening_hours, lang);
   const connectorWidth = (depth + 1) * CONNECTOR_STEP;
   const currentCenter = depth * CONNECTOR_STEP + CONNECTOR_CENTER;
   const isRootOrganization = depth === 0 && provider.organization_level === "organization";
@@ -540,9 +556,9 @@ function TimelineNode({
         <button
           type="button"
           onClick={() => onProviderClick(provider.id)}
-          className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+          className="flex min-w-0 flex-1 items-start justify-between gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         >
-          <span className="min-w-0">
+          <span className="min-w-0 flex-1">
             <span className="block truncate text-xs font-semibold text-foreground">
               {provider.name}
             </span>
@@ -583,12 +599,11 @@ function TimelineNode({
                 </span>
               ) : null}
             </span>
-            {availabilityText ? (
-              <span className="mt-1 block min-w-0 text-[11px] text-muted-foreground">
-                <span className="font-medium text-foreground/70">{tr.providers_opening_hours}: </span>
-                {renderHoursWithBoldComments(availabilityText)}
-              </span>
-            ) : null}
+            <TimelineAvailabilityBlock
+              value={provider.opening_hours}
+              lang={lang}
+              label={tr.providers_opening_hours ?? "Availability"}
+            />
           </span>
           <span className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 text-[11px] text-muted-foreground">
             {hasChildren ? (

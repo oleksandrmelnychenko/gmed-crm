@@ -471,9 +471,9 @@ function ClinicalSection<T extends { id?: string | null }>({
   const renderRow = (item: T, index: number) => (
     <div
       key={item.id ?? index}
-      className="flex items-start justify-between gap-3 rounded-lg border border-border/50 bg-background px-3 py-2"
+      className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-lg border border-border/50 bg-background px-3 py-2"
     >
-      <div className="min-w-0 flex-1">{rowView ? rowView(item) : null}</div>
+      <div className="min-w-0">{rowView ? rowView(item) : null}</div>
       {renderActions(item, index)}
     </div>
   );
@@ -1740,11 +1740,13 @@ export function PatientClinicalTab({
           setExaminations(next);
         }}
         rowView={(e) => (
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium text-foreground">{e.title}</span>
+          <div className="min-w-0 space-y-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">{e.title}</span>
               {e.performed_on ? (
-                <span className="text-[11px] text-muted-foreground">{e.performed_on}</span>
+                <span className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">
+                  {e.performed_on}
+                </span>
               ) : null}
               {e.status === "pending" ? (
                 <Badge variant="outline" className="rounded-full border-amber-300 bg-amber-50 text-[10px] text-amber-700">
@@ -1752,7 +1754,9 @@ export function PatientClinicalTab({
                 </Badge>
               ) : null}
             </div>
-            {e.result ? <p className="text-[11px] text-muted-foreground">{e.result}</p> : null}
+            {e.result ? (
+              <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{e.result}</p>
+            ) : null}
             {attributionRow(e)}
           </div>
         )}

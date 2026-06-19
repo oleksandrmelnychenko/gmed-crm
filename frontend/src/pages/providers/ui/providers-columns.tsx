@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import {
   compactDateTime,
   formatWeeklyAvailabilityDisplay,
+  formatWeeklyAvailabilityDisplayItems,
   providerTypeLabel,
 } from "../model/list-model";
 import { specializationSummaryForItems } from "../model/specialization-labels";
@@ -36,6 +37,32 @@ function optionsFrom(values: Iterable<string>): FilterOption[] {
   return Array.from(values)
     .sort((a, b) => a.localeCompare(b))
     .map((value) => ({ value, label: value }));
+}
+
+function availabilityBadgeClass(closed: boolean) {
+  return closed
+    ? "border-orange-200 bg-orange-50 text-orange-800"
+    : "border-border/60 bg-muted/30 text-foreground";
+}
+
+function renderAvailabilityBadges(value: string | null | undefined, lang: "de" | "ru") {
+  const rows = formatWeeklyAvailabilityDisplayItems(value, lang);
+  return (
+    <span className="flex min-w-[220px] flex-wrap gap-1">
+      {rows.map((row, index) => (
+        <span
+          key={`${row.day ?? "custom"}-${index}`}
+          className={cn(
+            "rounded-md border px-1.5 py-0.5 text-[10px] font-semibold leading-tight",
+            availabilityBadgeClass(row.closed),
+            row.freeText ? "max-w-full break-words" : null,
+          )}
+        >
+          {row.label}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 function optionsFromMap(values: ReadonlyMap<string, string>): FilterOption[] {
@@ -557,16 +584,13 @@ export function buildProviderColumns(
       filterType: "text",
       sortable: true,
       searchable: true,
-      width: 240,
+      width: 360,
       group: "contact",
       render: (provider) => {
         const value = formatWeeklyAvailabilityDisplay(provider.opening_hours, lang);
         return (
-          <span
-            className="block max-w-full truncate text-xs text-muted-foreground"
-            title={value || undefined}
-          >
-            {value || notSet}
+          <span title={value || undefined}>
+            {renderAvailabilityBadges(provider.opening_hours, lang)}
           </span>
         );
       },
