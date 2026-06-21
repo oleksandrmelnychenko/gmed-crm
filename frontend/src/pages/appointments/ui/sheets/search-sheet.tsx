@@ -221,6 +221,8 @@ function SearchSheet({
           providerPlaceholder={tr.providers_all}
           taxonomyPlaceholder={t.appointments_provider_category}
           taxonomyAllLabel={tr.providers_all}
+          showInsuranceFilter
+          insurancePlaceholder={t.patients_insurance_provider}
           taxonomySelectClassName={selectClass}
           providerSelectClassName={selectClass}
           providerLabel={(provider) => provider.name}

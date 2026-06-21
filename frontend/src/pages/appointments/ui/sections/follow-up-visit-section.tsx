@@ -542,6 +542,8 @@ function useAppointmentFollowUpVisitSectionContent({
               taxonomyAllLabel={t.providers_all}
               noProvidersLabel={t.providers_none_in_category}
               restrictTaxonomyToAvailable
+              showInsuranceFilter
+              insurancePlaceholder={t.patients_insurance_provider}
               taxonomySelectClassName={selectClassName}
               providerSelectClassName={selectClassName}
               providerLabel={(provider) => provider.name}

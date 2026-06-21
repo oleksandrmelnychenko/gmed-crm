@@ -1082,6 +1082,9 @@ function useEditAppointmentSectionContentContent({
               taxonomyAllLabel={t.providers_all}
               noProvidersLabel={t.providers_none_in_category}
               restrictTaxonomyToAvailable
+              showInsuranceFilter
+              insuranceLabel={t.patients_insurance_provider}
+              insurancePlaceholder={t.providers_all}
               taxonomyLabel={t.appointments_provider_category}
               providerSelectLabel={t.common_provider}
               taxonomySelectClassName={selectClassName}

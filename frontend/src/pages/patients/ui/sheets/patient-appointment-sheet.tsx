@@ -319,7 +319,8 @@ function PatientAppointmentScheduleSection({
             taxonomyAllLabel={t.providers_all}
             disabled={form.appointmentType === "internal"}
             providerDisabled={providersLoading && providerOptions.length === 0}
-            containerClassName="grid-cols-1 sm:grid-cols-2"
+            showInsuranceFilter
+            insurancePlaceholder={t.patients_insurance_provider}
             taxonomySelectClassName={cn("w-full", selectClass)}
             providerSelectClassName={cn("w-full", selectClass)}
             providerLabel={providerLabel}
