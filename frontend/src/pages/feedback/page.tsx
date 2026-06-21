@@ -304,7 +304,7 @@ function EmptyState({
 function FeedbackSummaryLine({ label, value }: { label: string; value?: string | null }) {
   return (
     <div className="flex min-w-0 items-center gap-2 px-3 py-1.5">
-      <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+      <span className="min-w-0 break-words text-xs font-medium text-muted-foreground">
         {label}
       </span>
       <span className="h-px min-w-6 flex-1 bg-border/70" />
@@ -369,9 +369,9 @@ function FeedbackReviewHeaderVariants({ item, t }: { item: PortalFeedbackItem; t
                 {feedbackReviewStatusLabel(item.status, t)}
               </StatusBadge>
             </div>
-            <h3 className="mt-2 text-lg font-semibold leading-none text-foreground">{title}</h3>
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">{context}</p>
-            <div className="mt-3 flex flex-wrap gap-2">{tags}</div>
+            <h3 className="mt-1.5 text-lg font-semibold leading-none text-foreground">{title}</h3>
+            <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{context}</p>
+            <div className="mt-2.5 flex flex-wrap gap-2">{tags}</div>
           </div>
           <div className="flex flex-col justify-between border-l border-dashed border-border pl-4">
             <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
@@ -576,8 +576,8 @@ function feedbackCard(item: PortalFeedbackItem, t: Translations, withInternal = 
               <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.feedback_scores)}</h2>
             </div>
           </div>
-          <div className="mt-5 grid gap-3 xl:grid-cols-2">
-            <div className="grid gap-2 rounded-xl bg-card p-3">
+          <div className="mt-5 grid gap-2.5 xl:grid-cols-2">
+            <div className="grid gap-1.5 rounded-xl bg-card p-3">
               <FeedbackSummaryLine label={t.feedback_overall} value={String(item.overall_score)} />
               <FeedbackSummaryLine label={t.uiText.feedback_pm_label} value={item.patient_manager_score ? String(item.patient_manager_score) : notRated} />
               <FeedbackSummaryLine label={t.feedback_interpreter} value={item.interpreter_score ? String(item.interpreter_score) : notRated} />
@@ -585,7 +585,7 @@ function feedbackCard(item: PortalFeedbackItem, t: Translations, withInternal = 
               <FeedbackSummaryLine label={t.feedback_treatment} value={item.treatment_score ? String(item.treatment_score) : notRated} />
               <FeedbackSummaryLine label={t.feedback_doctor} value={item.doctor_score ? String(item.doctor_score) : notRated} />
             </div>
-            <div className="grid gap-2 rounded-xl bg-card p-3">
+            <div className="grid gap-1.5 rounded-xl bg-card p-3">
               <FeedbackSummaryLine label={t.feedback_organization} value={item.organization_score ? String(item.organization_score) : notRated} />
               <FeedbackSummaryLine label={t.feedback_service} value={item.service_score ? String(item.service_score) : notRated} />
               <FeedbackSummaryLine label={t.feedback_ambience} value={item.infrastructure_score ? String(item.infrastructure_score) : notRated} />
@@ -638,15 +638,15 @@ function RankingList({
           <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
         </div>
       </div>
-      <div className={cn("mt-5", horizontal ? "grid gap-2 md:grid-cols-2 xl:grid-cols-5" : "space-y-2")}>
+      <div className={cn("mt-5", horizontal ? "grid gap-1.5 md:grid-cols-2 xl:grid-cols-5" : "space-y-1.5")}>
         {rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">{empty}</p>
         ) : (
           rows.map((row) => (
             <div key={row.id} className={cn("flex items-center justify-between gap-3 rounded-lg px-3 py-2", tokens.surface.mutedCard)}>
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-foreground">{row.name}</p>
-                <p className="truncate text-xs text-muted-foreground">{row.subtitle}</p>
+                <p className="break-words text-sm font-medium text-foreground">{row.name}</p>
+                <p className="break-words text-xs text-muted-foreground">{row.subtitle}</p>
               </div>
               <StatusBadge tone="info">{row.value}</StatusBadge>
             </div>
@@ -1718,7 +1718,7 @@ function useStaffFeedbackWorkspaceContent() {
 
       <div className="space-y-4">
         {summary ? (
-          <div className="grid gap-4 xl:grid-cols-4">
+          <div className="grid gap-3 xl:grid-cols-4">
               <section className="rounded-xl border border-border bg-card p-6 xl:col-span-2">
                 <div className="flex items-start justify-between gap-4">
                   <div>
@@ -1727,14 +1727,14 @@ function useStaffFeedbackWorkspaceContent() {
                     </h2>
                   </div>
                 </div>
-                <div className="mt-5 grid gap-3 xl:grid-cols-2">
-                  <div className="grid gap-2 rounded-xl bg-card p-3">
+                <div className="mt-5 grid gap-2.5 xl:grid-cols-2">
+                  <div className="grid gap-1.5 rounded-xl bg-card p-3">
                     <FeedbackSummaryLine label={t.feedback_overall_average} value={formatPortalAverage(summary.average_scores.overall)} />
                     <FeedbackSummaryLine label={t.feedback_interpreter_average} value={formatPortalAverage(summary.average_scores.interpreter)} />
                     <FeedbackSummaryLine label={t.feedback_concierge_average} value={formatPortalAverage(summary.average_scores.concierge)} />
                     <FeedbackSummaryLine label={t.feedback_treatment_average} value={formatPortalAverage(summary.average_scores.treatment)} />
                   </div>
-                  <div className="grid gap-2 rounded-xl bg-card p-3">
+                  <div className="grid gap-1.5 rounded-xl bg-card p-3">
                     <FeedbackSummaryLine label={t.feedback_service_average} value={formatPortalAverage(summary.average_scores.service)} />
                     <FeedbackSummaryLine label={t.feedback_ambience_average} value={formatPortalAverage(summary.average_scores.infrastructure)} />
                     <FeedbackSummaryLine label={t.feedback_value_average} value={formatPortalAverage(summary.average_scores.price_value)} />

@@ -50,9 +50,9 @@ export function SymptomsSection() {
       missingPrimaryMessage={tri(lang, "case_ws_please_enter_a_description")}
       cardContent={(item) => (
         <>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
             <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
-            <p className="truncate text-sm font-medium text-foreground">
+            <p className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
               {item.beschreibung ||
                 tri(lang, "case_ws_untitled_3")}
             </p>

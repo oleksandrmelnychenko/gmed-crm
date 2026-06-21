@@ -60,10 +60,10 @@ function ContractOverviewTile({
       <p className="text-2xl font-semibold leading-[0.85] text-foreground">
         {value}
       </p>
-      <p className="mt-[5px] line-clamp-2 text-[11px] leading-tight text-muted-foreground/75">
+      <p className="mt-[5px] break-words text-[11px] leading-tight text-muted-foreground/75">
         {description}
       </p>
-      <p className={cn("mt-0.5 line-clamp-2 text-xs font-medium leading-tight", tokens.text.muted)}>
+      <p className={cn("mt-0.5 break-words text-xs font-medium leading-tight", tokens.text.muted)}>
         {label}
       </p>
     </article>
@@ -153,20 +153,20 @@ export function PatientContractsTab({
             {l("patients_no_contract_has_been_created_for_this_patient_yet")}
           </EmptyCell>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {contracts.map((contract) => (
               <article
                 key={contract.id}
                 className="rounded-xl border border-border bg-card"
               >
-                <div className="relative overflow-hidden p-4">
+                <div className="relative overflow-hidden p-3.5">
                   <span
                     className={cn(
                       "absolute left-0 top-4 h-12 w-1 rounded-r-full",
                       contractAccentClass(contract.status),
                     )}
                   />
-                  <div className="grid gap-4 pl-3 md:grid-cols-[minmax(0,1fr)_180px]">
+                  <div className="grid gap-3 pl-3 md:grid-cols-[minmax(0,1fr)_180px]">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="h-px w-8 bg-border" />
@@ -177,10 +177,10 @@ export function PatientContractsTab({
                           {statusLabel(contract.status)}
                         </Badge>
                       </div>
-                      <h3 className="mt-2 font-mono text-lg font-semibold leading-none text-foreground">
+                      <h3 className="mt-1.5 font-mono text-lg font-semibold leading-none text-foreground">
                         {contract.contract_number}
                       </h3>
-                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                      <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
                         {[
                           `${l("patients_signed")}: ${formatDateTime(contract.signed_at, commonNotSet)}`,
                           `${l("patients_valid_from")}: ${formatDate(contract.valid_from, commonNotSet)}`,
@@ -188,7 +188,7 @@ export function PatientContractsTab({
                         ].join(" - ")}
                       </p>
                       {contract.valid_to ? (
-                        <div className="mt-3 flex flex-wrap gap-2">
+                        <div className="mt-2.5 flex flex-wrap gap-2">
                           <Badge
                             variant="outline"
                             className={cn(
@@ -205,7 +205,7 @@ export function PatientContractsTab({
                         </div>
                       ) : null}
                     </div>
-                    <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
+                    <div className="flex flex-col justify-between gap-3 border-l border-dashed border-border pl-4">
                       <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                         {l("patients_contract")}
                       </span>

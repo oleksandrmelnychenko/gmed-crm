@@ -491,10 +491,10 @@ function ServiceSummaryLine({
       <span className="min-w-0 shrink-0 truncate text-xs font-medium text-muted-foreground">
         {label}
       </span>
-      <span className="h-px min-w-6 flex-1 bg-border/70" />
+      <span className="h-px min-w-6 flex-1 self-center bg-border/70" />
       <span
         className={cn(
-          "min-w-0 max-w-[58%] truncate text-right text-sm font-semibold leading-none text-foreground",
+          "min-w-0 max-w-full break-words text-right text-sm font-semibold leading-snug text-foreground",
           typeof displayValue === "string" ? undefined : "flex justify-end",
         )}
       >
@@ -2193,7 +2193,7 @@ function useStaffServicesPageContent() {
                     </div>
                   ) : null}
                   <Section title={t.staff_services_create_section_service}>
-                    <div className="grid gap-2 md:grid-cols-2">
+                    <div className="grid gap-1.5 md:grid-cols-2">
                       <ServiceMiniMetric label={t.staff_services_column_status} value={serviceStatusLabel(selectedService.status, t)} />
                       <ServiceMiniMetric label={t.staff_services_column_billing} value={billingStatusLabel(selectedService.billing_status, t)} />
                       <ServiceMiniMetric label={t.staff_services_column_patient} value={`${selectedService.patient_name} (${selectedService.patient_pid})`} />
@@ -2211,21 +2211,21 @@ function useStaffServicesPageContent() {
                   </Section>
 
                   <Section title={t.staff_services_create_section_schedule}>
-                    <div className="grid gap-1.5">
+                    <div className="grid gap-1">
                       <ServiceDetailField label={t.staff_services_form_start} value={selectedService.starts_at ? formatPortalDateTime(selectedService.starts_at) : null} />
                       <ServiceDetailField label={t.staff_services_form_end} value={selectedService.ends_at ? formatPortalDateTime(selectedService.ends_at) : null} />
                     </div>
                   </Section>
 
                   <Section title={t.staff_services_create_section_assignment}>
-                    <div className="grid gap-1.5">
+                    <div className="grid gap-1">
                       <ServiceDetailField label={t.staff_services_form_provider} value={selectedService.provider_name} />
                       <ServiceDetailField label={t.staff_services_form_concierge} value={selectedService.assigned_concierge_name} />
                     </div>
                   </Section>
 
                   <Section title={t.staff_services_create_section_finance}>
-                    <div className="grid gap-2 md:grid-cols-3">
+                    <div className="grid gap-1.5 md:grid-cols-3">
                       <ServiceMiniMetric label={t.providers_services} value={selectedService.provider_service_name} />
                       <ServiceMiniMetric label={t.invoices_workspace_quantity} value={selectedService.quantity} />
                       <ServiceMiniMetric label={t.providers_service_price} value={selectedService.unit_price ? formatPortalCurrency(selectedService.unit_price) : null} />
@@ -2236,7 +2236,7 @@ function useStaffServicesPageContent() {
                   </Section>
 
                   <Section title={t.staff_services_create_section_vendor_notes}>
-                    <div className="grid gap-1.5">
+                    <div className="grid gap-1">
                       <ServiceDetailField label={t.staff_services_form_booking_reference} value={selectedService.booking_reference} />
                       <ServiceDetailField label={t.staff_services_form_vendor} value={selectedService.vendor_name} />
                       <ServiceDetailField label={t.staff_services_form_vendor_contact} value={selectedService.vendor_contact} />

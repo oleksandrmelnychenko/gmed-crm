@@ -216,7 +216,7 @@ function WorkflowMiniMetric({
 }) {
   return (
     <div className="flex min-w-[210px] flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-4 py-2">
-      <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+      <span className="min-w-0 max-w-full break-words text-xs font-medium text-muted-foreground">
         {label}
       </span>
       <span className="shrink-0 text-sm font-semibold leading-none text-foreground">
@@ -436,7 +436,7 @@ function AppointmentWorkflowTab({
       />
       {showTransitionLane ? (
         <div>
-          <div className="grid gap-4 xl:grid-cols-2">
+          <div className="grid gap-3 xl:grid-cols-2">
             {showCompletionSection ? (
               <div className="xl:col-span-2">
                 <MemoizedAppointmentCompletionSection
@@ -471,7 +471,7 @@ function AppointmentWorkflowTab({
 
       {showLogisticsLane ? (
         <div>
-          <div className="grid gap-4">
+          <div className="grid gap-3">
             {showScheduleSection ? editAppointmentSection : null}
             {showInterpreterSection ? (
               <MemoizedAppointmentInterpreterSection
@@ -501,7 +501,7 @@ function AppointmentWorkflowTab({
             ) : null}
 
             {showReminderSection || showTaskSection ? (
-              <div className="grid gap-4">
+              <div className="grid gap-3">
                 {showReminderSection ? (
                   <MemoizedAppointmentRemindersSection
                     detail={detail}
@@ -898,7 +898,7 @@ function InterpreterAssignmentManagement({
       }
     >
       {detail.interpreter_id ? (
-        <div className="grid gap-2 md:grid-cols-2">
+        <div className="grid gap-1.5 md:grid-cols-2">
           <WorkflowMiniMetric
             label={t.role_interpreter}
             value={detail.interpreter_name ?? t.common_not_set}
@@ -1185,7 +1185,7 @@ function AppointmentChecklistSection({
         />
       }
     >
-      <div className="space-y-3">
+      <div className="space-y-2.5">
         {items.length === 0 ? (
           <WorkflowEmptyState
             title={appointmentText("appointments_no_workflow_steps_exist_for_this_appointment_yet")}
@@ -1197,7 +1197,7 @@ function AppointmentChecklistSection({
               className="overflow-hidden rounded-2xl border border-border bg-card"
             >
               <div className="grid lg:grid-cols-[minmax(0,1fr)_112px]">
-                <div className="p-4">
+                <div className="p-3.5">
                   <div className="flex items-start gap-3">
                     <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
                       {index + 1}
@@ -1206,7 +1206,7 @@ function AppointmentChecklistSection({
                       <h3 className="text-sm font-semibold leading-snug text-foreground">
                         {item.item_text}
                       </h3>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
+                      <div className="mt-1.5 flex flex-wrap gap-1">
                         <span className={workflowInlineBadgeClassName}>
                           {checklistPhaseLabel(item.phase)}
                         </span>
@@ -1446,13 +1446,13 @@ function AppointmentRemindersSection({
         />
       }
     >
-      <div className="space-y-3">
+      <div className="space-y-2.5">
         {reminders.length === 0 ? (
           <WorkflowEmptyState
             title={appointmentText("appointments_no_reminders_exist_for_this_appointment_yet")}
           />
         ) : (
-          <div className="space-y-3 pl-6">
+          <div className="space-y-2.5 pl-6">
           {reminders.map((item, index) => (
             <div
               key={item.id}
@@ -1468,15 +1468,15 @@ function AppointmentRemindersSection({
                   item.is_completed ? "bg-emerald-500" : "bg-orange-400",
                 )}
               />
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <div className={tokens.text.sectionTitle}>{item.title}</div>
                 <span className="text-xs text-muted-foreground">
                   {formatDateTimeLabel(item.remind_at)}
                 </span>
               </div>
-              <div className="mt-2 overflow-hidden rounded-2xl border border-border bg-card">
+              <div className="mt-1.5 overflow-hidden rounded-2xl border border-border bg-card">
                 <div className="grid gap-0 sm:grid-cols-[minmax(0,1fr)_112px]">
-                <div className="px-4 py-3">
+                <div className="px-4 py-2.5">
                   <div className="text-xs text-muted-foreground">
                     {t.patients_assign_owner}
                   </div>
@@ -1484,7 +1484,7 @@ function AppointmentRemindersSection({
                   {item.user_name} · {formatDateTimeLabel(item.remind_at)}
                   </p>
                   {item.description ? (
-                    <p className="mt-2 text-sm text-muted-foreground">
+                    <p className="mt-1.5 text-sm text-muted-foreground">
                       {item.description}
                     </p>
                   ) : null}
@@ -2391,7 +2391,7 @@ function AppointmentTaskList({
   onTaskStatus: (taskId: string, status: string) => void | Promise<void>;
 }) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5">
       {tasks.length === 0 ? (
         <WorkflowEmptyState
           title={appointmentText("appointments_no_operational_tasks_exist_for_this_appointment_yet")}
@@ -2403,13 +2403,13 @@ function AppointmentTaskList({
             className="overflow-hidden rounded-2xl border border-border bg-card"
           >
             <div className="grid xl:grid-cols-[minmax(0,1fr)_340px]">
-              <div className="p-4">
+              <div className="p-3.5">
                 <div className="flex items-start gap-3">
                   <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
                     {index + 1}
                   </div>
                   <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       <p className="text-sm font-semibold text-foreground">
                         {task.title}
                       </p>
@@ -2421,7 +2421,7 @@ function AppointmentTaskList({
                       {task.assigned_to_name} В· {roleLabel(task.assigned_to_role)}
                     </p>
                     {task.description ? (
-                      <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                      <p className="mt-2.5 text-sm leading-6 text-muted-foreground">
                         {task.description}
                       </p>
                     ) : null}
@@ -2458,7 +2458,7 @@ function AppointmentTaskList({
                     </button>
                   ))}
                 </div>
-                <div className="mt-2 text-right text-xs font-medium text-muted-foreground">
+                <div className="mt-1.5 text-right text-xs font-medium text-muted-foreground">
                   {task.due_date ? formatDateTimeLabel(task.due_date) : notSetLabel}
                 </div>
               </div>

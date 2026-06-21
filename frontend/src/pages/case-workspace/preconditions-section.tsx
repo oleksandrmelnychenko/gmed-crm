@@ -58,9 +58,9 @@ export function PreconditionsSection() {
       missingPrimaryMessage={tri(lang, "case_ws_please_enter_the_condition_name")}
       cardContent={(item) => (
         <>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-start gap-1.5">
             <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
-            <p className="truncate text-sm font-medium text-foreground">
+            <p className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
               {item.erkrankung || tri(lang, "case_ws_untitled")}
             </p>
           </div>
@@ -74,7 +74,7 @@ export function PreconditionsSection() {
             </Badge>
           ) : null}
           {item.notiz ? (
-            <p className="line-clamp-3 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
+            <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-muted-foreground">
               {item.notiz}
             </p>
           ) : (

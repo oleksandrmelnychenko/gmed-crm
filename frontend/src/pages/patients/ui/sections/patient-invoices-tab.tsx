@@ -747,7 +747,7 @@ function usePatientInvoicesTabContent({
             </Button>
           </div>
         </AdminToolbar>
-        <div className="grid gap-y-4 overflow-hidden rounded-xl border border-border px-3 pb-4 pt-4 md:grid-cols-2 xl:grid-cols-4 [&>article:not(:last-child):not(:nth-child(4n))_.admin-inline-metric-separator]:xl:block">
+        <div className="grid gap-y-3 overflow-hidden rounded-xl border border-border px-3 pb-4 pt-4 md:grid-cols-2 xl:grid-cols-4 [&>article:not(:last-child):not(:nth-child(4n))_.admin-inline-metric-separator]:xl:block">
           <AdminInlineMetric
             icon={CircleDollarSign}
             label={t.patient_invoices_gross_revenue}
@@ -812,11 +812,11 @@ function usePatientInvoicesTabContent({
         </div>
 
         {financialBreakdownByServiceType.length ? (
-          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-3">
             {financialBreakdownByServiceType.map((item) => (
               <div
                 key={item.service_type}
-                className="rounded-xl border border-border/50 bg-card px-4 py-3"
+                className="rounded-xl border border-border/50 bg-card px-4 py-2.5"
               >
                 <p className="text-sm font-semibold text-foreground">
                   {patientInvoiceServiceTypeLabel(item.service_type)}
@@ -1225,7 +1225,7 @@ function usePatientInvoicesTabContent({
                     <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
                       <div className="min-w-0">
                         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                          <p className="max-w-full truncate text-[15px] font-semibold leading-5 text-foreground">
+                          <p className="min-w-0 max-w-full break-words text-[15px] font-semibold leading-5 text-foreground">
                             {group.packageName}
                           </p>
                           {group.orderNumber ? (
@@ -1252,7 +1252,7 @@ function usePatientInvoicesTabContent({
                           {payerLabel ? (
                             <>
                               <span className="size-1 rounded-full bg-muted-foreground/35" />
-                              <span className="max-w-[320px] truncate">
+                              <span className="min-w-0 max-w-full break-words">
                                 {t.patient_invoices_payer}:{" "}
                                 <span className="font-medium text-foreground">
                                   {payerLabel}
@@ -1263,7 +1263,7 @@ function usePatientInvoicesTabContent({
                           {group.notes ? (
                             <>
                               <span className="size-1 rounded-full bg-muted-foreground/35" />
-                              <span className="max-w-[420px] truncate">
+                              <span className="min-w-0 max-w-full break-words">
                                 {group.notes}
                               </span>
                             </>
@@ -1311,14 +1311,14 @@ function usePatientInvoicesTabContent({
                     <span className="h-px flex-1 bg-gradient-to-r from-border/70 to-transparent" />
                   </div>
                   <div className="mb-2 ml-20 overflow-hidden rounded-lg bg-[#fbfdff] p-2 shadow-sm">
-                    <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="grid gap-1.5 sm:grid-cols-2">
                       {group.items.map((item) => (
                         <div
                           key={item.package_item_id ?? `${id}:summary`}
                           className="rounded-md bg-white px-3 py-2 text-xs shadow-sm ring-1 ring-border/40"
                         >
                           <div className="flex items-start justify-between gap-3">
-                            <p className="min-w-0 truncate font-medium text-foreground">
+                            <p className="min-w-0 max-w-full break-words font-medium text-foreground">
                               {item.package_item_id
                                 ? packageItemLabel(item, t)
                                 : t.patient_invoices_package_summary}
@@ -1427,13 +1427,13 @@ function usePatientInvoicesTabContent({
             {t.patient_invoices_no_ledger_entries}
           </EmptyCell>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {ledgerEntries.slice(0, 12).map((entry) => (
               <article
                 key={entry.id}
                 className="overflow-hidden rounded-xl border border-border bg-card"
               >
-                <div className="grid gap-3 px-4 py-3 text-sm md:grid-cols-[96px_minmax(0,1fr)_180px] md:items-center">
+                <div className="grid gap-2.5 px-4 py-2.5 text-sm md:grid-cols-[96px_minmax(0,1fr)_180px] md:items-center">
                   <div className="flex flex-col gap-1">
                     <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                       {formatDate(entry.entry_date)}
@@ -1467,7 +1467,7 @@ function usePatientInvoicesTabContent({
                         {patientInvoiceLedgerCategoryLabel(entry.category)}
                       </Badge>
                     </div>
-                    <p className="mt-2 truncate font-medium text-foreground">
+                    <p className="mt-2 break-words font-medium text-foreground">
                       {entry.description}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
@@ -1510,20 +1510,20 @@ function usePatientInvoicesTabContent({
             {t.patient_invoices_no_invoices}
           </EmptyCell>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {invoices.map((invoice) => (
               <article
                 key={invoice.id}
                 className="rounded-xl border border-border bg-card"
               >
-                <div className="relative overflow-hidden p-4">
+                <div className="relative overflow-hidden p-3.5">
                   <span
                     className={cn(
                       "absolute left-0 top-4 h-12 w-1 rounded-r-full",
                       invoiceAccentClass(invoice.status),
                     )}
                   />
-                  <div className="grid gap-4 pl-3 md:grid-cols-[minmax(0,1fr)_190px]">
+                  <div className="grid gap-3 pl-3 md:grid-cols-[minmax(0,1fr)_190px]">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="h-px w-8 bg-border" />
@@ -1608,7 +1608,7 @@ function usePatientInvoicesTabContent({
                       ) : null}
                     </div>
 
-                    <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
+                    <div className="flex flex-col justify-between gap-3 border-l border-dashed border-border pl-4">
                       <div>
                         <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                           {t.patient_invoices_open}

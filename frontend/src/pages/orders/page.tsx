@@ -359,10 +359,10 @@ function MiniMetric({
         className,
       )}
     >
-      <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+      <span className="min-w-0 break-words text-xs font-medium text-muted-foreground">
         {label}
       </span>
-      <span className="min-w-0 max-w-[55%] truncate text-right text-sm font-semibold leading-none text-foreground">
+      <span className="min-w-0 max-w-[55%] break-words text-right text-sm font-semibold leading-snug text-foreground">
         {value}
       </span>
     </div>
@@ -3044,7 +3044,7 @@ function useOrdersPageContent() {
                             {orderStatusLabel(orderDetail.status)}
                           </StatusBadge>
                         </div>
-                        <h3 className="mt-2 truncate text-lg font-semibold leading-none text-foreground">
+                        <h3 className="mt-2 min-w-0 max-w-full break-words text-lg font-semibold leading-snug text-foreground">
                           {orderDetail.patient_name}
                         </h3>
                         <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -5037,10 +5037,10 @@ function useOrdersPageContent() {
                                   </span>
 
                                   <div className="rounded-xl border border-border bg-zinc-50/60 p-3">
-                                    <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+                                    <div className="grid gap-1.5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
                                       <div className="min-w-0">
                                         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                                          <p className="max-w-full truncate text-[15px] font-semibold leading-5 text-foreground">
+                                          <p className="min-w-0 max-w-full break-words text-[15px] font-semibold leading-5 text-foreground">
                                             {group.label}
                                           </p>
                                           <span className="size-1 rounded-full bg-muted-foreground/35" />
@@ -5091,7 +5091,7 @@ function useOrdersPageContent() {
                                       </div>
                                     </div>
 
-                                    <div className="mt-3 grid gap-2">
+                                    <div className="mt-2.5 grid gap-1.5">
                                       {group.items.map((item) => {
                                         const itemStatus = item.is_completed
                                           ? "completed"
@@ -5108,7 +5108,7 @@ function useOrdersPageContent() {
                                             <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                                               <div className="min-w-0">
                                                 <div className="flex min-w-0 flex-wrap items-center gap-2">
-                                                  <p className="min-w-0 truncate text-sm font-medium text-foreground">
+                                                  <p className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
                                                     {localizeWorkflowItemText(
                                                       item.item_key,
                                                       item.item_text,
@@ -5236,7 +5236,7 @@ function useOrdersPageContent() {
                         ) : undefined
                       }
                     >
-                      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,230px),1fr))] gap-2">
+                      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,230px),1fr))] gap-1.5">
                         <MiniMetric
                           label={tx.providers_services}
                           value={String(leistungMetrics.total)}
@@ -5330,7 +5330,7 @@ function useOrdersPageContent() {
                             const providerValue = leistung.provider_id ? (
                               <button
                                 type="button"
-                                className="max-w-full truncate text-right font-semibold text-sky-700 hover:text-sky-800"
+                                className="min-w-0 max-w-full break-words text-right font-semibold text-sky-700 hover:text-sky-800"
                                 onClick={() =>
                                   window.open(
                                     `/providers/${leistung.provider_id}?return_to=/orders`,
@@ -5348,7 +5348,7 @@ function useOrdersPageContent() {
                               leistung.provider_id && leistung.doctor_id ? (
                                 <button
                                   type="button"
-                                  className="max-w-full truncate text-right font-semibold text-sky-700 hover:text-sky-800"
+                                  className="min-w-0 max-w-full break-words text-right font-semibold text-sky-700 hover:text-sky-800"
                                   onClick={() =>
                                     window.open(
                                       `/appointments?provider=${leistung.provider_id}&doctor=${leistung.doctor_id}`,
@@ -5367,7 +5367,7 @@ function useOrdersPageContent() {
                               leistung.external_document_id ? (
                                 <button
                                   type="button"
-                                  className="max-w-full truncate text-right font-semibold text-sky-700 hover:text-sky-800"
+                                  className="min-w-0 max-w-full break-words text-right font-semibold text-sky-700 hover:text-sky-800"
                                   onClick={() =>
                                     staffGo(
                                       `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
@@ -5497,7 +5497,7 @@ function useOrdersPageContent() {
                                   </div>
                                 </div>
 
-                                <div className="grid gap-2 border-t border-border bg-muted/15 p-3 min-[760px]:grid-cols-2">
+                                <div className="grid gap-1.5 border-t border-border bg-muted/15 p-3 min-[760px]:grid-cols-2">
                                   <MiniMetric
                                     label={t.common_provider}
                                     value={providerValue}
@@ -5586,7 +5586,7 @@ function useOrdersPageContent() {
                         ) : undefined
                       }
                     >
-                      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,230px),1fr))] gap-2">
+                      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,230px),1fr))] gap-1.5">
                         <MiniMetric
                           label={t.orders_external_invoices_count_label}
                           value={String(externalInvoiceMetrics.total)}
@@ -5626,7 +5626,7 @@ function useOrdersPageContent() {
                             const providerValue = invoice.provider_id ? (
                               <button
                                 type="button"
-                                className="max-w-full truncate font-semibold text-sky-700 hover:text-sky-800"
+                                className="min-w-0 max-w-full break-words font-semibold text-sky-700 hover:text-sky-800"
                                 onClick={() =>
                                   window.open(
                                     `/providers/${invoice.provider_id}?return_to=/orders`,

@@ -164,7 +164,7 @@ function DemoItem({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="min-w-0">
       <p className="text-[10px] uppercase tracking-wide text-muted-foreground/70">{label}</p>
-      <p className="truncate text-[13px] font-semibold text-foreground">
+      <p className="min-w-0 max-w-full break-words text-[13px] font-semibold text-foreground">
         {value && String(value).trim() ? value : <span className="text-muted-foreground">—</span>}
       </p>
     </div>
@@ -298,9 +298,9 @@ export function PatientOverviewCard({
   ];
 
   return (
-    <section className="space-y-3 rounded-2xl border border-border/70 bg-card p-3 shadow-sm">
+    <section className="space-y-2.5 rounded-2xl border border-border/70 bg-card p-3 shadow-sm">
       {showDemographics ? (
-        <div className="grid gap-x-5 gap-y-2 border-b border-border/60 pb-3 text-xs sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid gap-x-5 gap-y-1.5 border-b border-border/60 pb-3 text-xs sm:grid-cols-3 lg:grid-cols-5">
           <DemoItem label={tx("Дата рождения", "Geburtsdatum")} value={formatBirthDate(birthDate, lang)} />
           <DemoItem
             label={tx("Возраст", "Alter")}
@@ -311,9 +311,9 @@ export function PatientOverviewCard({
           <DemoItem label="Email" value={email ?? ""} />
         </div>
       ) : null}
-      <div className="grid gap-x-5 gap-y-4 lg:grid-cols-[minmax(0,1fr)_14rem]">
+      <div className="grid gap-x-5 gap-y-3 lg:grid-cols-[minmax(0,1fr)_14rem]">
         <div className="min-w-0 space-y-4">
-          <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-[0.8fr_1.3fr_1.3fr]">
+          <div className="grid gap-x-5 gap-y-3 sm:grid-cols-2 lg:grid-cols-[0.8fr_1.3fr_1.3fr]">
             <div className="min-w-0">
               <ColumnTitle count={allergyCount || undefined}>{tx("Аллергии", "Allergien")}</ColumnTitle>
               {allergien.length > 0 ? (

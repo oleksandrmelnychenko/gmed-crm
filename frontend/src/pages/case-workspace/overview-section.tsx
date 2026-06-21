@@ -234,8 +234,8 @@ function OverviewSectionForm({
           />
         </Field>
 
-        <div className="rounded-xl border border-border/50 bg-muted/25 p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="rounded-xl border border-border/50 bg-muted/25 p-3.5">
+          <div className="flex flex-wrap items-start justify-between gap-2.5">
             <div>
               <p className="text-sm font-medium text-foreground">
                 {t.cases_workspace_overview_snippets_title}
@@ -249,11 +249,11 @@ function OverviewSectionForm({
             </code>
           </div>
           {activeSnippets.length === 0 ? (
-            <p className="mt-3 text-sm text-muted-foreground">
+            <p className="mt-2.5 text-sm text-muted-foreground">
               {t.cases_workspace_overview_snippets_empty}
             </p>
           ) : (
-            <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            <div className="mt-4 grid gap-2.5 lg:grid-cols-2">
               {activeSnippets.map((snippet) => {
                 const rendered = renderCaseTextSnippet(
                   snippet.body,
@@ -262,19 +262,19 @@ function OverviewSectionForm({
                 return (
                   <div
                     key={snippet.id}
-                    className="rounded-xl border border-border/50 bg-card p-4"
+                    className="rounded-xl border border-border/50 bg-card p-3.5"
                   >
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start justify-between gap-2.5">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-foreground">
+                        <p className="break-words text-sm font-medium text-foreground">
                           {snippet.label}
                         </p>
-                        <p className="truncate text-xs text-muted-foreground">
+                        <p className="break-words text-xs text-muted-foreground">
                           {snippetCategoryLabel(snippet.category, t)}
                         </p>
                       </div>
                     </div>
-                    <p className="mt-3 whitespace-pre-wrap text-sm text-foreground">
+                    <p className="mt-2.5 whitespace-pre-wrap text-sm text-foreground">
                       {rendered}
                     </p>
                     <div className="mt-3 flex justify-end">

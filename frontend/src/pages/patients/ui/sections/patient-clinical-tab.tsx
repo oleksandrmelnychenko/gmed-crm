@@ -471,7 +471,7 @@ function ClinicalSection<T extends { id?: string | null }>({
   const renderRow = (item: T, index: number) => (
     <div
       key={item.id ?? index}
-      className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-lg border border-border/50 bg-background px-3 py-2"
+      className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2.5 rounded-lg border border-border/50 bg-background px-3 py-2"
     >
       <div className="min-w-0">{rowView ? rowView(item) : null}</div>
       {renderActions(item, index)}
@@ -501,7 +501,7 @@ function ClinicalSection<T extends { id?: string | null }>({
         ) : null}
       </header>
 
-      <div className="space-y-2 p-3">
+      <div className="space-y-1.5 p-3">
         {list.length === 0 ? (
           <p className="px-1 py-4 text-center text-xs text-muted-foreground">
             {tx("Пока нет записей", "Noch keine Einträge")}
@@ -516,7 +516,7 @@ function ClinicalSection<T extends { id?: string | null }>({
                   const rows = indexed.filter(({ item }) => groupOf(item) === group.key);
                   if (rows.length === 0) return null;
                   return (
-                    <div key={group.key} className="space-y-2">
+                    <div key={group.key} className="space-y-1.5">
                       <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                         {group.label}
                       </p>
@@ -798,12 +798,12 @@ function PatientRecommendationsSection({
     <div
       key={rec.id}
       className={cn(
-        "grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-lg border border-border/50 px-3 py-2",
+        "grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2.5 rounded-lg border border-border/50 px-3 py-2",
         muted ? "bg-muted/40" : "bg-background",
       )}
     >
       <div className="min-w-0 space-y-1">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <span className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">{rec.title}</span>
           {typeLabel(rec.recommendation_type) ? (
             <Badge variant="outline" className="rounded-full text-[10px]">
@@ -873,7 +873,7 @@ function PatientRecommendationsSection({
         ) : null}
       </header>
 
-      <div className="space-y-2 p-3">
+      <div className="space-y-1.5 p-3">
         {recommendations.length === 0 ? (
           <p className="px-1 py-4 text-center text-xs text-muted-foreground">
             {tx("Рекомендаций нет", "Keine Empfehlungen")}
@@ -883,7 +883,7 @@ function PatientRecommendationsSection({
         {activeRecs.map((rec) => renderRow(rec, false))}
 
         {doneRecs.length > 0 ? (
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <button
               type="button"
               className="flex w-full items-center gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
@@ -1260,7 +1260,7 @@ export function PatientClinicalTab({
         }}
         rowView={(w) => (
           <div className="min-w-0 space-y-1">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
               <span className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">{w.label}</span>
               {w.severity ? (
                 <span className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">
@@ -1381,7 +1381,7 @@ export function PatientClinicalTab({
         }}
         rowView={(p) => (
           <div className="min-w-0 space-y-1">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
               {p.performed_on ? (
                 <span className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">
                   {p.performed_on}
@@ -1759,7 +1759,7 @@ export function PatientClinicalTab({
         }}
         rowView={(e) => (
           <div className="min-w-0 space-y-1">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
               <span className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">{e.title}</span>
               {e.performed_on ? (
                 <span className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">

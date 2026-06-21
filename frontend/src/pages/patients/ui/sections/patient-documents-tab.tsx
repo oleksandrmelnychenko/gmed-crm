@@ -89,10 +89,10 @@ function DocumentOverviewTile({
       <p className="text-2xl font-semibold leading-[0.85] text-foreground">
         {value}
       </p>
-      <p className="mt-[5px] line-clamp-2 text-[11px] leading-tight text-muted-foreground/75">
+      <p className="mt-[5px] text-[11px] leading-tight text-muted-foreground/75 break-words">
         {description}
       </p>
-      <p className={cn("mt-0.5 line-clamp-2 text-xs font-medium leading-tight", tokens.text.muted)}>
+      <p className={cn("mt-0.5 text-xs font-medium leading-tight break-words", tokens.text.muted)}>
         {label}
       </p>
     </article>
@@ -350,7 +350,7 @@ export function PatientDocumentsTab({
           </EmptyCell>
         ) : (
           <>
-            <div className="space-y-2 md:hidden">
+            <div className="space-y-1.5 md:hidden">
               {filteredDocuments.map((doc) => (
                 <button
                   key={doc.id}
@@ -361,11 +361,11 @@ export function PatientDocumentsTab({
                       doc.filename || "document",
                     )
                   }
-                  className="block w-full rounded-xl border border-border/50 bg-card px-4 py-3 text-left transition-colors hover:border-border hover:bg-muted/30"
+                  className="block w-full rounded-xl border border-border/50 bg-card px-4 py-2.5 text-left transition-colors hover:border-border hover:bg-muted/30"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-foreground">{doc.filename}</p>
+                      <p className="break-words text-sm font-medium text-foreground">{doc.filename}</p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {doc.category ? localizeDocumentCode(doc.category, l) : commonNotSet}
                       </p>
@@ -380,7 +380,7 @@ export function PatientDocumentsTab({
                       {doc.status ? statusLabel(doc.status) : commonNotSet}
                     </Badge>
                   </div>
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <div className="mt-1.5 flex flex-wrap gap-2 text-xs text-muted-foreground">
                     <span>{doc.uploaded_by_name ?? commonUnknown}</span>
                     <span>· {formatDate(doc.created_at)}</span>
                   </div>

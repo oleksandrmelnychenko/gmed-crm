@@ -1405,7 +1405,7 @@ function useStaffInvoicesPageContent() {
 
   return (
     <>
-      <div className="space-y-6">
+      <div className="space-y-5">
         <PageHeader
           title={t.invoices_title}
           actions={(
@@ -1507,7 +1507,7 @@ function useStaffInvoicesPageContent() {
                 <ShellBanner tone="error">{accountingError}</ShellBanner>
               ) : accountingLedger ? (
                 <div className="space-y-4">
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-4">
                     <MiniMetric
                       label={text.cashIncome}
                       value={formatMoney(accountingSummary.income_gross)}
@@ -1970,7 +1970,7 @@ function useStaffInvoicesPageContent() {
             {detailBusy ? <LoadingState label={t.common_loading} /> : detailError ? <ShellBanner tone="error">{detailError}</ShellBanner> : !detail ? <EmptyState title={text.noInvoiceSelected} description={text.noInvoiceSelectedDescription} /> : (
               <div className="space-y-4 rounded-xl">
                 <section className="rounded-xl border border-border bg-card">
-                  <div className="relative overflow-hidden p-4">
+                  <div className="relative overflow-hidden p-3.5">
                     <span
                       className={cn(
                         "absolute left-0 top-4 h-12 w-1 rounded-r-full",
@@ -1983,7 +1983,7 @@ function useStaffInvoicesPageContent() {
                               : "bg-sky-500",
                       )}
                     />
-                    <div className="grid gap-4 pl-3 md:grid-cols-[minmax(0,1fr)_180px]">
+                    <div className="grid gap-3 pl-3 md:grid-cols-[minmax(0,1fr)_180px]">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="h-px w-8 bg-border" />
@@ -2075,13 +2075,13 @@ function useStaffInvoicesPageContent() {
                       <SummaryLine label={t.invoices_paid} value={formatMoney(detail.paid_amount)} />
                       <SummaryLine label={text.balanceDue} value={formatMoney(detail.balance_due)} />
                     </div>
-                    <div className="space-y-3">
+                    <div className="space-y-2.5">
                       <div className="flex items-start justify-between gap-4">
                         <div>
                           <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.notes)}</h2>
                         </div>
                       </div>
-                      <div className="rounded-xl border border-border bg-background/60 p-4 text-sm leading-snug text-muted-foreground">
+                      <div className="rounded-xl border border-border bg-background/60 p-3.5 text-sm leading-snug text-muted-foreground">
                         {detail.notes || t.common_not_set}
                       </div>
                     </div>
@@ -2089,7 +2089,7 @@ function useStaffInvoicesPageContent() {
                 </SectionCard>
 
                 <SectionCard title={t.providers_linked_patients}>
-                  <div className="grid gap-3 md:grid-cols-4">
+                  <div className="grid gap-2.5 md:grid-cols-4">
                     <button
                       type="button"
                       className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
@@ -2097,7 +2097,7 @@ function useStaffInvoicesPageContent() {
                     >
                       <div className="relative z-10">
                         <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{t.invoices_patient}</h3>
-                        <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                        <p className="mt-1.5 text-xs leading-tight text-muted-foreground">
                           {text.linkedPatientCardDescription}
                         </p>
                       </div>
@@ -2112,7 +2112,7 @@ function useStaffInvoicesPageContent() {
                     >
                       <div className="relative z-10">
                         <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.linkedOrder}</h3>
-                        <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                        <p className="mt-1.5 text-xs leading-tight text-muted-foreground">
                           {text.linkedOrderCardDescription}
                         </p>
                       </div>
@@ -2127,7 +2127,7 @@ function useStaffInvoicesPageContent() {
                     >
                       <div className="relative z-10">
                         <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.quotes}</h3>
-                        <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                        <p className="mt-1.5 text-xs leading-tight text-muted-foreground">
                           {text.linkedQuoteCardDescription}
                         </p>
                       </div>
@@ -2142,7 +2142,7 @@ function useStaffInvoicesPageContent() {
                     >
                       <div className="relative z-10">
                         <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.documents}</h3>
-                        <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                        <p className="mt-1.5 text-xs leading-tight text-muted-foreground">
                           {text.linkedDocumentsCardDescription}
                         </p>
                       </div>
@@ -2169,7 +2169,7 @@ function useStaffInvoicesPageContent() {
                       >
                         <Pencil className="size-3.5" />
                       </Button>
-                      <div className="mt-5 grid gap-2 md:grid-cols-2">
+                      <div className="mt-5 grid gap-1.5 md:grid-cols-2">
                         <MiniMetric
                           label={t.revenue_invoices_preview_portal}
                           value={
@@ -2230,7 +2230,7 @@ function useStaffInvoicesPageContent() {
                       >
                         <Pencil className="size-3.5" />
                       </Button>
-                      <div className="mt-5 grid gap-2 md:grid-cols-2">
+                      <div className="mt-5 grid gap-1.5 md:grid-cols-2">
                         <MiniMetric
                           label={t.revenue_invoices_contact_name}
                           value={
@@ -2274,11 +2274,11 @@ function useStaffInvoicesPageContent() {
                   }
                 >
                   {dunningError ? <ShellBanner tone="error">{dunningError}</ShellBanner> : null}
-                  <div className="space-y-3">
+                  <div className="space-y-2.5">
                     {dunningEvents.length === 0 ? (
                       <EmptyState title={text.noDunningEvents} description={text.noDunningEventsDescription} />
                     ) : (
-                      <div className="space-y-3 pl-6">
+                      <div className="space-y-2.5 pl-6">
                         {dunningEvents.map((event, index) => (
                           <div
                             key={event.id}
@@ -2299,7 +2299,7 @@ function useStaffInvoicesPageContent() {
                             </div>
                             <div className="mt-2 overflow-hidden rounded-2xl border border-border bg-card">
                               <div className="grid gap-0 sm:grid-cols-[minmax(0,1fr)_190px]">
-                                <div className="px-4 py-3">
+                                <div className="px-4 py-2.5">
                                   <div className="text-xs text-muted-foreground">
                                     {text.dunningBalanceDue}
                                   </div>
@@ -2307,13 +2307,13 @@ function useStaffInvoicesPageContent() {
                                     {formatMoney(event.balance_due)}
                                   </div>
                                   {event.note ? (
-                                    <div className="mt-3 max-w-xl text-xs leading-snug text-muted-foreground">
+                                    <div className="mt-2.5 max-w-xl text-xs leading-snug text-muted-foreground">
                                       {event.note}
                                     </div>
                                   ) : null}
                                 </div>
-                                <div className="relative border-t border-border px-4 py-3 sm:border-t-0 sm:pl-5 sm:before:absolute sm:before:bottom-3 sm:before:left-0 sm:before:top-3 sm:before:border-l sm:before:border-dashed sm:before:border-border">
-                                  <div className="space-y-2 text-xs leading-tight">
+                                <div className="relative border-t border-border px-4 py-2.5 sm:border-t-0 sm:pl-5 sm:before:absolute sm:before:bottom-3 sm:before:left-0 sm:before:top-3 sm:before:border-l sm:before:border-dashed sm:before:border-border">
+                                  <div className="space-y-1.5 text-xs leading-tight">
                                     <div>
                                       <div className="text-muted-foreground">{text.dunningResponsible}</div>
                                       <div className="mt-0.5 font-medium text-foreground">
@@ -2333,7 +2333,7 @@ function useStaffInvoicesPageContent() {
 
                 <SectionCard title={text.lineItems}>
                   {!detail.line_items || detail.line_items.length === 0 ? <EmptyState title={text.noLineItems} description={text.noLineItemsDescription} /> : (
-                    <div className="space-y-3">
+                    <div className="space-y-2.5">
                       {detail.line_items.map((line, index) => {
                         const lineDescription = agencyServiceNameLabel(
                           undefined,
@@ -2355,7 +2355,7 @@ function useStaffInvoicesPageContent() {
                             className="overflow-hidden rounded-2xl border border-border bg-card"
                           >
                             <div className="grid lg:grid-cols-[minmax(0,1fr)_120px]">
-                              <div className="p-4">
+                              <div className="p-3.5">
                                 <div className="flex items-start gap-3">
                                   <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
                                     {index + 1}
@@ -2381,7 +2381,7 @@ function useStaffInvoicesPageContent() {
                                   </div>
                                 </div>
                               </div>
-                              <div className="relative border-t border-border p-4 lg:border-t-0 lg:pl-5 lg:before:absolute lg:before:bottom-4 lg:before:left-0 lg:before:top-4 lg:before:border-l lg:before:border-dashed lg:before:border-border">
+                              <div className="relative border-t border-border p-3.5 lg:border-t-0 lg:pl-5 lg:before:absolute lg:before:bottom-4 lg:before:left-0 lg:before:top-4 lg:before:border-l lg:before:border-dashed lg:before:border-border">
                                 <div className="flex flex-wrap gap-1.5 lg:justify-end">
                                   <span className="rounded-full border border-border bg-background px-2.5 py-1 text-xs font-semibold leading-none text-foreground">
                                     {`${t.invoices_vat} ${line.vat_rate}%`}
@@ -2390,15 +2390,15 @@ function useStaffInvoicesPageContent() {
                               </div>
                             </div>
                             <div className="grid border-t border-border bg-muted/15 sm:grid-cols-3">
-                              <div className="px-4 py-3">
+                              <div className="px-4 py-2.5">
                                 <div className="text-xs text-muted-foreground">{text.net}</div>
                                 <div className="mt-1 text-sm font-semibold text-foreground">{formatMoney(line.line_net)}</div>
                               </div>
-                              <div className="border-t border-border px-4 py-3 sm:border-l sm:border-t-0">
+                              <div className="border-t border-border px-4 py-2.5 sm:border-l sm:border-t-0">
                                 <div className="text-xs text-muted-foreground">{t.invoices_vat}</div>
                                 <div className="mt-1 text-sm font-semibold text-foreground">{formatMoney(line.line_vat)}</div>
                               </div>
-                              <div className="border-t border-border px-4 py-3 sm:border-l sm:border-t-0">
+                              <div className="border-t border-border px-4 py-2.5 sm:border-l sm:border-t-0">
                                 <div className="text-xs text-muted-foreground">{text.gross}</div>
                                 <div className="mt-1 text-sm font-semibold text-foreground">{formatMoney(line.line_gross)}</div>
                               </div>
@@ -2425,7 +2425,7 @@ function useStaffInvoicesPageContent() {
                       description={text.noSupportingDocumentsDescription}
                     />
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-2.5">
                       {detail.supporting_documents.map((document) => (
                         <button
                           type="button"
@@ -2444,10 +2444,10 @@ function useStaffInvoicesPageContent() {
                               <FileText className="size-4" />
                             </div>
                             <div className="min-w-0">
-                              <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
+                              <h3 className="break-words text-[13px] font-semibold tracking-tight text-foreground">
                                 {document.auto_name || document.original_filename || document.id}
                               </h3>
-                              <p className="mt-1 line-clamp-2 text-xs leading-snug text-muted-foreground">
+                              <p className="mt-1 break-words text-xs leading-snug text-muted-foreground">
                                 {[document.art, document.category, document.original_filename]
                                   .filter(Boolean)
                                   .join(" | ") || text.linkedOrderDocument}

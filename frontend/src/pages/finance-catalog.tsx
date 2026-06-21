@@ -1045,15 +1045,15 @@ function useFinanceCatalogPageContent() {
         ) : taxProfiles.length === 0 ? (
           <EmptyCell>{t.finance_catalog_empty_tax_profiles}</EmptyCell>
         ) : (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-3">
             {taxProfiles.map((profile) => (
               <article
                 key={profile.id}
-                className="relative overflow-hidden rounded-xl border border-border/50 bg-card px-4 py-3"
+                className="relative overflow-hidden rounded-xl border border-border/50 bg-card px-4 py-2.5"
               >
-                <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="flex flex-wrap items-start justify-between gap-1.5">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-foreground">
+                    <p className="max-w-full break-words text-sm font-semibold text-foreground">
                       {profile.name}
                     </p>
                     <p className="font-mono text-xs text-muted-foreground">
@@ -1092,7 +1092,7 @@ function useFinanceCatalogPageContent() {
                     ) : null}
                   </div>
                 </div>
-                <p className="mt-3 text-2xl font-semibold text-foreground">
+                <p className="mt-2.5 text-2xl font-semibold text-foreground">
                   {profile.vat_rate}%
                 </p>
                 <p className="mt-1 pr-16 text-xs text-muted-foreground">
@@ -1276,7 +1276,7 @@ function useFinanceCatalogPageContent() {
                   <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
                     <div className="min-w-0">
                       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                        <p className="max-w-full truncate text-[15px] font-semibold leading-5 text-foreground">
+                        <p className="min-w-0 max-w-full break-words text-[15px] font-semibold leading-5 text-foreground">
                           {item.name}
                         </p>
                         <span className="size-1 rounded-full bg-muted-foreground/35" />
@@ -1299,7 +1299,7 @@ function useFinanceCatalogPageContent() {
                         {item.description ? (
                           <>
                             <span className="size-1 rounded-full bg-muted-foreground/35" />
-                            <span className="max-w-[420px] truncate">
+                            <span className="min-w-0 max-w-full break-words">
                               {item.description}
                             </span>
                           </>
@@ -1359,14 +1359,14 @@ function useFinanceCatalogPageContent() {
                 </div>
                 <div className="mb-2 ml-20 overflow-hidden rounded-lg bg-[#fbfdff] p-2 shadow-sm">
                   {item.items?.length ? (
-                    <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="grid gap-1.5 sm:grid-cols-2">
                       {item.items.map((packageItem) => (
                         <div
                           key={packageItem.id}
                           className="rounded-md bg-white px-3 py-2 text-xs shadow-sm ring-1 ring-border/40"
                         >
                           <div className="flex items-start justify-between gap-3">
-                            <p className="min-w-0 truncate font-medium text-foreground">
+                            <p className="min-w-0 break-words font-medium text-foreground">
                               {packageItem.agency_service_name || packageItem.service_key
                                 ? agencyServiceNameLabel(
                                     packageItem.service_key,
@@ -1380,7 +1380,7 @@ function useFinanceCatalogPageContent() {
                               {agencyServiceUnitLabel(packageItem.unit_label, t)}
                             </span>
                           </div>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
                             {packageItem.service_key ? (
                               <span className="font-mono">{packageItem.service_key}</span>
                             ) : null}

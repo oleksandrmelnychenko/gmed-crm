@@ -150,7 +150,7 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className={cn("rounded-xl p-3", tokens.surface.mutedCard)}>
       <div className={tokens.text.eyebrow}>{label}</div>
-      <div className="mt-2 text-sm text-foreground">{value}</div>
+      <div className="mt-1.5 text-sm text-foreground">{value}</div>
     </div>
   );
 }
@@ -159,8 +159,8 @@ function SummaryLine({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex min-w-0 items-center gap-3 py-2">
       <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
-      <span className="h-px min-w-6 flex-1 bg-border/70" />
-      <span className="max-w-[55%] truncate text-right text-sm font-semibold text-foreground">
+      <span className="h-px min-w-6 flex-1 self-center bg-border/70" />
+      <span className="min-w-0 max-w-[55%] break-words text-right text-sm font-semibold text-foreground">
         {value}
       </span>
     </div>
@@ -833,7 +833,7 @@ function useSopsPageContent() {
 
   return (
     <>
-      <div className="space-y-6">
+      <div className="space-y-5">
         <PageHeader
           title={text.title}
           description={text.subtitle}
@@ -1026,12 +1026,12 @@ function useSopsPageContent() {
             />
           </AdminTableCard>
 
-          <div className="space-y-6">
+          <div className="space-y-5">
             <AdminTableCard
               title={titleWithDot(text.targetingModelTitle)}
               description={text.targetingModelDescription}
             >
-              <div className="flex flex-wrap gap-2 p-4">
+              <div className="flex flex-wrap gap-2 p-3.5">
                 {allowedTargetRoles.length > 0 ? (
                   allowedTargetRoles.map((role) => (
                     <Badge key={role} variant="outline" className="rounded-full">
@@ -1048,7 +1048,7 @@ function useSopsPageContent() {
               title={titleWithDot(text.scopeTitle)}
               description={text.scopeDescription}
             >
-              <div className="p-4 text-sm text-muted-foreground">
+              <div className="p-3.5 text-sm text-muted-foreground">
                 {text.scopeDescription}
               </div>
             </AdminTableCard>
@@ -1082,7 +1082,7 @@ function useSopsPageContent() {
                       sopAccentClass(selectedItem.status),
                     )}
                   />
-                  <div className="grid gap-4 p-4 pl-7 md:grid-cols-[minmax(0,1fr)_180px]">
+                  <div className="grid gap-3 p-3.5 pl-7 md:grid-cols-[minmax(0,1fr)_180px]">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="h-px w-8 bg-border" />
@@ -1090,10 +1090,10 @@ function useSopsPageContent() {
                           {statusLabel(selectedItem.status)}
                         </Badge>
                       </div>
-                      <h3 className="mt-2 truncate text-lg font-semibold leading-none text-foreground">
+                      <h3 className="mt-2 max-w-full break-words text-lg font-semibold leading-snug text-foreground">
                         {selectedItem.title}
                       </h3>
-                      <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                      <p className="mt-2 break-words text-xs leading-5 text-muted-foreground">
                         {selectedItem.summary || text.statusNotSet}
                       </p>
                       <div className="mt-3 flex flex-wrap gap-2">
@@ -1110,7 +1110,7 @@ function useSopsPageContent() {
                         ) : null}
                       </div>
                     </div>
-                    <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
+                    <div className="flex flex-col justify-between gap-3 border-l border-dashed border-border pl-4">
                       <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                         {text.columns.updated}
                       </span>
@@ -1427,7 +1427,7 @@ function useSopsPageContent() {
               {reviewError ? <ShellBanner tone="error">{reviewError}</ShellBanner> : null}
               {reviewItem ? (
                 <AdminTableCard title={titleWithDot(text.detailOverview)}>
-                  <div className="grid gap-3 p-4">
+                  <div className="grid gap-2.5 p-3.5">
                     <DetailField label={text.columns.title} value={reviewItem.title} />
                     <DetailField label={text.columns.author} value={reviewItem.created_by_name || roleLabel(reviewItem.created_by_role)} />
                     <DetailField

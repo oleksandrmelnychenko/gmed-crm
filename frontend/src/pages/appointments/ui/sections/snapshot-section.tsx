@@ -63,14 +63,14 @@ function AppointmentSnapshotSection({
   }
 
   return (
-    <section className="space-y-3 rounded-xl p-3.5 border border-border/50 bg-card/40">
+    <section className="space-y-2.5 rounded-xl p-3.5 border border-border/50 bg-card/40">
       <div className="flex items-center gap-2">
         <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
         <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
           {summaryTitle}
         </h3>
       </div>
-      <div className="mt-5 grid gap-x-14 gap-y-4 lg:grid-cols-2">
+      <div className="mt-5 grid gap-x-14 gap-y-3 lg:grid-cols-2">
         {snapshotCards.map((card, index) => (
           <SnapshotSummaryRow
             key={`${card.label}:${card.value}`}
@@ -103,20 +103,20 @@ function SnapshotSummaryRow({
     <div
       className={
         fullWidth
-          ? "grid grid-cols-[minmax(96px,max-content)_minmax(24px,1fr)_minmax(0,auto)] items-start gap-3 lg:col-span-2"
-          : "grid grid-cols-[minmax(96px,max-content)_minmax(24px,1fr)_auto] items-start gap-3"
+          ? "grid grid-cols-[minmax(96px,max-content)_minmax(24px,1fr)_minmax(0,auto)] items-start gap-2.5 lg:col-span-2"
+          : "grid grid-cols-[minmax(96px,max-content)_minmax(24px,1fr)_auto] items-start gap-2.5"
       }
     >
       <div className="min-w-0 pt-0.5">
-        <p className="truncate text-[12px] font-medium leading-tight text-muted-foreground">
+        <p className="break-words text-[12px] font-medium leading-tight text-muted-foreground">
           {label}
         </p>
-        <p className="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground/75">
+        <p className="mt-0.5 break-words text-[11px] leading-tight text-muted-foreground/75">
           {subLabel}
         </p>
       </div>
       <span className="mt-3 h-px min-w-6 bg-border/70" />
-      <p className="max-w-[420px] truncate text-right text-sm font-semibold leading-tight text-foreground">
+      <p className="min-w-0 max-w-[420px] break-words text-right text-sm font-semibold leading-tight text-foreground">
         {value}
       </p>
     </div>

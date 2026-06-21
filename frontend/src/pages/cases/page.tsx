@@ -2678,7 +2678,7 @@ function useCasesPageContent({
               <Banner tone="error">{detailError}</Banner>
             ) : detail ? (
               <>
-                <section className={cardClass("p-5")}>
+                <section className={cardClass("p-4")}>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge
                       variant="outline"
@@ -2704,34 +2704,34 @@ function useCasesPageContent({
                             ? patientLabel(selectedPatient)
                             : detail.patient_id}
                       </p>
-                      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
+                      <div className="mt-4 grid gap-2.5 md:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-xl border border-border bg-muted/20 px-4 py-2.5">
                           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                             {t.cases_clinical_reference_code}
                           </div>
-                          <div className="mt-2 font-mono text-sm text-foreground">{detail.case_id}</div>
+                          <div className="mt-1.5 font-mono text-sm text-foreground">{detail.case_id}</div>
                         </div>
-                        <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
+                        <div className="rounded-xl border border-border bg-muted/20 px-4 py-2.5">
                           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                             {t.cases_clinical_system_case_uuid}
                           </div>
-                          <div className="mt-2 break-all font-mono text-xs text-foreground">
+                          <div className="mt-1.5 break-all font-mono text-xs text-foreground">
                             {detail.case_uuid ?? detail.id}
                           </div>
                         </div>
-                        <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
+                        <div className="rounded-xl border border-border bg-muted/20 px-4 py-2.5">
                           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                             {t.cases_clinical_retention_until}
                           </div>
-                          <div className="mt-2 text-sm text-foreground">
+                          <div className="mt-1.5 text-sm text-foreground">
                             {formatDate(detail.retention_until)}
                           </div>
                         </div>
-                        <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
+                        <div className="rounded-xl border border-border bg-muted/20 px-4 py-2.5">
                           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                             {t.cases_clinical_last_clinical_update}
                           </div>
-                          <div className="mt-2 text-sm text-foreground">
+                          <div className="mt-1.5 text-sm text-foreground">
                             {formatDateTime(detail.last_clinical_update_at ?? detail.updated_at)}
                           </div>
                         </div>
@@ -2753,7 +2753,7 @@ function useCasesPageContent({
                     </div>
                   </div>
 
-                  <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                  <div className="mt-5 grid gap-2.5 md:grid-cols-2 xl:grid-cols-5">
                     <MetricCard label={t.cases_preconditions} value={detail.vorerkrankungen.length.toString()} description={t.cases_subtitle} icon={<Stethoscope className="size-4" />} />
                     <MetricCard label={t.cases_allergies} value={detail.allergien.length.toString()} description={t.cases_subtitle} icon={<Plus className="size-4" />} />
                     <MetricCard label={t.cases_medication} value={detail.medikamente.length.toString()} description={t.cases_subtitle} icon={<ClipboardList className="size-4" />} />
@@ -2984,7 +2984,7 @@ function useCasesPageContent({
                                     {snippet.is_active ? t.common_active : t.common_inactive}
                                   </Badge>
                                 </div>
-                                <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground">
+                                <p className="mt-2 whitespace-pre-wrap break-words text-xs text-muted-foreground">
                                   {snippet.body}
                                 </p>
                               </button>
@@ -4185,11 +4185,11 @@ function useCasesPageContent({
                   description={caseText("cases_append_only_section_history_with_retention_metadata_for")}
                 >
                   {detail.history?.length ? (
-                    <div className="space-y-3">
+                    <div className="space-y-2.5">
                       {detail.history.map((entry) => (
                         <article
                           key={entry.id}
-                          className="rounded-xl border border-border bg-muted/20 p-4"
+                          className="rounded-xl border border-border bg-muted/20 p-3.5"
                         >
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
@@ -4208,12 +4208,12 @@ function useCasesPageContent({
                               #{entry.id}
                             </Badge>
                           </div>
-                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                          <div className="mt-2.5 grid gap-2.5 md:grid-cols-2">
                             <div className="rounded-xl border border-border bg-white p-3">
                               <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                                 {caseText("cases_previous")}
                               </div>
-                              <p className="mt-2 break-words font-mono text-xs text-foreground">
+                              <p className="mt-1.5 break-words font-mono text-xs text-foreground">
                                 {historyValuePreview(entry.old_value)}
                               </p>
                             </div>
@@ -4221,7 +4221,7 @@ function useCasesPageContent({
                               <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                                 {caseText("cases_new")}
                               </div>
-                              <p className="mt-2 break-words font-mono text-xs text-foreground">
+                              <p className="mt-1.5 break-words font-mono text-xs text-foreground">
                                 {historyValuePreview(entry.new_value)}
                               </p>
                             </div>
@@ -4255,7 +4255,7 @@ export function CasesPage(...args: Parameters<typeof useCasesPageContent>) {
 
 function MetricCard({ label, value, description, icon }: MetricCardProps) {
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
+    <div className="rounded-xl border border-border bg-card p-3.5">
       <div className="flex items-center justify-between gap-3">
         <span className="inline-flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
           <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
@@ -4264,7 +4264,7 @@ function MetricCard({ label, value, description, icon }: MetricCardProps) {
         <span className="rounded-lg bg-muted p-2 text-muted-foreground">{icon}</span>
       </div>
       <p className="mt-4 text-3xl font-semibold tracking-tight text-foreground">{value}</p>
-      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{description}</p>
+      <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{description}</p>
     </div>
   );
 }

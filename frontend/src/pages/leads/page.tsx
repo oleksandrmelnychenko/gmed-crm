@@ -1018,10 +1018,10 @@ function useLeadsPageContent() {
               <Banner tone="error">{detailError}</Banner>
             </div>
           ) : detail ? (
-            <div className="space-y-6">
+            <div className="space-y-5">
             {paneTab === "overview" ? (
               <>
-                <section className={cardClass("p-5")}>
+                <section className={cardClass("p-4")}>
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusBadge tone={leadStatusTone(detail.qualification_status)}>
                       {statusLabel(detail.qualification_status, t)}
@@ -1046,7 +1046,7 @@ function useLeadsPageContent() {
                   </p>
                 </section>
 
-                <section className={cardClass("p-5")}>
+                <section className={cardClass("p-4")}>
                   <SectionTitle>{t.lead_section_contact_origin}</SectionTitle>
                   <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                     <DetailCard label={t.patients_email} value={detail.email || t.common_not_set} />
@@ -1057,7 +1057,7 @@ function useLeadsPageContent() {
                 </section>
 
                 {detail.intake_source === "visitor_facade" ? (
-                  <section className={cardClass("p-5")}>
+                  <section className={cardClass("p-4")}>
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-700">
                         {t.lead_from_website_wizard}
@@ -1081,7 +1081,7 @@ function useLeadsPageContent() {
                   </section>
                 ) : null}
 
-                <section className={cardClass("p-5")}>
+                <section className={cardClass("p-4")}>
                   <SectionTitle>{t.lead_section_identity}</SectionTitle>
                   <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                     <DetailCard
@@ -1104,7 +1104,7 @@ function useLeadsPageContent() {
                   </div>
                 </section>
 
-                <section className={cardClass("p-5")}>
+                <section className={cardClass("p-4")}>
                   <SectionTitle>{t.lead_section_address}</SectionTitle>
                   <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                     <DetailCard label={t.providers_country} value={dashOrValue(detail.country, t)} />
@@ -1120,7 +1120,7 @@ function useLeadsPageContent() {
             {paneTab === "process" ? (
               <>
                 {leadWorkflow ? (
-                  <section className={cardClass("p-5")}>
+                  <section className={cardClass("p-4")}>
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <SectionTitle>{t.lead_workflow_title}</SectionTitle>
@@ -1138,7 +1138,7 @@ function useLeadsPageContent() {
                       </div>
                     </div>
 
-                    <div className="mt-4 grid gap-3 xl:grid-cols-2">
+                    <div className="mt-4 grid gap-2.5 xl:grid-cols-2">
                       <WorkflowActionCard
                         icon={<ClipboardCheck className="size-4" />}
                         title={t.lead_workflow_complete_gate_title}
@@ -1288,7 +1288,7 @@ function useLeadsPageContent() {
                   </section>
                 ) : null}
 
-                <section className={cardClass("p-5")}>
+                <section className={cardClass("p-4")}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <SectionTitle>{t.lead_section_process_readiness}</SectionTitle>
@@ -1333,7 +1333,7 @@ function useLeadsPageContent() {
                         className="flex min-w-0 items-center gap-3 rounded-lg px-2 py-1.5"
                       >
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-foreground">
+                          <p className="break-words text-sm font-medium text-foreground">
                             {leadReadinessCheckLabel(check, t)}
                           </p>
                           <p className="mt-0.5 text-xs text-muted-foreground">
@@ -1370,7 +1370,7 @@ function useLeadsPageContent() {
                   ) : null}
                 </section>
 
-                <section className={cardClass("p-5")}>
+                <section className={cardClass("p-4")}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <SectionTitle>{t.lead_section_lifecycle}</SectionTitle>
@@ -1394,7 +1394,7 @@ function useLeadsPageContent() {
                     />
                   </div>
 
-                  <div className="mt-4 space-y-3">
+                  <div className="mt-4 space-y-2.5">
                     {detail.lifecycle.history.map((event) => (
                       <div
                         key={[
@@ -1404,7 +1404,7 @@ function useLeadsPageContent() {
                           event.transition_kind,
                           event.note ?? "",
                         ].join("|")}
-                        className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3"
+                        className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-2.5"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div>
@@ -1434,7 +1434,7 @@ function useLeadsPageContent() {
             {paneTab === "qualification" ? (
               <>
                 {gateForm && detail.failed_outcome.status === "none" ? (
-                  <section className={cardClass("p-5")}>
+                  <section className={cardClass("p-4")}>
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <SectionTitle>{t.lead_qualification_gate_data}</SectionTitle>
@@ -1637,7 +1637,7 @@ function useLeadsPageContent() {
                 ) : null}
 
                 {detail.converted_patient_id ? null : (
-                  <section className={cardClass("p-5")}>
+                  <section className={cardClass("p-4")}>
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <SectionTitle>{t.lead_failed_resolution_title}</SectionTitle>
@@ -1761,7 +1761,7 @@ function useLeadsPageContent() {
                   detail.can_travel !== null ||
                   detail.has_medical_records ||
                   detail.has_travel_documents !== null) ? (
-                  <section className={cardClass("p-5")}>
+                  <section className={cardClass("p-4")}>
                     <SectionTitle>{t.lead_section_eligibility_path}</SectionTitle>
                     <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                       <DetailCard label={t.lead_location} value={dashOrValue(detail.location, t)} />
@@ -1783,7 +1783,7 @@ function useLeadsPageContent() {
                   detail.has_health_risk_for_travel !== null ||
                   detail.primary_concern_text ||
                   detail.additional_concerns) ? (
-                  <section className={cardClass("p-5")}>
+                  <section className={cardClass("p-4")}>
                     <SectionTitle>{t.lead_section_health_concern}</SectionTitle>
                     <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                       <DetailCard label={t.lead_currently_in_treatment} value={yesNo(detail.currently_in_treatment, t)} />
@@ -1805,7 +1805,7 @@ function useLeadsPageContent() {
                 {(detail.services?.length ||
                   detail.has_insurance !== null ||
                   detail.insurance_covers_germany) ? (
-                  <section className={cardClass("p-5")}>
+                  <section className={cardClass("p-4")}>
                     <SectionTitle>{t.lead_section_services_insurance}</SectionTitle>
                     <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                       <DetailCard
@@ -1827,7 +1827,7 @@ function useLeadsPageContent() {
                 {(detail.preferred_location ||
                   detail.visit_timing ||
                   detail.message) ? (
-                  <section className={cardClass("p-5")}>
+                  <section className={cardClass("p-4")}>
                     <SectionTitle>{t.lead_section_wrap_up}</SectionTitle>
                     <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                       <DetailCard label={t.lead_preferred_location} value={dashOrValue(detail.preferred_location, t)} />
@@ -1842,7 +1842,7 @@ function useLeadsPageContent() {
                 ) : null}
 
                 {detail.intake_source === "visitor_facade" ? (
-                  <section className={cardClass("p-5")}>
+                  <section className={cardClass("p-4")}>
                     <SectionTitle>{t.lead_section_consents}</SectionTitle>
                     <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                       <DetailCard label={t.lead_consent_automated_contact} value={yesNo(detail.consent_automated_contact, t)} />
@@ -1855,12 +1855,12 @@ function useLeadsPageContent() {
                   </section>
                 ) : null}
 
-                <section className={cardClass("p-5")}>
+                <section className={cardClass("p-4")}>
                   <SectionTitle>
                     {`${t.lead_attachments} (${detail.attachments?.length ?? 0})`}
                   </SectionTitle>
                   {detail.attachments && detail.attachments.length > 0 ? (
-                    <ul className="mt-4 space-y-2">
+                    <ul className="mt-4 space-y-1.5">
                       {detail.attachments.map((file) => (
                         <li
                           key={file.id}
@@ -2220,7 +2220,7 @@ function useLeadsPageContent() {
               <div className="space-y-4 rounded-xl">
                 {createError ? <ShellBanner tone="error">{createError}</ShellBanner> : null}
 
-                <section className={cardClass("p-5")}>
+                <section className={cardClass("p-4")}>
                   <SectionTitle>{t.lead_section_identity}</SectionTitle>
                   <div className="mt-5 grid gap-4 md:grid-cols-2">
                     <LeadField label={t.patients_first_name}>
@@ -2246,7 +2246,7 @@ function useLeadsPageContent() {
                   </div>
                 </section>
 
-                <section className={cardClass("p-5")}>
+                <section className={cardClass("p-4")}>
                   <SectionTitle>{t.lead_section_contact_origin}</SectionTitle>
                   <div className="mt-5 grid gap-4 md:grid-cols-2">
                     <LeadField label={t.field_phone}>
@@ -2289,7 +2289,7 @@ function useLeadsPageContent() {
                   </div>
                 </section>
 
-                <section className={cardClass("p-5")}>
+                <section className={cardClass("p-4")}>
                   <SectionTitle>{t.patients_notes}</SectionTitle>
                   <div className="mt-5">
                     <textarea
@@ -2394,10 +2394,10 @@ function SectionTitle({ children }: { children: ReactNode }) {
 
 function DetailCard({ label, value }: { label: ReactNode; value: ReactNode }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg py-2">
+    <div className="flex min-w-0 items-center gap-3 rounded-lg py-2">
       <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
-      <span className="h-px min-w-6 flex-1 bg-border/70" />
-      <span className="max-w-[48%] text-right text-sm font-semibold leading-tight text-foreground">
+      <span className="h-px min-w-6 flex-1 self-center bg-border/70" />
+      <span className="min-w-0 max-w-[48%] break-words text-right text-sm font-semibold leading-snug text-foreground">
         {value}
       </span>
     </div>
@@ -2427,7 +2427,7 @@ function WorkflowActionCard({
   }[tone];
 
   return (
-    <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+    <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5">
       <div className="flex items-start gap-3">
         <div className="mt-0.5 rounded-lg border border-zinc-200 bg-white p-2 text-zinc-600">
           {icon}

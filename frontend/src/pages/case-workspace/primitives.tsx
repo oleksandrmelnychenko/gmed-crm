@@ -23,21 +23,21 @@ export function Panel({
   return (
     <section
       className={cn(
-        "space-y-3 rounded-xl p-3.5",
+        "space-y-2.5 rounded-xl p-3.5",
         tokens.surface.softCard,
         className,
       )}
     >
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             {accent ? (
               <span
                 aria-hidden
                 className="size-2 shrink-0 rounded-full bg-[var(--brand)]"
               />
             ) : null}
-            <h3 className={cn(tokens.text.sectionTitle, "truncate")}>
+            <h3 className={cn(tokens.text.sectionTitle, "min-w-0 max-w-full break-words")}>
               {title}
             </h3>
           </div>
@@ -51,7 +51,7 @@ export function Panel({
           <div className="flex shrink-0 items-center gap-2">{action}</div>
         ) : null}
       </header>
-      <div className="space-y-3">{children}</div>
+      <div className="space-y-2.5">{children}</div>
     </section>
   );
 }
@@ -65,7 +65,7 @@ type FieldProps = {
 
 export function Field({ label, children, hint }: FieldProps) {
   return (
-    <label className="flex flex-col gap-1.5">
+    <label className="flex flex-col gap-1">
       <span className="flex items-center gap-1.5 text-[11.5px] font-medium leading-tight text-muted-foreground">
         {label}
       </span>

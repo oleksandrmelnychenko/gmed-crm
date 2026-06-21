@@ -5125,7 +5125,7 @@ function StaffDocumentsPage({
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="truncate text-xl font-semibold tracking-tight text-foreground">
+                        <h2 className="min-w-0 break-words text-xl font-semibold tracking-tight text-foreground">
                           {localizeDocumentCode(detail.auto_name, l)}
                         </h2>
                         <StatusBadge tone={documentStatusTone(detail.status)}>
@@ -5138,7 +5138,7 @@ function StaffDocumentsPage({
                           {formatSensitivityLabel(detail.data_sensitivity)}
                         </StatusBadge>
                       </div>
-                      <p className="mt-0.5 truncate text-sm text-muted-foreground">
+                      <p className="mt-0.5 break-words text-sm text-muted-foreground">
                         {[
                           detail.original_filename,
                           detail.mime_type,
@@ -5408,7 +5408,7 @@ function StaffDocumentsPage({
                           className="mb-1 h-1.5 w-11 shrink-0 rounded-full bg-[var(--brand)] opacity-30"
                         />
                       </div>
-                      <div className="space-y-3">
+                      <div className="space-y-2.5">
                         <DetailField
                           label={t.documents_uploaded_by}
                           value={detail.uploaded_by_name || t.documents_unknown_uploader}
@@ -5431,7 +5431,7 @@ function StaffDocumentsPage({
                         <div className="w-full rounded-xl border border-slate-200/70 bg-[#f9fdff] px-4 py-3">
                           <div className="mb-2 flex items-center gap-2.5">
                             <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-                            <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">
+                            <span className="min-w-0 break-words text-[13px] font-semibold text-foreground">
                               {t.patients_notes}
                             </span>
                           </div>
@@ -5486,7 +5486,7 @@ function StaffDocumentsPage({
 
                           <div className="min-w-0">
                             <div className="flex min-w-0 flex-wrap items-center gap-2">
-                              <span className="min-w-0 truncate text-sm font-semibold text-foreground">
+                              <span className="min-w-0 break-words text-sm font-semibold text-foreground">
                                 {localizeDocumentCode(version.auto_name, l)}
                               </span>
                             </div>
@@ -5494,7 +5494,7 @@ function StaffDocumentsPage({
                               <span className="tabular-nums">
                                 {formatDateTime(version.created_at)}
                               </span>
-                              <span className="min-w-0 truncate">{filename}</span>
+                              <span className="min-w-0 break-words">{filename}</span>
                             </div>
                           </div>
 
@@ -5561,7 +5561,7 @@ function StaffDocumentsPage({
                   {textExtractionError ? (
                     <Banner tone="error">{textExtractionError}</Banner>
                   ) : null}
-                  <div className="space-y-3">
+                  <div className="space-y-2.5">
                     {textExtraction && formatExtractionMessageLabel(textExtraction, t) ? (
                       <div className="px-1 py-1 text-sm text-amber-900">
                         {formatExtractionMessageLabel(textExtraction, t)}
@@ -5908,7 +5908,7 @@ function StaffDocumentsPage({
                                 <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
                                   <div className="min-w-0">
                                     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                                      <p className="max-w-full truncate text-[15px] font-semibold leading-5 text-foreground">
+                                      <p className="max-w-full break-words text-[15px] font-semibold leading-5 text-foreground">
                                         {request.requested_by_name ||
                                           t.documents_unknown_requester}
                                       </p>
@@ -5991,7 +5991,7 @@ function StaffDocumentsPage({
                                       <p className="text-[11.5px] font-medium leading-tight text-muted-foreground">
                                         {t.documents_ready_document}
                                       </p>
-                                      <p className="mt-1 truncate text-sm font-medium text-foreground">
+                                      <p className="mt-1 break-words text-sm font-medium text-foreground">
                                         {request.translated_document_name ?? t.documents_translated_text}
                                       </p>
                                     </div>
@@ -6415,7 +6415,7 @@ function StaffDocumentsPage({
                             </div>
                             <div className="min-w-0">
                               <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-                                <p className="min-w-0 truncate text-sm font-semibold text-foreground">
+                                <p className="min-w-0 break-words text-sm font-semibold text-foreground">
                                   {share.target_user_name ||
                                     t.documents_patient_portal_user}
                                 </p>
@@ -7413,7 +7413,7 @@ function SectionCard({
           >
             {icon ?? <span className="size-2 rounded-full bg-current" />}
           </span>
-          <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
+          <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">
             {title}
           </h3>
         </div>
@@ -7421,7 +7421,7 @@ function SectionCard({
           <div className="min-w-0 max-w-full">{accessory}</div>
         ) : null}
       </div>
-      <div className="space-y-3 p-4">{children}</div>
+      <div className="space-y-2.5 p-3.5">{children}</div>
     </section>
   );
 }
@@ -7479,7 +7479,7 @@ function DocumentMetaPanel({
     <div className={cn("px-5 py-4", compact && "px-0 py-0", className)}>
       <div className={cn("flex items-center gap-2.5", compact ? "mb-2.5" : "mb-3.5")}>
         <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-        <p className="min-w-0 truncate text-[13px] font-semibold text-foreground">
+        <p className="min-w-0 break-words text-[13px] font-semibold text-foreground">
           {title}
         </p>
       </div>

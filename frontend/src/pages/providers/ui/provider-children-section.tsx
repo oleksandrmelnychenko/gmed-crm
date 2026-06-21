@@ -68,7 +68,7 @@ export function ProviderChildrenSection({
   const openLabel = t.uiText.providers_open_provider ?? localizedFallback(lang, "Provider öffnen", "Открыть провайдера");
 
   return (
-    <section className={cn("space-y-3 rounded-xl border border-border/70 bg-card p-3.5", className)}>
+    <section className={cn("space-y-2.5 rounded-xl border border-border/70 bg-card p-3.5", className)}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -102,10 +102,10 @@ export function ProviderChildrenSection({
                     <Building2 className="size-4" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold text-foreground">
+                    <span className="block min-w-0 max-w-full break-words text-sm font-semibold text-foreground">
                       {child.name}
                     </span>
-                    <span className="mt-2 flex flex-wrap gap-1.5">
+                    <span className="mt-1.5 flex flex-wrap gap-1.5">
                       <Badge
                         variant="outline"
                         className="rounded-full border-border bg-muted/30 text-[10px] text-muted-foreground"
@@ -130,7 +130,7 @@ export function ProviderChildrenSection({
                 <span className="mt-4 flex items-center justify-between gap-3 text-xs text-muted-foreground">
                   <span className="flex min-w-0 items-center gap-1.5">
                     <MapPin className="size-3.5 shrink-0" />
-                    <span className="truncate">{location || t.common_not_set}</span>
+                    <span className="min-w-0 max-w-full break-words">{location || t.common_not_set}</span>
                   </span>
                   <span
                     aria-hidden="true"

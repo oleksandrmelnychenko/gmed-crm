@@ -131,15 +131,15 @@ export function AdminInlineMetric({
       </div>
       {hasTwoLabels ? (
         <>
-          <p className="mt-[4px] line-clamp-2 text-[11px] leading-tight text-muted-foreground/75">
+          <p className="mt-[4px] break-words text-[11px] leading-tight text-muted-foreground/75">
             {description}
           </p>
-          <p className="mt-0.5 line-clamp-2 text-xs font-medium leading-tight text-muted-foreground">
+          <p className="mt-0.5 break-words text-xs font-medium leading-tight text-muted-foreground">
             {label}
           </p>
         </>
       ) : singleLabel ? (
-        <p className="mt-0.5 line-clamp-2 text-xs font-medium leading-tight text-muted-foreground">
+        <p className="mt-0.5 break-words text-xs font-medium leading-tight text-muted-foreground">
           {singleLabel}
         </p>
       ) : null}
@@ -200,7 +200,7 @@ export function AdminSectionTitle({
         aria-hidden
         className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]"
       />
-      <span className="min-w-0 truncate">{children}</span>
+      <span className="min-w-0 max-w-full break-words">{children}</span>
     </h3>
   );
 }

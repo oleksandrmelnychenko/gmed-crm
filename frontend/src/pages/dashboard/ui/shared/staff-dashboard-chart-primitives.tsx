@@ -225,12 +225,12 @@ export function MiniDonut({
       </div>
       <div className="flex flex-col gap-1 text-[11.5px]">
         {visible.map((entry, index) => (
-          <div key={entry.name} className="flex items-center gap-2">
+          <div key={entry.name} className="flex min-w-0 items-center gap-2">
             <span
               className="inline-block size-2 shrink-0 rounded-sm"
               style={{ background: PALETTE[index % PALETTE.length] }}
             />
-            <span className="max-w-[110px] truncate text-muted-foreground">{entry.name}</span>
+            <span className="min-w-0 max-w-[110px] break-words text-muted-foreground">{entry.name}</span>
             <span className="ml-auto tabular-nums font-medium text-foreground">{entry.value}</span>
           </div>
         ))}

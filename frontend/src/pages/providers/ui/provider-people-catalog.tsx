@@ -1138,7 +1138,7 @@ function MobilePeopleCards({
           key={`${row.person_type}:${row.person_id}:${row.provider_id}`}
           className="rounded-lg border border-border bg-card p-3 shadow-sm"
         >
-          <div className="flex items-start gap-3">
+          <div className="flex items-start gap-2.5">
             <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/30 text-muted-foreground">
               {row.person_type === "doctor" &&
               !isContactPersonType(row.person_type, row.provider_type, forceNonMedical) ? (
@@ -1149,7 +1149,7 @@ function MobilePeopleCards({
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                <h4 className="truncate text-sm font-semibold text-foreground">
+                <h4 className="min-w-0 max-w-full break-words text-sm font-semibold text-foreground">
                   {personDisplayName(row, forceNonMedical)}
                 </h4>
                 <PersonTypeBadge
@@ -1160,13 +1160,13 @@ function MobilePeopleCards({
                   uiText={uiText}
                 />
               </div>
-              <p className="mt-1 truncate text-xs text-muted-foreground">
+              <p className="mt-1 break-words text-xs text-muted-foreground">
                 {roleLabel(row, labels, uiText, lang)}
               </p>
-              <p className="mt-2 truncate text-xs text-muted-foreground">
+              <p className="mt-1.5 break-words text-xs text-muted-foreground">
                 {row.provider_name}
               </p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
                 <ProviderTypeBadge labels={labels} providerType={row.provider_type} />
                 <Badge
                   variant="outline"
@@ -1178,14 +1178,14 @@ function MobilePeopleCards({
             </div>
           </div>
 
-          <div className="mt-3 space-y-1.5 text-xs text-muted-foreground">
-            <p className="line-clamp-2">
+          <div className="mt-2.5 space-y-1.5 text-xs text-muted-foreground">
+            <p className="break-words">
               <span className="font-medium text-foreground/75">
                 {labels.providers_fachbereich ?? localizedFallback(lang, "Fachbereich", "Специализация")}:{" "}
               </span>
               {specializationSummary(row, lang, labels.common_not_set ?? "-")}
             </p>
-            <p className="line-clamp-2">
+            <p className="break-words">
               <span className="font-medium text-foreground/75">
                 {uiLabel(uiText, "providers_contacts", localizedFallback(lang, "Kontakte", "Контакты"))}:{" "}
               </span>
@@ -1193,11 +1193,11 @@ function MobilePeopleCards({
             </p>
           </div>
 
-          <div className="mt-3">
+          <div className="mt-2.5">
             <CountsInline labels={labels} row={row} uiText={uiText} />
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2">
+          <div className="mt-2.5 grid grid-cols-2 gap-2">
             <Button
               type="button"
               variant="outline"

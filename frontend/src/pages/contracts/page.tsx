@@ -190,10 +190,10 @@ function contractMetricCard(
           {value}
         </p>
       </div>
-      <p className="mt-[4px] line-clamp-2 text-[11px] leading-tight text-muted-foreground/75">
+      <p className="mt-[4px] break-words text-[11px] leading-tight text-muted-foreground/75">
         {description}
       </p>
-      <p className="mt-0.5 line-clamp-2 text-xs font-medium leading-tight text-muted-foreground">
+      <p className="mt-0.5 break-words text-xs font-medium leading-tight text-muted-foreground">
         {label}
       </p>
     </article>
@@ -1887,7 +1887,7 @@ function useContractsPageContent() {
 
   return (
     <>
-      <div className="space-y-6">
+      <div className="space-y-5">
         <PageHeader
           title={text.workspaceTitle}
           actions={
@@ -1972,7 +1972,7 @@ function useContractsPageContent() {
           </div>
 
           <div className="mt-5 space-y-4 border-b border-border pb-4">
-            <div className="grid gap-2 sm:grid-cols-3">
+            <div className="grid gap-1.5 sm:grid-cols-3">
               <MiniMetric label={text.catalogItems} value={String(agencyServiceStats.total)} />
               <MiniMetric label={text.activeLabel} value={String(agencyServiceStats.active)} />
               <MiniMetric label={text.priced} value={String(agencyServiceStats.priced)} />
@@ -2765,7 +2765,7 @@ function useContractsPageContent() {
                           value={formatDate(contractDetail.valid_to, locale, t.common_not_set)}
                         />
                       </div>
-                      <div className="space-y-3">
+                      <div className="space-y-2.5">
                         <div className="flex items-start justify-between gap-4">
                           <div>
                             <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.contracts_notes)}</h2>
@@ -2987,7 +2987,7 @@ function useContractsPageContent() {
                           }
                         />
                       </div>
-                      <div className="space-y-3">
+                      <div className="space-y-2.5">
                         <div className="flex items-start justify-between gap-4">
                           <div>
                             <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.contracts_notes)}</h2>

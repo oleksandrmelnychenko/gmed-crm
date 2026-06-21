@@ -456,7 +456,7 @@ function WorkflowOverview({
         </CountBadge>
       }
     >
-      <div className="grid gap-y-4 overflow-hidden rounded-xl border border-border px-3 pb-4 pt-4 md:grid-cols-2 xl:grid-cols-4 [&>article:not(:last-child):not(:nth-child(4n))_.admin-inline-metric-separator]:xl:block">
+      <div className="grid gap-y-3 overflow-hidden rounded-xl border border-border px-3 pb-4 pt-4 md:grid-cols-2 xl:grid-cols-4 [&>article:not(:last-child):not(:nth-child(4n))_.admin-inline-metric-separator]:xl:block">
         <AdminInlineMetric
           icon={ListChecks}
           label={l("patients_open_items")}
@@ -558,7 +558,7 @@ function WorkflowGroupSummary({
       <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <p className="max-w-full truncate text-[15px] font-semibold leading-5 text-foreground">{group.label}</p>
+            <p className="min-w-0 max-w-full break-words text-[15px] font-semibold leading-5 text-foreground">{group.label}</p>
             <span className="size-1 rounded-full bg-muted-foreground/35" />
             <span className="text-xs tabular-nums text-muted-foreground">
               {openItems} {l("patients_open_2")} / {group.items.length}{" "}
@@ -618,7 +618,7 @@ function WorkflowGroupConnector() {
 function WorkflowChecklistItems({ items, ...checklistProps }: WorkflowChecklistItemsProps) {
   return (
     <div className="mb-2 ml-20 overflow-hidden rounded-lg bg-[#fbfdff] p-2 shadow-sm">
-      <div className="grid gap-2">
+      <div className="grid gap-1.5">
         {items.map((item) => (
           <WorkflowChecklistItemCard key={item.id} item={item} {...checklistProps} />
         ))}
@@ -650,10 +650,10 @@ function WorkflowChecklistItemCard({
         item.is_completed && "opacity-75",
       )}
     >
-      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+      <div className="flex flex-col gap-1.5 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <p className="min-w-0 truncate text-sm font-medium text-foreground">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <p className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
               {localizeWorkflowItemText(item.item_key, item.item_text, l)}
             </p>
             <Badge variant="outline" className={cn("rounded-full text-[10px]", priorityBadgeClass(item.priority))}>

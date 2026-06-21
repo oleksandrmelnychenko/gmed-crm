@@ -479,7 +479,7 @@ function PatientContactSection({
                     )}
                   </span>
                   <div className="min-w-0">
-                    <p className="truncate text-[13px] font-semibold tracking-tight text-foreground">
+                    <p className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">
                       {contactValueLabel(contact.contactKind)}
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
@@ -514,7 +514,7 @@ function PatientContactSection({
                 </div>
               </div>
 
-              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-[150px_150px_minmax(220px,1fr)]">
+              <div className="mt-2.5 grid gap-3 md:grid-cols-2 xl:grid-cols-[150px_150px_minmax(220px,1fr)]">
                 <Field label={l("providers_contact_kind")}>
                   <NativeComboboxSelect
                     value={contact.contactKind}

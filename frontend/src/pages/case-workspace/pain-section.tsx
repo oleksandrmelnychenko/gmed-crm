@@ -65,9 +65,9 @@ export function PainSection() {
       missingPrimaryMessage={t.cases_pain_missing_location}
       cardContent={(item) => (
         <>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
             <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
-            <p className="truncate text-sm font-medium text-foreground">
+            <p className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
               {item.lokalisierung || t.cases_pain_no_location}
             </p>
           </div>
@@ -98,7 +98,7 @@ export function PainSection() {
             ) : null}
           </div>
           {item.ursache ? (
-            <p className="line-clamp-3 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
+            <p className="min-w-0 max-w-full whitespace-pre-wrap break-words text-[13px] leading-relaxed text-muted-foreground">
               <span className="mr-1 text-[11.5px] font-medium text-muted-foreground">
                 {t.cases_pain_cause}:
               </span>

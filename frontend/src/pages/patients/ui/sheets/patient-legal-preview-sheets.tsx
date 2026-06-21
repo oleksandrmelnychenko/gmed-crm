@@ -111,7 +111,7 @@ export function PatientDocumentsPreviewSheet({
         ) : items.length === 0 ? (
           <EmptyBlock text={t.patient_preview_not_recorded} />
         ) : (
-          <ul className="space-y-2">
+          <ul className="space-y-1.5">
             {items.map((item) => (
               <li key={item.id}>
                 <button
@@ -122,8 +122,8 @@ export function PatientDocumentsPreviewSheet({
                     staffGo(`/documents?patient=${patientId}&document=${item.id}`);
                   }}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="truncate text-[13px] font-medium text-foreground">
+                  <div className="flex min-w-0 items-start justify-between gap-2.5">
+                    <p className="min-w-0 max-w-full break-words text-[13px] font-medium text-foreground">
                       {item.filename}
                     </p>
                     {item.status ? (
@@ -132,7 +132,7 @@ export function PatientDocumentsPreviewSheet({
                       </Badge>
                     ) : null}
                   </div>
-                  <p className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
+                  <p className="mt-0.5 break-words text-[11.5px] text-muted-foreground">
                     {formatDate(item.created_at, lang)}
                     {item.category ? ` | ${documentCategoryLabel(item.category)}` : ""}
                     {item.uploaded_by_name ? ` | ${item.uploaded_by_name}` : ""}
@@ -222,7 +222,7 @@ export function PatientContractsPreviewSheet({
         ) : items.length === 0 ? (
           <EmptyBlock text={t.patient_preview_not_recorded} />
         ) : (
-          <ul className="space-y-2">
+          <ul className="space-y-1.5">
             {items.map((item) => (
               <li key={item.id}>
                 <button
@@ -233,8 +233,8 @@ export function PatientContractsPreviewSheet({
                     staffGo(`/contracts?patient=${patientId}&contract=${item.id}`);
                   }}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="truncate font-mono text-[13px] font-medium text-foreground">
+                  <div className="flex min-w-0 items-start justify-between gap-2.5">
+                    <p className="min-w-0 max-w-full break-words font-mono text-[13px] font-medium text-foreground">
                       {item.contract_number}
                     </p>
                     <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">
@@ -333,7 +333,7 @@ export function PatientInvoicesPreviewSheet({
         ) : items.length === 0 ? (
           <EmptyBlock text={t.patient_preview_not_recorded} />
         ) : (
-          <ul className="space-y-2">
+          <ul className="space-y-1.5">
             {items.map((item) => (
               <li key={item.id}>
                 <button
@@ -344,8 +344,8 @@ export function PatientInvoicesPreviewSheet({
                     staffGo(`/invoices?patient=${patientId}&invoice=${item.id}`);
                   }}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="font-mono text-[13px] font-medium text-foreground">
+                  <div className="flex min-w-0 items-start justify-between gap-2.5">
+                    <p className="min-w-0 max-w-full break-words font-mono text-[13px] font-medium text-foreground">
                       {item.invoice_number}
                     </p>
                     <Badge variant="outline" className="shrink-0 rounded-full text-[10px]">

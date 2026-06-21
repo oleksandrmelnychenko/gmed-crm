@@ -246,7 +246,7 @@ function PatientProfileEditorFormSections({
 
   return (        <div className="space-y-3">
               <FormSection title={dictionary.patient_profile_editor_personal_data}>
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-5">
                   <FormField label={dictionary.patient_profile_editor_title}>
                     <Input
                       value={form.title}
@@ -297,7 +297,7 @@ function PatientProfileEditorFormSections({
                     {text.patients_minor_guardian_notice ?? dictionary.patient_profile_editor_emergency_contact}
                   </div>
                 ) : null}
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-2.5 md:grid-cols-2">
                   <FormField label={dictionary.patient_profile_editor_nationality}>
                     <NationalitySelect
                       value={form.nationality}
@@ -333,7 +333,7 @@ function PatientProfileEditorFormSections({
                 </FormField>
               </FormSection>
               <FormSection title={dictionary.patient_profile_editor_contact}>
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   {contacts.map((contact) => (
                     <div
                       key={contact.id}
@@ -349,7 +349,7 @@ function PatientProfileEditorFormSections({
                             )}
                           </span>
                           <div className="min-w-0">
-                            <p className="truncate text-[13px] font-semibold tracking-tight text-foreground">
+                            <p className="min-w-0 max-w-full break-words text-[13px] font-semibold tracking-tight text-foreground">
                               {contactValueLabel(contact.contactKind)}
                             </p>
                             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -384,7 +384,7 @@ function PatientProfileEditorFormSections({
                         </div>
                       </div>
 
-                      <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-[150px_150px_minmax(220px,1fr)]">
+                      <div className="mt-2.5 grid gap-2.5 md:grid-cols-2 xl:grid-cols-[150px_150px_minmax(220px,1fr)]">
                         <FormField label={label("providers_contact_kind", dictionary.common_not_set)}>
                           <NativeComboboxSelect
                             value={contact.contactKind}
@@ -470,7 +470,7 @@ function PatientProfileEditorFormSections({
                     className={formInputClassName}
                   />
                 </FormField>
-                <div className="grid gap-3 md:grid-cols-3">
+                <div className="grid gap-2.5 md:grid-cols-3">
                   <FormField label={dictionary.patient_profile_editor_city}>
                     <Input
                       value={form.addressCity}
@@ -495,7 +495,7 @@ function PatientProfileEditorFormSections({
                 </div>
               </FormSection>
               <FormSection title={dictionary.patient_profile_editor_insurance}>
-                <div className="grid gap-3 md:grid-cols-3">
+                <div className="grid gap-2.5 md:grid-cols-3">
                   <FormField label={dictionary.patient_profile_editor_insurance_provider}>
                     <Input
                       value={form.insuranceProvider}
@@ -543,7 +543,7 @@ function PatientProfileEditorFormSections({
                     : dictionary.patient_profile_editor_emergency_contact
                 }
               >
-                <div className="grid gap-3 md:grid-cols-3">
+                <div className="grid gap-2.5 md:grid-cols-3">
                   <FormField label={dictionary.patient_profile_editor_contact_2}>
                     <Input
                       value={form.emergencyContactName}

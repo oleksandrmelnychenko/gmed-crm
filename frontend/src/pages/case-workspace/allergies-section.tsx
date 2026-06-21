@@ -42,14 +42,14 @@ export function AllergiesSection() {
       missingPrimaryMessage={t.cases_allergies_missing_allergen}
       cardContent={(item) => (
         <>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
             <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
-            <p className="truncate text-sm font-medium text-foreground">
+            <p className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
               {item.allergie || t.cases_allergies_untitled}
             </p>
           </div>
           {item.reaktion ? (
-            <p className="line-clamp-3 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">
+            <p className="min-w-0 max-w-full whitespace-pre-wrap break-words text-[13px] leading-relaxed text-muted-foreground">
               <span className="mr-1 text-[11.5px] font-medium text-muted-foreground">
                 {t.cases_allergies_reaction}:
               </span>

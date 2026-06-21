@@ -56,14 +56,14 @@ function AppointmentOverviewSection({
     .join("");
 
   return (
-    <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
+    <section className="space-y-2.5 rounded-xl border border-border/50 bg-card/40 p-3.5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
         <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] text-[12px] font-semibold text-white">
           {patientInitials || "AP"}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="truncate text-xl font-semibold tracking-tight text-foreground">
+            <h2 className="min-w-0 max-w-full break-words text-xl font-semibold tracking-tight text-foreground">
               {detail.title}
             </h2>
             <span
@@ -131,17 +131,17 @@ function AppointmentOverviewSection({
           </span>
         ) : null}
       </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <div className="min-w-0 overflow-hidden rounded-xl border border-border/50 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
+      <div className="mt-4 grid gap-2.5 md:grid-cols-3">
+        <div className="min-w-0 overflow-hidden rounded-xl border border-border/50 bg-muted/25 px-4 py-2.5 text-sm text-muted-foreground">
           <OverviewInfoLine icon={Clock3} label={formatAppointmentSlotLabel(detail)} />
         </div>
-        <div className="min-w-0 overflow-hidden rounded-xl border border-border/50 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
+        <div className="min-w-0 overflow-hidden rounded-xl border border-border/50 bg-muted/25 px-4 py-2.5 text-sm text-muted-foreground">
           <OverviewInfoLine
             icon={Stethoscope}
             label={detail.provider_name || tr.common_not_set}
           />
         </div>
-        <div className="min-w-0 overflow-hidden rounded-xl border border-border/50 bg-muted/25 px-4 py-3 text-sm text-muted-foreground">
+        <div className="min-w-0 overflow-hidden rounded-xl border border-border/50 bg-muted/25 px-4 py-2.5 text-sm text-muted-foreground">
           <OverviewInfoLine
             icon={MapPin}
             label={detail.location || tr.common_not_set}
@@ -149,7 +149,7 @@ function AppointmentOverviewSection({
         </div>
       </div>
       {detail.is_blocked ? (
-        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700">
           {t.appointments_overview_concierge_limited_warning}
         </div>
       ) : null}
@@ -189,7 +189,7 @@ function RecurringSeriesDetails({
         <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-              <p className="max-w-full truncate text-[15px] font-semibold leading-5 text-foreground">
+              <p className="min-w-0 max-w-full break-words text-[15px] font-semibold leading-5 text-foreground">
                 {t.appointments_recurring_series}
               </p>
               <span className="size-1 rounded-full bg-muted-foreground/35" />
@@ -274,7 +274,7 @@ function RecurringSeriesDetails({
                 {detail.recurring_scope_preview.length}
               </span>
             </div>
-            <div className="mt-2 grid gap-1.5">
+            <div className="mt-2 grid gap-1">
               {detail.recurring_scope_preview.map((item) => (
                 <div
                   key={item.id}
@@ -317,7 +317,7 @@ function RecurringSeriesDetails({
                 {t.appointments_lineage_related_series}
               </span>
             </div>
-            <div className="mt-2 grid gap-1.5">
+            <div className="mt-2 grid gap-1">
               {detail.recurring_lineage_history.map((item) => (
                 <div
                   key={item.series_id}
@@ -371,11 +371,11 @@ function OverviewInfoLine({
 }) {
   return (
     <div
-      className="inline-flex max-w-full min-w-0 items-center gap-2 text-foreground"
+      className="inline-flex max-w-full min-w-0 items-start gap-2 text-foreground"
       title={label}
     >
       <Icon className="size-4 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="min-w-0 flex-1 break-words">{label}</span>
     </div>
   );
 }

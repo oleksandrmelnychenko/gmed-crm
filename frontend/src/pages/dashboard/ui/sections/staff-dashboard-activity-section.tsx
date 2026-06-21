@@ -46,7 +46,7 @@ export function StaffDashboardActivitySection({
 }) {
   return (
     <>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-3 lg:grid-cols-2">
         <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <div className="flex items-center gap-2">
@@ -90,10 +90,10 @@ export function StaffDashboardActivitySection({
                     </span>
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] font-medium text-foreground">
+                    <div className="min-w-0 max-w-full break-words text-[13px] font-medium text-foreground">
                       {appointment.title || appointment.patient_name}
                     </div>
-                    <div className="truncate text-[11.5px] text-muted-foreground">
+                    <div className="min-w-0 max-w-full break-words text-[11.5px] text-muted-foreground">
                       {appointment.time_start ? `${appointment.time_start.slice(0, 5)} - ` : ""}
                       {appointment.patient_name}
                       {appointment.location ? ` - ${appointment.location}` : ""}
@@ -137,10 +137,10 @@ export function StaffDashboardActivitySection({
                 >
                   <PriorityDot priority={task.priority} />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] font-medium text-foreground">
+                    <div className="min-w-0 max-w-full break-words text-[13px] font-medium text-foreground">
                       {task.title}
                     </div>
-                    <div className="truncate text-[11.5px] text-muted-foreground">
+                    <div className="min-w-0 max-w-full break-words text-[11.5px] text-muted-foreground">
                       {task.due_date
                         ? `${tr.dash_due ?? tr.common_unknown} ${formatShortDate(task.due_date)}`
                         : tr.dash_no_due ?? tr.common_unknown}
@@ -159,7 +159,7 @@ export function StaffDashboardActivitySection({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4">
         <QuickLink icon={UsersIcon} label={tr.patients_title ?? tr.common_unknown} onClick={onOpenPatients} />
         <QuickLink icon={UserPlus} label={tr.leads_title ?? tr.common_unknown} onClick={onOpenLeads} />
         <QuickLink

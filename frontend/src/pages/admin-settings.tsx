@@ -837,7 +837,7 @@ function useAdminSettingsPageContent() {
             </div>
 
             <Section title={t.common_configuration}>
-              <div className="grid gap-3 xl:grid-cols-2">
+              <div className="grid gap-2.5 xl:grid-cols-2">
                 {SETTINGS_GROUPS.map((group) => {
                   const Icon = group.icon;
                   return (
@@ -875,7 +875,7 @@ function useAdminSettingsPageContent() {
                         <StatusBadge tone="info">{t.common_edit}</StatusBadge>
                       </div>
 
-                      <div className="mt-3 grid gap-2 md:grid-cols-2">
+                      <div className="mt-2.5 grid gap-1.5 md:grid-cols-2">
                         {group.fields.map((field) => (
                           <div
                             key={field.key}
@@ -1018,7 +1018,7 @@ function useAdminSettingsPageContent() {
 
                 <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
                   <AdminSectionTitle>{t.admin_system_fields}</AdminSectionTitle>
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid gap-3 md:grid-cols-2">
                     {selectedGroup.fields.map((field) => {
                       const changed = hasFieldChanged(field.key);
                       const inputClassName = cn(

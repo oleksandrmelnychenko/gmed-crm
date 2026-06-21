@@ -38,7 +38,7 @@ function AppointmentLinksSection({
       title={t.compliance_col_linked_records}
       accessory={<CountBadge>{linkedCount}</CountBadge>}
     >
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-5">
         <LinkedRecordTile
           title={patientLabel}
           description={descriptions.patient}
@@ -85,12 +85,12 @@ function LinkedRecordTile({
   return (
     <button
       type="button"
-      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-3.5 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
       onClick={onClick}
     >
       <div className="relative z-10 min-w-0">
         <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
-        <p className="mt-2 line-clamp-3 text-xs leading-tight text-muted-foreground">
+        <p className="mt-1.5 text-xs leading-tight text-muted-foreground break-words">
           {description}
         </p>
       </div>

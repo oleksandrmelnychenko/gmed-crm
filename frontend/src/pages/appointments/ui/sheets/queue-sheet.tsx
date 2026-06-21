@@ -374,7 +374,7 @@ function useQueueSheetContent({
         </div>
       ) : null}
       {hasAppointmentRequests ? (
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-[13px] font-semibold tracking-tight text-foreground">
               {appointmentText("appointments_portal_requests")}
@@ -384,14 +384,14 @@ function useQueueSheetContent({
             </span>
           </div>
           {appointmentRequests.map((item) => (
-            <ListItem key={item.id} className="space-y-3">
-              <div className="flex items-start justify-between gap-3">
+            <ListItem key={item.id} className="space-y-2.5">
+              <div className="flex items-start justify-between gap-2.5">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-foreground">
+                  <p className="break-words text-sm font-semibold text-foreground">
                     {item.patient_pid ? `${item.patient_pid} · ` : ""}
                     {item.patient_name || appointmentText("appointments_patient")}
                   </p>
-                  <p className="truncate text-xs text-muted-foreground">
+                  <p className="break-words text-xs text-muted-foreground">
                     {appointmentTypeLabel(item.appointment_type, tr)} · {carePathKindLabel(item.care_path_kind)}
                   </p>
                 </div>
@@ -405,18 +405,18 @@ function useQueueSheetContent({
                 </span>
               </div>
               <div className="space-y-1 text-xs text-muted-foreground">
-                <p className="truncate font-medium text-foreground">
+                <p className="break-words font-medium text-foreground">
                   {preferredWindowLabel(item)}
                 </p>
                 {item.requested_provider_name || item.requested_doctor_name ? (
-                  <p className="truncate">
+                  <p className="break-words">
                     {[item.requested_provider_name, item.requested_doctor_name]
                       .filter(Boolean)
                       .join(" · ")}
                   </p>
                 ) : null}
-                {item.specialty ? <p className="truncate">{item.specialty}</p> : null}
-                {item.reason ? <p className="line-clamp-2">{item.reason}</p> : null}
+                {item.specialty ? <p className="break-words">{item.specialty}</p> : null}
+                {item.reason ? <p className="break-words">{item.reason}</p> : null}
               </div>
               {item.status === "requested" ? (
                 <div className="flex flex-wrap gap-2">
@@ -665,24 +665,24 @@ function useQueueSheetContent({
       {!hasAppointments && !hasAppointmentRequests ? (
         <EmptyCell>{tr.common_not_set}</EmptyCell>
       ) : hasAppointments ? (
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           {hasAppointmentRequests ? (
             <h2 className="text-[13px] font-semibold tracking-tight text-foreground">
               {appointmentText("appointments_appointment_queue")}
             </h2>
           ) : null}
           {items.map((item) => (
-            <ListItem key={item.id} className="space-y-3">
-              <div className="flex items-start justify-between gap-3">
+            <ListItem key={item.id} className="space-y-2.5">
+              <div className="flex items-start justify-between gap-2.5">
                 <div className="min-w-0">
                   <button
                     type="button"
                     onClick={() => openDetailSheet(item.id)}
-                    className="truncate text-left text-sm font-semibold text-foreground transition-colors hover:text-[var(--brand)]"
+                    className="break-words max-w-full text-left text-sm font-semibold text-foreground transition-colors hover:text-[var(--brand)]"
                   >
                     {item.title}
                   </button>
-                  <p className="truncate text-xs text-muted-foreground">
+                  <p className="break-words text-xs text-muted-foreground">
                     {item.patient_pid} · {item.patient_name}
                   </p>
                 </div>
@@ -695,7 +695,7 @@ function useQueueSheetContent({
                   {statusLabel(item.status)}
                 </span>
               </div>
-              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-2.5 text-xs text-muted-foreground">
                 <span className="inline-flex items-center gap-1">
                   <Clock3 className="size-3.5" />
                   {slotLabel(item)}
@@ -707,7 +707,7 @@ function useQueueSheetContent({
                   </span>
                 ) : null}
               </div>
-              <p className="truncate text-xs font-medium text-muted-foreground">
+              <p className="break-words text-xs font-medium text-muted-foreground">
                 {operationalScopeReason(
                   item,
                   operationalScope,

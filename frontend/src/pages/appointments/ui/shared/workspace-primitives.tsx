@@ -27,7 +27,7 @@ export function AppointmentWorkspaceSectionIntro({
   accessory?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-muted/20 p-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className="flex flex-col gap-2.5 rounded-2xl border border-border/60 bg-muted/20 p-3.5 sm:flex-row sm:items-start sm:justify-between">
       <div className="space-y-1">
         <h2 className="text-[13px] font-semibold tracking-tight text-foreground">{title}</h2>
         <p className="max-w-3xl text-xs text-muted-foreground">{description}</p>
@@ -56,7 +56,7 @@ export function AppointmentClinicalToggleCard({
       htmlFor={id}
       aria-label={title}
       className={cn(
-        "flex items-start gap-3",
+        "flex items-start gap-2.5",
         appointmentPreviewInfoCardClassName,
         disabled && "opacity-60",
       )}
@@ -263,7 +263,7 @@ export function AppointmentSectionHeading({
     <div className="min-w-0 space-y-1">
       <div className="flex min-w-0 items-center gap-2">
         <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-        <h3 className={cn(tokens.text.sectionTitle, "truncate")}>{title}</h3>
+        <h3 className={cn(tokens.text.sectionTitle, "min-w-0 break-words")}>{title}</h3>
       </div>
       {description ? (
         <p className={cn(tokens.text.muted, "max-w-3xl")}>{description}</p>
@@ -276,7 +276,7 @@ export function AppointmentDotLabel({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-w-0 items-center gap-2">
       <span className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
-      <p className={cn(tokens.text.eyebrow, "truncate")}>{children}</p>
+      <p className={cn(tokens.text.eyebrow, "min-w-0 break-words")}>{children}</p>
     </div>
   );
 }

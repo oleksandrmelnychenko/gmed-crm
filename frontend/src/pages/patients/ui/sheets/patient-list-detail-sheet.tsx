@@ -105,7 +105,7 @@ function PatientOverviewSection({
   const tr = t as unknown as Record<string, string>;
 
   return (
-    <section className={cn("rounded-xl p-3.5 space-y-3", tokens.surface.softCard)}>
+    <section className={cn("rounded-xl p-3.5 space-y-2.5", tokens.surface.softCard)}>
       <div className="flex flex-wrap items-center gap-1.5">
         <span
           className={cn(
@@ -134,7 +134,7 @@ function PatientOverviewSection({
         ))}
       </div>
 
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+      <div className="flex flex-col gap-2.5 xl:flex-row xl:items-start xl:justify-between">
         <div>
           <h2 className="text-lg font-semibold tracking-tight text-foreground">
             {getPatientDisplayName(detail)}
@@ -142,15 +142,15 @@ function PatientOverviewSection({
           <p className="mt-0.5 text-[12px] text-muted-foreground">{detail.patient_id}</p>
         </div>
         <div className="grid gap-1 text-[12.5px] text-muted-foreground">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <CalendarClock className="size-3.5 text-muted-foreground/70" />
             <span>{formatPatientDate(detail.birth_date, t.common_not_set)}</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <Phone className="size-3.5 text-muted-foreground/70" />
             <span>{getPatientFieldValue(detail.phone_primary, t.common_not_set)}</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <Mail className="size-3.5 text-muted-foreground/70" />
             <span>{getPatientFieldValue(detail.email, t.common_not_set)}</span>
           </div>
@@ -203,12 +203,12 @@ function PatientProfileSection({
   );
 
   return (
-    <div className="space-y-3">
-      <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3.5">
+    <div className="space-y-2.5">
+      <section className="space-y-2.5 rounded-xl border border-border/60 bg-card p-3.5">
         <div className="text-sm font-semibold text-foreground">
           {l("patients_identification")}
         </div>
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-2.5 md:grid-cols-3">
           <div className="space-y-1">
             <div className="text-[12px] font-medium text-muted-foreground">{t.patients_birth_date}</div>
             <Input value={detail.birth_date ?? ""} disabled className={formInputClassName} />
@@ -266,7 +266,7 @@ function AssignmentsSection({
   const tr = t as unknown as Record<string, string>;
 
   return (
-    <section className="space-y-3 rounded-xl border border-border/60 bg-card p-3.5">
+    <section className="space-y-2.5 rounded-xl border border-border/60 bg-card p-3.5">
       <div className="text-sm font-semibold text-foreground">{t.patients_assign_owner}</div>
 
       {assignmentError ? <Banner tone="error">{assignmentError}</Banner> : null}
@@ -274,15 +274,15 @@ function AssignmentsSection({
       {assignments.length === 0 ? (
         <p className="text-[12.5px] text-muted-foreground italic">{t.patients_no_assignments}</p>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           {assignments.map((item) => (
             <div
               key={`${item.user_id}-${item.assigned_at}`}
               className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5"
             >
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start justify-between gap-1.5">
                 <div className="min-w-0">
-                  <p className="text-[13px] font-semibold text-foreground truncate">{item.user_name}</p>
+                  <p className="text-[13px] font-semibold text-foreground min-w-0 max-w-full break-words">{item.user_name}</p>
                   <p className="text-[12px] text-muted-foreground">
                     {getPatientRoleLabel(item.user_role, tr)}
                   </p>
@@ -291,7 +291,7 @@ function AssignmentsSection({
                   {item.revoked_at ? t.patients_revoked : t.common_active}
                 </Badge>
               </div>
-              <div className="mt-2 grid gap-0.5 text-[11.5px] text-muted-foreground md:grid-cols-2">
+              <div className="mt-1.5 grid gap-0.5 text-[11.5px] text-muted-foreground md:grid-cols-2">
                 <div>{t.patients_assigned_by} {formatPatientDateTime(item.assigned_at, t.common_not_set)}</div>
                 <div>{t.patients_assigned_by} {item.assigned_by_name || t.common_unknown}</div>
                 {item.revoked_at ? (

@@ -27,7 +27,7 @@ export function StaffDashboardClinicalSection({
         hint={tr.dash_sec_clinical_hint ?? tr.common_unknown}
       />
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_220px]">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_220px]">
         <ChartCard
           title={tr.dash_top_reasons ?? tr.common_unknown}
           hint={tr.dash_top_reasons_hint ?? tr.common_unknown}
@@ -57,7 +57,7 @@ export function StaffDashboardClinicalSection({
           />
         </ChartCard>
 
-        <div className="relative flex flex-col justify-between overflow-hidden rounded-xl border border-border bg-card p-4">
+        <div className="relative flex flex-col justify-between overflow-hidden rounded-xl border border-border bg-card p-3.5">
           <div
             aria-hidden
             className="pointer-events-none absolute inset-0"
@@ -70,7 +70,7 @@ export function StaffDashboardClinicalSection({
             <span className="text-[12px] text-muted-foreground">
               {tr.dash_avg_duration ?? tr.common_unknown}
             </span>
-            <p className="mt-2 text-[30px] font-semibold leading-none tracking-tight text-foreground">
+            <p className="mt-1.5 text-[30px] font-semibold leading-none tracking-tight text-foreground">
               {clinical && Number.isFinite(clinical.avg_case_duration_days)
                 ? Math.round(clinical.avg_case_duration_days)
                 : "-"}
@@ -78,7 +78,7 @@ export function StaffDashboardClinicalSection({
             <p className="mt-1.5 text-[12px] text-muted-foreground">
               {tr.dash_days ?? tr.common_unknown}
             </p>
-            <p className="mt-3 text-[11px] text-muted-foreground">
+            <p className="mt-2.5 text-[11px] text-muted-foreground">
               {tr.dash_avg_duration_hint ?? tr.common_unknown}
             </p>
           </div>

@@ -66,8 +66,8 @@ export function InterpreterSuggestionsPanel({
       </p>
 
       {topSuggestion ? (
-        <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm text-sky-900">
+          <div className="flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="font-semibold">
                 {t.appointments_interpreter_recommended_now}:{" "}
@@ -102,17 +102,17 @@ export function InterpreterSuggestionsPanel({
           {t.appointments_interpreter_no_suggestions}
         </div>
       ) : (
-        <div className="grid gap-3">
+        <div className="grid gap-2.5">
           {suggestions.map((suggestion) => {
             const selected = selectedInterpreterId === suggestion.interpreter_id;
             return (
               <article
                 key={suggestion.interpreter_id}
-                className="rounded-xl border border-border/50 bg-card/60 px-4 py-3"
+                className="rounded-xl border border-border/50 bg-card/60 px-4 py-2.5"
               >
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div className="flex flex-col gap-2.5 md:flex-row md:items-start md:justify-between">
                   <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       <h4 className="font-semibold text-foreground">
                         {suggestion.interpreter_name}
                       </h4>
@@ -134,7 +134,7 @@ export function InterpreterSuggestionsPanel({
                       {t.appointments_interpreter_score.toLowerCase()}{" "}
                       {suggestion.score}
                     </p>
-                    <div className="mt-3 flex flex-wrap gap-1.5">
+                    <div className="mt-2.5 flex flex-wrap gap-1.5">
                       {suggestion.reasons.map((reason) => (
                         <span
                           key={reason}
@@ -145,7 +145,7 @@ export function InterpreterSuggestionsPanel({
                       ))}
                     </div>
                     {suggestion.languages.length > 0 ? (
-                      <p className="mt-2 text-[11px] text-muted-foreground">
+                      <p className="mt-1.5 text-[11px] text-muted-foreground">
                         {t.appointments_interpreter_languages}:{" "}
                         {suggestion.languages.join(", ")}
                       </p>
@@ -182,7 +182,7 @@ export function InterpreterSuggestionsPanel({
         </div>
       )}
 
-      <div className="rounded-xl border border-border/50 bg-card/50 px-4 py-3">
+      <div className="rounded-xl border border-border/50 bg-card/50 px-4 py-2.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h4 className="text-sm font-semibold text-foreground">
@@ -210,7 +210,7 @@ export function InterpreterSuggestionsPanel({
             {t.appointments_interpreter_no_history}
           </div>
         ) : (
-          <div className="mt-3 grid gap-2">
+          <div className="mt-2.5 grid gap-2">
             {history.map((item) => {
               const interpreterId = item.interpreter_id;
               return (
@@ -223,10 +223,10 @@ export function InterpreterSuggestionsPanel({
                   }
                   className="rounded-xl border border-border/50 bg-muted/20 px-3 py-2"
                 >
-                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div className="flex flex-col gap-1.5 md:flex-row md:items-center md:justify-between">
                     <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate text-sm font-medium text-foreground">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <p className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
                           {item.interpreter_name ??
                             item.patient_name ??
                             t.appointments_interpreter_fallback_name}

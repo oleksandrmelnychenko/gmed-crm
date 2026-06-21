@@ -743,7 +743,7 @@ function useAdminNotificationsPageContent() {
           >
             {selectedChannel ? (
               <>
-                <section className={cn("space-y-3 rounded-xl p-3.5", tokens.surface.softCard)}>
+                <section className={cn("space-y-2.5 rounded-xl p-3.5", tokens.surface.softCard)}>
                   <AdminSectionTitle>{t.activity_details}</AdminSectionTitle>
                   <div className="flex flex-wrap items-center gap-1.5">
                     <StatusBadge
@@ -756,23 +756,23 @@ function useAdminNotificationsPageContent() {
                     </StatusBadge>
                   </div>
 
-                  <div className="grid gap-3 md:grid-cols-2">
+                  <div className="grid gap-2.5 md:grid-cols-2">
                     <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
                       <p className="text-[11.5px] text-muted-foreground">{t.notif_name}</p>
-                      <p className="mt-1 text-sm font-medium text-foreground">
+                      <p className="mt-1 break-words text-sm font-medium text-foreground">
                         {selectedChannel.name}
                       </p>
                     </div>
                     <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
                       <p className="text-[11.5px] text-muted-foreground">{t.notif_type}</p>
-                      <p className="mt-1 text-sm font-medium text-foreground">
+                      <p className="mt-1 break-words text-sm font-medium text-foreground">
                         {channelTypeLabel(selectedChannel.channel_type)}
                       </p>
                     </div>
                   </div>
                 </section>
 
-                <section className={cn("space-y-3 rounded-xl p-3.5", tokens.surface.softCard)}>
+                <section className={cn("space-y-2.5 rounded-xl p-3.5", tokens.surface.softCard)}>
                   <div className="flex items-center justify-between gap-2">
                     <AdminSectionTitle>{t.notif_config}</AdminSectionTitle>
                   </div>

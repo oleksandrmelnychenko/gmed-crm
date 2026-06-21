@@ -534,7 +534,7 @@ function metricCard(
             {value}
           </p>
         </div>
-        <p className="mt-0.5 line-clamp-2 text-xs font-medium leading-tight text-muted-foreground">
+        <p className="mt-0.5 break-words text-xs font-medium leading-tight text-muted-foreground">
           {label}
         </p>
       </article>
@@ -553,7 +553,7 @@ function metricCard(
         {options?.hideIcon ? null : (
           <Icon className="size-3.5 shrink-0 text-muted-foreground" />
         )}
-        <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+        <span className="min-w-0 max-w-full break-words text-xs font-medium text-muted-foreground">
           {label}
         </span>
       </span>
@@ -578,7 +578,7 @@ function lineMetric(label: string, value: string | number) {
 function capsuleMetric(label: string, value: string | number) {
   return (
     <div className="flex min-w-[210px] flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-4 py-2">
-      <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+      <span className="min-w-0 max-w-full break-words text-xs font-medium text-muted-foreground">
         {label}
       </span>
       <span className="shrink-0 text-sm font-semibold leading-none text-foreground">
@@ -1725,8 +1725,8 @@ function useReportsPageContent() {
                   {text.billing.trackedInvoices(data.billing_kpis.tracked_invoice_count)}
                 </Badge>
               </div>
-              <div className="mt-5 grid gap-3 xl:grid-cols-3">
-                <div className="grid gap-2 rounded-xl bg-card p-3">
+              <div className="mt-5 grid gap-2.5 xl:grid-cols-3">
+                <div className="grid gap-1.5 rounded-xl bg-card p-3">
                   {metricCard(text.billing.invoices30d, data.billing_kpis.invoices_30d, Wallet, {
                     borderless: true,
                     connector: true,
@@ -1745,7 +1745,7 @@ function useReportsPageContent() {
                     { borderless: true, connector: true, hideIcon: true },
                   )}
                 </div>
-                <div className="grid gap-2 rounded-xl bg-card p-3">
+                <div className="grid gap-1.5 rounded-xl bg-card p-3">
                   {metricCard(
                     text.billing.dunningShare,
                     formatPercent(data.billing_kpis.dunning_rate_pct, text.noBaseline),
@@ -1765,7 +1765,7 @@ function useReportsPageContent() {
                     { borderless: true, connector: true, hideIcon: true },
                   )}
                 </div>
-                <div className="grid gap-2 rounded-xl bg-card p-3">
+                <div className="grid gap-1.5 rounded-xl bg-card p-3">
                   {metricCard(
                     text.billing.averageInvoiceGross,
                     formatMoneyMetric(data.billing_kpis.avg_invoice_gross, locale),
@@ -1799,8 +1799,8 @@ function useReportsPageContent() {
                   {text.sales.leadCountries(data.sales_kpis.active_lead_country_count)}
                 </Badge>
               </div>
-              <div className="mt-5 grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,0.65fr)]">
-                <div className="grid gap-1.5 rounded-xl bg-card p-2.5">
+              <div className="mt-5 grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(280px,0.65fr)]">
+                <div className="grid gap-1 rounded-xl bg-card p-2.5">
                   {metricCard(text.sales.newLeads30d, data.sales_kpis.new_leads_30d, Activity, {
                     borderless: true,
                     connector: true,
@@ -1829,10 +1829,10 @@ function useReportsPageContent() {
                     { borderless: true, connector: true, hideIcon: true },
                   )}
                 </div>
-                <article className="relative overflow-hidden rounded-xl px-4 py-3">
+                <article className="relative overflow-hidden rounded-xl px-4 py-2.5">
                   <span className="pointer-events-none absolute right-3 top-3 size-20 rounded-full bg-[var(--brand)]/10 blur-2xl" />
                   <div className="relative flex items-center justify-between gap-3">
-                    <p className="min-w-0 truncate text-sm font-semibold text-foreground">
+                    <p className="min-w-0 max-w-full break-words text-sm font-semibold text-foreground">
                       {text.sales.topLeadCountries90d}
                     </p>
                     <Badge variant="outline" className="rounded-full bg-card/70">
@@ -1846,7 +1846,7 @@ function useReportsPageContent() {
                     );
 
                     return (
-                      <div className="relative mt-3">
+                      <div className="relative mt-2.5">
                         <div className="grid min-h-[148px] grid-cols-[repeat(auto-fit,minmax(34px,1fr))] items-end gap-2 pb-2">
                           {data.sales_kpis.top_countries.map((item) => (
                             <div
@@ -1871,7 +1871,7 @@ function useReportsPageContent() {
                       </div>
                     );
                   })() : (
-                    <p className="relative mt-3 text-sm text-muted-foreground">
+                    <p className="relative mt-2.5 text-sm text-muted-foreground">
                       {text.sales.noLeadGeographyYet}
                     </p>
                   )}
@@ -1917,7 +1917,7 @@ function useReportsPageContent() {
                         {text.forecast.quotes(forecasting.quote_pipeline.open_quotes)}
                       </Badge>
                     </div>
-                    <div className="mt-5 grid gap-2 md:grid-cols-3">
+                    <div className="mt-5 grid gap-1.5 md:grid-cols-3">
                       {capsuleMetric(text.forecast.expiring14d, forecasting.quote_pipeline.expiring_next_14d)}
                       {capsuleMetric(
                         text.forecast.grossPipeline,
@@ -1949,7 +1949,7 @@ function useReportsPageContent() {
                       <p className={cn("mt-1", tokens.text.muted)}>
                         {text.forecast.collectionsDescription}
                       </p>
-                      <div className="mt-5 grid gap-2 rounded-xl bg-card p-3">
+                      <div className="mt-5 grid gap-1.5 rounded-xl bg-card p-3">
                         {lineMetric(
                           text.forecast.due14d,
                           `${forecasting.collections.due_next_14d_count} / ${forecasting.collections.due_next_14d_total ? formatMoney(forecasting.collections.due_next_14d_total, locale) : text.countsOnly}`,
@@ -1976,7 +1976,7 @@ function useReportsPageContent() {
                       <p className={cn("mt-1", tokens.text.muted)}>
                         {text.forecast.followupDescription}
                       </p>
-                      <div className="mt-5 grid gap-2 rounded-xl bg-card p-3">
+                      <div className="mt-5 grid gap-1.5 rounded-xl bg-card p-3">
                         {lineMetric(text.forecast.activeFollowupOrders, forecasting.followup.active_orders)}
                         {lineMetric(text.forecast.milestones30d, forecasting.followup.milestones_due_next_30d)}
                         {lineMetric(
@@ -2313,7 +2313,7 @@ function useReportsPageContent() {
                   {detail.kind === "clinic" ? (
                     <>
                       <AdminTableCard title={titleWithDot(text.clinicReport.title)}>
-                        <div className="grid gap-3 p-3 sm:grid-cols-2">
+                        <div className="grid gap-2.5 p-3 sm:grid-cols-2">
                           <div className={card("p-3")}>
                             <p className="text-xs text-muted-foreground">{text.common.services}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">{providerTypeLabel(detail.row.provider_type)}</p>
@@ -2365,7 +2365,7 @@ function useReportsPageContent() {
                   {detail.kind === "doctor" ? (
                     <>
                       <AdminTableCard title={titleWithDot(text.doctors.title)}>
-                        <div className="grid gap-3 p-3 sm:grid-cols-2">
+                        <div className="grid gap-2.5 p-3 sm:grid-cols-2">
                           <div className={card("p-3")}>
                             <p className="text-xs text-muted-foreground">{text.medicalProviders.title}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">{detail.row.provider_name}</p>
@@ -2405,7 +2405,7 @@ function useReportsPageContent() {
                   {detail.kind === "provider_cost" ? (
                     <>
                       <AdminTableCard title={titleWithDot(text.providerCosts.title)}>
-                        <div className="grid gap-3 p-3 sm:grid-cols-2">
+                        <div className="grid gap-2.5 p-3 sm:grid-cols-2">
                           <div className={card("p-3")}>
                             <p className="text-xs text-muted-foreground">{text.medicalProviders.title}</p>
                             <p className="mt-1 text-sm font-medium text-foreground">{detail.row.provider_name}</p>

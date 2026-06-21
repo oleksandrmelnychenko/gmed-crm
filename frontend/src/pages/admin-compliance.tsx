@@ -1756,7 +1756,7 @@ function useAdminCompliancePageContent() {
                       ) : null}
                     </div>
 
-                    <div className="space-y-2 rounded-lg border border-border/60 bg-card p-3">
+                    <div className="space-y-1.5 rounded-lg border border-border/60 bg-card p-3">
                       <p className="text-xs font-medium text-foreground">{t.compliance_impact_summary}</p>
                       {reviewSheetImpactSummary.map((line) => (
                         <p key={line} className="text-xs text-muted-foreground">

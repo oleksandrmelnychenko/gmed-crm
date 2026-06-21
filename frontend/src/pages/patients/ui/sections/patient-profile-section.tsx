@@ -122,13 +122,13 @@ function ProfileDetailTile({
   return (
     <article
       className={cn(
-        "group relative min-h-[136px] overflow-hidden rounded-xl border border-border bg-white px-4 py-3 transition-colors hover:border-zinc-300",
+        "group relative min-h-[118px] overflow-hidden rounded-xl border border-border bg-white px-3.5 py-2.5 transition-colors hover:border-zinc-300",
       )}
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start justify-between gap-2.5">
         <div className="min-w-0">
           <span className="block h-px w-8 bg-border" />
-          <p className="mt-3 line-clamp-2 text-sm font-semibold leading-5 text-foreground">
+          <p className="mt-2.5 break-words text-sm font-semibold leading-5 text-foreground">
             {label}
           </p>
         </div>
@@ -143,7 +143,7 @@ function ProfileDetailTile({
           </div>
         ) : null}
       </div>
-      <div className="absolute bottom-3 left-4 right-4 flex items-center gap-2">
+      <div className="absolute bottom-2.5 left-3.5 right-3.5 flex items-center gap-2">
         <span className="h-px min-w-6 flex-1 bg-border/70" />
         <Badge
           variant="outline"
@@ -171,14 +171,14 @@ function ProfileSummaryCard({
   contentClassName?: string;
 }) {
   return (
-    <section className="rounded-xl border border-border bg-card p-4">
+    <section className="rounded-xl border border-border bg-card p-3.5">
       <div className="flex min-w-0 items-center gap-2">
         <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-        <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
+        <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">
           {title}
         </h3>
       </div>
-      <div className={cn("mt-3 grid gap-1.5", contentClassName)}>
+      <div className={cn("mt-2.5 grid gap-1", contentClassName)}>
         {children}
       </div>
     </section>
@@ -197,14 +197,14 @@ function ProfileSummaryLine({
   editLabel?: string;
 }) {
   return (
-    <div className="group relative flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5">
-      <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+    <div className="group relative flex min-w-0 items-center gap-2 rounded-lg px-2 py-1">
+      <span className="min-w-0 break-words text-xs font-medium text-muted-foreground">
         {label}
       </span>
-      <span className="h-px min-w-5 flex-1 bg-border/70" />
+      <span className="h-px min-w-5 flex-1 self-center bg-border/70" />
       <span
         className={cn(
-          "min-w-0 max-w-[58%] truncate text-right text-sm font-semibold leading-none text-foreground",
+          "min-w-0 max-w-[58%] break-words text-right text-sm font-semibold leading-snug text-foreground",
           onEdit ? "pr-5" : undefined,
         )}
       >
@@ -241,12 +241,12 @@ function ProfileActionCard({
     <button
       type="button"
       disabled={disabled}
-      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-zinc-200 disabled:hover:bg-zinc-50/80"
+      className="group relative min-h-[128px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-3.5 pb-12 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-zinc-200 disabled:hover:bg-zinc-50/80"
       onClick={onClick}
     >
       <div className="relative z-10">
         <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
-        <p className="mt-2 text-xs leading-tight text-muted-foreground">
+        <p className="mt-1.5 text-xs leading-tight text-muted-foreground">
           {description}
         </p>
       </div>
@@ -473,8 +473,8 @@ function usePatientProfileTabContent({
   }
 
   return (
-    <div className="space-y-6 mt-4 min-h-[400px]">
-      <div className="grid gap-4 xl:grid-cols-2">
+    <div className="space-y-5 mt-4 min-h-[400px]">
+      <div className="grid gap-3 xl:grid-cols-2">
         <ProfileSummaryCard
           title={t.patient_profile_personal_data}
           contentClassName="md:grid-cols-2"
@@ -603,7 +603,7 @@ function usePatientProfileTabContent({
           ) : null
         }
       >
-        <div className="grid gap-y-4 overflow-hidden rounded-xl border border-border px-3 pb-4 pt-4 md:grid-cols-2 xl:grid-cols-4 [&>article:not(:last-child):not(:nth-child(4n))_.admin-inline-metric-separator]:xl:block">
+        <div className="grid gap-y-3 overflow-hidden rounded-xl border border-border px-3 pb-3.5 pt-3.5 md:grid-cols-2 xl:grid-cols-4 [&>article:not(:last-child):not(:nth-child(4n))_.admin-inline-metric-separator]:xl:block">
           <AdminInlineMetric
             icon={ShieldCheck}
             label={t.patient_profile_contract_status}
@@ -681,7 +681,7 @@ function usePatientProfileTabContent({
           <span className="h-px flex-1 bg-gradient-to-r from-border via-border to-transparent" />
         </div>
 
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-5">
           {canExportPatientCompliance ? (
             <ProfileActionCard
               title={t.patient_profile_dsgvo_export}

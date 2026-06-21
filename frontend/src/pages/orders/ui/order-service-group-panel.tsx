@@ -178,11 +178,11 @@ export function OrderServiceGroupPanel({
   const previewLines = preview?.lines ?? [];
 
   return (
-    <article className="rounded-xl border border-border bg-card p-4">
+    <article className="rounded-xl border border-border bg-card p-3.5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h3 className="max-w-full truncate text-base font-semibold text-foreground">
+            <h3 className="min-w-0 max-w-full break-words text-base font-semibold text-foreground">
               {group.group_title || t.orders_service_group_split_title}
             </h3>
           </div>
@@ -273,7 +273,7 @@ export function OrderServiceGroupPanel({
 
       {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
 
-      <div className="mt-4 space-y-3">
+      <div className="mt-4 space-y-2.5">
         {previewLines.length > 0
           ? previewLines.map((line, index) => (
               <ServiceGroupLineRow
@@ -958,11 +958,11 @@ function ServiceGroupLineRow({
       <div className="flex flex-col gap-2 2xl:flex-row 2xl:items-start 2xl:justify-between">
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <h4 className="min-w-0 max-w-full truncate text-sm font-semibold text-foreground">
+            <h4 className="min-w-0 max-w-full break-words text-sm font-semibold text-foreground">
               {doctorName}
             </h4>
             <span className="size-1 rounded-full bg-muted-foreground/35" />
-            <p className="min-w-0 max-w-full truncate text-xs text-muted-foreground">
+            <p className="min-w-0 max-w-full break-words text-xs text-muted-foreground">
               {providerName}
             </p>
           </div>
@@ -972,13 +972,13 @@ function ServiceGroupLineRow({
         </Badge>
       </div>
 
-      <div className="mt-3 rounded-lg border border-border/70 bg-card px-3 py-2">
+      <div className="mt-2.5 rounded-lg border border-border/70 bg-card px-3 py-2">
         <p className="break-words text-xs leading-snug text-muted-foreground">
           {detail}
         </p>
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-2.5 flex flex-wrap gap-2">
         <span className="inline-flex max-w-full items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs font-semibold text-foreground">
           <span className="text-muted-foreground">{amount}</span>
         </span>

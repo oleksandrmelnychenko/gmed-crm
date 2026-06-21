@@ -1063,7 +1063,7 @@ function useChatPageContent() {
                         >
                           <Shield className="size-4 shrink-0" />
                           <div className="min-w-0 flex-1">
-                            <p className="text-xs font-medium truncate">
+                            <p className="text-xs font-medium break-words">
                               {m.attachment_filename}
                             </p>
                             <p className="text-[10px] opacity-70">
@@ -1084,7 +1084,7 @@ function useChatPageContent() {
                         >
                           <FileText className="size-4 shrink-0" />
                           <div className="min-w-0 flex-1">
-                            <p className="text-xs font-medium truncate">{m.attachment_filename}</p>
+                            <p className="text-xs font-medium break-words">{m.attachment_filename}</p>
                             <p className="text-[10px] opacity-70">
                               {isImage ? t.uiText.chat_attachment_image : t.uiText.chat_attachment_file} - {formatSize(m.attachment_size ?? 0)}
                             </p>
@@ -1126,7 +1126,7 @@ function useChatPageContent() {
             {pendingFile && (
               <div className="flex items-center gap-3 px-5 py-2 border-t bg-muted/30 animate-in fade-in duration-150">
                 <FileText className="size-4 text-muted-foreground shrink-0" />
-                <span className="text-sm truncate flex-1">{pendingFile.name}</span>
+                <span className="text-sm flex-1 min-w-0 break-words">{pendingFile.name}</span>
                 <span className="text-xs text-muted-foreground">{formatSize(pendingFile.size)}</span>
                 <button onClick={() => setPendingFile(null)} className="text-muted-foreground hover:text-foreground">
                   <X className="size-4" />

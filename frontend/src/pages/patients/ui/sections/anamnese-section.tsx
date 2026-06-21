@@ -200,9 +200,9 @@ export function AnamneseSection({
         </div>
       </header>
 
-      <div className="space-y-3 p-3">
+      <div className="space-y-2.5 p-3">
         {active && activeNonEmpty.length > 0 ? (
-          <dl className="grid gap-3 md:grid-cols-2">
+          <dl className="grid gap-2.5 md:grid-cols-2">
             {activeNonEmpty.map((field) => (
               <div key={field.key} className="min-w-0">
                 <dt className="mb-1 text-[11px] font-medium text-muted-foreground">{field.label}</dt>
@@ -219,7 +219,7 @@ export function AnamneseSection({
         )}
 
         {historyOpen ? (
-          <div className="space-y-2 rounded-lg border border-border/50 bg-background p-3">
+          <div className="space-y-1.5 rounded-lg border border-border/50 bg-background p-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               {tx("История версий", "Versionsverlauf")}
             </p>
@@ -230,16 +230,16 @@ export function AnamneseSection({
                 {tx("Версий нет", "Keine Versionen")}
               </p>
             ) : (
-              <ul className="space-y-2">
+              <ul className="space-y-1.5">
                 {history.map((version) => {
                   const snippet = versionSnippet(version);
                   return (
                     <li
                       key={version.id ?? `${version.updated_at}`}
-                      className="flex items-start justify-between gap-3 rounded-lg border border-border/50 bg-card px-3 py-2"
+                      className="flex items-start justify-between gap-2.5 rounded-lg border border-border/50 bg-card px-3 py-2"
                     >
                       <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
                           <span className="text-[11px] text-muted-foreground">
                             {formatTimestamp(version.updated_at)}
                           </span>
@@ -255,7 +255,7 @@ export function AnamneseSection({
                           </span>
                         </div>
                         {snippet ? (
-                          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{snippet}</p>
+                          <p className="mt-0.5 min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{snippet}</p>
                         ) : null}
                       </div>
                       {canManage ? (

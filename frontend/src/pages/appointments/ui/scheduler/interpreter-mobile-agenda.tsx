@@ -155,11 +155,11 @@ function MobileAgendaCard({
           <button
             type="button"
             onClick={onOpen}
-            className="truncate text-left text-sm font-semibold text-foreground hover:text-[var(--brand)]"
+            className="min-w-0 max-w-full break-words text-left text-sm font-semibold text-foreground hover:text-[var(--brand)]"
           >
             {item.title}
           </button>
-          <p className="mt-1 truncate text-xs text-muted-foreground">
+          <p className="mt-1 break-words text-xs text-muted-foreground">
             {item.patient_pid} - {item.patient_name}
           </p>
         </div>
@@ -173,7 +173,7 @@ function MobileAgendaCard({
         </span>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+      <div className="mt-2.5 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-1">
           <Clock3 className="size-3.5" />
           {slotLabel(item)}
@@ -186,9 +186,9 @@ function MobileAgendaCard({
         ) : null}
       </div>
 
-      <p className="mt-3 text-xs font-medium text-muted-foreground">{summary}</p>
+      <p className="mt-2.5 text-xs font-medium text-muted-foreground">{summary}</p>
 
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-2.5 flex flex-wrap gap-1.5">
         {item.interpreter_response ? (
           <span className={appointmentMobileAgendaInfoBadgeClassName}>
             {appointmentText("appointments_interpreter")} {responseLabel(item.interpreter_response)}
@@ -253,7 +253,7 @@ export function InterpreterMobileAgenda({
   return (
     <div className="space-y-4">
       <section className={appointmentSectionCardClassName("p-4")}>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-2.5 sm:grid-cols-3">
           <StatsCard
             icon={CalendarDays}
             label={todayLabel}
@@ -347,7 +347,7 @@ export function InterpreterMobileAgenda({
                 {section.itemCount}
               </span>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               {section.items.map((item) => (
                 <MobileAgendaCard
                   key={item.id}

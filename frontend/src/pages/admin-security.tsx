@@ -836,7 +836,7 @@ function useAdminSecurityPageContent() {
                 </Button>
               )}
             >
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-2.5 md:grid-cols-2">
                 <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
                   <p className="text-[11.5px] text-muted-foreground">{t.users_status}</p>
                   <div className="mt-1">
@@ -859,7 +859,7 @@ function useAdminSecurityPageContent() {
             <Section title={t.security_audit_analytics}>
               <p className="text-sm text-muted-foreground">{t.security_audit_hint}</p>
 
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-5">
                 <StatCard
                   label={t.security_audit_failed_logins}
                   value={auditAnalytics?.summary.failed_logins_24h ?? 0}

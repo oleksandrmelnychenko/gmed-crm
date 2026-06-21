@@ -199,7 +199,7 @@ const availabilityTimeInputClassName = cn(
 const providerDetailSectionClassName =
   "border-border/70 bg-card px-5 py-4 sm:px-6 sm:py-5";
 const providerDetailPanelClassName = cn(
-  "space-y-3 rounded-xl border",
+  "space-y-2.5 rounded-xl border",
   providerDetailSectionClassName,
 );
 const contactAddButtonClassName =
@@ -3210,7 +3210,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               {detail.provider_type === "medical" ? (
                 <div className="flex flex-wrap items-start gap-3 px-4 py-3">
                   <div className="min-w-0">
-                    <h1 className="truncate text-xl font-semibold text-foreground">
+                    <h1 className="break-words text-xl font-semibold text-foreground">
                       {detail.name || t.providers_detail}
                     </h1>
                     <p className="mt-1 text-sm text-muted-foreground">{t.providers_subtitle}</p>
@@ -4270,7 +4270,7 @@ function ReadOnlyLine({
       <span
         className={cn(
           "min-w-0 text-right text-sm font-semibold text-foreground",
-          wrap ? "max-w-[70%] break-words" : "max-w-[58%] truncate",
+          wrap ? "max-w-[70%] break-words" : "max-w-[58%] break-words",
         )}
       >
         {value}
@@ -5543,11 +5543,11 @@ function SpecializationManagerSheet({
                   {items.map((item) => (
                     <div
                       key={item.id}
-                      className="grid gap-3 rounded-lg border border-border bg-card/70 p-3 md:grid-cols-[minmax(0,1fr)_auto]"
+                      className="grid gap-2.5 rounded-lg border border-border bg-card/70 p-3 md:grid-cols-[minmax(0,1fr)_auto]"
                     >
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <p className="truncate text-sm font-semibold text-foreground">
+                          <p className="min-w-0 break-words text-sm font-semibold text-foreground">
                             {specializationOptionLabel(item, lang)}
                           </p>
                           <Badge
@@ -5562,10 +5562,10 @@ function SpecializationManagerSheet({
                             {item.is_active ? t.common_active : t.common_inactive}
                           </Badge>
                         </div>
-                        <p className="mt-1 truncate text-xs text-muted-foreground">
+                        <p className="mt-1 break-words text-xs text-muted-foreground">
                           {item.code} - {l("providers_specialization_sort_order")}: {item.sort_order}
                         </p>
-                        <p className="mt-1 truncate text-xs text-muted-foreground">
+                        <p className="mt-1 break-words text-xs text-muted-foreground">
                           DE: {specializationDeLabel(item) || "-"} / RU: {specializationRuLabel(item) || "-"}
                         </p>
                       </div>
@@ -5822,11 +5822,11 @@ function StaffRoleManagerSheet({
                   {roles.map((role) => (
                     <div
                       key={role.id}
-                      className="grid gap-3 rounded-lg border border-border bg-card/70 p-3 md:grid-cols-[minmax(0,1fr)_auto]"
+                      className="grid gap-2.5 rounded-lg border border-border bg-card/70 p-3 md:grid-cols-[minmax(0,1fr)_auto]"
                     >
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <p className="truncate text-sm font-semibold text-foreground">
+                          <p className="min-w-0 break-words text-sm font-semibold text-foreground">
                             {staffRoleDisplayName(role, lang)}
                           </p>
                           <Badge
@@ -5841,10 +5841,10 @@ function StaffRoleManagerSheet({
                             {role.is_active ? t.common_active : t.common_inactive}
                           </Badge>
                         </div>
-                        <p className="mt-1 truncate text-xs text-muted-foreground">
+                        <p className="mt-1 break-words text-xs text-muted-foreground">
                           {role.code} - {l("providers_staff_role_sort_order")}: {role.sort_order}
                         </p>
-                        <p className="mt-1 truncate text-xs text-muted-foreground">
+                        <p className="mt-1 break-words text-xs text-muted-foreground">
                           DE: {role.name_de || "-"} / RU: {role.name_ru || "-"}
                         </p>
                       </div>
@@ -5992,7 +5992,7 @@ function ProviderOverviewSection({
   return (
     <div className={cn("flex min-w-0 gap-2", wrap ? "items-start" : "items-center")}>
       <Icon className="size-3.5 shrink-0 text-muted-foreground/65" />
-      <div className={cn("min-w-0", wrap ? "break-words" : "truncate")}>{children}</div>
+      <div className={cn("min-w-0 max-w-full", "break-words")}>{children}</div>
     </div>
   );
 }
@@ -6033,7 +6033,7 @@ function ProviderSheetHero({
           detail.is_active ? "bg-emerald-500" : "bg-zinc-300",
         )}
       />
-      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_240px] md:items-stretch">
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_240px] md:items-stretch">
         <div className="min-w-0">
           <div className="mb-2 flex items-center gap-3">
             <span className="h-px w-8 bg-border" />
@@ -6052,7 +6052,7 @@ function ProviderSheetHero({
           <h2 className="break-words text-xl font-semibold leading-tight text-foreground">
             {detail.name}
           </h2>
-          <p className="mt-2 line-clamp-1 text-sm text-muted-foreground">
+          <p className="mt-1.5 break-words text-sm text-muted-foreground">
             {metaLine || t.common_not_set}
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -6078,7 +6078,7 @@ function ProviderSheetHero({
                 variant="outline"
                 className="max-w-full rounded-full border-border bg-muted/30 px-2 py-0.5 text-xs font-medium text-muted-foreground"
               >
-                <span className="break-words">{taxonomyLine}</span>
+                <span className="truncate">{taxonomyLine}</span>
               </Badge>
             ) : null}
             {detail.parent_provider_name ? (
@@ -6363,7 +6363,7 @@ function ContactPersonCard({
   const position = contact.subrole?.trim() ?? "";
 
   return (
-    <div className="grid gap-4 rounded-[1.4rem] border border-border bg-card p-4 md:grid-cols-[minmax(0,1fr)_160px]">
+    <div className="grid gap-3 rounded-[1.4rem] border border-border bg-card p-3.5 md:grid-cols-[minmax(0,1fr)_160px]">
       <button
         type="button"
         className="min-w-0 text-left"
@@ -6539,7 +6539,7 @@ function DoctorCardSummary({
 
   return (
     <summary
-      className="grid cursor-pointer list-none gap-4 p-4 transition hover:bg-muted/20 md:grid-cols-[minmax(0,1fr)_160px] [&::-webkit-details-marker]:hidden"
+      className="grid cursor-pointer list-none gap-3 p-3.5 transition hover:bg-muted/20 md:grid-cols-[minmax(0,1fr)_160px] [&::-webkit-details-marker]:hidden"
       onClick={(event) => {
         if ((event.target as HTMLElement).closest("button")) return;
         event.preventDefault();
@@ -6987,7 +6987,7 @@ function StaffSection({
                   }
                 }}
               >
-                <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_180px_160px]">
+                <div className="grid gap-3 p-3.5 lg:grid-cols-[minmax(0,1fr)_180px_160px]">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-foreground">{staff.display_name}</p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -7035,7 +7035,7 @@ function StaffSection({
                     <span className="text-xs text-muted-foreground">
                       {l("providers_staff_notes")}
                     </span>
-                    <p className="mt-1 line-clamp-3 text-sm text-foreground">
+                    <p className="mt-1 break-words text-sm text-foreground">
                       {staff.notes || t.common_not_set}
                     </p>
                   </div>
@@ -7143,7 +7143,7 @@ function ServiceSection({
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">{service.service_name}</p>
                   {serviceTaxonomyLabel(service, taxonomyNodes, lang) ? (
-                    <p className="mt-1 truncate text-xs font-medium text-muted-foreground">
+                    <p className="mt-1 break-words text-xs font-medium text-muted-foreground">
                       {serviceTaxonomyLabel(service, taxonomyNodes, lang)}
                     </p>
                   ) : null}
@@ -7244,7 +7244,7 @@ function LinkedPatientsSection({
               key={patient.id}
               className="overflow-hidden rounded-[1.4rem] border border-border bg-card"
             >
-              <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_270px_160px]">
+              <div className="grid gap-3 p-3.5 lg:grid-cols-[minmax(0,1fr)_270px_160px]">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">{patientLabel(patient)}</p>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">

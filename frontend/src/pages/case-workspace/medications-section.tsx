@@ -229,14 +229,14 @@ type MedicationCardContentProps = {
 function MedicationCardContent({ item, t }: MedicationCardContentProps) {
   return (
     <>
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
         <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
-        <p className="truncate text-sm font-medium text-foreground">
+        <p className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
           {item.handelsname || t.cases_medications_untitled}
         </p>
       </div>
       {item.wirkstoff ? (
-        <p className="truncate text-xs text-muted-foreground">{item.wirkstoff}</p>
+        <p className="break-words text-xs text-muted-foreground">{item.wirkstoff}</p>
       ) : null}
       <div className="flex flex-wrap gap-1.5">
         {item.dosis ? (
@@ -298,7 +298,7 @@ function MedicationFormContent({
   return (
     <>
       <Panel title={t.cases_medications_group_identity}>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-3 md:grid-cols-2">
           <Field label={t.cases_medications_brand_name} required>
             <Input
               value={form.handelsname}
@@ -319,7 +319,7 @@ function MedicationFormContent({
       </Panel>
 
       <Panel title={t.cases_medications_group_dosage}>
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-3">
           <Field label={t.cases_medications_dose}>
             <Input
               value={form.dosis ?? ""}
@@ -348,7 +348,7 @@ function MedicationFormContent({
       </Panel>
 
       <Panel title={t.cases_medications_group_form_validity}>
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-3">
           <Field label={t.cases_medications_form}>
             <NativeComboboxSelect
               value={form.darreichungsform ?? ""}
@@ -400,7 +400,7 @@ function MedicationFormContent({
           </Field>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-3 md:grid-cols-2">
           <Field label={t.cases_medications_since}>
             <Input
               value={form.seit ?? ""}
@@ -566,7 +566,7 @@ function MedicationReferenceWorkspace({
   setIncludeEquivalentCandidates,
 }: MedicationReferenceWorkspaceProps) {
   return selectedEquivalentMedication ? (
-        <div className="mt-4 space-y-3">
+        <div className="mt-4 space-y-2.5">
           <Field label={t.cases_medications_equivalent_lookup_medication}>
             <NativeComboboxSelect
               value={selectedEquivalentMedication.id}
@@ -690,15 +690,15 @@ function MedicationReferenceWorkspace({
                 {t.cases_medications_search_results_empty}
               </div>
             ) : (
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-3">
                 {drugSearchResults.map((product) => (
                   <article
                     key={product.id}
-                    className="rounded-xl border border-border/50 bg-card/60 px-4 py-3"
+                    className="rounded-xl border border-border/50 bg-card/60 px-4 py-2.5"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-foreground">
+                        <p className="break-words text-sm font-semibold text-foreground">
                           {product.brand_name}
                         </p>
                         <p className="text-xs text-muted-foreground">
@@ -711,7 +711,7 @@ function MedicationReferenceWorkspace({
                         {verificationStatusLabel(t, product.verification_status)}
                       </Badge>
                     </div>
-                    <p className="mt-2 text-xs text-muted-foreground">
+                    <p className="mt-1.5 text-xs text-muted-foreground">
                       {t.cases_medications_substances}:{" "}
                       {product.substances.join(", ") || t.cases_medications_unknown}
                     </p>
@@ -784,7 +784,7 @@ function MedicationReferenceWorkspace({
               </div>
             ) : null}
             {drugImportPreview ? (
-              <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-3">
+              <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-2.5">
                 <p className="text-sm font-semibold text-foreground">
                   {drugImportPreview.message}
                 </p>
@@ -795,7 +795,7 @@ function MedicationReferenceWorkspace({
                     issues: String(drugImportPreview.issue_preview_count),
                   })}
                 </p>
-                <div className="mt-3 grid gap-2">
+                <div className="mt-2.5 grid gap-1.5">
                   {drugImportPreview.preview.map((row) => (
                     <div
                       key={row.row_number}
