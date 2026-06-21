@@ -281,19 +281,19 @@ function TimelineAvailabilityBlock({
   const rows = formatWeeklyAvailabilityDisplayItems(value, lang);
 
   return (
-    <span className="mt-2.5 block min-w-0 rounded-xl border border-border/70 bg-white/80 p-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-      <span className="mb-2 flex items-center gap-2 text-xs font-semibold text-foreground">
+    <span className="mt-2 block min-w-0">
+      <span className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
         <CalendarClock className="size-3.5 text-orange-600" />
         {label}
       </span>
-      <span className="grid min-w-0 gap-1.5 sm:grid-cols-2 xl:grid-cols-4">
+      <span className="flex min-w-0 flex-wrap gap-1.5">
         {rows.map((row, index) => (
           <span
             key={`${row.day ?? "custom"}-${index}`}
             className={cn(
-              "min-w-0 rounded-lg border px-3 py-2 text-sm font-semibold leading-tight",
+              "rounded-md border px-2 py-0.5 text-[11px] font-medium",
               availabilityBadgeClass(row.closed),
-              row.freeText ? "break-words sm:col-span-2 xl:col-span-4" : "break-words",
+              row.freeText ? "max-w-full break-words" : "whitespace-nowrap",
             )}
             title={row.label}
           >
