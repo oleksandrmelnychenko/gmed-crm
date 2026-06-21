@@ -140,9 +140,28 @@ function blankWarning(kind: ClinicalWarningKind): ClinicalWarning {
   return { kind, label: "", reaction: null, severity: null, note: null };
 }
 
-function trimToNull(value: string): string | null {
-  const trimmed = value.trim();
-  return trimmed === "" ? null : trimmed;
+/**
+ * Empty string -> null. Does NOT trim, so spaces stay typeable in controlled
+ * inputs (trimming on every keystroke strips the just-typed trailing space and
+ * makes it impossible to type a space). Trimming happens once, on save, via
+ * {@link trimDraftStrings}.
+ */
+function blankToNull(value: string): string | null {
+  return value === "" ? null : value;
+}
+
+/** Trim every top-level string field at save time (empty -> null). */
+function trimDraftStrings<T>(draft: T): T {
+  if (!draft || typeof draft !== "object") return draft;
+  const out = { ...(draft as Record<string, unknown>) };
+  for (const key of Object.keys(out)) {
+    const value = out[key];
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      out[key] = trimmed === "" ? null : trimmed;
+    }
+  }
+  return out as T;
 }
 
 function attributionLabel(item: ClinicalAttribution): string | null {
@@ -192,17 +211,17 @@ export function PatientMedicationTable({
   const columnCount = canManage ? 12 : 11;
   const doseCell = (value: string | null) => (value && value.trim() ? value.trim() : "");
 
-  // Rendered as a paper-like document (always light) to match the official BMP.
-  const headCell = "border border-zinc-300 px-2.5 py-2 font-bold text-zinc-900";
-  const headDoseCell = "border border-zinc-300 px-1.5 py-2 text-center font-bold text-zinc-900";
-  const bodyCell = "break-words border border-zinc-300 px-2.5 py-1.5 align-top text-zinc-900";
-  const bodyDoseCell = "border border-zinc-300 px-1.5 py-1.5 text-center align-top font-mono text-zinc-900";
+  // Design-system table styling (soft borders, muted header, hover rows).
+  const headCell = "px-2.5 py-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
+  const headDoseCell = "px-1.5 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
+  const bodyCell = "break-words px-2.5 py-2 align-top text-foreground";
+  const bodyDoseCell = "px-1.5 py-2 text-center align-top font-mono tabular-nums text-foreground";
 
   return (
-    <div className="overflow-x-auto rounded-md border border-zinc-300 bg-white">
+    <div className="overflow-x-auto rounded-xl border border-border bg-card">
       <table className="w-full min-w-[1080px] border-collapse text-left text-xs">
-        <thead>
-          <tr className="bg-zinc-200/70">
+        <thead className="border-b border-border bg-muted/40">
+          <tr>
             <th scope="col" className={headCell}>{tx("Действующее вещество", "Wirkstoff")}</th>
             <th scope="col" className={headCell}>{tx("Торговое название", "Handelsname")}</th>
             <th scope="col" className={headCell}>{tx("Дозировка", "Stärke")}</th>
@@ -215,20 +234,20 @@ export function PatientMedicationTable({
             <th scope="col" className={headCell}>{tx("Указания", "Hinweise")}</th>
             <th scope="col" className={headCell}>{tx("Показание", "Grund")}</th>
             {canManage ? (
-              <th scope="col" className="border border-zinc-300 px-2 py-2 text-right font-bold">
+              <th scope="col" className="px-2 py-2 text-right">
                 <span className="sr-only">{tx("Действия", "Aktionen")}</span>
               </th>
             ) : null}
           </tr>
         </thead>
-        <tbody>
+        <tbody className="divide-y divide-border/60">
           {sections.map((section) => (
             <Fragment key={section.key}>
               {section.label && section.key !== "dauer" ? (
                 <tr>
                   <td
                     colSpan={columnCount}
-                    className="border border-zinc-300 bg-zinc-100 px-2.5 py-1.5 text-[13px] font-bold text-zinc-900"
+                    className="bg-muted/40 px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
                   >
                     {section.label}
                   </td>
@@ -237,7 +256,10 @@ export function PatientMedicationTable({
               {section.rows.map(({ item, index }) => {
                 const attribution = attributionLabel(item);
                 return (
-                  <tr key={item.id ?? index} className={item.on_hold ? "bg-amber-50" : undefined}>
+                  <tr
+                    key={item.id ?? index}
+                    className={cn("transition-colors", item.on_hold ? "bg-amber-50/70" : "hover:bg-muted/30")}
+                  >
                     <td className={cn(bodyCell, "whitespace-pre-line")}>{item.wirkstoff || "—"}</td>
                     <td className={cn(bodyCell, "font-medium")}>
                       {item.handelsname || tx("Без названия", "Ohne Namen")}
@@ -258,12 +280,12 @@ export function PatientMedicationTable({
                     <td className={bodyCell}>
                       {item.hinweis ? <span className="whitespace-pre-line break-words">{item.hinweis}</span> : null}
                       {attribution ? (
-                        <span className="mt-0.5 block break-words text-[10px] text-zinc-500">{attribution}</span>
+                        <span className="mt-0.5 block break-words text-[10px] text-muted-foreground">{attribution}</span>
                       ) : null}
                     </td>
                     <td className={bodyCell}>{item.grund || ""}</td>
                     {canManage ? (
-                      <td className="border border-zinc-300 px-2 py-1.5 text-right align-top">
+                      <td className="px-2 py-2 text-right align-top">
                         {renderActions(item, index)}
                       </td>
                     ) : null}
@@ -433,9 +455,10 @@ function ClinicalSection<T extends { id?: string | null }>({
 
   function submitDraft() {
     if (!editing || !isValid(editing.draft)) return;
+    const cleaned = trimDraftStrings(editing.draft);
     const next = [...list];
-    if (editing.index === null) next.push(editing.draft);
-    else next[editing.index] = editing.draft;
+    if (editing.index === null) next.push(cleaned);
+    else next[editing.index] = cleaned;
     void persist(next);
   }
 
@@ -944,7 +967,7 @@ function PatientRecommendationsSection({
               <Field label={tx("Описание", "Beschreibung")}>
                 <textarea
                   value={editing.description ?? ""}
-                  onChange={(e) => set({ description: trimToNull(e.target.value) })}
+                  onChange={(e) => set({ description: blankToNull(e.target.value) })}
                   className={cn(inputClass, "h-20 py-2")}
                 />
               </Field>
@@ -985,7 +1008,7 @@ function PatientRecommendationsSection({
                   <Input
                     type="date"
                     value={editing.recommended_on ?? ""}
-                    onChange={(e) => set({ recommended_on: trimToNull(e.target.value) })}
+                    onChange={(e) => set({ recommended_on: blankToNull(e.target.value) })}
                     className={inputClass}
                   />
                 </Field>
@@ -1010,7 +1033,7 @@ function PatientRecommendationsSection({
                   <Input
                     type="date"
                     value={editing.valid_from ?? ""}
-                    onChange={(e) => set({ valid_from: trimToNull(e.target.value) })}
+                    onChange={(e) => set({ valid_from: blankToNull(e.target.value) })}
                     className={inputClass}
                   />
                 </Field>
@@ -1018,7 +1041,7 @@ function PatientRecommendationsSection({
                   <Input
                     type="date"
                     value={editing.valid_to ?? ""}
-                    onChange={(e) => set({ valid_to: trimToNull(e.target.value) })}
+                    onChange={(e) => set({ valid_to: blankToNull(e.target.value) })}
                     className={inputClass}
                   />
                 </Field>
@@ -1040,7 +1063,7 @@ function PatientRecommendationsSection({
                   <Input
                     type="date"
                     value={editing.reminder_at ?? ""}
-                    onChange={(e) => set({ reminder_at: trimToNull(e.target.value) })}
+                    onChange={(e) => set({ reminder_at: blankToNull(e.target.value) })}
                     className={inputClass}
                   />
                 </Field>
@@ -1064,7 +1087,7 @@ function PatientRecommendationsSection({
                   <Field label={tx("Примечание к результату", "Ergebnisnotiz")}>
                     <Input
                       value={editing.outcome_note ?? ""}
-                      onChange={(e) => set({ outcome_note: trimToNull(e.target.value) })}
+                      onChange={(e) => set({ outcome_note: blankToNull(e.target.value) })}
                       className={inputClass}
                     />
                   </Field>
@@ -1073,7 +1096,7 @@ function PatientRecommendationsSection({
                       <Input
                         type="date"
                         value={editing.outcome_at ?? ""}
-                        onChange={(e) => set({ outcome_at: trimToNull(e.target.value) })}
+                        onChange={(e) => set({ outcome_at: blankToNull(e.target.value) })}
                         className={inputClass}
                       />
                     </Field>
@@ -1083,7 +1106,7 @@ function PatientRecommendationsSection({
               <Field label={tx("Внутренняя заметка", "Interne Notiz")}>
                 <textarea
                   value={editing.note_intern ?? ""}
-                  onChange={(e) => set({ note_intern: trimToNull(e.target.value) })}
+                  onChange={(e) => set({ note_intern: blankToNull(e.target.value) })}
                   className={cn(inputClass, "h-20 py-2")}
                 />
               </Field>
@@ -1289,7 +1312,7 @@ export function PatientClinicalTab({
             <Field label={tx("Реакция", "Reaktion")}>
               <Input
                 value={draft.reaction ?? ""}
-                onChange={(e) => set({ reaction: trimToNull(e.target.value) })}
+                onChange={(e) => set({ reaction: blankToNull(e.target.value) })}
                 className={inputClass}
                 placeholder={tx("Сыпь, отёк", "Hautausschlag, Schwellung")}
               />
@@ -1297,7 +1320,7 @@ export function PatientClinicalTab({
             <Field label={tx("Тяжесть", "Schweregrad")}>
               <Input
                 value={draft.severity ?? ""}
-                onChange={(e) => set({ severity: trimToNull(e.target.value) })}
+                onChange={(e) => set({ severity: blankToNull(e.target.value) })}
                 className={inputClass}
                 placeholder={tx("лёгкая / средняя / тяжёлая", "leicht / mittel / schwer")}
               />
@@ -1305,7 +1328,7 @@ export function PatientClinicalTab({
             <Field label={tx("Примечание", "Notiz")}>
               <Input
                 value={draft.note ?? ""}
-                onChange={(e) => set({ note: trimToNull(e.target.value) })}
+                onChange={(e) => set({ note: blankToNull(e.target.value) })}
                 className={inputClass}
               />
             </Field>
@@ -1346,7 +1369,7 @@ export function PatientClinicalTab({
             <Field label={tx("Примечание", "Notiz")}>
               <Input
                 value={draft.note ?? ""}
-                onChange={(e) => set({ note: trimToNull(e.target.value) })}
+                onChange={(e) => set({ note: blankToNull(e.target.value) })}
                 className={inputClass}
               />
             </Field>
@@ -1414,7 +1437,7 @@ export function PatientClinicalTab({
               <Field label="OPS">
                 <Input
                   value={draft.ops_code ?? ""}
-                  onChange={(e) => set({ ops_code: trimToNull(e.target.value) })}
+                  onChange={(e) => set({ ops_code: blankToNull(e.target.value) })}
                   className={inputClass}
                   placeholder="5-470.10"
                 />
@@ -1423,7 +1446,7 @@ export function PatientClinicalTab({
                 <Input
                   type="date"
                   value={draft.performed_on ?? ""}
-                  onChange={(e) => set({ performed_on: trimToNull(e.target.value) })}
+                  onChange={(e) => set({ performed_on: blankToNull(e.target.value) })}
                   className={inputClass}
                 />
               </Field>
@@ -1431,7 +1454,7 @@ export function PatientClinicalTab({
             <Field label={tx("Примечание", "Notiz")}>
               <Input
                 value={draft.note ?? ""}
-                onChange={(e) => set({ note: trimToNull(e.target.value) })}
+                onChange={(e) => set({ note: blankToNull(e.target.value) })}
                 className={inputClass}
               />
             </Field>
@@ -1561,7 +1584,7 @@ export function PatientClinicalTab({
               <Field label={tx("Действующее вещество", "Wirkstoff")}>
                 <Input
                   value={draft.wirkstoff ?? ""}
-                  onChange={(e) => set({ wirkstoff: trimToNull(e.target.value) })}
+                  onChange={(e) => set({ wirkstoff: blankToNull(e.target.value) })}
                   className={inputClass}
                   placeholder="Bisoprolol"
                 />
@@ -1571,7 +1594,7 @@ export function PatientClinicalTab({
               <Field label={tx("Дозировка", "Stärke")}>
                 <Input
                   value={draft.staerke ?? ""}
-                  onChange={(e) => set({ staerke: trimToNull(e.target.value) })}
+                  onChange={(e) => set({ staerke: blankToNull(e.target.value) })}
                   className={inputClass}
                   placeholder="5 mg"
                 />
@@ -1579,7 +1602,7 @@ export function PatientClinicalTab({
               <Field label={tx("Единица", "Einheit")}>
                 <Input
                   value={draft.einheit ?? ""}
-                  onChange={(e) => set({ einheit: trimToNull(e.target.value) })}
+                  onChange={(e) => set({ einheit: blankToNull(e.target.value) })}
                   className={inputClass}
                   placeholder="Stück"
                 />
@@ -1592,7 +1615,7 @@ export function PatientClinicalTab({
                   <Input
                     key={key}
                     value={draft[key] ?? ""}
-                    onChange={(e) => set({ [key]: trimToNull(e.target.value) } as Partial<ClinicalMedication>)}
+                    onChange={(e) => set({ [key]: blankToNull(e.target.value) } as Partial<ClinicalMedication>)}
                     className={cn(inputClass, "text-center")}
                     aria-label={
                       [
@@ -1610,7 +1633,7 @@ export function PatientClinicalTab({
             <Field label={tx("Причина", "Grund")}>
               <Input
                 value={draft.grund ?? ""}
-                onChange={(e) => set({ grund: trimToNull(e.target.value) })}
+                onChange={(e) => set({ grund: blankToNull(e.target.value) })}
                 className={inputClass}
                 placeholder="Bluthochdruck"
               />
@@ -1618,7 +1641,7 @@ export function PatientClinicalTab({
             <Field label={tx("Указания", "Hinweise")}>
               <Input
                 value={draft.hinweis ?? ""}
-                onChange={(e) => set({ hinweis: trimToNull(e.target.value) })}
+                onChange={(e) => set({ hinweis: blankToNull(e.target.value) })}
                 className={inputClass}
                 placeholder="Während oder nach den Mahlzeiten"
               />
@@ -1628,7 +1651,7 @@ export function PatientClinicalTab({
                 <Input
                   type="date"
                   value={draft.verordnet_am ?? ""}
-                  onChange={(e) => set({ verordnet_am: trimToNull(e.target.value) })}
+                  onChange={(e) => set({ verordnet_am: blankToNull(e.target.value) })}
                   className={inputClass}
                 />
               </Field>
@@ -1636,7 +1659,7 @@ export function PatientClinicalTab({
                 <Input
                   type="date"
                   value={draft.einnahme_von ?? ""}
-                  onChange={(e) => set({ einnahme_von: trimToNull(e.target.value) })}
+                  onChange={(e) => set({ einnahme_von: blankToNull(e.target.value) })}
                   className={inputClass}
                 />
               </Field>
@@ -1644,7 +1667,7 @@ export function PatientClinicalTab({
                 <Input
                   type="date"
                   value={draft.einnahme_bis ?? ""}
-                  onChange={(e) => set({ einnahme_bis: trimToNull(e.target.value) })}
+                  onChange={(e) => set({ einnahme_bis: blankToNull(e.target.value) })}
                   className={inputClass}
                 />
               </Field>
@@ -1824,7 +1847,7 @@ export function PatientClinicalTab({
                 <Input
                   type="date"
                   value={draft.performed_on ?? ""}
-                  onChange={(e) => set({ performed_on: trimToNull(e.target.value) })}
+                  onChange={(e) => set({ performed_on: blankToNull(e.target.value) })}
                   className={inputClass}
                 />
               </Field>
@@ -1832,7 +1855,7 @@ export function PatientClinicalTab({
             <Field label={tx("Результат / Befund", "Befund")}>
               <textarea
                 value={draft.result ?? ""}
-                onChange={(e) => set({ result: trimToNull(e.target.value) })}
+                onChange={(e) => set({ result: blankToNull(e.target.value) })}
                 className={cn(inputClass, "h-20 py-2")}
                 placeholder={tx("Описание результата", "Befundtext")}
               />

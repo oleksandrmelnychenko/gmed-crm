@@ -4287,24 +4287,20 @@ function weeklyAvailabilityBadgeClass(closed: boolean) {
 
 function WeeklyAvailabilityBadgeList({
   value,
-  compact = false,
 }: {
   value: string | null | undefined;
-  compact?: boolean;
 }) {
   const { lang } = useLang();
   const rows = formatWeeklyAvailabilityDisplayItems(value, lang);
 
   return (
-    <div className={cn("grid gap-2", compact ? "grid-cols-1 sm:grid-cols-2" : "sm:grid-cols-2 lg:grid-cols-4")}>
+    <div className="flex flex-wrap gap-1.5">
       {rows.map((row, index) => (
         <span
           key={`${row.day ?? "custom"}-${index}`}
           className={cn(
-            "rounded-lg border font-semibold",
-            compact ? "px-2 py-1 text-[11px]" : "px-3 py-1.5 text-sm",
+            "whitespace-nowrap rounded-md border px-2 py-0.5 text-[11px] font-medium",
             weeklyAvailabilityBadgeClass(row.closed),
-            row.freeText && !compact ? "sm:col-span-2 lg:col-span-4" : null,
           )}
         >
           {row.label}
@@ -4326,7 +4322,7 @@ function ReadOnlyAvailabilityLine({
       <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
       <span className="mt-3 h-px min-w-6 flex-1 bg-border/70" />
       <div className="min-w-0 max-w-[70%] flex-1">
-        <WeeklyAvailabilityBadgeList value={value} compact />
+        <WeeklyAvailabilityBadgeList value={value} />
       </div>
     </div>
   );
@@ -6101,7 +6097,7 @@ function ProviderSheetHero({
               {detail.email || t.common_not_set}
             </HeroInfoLine>
             <HeroInfoLine icon={CalendarClock} wrap>
-              <WeeklyAvailabilityBadgeList value={detail.opening_hours} compact />
+              <WeeklyAvailabilityBadgeList value={detail.opening_hours} />
             </HeroInfoLine>
             <HeroInfoLine icon={BadgeCheck}>
               {detail.tax_id || t.common_not_set}
@@ -6410,7 +6406,7 @@ function ContactPersonCard({
                 <span className="mb-1 block text-[11px] font-medium leading-tight text-muted-foreground">
                   {l("providers_opening_hours")}
                 </span>
-                <WeeklyAvailabilityBadgeList value={contact.opening_hours} compact />
+                <WeeklyAvailabilityBadgeList value={contact.opening_hours} />
               </span>
             ) : null}
           </span>
@@ -6609,7 +6605,7 @@ function DoctorCardSummary({
               <p className="mb-1 text-[11px] font-medium leading-tight text-muted-foreground">
                 {l("providers_opening_hours")}
               </p>
-              <WeeklyAvailabilityBadgeList value={doctor.opening_hours} compact />
+              <WeeklyAvailabilityBadgeList value={doctor.opening_hours} />
             </div>
           ) : null}
         </div>
@@ -7026,7 +7022,7 @@ function StaffSection({
                         <p className="mb-1 text-[11px] font-medium leading-tight text-muted-foreground">
                           {l("providers_opening_hours")}
                         </p>
-                        <WeeklyAvailabilityBadgeList value={staff.opening_hours} compact />
+                        <WeeklyAvailabilityBadgeList value={staff.opening_hours} />
                       </div>
                     ) : null}
                   </div>

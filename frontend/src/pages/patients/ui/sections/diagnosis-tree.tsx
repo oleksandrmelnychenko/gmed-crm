@@ -40,9 +40,27 @@ function nextCid(): string {
   return `new-${cidCounter}`;
 }
 
-function trimToNull(value: string): string | null {
-  const trimmed = value.trim();
-  return trimmed === "" ? null : trimmed;
+/**
+ * Empty string -> null. Does NOT trim, so spaces stay typeable in controlled
+ * inputs (trimming on every keystroke strips the just-typed trailing space).
+ * Trimming happens once, on save, via {@link trimDraftStrings}.
+ */
+function blankToNull(value: string): string | null {
+  return value === "" ? null : value;
+}
+
+/** Trim every top-level string field at save time (empty -> null). */
+function trimDraftStrings<T>(draft: T): T {
+  if (!draft || typeof draft !== "object") return draft;
+  const out = { ...(draft as Record<string, unknown>) };
+  for (const key of Object.keys(out)) {
+    const value = out[key];
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      out[key] = trimmed === "" ? null : trimmed;
+    }
+  }
+  return out as T;
 }
 
 /** Allowed child kinds for a given parent kind, per the nesting rules. */
@@ -515,7 +533,7 @@ function DiagnosisForm({
           <Field label="ICD-10">
             <Input
               value={draft.icd_code ?? ""}
-              onChange={(e) => set({ icd_code: trimToNull(e.target.value) })}
+              onChange={(e) => set({ icd_code: blankToNull(e.target.value) })}
               className={inputClass}
               placeholder="K35.8"
             />
@@ -525,7 +543,7 @@ function DiagnosisForm({
           <Field label="OPS">
             <Input
               value={draft.ops_code ?? ""}
-              onChange={(e) => set({ ops_code: trimToNull(e.target.value) })}
+              onChange={(e) => set({ ops_code: blankToNull(e.target.value) })}
               className={inputClass}
               placeholder="5-470.10"
             />
@@ -535,7 +553,7 @@ function DiagnosisForm({
           <Input
             type="date"
             value={draft.diagnosed_on ?? ""}
-            onChange={(e) => set({ diagnosed_on: trimToNull(e.target.value) })}
+            onChange={(e) => set({ diagnosed_on: blankToNull(e.target.value) })}
             className={inputClass}
           />
         </Field>
@@ -544,7 +562,7 @@ function DiagnosisForm({
       <Field label={tx("Примечание", "Notiz")}>
         <Input
           value={draft.note ?? ""}
-          onChange={(e) => set({ note: trimToNull(e.target.value) })}
+          onChange={(e) => set({ note: blankToNull(e.target.value) })}
           className={inputClass}
         />
       </Field>
@@ -647,14 +665,14 @@ function DiagnosisForm({
               <Field label={tx("Клиника", "Klinik")}>
                 <Input
                   value={draft.external_clinic ?? ""}
-                  onChange={(e) => set({ external_clinic: trimToNull(e.target.value) })}
+                  onChange={(e) => set({ external_clinic: blankToNull(e.target.value) })}
                   className={inputClass}
                 />
               </Field>
               <Field label={tx("Врач", "Arzt")}>
                 <Input
                   value={draft.external_doctor ?? ""}
-                  onChange={(e) => set({ external_doctor: trimToNull(e.target.value) })}
+                  onChange={(e) => set({ external_doctor: blankToNull(e.target.value) })}
                   className={inputClass}
                 />
               </Field>
@@ -752,7 +770,7 @@ export function DiagnosisTreeSection({
 
   function submitDraft() {
     if (!editing) return;
-    const draft = editing.draft;
+    const draft = trimDraftStrings(editing.draft);
     if (draft.label.trim() === "") return;
     if (draft.source_mode === "extern" && !draft.external_country) return;
 

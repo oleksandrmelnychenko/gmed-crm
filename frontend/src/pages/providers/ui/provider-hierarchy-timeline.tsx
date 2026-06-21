@@ -1,10 +1,11 @@
 import { Fragment, useMemo, useState } from "react";
-import { Building2, CalendarClock, ChevronRight, MapPin, Stethoscope, UsersRound } from "lucide-react";
+import { Building2, CalendarClock, ChevronRight, Stethoscope } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
+import { ProviderCategoryIcon } from "./provider-category-icon";
 import { formatWeeklyAvailabilityDisplayItems, providerTypeLabel } from "../model/list-model";
 import { specializationLabelForItem, specializationLabelForValue } from "../model/specialization-labels";
 import type { ProviderOrganizationLevel, ProviderSummary, SpecializationItem } from "../model/types";
@@ -83,27 +84,6 @@ function levelTone(level: ProviderOrganizationLevel) {
         dot: "border-border bg-muted text-muted-foreground",
         rail: "bg-border",
       };
-  }
-}
-
-function ProviderLevelIcon({
-  className,
-  level,
-}: {
-  className?: string;
-  level: ProviderOrganizationLevel;
-}) {
-  switch (level) {
-    case "organization":
-      return <Building2 className={className} />;
-    case "clinic":
-      return <Stethoscope className={className} />;
-    case "department":
-      return <UsersRound className={className} />;
-    case "unit":
-      return <MapPin className={className} />;
-    default:
-      return <Building2 className={className} />;
   }
 }
 
@@ -520,7 +500,11 @@ function TimelineNode({
             transform: "translateY(-50%)",
           }}
         >
-          <ProviderLevelIcon className="size-3.5" level={provider.organization_level} />
+          <ProviderCategoryIcon
+            providerType={provider.provider_type}
+            categoryKey={provider.taxonomy_node?.code ?? null}
+            className="size-3.5"
+          />
         </span>
       </div>
       <div

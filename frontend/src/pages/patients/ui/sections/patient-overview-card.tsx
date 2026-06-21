@@ -404,12 +404,12 @@ export function PatientOverviewCard({
             {medications.length === 0 ? (
               dash
             ) : (
-              <div className="overflow-x-auto rounded-lg border border-border/70 bg-background">
+              <div className="overflow-x-auto rounded-xl border border-border bg-card">
                 <table className="w-full min-w-[720px] border-collapse text-left text-xs">
-                  <thead className="border-b border-border/70 bg-muted/40 text-[10px] uppercase text-muted-foreground">
+                  <thead className="border-b border-border bg-muted/40 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
                     <tr>
                       {medColumns.map((column) => (
-                        <th key={column} scope="col" className="px-2.5 py-1.5 font-semibold">
+                        <th key={column} scope="col" className="px-2.5 py-2 font-semibold">
                           {column}
                         </th>
                       ))}
@@ -417,16 +417,16 @@ export function PatientOverviewCard({
                   </thead>
                   <tbody className="divide-y divide-border/60">
                     {medications.map((item, index) => (
-                      <tr key={item.id ?? index} className="align-top">
-                        <td className="px-2.5 py-1.5 text-foreground">{item.wirkstoff || "—"}</td>
-                        <td className="px-2.5 py-1.5 font-medium text-foreground">
+                      <tr key={item.id ?? index} className="align-top transition-colors hover:bg-muted/30">
+                        <td className="px-2.5 py-2 text-foreground">{item.wirkstoff || "—"}</td>
+                        <td className="px-2.5 py-2 font-medium text-foreground">
                           {item.handelsname || tx("Без названия", "Ohne Namen")}
                         </td>
-                        <td className="whitespace-nowrap px-2.5 py-1.5 font-mono text-foreground">{item.staerke || ""}</td>
-                        <td className="px-2.5 py-1.5 text-foreground">{item.form || ""}</td>
-                        <td className="whitespace-nowrap px-2.5 py-1.5 font-mono text-foreground">{intakeScheme(item) || "—"}</td>
-                        <td className="px-2.5 py-1.5 text-muted-foreground">{item.hinweis || ""}</td>
-                        <td className="px-2.5 py-1.5 text-foreground">{item.grund || ""}</td>
+                        <td className="whitespace-nowrap px-2.5 py-2 font-mono tabular-nums text-foreground">{item.staerke || ""}</td>
+                        <td className="px-2.5 py-2 text-foreground">{item.form || ""}</td>
+                        <td className="whitespace-nowrap px-2.5 py-2 font-mono tabular-nums text-foreground">{intakeScheme(item) || "—"}</td>
+                        <td className="px-2.5 py-2 text-muted-foreground">{item.hinweis || ""}</td>
+                        <td className="px-2.5 py-2 text-foreground">{item.grund || ""}</td>
                       </tr>
                     ))}
                   </tbody>
