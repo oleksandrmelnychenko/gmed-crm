@@ -12,7 +12,37 @@ export type ProviderTaxonomyCarrier = {
   taxonomy_filter_ids?: string[];
   taxonomy_node?: { id?: string | null } | null;
   taxonomy_path?: Array<{ id?: string | null }>;
+  /** Insurances this provider accepts (medical providers only). */
+  insurance_providers?: Array<{ id?: string | null; name?: string | null }>;
 };
+
+/** Deduped {id,name} list of every insurance accepted by the given providers. */
+export function collectInsuranceOptions<TProvider extends ProviderTaxonomyCarrier>(
+  providers: readonly TProvider[],
+): Array<{ id: string; name: string }> {
+  const byId = new Map<string, string>();
+  for (const provider of providers) {
+    for (const item of provider.insurance_providers ?? []) {
+      const id = (item?.id ?? "").trim();
+      if (!id || byId.has(id)) continue;
+      byId.set(id, (item?.name ?? "").trim() || id);
+    }
+  }
+  return Array.from(byId, ([id, name]) => ({ id, name })).sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+  );
+}
+
+export function providerMatchesInsurance(
+  provider: ProviderTaxonomyCarrier,
+  insuranceId: string,
+): boolean {
+  const selected = insuranceId.trim();
+  if (!selected) return true;
+  return (provider.insurance_providers ?? []).some(
+    (item) => (item?.id ?? "").trim() === selected,
+  );
+}
 
 /** Every taxonomy node id a provider belongs to (assigned node + ancestors + path). */
 export function providerTaxonomyIdList(provider: ProviderTaxonomyCarrier): string[] {

@@ -7,6 +7,8 @@ import { ProviderTaxonomyCascadeSelect } from "@/pages/providers/ui/provider-tax
 import type { ProviderTaxonomyNode, ProviderType } from "@/pages/providers/model/types";
 import {
   type ProviderTaxonomyCarrier,
+  collectInsuranceOptions,
+  providerMatchesInsurance,
   providerMatchesTaxonomy,
   providerMatchesType,
   selectAvailableTaxonomyNodes,
@@ -35,6 +37,13 @@ type ProviderSelectWithTaxonomyFilterProps<TProvider extends ProviderTaxonomyCar
   noProvidersLabel?: ReactNode;
   /** When true, the category dropdown only lists categories that actually have a provider of the current type. */
   restrictTaxonomyToAvailable?: boolean;
+  /** When true, adds an insurance dropdown that filters providers by accepted insurance. */
+  showInsuranceFilter?: boolean;
+  /** Controlled selected insurance id (optional; falls back to internal state). */
+  insuranceValue?: string;
+  insurancePlaceholder?: string;
+  insuranceLabel?: ReactNode;
+  onInsuranceChange?: (insuranceId: string) => void;
   providerLabel?: (provider: TProvider) => ReactNode;
   providerSearchText?: (provider: TProvider) => string;
   "aria-label"?: string;
@@ -67,6 +76,11 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
   providerSelectLabel,
   noProvidersLabel,
   restrictTaxonomyToAvailable,
+  showInsuranceFilter,
+  insuranceValue,
+  insurancePlaceholder,
+  insuranceLabel,
+  onInsuranceChange,
   providerLabel = defaultProviderLabel,
   providerSearchText,
   "aria-label": ariaLabel,
@@ -76,16 +90,25 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
   const generatedId = useId();
   const taxonomySelectId = `${generatedId}-taxonomy`;
   const providerSelectId = `${generatedId}-provider`;
+  const insuranceSelectId = `${generatedId}-insurance`;
   const [internalTaxonomyValue, setInternalTaxonomyValue] = useState("");
   const selectedTaxonomyValue = taxonomyValue ?? internalTaxonomyValue;
+  const [internalInsuranceValue, setInternalInsuranceValue] = useState("");
+  const selectedInsuranceValue = insuranceValue ?? internalInsuranceValue;
+  const insuranceOptions = useMemo(
+    () => (showInsuranceFilter ? collectInsuranceOptions(providers) : []),
+    [showInsuranceFilter, providers],
+  );
+  const insuranceFilterActive = showInsuranceFilter && insuranceOptions.length > 0;
   const filteredProviders = useMemo(
     () =>
       providers.filter(
         (provider) =>
           providerMatchesType(provider, providerType) &&
-          providerMatchesTaxonomy(provider, selectedTaxonomyValue),
+          providerMatchesTaxonomy(provider, selectedTaxonomyValue) &&
+          (!insuranceFilterActive || providerMatchesInsurance(provider, selectedInsuranceValue)),
       ),
-    [providerType, providers, selectedTaxonomyValue],
+    [providerType, providers, selectedTaxonomyValue, insuranceFilterActive, selectedInsuranceValue],
   );
   const selectedProviderStillVisible =
     !value || filteredProviders.some((provider) => provider.id === value);
@@ -128,6 +151,44 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
     }
   };
 
+  const handleInsuranceChange = (insuranceId: string) => {
+    if (insuranceValue === undefined) {
+      setInternalInsuranceValue(insuranceId);
+    }
+    onInsuranceChange?.(insuranceId);
+
+    if (
+      value &&
+      !providers.some(
+        (provider) =>
+          provider.id === value &&
+          providerMatchesType(provider, providerType) &&
+          providerMatchesTaxonomy(provider, selectedTaxonomyValue) &&
+          providerMatchesInsurance(provider, insuranceId),
+      )
+    ) {
+      onChange("");
+    }
+  };
+
+  const insuranceControl = insuranceFilterActive ? (
+    <NativeComboboxSelect
+      id={insuranceSelectId}
+      value={selectedInsuranceValue}
+      onChange={(event) => handleInsuranceChange(event.target.value)}
+      disabled={disabled}
+      className={providerSelectClassName}
+      aria-label={insurancePlaceholder ?? "Insurance"}
+    >
+      <option value="">{insurancePlaceholder ?? "Insurance"}</option>
+      {insuranceOptions.map((option) => (
+        <option key={option.id} value={option.id}>
+          {option.name}
+        </option>
+      ))}
+    </NativeComboboxSelect>
+  ) : null;
+
   const taxonomyControl = (
     <ProviderTaxonomyCascadeSelect
       id={taxonomySelectId}
@@ -166,7 +227,15 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
   );
 
   return (
-    <div className={cn("grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]", containerClassName)}>
+    <div
+      className={cn(
+        "grid min-w-0 gap-2",
+        insuranceFilterActive
+          ? "sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]"
+          : "sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]",
+        containerClassName,
+      )}
+    >
       {taxonomyLabel ? (
         <div className="space-y-1.5">
           <label htmlFor={taxonomySelectId} className={cn(tokens.text.label, "block")}>
@@ -177,6 +246,18 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
       ) : (
         taxonomyControl
       )}
+      {insuranceControl ? (
+        insuranceLabel ? (
+          <div className="space-y-1.5">
+            <label htmlFor={insuranceSelectId} className={cn(tokens.text.label, "block")}>
+              {insuranceLabel}
+            </label>
+            {insuranceControl}
+          </div>
+        ) : (
+          insuranceControl
+        )
+      ) : null}
       {providerSelectLabel ? (
         <div className="space-y-1.5">
           <label htmlFor={providerSelectId} className={cn(tokens.text.label, "block")}>
