@@ -242,6 +242,23 @@ export function PatientsPage() {
     sortStack,
     tr,
   });
+  const insuranceOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const patient of patients) {
+      const value = (patient.insurance_provider ?? "").trim();
+      if (value) seen.add(value);
+    }
+    return Array.from(seen).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" }),
+    );
+  }, [patients]);
+  const displayedPatients = useMemo(() => {
+    const selected = filters.insuranceProvider.trim().toLocaleLowerCase();
+    if (!selected) return sortedAndFilteredPatients;
+    return sortedAndFilteredPatients.filter(
+      (patient) => (patient.insurance_provider ?? "").trim().toLocaleLowerCase() === selected,
+    );
+  }, [sortedAndFilteredPatients, filters.insuranceProvider]);
   const {
     assignmentBusy,
     assignmentError,
@@ -294,6 +311,7 @@ export function PatientsPage() {
     filters.activeOnly !== "true" ||
     filters.providerId !== "" ||
     filters.doctorId !== "" ||
+    filters.insuranceProvider !== "" ||
     filterPredicates.length > 0;
 
   function openCreateSheet() {
@@ -342,6 +360,7 @@ export function PatientsPage() {
           frozenColumns={frozenColumns}
           groupLabels={groupLabels}
           hiddenColumns={hiddenColumns}
+          insuranceOptions={insuranceOptions}
           lastUpdatedText={lastUpdated ? formatRelativeTime(lastUpdated) : null}
           listBusy={listBusy}
           maxFrozenColumns={MAX_PATIENT_FROZEN_COLUMNS}
@@ -359,11 +378,14 @@ export function PatientsPage() {
             const visibleCols = columns.filter(
               (column) => !hiddenColumns.includes(column.id) || column.required,
             );
-            exportCsv(sortedAndFilteredPatients, visibleCols, createPatientsExportFilename());
+            exportCsv(displayedPatients, visibleCols, createPatientsExportFilename());
           }}
           onFiltersChange={setFilterPredicates}
           onFrozenColumnsChange={setFrozenColumns}
           onHiddenColumnsChange={setHiddenColumns}
+          onInsuranceFilterChange={(value) => {
+            setFilters((current) => ({ ...current, insuranceProvider: value }));
+          }}
           onProviderFilterChange={(value) => {
             setFilters((current) => ({ ...current, providerId: value, doctorId: "" }));
             syncQuery({ provider: value || null, doctor: null });
@@ -423,7 +445,7 @@ export function PatientsPage() {
             onOpenDocuments: () => detail ? staffGo(`/documents?patient=${detail.id}`) : undefined,
           }}
           emptyLabel={t.patients_no_match}
-          filteredCount={sortedAndFilteredPatients.length}
+          filteredCount={displayedPatients.length}
           frozenColumns={frozenColumns}
           hiddenColumns={hiddenColumns}
           loading={listBusy && patients.length === 0}
@@ -432,7 +454,7 @@ export function PatientsPage() {
           onOpenPatient={handleOpenPatient}
           onFrozenColumnsChange={setFrozenColumns}
           onSortChange={setSortStack}
-          rows={sortedAndFilteredPatients}
+          rows={displayedPatients}
           selectedId={selectedId}
           sortStack={sortStack}
           t={tr}

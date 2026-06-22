@@ -51,10 +51,12 @@ type PatientsListToolbarProps = {
     doctorId: string;
     providerId: string;
     search: string;
+    insuranceProvider: string;
   };
   frozenColumns: string[];
   groupLabels: Record<string, string>;
   hiddenColumns: string[];
+  insuranceOptions: string[];
   lastUpdatedText: string | null;
   listBusy: boolean;
   maxFrozenColumns: number;
@@ -66,6 +68,7 @@ type PatientsListToolbarProps = {
   onFiltersChange: (value: FilterPredicate[]) => void;
   onFrozenColumnsChange: (value: string[]) => void;
   onHiddenColumnsChange: (value: string[]) => void;
+  onInsuranceFilterChange: (value: string) => void;
   onProviderFilterChange: (value: string) => void;
   onRefresh: () => void;
   onSearchChange: (value: string) => void;
@@ -95,6 +98,7 @@ export function PatientsListToolbar({
   frozenColumns,
   groupLabels,
   hiddenColumns,
+  insuranceOptions,
   lastUpdatedText,
   listBusy,
   maxFrozenColumns,
@@ -106,6 +110,7 @@ export function PatientsListToolbar({
   onFiltersChange,
   onFrozenColumnsChange,
   onHiddenColumnsChange,
+  onInsuranceFilterChange,
   onProviderFilterChange,
   onRefresh,
   onSearchChange,
@@ -142,7 +147,7 @@ export function PatientsListToolbar({
   return (
     <div className="relative z-30 flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-1.5">
-        <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+        <div className="relative min-w-[170px] flex-1 sm:max-w-[220px]">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
           <Input
             ref={searchInputRef}
@@ -165,7 +170,7 @@ export function PatientsListToolbar({
           providerPlaceholder={t.providers_all}
           taxonomyPlaceholder={t.providers_category}
           taxonomyAllLabel={t.providers_all}
-          containerClassName="sm:grid-cols-[220px_220px]"
+          containerClassName="sm:grid-cols-[160px_160px]"
           taxonomySelectClassName="h-8 bg-background text-[13px]"
           providerSelectClassName="h-8 bg-background text-[13px]"
           providerLabel={(provider) =>
@@ -179,7 +184,7 @@ export function PatientsListToolbar({
 
           disabled={!filters.providerId}
 
-          onChange={(event) => onDoctorFilterChange(event.target.value ?? "")} className="h-8 w-[200px] bg-background text-[13px]">
+          onChange={(event) => onDoctorFilterChange(event.target.value ?? "")} className="h-8 w-[150px] bg-background text-[13px]">
             <option value="">{t.providers_all}</option>
             {doctors.map((doctor) => (
               <option key={doctor.id} value={doctor.id}>
@@ -189,11 +194,26 @@ export function PatientsListToolbar({
           </NativeComboboxSelect>
 
         <NativeComboboxSelect value={filters.activeOnly}
-          onChange={(event) => onActiveFilterChange(event.target.value ?? "")} className="h-8 bg-background text-[13px]">
+          onChange={(event) => onActiveFilterChange(event.target.value ?? "")} className="h-8 w-[140px] bg-background text-[13px]">
             <option value="">{t.providers_all}</option>
             <option value="true">{t.common_active}</option>
             <option value="false">{t.common_inactive}</option>
           </NativeComboboxSelect>
+
+        {insuranceOptions.length > 0 ? (
+          <NativeComboboxSelect
+            value={filters.insuranceProvider}
+            onChange={(event) => onInsuranceFilterChange(event.target.value ?? "")}
+            className="h-8 w-[170px] bg-background text-[13px]"
+          >
+            <option value="">{t.patients_insurance_provider}</option>
+            {insuranceOptions.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </NativeComboboxSelect>
+        ) : null}
 
         <div className="ml-auto flex items-center gap-1">
           {lastUpdatedText ? (

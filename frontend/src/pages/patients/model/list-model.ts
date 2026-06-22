@@ -99,6 +99,7 @@ export type PatientFilters = {
   activeOnly: string;
   providerId: string;
   doctorId: string;
+  insuranceProvider: string;
 };
 
 export type PatientFormState = {
@@ -140,6 +141,7 @@ export const DEFAULT_PATIENT_FILTERS: PatientFilters = {
   activeOnly: "true",
   providerId: "",
   doctorId: "",
+  insuranceProvider: "",
 };
 
 export function patientPermissions(role?: string): PatientPermissions {
