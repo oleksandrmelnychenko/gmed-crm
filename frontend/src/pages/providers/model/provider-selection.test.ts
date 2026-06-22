@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  collectInsuranceOptions,
+  providerMatchesInsurance,
   providerMatchesTaxonomy,
   providerMatchesType,
   selectAvailableTaxonomyNodes,
@@ -107,5 +109,59 @@ describe("providerMatchesTaxonomy", () => {
     expect(providerMatchesTaxonomy(p, "")).toBe(true);
     expect(providerMatchesTaxonomy(p, "g1")).toBe(true); // ancestor match
     expect(providerMatchesTaxonomy(p, "g2")).toBe(false);
+  });
+});
+
+function insured(
+  id: string,
+  insurances: Array<{ id?: string | null; name?: string | null }>,
+): ProviderTaxonomyCarrier {
+  return { id, name: id, provider_type: "medical", insurance_providers: insurances };
+}
+
+describe("collectInsuranceOptions", () => {
+  it("dedupes by id across providers and sorts by name", () => {
+    const a = insured("a", [
+      { id: "i2", name: "BKK" },
+      { id: "i1", name: "AOK" },
+    ]);
+    const b = insured("b", [
+      { id: "i1", name: "AOK" }, // duplicate id -> kept once
+      { id: "i3", name: "TK" },
+    ]);
+    expect(collectInsuranceOptions([a, b])).toEqual([
+      { id: "i1", name: "AOK" },
+      { id: "i2", name: "BKK" },
+      { id: "i3", name: "TK" },
+    ]);
+  });
+
+  it("ignores entries without an id and falls back to id when name is blank", () => {
+    const a = insured("a", [
+      { id: "", name: "Ghost" }, // no id -> skipped
+      { id: "i9", name: "  " }, // blank name -> labelled by id
+    ]);
+    expect(collectInsuranceOptions([a])).toEqual([{ id: "i9", name: "i9" }]);
+  });
+
+  it("returns an empty list when no provider carries insurance", () => {
+    expect(collectInsuranceOptions([provider("a", "medical", [])])).toEqual([]);
+  });
+});
+
+describe("providerMatchesInsurance", () => {
+  it("is true when no insurance is selected (empty filter)", () => {
+    expect(providerMatchesInsurance(insured("a", []), "")).toBe(true);
+    expect(providerMatchesInsurance(insured("a", []), "   ")).toBe(true);
+  });
+
+  it("matches a provider that carries the selected insurance id", () => {
+    const p = insured("a", [{ id: "i1", name: "AOK" }]);
+    expect(providerMatchesInsurance(p, "i1")).toBe(true);
+    expect(providerMatchesInsurance(p, "i2")).toBe(false);
+  });
+
+  it("is false when the provider has no insurance coverage", () => {
+    expect(providerMatchesInsurance(provider("a", "medical", []), "i1")).toBe(false);
   });
 });

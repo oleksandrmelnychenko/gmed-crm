@@ -27,6 +27,8 @@ import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 
 import {
   canAssignTarget,
+  collectPatientInsuranceOptions,
+  filterPatientsByInsurance,
   patientPermissions,
 } from "./model/list-model";
 import { usePatientDetailSheetData } from "./data/use-patient-detail-sheet-data";
@@ -242,23 +244,14 @@ export function PatientsPage() {
     sortStack,
     tr,
   });
-  const insuranceOptions = useMemo(() => {
-    const seen = new Set<string>();
-    for (const patient of patients) {
-      const value = (patient.insurance_provider ?? "").trim();
-      if (value) seen.add(value);
-    }
-    return Array.from(seen).sort((a, b) =>
-      a.localeCompare(b, undefined, { sensitivity: "base" }),
-    );
-  }, [patients]);
-  const displayedPatients = useMemo(() => {
-    const selected = filters.insuranceProvider.trim().toLocaleLowerCase();
-    if (!selected) return sortedAndFilteredPatients;
-    return sortedAndFilteredPatients.filter(
-      (patient) => (patient.insurance_provider ?? "").trim().toLocaleLowerCase() === selected,
-    );
-  }, [sortedAndFilteredPatients, filters.insuranceProvider]);
+  const insuranceOptions = useMemo(
+    () => collectPatientInsuranceOptions(patients),
+    [patients],
+  );
+  const displayedPatients = useMemo(
+    () => filterPatientsByInsurance(sortedAndFilteredPatients, filters.insuranceProvider),
+    [sortedAndFilteredPatients, filters.insuranceProvider],
+  );
   const {
     assignmentBusy,
     assignmentError,
