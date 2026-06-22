@@ -915,7 +915,7 @@ function FiltersBar({
 
   return (
     <div className="space-y-2">
-      <div className="grid gap-1.5 md:grid-cols-[minmax(190px,1.35fr)_repeat(3,minmax(118px,0.8fr))_auto] md:items-end">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         <label className="min-w-0">
           <FieldLabel>{labels.common_search ?? localizedFallback(lang, "Suchen", "Поиск")}</FieldLabel>
           <div className="relative">
@@ -984,19 +984,6 @@ function FiltersBar({
           <option value="non_medical">{providerTypeLabel("non_medical", labels)}</option>
         </SelectField>
 
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8 justify-center rounded-md bg-background px-2 text-xs"
-          onClick={reset}
-        >
-          <RotateCcw className="size-3.5" />
-          {labels.common_reset ?? localizedFallback(lang, "Zurücksetzen", "Сбросить")}
-        </Button>
-      </div>
-
-      <div className={cn("grid gap-1.5", showClinicalFilters ? "md:grid-cols-5" : "md:grid-cols-1")}>
         {showClinicalFilters ? (
           <>
             <TextFilterField
@@ -1057,6 +1044,19 @@ function FiltersBar({
             ))}
           </SelectField>
         ) : null}
+      </div>
+
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 justify-center rounded-md bg-background px-2 text-xs"
+          onClick={reset}
+        >
+          <RotateCcw className="size-3.5" />
+          {labels.common_reset ?? localizedFallback(lang, "Zurücksetzen", "Сбросить")}
+        </Button>
       </div>
     </div>
   );

@@ -3670,7 +3670,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                 <option value="non_medical">{t.providers_type_non_medical}</option>
               </NativeComboboxSelect>
 
-              <div className="min-w-[240px] max-w-2xl flex-1 sm:flex-none">
+              <div className="w-[200px]">
                 <ProviderTaxonomyCascadeSelect
                   value={filters.taxonomyNodeId}
                   nodes={taxonomyNodes}
@@ -3685,7 +3685,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   placeholder={t.providers_category}
                   allLabel={t.providers_all}
                   containerClassName="w-full"
-                  selectClassName={cn(selectClassName, "h-8 min-w-[180px] flex-1 bg-card text-[13px]")}
+                  selectClassName={cn(selectClassName, "h-8 w-full bg-card text-[13px]")}
                   onChange={(nextValue) => {
                     setFilters((current) => ({
                       ...current,
@@ -3789,7 +3789,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                 <option value="2">2+</option>
               </NativeComboboxSelect>
 
-              <div className="min-w-[220px] max-w-sm flex-1 sm:flex-none">
+              <div className="w-[180px]">
                 <SpecializationMultiSelect
                   value={filters.specializations}
                   items={specializations}
@@ -3799,7 +3799,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   onChange={(nextValue) => setServerFilter("specializations", nextValue, "specializations")}
                 />
               </div>
-              <div className="min-w-[220px] max-w-sm flex-1 sm:flex-none">
+              <div className="w-[180px]">
                 <InsuranceProviderMultiSelect
                   value={filters.insuranceProvider}
                   items={insuranceProviders}
