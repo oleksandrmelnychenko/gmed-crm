@@ -18,14 +18,12 @@ import {
   CalendarClock,
   ChevronDown,
   Copy,
-  Download,
   LoaderCircle,
   Mail,
   MapPin,
   Pencil,
   Phone,
   Plus,
-  RefreshCw,
   Search,
   SlidersHorizontal,
   Stethoscope,
@@ -54,7 +52,6 @@ import { formatUiText, uiText, useLang } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
-import { exportCsv } from "@/components/data-table/csv-export";
 import type { SortStack } from "@/components/data-table/types";
 import { readDataTableState, writeDataTableState } from "@/components/data-table/url-state";
 
@@ -2054,7 +2051,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     return [currentProvider, ...withDoctors];
   }, [detail, parentProviderOptions]);
 
-  const { columns, metrics, sortedAndFilteredProviders } = useProvidersListTableModel({
+  const { metrics, sortedAndFilteredProviders } = useProvidersListTableModel({
     deferredSearch: "",
     lang,
     providers,
@@ -2132,11 +2129,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
   function refreshPeople() {
     setPeopleVersion((current) => current + 1);
-  }
-
-  function exportProviders() {
-    const stamp = new Date().toISOString().slice(0, 10);
-    exportCsv(sortedAndFilteredProviders, columns, `providers-${stamp}.csv`);
   }
 
   function syncQuery(next: Record<string, string | null>) {
@@ -3605,36 +3597,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                 </span>
               ) : null}
             </Button>
-
-            <div className="ml-auto flex items-center gap-1">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                className="!bg-card hover:!bg-card"
-                title={t.common_refresh}
-                aria-label={t.common_refresh}
-                onClick={() => {
-                  refreshList();
-                  if (detailOpen && selectedId) {
-                    refreshDetail();
-                  }
-                }}
-              >
-                <RefreshCw className={cn("size-3.5", listBusy && "animate-spin")} />
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                className="!bg-card hover:!bg-card"
-                title={t.common_export}
-                aria-label={t.common_export}
-                onClick={exportProviders}
-              >
-                <Download className="size-3.5" />
-              </Button>
-            </div>
           </div>
 
           {providerFiltersOpen ? (

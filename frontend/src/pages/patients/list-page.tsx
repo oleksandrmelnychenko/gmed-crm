@@ -7,7 +7,6 @@ import {
   Plus,
 } from "lucide-react";
 
-import { exportCsv } from "@/components/data-table/csv-export";
 import { formatRelativeTime } from "@/components/data-table/relative-time";
 import {
   DEFAULT_PATIENT_FROZEN_COLUMNS,
@@ -52,11 +51,6 @@ const LazyPatientsShortcutsDialog = lazy(async () => {
   const mod = await loadPatientsShortcutsDialog();
   return { default: mod.PatientsShortcutsDialog };
 });
-
-function createPatientsExportFilename() {
-  const stamp = new Date().toISOString().slice(0, 10);
-  return `patients-${stamp}.csv`;
-}
 
 const PATIENT_REALTIME_EVENTS = [
   "patient.created",
@@ -330,7 +324,6 @@ export function PatientsPage() {
           deferredSearchPlaceholder={t.common_search}
           density={density}
           doctors={doctors}
-          exportLabel={t.common_export}
           filterPredicates={filterPredicates}
           filters={filters}
           frozenColumns={frozenColumns}
@@ -338,7 +331,6 @@ export function PatientsPage() {
           hiddenColumns={hiddenColumns}
           insuranceOptions={insuranceOptions}
           lastUpdatedText={lastUpdated ? formatRelativeTime(lastUpdated) : null}
-          listBusy={listBusy}
           maxFrozenColumns={MAX_PATIENT_FROZEN_COLUMNS}
           onActiveFilterChange={(value) => {
             setFilters((current) => ({ ...current, activeOnly: value }));
@@ -350,12 +342,6 @@ export function PatientsPage() {
             setFilters((current) => ({ ...current, doctorId: value }));
             syncQuery({ doctor: value || null });
           }}
-          onExport={() => {
-            const visibleCols = columns.filter(
-              (column) => !hiddenColumns.includes(column.id) || column.required,
-            );
-            exportCsv(displayedPatients, visibleCols, createPatientsExportFilename());
-          }}
           onFiltersChange={setFilterPredicates}
           onFrozenColumnsChange={setFrozenColumns}
           onHiddenColumnsChange={setHiddenColumns}
@@ -366,7 +352,6 @@ export function PatientsPage() {
             setFilters((current) => ({ ...current, providerId: value, doctorId: "" }));
             syncQuery({ provider: value || null, doctor: null });
           }}
-          onRefresh={refreshList}
           onSearchChange={(value) => {
             setFilters((current) => ({ ...current, search: value }));
             syncQuery({ q: value.trim() ? value : null });
@@ -379,7 +364,6 @@ export function PatientsPage() {
           onShortcutsOpen={openShortcutsDialog}
           onSortChange={setSortStack}
           providers={providers}
-          refreshLabel={t.common_refresh}
           rows={patients}
           searchInputRef={searchInputRef}
           sortStack={sortStack}

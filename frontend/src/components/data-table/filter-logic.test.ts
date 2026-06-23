@@ -10,13 +10,14 @@ type Row = {
   email: string | null;
   tags: string[];
   insurance: "private" | "public" | "self_pay" | null;
+  insuranceProvider?: string | null;
   birth: string | null;
   created: string;
   active: boolean;
 };
 
 const rows: Row[] = [
-  { id: "1", name: "Anna Müller", age: 34, email: "anna@example.com", tags: ["VIP", "DE"], insurance: "private", birth: "1991-05-14", created: "2026-04-10", active: true },
+  { id: "1", name: "Anna Müller", age: 34, email: "anna@example.com", tags: ["VIP", "DE"], insurance: "private", insuranceProvider: " Albatros ", birth: "1991-05-14", created: "2026-04-10", active: true },
   { id: "2", name: "Boris Petrov", age: 52, email: null, tags: ["RU"], insurance: "public", birth: "1973-11-02", created: "2026-04-18", active: true },
   { id: "3", name: "Clara O'Neill", age: null, email: "clara@mail.com", tags: [], insurance: null, birth: null, created: "2026-03-01", active: false },
   { id: "4", name: "Дмитро Мельник", age: 41, email: "d.melnyk@mail.com", tags: ["UA", "VIP"], insurance: "self_pay", birth: "1984-08-20", created: "2026-04-20", active: true },
@@ -29,6 +30,7 @@ const ctx: FilterContext<Row> = {
     email: (r) => r.email,
     tags: (r) => r.tags,
     insurance: (r) => r.insurance,
+    insuranceProvider: (r) => r.insuranceProvider,
     birth: (r) => r.birth,
     created: (r) => r.created,
     active: (r) => r.active,
@@ -81,6 +83,11 @@ describe("evaluatePredicate — is / is_not / equals", () => {
     expect(evaluatePredicate(rows[0], pred("insurance", "is", "private"), ctx)).toBe(true);
     expect(evaluatePredicate(rows[1], pred("insurance", "is", "private"), ctx)).toBe(false);
   });
+  it("matches enum strings case/space-insensitively", () => {
+    expect(evaluatePredicate(rows[0], pred("insuranceProvider", "is", "albatros"), ctx)).toBe(true);
+    expect(evaluatePredicate(rows[0], pred("insuranceProvider", "is", "  ALBATROS  "), ctx)).toBe(true);
+    expect(evaluatePredicate(rows[0], pred("insuranceProvider", "is_not", "  ALBATROS  "), ctx)).toBe(false);
+  });
   it("is on null field returns false", () => {
     expect(evaluatePredicate(rows[2], pred("insurance", "is", "private"), ctx)).toBe(false);
   });
@@ -106,6 +113,10 @@ describe("evaluatePredicate — is_any_of / is_none_of", () => {
     expect(evaluatePredicate(rows[0], pred("insurance", "is_any_of", ["private", "public"]), ctx)).toBe(true);
     expect(evaluatePredicate(rows[3], pred("insurance", "is_any_of", ["private", "public"]), ctx)).toBe(false);
   });
+  it("is_any_of matches string options case/space-insensitively", () => {
+    expect(evaluatePredicate(rows[0], pred("insuranceProvider", "is_any_of", [" albatros "]), ctx)).toBe(true);
+    expect(evaluatePredicate(rows[0], pred("insuranceProvider", "is_none_of", [" albatros "]), ctx)).toBe(false);
+  });
   it("is_any_of empty list = no-op (keeps row)", () => {
     expect(evaluatePredicate(rows[0], pred("insurance", "is_any_of", []), ctx)).toBe(true);
   });
@@ -122,6 +133,9 @@ describe("evaluatePredicate — has_any / has_all / has_none", () => {
   it("has_any matches overlap", () => {
     expect(evaluatePredicate(rows[0], pred("tags", "has_any", ["VIP"]), ctx)).toBe(true);
     expect(evaluatePredicate(rows[1], pred("tags", "has_any", ["VIP"]), ctx)).toBe(false);
+  });
+  it("has_any normalizes tag values", () => {
+    expect(evaluatePredicate(rows[0], pred("tags", "has_any", [" vip "]), ctx)).toBe(true);
   });
   it("has_all requires all", () => {
     expect(evaluatePredicate(rows[0], pred("tags", "has_all", ["VIP", "DE"]), ctx)).toBe(true);

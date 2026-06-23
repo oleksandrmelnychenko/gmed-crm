@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { Download, Info, RefreshCw, Search, X } from "lucide-react";
+import { Info, Search, X } from "lucide-react";
 
 import { ColumnVisibilityMenu } from "@/components/data-table/column-visibility-menu";
 import { DensityToggle } from "@/components/data-table/density-toggle";
@@ -14,7 +14,6 @@ import type {
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
 
@@ -44,7 +43,6 @@ type PatientsListToolbarProps = {
   deferredSearchPlaceholder: string;
   density: DensityLevel;
   doctors: DoctorOption[];
-  exportLabel: string;
   filterPredicates: FilterPredicate[];
   filters: {
     activeOnly: string;
@@ -58,25 +56,21 @@ type PatientsListToolbarProps = {
   hiddenColumns: string[];
   insuranceOptions: string[];
   lastUpdatedText: string | null;
-  listBusy: boolean;
   maxFrozenColumns: number;
   onActiveFilterChange: (value: string) => void;
   onClearAll: () => void;
   onDensityChange: (value: DensityLevel) => void;
   onDoctorFilterChange: (value: string) => void;
-  onExport: () => void;
   onFiltersChange: (value: FilterPredicate[]) => void;
   onFrozenColumnsChange: (value: string[]) => void;
   onHiddenColumnsChange: (value: string[]) => void;
   onInsuranceFilterChange: (value: string) => void;
   onProviderFilterChange: (value: string) => void;
-  onRefresh: () => void;
   onSearchChange: (value: string) => void;
   onSearchEscape: (input: HTMLInputElement) => void;
   onShortcutsOpen: () => void;
   onSortChange: (value: SortStack) => void;
   providers: ProviderOption[];
-  refreshLabel: string;
   rows: PatientSummary[];
   searchInputRef: RefObject<HTMLInputElement | null>;
   sortStack: SortStack;
@@ -92,7 +86,6 @@ export function PatientsListToolbar({
   deferredSearchPlaceholder,
   density,
   doctors,
-  exportLabel,
   filterPredicates,
   filters,
   frozenColumns,
@@ -100,25 +93,21 @@ export function PatientsListToolbar({
   hiddenColumns,
   insuranceOptions,
   lastUpdatedText,
-  listBusy,
   maxFrozenColumns,
   onActiveFilterChange,
   onClearAll,
   onDensityChange,
   onDoctorFilterChange,
-  onExport,
   onFiltersChange,
   onFrozenColumnsChange,
   onHiddenColumnsChange,
   onInsuranceFilterChange,
   onProviderFilterChange,
-  onRefresh,
   onSearchChange,
   onSearchEscape,
   onShortcutsOpen,
   onSortChange,
   providers,
-  refreshLabel,
   rows,
   searchInputRef,
   sortStack,
@@ -221,26 +210,6 @@ export function PatientsListToolbar({
               {lastUpdatedText}
             </span>
           ) : null}
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            title={refreshLabel}
-            aria-label={refreshLabel}
-            onClick={onRefresh}
-          >
-            <RefreshCw className={cn("size-3.5", listBusy && "animate-spin")} />
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            title={exportLabel}
-            aria-label={exportLabel}
-            onClick={onExport}
-          >
-            <Download className="size-3.5" />
-          </Button>
           <Button
             type="button"
             variant="outline"

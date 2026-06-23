@@ -14,6 +14,13 @@ function toLower(value: unknown): string {
   return String(value).toLowerCase();
 }
 
+function normalizeComparable(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase();
+}
+
 function isEmpty(value: unknown): boolean {
   if (value == null) return true;
   if (typeof value === "string") return value.trim() === "";
@@ -79,44 +86,44 @@ export function evaluatePredicate<T>(
       if (isEmpty(fieldValue)) return false;
       if (operand == null) return false;
       if (typeof operand === "boolean") return Boolean(fieldValue) === operand;
-      return String(fieldValue) === String(operand);
+      return normalizeComparable(fieldValue) === normalizeComparable(operand);
     }
     case "is_not": {
       if (operand === "") return true;
       if (operand == null) return true;
       if (typeof operand === "boolean") return Boolean(fieldValue) !== operand;
-      return String(fieldValue) !== String(operand);
+      return normalizeComparable(fieldValue) !== normalizeComparable(operand);
     }
 
     case "is_any_of": {
-      const list = asStringArray(operand);
+      const list = asStringArray(operand).map(normalizeComparable);
       if (list.length === 0) return true;
       if (isEmpty(fieldValue)) return false;
-      return list.includes(String(fieldValue));
+      return list.includes(normalizeComparable(fieldValue));
     }
     case "is_none_of": {
-      const list = asStringArray(operand);
+      const list = asStringArray(operand).map(normalizeComparable);
       if (list.length === 0) return true;
       if (isEmpty(fieldValue)) return true;
-      return !list.includes(String(fieldValue));
+      return !list.includes(normalizeComparable(fieldValue));
     }
 
     case "has_any": {
-      const list = asStringArray(operand);
+      const list = asStringArray(operand).map(normalizeComparable);
       if (list.length === 0) return true;
-      const arr = fieldAsArray(fieldValue);
+      const arr = fieldAsArray(fieldValue).map(normalizeComparable);
       return arr.some((v) => list.includes(v));
     }
     case "has_all": {
-      const list = asStringArray(operand);
+      const list = asStringArray(operand).map(normalizeComparable);
       if (list.length === 0) return true;
-      const arr = fieldAsArray(fieldValue);
+      const arr = fieldAsArray(fieldValue).map(normalizeComparable);
       return list.every((v) => arr.includes(v));
     }
     case "has_none": {
-      const list = asStringArray(operand);
+      const list = asStringArray(operand).map(normalizeComparable);
       if (list.length === 0) return true;
-      const arr = fieldAsArray(fieldValue);
+      const arr = fieldAsArray(fieldValue).map(normalizeComparable);
       return arr.every((v) => !list.includes(v));
     }
 
