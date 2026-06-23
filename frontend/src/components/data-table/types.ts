@@ -78,6 +78,7 @@ export type ColumnDef<T> = {
   group?: string;
   render?: (row: T) => ReactNode;
   headerRender?: () => ReactNode;
+  cellClassName?: string;
   ariaLabel?: string;
 };
 

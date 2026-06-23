@@ -211,10 +211,13 @@ export function buildPatientColumns(
       required: true,
       pinned: "left",
       width: 240,
+      cellClassName: "min-w-0 whitespace-normal",
       group: "identity",
       render: (p: PatientSummary) => (
-        <div className="min-w-0">
-          <div className="truncate text-xs font-medium text-foreground">{patientDisplayName(p)}</div>
+        <div className="min-w-0 space-y-1">
+          <div className="line-clamp-2 min-w-0 break-words text-xs font-medium leading-4 text-foreground">
+            {patientDisplayName(p)}
+          </div>
           {p.functional_labels?.length ? (
             <FunctionalLabelSummary labels={p.functional_labels} />
           ) : null}
@@ -256,16 +259,9 @@ export function buildPatientColumns(
       width: 220,
       group: "insurance",
       render: (p: PatientSummary) => (
-        <div className="flex min-w-0 flex-col leading-tight">
-          <span className="truncate text-xs text-foreground">
-            {insuranceText(p.insurance_type, tr)}
-          </span>
-          {p.insurance_provider ? (
-            <span className="truncate text-[10px] text-muted-foreground">
-              {p.insurance_provider}
-            </span>
-          ) : null}
-        </div>
+        <span className="block min-w-0 truncate text-xs text-foreground">
+          {insuranceText(p.insurance_type, tr)}
+        </span>
       ),
     },
     {

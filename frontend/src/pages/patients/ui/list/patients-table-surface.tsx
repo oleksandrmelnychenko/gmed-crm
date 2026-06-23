@@ -19,6 +19,12 @@ const LazyPatientDetailSheet = lazy(async () => {
   return { default: mod.MemoizedPatientDetailSheet };
 });
 
+const PATIENT_TABLE_ROW_HEIGHTS: Partial<Record<DensityLevel, number>> = {
+  comfortable: 56,
+  compact: 48,
+  condensed: 40,
+};
+
 type PatientsTableSurfaceProps = {
   columns: ColumnDef<PatientSummary>[];
   density: DensityLevel;
@@ -114,6 +120,7 @@ export function PatientsTableSurface({
           freezeLimitReached: tr.table_columns_freeze_limit,
         }}
         density={density}
+        rowHeightOverrides={PATIENT_TABLE_ROW_HEIGHTS}
         rowId={(patient) => patient.id}
         activeRowId={selectedId}
         onRowClick={(patient) => onOpenPatient(patient.id)}

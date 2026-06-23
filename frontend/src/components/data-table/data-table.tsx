@@ -554,7 +554,7 @@ function useDataTableContent<T>({
                         )}
                         style={pinStyle.style}
                       >
-                        <div className="w-full truncate">
+                        <div className={col.cellClassName ? cn("w-full", col.cellClassName) : "w-full truncate"}>
                           {col.render ? col.render(row) : defaultRender(col.accessor(row), t)}
                         </div>
                       </div>
