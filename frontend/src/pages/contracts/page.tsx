@@ -12,15 +12,10 @@ import {
 import { useSearchParams } from "react-router-dom";
 import {
   ArrowUpRight,
-  CalendarClock,
   FileBadge2,
-  FileSpreadsheet,
   LoaderCircle,
-  type LucideIcon,
   Plus,
   Search,
-  ShieldCheck,
-  Wallet,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -164,40 +159,6 @@ function useDebouncedValue<T>(value: T, delayMs: number) {
   }, [delayMs, value]);
 
   return debouncedValue;
-}
-
-function contractMetricCard(
-  label: ReactNode,
-  value: ReactNode,
-  description: ReactNode,
-  icon: LucideIcon,
-  options?: { groupedLast?: boolean },
-) {
-  const Icon = icon;
-
-  return (
-    <article className="relative min-h-[44px] min-w-[190px] px-3 py-1">
-      {!options?.groupedLast ? (
-        <span className="absolute right-0 top-1/2 hidden -translate-y-1/2 space-y-1 xl:block">
-          <span className="block h-1.5 w-px bg-border" />
-          <span className="block h-1.5 w-px bg-border" />
-          <span className="block h-1.5 w-px bg-border" />
-        </span>
-      ) : null}
-      <div className="flex items-baseline gap-2">
-        <Icon className="size-4.5 shrink-0 text-muted-foreground/55" />
-        <p className="text-2xl font-semibold leading-[0.75] text-foreground">
-          {value}
-        </p>
-      </div>
-      <p className="mt-[4px] break-words text-[11px] leading-tight text-muted-foreground/75">
-        {description}
-      </p>
-      <p className="mt-0.5 break-words text-xs font-medium leading-tight text-muted-foreground">
-        {label}
-      </p>
-    </article>
-  );
 }
 
 function ContractSummaryLine({ label, value }: { label: string; value: ReactNode }) {
@@ -829,19 +790,6 @@ function useContractsPageContent() {
     if (!quoteFilters.patientId) return orders;
     return orders.filter((order) => order.patient_id === quoteFilters.patientId);
   }, [orders, quoteFilters.patientId]);
-
-  const contractStats = useMemo(() => {
-    const signed = contracts.filter((item) => item.status === "signed").length;
-    const sent = contracts.filter((item) => item.status === "sent").length;
-    return { total: contracts.length, signed, sent };
-  }, [contracts]);
-
-  const quoteStats = useMemo(() => {
-    const accepted = quotes.filter((item) => item.status === "accepted").length;
-    const gross = quotes.reduce((sum, item) => sum + Number(item.total_gross ?? 0), 0);
-    const paid = quotes.reduce((sum, item) => sum + Number(item.paid_amount ?? 0), 0);
-    return { total: quotes.length, accepted, gross, paid };
-  }, [quotes]);
 
   const agencyServiceStats = useMemo(() => {
     const active = agencyServices.filter((item) => item.is_active).length;
@@ -1930,34 +1878,6 @@ function useContractsPageContent() {
             </>
           }
         />
-
-        <section className="grid overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 md:grid-cols-2 xl:grid-cols-4">
-          {contractMetricCard(
-            t.contracts_title,
-            String(contractStats.total),
-            `${contractStats.signed} / ${contractStats.sent} ${text.contractStatsDescription}`,
-            ShieldCheck,
-          )}
-          {contractMetricCard(
-            text.quotesTab,
-            String(quoteStats.total),
-            `${quoteStats.accepted} ${text.quoteStatsDescription}`,
-            FileSpreadsheet,
-          )}
-          {contractMetricCard(
-            t.contracts_total,
-            formatCurrency(quoteStats.gross),
-            t.contracts_subtitle,
-            Wallet,
-          )}
-          {contractMetricCard(
-            t.invoices_paid_at,
-            formatCurrency(quoteStats.paid),
-            t.invoices_subtitle,
-            CalendarClock,
-            { groupedLast: true },
-          )}
-        </section>
 
         {optionsError ? <ShellBanner tone="error">{optionsError}</ShellBanner> : null}
 

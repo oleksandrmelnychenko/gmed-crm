@@ -3213,7 +3213,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     <h1 className="break-words text-xl font-semibold text-foreground">
                       {detail.name || t.providers_detail}
                     </h1>
-                    <p className="mt-1 text-sm text-muted-foreground">{t.providers_subtitle}</p>
                   </div>
                 </div>
               ) : null}

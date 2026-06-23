@@ -1651,18 +1651,6 @@ function useReportsPageContent() {
     );
   }
 
-  const summaryMetricNodes = data ? [
-    metricCard(text.summary.activePatients, data.summary.active_patients, Globe2, { grouped: true, itemKey: "active-patients" }),
-    metricCard(text.summary.activeOrders, data.summary.active_orders, Rows3, { grouped: true, itemKey: "active-orders" }),
-    metricCard(text.summary.activeClinics, data.summary.active_clinics, Building2, { grouped: true, itemKey: "active-clinics" }),
-    metricCard(text.summary.deliveredServiceItems, data.summary.delivered_service_items, BarChart3, { grouped: true, itemKey: "delivered-service-items" }),
-    metricCard(
-      text.summary.deliveredServiceVolume,
-      data.summary.delivered_service_volume ? formatMoney(data.summary.delivered_service_volume, locale) : text.roleScoped,
-      BarChart3,
-      { grouped: true, groupedLast: true, itemKey: "delivered-service-volume" },
-    ),
-  ] : [];
   const taxonomySelectLabel = taxonomyFilterLabel;
 
   return (
@@ -1711,10 +1699,6 @@ function useReportsPageContent() {
 
       {data ? (
         <>
-          <section className="grid overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 md:grid-cols-2 xl:grid-cols-5">
-            {summaryMetricNodes}
-          </section>
-
           {allowedSections.has("billing_kpis") && data.billing_kpis ? (
             <section className={card("p-6")}>
               <div className="flex items-start justify-between gap-4">
@@ -1882,30 +1866,6 @@ function useReportsPageContent() {
 
           {forecasting ? (
             <>
-              <section className="grid overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 md:grid-cols-2 xl:grid-cols-4">
-                {metricCard(text.forecast.openQuotes, forecasting.summary.open_quotes, Activity, { grouped: true })}
-                {metricCard(
-                  text.forecast.pipelineGross,
-                  forecasting.summary.pipeline_gross_total
-                    ? formatMoney(forecasting.summary.pipeline_gross_total, locale)
-                    : text.countsOnly,
-                  Wallet,
-                  { grouped: true },
-                )}
-                {metricCard(
-                  text.forecast.milestones30d,
-                  forecasting.summary.followup_milestones_next_30d,
-                  CalendarDays,
-                  { grouped: true },
-                )}
-                {metricCard(
-                  text.forecast.appointments30d,
-                  forecasting.summary.appointments_next_30d,
-                  BarChart3,
-                  { grouped: true, groupedLast: true },
-                )}
-              </section>
-
               <section className="space-y-6">
                 {forecastSections.has("quote_pipeline") && forecasting.quote_pipeline ? (
                   <section className={card("p-6")}>

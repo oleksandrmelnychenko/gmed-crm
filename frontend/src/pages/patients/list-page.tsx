@@ -70,8 +70,6 @@ const PATIENT_REALTIME_EVENTS = [
 type PatientsPageHeaderProps = {
   canCreate: boolean;
   createLabel: string;
-  showStats: boolean;
-  tallyParts: string[];
   title: string;
   onCreate: () => void;
 };
@@ -79,8 +77,6 @@ type PatientsPageHeaderProps = {
 function PatientsPageHeader({
   canCreate,
   createLabel,
-  showStats,
-  tallyParts,
   title,
   onCreate,
 }: PatientsPageHeaderProps) {
@@ -90,11 +86,6 @@ function PatientsPageHeader({
         <h1 className="text-[22px] font-semibold tracking-tight text-foreground leading-tight">
           {title}
         </h1>
-        {showStats ? (
-          <span className="text-xs text-muted-foreground tabular-nums">
-            · {tallyParts.join(" · ")}
-          </span>
-        ) : null}
       </div>
       <div className="flex items-center gap-1.5">
         {canCreate ? (
@@ -166,7 +157,6 @@ export function PatientsPage() {
   const permissions = useMemo(() => patientPermissions(user?.role), [user?.role]);
   const groupLabels = useMemo(() => patientColumnGroupLabels(tr), [tr]);
   const taxonomyNodes = useProviderTaxonomyNodes();
-  const showStats = true;
   const {
     clearAllFilters,
     createOpen,
@@ -236,7 +226,7 @@ export function PatientsPage() {
     () => staff.filter((member) => canAssignTarget(user?.role, member.role)),
     [staff, user?.role]
   );
-  const { columns, metrics, sortedAndFilteredPatients } = usePatientsListTableModel({
+  const { columns, sortedAndFilteredPatients } = usePatientsListTableModel({
     deferredSearch,
     filterPredicates,
     frozenColumns,
@@ -321,11 +311,6 @@ export function PatientsPage() {
     setHelpOpen(true);
   }
 
-  const tallyParts: string[] = [
-    `${metrics.total} ${t.patients_title.toLowerCase()}`,
-    `${metrics.active} ${t.common_active.toLowerCase()}`,
-  ];
-
   return (
     <>
       <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -333,8 +318,6 @@ export function PatientsPage() {
         <PatientsPageHeader
           canCreate={permissions.canCreateEdit}
           createLabel={t.patients_new}
-          showStats={showStats}
-          tallyParts={tallyParts}
           title={t.patients_title}
           onCreate={openCreateSheet}
         />

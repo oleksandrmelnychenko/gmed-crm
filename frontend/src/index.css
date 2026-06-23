@@ -180,6 +180,10 @@
     pointer-events: none !important;
   }
 
+  :where(div, section):has(> article > .admin-inline-metric-separator) {
+    display: none !important;
+  }
+
   .data-table-header-row,
   .data-table-header-cell {
     background-color: var(--card);

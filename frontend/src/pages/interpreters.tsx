@@ -1207,14 +1207,11 @@ export function InterpretersPage() {
     <main className="min-h-[calc(100vh-3rem)] bg-background">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-5 py-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-	          <div>
-	            <h1 className="text-2xl font-semibold text-foreground">
-	              {copy.title}
-	            </h1>
-	            <p className="mt-1 text-sm text-muted-foreground">
-	              {copy.subtitle}
-	            </p>
-	          </div>
+          <div>
+            <h1 className="text-2xl font-semibold text-foreground">
+              {copy.title}
+            </h1>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
