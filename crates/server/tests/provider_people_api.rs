@@ -749,7 +749,7 @@ async fn existing_doctor_can_be_linked_to_another_provider_with_shared_identity(
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
-    assert_ne!(linked_body["id"], source_doctor_id);
+    assert_eq!(linked_body["id"], source_doctor_id);
     assert_eq!(linked_body["shared_identity_id"], shared_identity_id);
 
     let linked_doctor_id = linked_body["id"].as_str().expect("linked doctor id");
@@ -760,6 +760,40 @@ async fn existing_doctor_can_be_linked_to_another_provider_with_shared_identity(
             .await
             .unwrap();
     assert_eq!(linked_identity_id.to_string(), shared_identity_id);
+    let doctor_row_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM provider_doctors WHERE shared_identity_id = $1")
+            .bind(Uuid::parse_str(shared_identity_id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(doctor_row_count, 1);
+    let link_row_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM provider_doctor_links WHERE doctor_id = $1")
+            .bind(Uuid::parse_str(source_doctor_id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(link_row_count, 2);
+
+    let (status, target_people_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/provider-people?provider_id={target_provider_id}&person_type=doctor&search={tag}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let target_people = target_people_body
+        .as_array()
+        .expect("target provider people array");
+    let target_provider_id_text = target_provider_id.to_string();
+    assert!(
+        target_people
+            .iter()
+            .any(|row| row["doctor_id"] == source_doctor_id
+                && row["provider_id"].as_str() == Some(target_provider_id_text.as_str()))
+    );
 
     let (status, duplicate_body) = json_request(
         &app,

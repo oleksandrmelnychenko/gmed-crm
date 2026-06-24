@@ -9418,8 +9418,9 @@ async fn provider_matches_medical_document_specialty(
                  AND lower(trim(COALESCE(p.fachbereich, ''))) = $2
            ) OR EXISTS(
                SELECT 1
-               FROM provider_doctors d
-               WHERE d.provider_id = $1
+               FROM provider_doctor_links l
+               JOIN provider_doctors d ON d.id = l.doctor_id
+               WHERE l.provider_id = $1
                  AND lower(trim(COALESCE(d.fachbereich, ''))) = $2
            )"#,
     )

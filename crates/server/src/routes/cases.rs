@@ -1150,8 +1150,9 @@ async fn list_case_doctors(
                       AND ms.deleted_at IS NULL
                   ), '[]'::jsonb) AS specializations,
                   p.name AS provider_name
-           FROM provider_doctors d
-           JOIN providers p ON p.id = d.provider_id
+           FROM provider_doctor_links l
+           JOIN provider_doctors d ON d.id = l.doctor_id
+           JOIN providers p ON p.id = l.provider_id
            WHERE p.is_active = true
              AND p.provider_type = 'medical'
            ORDER BY p.name,

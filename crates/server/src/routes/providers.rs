@@ -417,8 +417,8 @@ async fn list_providers(
                   (p.kooperationsvertrag IS NOT NULL) AS has_contract,
                   (
                     SELECT COUNT(*)
-                    FROM provider_doctors d
-                    WHERE d.provider_id = p.id
+                    FROM provider_doctor_links l
+                    WHERE l.provider_id = p.id
                   ) AS doctor_count,
                   (
                     SELECT COUNT(DISTINCT a.patient_id)
@@ -519,10 +519,11 @@ async fn list_providers(
                 )
                 OR EXISTS (
                     SELECT 1
-                    FROM provider_doctors d
+                    FROM provider_doctor_links l
+                    JOIN provider_doctors d ON d.id = l.doctor_id
                     JOIN provider_doctor_insurances di ON di.doctor_id = d.id
                     JOIN insurance_providers ip ON ip.id = di.insurance_provider_id
-                    WHERE d.provider_id = p.id
+                    WHERE l.provider_id = p.id
                       AND de_normalize(ip.name) LIKE de_normalize($3)
                 )
                 OR EXISTS (
@@ -544,8 +545,9 @@ async fn list_providers(
                 )
                  OR EXISTS (
                      SELECT 1
-                     FROM provider_doctors d
-                     WHERE d.provider_id = p.id
+                     FROM provider_doctor_links l
+                     JOIN provider_doctors d ON d.id = l.doctor_id
+                     WHERE l.provider_id = p.id
                        AND de_normalize(concat_ws(' ',
                              d.name, d.display_name, d.first_name, d.last_name,
                              d.fachbereich, d.title, d.role_code, d.role_label, d.subrole,
@@ -630,8 +632,9 @@ async fn list_providers(
                 $7::text = '%%'
                 OR EXISTS (
                     SELECT 1
-                    FROM provider_doctors d
-                    WHERE d.provider_id = p.id
+                    FROM provider_doctor_links l
+                    JOIN provider_doctors d ON d.id = l.doctor_id
+                    WHERE l.provider_id = p.id
                       AND (
                         d.name ILIKE $7
                         OR COALESCE(d.display_name, '') ILIKE $7
@@ -644,8 +647,9 @@ async fn list_providers(
                 $8::text = '%%'
                 OR EXISTS (
                     SELECT 1
-                    FROM provider_doctors d
-                    WHERE d.provider_id = p.id
+                    FROM provider_doctor_links l
+                    JOIN provider_doctors d ON d.id = l.doctor_id
+                    WHERE l.provider_id = p.id
                       AND (
                         COALESCE(d.fachbereich, '') ILIKE $8
                         OR EXISTS (
@@ -803,10 +807,11 @@ async fn list_providers(
 	                 )
 	                 OR EXISTS (
 	                     SELECT 1
-	                     FROM provider_doctors d
+	                     FROM provider_doctor_links l
+	                     JOIN provider_doctors d ON d.id = l.doctor_id
 	                     JOIN provider_doctor_insurances di ON di.doctor_id = d.id
 	                     JOIN insurance_providers ip ON ip.id = di.insurance_provider_id
-	                     WHERE d.provider_id = p.id
+	                     WHERE l.provider_id = p.id
 	                       AND EXISTS (
 	                           SELECT 1
 	                           FROM unnest($21::text[]) AS wanted(value)
@@ -2771,7 +2776,7 @@ async fn get_doctor(
     }
 
     match sqlx::query(
-        r#"SELECT d.id, d.provider_id, d.shared_identity_id, d.name, d.first_name, d.last_name, d.display_name,
+        r#"SELECT d.id, l.provider_id, d.shared_identity_id, d.name, d.first_name, d.last_name, d.display_name,
                   d.title, d.role_code, d.role_label, d.subrole, d.website, d.schwerpunkt, d.gender, d.opening_hours,
                   d.fachbereich, d.languages,
                   d.phone, d.email, d.license_number, d.licensing_country,
@@ -2780,14 +2785,17 @@ async fn get_doctor(
                     SELECT COUNT(DISTINCT a.patient_id)
                     FROM appointments a
                     WHERE a.doctor_id = d.id
+                      AND a.provider_id = $1
                   ) AS patient_count,
                   (
                     SELECT COUNT(*)
                     FROM appointments a
                     WHERE a.doctor_id = d.id
+                      AND a.provider_id = $1
                   ) AS appointment_count
-           FROM provider_doctors d
-           WHERE d.provider_id = $1 AND d.id = $2"#,
+           FROM provider_doctor_links l
+           JOIN provider_doctors d ON d.id = l.doctor_id
+           WHERE l.provider_id = $1 AND d.id = $2"#,
     )
     .bind(provider_id)
     .bind(doctor_id)
@@ -2881,26 +2889,44 @@ async fn get_doctor(
     }
 }
 
-async fn resolve_doctor_shared_identity(
+struct DoctorIdentityReference {
+    doctor_id: Uuid,
+    shared_identity_id: Uuid,
+}
+
+async fn resolve_existing_doctor_reference(
     state: &AppState,
     requested_identity_id: Option<Uuid>,
-) -> Result<Uuid, axum::response::Response> {
+) -> Result<Option<DoctorIdentityReference>, axum::response::Response> {
     let Some(requested_identity_id) = requested_identity_id else {
-        return Ok(Uuid::new_v4());
+        return Ok(None);
     };
 
-    match sqlx::query_scalar::<_, Uuid>(
-        r#"SELECT shared_identity_id
+    match sqlx::query(
+        r#"SELECT id, shared_identity_id
            FROM provider_doctors
            WHERE id = $1 OR shared_identity_id = $1
-           ORDER BY CASE WHEN id = $1 THEN 0 ELSE 1 END
+           ORDER BY CASE WHEN id = $1 THEN 0 ELSE 1 END, created_at, id
            LIMIT 1"#,
     )
     .bind(requested_identity_id)
     .fetch_optional(&state.db)
     .await
     {
-        Ok(Some(shared_identity_id)) => Ok(shared_identity_id),
+        Ok(Some(row)) => Ok(Some(DoctorIdentityReference {
+            doctor_id: row.try_get::<Uuid, _>("id").map_err(|_| {
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to decode doctor identity",
+                )
+            })?,
+            shared_identity_id: row.try_get::<Uuid, _>("shared_identity_id").map_err(|_| {
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to decode doctor identity",
+                )
+            })?,
+        })),
         Ok(None) => Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Shared doctor identity not found",
@@ -2915,19 +2941,19 @@ async fn resolve_doctor_shared_identity(
     }
 }
 
-async fn ensure_doctor_identity_not_linked_to_provider(
+async fn ensure_doctor_not_linked_to_provider(
     state: &AppState,
     provider_id: Uuid,
-    shared_identity_id: Uuid,
+    doctor_id: Uuid,
 ) -> Result<(), axum::response::Response> {
     match sqlx::query_scalar::<_, Uuid>(
-        r#"SELECT id
-           FROM provider_doctors
-           WHERE provider_id = $1 AND shared_identity_id = $2
+        r#"SELECT doctor_id
+           FROM provider_doctor_links
+           WHERE provider_id = $1 AND doctor_id = $2
            LIMIT 1"#,
     )
     .bind(provider_id)
-    .bind(shared_identity_id)
+    .bind(doctor_id)
     .fetch_optional(&state.db)
     .await
     {
@@ -2937,10 +2963,10 @@ async fn ensure_doctor_identity_not_linked_to_provider(
         )),
         Ok(None) => Ok(()),
         Err(e) => {
-            tracing::error!(error = %e, provider_id = %provider_id, shared_identity_id = %shared_identity_id, "Failed to validate doctor shared identity");
+            tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, "Failed to validate doctor link");
             Err(err(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to validate doctor shared identity",
+                "Failed to validate doctor link",
             ))
         }
     }
@@ -2991,16 +3017,74 @@ async fn create_doctor(
             "Doctor insurance providers are only allowed for medical providers",
         );
     }
-    let shared_identity_id =
-        match resolve_doctor_shared_identity(&state, doctor.shared_identity_id).await {
+    if let Some(existing) =
+        match resolve_existing_doctor_reference(&state, doctor.shared_identity_id).await {
             Ok(value) => value,
             Err(resp) => return resp,
-        };
-    if let Err(resp) =
-        ensure_doctor_identity_not_linked_to_provider(&state, provider_id, shared_identity_id).await
+        }
     {
-        return resp;
+        if let Err(resp) =
+            ensure_doctor_not_linked_to_provider(&state, provider_id, existing.doctor_id).await
+        {
+            return resp;
+        }
+
+        let row = match sqlx::query(
+            r#"INSERT INTO provider_doctor_links (provider_id, doctor_id)
+               VALUES ($1, $2)
+               RETURNING created_at"#,
+        )
+        .bind(provider_id)
+        .bind(existing.doctor_id)
+        .fetch_one(&state.db)
+        .await
+        {
+            Ok(row) => row,
+            Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23505") => {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Doctor is already linked to this provider",
+                );
+            }
+            Err(e) => {
+                tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %existing.doctor_id, "Failed to link existing doctor");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to link doctor");
+            }
+        };
+
+        let _ = audit(
+            &state,
+            auth.user_id,
+            "link_provider_doctor",
+            "provider_doctor",
+            Some(existing.doctor_id),
+            Some(json!({ "provider_id": provider_id, "doctor_id": existing.doctor_id })),
+        )
+        .await;
+        crate::realtime::publish_provider_event(
+            &state,
+            Some(auth.user_id),
+            "provider.doctor_created",
+            provider_id,
+            json!({ "provider_id": provider_id, "doctor_id": existing.doctor_id }),
+        )
+        .await;
+
+        return (
+            StatusCode::CREATED,
+            Json(json!({
+                "id": existing.doctor_id,
+                "shared_identity_id": existing.shared_identity_id,
+                "created_at": row
+                    .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+                    .map(|v| v.to_rfc3339())
+                    .unwrap_or_default(),
+            })),
+        )
+            .into_response();
     }
+
+    let shared_identity_id = Uuid::new_v4();
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -3138,7 +3222,10 @@ async fn update_doctor(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     let current_title: Option<String> = match sqlx::query_scalar(
-        "SELECT title FROM provider_doctors WHERE provider_id = $1 AND id = $2",
+        r#"SELECT d.title
+           FROM provider_doctor_links l
+           JOIN provider_doctors d ON d.id = l.doctor_id
+           WHERE l.provider_id = $1 AND d.id = $2"#,
     )
     .bind(provider_id)
     .bind(doctor_id)
@@ -3211,7 +3298,13 @@ async fn update_doctor(
                licensing_country = $20,
                licensing_valid_until = $21,
                notes = $22
-           WHERE provider_id = $1 AND id = $2"#,
+           WHERE id = $2
+             AND EXISTS (
+                 SELECT 1
+                 FROM provider_doctor_links l
+                 WHERE l.provider_id = $1
+                   AND l.doctor_id = provider_doctors.id
+             )"#,
     )
     .bind(provider_id)
     .bind(doctor_id)
@@ -3309,18 +3402,82 @@ async fn delete_doctor(
         return e;
     }
 
-    match sqlx::query("DELETE FROM provider_doctors WHERE provider_id = $1 AND id = $2")
-        .bind(provider_id)
-        .bind(doctor_id)
-        .execute(&state.db)
-        .await
-    {
-        Ok(result) if result.rows_affected() > 0 => {}
-        Ok(_) => return err(StatusCode::NOT_FOUND, "Doctor not found"),
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
         Err(e) => {
-            tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, "Failed to delete doctor");
+            tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, "Failed to start doctor delete transaction");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete doctor");
         }
+    };
+
+    let owner_provider_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT d.provider_id
+           FROM provider_doctor_links l
+           JOIN provider_doctors d ON d.id = l.doctor_id
+           WHERE l.provider_id = $1 AND l.doctor_id = $2"#,
+    )
+    .bind(provider_id)
+    .bind(doctor_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Doctor not found"),
+        Err(e) => {
+            tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, "Failed to load doctor link");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete doctor");
+        }
+    };
+
+    if let Err(e) =
+        sqlx::query("DELETE FROM provider_doctor_links WHERE provider_id = $1 AND doctor_id = $2")
+            .bind(provider_id)
+            .bind(doctor_id)
+            .execute(&mut *tx)
+            .await
+    {
+        tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, "Failed to delete doctor link");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete doctor");
+    }
+    if let Err(e) = sqlx::query(
+        "DELETE FROM provider_person_contacts WHERE provider_id = $1 AND doctor_id = $2",
+    )
+    .bind(provider_id)
+    .bind(doctor_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, "Failed to delete provider doctor contacts");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete doctor");
+    }
+
+    let remaining_links = match sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM provider_doctor_links WHERE doctor_id = $1",
+    )
+    .bind(doctor_id)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, "Failed to count remaining doctor links");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete doctor");
+        }
+    };
+    if owner_provider_id == provider_id
+        && remaining_links == 0
+        && let Err(e) = sqlx::query("DELETE FROM provider_doctors WHERE id = $1")
+            .bind(doctor_id)
+            .execute(&mut *tx)
+            .await
+    {
+        tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, "Failed to delete provider doctor");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete doctor");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, "Failed to commit doctor delete transaction");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete doctor");
     }
 
     let _ = audit(
@@ -5285,11 +5442,15 @@ async fn ensure_doctor_belongs_to_provider(
     provider_id: Uuid,
     doctor_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    match sqlx::query("SELECT id FROM provider_doctors WHERE provider_id = $1 AND id = $2")
-        .bind(provider_id)
-        .bind(doctor_id)
-        .fetch_optional(&state.db)
-        .await
+    match sqlx::query(
+        r#"SELECT doctor_id
+           FROM provider_doctor_links
+           WHERE provider_id = $1 AND doctor_id = $2"#,
+    )
+    .bind(provider_id)
+    .bind(doctor_id)
+    .fetch_optional(&state.db)
+    .await
     {
         Ok(Some(_)) => Ok(()),
         Ok(None) => Err(err(StatusCode::NOT_FOUND, "Doctor not found")),
@@ -5316,12 +5477,21 @@ async fn ensure_doctor_relationship_target(
         ));
     }
     match sqlx::query(
-        r#"SELECT d.provider_id, p.is_active AS provider_is_active
+        r#"SELECT provider_scope.provider_id, p.is_active AS provider_is_active
            FROM provider_doctors d
-           JOIN providers p ON p.id = d.provider_id
+           JOIN LATERAL (
+               SELECT l.provider_id
+               FROM provider_doctor_links l
+               WHERE l.doctor_id = d.id
+                 AND ($2::uuid IS NULL OR l.provider_id = $2)
+               ORDER BY CASE WHEN l.provider_id = $2 THEN 0 ELSE 1 END, l.created_at
+               LIMIT 1
+           ) provider_scope ON TRUE
+           JOIN providers p ON p.id = provider_scope.provider_id
            WHERE d.id = $1"#,
     )
     .bind(target_doctor_id)
+    .bind(expected_target_provider_id)
     .fetch_optional(&state.db)
     .await
     {
@@ -6698,11 +6868,12 @@ async fn replace_person_contacts_tx(
     contacts: &[PersonContactPayload],
 ) -> Result<(), axum::response::Response> {
     let delete_sql = if doctor_id.is_some() {
-        "DELETE FROM provider_person_contacts WHERE doctor_id = $1"
+        "DELETE FROM provider_person_contacts WHERE provider_id = $1 AND doctor_id = $2"
     } else {
-        "DELETE FROM provider_person_contacts WHERE staff_id = $1"
+        "DELETE FROM provider_person_contacts WHERE provider_id = $1 AND staff_id = $2"
     };
     sqlx::query(delete_sql)
+        .bind(provider_id)
         .bind(doctor_id.or(staff_id))
         .execute(&mut **tx)
         .await
@@ -7019,7 +7190,7 @@ async fn load_doctors_json(
     provider_id: Uuid,
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
     let rows = sqlx::query(
-        r#"SELECT d.id, d.provider_id, d.shared_identity_id, d.name, d.first_name, d.last_name, d.display_name,
+        r#"SELECT d.id, l.provider_id, d.shared_identity_id, d.name, d.first_name, d.last_name, d.display_name,
                   d.title, d.role_code, d.role_label, d.subrole, d.website, d.schwerpunkt, d.gender, d.opening_hours,
                   d.fachbereich, d.languages,
                   d.phone, d.email, d.license_number, d.licensing_country,
@@ -7028,14 +7199,17 @@ async fn load_doctors_json(
                     SELECT COUNT(DISTINCT a.patient_id)
                     FROM appointments a
                     WHERE a.doctor_id = d.id
+                      AND a.provider_id = $1
                   ) AS patient_count,
                   (
                     SELECT COUNT(*)
                     FROM appointments a
                     WHERE a.doctor_id = d.id
+                      AND a.provider_id = $1
                   ) AS appointment_count
-           FROM provider_doctors d
-           WHERE d.provider_id = $1
+           FROM provider_doctor_links l
+           JOIN provider_doctors d ON d.id = l.doctor_id
+           WHERE l.provider_id = $1
            ORDER BY CASE d.role_code
                       WHEN 'clinical_director' THEN 1
                       WHEN 'chefarzt' THEN 2

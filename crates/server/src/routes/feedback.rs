@@ -999,9 +999,15 @@ async fn resolve_feedback_context(
 
     if let Some(value) = doctor_id {
         let doctor_row = sqlx::query(
-            r#"SELECT provider_id
-               FROM provider_doctors
-               WHERE id = $1"#,
+            r#"SELECT COALESCE((
+                   SELECT l.provider_id
+                   FROM provider_doctor_links l
+                   WHERE l.doctor_id = d.id
+                   ORDER BY l.created_at
+                   LIMIT 1
+               ), d.provider_id) AS provider_id
+               FROM provider_doctors d
+               WHERE d.id = $1"#,
         )
         .bind(value)
         .fetch_optional(&state.db)
@@ -1020,7 +1026,26 @@ async fn resolve_feedback_context(
             .map(Some)
             .unwrap_or_default();
         if let Some(existing_provider_id) = provider_id {
-            if doctor_provider_id != Some(existing_provider_id) {
+            let linked = sqlx::query_scalar::<_, bool>(
+                r#"SELECT EXISTS(
+                    SELECT 1
+                    FROM provider_doctor_links
+                    WHERE provider_id = $1
+                      AND doctor_id = $2
+                )"#,
+            )
+            .bind(existing_provider_id)
+            .bind(value)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, provider_id = %existing_provider_id, doctor_id = %value, "validate feedback doctor link");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate doctor feedback context",
+                )
+            })?;
+            if !linked {
                 return Err(err(
                     StatusCode::UNPROCESSABLE_ENTITY,
                     "Doctor does not belong to the selected provider",

@@ -44,6 +44,7 @@ export interface RevenueTranslations {
   finance_catalog_included_items: string;
   finance_catalog_included_items_hint: string;
   finance_catalog_add_item: string;
+  finance_catalog_add_existing_item: string;
   finance_catalog_service_key: string;
   finance_catalog_included_quantity: string;
   finance_catalog_unit_label: string;
@@ -814,6 +815,7 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_included_items_hint:
     "Количество определяет списание объема и согласование превышений.",
   finance_catalog_add_item: "Добавить позицию",
+  finance_catalog_add_existing_item: "Добавить из каталога",
   finance_catalog_service_key: "Ключ услуги",
   finance_catalog_included_quantity: "Включенное количество",
   finance_catalog_unit_label: "Единица",
@@ -1139,6 +1141,7 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_included_items_hint:
     "Mengen steuern Verbrauch und Freigabe von Mehrleistungen.",
   finance_catalog_add_item: "Position hinzufügen",
+  finance_catalog_add_existing_item: "Aus Katalog hinzufügen",
   finance_catalog_service_key: "Leistungsschlüssel",
   finance_catalog_included_quantity: "Enthaltene Menge",
   finance_catalog_unit_label: "Einheit",

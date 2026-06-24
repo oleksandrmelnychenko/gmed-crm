@@ -6987,10 +6987,8 @@ async fn clinical_resolve_attribution(
     }
 
     if let Some(did) = doctor_id {
-        // provider_doctors.provider_id is NOT NULL, so a present row always
-        // yields the owning provider.
         let doc_row = sqlx::query(
-            r#"SELECT d.provider_id, p.provider_type
+            r#"SELECT p.provider_type
                    FROM provider_doctors d
                    JOIN providers p ON p.id = d.provider_id
                    WHERE d.id = $1"#,
@@ -7005,10 +7003,6 @@ async fn clinical_resolve_attribution(
         let Some(doc_row) = doc_row else {
             return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Unknown doctor"));
         };
-        let doc_provider: Uuid = doc_row.try_get("provider_id").map_err(|e| {
-            tracing::error!(error = %e, doctor_id = %did, "read clinical doctor provider");
-            attribution_fail()
-        })?;
         let doc_provider_type: String = doc_row.try_get("provider_type").map_err(|e| {
             tracing::error!(error = %e, doctor_id = %did, "read clinical doctor provider type");
             attribution_fail()
@@ -7019,13 +7013,29 @@ async fn clinical_resolve_attribution(
                 "Clinical attribution requires a medical provider",
             ));
         }
-        if let Some(pid) = provider_id
-            && doc_provider != pid
-        {
-            return Err(err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "Doctor does not belong to the selected provider",
-            ));
+        if let Some(pid) = provider_id {
+            let linked = sqlx::query_scalar::<_, bool>(
+                r#"SELECT EXISTS(
+                    SELECT 1
+                    FROM provider_doctor_links
+                    WHERE provider_id = $1
+                      AND doctor_id = $2
+                )"#,
+            )
+            .bind(pid)
+            .bind(did)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, provider_id = %pid, doctor_id = %did, "validate clinical doctor link");
+                attribution_fail()
+            })?;
+            if !linked {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Doctor does not belong to the selected provider",
+                ));
+            }
         }
     }
 
@@ -7376,9 +7386,10 @@ async fn list_all_doctors(
     auth.require_any_role(PATIENT_CLINICAL_ROLES)?;
 
     let rows = sqlx::query(
-        r#"SELECT d.id, d.name, d.title, d.fachbereich, d.provider_id, p.name AS provider_name
-           FROM provider_doctors d
-           JOIN providers p ON p.id = d.provider_id
+        r#"SELECT d.id, d.name, d.title, d.fachbereich, l.provider_id, p.name AS provider_name
+           FROM provider_doctor_links l
+           JOIN provider_doctors d ON d.id = l.doctor_id
+           JOIN providers p ON p.id = l.provider_id
            WHERE p.is_active = true
              AND p.provider_type = 'medical'
            ORDER BY d.name"#,

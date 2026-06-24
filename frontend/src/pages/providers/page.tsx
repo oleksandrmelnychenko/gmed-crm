@@ -1417,6 +1417,7 @@ function providerPeopleDoctorToNewProviderForm(row: ProviderPeopleRow): DoctorFo
   return {
     ...providerPeopleDoctorToForm(row),
     id: "",
+    sharedIdentityId: row.person_id,
   };
 }
 

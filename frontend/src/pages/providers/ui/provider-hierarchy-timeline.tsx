@@ -1,12 +1,12 @@
 import { Fragment, useMemo, useState } from "react";
-import { Building2, CalendarClock, ChevronRight, Stethoscope } from "lucide-react";
+import { Building2, ChevronRight, Stethoscope } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { ProviderCategoryIcon } from "./provider-category-icon";
-import { formatWeeklyAvailabilityDisplayItems, providerTypeLabel } from "../model/list-model";
+import { providerTypeLabel } from "../model/list-model";
 import { specializationLabelForItem, specializationLabelForValue } from "../model/specialization-labels";
 import type { ProviderOrganizationLevel, ProviderSummary, SpecializationItem } from "../model/types";
 
@@ -262,48 +262,6 @@ type ProviderHierarchyTimelineProps = {
   selectedProviderId?: string | null;
   tr: Record<string, string>;
 };
-
-function availabilityBadgeClass(closed: boolean) {
-  return closed
-    ? "border-orange-200 bg-orange-50 text-orange-800"
-    : "border-border/60 bg-muted/30 text-foreground";
-}
-
-function TimelineAvailabilityBlock({
-  lang,
-  label,
-  value,
-}: {
-  lang: Lang;
-  label: string;
-  value: string | null | undefined;
-}) {
-  const rows = formatWeeklyAvailabilityDisplayItems(value, lang);
-
-  return (
-    <span className="mt-2 block min-w-0">
-      <span className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
-        <CalendarClock className="size-3.5 text-orange-600" />
-        {label}
-      </span>
-      <span className="flex min-w-0 flex-wrap gap-1.5">
-        {rows.map((row, index) => (
-          <span
-            key={`${row.day ?? "custom"}-${index}`}
-            className={cn(
-              "rounded-md border px-2 py-0.5 text-[11px] font-medium",
-              availabilityBadgeClass(row.closed),
-              row.freeText ? "max-w-full break-words" : "whitespace-nowrap",
-            )}
-            title={row.label}
-          >
-            {row.label}
-          </span>
-        ))}
-      </span>
-    </span>
-  );
-}
 
 export function ProviderHierarchyTimeline({
   lang,
@@ -583,11 +541,6 @@ function TimelineNode({
                 </span>
               ) : null}
             </span>
-            <TimelineAvailabilityBlock
-              value={provider.opening_hours}
-              lang={lang}
-              label={tr.providers_opening_hours ?? "Availability"}
-            />
           </span>
           <span className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 text-[11px] text-muted-foreground">
             {hasChildren ? (

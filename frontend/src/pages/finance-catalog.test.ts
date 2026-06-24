@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createPackageItemFromAgencyService,
   packageItemPatchFromAgencyService,
   packageItemVatRate,
   validateAgencyServiceForm,
@@ -97,6 +98,34 @@ describe("packageItemPatchFromAgencyService", () => {
       unitLabel: "ед.",
       overageUnitPriceNet: "",
     });
+  });
+});
+
+describe("createPackageItemFromAgencyService", () => {
+  it("creates a new package item row from an existing catalog service", () => {
+    const item = createPackageItemFromAgencyService(
+      {
+        id: "service-1",
+        service_key: "interpreter_hours",
+        service_name: "Interpreter hours",
+        description: "Interpreter support per hour",
+        unit_label: "h",
+        unit_price: "120.50",
+      },
+      "ед.",
+    );
+
+    expect(item).toMatchObject({
+      agencyServiceId: "service-1",
+      description: "Interpreter support per hour",
+      serviceKey: "interpreter_hours",
+      includedQuantity: "1",
+      unitLabel: "h",
+      overageUnitPriceNet: "120.50",
+      taxProfileId: "",
+      requiresPatientApproval: false,
+    });
+    expect(item.formKey).toMatch(/^package-item-form-/);
   });
 });
 

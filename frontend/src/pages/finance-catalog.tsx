@@ -358,6 +358,19 @@ export function packageItemPatchFromAgencyService(
   };
 }
 
+export function createPackageItemFromAgencyService(
+  service: Pick<
+    AgencyServiceItem,
+    "id" | "description" | "service_key" | "service_name" | "unit_label" | "unit_price"
+  >,
+  defaultUnitLabel: string,
+): ServicePackageItemForm {
+  return {
+    ...createBlankPackageItem(defaultUnitLabel),
+    ...packageItemPatchFromAgencyService(service, defaultUnitLabel),
+  };
+}
+
 function decimalPayload(value: string, fallback = 0) {
   const parsed = Number(value.replace(",", "."));
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -844,6 +857,32 @@ function useFinanceCatalogPageContent() {
         t.finance_catalog_unit_default,
       ),
     });
+  }
+
+  function addAgencyServiceToPackage(serviceId: string) {
+    const service = agencyServices.find((item) => item.id === serviceId);
+    if (!service) return;
+    const nextItem = createPackageItemFromAgencyService(
+      service,
+      t.finance_catalog_unit_default,
+    );
+    const isEmptyDefaultItem = (item: ServicePackageItemForm) =>
+      !item.agencyServiceId &&
+      !item.description.trim() &&
+      !item.serviceKey.trim() &&
+      (!item.includedQuantity.trim() || item.includedQuantity.trim() === "1") &&
+      (!item.unitLabel.trim() ||
+        item.unitLabel.trim() === t.finance_catalog_unit_default) &&
+      !item.overageUnitPriceNet.trim() &&
+      !item.taxProfileId &&
+      !item.requiresPatientApproval;
+    setPackageForm((current) => ({
+      ...current,
+      items:
+        current.items.length === 1 && isEmptyDefaultItem(current.items[0])
+          ? [nextItem]
+          : [...current.items, nextItem],
+    }));
   }
 
   function removePackageItem(index: number) {
@@ -2213,26 +2252,52 @@ function useFinanceCatalogPageContent() {
 
                 <Section title={t.finance_catalog_included_items}>
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
                       <p className="text-xs text-muted-foreground">
                         {t.finance_catalog_included_items_hint}
                       </p>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 rounded-lg"
-                        onClick={() =>
-                          setPackageForm((current) => ({
-                            ...current,
-                            items: [...current.items, blankPackageItem()],
-                          }))
-                        }
-                        disabled={packageBusy}
-                      >
-                        <Plus className="size-4" />
-                        {t.finance_catalog_add_item}
-                      </Button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <NativeComboboxSelect
+                          value="__select_existing__"
+                          onChange={(event) => {
+                            if (event.target.value !== "__select_existing__") {
+                              addAgencyServiceToPackage(event.target.value);
+                            }
+                          }}
+                          className={cn(selectClass, "h-8 min-w-64")}
+                          disabled={packageBusy || agencyServices.length === 0}
+                        >
+                          <option value="__select_existing__">
+                            {t.finance_catalog_add_existing_item}
+                          </option>
+                          {agencyServices.map((service) => (
+                            <option key={service.id} value={service.id}>
+                              {agencyServiceNameLabel(
+                                service.service_key,
+                                service.service_name,
+                                t,
+                              )}{" "}
+                              / {valueToInput(service.vat_rate) || "0"}%
+                            </option>
+                          ))}
+                        </NativeComboboxSelect>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 rounded-lg"
+                          onClick={() =>
+                            setPackageForm((current) => ({
+                              ...current,
+                              items: [...current.items, blankPackageItem()],
+                            }))
+                          }
+                          disabled={packageBusy}
+                        >
+                          <Plus className="size-4" />
+                          {t.finance_catalog_add_item}
+                        </Button>
+                      </div>
                     </div>
                     {packageForm.items.map((item, index) => (
                       <div

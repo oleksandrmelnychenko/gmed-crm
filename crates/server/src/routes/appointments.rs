@@ -7337,19 +7337,22 @@ async fn validate_provider_doctor_context(
     }
 
     if let Some(doctor_id) = doctor_id {
-        let row =
-            sqlx::query("SELECT id FROM provider_doctors WHERE provider_id = $1 AND id = $2")
-                .bind(provider_id)
-                .bind(doctor_id)
-                .fetch_optional(&state.db)
-                .await
-                .map_err(|e| {
-                    tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, "Failed to validate provider doctor");
-                    err(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Failed to validate provider doctor",
-                    )
-                })?;
+        let row = sqlx::query(
+            r#"SELECT doctor_id
+               FROM provider_doctor_links
+               WHERE provider_id = $1 AND doctor_id = $2"#,
+        )
+        .bind(provider_id)
+        .bind(doctor_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, "Failed to validate provider doctor");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate provider doctor",
+            )
+        })?;
         if row.is_none() {
             return Err(err(
                 StatusCode::UNPROCESSABLE_ENTITY,

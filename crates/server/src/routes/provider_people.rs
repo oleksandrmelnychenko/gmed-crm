@@ -174,7 +174,7 @@ async fn load_doctor_people(
     insurance_provider_terms: &[String],
 ) -> Result<Vec<Value>, axum::response::Response> {
     let rows = sqlx::query(
-        r#"SELECT d.id, d.provider_id, d.shared_identity_id, d.name, d.first_name, d.last_name, d.display_name,
+        r#"SELECT d.id, l.provider_id, d.shared_identity_id, d.name, d.first_name, d.last_name, d.display_name,
                   d.title, d.role_code, d.role_label, to_jsonb(d)->>'subrole' AS subrole,
                   to_jsonb(d)->>'website' AS website, to_jsonb(d)->>'schwerpunkt' AS schwerpunkt,
                   d.gender, d.opening_hours, d.fachbereich, d.languages, d.phone, d.email,
@@ -239,19 +239,23 @@ async fn load_doctor_people(
                       )
                       FROM provider_person_contacts pc
                       WHERE pc.doctor_id = d.id
+                        AND pc.provider_id = p.id
                   ), '[]'::jsonb) AS contacts,
                   (
                       SELECT COUNT(DISTINCT a.patient_id)
                       FROM appointments a
                       WHERE a.doctor_id = d.id
+                        AND a.provider_id = p.id
                   ) AS patient_count,
                   (
                       SELECT COUNT(*)
                       FROM appointments a
                       WHERE a.doctor_id = d.id
+                        AND a.provider_id = p.id
                   ) AS appointment_count
-           FROM provider_doctors d
-           JOIN providers p ON p.id = d.provider_id
+           FROM provider_doctor_links l
+           JOIN provider_doctors d ON d.id = l.doctor_id
+           JOIN providers p ON p.id = l.provider_id
            LEFT JOIN providers parent ON parent.id = p.parent_provider_id
            WHERE ($1::bool = false OR p.is_active = true)
              AND ($2::uuid IS NULL OR p.id = $2)
@@ -269,6 +273,7 @@ async fn load_doctor_people(
                      SELECT 1
                      FROM provider_person_contacts pc
                      WHERE pc.doctor_id = d.id
+                       AND pc.provider_id = p.id
                        AND de_normalize(pc.value) LIKE de_normalize($4)
                  )
                  OR EXISTS (

@@ -3982,7 +3982,11 @@ async fn validate_provider_doctor_context(
             "doctor_id requires provider_id",
         )),
         (Some(provider_id), Some(doctor_id)) => {
-            let row = sqlx::query("SELECT id FROM provider_doctors WHERE provider_id = $1 AND id = $2")
+            let row = sqlx::query(
+                r#"SELECT doctor_id
+                   FROM provider_doctor_links
+                   WHERE provider_id = $1 AND doctor_id = $2"#,
+            )
                 .bind(provider_id)
                 .bind(doctor_id)
                 .fetch_optional(&state.db)

@@ -2194,8 +2194,8 @@ async fn load_report_clinics(
                 ) AS delivered_items,
                 (
                     SELECT COUNT(*)::bigint
-                    FROM provider_doctors pd
-                    WHERE pd.provider_id = p.id
+                    FROM provider_doctor_links l
+                    WHERE l.provider_id = p.id
                 ) AS doctor_count,
                 (
                     SELECT COALESCE(
@@ -2698,8 +2698,8 @@ async fn load_report_medical_providers(
                 ) AS delivered_items,
                 (
                     SELECT COUNT(*)::bigint
-                    FROM provider_doctors pd
-                    WHERE pd.provider_id = p.id
+                    FROM provider_doctor_links l
+                    WHERE l.provider_id = p.id
                 ) AS doctor_count,
                 (
                     SELECT COALESCE(
@@ -2716,8 +2716,9 @@ async fn load_report_medical_providers(
                         SELECT
                             COALESCE(NULLIF(TRIM(pd.fachbereich), ''), 'provider_specialty.unknown') AS label,
                             COUNT(*) AS usage_count
-                        FROM provider_doctors pd
-                        WHERE pd.provider_id = p.id
+                        FROM provider_doctor_links l
+                        JOIN provider_doctors pd ON pd.id = l.doctor_id
+                        WHERE l.provider_id = p.id
                         GROUP BY 1
                         ORDER BY usage_count DESC, label
                         LIMIT 5
@@ -3108,7 +3109,7 @@ async fn load_report_doctors(
     let rows = sqlx::query(
         r#"SELECT
                 pd.id,
-                pd.provider_id,
+                l.provider_id,
                 pd.name,
                 pd.title,
                 pd.fachbereich,
@@ -3342,8 +3343,9 @@ async fn load_report_doctors(
                     WHERE ol.doctor_id = pd.id
                       AND ol.status IN ('delivered', 'approved', 'invoiced')
                 ) AS gross_service_volume
-           FROM provider_doctors pd
-           JOIN providers p ON p.id = pd.provider_id
+           FROM provider_doctor_links l
+           JOIN provider_doctors pd ON pd.id = l.doctor_id
+           JOIN providers p ON p.id = l.provider_id
            LEFT JOIN LATERAL (
                 SELECT
                     n.id,
@@ -3361,7 +3363,7 @@ async fn load_report_doctors(
            ) primary_taxonomy ON TRUE
            WHERE p.is_active = true
              AND p.provider_type = 'medical'
-             AND ($1::uuid IS NULL OR pd.provider_id = $1)
+             AND ($1::uuid IS NULL OR l.provider_id = $1)
              AND (
                 ($2::uuid IS NULL AND NULLIF(TRIM($3::text), '') IS NULL)
                 OR EXISTS (
@@ -4006,8 +4008,8 @@ async fn load_forecast_clinic_capacity(state: &AppState) -> Result<Value, sqlx::
                 p.address_city,
                 (
                     SELECT COUNT(*)::bigint
-                    FROM provider_doctors pd
-                    WHERE pd.provider_id = p.id
+                    FROM provider_doctor_links l
+                    WHERE l.provider_id = p.id
                 ) AS doctor_count,
                 (
                     SELECT COUNT(*)::bigint

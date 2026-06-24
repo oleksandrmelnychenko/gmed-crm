@@ -714,9 +714,9 @@ async fn validate_provider_doctor_in_tx(
     let exists = sqlx::query_scalar::<_, bool>(
         r#"SELECT EXISTS(
                 SELECT 1
-                FROM provider_doctors
+                FROM provider_doctor_links
                 WHERE provider_id = $1
-                  AND id = $2
+                  AND doctor_id = $2
            )"#,
     )
     .bind(provider_id)
