@@ -885,6 +885,21 @@ function parsePainNumber(value: string | number | null | undefined) {
   return null;
 }
 
+function painNrsValidationMessage(items: PainItem[]) {
+  const invalid = items.some((item) =>
+    [item.nrs_aktuell, item.nrs_anfang].some((value) => {
+      if (value == null) return false;
+      return !Number.isInteger(value) || value < 0 || value > 10;
+    }),
+  );
+
+  if (!invalid) return "";
+
+  return getLang() === "de"
+    ? "NRS-Werte müssen ganze Zahlen von 0 bis 10 sein."
+    : "Значения NRS должны быть целыми числами от 0 до 10.";
+}
+
 function countFilled(items: Array<{ [key: string]: unknown }>, key: string) {
   return items.filter((item) => {
     const value = item[key];
@@ -925,6 +940,12 @@ function sectionSaveErrorText(error: unknown, fallback: string) {
     return lang === "de"
       ? "Bitte prüfen Sie das Datum. Erwartetes Format: JJJJ-MM-TT."
       : "Проверьте дату. Ожидаемый формат: ГГГГ-ММ-ДД.";
+  }
+
+  if (normalized.includes("nrs")) {
+    return lang === "de"
+      ? "NRS-Werte müssen ganze Zahlen von 0 bis 10 sein."
+      : "Значения NRS должны быть целыми числами от 0 до 10.";
   }
 
   return message;
@@ -2291,6 +2312,11 @@ function useCasesPageContent({
   async function handleSavePain(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!detail) return;
+    const validationError = painNrsValidationMessage(painRecords);
+    if (validationError) {
+      setSectionErrors((current) => ({ ...current, pain: validationError }));
+      return;
+    }
     await runSectionSave(
       "pain",
       () =>
@@ -3452,8 +3478,8 @@ function useCasesPageContent({
                         <Field label={t.cases_symptoms}><Input value={item.qualitaet ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { qualitaet: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_symptoms}><Input value={item.kontinuitaet ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { kontinuitaet: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_symptoms}><Input value={item.entwicklung ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { entwicklung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_pain}><Input value={item.nrs_aktuell == null ? "" : String(item.nrs_aktuell)} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { nrs_aktuell: parsePainNumber(event.target.value) }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_pain}><Input value={item.nrs_anfang == null ? "" : String(item.nrs_anfang)} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { nrs_anfang: parsePainNumber(event.target.value) }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={lang === "de" ? "NRS aktuell (0-10)" : "NRS сейчас (0-10)"}><Input type="number" min={0} max={10} step={1} value={item.nrs_aktuell == null ? "" : String(item.nrs_aktuell)} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { nrs_aktuell: parsePainNumber(event.target.value) }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={lang === "de" ? "NRS zu Beginn (0-10)" : "NRS в начале (0-10)"}><Input type="number" min={0} max={10} step={1} value={item.nrs_anfang == null ? "" : String(item.nrs_anfang)} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { nrs_anfang: parsePainNumber(event.target.value) }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_pain}><Input value={item.dauer_anfang ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { dauer_anfang: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_pain}><Input value={item.dauer_aktuell ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { dauer_aktuell: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_pain}><Input value={item.ausstrahlung ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { ausstrahlung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>

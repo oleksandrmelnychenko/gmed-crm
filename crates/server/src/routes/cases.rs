@@ -1619,6 +1619,20 @@ async fn save_pain_records(
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
     }
+    for item in &body.items {
+        if item
+            .nrs_aktuell
+            .is_some_and(|value| !(0..=10).contains(&value))
+            || item
+                .nrs_anfang
+                .is_some_and(|value| !(0..=10).contains(&value))
+        {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "NRS values must be whole numbers from 0 to 10",
+            );
+        }
+    }
     let old_value = match load_case_section_snapshot(&state.db, case_uuid, "pain_records").await {
         Ok(value) => value.unwrap_or(serde_json::json!([])),
         Err(e) => {

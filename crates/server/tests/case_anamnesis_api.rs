@@ -449,6 +449,41 @@ async fn save_pain_records_round_trips_nrs_and_localization() {
     assert_eq!(item["auftreten"].as_str(), Some("morning, after activity"));
 }
 
+#[tokio::test]
+async fn save_pain_records_rejects_nrs_values_outside_scale() {
+    let Some((app, _pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let bearer = auth_header_for(admin_id, "ceo");
+
+    let tag = unique_tag("case-pain-validation");
+    let patient_id = create_patient(&app, &bearer, &tag).await;
+    let case_uuid = create_case(&app, &bearer, patient_id).await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_uuid}/pain"),
+        &bearer,
+        Some(json!({
+            "items": [
+                {
+                    "lokalisierung": "shoulder",
+                    "nrs_aktuell": 45,
+                    "nrs_anfang": 54
+                }
+            ]
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        body["message"].as_str(),
+        Some("NRS values must be whole numbers from 0 to 10")
+    );
+}
+
 // ============================================================================
 // EPIC 2 T-018 — symptome repeat block (description + fachrichtung)
 // ============================================================================
@@ -592,8 +627,8 @@ async fn save_medikamente_round_trips_full_repeat_block_fields() {
                     "dosis": "5",
                     "dosis_einheit": "mg",
                     "einnahmeschema": "1-0-0",
-                    "darreichungsform": "tablette",
-                    "einheit": "Tablette",
+                    "darreichungsform": "AMP",
+                    "einheit": "Ampulle",
                     "anmerkung": "morgens nüchtern",
                     "grund": "arterielle Hypertonie",
                     "seit": "2018-04",
@@ -605,7 +640,7 @@ async fn save_medikamente_round_trips_full_repeat_block_fields() {
                     "dosis": "1000",
                     "dosis_einheit": "mg",
                     "einnahmeschema": "1-0-1",
-                    "darreichungsform": "tablette",
+                    "darreichungsform": "TABL",
                     "med_typ": "permanent"
                 }
             ]
@@ -624,7 +659,7 @@ async fn save_medikamente_round_trips_full_repeat_block_fields() {
     assert_eq!(first["dosis"].as_str(), Some("5"));
     assert_eq!(first["dosis_einheit"].as_str(), Some("mg"));
     assert_eq!(first["einnahmeschema"].as_str(), Some("1-0-0"));
-    assert_eq!(first["darreichungsform"].as_str(), Some("tablette"));
+    assert_eq!(first["darreichungsform"].as_str(), Some("AMP"));
     assert_eq!(first["anmerkung"].as_str(), Some("morgens nüchtern"));
     assert_eq!(first["grund"].as_str(), Some("arterielle Hypertonie"));
     assert_eq!(first["seit"].as_str(), Some("2018-04"));
@@ -634,6 +669,7 @@ async fn save_medikamente_round_trips_full_repeat_block_fields() {
     assert_eq!(second["handelsname"].as_str(), Some("Metformin"));
     assert_eq!(second["dosis"].as_str(), Some("1000"));
     assert_eq!(second["einnahmeschema"].as_str(), Some("1-0-1"));
+    assert_eq!(second["darreichungsform"].as_str(), Some("TABL"));
 }
 
 // ============================================================================
