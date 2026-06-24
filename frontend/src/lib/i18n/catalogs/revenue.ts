@@ -62,6 +62,8 @@ export interface RevenueTranslations {
   finance_catalog_tax_profile_prefix: string;
   finance_catalog_approval_suffix: string;
   finance_catalog_more_items: string;
+  finance_catalog_packages_column: string;
+  finance_catalog_more_packages: string;
   finance_catalog_empty_included_items: string;
   finance_catalog_agency_service_vat_mapping: string;
   finance_catalog_loading_mapping: string;
@@ -833,6 +835,8 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_tax_profile_prefix: "Налоговый профиль",
   finance_catalog_approval_suffix: "согласование",
   finance_catalog_more_items: "Еще позиций: {count}",
+  finance_catalog_packages_column: "Пакеты",
+  finance_catalog_more_packages: "+{count} пак.",
   finance_catalog_empty_included_items: "Включенные позиции не настроены.",
   finance_catalog_agency_service_vat_mapping: "Сопоставление НДС услуг агентства",
   finance_catalog_loading_mapping: "Загрузка сопоставления каталога...",
@@ -1159,6 +1163,8 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_tax_profile_prefix: "Steuerprofil",
   finance_catalog_approval_suffix: "Freigabe",
   finance_catalog_more_items: "Weitere Positionen: {count}",
+  finance_catalog_packages_column: "Pakete",
+  finance_catalog_more_packages: "+{count} Pak.",
   finance_catalog_empty_included_items: "Keine enthaltenen Positionen konfiguriert.",
   finance_catalog_agency_service_vat_mapping: "USt.-Zuordnung für Agenturleistungen",
   finance_catalog_loading_mapping: "Katalogzuordnung wird geladen...",

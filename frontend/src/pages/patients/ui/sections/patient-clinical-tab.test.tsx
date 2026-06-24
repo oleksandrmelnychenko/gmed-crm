@@ -1,13 +1,18 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { ClinicalDiagnosis, ClinicalMedication } from "@/pages/patients/data/patient-clinical";
+import type {
+  ClinicalDiagnosis,
+  ClinicalMedication,
+  PatientRecommendation,
+} from "@/pages/patients/data/patient-clinical";
 import type { ProviderSummary } from "@/pages/providers/model/types";
 
 import { DiagnosisTreeSection } from "./diagnosis-tree";
 import {
   CLINICAL_PROVIDER_QUERY,
   PatientMedicationTable,
+  PatientRecommendationsSection,
   clinicalMedicalProviderRows,
 } from "./patient-clinical-tab";
 
@@ -98,6 +103,30 @@ function diagnosis(overrides: Partial<ClinicalDiagnosis> = {}): ClinicalDiagnosi
   };
 }
 
+function recommendation(overrides: Partial<PatientRecommendation> = {}): PatientRecommendation {
+  return {
+    description: null,
+    due_at: null,
+    id: "recommendation-1",
+    lifecycle_status: "aktiv",
+    note_intern: null,
+    outcome_at: null,
+    outcome_note: null,
+    priority: "normal",
+    recommendation_type: null,
+    recommended_on: null,
+    reminder_at: null,
+    reminder_lead_days: null,
+    source_doctor_id: null,
+    source_doctor_name: null,
+    status: null,
+    title: "Kontrolle",
+    valid_from: null,
+    valid_to: null,
+    ...overrides,
+  };
+}
+
 describe("PatientMedicationTable", () => {
   it("loads and keeps only medical providers for clinical attribution fields", () => {
     expect(CLINICAL_PROVIDER_QUERY).toContain("provider_type=medical");
@@ -157,6 +186,29 @@ describe("PatientMedicationTable", () => {
     expect(html).toContain("Dr. Heart · Klinik München");
     expect(html).toContain("Bearb.");
   });
+
+  it("renders medication hold state with until date and note", () => {
+    const html = renderToStaticMarkup(
+      <PatientMedicationTable
+        canManage
+        indexed={[
+          {
+            item: medication({
+              on_hold: true,
+              hold_until: "2026-07-15",
+              hold_note: "Patient pausiert wegen Nebenwirkungen",
+            }),
+            index: 0,
+          },
+        ]}
+        renderActions={() => <button type="button">Bearb.</button>}
+        tx={(_ru, de) => de}
+      />,
+    );
+
+    expect(html).toContain("Auf Hold bis 2026-07-15");
+    expect(html).toContain("Patient pausiert wegen Nebenwirkungen");
+  });
 });
 
 describe("DiagnosisTreeSection", () => {
@@ -184,5 +236,23 @@ describe("DiagnosisTreeSection", () => {
     expect(html).toContain("break-words text-sm font-medium");
     expect(html).toContain("break-words font-mono");
     expect(html).toContain("break-words text-[11px] text-muted-foreground");
+  });
+});
+
+describe("PatientRecommendationsSection", () => {
+  it("uses the Russian label for the add recommendation button", () => {
+    const html = renderToStaticMarkup(
+      <PatientRecommendationsSection
+        allDoctors={[]}
+        canManage
+        onReload={() => undefined}
+        patientId="patient-1"
+        recommendations={[recommendation()]}
+        tx={(ru) => ru}
+      />,
+    );
+
+    expect(html).toContain("Рекомендация");
+    expect(html).not.toContain(">Empfehlung<");
   });
 });

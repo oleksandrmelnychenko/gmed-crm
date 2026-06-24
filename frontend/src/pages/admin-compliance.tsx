@@ -51,6 +51,10 @@ import {
 } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
 import {
+  buildConsentFormPatchAfterSuccess,
+  type ConsentAction,
+} from "./admin-compliance.helpers";
+import {
   createPatientPrivacyRequest,
   downloadPatientComplianceExport,
   executeCompliancePrivacyRequest,
@@ -654,7 +658,7 @@ function useAdminCompliancePageContent() {
     await loadPatientWorkspace(targetPatientId);
   };
 
-  const handleConsentAction = async (action: "grant" | "revoke") => {
+  const handleConsentAction = async (action: ConsentAction) => {
     const targetPatientId = (activePatientId || patientInput).trim();
     if (!targetPatientId) {
       setActionError(t.compliance_uuid_required);
@@ -674,8 +678,7 @@ function useAdminCompliancePageContent() {
       });
 
       setActivePatientId(targetPatientId);
-      setConsentNote("");
-      setConsentExpiresAt("");
+      dispatchComplianceState(buildConsentFormPatchAfterSuccess(action));
       syncPatientQuery(targetPatientId);
       await Promise.all([
         loadConsentDashboard(),

@@ -12,8 +12,10 @@ import {
   buildProvidersQuery,
   composeDoctorDisplayName,
   composeStaffDisplayName,
+  doctorIdentityValue,
   doctorListDisplayName,
   doctorToForm,
+  existingDoctorLinkOptions,
   formatDoctorTitleValue,
   formatWeeklyAvailabilityDisplay,
   formatWeeklyAvailabilityDisplayItems,
@@ -30,10 +32,47 @@ import {
   updateTaxonomyAttributeValue,
   updateWeeklyAvailabilityIntervalValue,
 } from "./list-model";
+import type { ProviderPeopleRow } from "./people-types";
 import type { ProviderFilters } from "./types";
 
 function paramsFromPath(path: string) {
   return new URL(path, "https://crm.test").searchParams;
+}
+
+function providerPeopleDoctorRow(overrides: Partial<ProviderPeopleRow> = {}): ProviderPeopleRow {
+  return {
+    person_type: "doctor",
+    person_id: "doctor-1",
+    shared_identity_id: null,
+    provider_id: "provider-1",
+    provider_name: "Clinic",
+    provider_type: "medical",
+    name: "Dr. One",
+    first_name: null,
+    last_name: null,
+    display_name: null,
+    title: null,
+    role_code: null,
+    role_label: null,
+    gender: "unknown",
+    opening_hours: null,
+    fachbereich: null,
+    specializations: [],
+    insurance_providers: [],
+    languages: [],
+    phone: null,
+    email: null,
+    contacts: [],
+    department: null,
+    status: "active",
+    license_number: null,
+    licensing_country: null,
+    licensing_valid_until: null,
+    notes: null,
+    counts: {},
+    last_interaction_at: null,
+    ...overrides,
+  };
 }
 
 describe("buildProvidersQuery", () => {
@@ -413,6 +452,56 @@ describe("toDoctorPayload", () => {
 
     expect(payload.website).toBeNull();
     expect(payload.schwerpunkt).toBeNull();
+  });
+});
+
+describe("existingDoctorLinkOptions", () => {
+  it("deduplicates existing doctors by shared identity and excludes already linked rows", () => {
+    const options = existingDoctorLinkOptions(
+      [
+        providerPeopleDoctorRow({
+          person_id: "doctor-a-clinic-1",
+          shared_identity_id: "identity-a",
+          provider_id: "source-1",
+          provider_name: "Source 1",
+        }),
+        providerPeopleDoctorRow({
+          person_id: "doctor-a-clinic-2",
+          shared_identity_id: "identity-a",
+          provider_id: "source-2",
+          provider_name: "Source 2",
+        }),
+        providerPeopleDoctorRow({
+          person_id: "doctor-current",
+          shared_identity_id: "identity-current",
+          provider_id: "target",
+        }),
+        providerPeopleDoctorRow({
+          person_id: "doctor-linked",
+          shared_identity_id: "identity-linked",
+          provider_id: "source-3",
+        }),
+        providerPeopleDoctorRow({
+          person_id: "doctor-non-medical",
+          shared_identity_id: "identity-non-medical",
+          provider_id: "source-4",
+          provider_type: "non_medical",
+        }),
+      ],
+      "target",
+      new Set(["identity-linked"]),
+    );
+
+    expect(options.map(doctorIdentityValue)).toEqual(["identity-a"]);
+  });
+
+  it("uses the doctor id when a shared identity is not available yet", () => {
+    const row = providerPeopleDoctorRow({
+      person_id: "legacy-doctor-id",
+      shared_identity_id: null,
+    });
+
+    expect(doctorIdentityValue(row)).toBe("legacy-doctor-id");
   });
 });
 

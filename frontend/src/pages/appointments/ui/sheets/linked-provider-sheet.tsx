@@ -232,11 +232,13 @@ function LinkedProviderInteractionsSection({
   formatDateTimeLabel,
   onOpenPatient,
   onOpenAppointment,
+  onOpenOrder,
 }: {
   detail: ProviderSheetDetail;
   formatDateTimeLabel: (value?: string | null) => string;
   onOpenPatient: (patientId: string) => void;
   onOpenAppointment: (appointmentId: string) => void;
+  onOpenOrder: (orderId: string, patientId?: string | null) => void;
 }) {
   const notSet = appointmentText("appointments_not_set");
 
@@ -251,85 +253,100 @@ function LinkedProviderInteractionsSection({
         </EmptyCell>
       ) : (
         <div className="space-y-3">
-          {detail.interactions.map((item) => (
-            <ListItem key={item.id} className="space-y-3">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap gap-2">
-                    <StatusBadge tone="neutral">
-                      {humanizeLinkedCode(item.kind)}
-                    </StatusBadge>
-                    <StatusBadge status={item.status}>
-                      {humanizeLinkedCode(item.status)}
-                    </StatusBadge>
-                    {item.appointment_type ? (
-                      <StatusBadge tone="info">
-                        {humanizeLinkedCode(item.appointment_type)}
+          {detail.interactions.map((item) => {
+            const patientRouteId = item.patient_uuid ?? "";
+            return (
+              <ListItem key={item.id} className="space-y-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap gap-2">
+                      <StatusBadge tone="neutral">
+                        {humanizeLinkedCode(item.kind)}
                       </StatusBadge>
-                    ) : null}
+                      <StatusBadge status={item.status}>
+                        {humanizeLinkedCode(item.status)}
+                      </StatusBadge>
+                      {item.appointment_type ? (
+                        <StatusBadge tone="info">
+                          {humanizeLinkedCode(item.appointment_type)}
+                        </StatusBadge>
+                      ) : null}
+                    </div>
+                    <p className="mt-3 text-sm font-semibold text-foreground">
+                      {item.title}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {item.patient_id} · {item.patient_name}
+                    </p>
                   </div>
-                  <p className="mt-3 text-sm font-semibold text-foreground">
-                    {item.title}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {item.patient_id} · {item.patient_name}
+                  <p className="text-xs text-muted-foreground">
+                    {formatDateTimeLabel(item.occurred_at)}
                   </p>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {formatDateTimeLabel(item.occurred_at)}
-                </p>
-              </div>
 
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className={appointmentPreviewInfoCardClassName}>
-                  <InfoRow
-                    label={appointmentText("appointments_doctor")}
-                    value={item.doctor_name || notSet}
-                  />
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className={appointmentPreviewInfoCardClassName}>
+                    <InfoRow
+                      label={appointmentText("appointments_doctor")}
+                      value={item.doctor_name || notSet}
+                    />
+                  </div>
+                  <div className={appointmentPreviewInfoCardClassName}>
+                    <InfoRow
+                      label={appointmentText("appointments_location")}
+                      value={item.location || notSet}
+                    />
+                  </div>
                 </div>
-                <div className={appointmentPreviewInfoCardClassName}>
-                  <InfoRow
-                    label={appointmentText("appointments_location")}
-                    value={item.location || notSet}
-                  />
-                </div>
-              </div>
 
-              {item.notes ? (
-                <div
-                  className={cn(
-                    "rounded-xl px-4 py-3 text-sm leading-6 text-foreground",
-                    tokens.surface.mutedCard,
-                  )}
-                >
-                  {item.notes}
-                </div>
-              ) : null}
+                {item.notes ? (
+                  <div
+                    className={cn(
+                      "rounded-xl px-4 py-3 text-sm leading-6 text-foreground",
+                      tokens.surface.mutedCard,
+                    )}
+                  >
+                    {item.notes}
+                  </div>
+                ) : null}
 
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 rounded-lg"
-                  onClick={() => onOpenPatient(item.patient_id)}
-                >
-                  {appointmentText("appointments_patient")}
-                </Button>
-                {item.kind === "appointment" ? (
+                <div className="flex flex-wrap gap-2">
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     className="h-8 rounded-lg"
-                    onClick={() => onOpenAppointment(item.id)}
+                    disabled={!patientRouteId}
+                    onClick={() => onOpenPatient(patientRouteId)}
                   >
-                    {appointmentText("appointments_appointment_3")}
+                    {appointmentText("appointments_patient")}
                   </Button>
-                ) : null}
-              </div>
-            </ListItem>
-          ))}
+                  {item.kind === "appointment" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-lg"
+                      onClick={() => onOpenAppointment(item.id)}
+                    >
+                      {appointmentText("appointments_appointment_3")}
+                    </Button>
+                  ) : null}
+                  {item.order_id ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-lg"
+                      onClick={() => onOpenOrder(item.order_id!, patientRouteId)}
+                    >
+                      {appointmentText("appointments_order")}
+                    </Button>
+                  ) : null}
+                </div>
+              </ListItem>
+            );
+          })}
         </div>
       )}
     </Section>
@@ -346,6 +363,7 @@ export type LinkedProviderSheetProps = {
   formatDateTimeLabel: (value?: string | null) => string;
   onOpenPatient: (patientId: string) => void;
   onOpenAppointment: (appointmentId: string) => void;
+  onOpenOrder: (orderId: string, patientId?: string | null) => void;
 };
 
 function LinkedProviderSheet({
@@ -358,6 +376,7 @@ function LinkedProviderSheet({
   formatDateTimeLabel,
   onOpenPatient,
   onOpenAppointment,
+  onOpenOrder,
 }: LinkedProviderSheetProps) {
   return (
     <AppointmentPreviewSheet
@@ -388,6 +407,7 @@ function LinkedProviderSheet({
             formatDateTimeLabel={formatDateTimeLabel}
             onOpenPatient={onOpenPatient}
             onOpenAppointment={onOpenAppointment}
+            onOpenOrder={onOpenOrder}
           />
         </>
       ) : error ? (

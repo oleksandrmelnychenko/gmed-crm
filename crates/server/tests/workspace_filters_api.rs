@@ -8768,6 +8768,11 @@ async fn provider_and_doctor_detail_expose_linked_patients_and_interactions() {
     assert_eq!(body["legal_name"], format!("Clinic Legal {tag} GmbH"));
     assert_eq!(body["tax_id"], format!("DE-TAX-{tag}"));
     let interactions = body["interactions"].as_array().unwrap();
+    assert_eq!(interactions.len(), 2);
+    for item in interactions {
+        assert_eq!(item["patient_uuid"], patient_id.to_string());
+        assert_eq!(item["patient_id"], format!("PT-{tag}"));
+    }
     assert!(
         interactions
             .iter()
@@ -8791,6 +8796,12 @@ async fn provider_and_doctor_detail_expose_linked_patients_and_interactions() {
     assert_eq!(doctor_body["licensing_valid_until"], "2027-12-31");
     assert_eq!(doctor_body["languages"][0], "de");
     assert_eq!(doctor_body["languages"][1], "en");
+    let doctor_interactions = doctor_body["interactions"].as_array().unwrap();
+    assert_eq!(doctor_interactions.len(), 2);
+    for item in doctor_interactions {
+        assert_eq!(item["patient_uuid"], patient_id.to_string());
+        assert_eq!(item["patient_id"], format!("PT-{tag}"));
+    }
     assert_eq!(
         doctor_body["linked_patients"]
             .as_array()

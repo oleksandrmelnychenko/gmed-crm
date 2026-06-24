@@ -99,6 +99,7 @@ import {
   composeDoctorDisplayName,
   composeStaffDisplayName,
   formatWeeklyAvailabilityDisplayItems,
+  doctorIdentityValue,
   doctorToForm,
   doctorListDisplayName,
   doctorRelationshipTypeLabel,
@@ -118,6 +119,7 @@ import {
   providerPermissions,
   providerToForm,
   providerTypeLabel,
+  existingDoctorLinkOptions,
   serviceToForm,
   servicePriceLabel,
   staffToForm,
@@ -1417,7 +1419,7 @@ function providerPeopleDoctorToNewProviderForm(row: ProviderPeopleRow): DoctorFo
   return {
     ...providerPeopleDoctorToForm(row),
     id: "",
-    sharedIdentityId: row.person_id,
+    sharedIdentityId: doctorIdentityValue(row),
   };
 }
 
@@ -2363,13 +2365,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       .then((rows) => {
         if (cancelled) return;
         setExistingDoctorOptions(
-          rows.filter(
-            (row) =>
-              row.person_type === "doctor" &&
-              row.provider_type === "medical" &&
-              row.provider_id !== providerId &&
-              !linkedDoctorIdentityIds.has(row.shared_identity_id ?? row.person_id),
-          ),
+          existingDoctorLinkOptions(rows, providerId, linkedDoctorIdentityIds),
         );
         setExistingDoctorOptionsBusy(false);
       })
@@ -2558,8 +2554,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     setStaffDetailView({ source: "catalog", row });
   }
 
-  function handleExistingDoctorSelect(doctorId: string) {
-    const doctor = existingDoctorOptions.find((row) => row.person_id === doctorId);
+  function handleExistingDoctorSelect(identityId: string) {
+    const doctor = existingDoctorOptions.find((row) => doctorIdentityValue(row) === identityId);
     if (!doctor) return;
     setDoctorError("");
     setDoctorForm(providerPeopleDoctorToNewProviderForm(doctor));
@@ -3200,15 +3196,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             </div>
           ) : detail ? (
             <div className="flex min-h-0 flex-col">
-              {detail.provider_type === "medical" ? (
-                <div className="flex flex-wrap items-start gap-3 px-4 py-3">
-                  <div className="min-w-0">
-                    <h1 className="break-words text-xl font-semibold text-foreground">
-                      {detail.name || t.providers_detail}
-                    </h1>
-                  </div>
-                </div>
-              ) : null}
               <div className="space-y-3 rounded-xl p-4">
                   {detailError ? <Banner tone="error">{detailError}</Banner> : null}
                   {providerError ? <Banner tone="error">{providerError}</Banner> : null}
@@ -3323,7 +3310,9 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     onOpenAppointment={(appointmentId) =>
                       staffGo(`/appointments?appointment=${appointmentId}`)
                     }
-                    onOpenOrder={(orderId) => staffGo(`/orders?order=${orderId}`)}
+                    onOpenOrder={(orderId, patientId) =>
+                      staffGo(`/orders/${orderId}${patientId ? `?patient=${patientId}` : ""}`)
+                    }
                   />
               </div>
             </div>
@@ -4067,7 +4056,9 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   onOpenAppointment={(appointmentId) =>
                     staffGo(`/appointments?appointment=${appointmentId}`)
                   }
-                  onOpenOrder={(orderId) => staffGo(`/orders?order=${orderId}`)}
+                  onOpenOrder={(orderId, patientId) =>
+                    staffGo(`/orders/${orderId}${patientId ? `?patient=${patientId}` : ""}`)
+                  }
                 />
                 </div>
               </AdminSheetScaffold>
@@ -4878,7 +4869,7 @@ function ProviderDoctorFormSheet({
   busy: boolean;
   error: string;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onSelectExistingDoctor: (doctorId: string) => void;
+  onSelectExistingDoctor: (identityId: string) => void;
   onChange: (field: keyof DoctorFormState, value: string) => void;
   onContactsChange: (contacts: DoctorFormState["contacts"]) => void;
 }) {
@@ -4915,10 +4906,10 @@ function ProviderDoctorFormSheet({
                 <Section title={l("providers_existing_doctor_section")}>
                   <Field label={l("providers_existing_doctor_select")}>
                     <NativeComboboxSelect
-                      value=""
+                      value={form.sharedIdentityId || ""}
                       onChange={(event) => {
-                        const doctorId = event.target.value;
-                        if (doctorId) onSelectExistingDoctor(doctorId);
+                        const identityId = event.target.value;
+                        if (identityId) onSelectExistingDoctor(identityId);
                       }}
                       className={formSelectClassName}
                       disabled={busy || existingDoctorOptionsBusy}
@@ -4928,11 +4919,14 @@ function ProviderDoctorFormSheet({
                           ? l("providers_existing_doctor_loading")
                           : l("providers_existing_doctor_placeholder")}
                       </option>
-                      {existingDoctorOptions.map((doctor) => (
-                        <option key={`${doctor.provider_id}:${doctor.person_id}`} value={doctor.person_id}>
-                          {providerPeopleDoctorOptionLabel(doctor)}
-                        </option>
-                      ))}
+                      {existingDoctorOptions.map((doctor) => {
+                        const identityId = doctorIdentityValue(doctor);
+                        return (
+                          <option key={identityId} value={identityId}>
+                            {providerPeopleDoctorOptionLabel(doctor)}
+                          </option>
+                        );
+                      })}
                     </NativeComboboxSelect>
                   </Field>
                   {existingDoctorOptionsError ? (
@@ -5941,7 +5935,9 @@ function ProviderOverviewSection({
       </div>
     </section>
   );
-}function HeroInfoLine({
+}
+
+function HeroInfoLine({
   icon: Icon,
   children,
   wrap = false,
@@ -5956,6 +5952,15 @@ function ProviderOverviewSection({
       <div className={cn("min-w-0 max-w-full", "break-words")}>{children}</div>
     </div>
   );
+}
+
+function providerFullAddressLine(detail: ProviderDetail) {
+  const cityLine = [detail.address_zip, detail.address_city]
+    .filter(Boolean)
+    .join(" ");
+  return [detail.address_street, cityLine, detail.address_country]
+    .filter(Boolean)
+    .join(", ");
 }
 
 function ProviderSheetHero({
@@ -5979,6 +5984,7 @@ function ProviderSheetHero({
   const tr = t as unknown as Record<string, string>;
   const l = (key: string) => t.uiText[key] ?? key;
   const isMedical = detail.provider_type === "medical";
+  const addressLine = providerFullAddressLine(detail);
   const metaLine = [
     detail.legal_name && detail.legal_name !== detail.name ? detail.legal_name : null,
     providerMeta(detail),
@@ -6052,8 +6058,8 @@ function ProviderSheetHero({
             ) : null}
           </div>
           <div className="mt-4 grid gap-x-6 gap-y-2 text-xs text-muted-foreground sm:grid-cols-2">
-            <HeroInfoLine icon={MapPin}>
-              {providerMeta(detail) || t.common_not_set}
+            <HeroInfoLine icon={MapPin} wrap>
+              {addressLine || providerMeta(detail) || t.common_not_set}
             </HeroInfoLine>
             <HeroInfoLine icon={Phone}>
               {detail.phone || t.common_not_set}
@@ -6061,9 +6067,10 @@ function ProviderSheetHero({
             <HeroInfoLine icon={Mail}>
               {detail.email || t.common_not_set}
             </HeroInfoLine>
-            <HeroInfoLine icon={CalendarClock} wrap>
+            {/* Availability is temporarily hidden from the provider detail hero. */}
+            {/* <HeroInfoLine icon={CalendarClock} wrap>
               <WeeklyAvailabilityBadgeList value={detail.opening_hours} />
-            </HeroInfoLine>
+            </HeroInfoLine> */}
             <HeroInfoLine icon={BadgeCheck}>
               {detail.tax_id || t.common_not_set}
             </HeroInfoLine>
@@ -6083,7 +6090,7 @@ function ProviderSheetHero({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="h-8 w-full justify-center rounded-lg gap-1.5 bg-muted/20"
+                  className="h-8 w-full justify-center rounded-lg gap-1.5 border-orange-200 bg-orange-50/60 text-orange-700 hover:border-orange-300 hover:bg-orange-100 hover:text-orange-800"
                   onClick={onEdit}
                 >
                   <Pencil className="size-3.5" />
@@ -7267,7 +7274,7 @@ function InteractionHistorySection({
   onOpenPatient: (patientId: string) => void;
   onOpenAppointments: (patientId: string) => void;
   onOpenAppointment: (appointmentId: string) => void;
-  onOpenOrder: (orderId: string) => void;
+  onOpenOrder: (orderId: string, patientId?: string | null) => void;
 }) {
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
@@ -7295,111 +7302,116 @@ function InteractionHistorySection({
         </div>
       ) : (
         <div className="mt-4 space-y-3 pl-6">
-          {detail.interactions.map((item, index) => (
-            <div
-              key={item.id}
-              className={cn(
-                "relative",
-                index < detail.interactions.length - 1 &&
-                  "before:absolute before:-bottom-5 before:-left-4 before:top-3 before:w-px before:bg-border",
-              )}
-            >
-              <span className="absolute -left-[1.125rem] top-1.5 z-10 size-2 rounded-full bg-muted-foreground ring-4 ring-background" />
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                <div className="text-sm font-semibold text-foreground">
-                  {item.title}
+          {detail.interactions.map((item, index) => {
+            const patientRouteId = item.patient_uuid ?? "";
+            return (
+              <div
+                key={item.id}
+                className={cn(
+                  "relative",
+                  index < detail.interactions.length - 1 &&
+                    "before:absolute before:-bottom-5 before:-left-4 before:top-3 before:w-px before:bg-border",
+                )}
+              >
+                <span className="absolute -left-[1.125rem] top-1.5 z-10 size-2 rounded-full bg-muted-foreground ring-4 ring-background" />
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <div className="text-sm font-semibold text-foreground">
+                    {item.title}
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {compactDateTime(item.occurred_at, t.common_not_set)}
+                  </span>
                 </div>
-                <span className="text-xs text-muted-foreground">
-                  {compactDateTime(item.occurred_at, t.common_not_set)}
-                </span>
-              </div>
-              <div className="rounded-[1.4rem] border border-zinc-200 p-4">
-                <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_160px]">
-                  <div className="min-w-0 space-y-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" className="rounded-full border-zinc-200 text-zinc-700">
-                        {humanizeCode(item.kind)}
-                      </Badge>
-                      <Badge variant="outline" className="rounded-full border-zinc-200 text-zinc-700">
-                        {humanizeCode(item.status)}
-                      </Badge>
-                      {item.appointment_type ? (
+                <div className="rounded-[1.4rem] border border-zinc-200 p-4">
+                  <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_160px]">
+                    <div className="min-w-0 space-y-4">
+                      <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="outline" className="rounded-full border-zinc-200 text-zinc-700">
-                          {humanizeCode(item.appointment_type)}
+                          {humanizeCode(item.kind)}
                         </Badge>
+                        <Badge variant="outline" className="rounded-full border-zinc-200 text-zinc-700">
+                          {humanizeCode(item.status)}
+                        </Badge>
+                        {item.appointment_type ? (
+                          <Badge variant="outline" className="rounded-full border-zinc-200 text-zinc-700">
+                            {humanizeCode(item.appointment_type)}
+                          </Badge>
+                        ) : null}
+                      </div>
+
+                      <div className="grid gap-3 text-sm md:grid-cols-2">
+                        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                          <span className="text-xs text-muted-foreground">{l("orders_patient")}</span>
+                          <span className="font-medium text-foreground">{item.patient_name}</span>
+                          <span className="text-xs text-muted-foreground">ID</span>
+                          <span className="font-medium text-foreground">{item.patient_id}</span>
+                        </div>
+                        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                          <span className="text-xs text-muted-foreground">{l("providers_doctor")}</span>
+                          <span className="font-medium text-foreground">{item.doctor_name || t.common_not_set}</span>
+                          <span className="text-xs text-muted-foreground">{l("providers_location")}</span>
+                          <span className="font-medium text-foreground">{item.location || t.common_not_set}</span>
+                        </div>
+                      </div>
+
+                      {item.notes ? (
+                        <div className="rounded-xl border border-border/60 px-3 py-2 text-sm leading-6 text-zinc-700">
+                          <span className="mb-1 block text-xs text-muted-foreground">{l("patients_note")}</span>
+                          {item.notes}
+                        </div>
                       ) : null}
                     </div>
-
-                    <div className="grid gap-3 text-sm md:grid-cols-2">
-                      <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-                        <span className="text-xs text-muted-foreground">{l("orders_patient")}</span>
-                        <span className="font-medium text-foreground">{item.patient_name}</span>
-                        <span className="text-xs text-muted-foreground">ID</span>
-                        <span className="font-medium text-foreground">{item.patient_id}</span>
-                      </div>
-                      <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-                        <span className="text-xs text-muted-foreground">{l("providers_doctor")}</span>
-                        <span className="font-medium text-foreground">{item.doctor_name || t.common_not_set}</span>
-                        <span className="text-xs text-muted-foreground">{l("providers_location")}</span>
-                        <span className="font-medium text-foreground">{item.location || t.common_not_set}</span>
-                      </div>
+                    <div className="flex flex-col justify-end gap-2 border-t border-dashed border-border pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 w-full justify-center rounded-lg bg-muted/20"
+                        disabled={!patientRouteId}
+                        onClick={() => onOpenPatient(patientRouteId)}
+                      >
+                        {l("orders_patient")}
+                      </Button>
+                      {item.kind === "appointment" ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 w-full justify-center rounded-lg bg-muted/20"
+                          onClick={() => onOpenAppointment(item.id)}
+                        >
+                          {l("providers_appointment")}
+                        </Button>
+                      ) : null}
+                      {item.kind !== "appointment" ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 w-full justify-center rounded-lg bg-muted/20"
+                          disabled={!patientRouteId}
+                          onClick={() => onOpenAppointments(patientRouteId)}
+                        >
+                          {l("providers_appointments")}
+                        </Button>
+                      ) : null}
+                      {item.order_id ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 w-full justify-center rounded-lg bg-muted/20"
+                          onClick={() => onOpenOrder(item.order_id!, patientRouteId)}
+                        >
+                          {l("patients_order")}
+                        </Button>
+                      ) : null}
                     </div>
-
-                    {item.notes ? (
-                      <div className="rounded-xl border border-border/60 px-3 py-2 text-sm leading-6 text-zinc-700">
-                        <span className="mb-1 block text-xs text-muted-foreground">{l("patients_note")}</span>
-                        {item.notes}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-col justify-end gap-2 border-t border-dashed border-border pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                      onClick={() => onOpenPatient(item.patient_id)}
-                    >
-                      {l("orders_patient")}
-                    </Button>
-                    {item.kind === "appointment" ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                        onClick={() => onOpenAppointment(item.id)}
-                      >
-                        {l("providers_appointment")}
-                      </Button>
-                    ) : null}
-                    {item.kind !== "appointment" ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                        onClick={() => onOpenAppointments(item.patient_id)}
-                      >
-                        {l("providers_appointments")}
-                      </Button>
-                    ) : null}
-                    {item.order_id ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                        onClick={() => onOpenOrder(item.order_id!)}
-                      >
-                        {l("patients_order")}
-                      </Button>
-                    ) : null}
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>

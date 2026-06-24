@@ -24,6 +24,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/lib/auth";
 import { formatUiText, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import {
   buildInterpreterMobileAgendaSections,
   buildAppointmentTimelineEvents,
@@ -266,6 +267,7 @@ function createStaffAppointmentsPageFieldPatch<K extends keyof StaffAppointments
 
 function useStaffAppointmentsPageContent() {
   const { user } = useAuth();
+  const { staffGo } = useStaffNavigate();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1804,6 +1806,10 @@ function useStaffAppointmentsPageContent() {
         onOpenAppointment={(appointmentId) => {
           handleLinkedProviderOpenChange(false);
           openDetailSheet(appointmentId);
+        }}
+        onOpenOrder={(orderId, patientId) => {
+          handleLinkedProviderOpenChange(false);
+          staffGo(`/orders/${orderId}${patientId ? `?patient=${patientId}` : ""}`);
         }}
       />
 

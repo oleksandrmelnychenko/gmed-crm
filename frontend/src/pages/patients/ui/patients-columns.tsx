@@ -214,7 +214,7 @@ export function buildPatientColumns(
       cellClassName: "min-w-0 whitespace-normal",
       group: "identity",
       render: (p: PatientSummary) => (
-        <div className="min-w-0 space-y-1">
+        <div className="flex h-full min-w-0 flex-col justify-center gap-1 overflow-hidden py-1">
           <div className="line-clamp-2 min-w-0 break-words text-xs font-medium leading-4 text-foreground">
             {patientDisplayName(p)}
           </div>
@@ -557,7 +557,7 @@ function FunctionalLabelSummary({
   const hiddenCount = normalized.length - visible.length;
 
   return (
-    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1 overflow-hidden">
+    <div className="flex min-w-0 flex-nowrap items-center gap-1 overflow-hidden">
       {visible.map((label) => (
         <span
           key={label}

@@ -124,6 +124,7 @@ export function LinkedProviderSheetLayer({
   formatDateTimeLabel,
   onOpenPatient,
   onOpenAppointment,
+  onOpenOrder,
 }: LinkedProviderSheetLayerProps) {
   if (!open) return null;
 
@@ -149,6 +150,7 @@ export function LinkedProviderSheetLayer({
         formatDateTimeLabel={formatDateTimeLabel}
         onOpenPatient={onOpenPatient}
         onOpenAppointment={onOpenAppointment}
+        onOpenOrder={onOpenOrder}
       />
     </Suspense>
   );

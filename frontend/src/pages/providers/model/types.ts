@@ -178,6 +178,7 @@ export type LinkedPatient = {
 type InteractionItem = {
   kind: string;
   id: string;
+  patient_uuid?: string | null;
   patient_id: string;
   patient_name: string;
   doctor_id: string | null;

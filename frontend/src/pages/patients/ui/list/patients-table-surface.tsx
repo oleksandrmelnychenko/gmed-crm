@@ -20,9 +20,9 @@ const LazyPatientDetailSheet = lazy(async () => {
 });
 
 const PATIENT_TABLE_ROW_HEIGHTS: Partial<Record<DensityLevel, number>> = {
-  comfortable: 56,
-  compact: 48,
-  condensed: 40,
+  comfortable: 68,
+  compact: 64,
+  condensed: 60,
 };
 
 type PatientsTableSurfaceProps = {

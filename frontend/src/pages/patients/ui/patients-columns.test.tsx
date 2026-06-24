@@ -69,6 +69,29 @@ describe("buildPatientColumns", () => {
     const patientColumn = columns.find((column) => column.id === "patient");
 
     expect(patientColumn?.cellClassName).toContain("whitespace-normal");
-    expect(renderToStaticMarkup(<>{patientColumn?.render?.(patient())}</>)).toContain("line-clamp-2");
+    const html = renderToStaticMarkup(<>{patientColumn?.render?.(patient())}</>);
+    expect(html).toContain("line-clamp-2");
+    expect(html).toContain("justify-center");
+  });
+
+  it("keeps patient labels on one clipped row so they do not cover the name", () => {
+    const columns = buildPatientColumns(translations, []);
+    const patientColumn = columns.find((column) => column.id === "patient");
+
+    const html = renderToStaticMarkup(
+      <>
+        {patientColumn?.render?.(
+          patient({
+            first_name: "Alexandra Alexandra Alexandra",
+            functional_labels: ["vip", "high_risk", "fall_risk"],
+            last_name: "Grau Grau Grau Grau",
+          }),
+        )}
+      </>,
+    );
+
+    expect(html).toContain("line-clamp-2");
+    expect(html).toContain("flex-nowrap");
+    expect(html).toContain("+1");
   });
 });

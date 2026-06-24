@@ -9094,7 +9094,9 @@ async fn get_patient_medikationsplan_pdf(
     let med_rows = match sqlx::query(
         r#"SELECT category, wirkstoff, handelsname, staerke, form,
                   dose_morgens, dose_mittags, dose_abends, dose_nachts, einheit, hinweis, grund
-           FROM patient_medications WHERE patient_id = $1 ORDER BY sort_order, created_at"#,
+           FROM patient_medications
+           WHERE patient_id = $1 AND NOT COALESCE(on_hold, false)
+           ORDER BY sort_order, created_at"#,
     )
     .bind(patient_uuid)
     .fetch_all(&state.db)

@@ -786,6 +786,9 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
                     "dose_nachts": "0",
                     "einheit": "Stück",
                     "grund": "Bluthochdruck",
+                    "on_hold": true,
+                    "hold_until": "2026-07-15",
+                    "hold_note": "Patient pausiert wegen Nebenwirkungen",
                     "provider_id": provider_id.to_string(),
                     "doctor_id": doctor_id.to_string(),
                 },
@@ -846,6 +849,12 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
     assert_eq!(medications[0]["dose_morgens"], "1");
     assert_eq!(medications[0]["dose_abends"], "1");
     assert_eq!(medications[0]["einheit"], "Stück");
+    assert_eq!(medications[0]["on_hold"], true);
+    assert_eq!(medications[0]["hold_until"], "2026-07-15");
+    assert_eq!(
+        medications[0]["hold_note"],
+        "Patient pausiert wegen Nebenwirkungen"
+    );
     assert_eq!(medications[0]["doctor_name"], format!("Doctor {tag}"));
 
     let examinations = body["examinations"].as_array().expect("examinations array");
@@ -1289,5 +1298,70 @@ async fn patient_clinical_pdf_export_returns_pdf() {
         bytes.len() > 500,
         "expected a non-trivial PDF, got {} bytes",
         bytes.len()
+    );
+}
+
+#[tokio::test]
+async fn patient_medikationsplan_pdf_excludes_on_hold_medications() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-medikationsplan-hold");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/medications"),
+        &pm_bearer,
+        Some(json!({
+            "items": [
+                {
+                    "category": "dauer",
+                    "handelsname": "Metoprolol Active",
+                    "wirkstoff": "Metoprolol",
+                    "form": "TABL",
+                    "dose_morgens": "1",
+                    "einheit": "Stück"
+                },
+                {
+                    "category": "dauer",
+                    "handelsname": "Held Medication",
+                    "wirkstoff": "Heldstoff",
+                    "form": "TABL",
+                    "dose_morgens": "1",
+                    "einheit": "Stück",
+                    "on_hold": true,
+                    "hold_until": "2026-07-15",
+                    "hold_note": "Patient nimmt es nicht"
+                }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!("/api/v1/patients/{patient_id}/medikationsplan.pdf"))
+        .header("Authorization", &pm_bearer)
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
+    assert!(bytes.starts_with(b"%PDF"), "expected PDF magic bytes");
+
+    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(pdf_text.contains("Metoprolol Active"));
+    assert!(
+        !pdf_text.contains("Held Medication"),
+        "on-hold medications must not be printed as active intake plan: {pdf_text:?}"
     );
 }

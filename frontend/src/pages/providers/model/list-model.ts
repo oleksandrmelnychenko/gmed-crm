@@ -15,6 +15,7 @@ import type {
   ServiceItem,
   StaffFormState,
 } from "./types";
+import type { ProviderPeopleRow } from "./people-types";
 import {
   formatEnumLabelFromKeys,
   getLang,
@@ -1506,6 +1507,36 @@ export function doctorToForm(doctor: DoctorSummary): DoctorFormState {
     licensingValidUntil: doctor.licensing_valid_until ?? "",
     notes: doctor.notes ?? "",
   };
+}
+
+export function doctorIdentityValue(
+  doctor: Pick<ProviderPeopleRow, "person_id" | "shared_identity_id">,
+) {
+  return doctor.shared_identity_id?.trim() || doctor.person_id;
+}
+
+export function existingDoctorLinkOptions(
+  rows: readonly ProviderPeopleRow[],
+  currentProviderId: string,
+  linkedDoctorIdentityIds: ReadonlySet<string>,
+) {
+  const seenIdentityIds = new Set<string>();
+  const options: ProviderPeopleRow[] = [];
+
+  for (const row of rows) {
+    if (row.person_type !== "doctor" || row.provider_type !== "medical") continue;
+    if (row.provider_id === currentProviderId) continue;
+
+    const identityId = doctorIdentityValue(row);
+    if (!identityId || linkedDoctorIdentityIds.has(identityId) || seenIdentityIds.has(identityId)) {
+      continue;
+    }
+
+    seenIdentityIds.add(identityId);
+    options.push(row);
+  }
+
+  return options;
 }
 
 /**

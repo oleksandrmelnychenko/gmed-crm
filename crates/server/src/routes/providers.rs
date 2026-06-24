@@ -7500,12 +7500,13 @@ async fn load_provider_interactions_json(
     doctor_id: Option<Uuid>,
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
     let rows = sqlx::query(
-        r#"SELECT kind, interaction_id, patient_id, patient_name, doctor_id, doctor_name,
+        r#"SELECT kind, interaction_id, patient_uuid, patient_id, patient_name, doctor_id, doctor_name,
                   order_id, order_number, status, title, appointment_type, location, notes,
                   occurred_at, quantity, unit_price, currency
            FROM (
                 SELECT 'appointment'::text AS kind,
                        a.id AS interaction_id,
+                       p.id AS patient_uuid,
                        p.patient_id AS patient_id,
                        CONCAT_WS(' ', p.first_name, p.last_name) AS patient_name,
                        a.doctor_id AS doctor_id,
@@ -7532,6 +7533,7 @@ async fn load_provider_interactions_json(
 
                 SELECT 'leistung'::text AS kind,
                        ol.id AS interaction_id,
+                       p.id AS patient_uuid,
                        p.patient_id AS patient_id,
                        CONCAT_WS(' ', p.first_name, p.last_name) AS patient_name,
                        ol.doctor_id AS doctor_id,
@@ -7558,6 +7560,7 @@ async fn load_provider_interactions_json(
 
                 SELECT 'concierge_service'::text AS kind,
                        cs.id AS interaction_id,
+                       p.id AS patient_uuid,
                        p.patient_id AS patient_id,
                        CONCAT_WS(' ', p.first_name, p.last_name) AS patient_name,
                        NULL::uuid AS doctor_id,
@@ -7600,6 +7603,7 @@ async fn load_provider_interactions_json(
         interactions.push(json!({
             "kind": row.try_get::<String, _>("kind").unwrap_or_default(),
             "id": row.try_get::<Uuid, _>("interaction_id").unwrap_or_default(),
+            "patient_uuid": row.try_get::<Uuid, _>("patient_uuid").unwrap_or_default(),
             "patient_id": row.try_get::<String, _>("patient_id").unwrap_or_default(),
             "patient_name": row.try_get::<String, _>("patient_name").unwrap_or_default(),
             "doctor_id": row.try_get::<Option<Uuid>, _>("doctor_id").unwrap_or_default(),

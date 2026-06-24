@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  agencyServiceGrossAmount,
+  agencyServicePackageUsagesByServiceId,
   createPackageItemFromAgencyService,
   packageItemPatchFromAgencyService,
   packageItemVatRate,
@@ -126,6 +128,56 @@ describe("createPackageItemFromAgencyService", () => {
       requiresPatientApproval: false,
     });
     expect(item.formKey).toMatch(/^package-item-form-/);
+  });
+});
+
+describe("agencyServiceGrossAmount", () => {
+  it("calculates a catalog item gross price from net price and VAT", () => {
+    expect(
+      agencyServiceGrossAmount({
+        unit_price: "100",
+        vat_rate: "19",
+      } as never),
+    ).toBe(119);
+    expect(
+      agencyServiceGrossAmount({
+        unit_price: "12.5",
+        vat_rate: "7",
+      } as never),
+    ).toBe(13.38);
+  });
+});
+
+describe("agencyServicePackageUsagesByServiceId", () => {
+  it("groups package usage by agency service without duplicate package links", () => {
+    const usages = agencyServicePackageUsagesByServiceId([
+      {
+        id: "package-1",
+        package_key: "premium",
+        name: "Premium",
+        is_active: true,
+        items: [
+          { agency_service_id: "service-1" },
+          { agency_service_id: "service-1" },
+          { agency_service_id: "service-2" },
+        ],
+      },
+      {
+        id: "package-2",
+        package_key: "archive",
+        name: "Archive",
+        is_active: false,
+        items: [{ agency_service_id: "service-1" }],
+      },
+    ] as never);
+
+    expect(usages.get("service-1")).toEqual([
+      { id: "package-1", packageKey: "premium", name: "Premium", isActive: true },
+      { id: "package-2", packageKey: "archive", name: "Archive", isActive: false },
+    ]);
+    expect(usages.get("service-2")).toEqual([
+      { id: "package-1", packageKey: "premium", name: "Premium", isActive: true },
+    ]);
   });
 });
 

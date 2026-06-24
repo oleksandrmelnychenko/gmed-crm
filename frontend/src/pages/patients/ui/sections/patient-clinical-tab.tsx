@@ -1,8 +1,16 @@
-import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { TabsContent } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
@@ -10,7 +18,7 @@ import { toast } from "@/components/ui/toast";
 import { useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { PauseCircle, Pencil, PlayCircle, Plus, Trash2 } from "lucide-react";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import type { DoctorOption } from "@/pages/appointments/model/types";
 import { fetchProviders } from "@/pages/providers/data/provider-api";
@@ -63,6 +71,13 @@ export function clinicalMedicalProviderRows(providers: ProviderSummary[]): Provi
 
 type ClinicalSectionGroup = { key: string; label: string };
 type IndexedClinicalItem<T> = { item: T; index: number };
+type MedicationHoldDraft = Pick<ClinicalMedication, "on_hold" | "hold_until" | "hold_note">;
+type MedicationHoldEditor = {
+  index: number;
+  medication: ClinicalMedication;
+  list: ClinicalMedication[];
+  draft: MedicationHoldDraft;
+};
 
 type ClinicalSectionListViewArgs<T extends { id?: string | null }> = {
   indexed: IndexedClinicalItem<T>[];
@@ -267,6 +282,11 @@ export function PatientMedicationTable({
                         <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-wide text-amber-700">
                           {tx("На холд", "Auf Hold")}
                           {item.hold_until ? ` ${tx("до", "bis")} ${item.hold_until}` : ""}
+                        </span>
+                      ) : null}
+                      {item.on_hold && item.hold_note ? (
+                        <span className="mt-0.5 block break-words text-[10px] text-amber-800">
+                          {item.hold_note}
                         </span>
                       ) : null}
                     </td>
@@ -629,6 +649,104 @@ function CheckboxField({
   );
 }
 
+function MedicationHoldDialog({
+  editor,
+  busy,
+  onChange,
+  onClose,
+  onSubmit,
+  tx,
+}: {
+  editor: MedicationHoldEditor | null;
+  busy: boolean;
+  onChange: (patch: Partial<MedicationHoldDraft>) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+  tx: Bilingual;
+}) {
+  const draft = editor?.draft;
+  const medicationName = editor?.medication.handelsname?.trim();
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSubmit();
+  }
+
+  return (
+    <Dialog
+      allowImplicitDismissal
+      open={Boolean(editor)}
+      onOpenChange={(open) => {
+        if (!open && !busy) onClose();
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <DialogHeader>
+            <DialogTitle>{tx("На холд", "Auf Hold")}</DialogTitle>
+            <DialogDescription>
+              {medicationName || tx("Медикамент", "Medikament")}
+            </DialogDescription>
+          </DialogHeader>
+
+          {draft ? (
+            <div className="space-y-3">
+              <CheckboxField
+                label={tx("Пациент не принимает препарат", "Patient nimmt das Medikament nicht")}
+                checked={draft.on_hold}
+                onChange={(checked) =>
+                  onChange({
+                    on_hold: checked,
+                    hold_until: checked ? draft.hold_until : null,
+                    hold_note: checked ? draft.hold_note : null,
+                  })
+                }
+              />
+
+              {draft.on_hold ? (
+                <div className="grid gap-3">
+                  <Field label={tx("До какого числа", "Bis wann")}>
+                    <Input
+                      type="date"
+                      value={draft.hold_until ?? ""}
+                      onChange={(event) => onChange({ hold_until: event.target.value || null })}
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field label={tx("Заметка", "Notiz")}>
+                    <textarea
+                      value={draft.hold_note ?? ""}
+                      onChange={(event) => onChange({ hold_note: blankToNull(event.target.value) })}
+                      className={cn(inputClass, "h-24 resize-y py-2")}
+                      placeholder={tx("Причина паузы", "Grund der Pause")}
+                    />
+                  </Field>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 rounded-lg"
+              disabled={busy}
+              onClick={onClose}
+            >
+              {tx("Отмена", "Abbrechen")}
+            </Button>
+            <Button type="submit" size="sm" className="h-8 rounded-lg" disabled={busy || !draft}>
+              {draft?.on_hold ? tx("Сохранить холд", "Hold speichern") : tx("Снять холд", "Hold entfernen")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /** Empfehlungstyp options (value matches the DB `recommendation_type` check). */
 const RECOMMENDATION_TYPE_OPTIONS: { value: string; ru: string; de: string }[] = [
   { value: "follow_up", ru: "Контрольный визит", de: "Kontrolltermin" },
@@ -726,7 +844,7 @@ function lifecycleBadgeClass(status: RecommendationLifecycleStatus): string {
 }
 
 /** Admin CRUD for patient recommendations (Empfehlungen). Replaces the old read-only block. */
-function PatientRecommendationsSection({
+export function PatientRecommendationsSection({
   recommendations,
   allDoctors,
   patientId,
@@ -891,7 +1009,7 @@ function PatientRecommendationsSection({
             onClick={() => setEditing(blankRecommendationDraft())}
           >
             <Plus className="size-3.5" />
-            {tx("Empfehlung", "Empfehlung")}
+            {tx("Рекомендация", "Empfehlung")}
           </Button>
         ) : null}
       </header>
@@ -1164,6 +1282,8 @@ export function PatientClinicalTab({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [version, setVersion] = useState(0);
+  const [medicationHoldEditor, setMedicationHoldEditor] = useState<MedicationHoldEditor | null>(null);
+  const [medicationHoldBusy, setMedicationHoldBusy] = useState(false);
 
   // Refetch when another client edits this patient's clinical record.
   useDebouncedRealtimeSubscription(["patient.clinical_updated"], (_event, events) => {
@@ -1215,6 +1335,59 @@ export function PatientClinicalTab({
       </p>
     ) : null;
   };
+
+  function openMedicationHoldEditor(index: number, medication: ClinicalMedication, list: ClinicalMedication[]) {
+    setMedicationHoldEditor({
+      index,
+      medication,
+      list,
+      draft: {
+        on_hold: Boolean(medication.on_hold),
+        hold_until: medication.hold_until ?? null,
+        hold_note: medication.hold_note ?? null,
+      },
+    });
+  }
+
+  function updateMedicationHoldDraft(patch: Partial<MedicationHoldDraft>) {
+    setMedicationHoldEditor((current) =>
+      current
+        ? {
+            ...current,
+            draft: {
+              ...current.draft,
+              ...patch,
+            },
+          }
+        : current,
+    );
+  }
+
+  async function submitMedicationHoldEditor() {
+    if (!medicationHoldEditor) return;
+    const draft = medicationHoldEditor.draft;
+    const next = medicationHoldEditor.list.map((item, index) =>
+      index === medicationHoldEditor.index
+        ? trimDraftStrings({
+            ...item,
+            on_hold: draft.on_hold,
+            hold_until: draft.on_hold ? draft.hold_until : null,
+            hold_note: draft.on_hold ? draft.hold_note : null,
+          })
+        : item,
+    );
+
+    setMedicationHoldBusy(true);
+    try {
+      await savePatientMedications(patientId, next);
+      setMedications(next);
+      setMedicationHoldEditor(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : tx("Не удалось сохранить", "Speichern fehlgeschlagen"));
+    } finally {
+      setMedicationHoldBusy(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -1505,7 +1678,37 @@ export function PatientClinicalTab({
             groups={groups}
             groupOf={groupOf}
             canManage={canManage}
-            renderActions={renderActions}
+            renderActions={(item, index) => {
+              const currentList = indexed.map((row) => row.item);
+              return (
+                <div className="flex shrink-0 gap-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className={cn(
+                      "size-7 rounded-md p-0",
+                      item.on_hold ? "text-emerald-700" : "text-amber-700",
+                    )}
+                    aria-label={
+                      item.on_hold
+                        ? tx("Снять с холда", "Hold entfernen")
+                        : tx("Поставить на холд", "Auf Hold setzen")
+                    }
+                    title={
+                      item.on_hold
+                        ? tx("Снять с холда", "Hold entfernen")
+                        : tx("Поставить на холд", "Auf Hold setzen")
+                    }
+                    disabled={medicationHoldBusy}
+                    onClick={() => openMedicationHoldEditor(index, item, currentList)}
+                  >
+                    {item.on_hold ? <PlayCircle className="size-3.5" /> : <PauseCircle className="size-3.5" />}
+                  </Button>
+                  {renderActions(item, index)}
+                </div>
+              );
+            }}
             tx={tx}
           />
         )}
@@ -1725,39 +1928,6 @@ export function PatientClinicalTab({
                 />
               ) : null}
             </fieldset>
-            <fieldset className="rounded-lg border border-amber-300/70 bg-amber-50/40 p-2">
-              <CheckboxField
-                label={tx("На холд (пациент не принимает)", "Auf Hold (Patient nimmt es nicht)")}
-                checked={draft.on_hold}
-                onChange={(checked) =>
-                  set({
-                    on_hold: checked,
-                    hold_until: checked ? draft.hold_until : null,
-                    hold_note: checked ? draft.hold_note : null,
-                  })
-                }
-              />
-              {draft.on_hold ? (
-                <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  <Field label={tx("До какого числа", "Bis wann")}>
-                    <Input
-                      type="date"
-                      value={draft.hold_until ?? ""}
-                      onChange={(e) => set({ hold_until: e.target.value || null })}
-                      className={inputClass}
-                    />
-                  </Field>
-                  <Field label={tx("Заметка", "Notiz")}>
-                    <Input
-                      value={draft.hold_note ?? ""}
-                      onChange={(e) => set({ hold_note: e.target.value || null })}
-                      className={inputClass}
-                      placeholder={tx("Причина паузы", "Grund der Pause")}
-                    />
-                  </Field>
-                </div>
-              ) : null}
-            </fieldset>
             <ProviderDoctorFields
               value={draft}
               providers={providers}
@@ -1766,6 +1936,16 @@ export function PatientClinicalTab({
             />
           </div>
         )}
+      />
+      <MedicationHoldDialog
+        editor={medicationHoldEditor}
+        busy={medicationHoldBusy}
+        tx={tx}
+        onChange={updateMedicationHoldDraft}
+        onClose={() => {
+          if (!medicationHoldBusy) setMedicationHoldEditor(null);
+        }}
+        onSubmit={() => void submitMedicationHoldEditor()}
       />
 
       {/* ---- Examinations / Befunde ---- */}
