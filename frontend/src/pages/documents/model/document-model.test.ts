@@ -47,6 +47,49 @@ describe("buildStandardDocumentName", () => {
     ).toBe("FIN-Kostenübernahmeerklärung vom 11.11.2025-M. Mustermann");
   });
 
+  it("maps the expanded document category tree into the expected filename prefixes", () => {
+    expect(
+      buildStandardDocumentName({
+        category: "finance_cost_coverage",
+        art: "Kostenübernahmeerklärung",
+        documentDate: "2026-06-04",
+      }),
+    ).toBe("FIN-Kostenübernahmeerklärung vom 04.06.2026");
+
+    expect(
+      buildStandardDocumentName({
+        category: "visa_invitation_letter",
+        art: "Einladungsschreiben",
+        documentDate: "2026-06-04",
+      }),
+    ).toBe("AMT-Einladungsschreiben vom 04.06.2026");
+
+    expect(
+      buildStandardDocumentName({
+        category: "personal_passport",
+        art: "Reisepass",
+        documentDate: "2026-06-04",
+      }),
+    ).toBe("PERS-Reisepass vom 04.06.2026");
+
+    expect(
+      buildStandardDocumentName({
+        category: "medical_radiology",
+        art: "MRT Befund",
+        documentDate: "2026-06-04",
+        isMedical: true,
+      }),
+    ).toBe("RAD-MRT Befund vom 04.06.2026");
+
+    expect(
+      buildStandardDocumentName({
+        category: "medication_summary",
+        art: "Medikationsplan",
+        documentDate: "2026-06-04",
+      }),
+    ).toBe("MED-Medikationsplan vom 04.06.2026");
+  });
+
   it("uses a stable fallback code for other documents", () => {
     expect(
       buildStandardDocumentName({

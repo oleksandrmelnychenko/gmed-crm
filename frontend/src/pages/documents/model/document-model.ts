@@ -206,7 +206,15 @@ function standardDocumentCategoryCode(input: StandardDocumentNameInput) {
   const art = normalizeDocumentLookup(input.art);
   if (
     input.isMedical ||
-    ["medical", "medical_report", "lab_analysis", "conclusion"].includes(category)
+    category.startsWith("medical") ||
+    [
+      "medical",
+      "medical_report",
+      "lab_analysis",
+      "conclusion",
+      "treatment_plan",
+      "medication_summary",
+    ].includes(category)
   ) {
     return medicalDocumentCode(input);
   }
@@ -215,8 +223,18 @@ function standardDocumentCategoryCode(input: StandardDocumentNameInput) {
     return "FIN";
   }
   if (art.match(/\b(contract|vertrag|order|auftrag)\b/)) return "VERTRAG";
-  if (["finance", "financial", "invoice"].includes(category)) return "FIN";
-  if (["identity", "personal", "personlich"].includes(category)) return "PERS";
+  if (
+    category.startsWith("finance") ||
+    ["finance", "financial", "invoice"].includes(category)
+  ) {
+    return "FIN";
+  }
+  if (
+    category.startsWith("personal") ||
+    ["identity", "personal", "personlich"].includes(category)
+  ) {
+    return "PERS";
+  }
   if (["insurance", "versicherung"].includes(category)) return "VERS";
   if (["other", "sonstige"].includes(category)) return "SONST";
   if (
@@ -231,7 +249,17 @@ function standardDocumentCategoryCode(input: StandardDocumentNameInput) {
   ) {
     return "ADMIN";
   }
-  if (["official", "agency", "behoerde", "amtlich", "vedomstvennye"].includes(category)) {
+  if (
+    category.startsWith("official") ||
+    [
+      "official",
+      "agency",
+      "behoerde",
+      "amtlich",
+      "vedomstvennye",
+      "visa_invitation_letter",
+    ].includes(category)
+  ) {
     return "AMT";
   }
   if (category === "contract") return "VERTRAG";
@@ -413,6 +441,8 @@ export function emptyGenerateForm(patientId = ""): GenerateFormState {
     paymentDate: "",
     paymentMethod: "",
     textBlockKeys: [],
+    manualText: "",
+    manualTextDirty: false,
     bindings: {},
   };
 }

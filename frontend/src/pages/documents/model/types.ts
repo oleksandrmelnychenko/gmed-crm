@@ -165,11 +165,20 @@ export type StaffOption = { id: string; name: string; role: string };
 export type CategoryOption = {
   key: string;
   label: string;
+  label_de?: string;
+  label_en?: string;
   is_medical?: boolean;
   description?: string | null;
   portal_group?: string;
   sort_order?: number;
   patient_visible?: boolean;
+  parent_key?: string | null;
+  level?: "category" | "subcategory" | "type" | string;
+  short_code?: string | null;
+  access_category?: DocumentAccessCategory | null;
+  aliases?: string[];
+  breadcrumb_label?: string;
+  breadcrumb_label_de?: string;
 };
 export type CategoriesResponse = { categories: CategoryOption[]; arts: string[] };
 export type PatientOption = {
@@ -361,6 +370,8 @@ export type GenerateFormState = {
   paymentMethod: DocumentPaymentMethod | "";
   notes: string;
   textBlockKeys: string[];
+  manualText: string;
+  manualTextDirty: boolean;
   bindings: DocumentBindingForm;
 };
 

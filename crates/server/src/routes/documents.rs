@@ -224,6 +224,7 @@ const PDF_TEXT_NO_TEXT_MESSAGE: &str =
     "The PDF does not expose extractable text. Manual transcription is required.";
 const PDF_TEXT_FAILED_MESSAGE: &str = "PDF text extraction failed.";
 const PROVIDER_TEMPLATE_ID_PREFIX: &str = "provider_template:";
+const MAX_GENERATED_MANUAL_TEXT_LEN: usize = 30_000;
 
 #[derive(Clone, Copy)]
 struct DocumentTemplateDefinition {
@@ -1435,6 +1436,7 @@ struct GenerateDocumentRequest {
     title_override: Option<String>,
     introduction: Option<String>,
     closing_note: Option<String>,
+    manual_text: Option<String>,
     text_block_keys: Option<Vec<String>>,
     #[serde(default)]
     bindings: Option<DocumentBindingOverrides>,
@@ -9924,24 +9926,29 @@ async fn generate_provider_document_from_template_internal(
                 generated_at.format("%Y-%m-%d")
             )
         });
+    let manual_text = normalize_generated_manual_text(body.manual_text.as_deref())?;
 
     let mut body_paragraphs = Vec::new();
-    if let Some(introduction) = body
-        .introduction
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        body_paragraphs.push(introduction.to_string());
-    }
-    body_paragraphs.extend(provider_template_paragraphs(&rendered_body));
-    if let Some(closing_note) = body
-        .closing_note
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        body_paragraphs.push(closing_note.to_string());
+    if let Some(manual_text) = manual_text.as_deref() {
+        body_paragraphs.extend(generated_manual_text_paragraphs(manual_text));
+    } else {
+        if let Some(introduction) = body
+            .introduction
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            body_paragraphs.push(introduction.to_string());
+        }
+        body_paragraphs.extend(provider_template_paragraphs(&rendered_body));
+        if let Some(closing_note) = body
+            .closing_note
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            body_paragraphs.push(closing_note.to_string());
+        }
     }
 
     let context = GeneratedProviderTemplateContext {
@@ -10462,6 +10469,10 @@ async fn generate_document(
         .map(ToOwned::to_owned);
 
     let bindings = body.bindings.clone().unwrap_or_default();
+    let manual_text = match normalize_generated_manual_text(body.manual_text.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
     let patient_party = DocPartyBlock {
         name: patient_name.clone(),
         title: patient_title.clone(),
@@ -10515,7 +10526,29 @@ async fn generate_document(
         }),
     };
 
-    let (preview_html, pdf_bytes) = match template.id {
+    let template_match_id = if manual_text.is_some() {
+        "__manual_generated_text"
+    } else {
+        template.id
+    };
+    let (preview_html, pdf_bytes) = match template_match_id {
+        "__manual_generated_text" => {
+            let manual_text = manual_text
+                .as_deref()
+                .expect("manual text exists for manual document branch");
+            let title = title_override
+                .clone()
+                .unwrap_or_else(|| template.label.to_string());
+            let preview = manual_generated_text_preview_html(&title, manual_text);
+            let pdf_bytes = match build_manual_generated_text_pdf(&auto_name, &title, manual_text) {
+                Ok(bytes) => bytes,
+                Err(message) => {
+                    tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build manual generated document PDF");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, message);
+                }
+            };
+            (preview, pdf_bytes)
+        }
         "treatment_plan" => {
             let appointment_rows = match sqlx::query(
                 r#"SELECT a.id, a.date, a.time_start, a.time_end, a.title, a.location, a.category, a.notes,
@@ -11835,6 +11868,47 @@ fn admin_preview_html(title: &str, lines: &[String]) -> String {
     )
 }
 
+fn normalize_generated_manual_text(
+    value: Option<&str>,
+) -> Result<Option<String>, axum::response::Response> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if value.chars().count() > MAX_GENERATED_MANUAL_TEXT_LEN {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Generated document text is too long",
+        ));
+    }
+    Ok(Some(value.to_string()))
+}
+
+fn generated_manual_text_paragraphs(value: &str) -> Vec<String> {
+    value
+        .lines()
+        .map(str::trim_end)
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn manual_generated_text_preview_html(title: &str, text: &str) -> String {
+    let body = generated_manual_text_paragraphs(text)
+        .into_iter()
+        .map(|line| {
+            if line.trim().is_empty() {
+                "<p>&nbsp;</p>".to_string()
+            } else {
+                format!("<p>{}</p>", escape_html(line.trim()))
+            }
+        })
+        .collect::<String>();
+    format!(
+        "<section class=\"generated-document\"><h2>{}</h2>{}</section>",
+        escape_html(title),
+        body
+    )
+}
+
 fn new_admin_pdf() -> Result<(PdfDocument, PdfFontHandle, PdfFontHandle), &'static str> {
     let document = PdfDocument::new("Generated document");
     let (regular, bold) = pdf_text_font_handles();
@@ -11864,6 +11938,30 @@ fn admin_block(layout: &mut TreatmentPlanPdfLayout, text: &str, before: f32, aft
 
 fn admin_heading(layout: &mut TreatmentPlanPdfLayout, text: &str) {
     layout.text_block(text, 13.0, true, 0.0, TreatmentPlanPdfColor::Body, 3.0, 2.0);
+}
+
+fn build_manual_generated_text_pdf(
+    auto_name: &str,
+    title: &str,
+    text: &str,
+) -> Result<Vec<u8>, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let footer = auto_name.trim();
+    let footer = if footer.is_empty() {
+        "Generated document"
+    } else {
+        footer
+    };
+    let mut layout = TreatmentPlanPdfLayout::new(footer.to_string(), regular, bold);
+    admin_heading(&mut layout, title);
+    for line in generated_manual_text_paragraphs(text) {
+        if line.trim().is_empty() {
+            layout.spacer(3.0);
+        } else {
+            admin_block(&mut layout, line.trim(), 0.0, 1.0);
+        }
+    }
+    Ok(finalize_admin_pdf(document, layout))
 }
 
 fn admin_signature_block(
@@ -17909,9 +18007,24 @@ async fn list_document_categories(
     }
 
     let categories = match sqlx::query(
-        r#"SELECT id, name_en, is_medical, description, portal_group, sort_order, patient_visible
-           FROM ref_document_categories
-           ORDER BY sort_order, name_en"#,
+        r#"SELECT c.id,
+                  c.name_de,
+                  c.name_en,
+                  c.is_medical,
+                  c.description,
+                  c.portal_group,
+                  c.sort_order,
+                  c.patient_visible,
+                  c.parent_id,
+                  c.level,
+                  c.short_code,
+                  c.access_category,
+                  c.aliases,
+                  parent.name_de AS parent_name_de,
+                  parent.name_en AS parent_name_en
+           FROM ref_document_categories c
+           LEFT JOIN ref_document_categories parent ON parent.id = c.parent_id
+           ORDER BY c.sort_order, c.name_en"#,
     )
     .fetch_all(&state.db)
     .await
@@ -17922,11 +18035,26 @@ async fn list_document_categories(
                 json!({
                     "key": row.try_get::<String, _>("id").unwrap_or_default(),
                     "label": row.try_get::<String, _>("name_en").unwrap_or_default(),
+                    "label_de": row.try_get::<String, _>("name_de").unwrap_or_default(),
+                    "label_en": row.try_get::<String, _>("name_en").unwrap_or_default(),
                     "is_medical": row.try_get::<bool, _>("is_medical").unwrap_or(false),
                     "description": row.try_get::<Option<String>, _>("description").unwrap_or_default(),
                     "portal_group": row.try_get::<String, _>("portal_group").unwrap_or_else(|_| "other".to_string()),
                     "sort_order": row.try_get::<i32, _>("sort_order").unwrap_or(100),
                     "patient_visible": row.try_get::<bool, _>("patient_visible").unwrap_or(true),
+                    "parent_key": row.try_get::<Option<String>, _>("parent_id").unwrap_or_default(),
+                    "level": row.try_get::<String, _>("level").unwrap_or_else(|_| "type".to_string()),
+                    "short_code": row.try_get::<Option<String>, _>("short_code").unwrap_or_default(),
+                    "access_category": row.try_get::<Option<String>, _>("access_category").unwrap_or_default(),
+                    "aliases": row.try_get::<Vec<String>, _>("aliases").unwrap_or_default(),
+                    "breadcrumb_label": match row.try_get::<Option<String>, _>("parent_name_en").unwrap_or_default() {
+                        Some(parent) if !parent.is_empty() => format!("{} / {}", parent, row.try_get::<String, _>("name_en").unwrap_or_default()),
+                        _ => row.try_get::<String, _>("name_en").unwrap_or_default(),
+                    },
+                    "breadcrumb_label_de": match row.try_get::<Option<String>, _>("parent_name_de").unwrap_or_default() {
+                        Some(parent) if !parent.is_empty() => format!("{} / {}", parent, row.try_get::<String, _>("name_de").unwrap_or_default()),
+                        _ => row.try_get::<String, _>("name_de").unwrap_or_default(),
+                    },
                 })
             })
             .collect::<Vec<_>>(),
@@ -17955,7 +18083,10 @@ async fn list_document_categories(
 
 #[cfg(test)]
 mod tests {
-    use super::{GeneratedPatientStickerContext, build_patient_sticker_pdf, pdf_text_font_handles};
+    use super::{
+        GeneratedPatientStickerContext, build_manual_generated_text_pdf, build_patient_sticker_pdf,
+        pdf_text_font_handles,
+    };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
     use chrono::NaiveDate;
     use printpdf::{BuiltinFont, PdfFontHandle};
@@ -18009,5 +18140,23 @@ mod tests {
 
         assert_eq!(regular, PdfFontHandle::Builtin(BuiltinFont::Helvetica));
         assert_eq!(bold, PdfFontHandle::Builtin(BuiltinFont::HelveticaBold));
+    }
+
+    #[test]
+    fn manual_generated_document_pdf_preserves_editable_text() {
+        let bytes = build_manual_generated_text_pdf(
+            "Terminbestätigung",
+            "Terminbestätigung",
+            "Sehr geehrte Damen und Herren,\n\nIndividueller Text für den Patienten.",
+        )
+        .unwrap();
+
+        let raw_pdf = String::from_utf8_lossy(&bytes);
+        assert!(raw_pdf.contains("/F5"));
+        assert!(raw_pdf.contains("/F6"));
+
+        let extracted_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+        assert!(extracted_text.contains("Sehr geehrte Damen und Herren"));
+        assert!(extracted_text.contains("Individueller Text für den Patienten"));
     }
 }

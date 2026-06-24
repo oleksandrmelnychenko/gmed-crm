@@ -3223,7 +3223,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     onEdit={openProviderEditSheet}
                   />
 
-                  <ProviderAvailabilitySection detail={detail} />
+                  {/* ProviderAvailabilitySection is temporarily hidden from the provider detail page. */}
+                  {/* <ProviderAvailabilitySection detail={detail} /> */}
 
                   <ProviderOverviewSection
                     detail={detail}
@@ -4400,6 +4401,7 @@ function taxonomyAttributeReadOnlyRows(detail: ProviderDetail, lang: "de" | "ru"
   });
 }
 
+/*
 function ProviderAvailabilitySection({ detail }: { detail: ProviderDetail }) {
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
@@ -4419,6 +4421,7 @@ function ProviderAvailabilitySection({ detail }: { detail: ProviderDetail }) {
     </Section>
   );
 }
+*/
 
 function ProviderProfileReadOnlySection({ detail }: { detail: ProviderDetail }) {
   const { t, lang } = useLang();

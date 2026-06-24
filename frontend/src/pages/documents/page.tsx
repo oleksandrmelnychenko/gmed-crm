@@ -251,6 +251,236 @@ function optionLabel(
   return getLang() === "ru" ? option.labelRu : option.labelDe;
 }
 
+function documentCategoryOptionLabel(
+  category: CategoryOption,
+  lang: string,
+  showPath = false,
+) {
+  const label =
+    lang === "ru"
+      ? category.label || category.label_en || category.key
+      : category.label_de || category.label || category.label_en || category.key;
+  const path =
+    lang === "ru"
+      ? category.breadcrumb_label || label
+      : category.breadcrumb_label_de || category.breadcrumb_label || label;
+  const visible = showPath ? path : label;
+  return category.short_code ? `${category.short_code} · ${visible}` : visible;
+}
+
+function documentCategoryValueLabel(
+  value: string | null | undefined,
+  categories: CategoryOption[],
+  lang: string,
+  l: (key: string) => string,
+) {
+  if (!value) return runtimeTranslations().common_not_set;
+  const category = categories.find((item) => item.key === value);
+  return category
+    ? documentCategoryOptionLabel(category, lang)
+    : localizeDocumentCode(value, l);
+}
+
+function draftValue(value: string | null | undefined) {
+  return (value ?? "").trim();
+}
+
+function draftBinding(
+  form: GenerateFormState,
+  key: string,
+  fallback = "____________",
+) {
+  return draftValue(form.bindings[key]) || fallback;
+}
+
+function draftDate(value: string | null | undefined, fallback = "____________") {
+  const raw = draftValue(value);
+  return raw ? formatDate(raw) : fallback;
+}
+
+function draftMultiline(value: string | null | undefined) {
+  return draftValue(value)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function draftPipeRows(value: string | null | undefined) {
+  return draftMultiline(value).map((line) =>
+    line.split("|").map((part) => part.trim()).filter(Boolean),
+  );
+}
+
+function joinDraftLines(lines: Array<string | false | null | undefined>) {
+  return lines
+    .filter((line): line is string => line !== false && line !== null && line !== undefined)
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function buildKnownGeneratedDocumentDraft(input: {
+  template: DocumentTemplate;
+  form: GenerateFormState;
+  patientLabel: string;
+  orderNumber?: string;
+  appointment?: AppointmentOption | null;
+}) {
+  const { template, form, patientLabel, orderNumber, appointment } = input;
+  const title = form.titleOverride.trim() || template.label;
+  const patient = patientLabel || "____________";
+  const signPlace = draftBinding(form, "sign_place", "München");
+  const signDate = draftDate(form.bindings.sign_date || form.documentDate);
+  const recipient =
+    draftMultiline(form.bindings.recipient_block).join("\n") ||
+    "An die Bundespolizei / Grenzschutz";
+  const clinics = draftPipeRows(form.bindings.clinics_text);
+  const clinicText = clinics.length
+    ? clinics.map(([name, address]) => [name, address].filter(Boolean).join(", ")).join("; ")
+    : "den vereinbarten Kliniken";
+  const contactPhones = draftValue(form.bindings.contact_phones);
+  const passportNumber = draftValue(form.bindings.passport_number);
+  const passportValidUntil = draftValue(form.bindings.passport_valid_until);
+  const orderDate = draftDate(form.bindings.order_date || form.documentDate);
+  const contractDate = draftDate(form.bindings.contract_date);
+  const payerName = draftBinding(form, "payer_name", "____________");
+  const serviceRows = draftPipeRows(form.bindings.service_lines_text);
+
+  switch (template.id) {
+    case "appointment_confirmation": {
+      const firstExamination = draftDate(form.bindings.period_from, "in Kürze");
+      const passportLine = passportNumber
+        ? `Reisepass-Nr.: ${passportNumber}${
+            passportValidUntil
+              ? `, gültig bis ${draftDate(passportValidUntil)}`
+              : ""
+          }`
+        : "";
+      return joinDraftLines([
+        `Date: ${signDate}`,
+        "Pages: 1",
+        "Doc.-ID: automatisch",
+        "Originator: GMED",
+        `For: ${patient}`,
+        "Project: TB-V2",
+        "",
+        recipient,
+        "",
+        `${signPlace}, ${signDate}`,
+        "",
+        `Terminbestätigung für ${patient}`,
+        passportLine,
+        "",
+        "Sehr geehrte Damen und Herren,",
+        `hiermit bestätigen wir, dass ${patient} sämtliche Termine für Diagnostik und Behandlung in ${clinicText} wahrnehmen wird.`,
+        `Die ersten Untersuchungen finden am ${firstExamination} statt.`,
+        "Die Behandlung wurde in Deutschland begonnen und soll nun fortgesetzt werden. Dolmetscher und Transfer sind organisiert.",
+        "Die Kostenfrage wurde mit dem Patienten geklärt. Es fallen keine Kosten für die Bundesrepublik Deutschland an.",
+        contactPhones
+          ? `Für Rückfragen stehen wir Ihnen gerne unter ${contactPhones} zur Verfügung.`
+          : "Für Rückfragen stehen wir Ihnen gerne zur Verfügung.",
+        "",
+        "Mit freundlichen Grüßen,",
+        "",
+        "c/o GMED",
+        "Geschäftsführer",
+      ]);
+    }
+    case "visa_invitation_letter": {
+      const appointmentText = appointment
+        ? `Geplanter Termin: ${formatDate(appointment.date)}${
+            appointment.time_start ? ` um ${appointment.time_start}` : ""
+          }${appointment.title ? `, ${appointment.title}` : ""}.`
+        : "";
+      const passportClause = passportNumber
+        ? `, Reisepass-Nr. ${passportNumber}${
+            passportValidUntil
+              ? `, gültig bis ${draftDate(passportValidUntil)}`
+              : ""
+          }`
+        : "";
+      return joinDraftLines([
+        title,
+        "",
+        recipient,
+        "",
+        `${signPlace}, ${signDate}`,
+        "",
+        `Hiermit bestätigen wir, dass ${patient}${passportClause} zur medizinischen Koordination und Vorstellung eingeladen ist.`,
+        appointmentText,
+        `Vorgesehene Einrichtung(en): ${clinicText}.`,
+        orderNumber ? `Interne Koordinationsnummer: ${orderNumber}.` : "",
+        "Dieses Schreiben dient zur Vorlage bei Botschaft oder Konsulat im Rahmen des Visumantrags.",
+        contactPhones
+          ? `Für Rückfragen stehen wir Ihnen gerne unter ${contactPhones} zur Verfügung.`
+          : "Für Rückfragen stehen wir Ihnen gerne zur Verfügung.",
+      ]);
+    }
+    case "single_order": {
+      const specialties = draftBinding(form, "specialties", "den vereinbarten Fachbereichen");
+      const purpose =
+        draftValue(form.bindings.examination_purpose) ||
+        "ausführliche medizinische Untersuchung";
+      return joinDraftLines([
+        title,
+        orderNumber || draftValue(form.bindings.order_number)
+          ? `Auftragsnummer: ${orderNumber || form.bindings.order_number}`
+          : "",
+        "",
+        `Einzelauftrag vom ${orderDate} zum Rahmendienstleistungsvertrag vom ${contractDate}.`,
+        "",
+        "zwischen",
+        patient,
+        "und",
+        "GMED",
+        "",
+        "§ 1 Leistungsumfang",
+        `Individuelle Beratung und Informationsvermittlung für ${specialties} mit dem Zweck, sich einer ${purpose} zu unterziehen.`,
+        "Administrative Unterstützung bei der Zusammenstellung und Übermittlung medizinischer Unterlagen.",
+        "Koordination von Terminen, Dolmetschern, Transfer und nachgelagerten Prozessen.",
+        draftValue(form.bindings.order_components),
+      ]);
+    }
+    case "cost_coverage_declaration": {
+      const services = serviceRows.map(([description, fee, quantity, total]) =>
+        [description, fee, quantity, total].filter(Boolean).join(" | "),
+      );
+      return joinDraftLines([
+        title,
+        "",
+        `Kostenübernehmer: ${payerName}`,
+        `Auftraggeber: ${patient}`,
+        `Einzelauftrag vom: ${orderDate}`,
+        `Rahmendienstleistungsvertrag vom: ${contractDate}`,
+        "",
+        "Der Kostenübernehmer erklärt sich bereit, sämtliche im Zusammenhang mit dem genannten Einzelauftrag entstehenden Kosten gegenüber GMED zu übernehmen.",
+        services.length ? "Leistungen:" : "",
+        ...services.map((line) => `- ${line}`),
+        "",
+        `${signPlace}, ${signDate}`,
+      ]);
+    }
+    case "cost_estimate": {
+      const services = serviceRows.map(([description, range]) =>
+        [description, range].filter(Boolean).join(" | "),
+      );
+      return joinDraftLines([
+        title,
+        "",
+        `Patient: ${patient}`,
+        `Datum: ${orderDate}`,
+        services.length ? "Voraussichtliche Leistungen:" : "",
+        ...services.map((line) => `- ${line}`),
+        draftValue(form.bindings.estimate_total)
+          ? `Gesamt: ${form.bindings.estimate_total}`
+          : "",
+      ]);
+    }
+    default:
+      return null;
+  }
+}
+
 function labelFromOptions<T extends string>(
   value: T | "" | null | undefined,
   options: Array<{ value: T; labelRu: string; labelDe: string }>,
@@ -942,6 +1172,14 @@ function StaffDocumentsPage({
     paymentMethod: lang === "ru" ? "Метод оплаты" : "Zahlungsart",
     notFinancial: lang === "ru" ? "Не финансовый" : "Nicht finanziell",
     noPaymentMethod: lang === "ru" ? "Не указано" : "Nicht angegeben",
+    finalGeneratedText:
+      lang === "ru" ? "Финальный текст PDF" : "Finaler PDF-Text",
+    finalGeneratedTextHint:
+      lang === "ru"
+        ? "Текст ниже собран из текущих данных формы. Если его изменить, PDF будет создан именно из этого текста."
+        : "Der Text unten wird aus den aktuellen Formulardaten aufgebaut. Wenn du ihn bearbeitest, wird das PDF genau aus diesem Text erstellt.",
+    resetGeneratedText:
+      lang === "ru" ? "Вернуть текст шаблона" : "Vorlagentext wiederherstellen",
   };
   const documentsFailedLoadDocumentsText = t.documents_failed_load_documents;
   const documentsFailedLoadIntakeQueueText = t.documents_failed_load_intake_queue;
@@ -1299,6 +1537,106 @@ function StaffDocumentsPage({
     const allowed = new Set(selectedTemplate?.text_block_keys ?? []);
     return templateTextBlocks.filter((block) => allowed.has(block.key));
   }, [selectedTemplate, templateTextBlocks]);
+  const generatedManualTextDraft = useMemo(() => {
+    if (!selectedTemplate) return "";
+    const patient = patients.find((item) => item.id === generateForm.patientId);
+    const order = generateOrders.find((item) => item.id === generateForm.orderId);
+    const appointment = generateAppointments.find(
+      (item) => item.id === generateForm.appointmentId,
+    );
+    const patientLabel = patient ? patientOptionLabel(patient) : "";
+    const knownDraft = buildKnownGeneratedDocumentDraft({
+      template: selectedTemplate,
+      form: generateForm,
+      patientLabel,
+      orderNumber: order?.order_number,
+      appointment,
+    });
+    if (knownDraft) return knownDraft;
+
+    const lines: string[] = [];
+    const title = generateForm.titleOverride.trim() || selectedTemplate.label;
+    lines.push(title);
+    lines.push("");
+    lines.push(`${metaText.documentDate}: ${generateForm.documentDate || new Date().toISOString().slice(0, 10)}`);
+    if (patientLabel) lines.push(`${t.orders_patient}: ${patientLabel}`);
+    if (order) lines.push(`${t.orders_title}: ${order.order_number}`);
+    if (appointment) {
+      lines.push(
+        `${t.appointments_title}: ${appointment.title} · ${formatDate(appointment.date)}${
+          appointment.time_start ? ` · ${appointment.time_start}` : ""
+        }`,
+      );
+    }
+    const source = compactDocumentParty(
+      generateForm.sourcePerson || generateForm.ursprung,
+      generateForm.sourceInstitution || generateForm.klinik,
+    );
+    if (source) lines.push(`${metaText.sourceInstitution}: ${source}`);
+    const addressee =
+      compactDocumentParty(
+        generateForm.addresseePerson,
+        generateForm.addresseeInstitution,
+      ) || patientDocumentAddresseeLabel(generateForm.patientId, patients);
+    if (addressee) lines.push(`${metaText.addresseePerson}: ${addressee}`);
+
+    if (generateForm.introduction.trim()) {
+      lines.push("");
+      lines.push(generateForm.introduction.trim());
+    }
+
+    const bindingFields = DOCUMENT_BINDING_FIELDS[selectedTemplate.id] ?? [];
+    const bindingLines = bindingFields
+      .map((field) => {
+        const value = generateForm.bindings[field.key]?.trim();
+        return value ? `${field.label}: ${value}` : "";
+      })
+      .filter(Boolean);
+    if (bindingLines.length > 0) {
+      lines.push("");
+      lines.push(t.documents_section_bindings);
+      lines.push(...bindingLines);
+    }
+
+    const selectedBlocks = availableTemplateBlocks.filter((block) =>
+      generateForm.textBlockKeys.includes(block.key),
+    );
+    if (selectedBlocks.length > 0) {
+      lines.push("");
+      lines.push(t.documents_text_blocks);
+      for (const block of selectedBlocks) {
+        const textBlock = localizeTextBlock(block.key, lang, block);
+        lines.push(textBlock.label);
+        if (textBlock.description) lines.push(textBlock.description);
+      }
+    }
+
+    if (generateForm.closingNote.trim()) {
+      lines.push("");
+      lines.push(generateForm.closingNote.trim());
+    }
+
+    return lines.join("\n").trim();
+  }, [
+    availableTemplateBlocks,
+    generateAppointments,
+    generateForm,
+    generateOrders,
+    lang,
+    metaText.addresseePerson,
+    metaText.documentDate,
+    metaText.sourceInstitution,
+    patients,
+    selectedTemplate,
+    t.appointments_title,
+    t.documents_section_bindings,
+    t.documents_text_blocks,
+    t.orders_patient,
+    t.orders_title,
+  ]);
+  const displayedGeneratedManualText = generateForm.manualTextDirty
+    ? generateForm.manualText
+    : generatedManualTextDraft;
   const activePortalShares = useMemo(
     () =>
       shares.filter(
@@ -1880,6 +2218,8 @@ function StaffDocumentsPage({
           templateId,
           replaceDocumentId: "",
           textBlockKeys: [],
+          manualText: "",
+          manualTextDirty: false,
           bindings: {},
         };
       }
@@ -1925,6 +2265,8 @@ function StaffDocumentsPage({
         textBlockKeys: current.textBlockKeys.filter((key) =>
           allowedBlocks.has(key),
         ),
+        manualText: "",
+        manualTextDirty: false,
         bindings: template.id === current.templateId ? current.bindings : {},
       };
     });
@@ -2005,6 +2347,8 @@ function StaffDocumentsPage({
       paymentMethod: document.payment_method ?? "",
       notes: document.notes ?? "",
       textBlockKeys: [],
+      manualText: "",
+      manualTextDirty: false,
       bindings: prefillDocumentBindingsFromText(template.id, extractedText),
     });
     setGenerateError("");
@@ -2075,6 +2419,9 @@ function StaffDocumentsPage({
         payment_date: generateForm.paymentDate || null,
         payment_method: generateForm.paymentMethod || null,
         notes: generateForm.notes.trim() || null,
+        manual_text: generateForm.manualTextDirty
+          ? displayedGeneratedManualText.trim() || null
+          : null,
         text_block_keys: generateForm.textBlockKeys,
         bindings: buildBindingsPayload(selectedTemplate.id, generateForm.bindings),
       });
@@ -2698,10 +3045,12 @@ function StaffDocumentsPage({
                 size="sm"
                 className="h-8 rounded-lg gap-1.5"
                 onClick={() => {
-                  setGenerateForm((current) => ({
-                    ...current,
-                    replaceDocumentId: "",
-                  }));
+	                  setGenerateForm((current) => ({
+	                    ...current,
+	                    replaceDocumentId: "",
+	                    manualText: "",
+	                    manualTextDirty: false,
+	                  }));
                   setTemplateOpen(true);
                 }}
               >
@@ -2927,7 +3276,7 @@ function StaffDocumentsPage({
               <option value="">{text.allCategories}</option>
               {categories.map((category) => (
                 <option key={category.key} value={category.key}>
-                  {localizeDocumentCode(category.key, l) || category.label}
+                  {documentCategoryOptionLabel(category, lang, true)}
                 </option>
               ))}
             </NativeComboboxSelect>
@@ -3716,32 +4065,67 @@ function StaffDocumentsPage({
 
                 <DocumentSheetSection title={t.documents_section_text_notes}>
                   <div className="grid gap-4 md:grid-cols-2">
-              <Field label={t.documents_introduction}>
-                <textarea
-                  value={generateForm.introduction}
-                  onChange={(event) =>
-                    setGenerateForm((current) => ({
-                      ...current,
-                      introduction: event.target.value,
-                    }))
-                  }
-                  className={textareaClassName}
-                  placeholder={t.documents_introduction_placeholder}
-                />
-              </Field>
-              <Field label={t.documents_closing_note}>
-                <textarea
-                  value={generateForm.closingNote}
-                  onChange={(event) =>
-                    setGenerateForm((current) => ({
-                      ...current,
-                      closingNote: event.target.value,
-                    }))
-                  }
-                  className={textareaClassName}
-                  placeholder={t.documents_closing_note_placeholder}
-                />
-              </Field>
+                    <Field label={t.documents_introduction}>
+                      <textarea
+                        value={generateForm.introduction}
+                        onChange={(event) =>
+                          setGenerateForm((current) => ({
+                            ...current,
+                            introduction: event.target.value,
+                          }))
+                        }
+                        className={textareaClassName}
+                        placeholder={t.documents_introduction_placeholder}
+                      />
+                    </Field>
+                    <Field label={t.documents_closing_note}>
+                      <textarea
+                        value={generateForm.closingNote}
+                        onChange={(event) =>
+                          setGenerateForm((current) => ({
+                            ...current,
+                            closingNote: event.target.value,
+                          }))
+                        }
+                        className={textareaClassName}
+                        placeholder={t.documents_closing_note_placeholder}
+                      />
+                    </Field>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 rounded-lg"
+                        onClick={() =>
+                          setGenerateForm((current) => ({
+                            ...current,
+                            manualText: "",
+                            manualTextDirty: false,
+                          }))
+                        }
+                      >
+                        {metaText.resetGeneratedText}
+                      </Button>
+                    </div>
+                    <Field label={metaText.finalGeneratedText}>
+                      <textarea
+                        value={displayedGeneratedManualText}
+                        onChange={(event) =>
+                          setGenerateForm((current) => ({
+                            ...current,
+                            manualText: event.target.value,
+                            manualTextDirty: true,
+                          }))
+                        }
+                        className={cn(
+                          textareaClassName,
+                          "min-h-[260px] leading-relaxed",
+                        )}
+                      />
+                    </Field>
                   </div>
                   <Field label={t.documents_internal_note}>
                     <textarea
@@ -3912,7 +4296,7 @@ function StaffDocumentsPage({
                         <option value="">{t.documents_no_category}</option>
                         {categories.map((category) => (
                           <option key={category.key} value={category.key}>
-                            {localizeDocumentCode(category.key, l) || category.label}
+                            {documentCategoryOptionLabel(category, lang, true)}
                           </option>
                         ))}
                       </NativeComboboxSelect>
@@ -4641,7 +5025,7 @@ function StaffDocumentsPage({
                       <option value="">{t.documents_no_category}</option>
                       {categories.map((category) => (
                         <option key={category.key} value={category.key}>
-                          {localizeDocumentCode(category.key, l) || category.label}
+                          {documentCategoryOptionLabel(category, lang, true)}
                         </option>
                       ))}
                     </NativeComboboxSelect>
@@ -5307,7 +5691,7 @@ function StaffDocumentsPage({
                         <div className="mt-4 space-y-2.5">
                           <DocumentMetaFact
                             label={t.documents_category}
-                            value={detail.category ? localizeDocumentCode(detail.category, l) : t.common_not_set}
+                            value={documentCategoryValueLabel(detail.category, categories, lang, l)}
                           />
                           <DocumentMetaFact
                             label={t.common_provider}
@@ -6197,7 +6581,12 @@ function StaffDocumentsPage({
                           {text.suggestedClassification}{" "}
                           <span className="font-medium">
                             {localizeDocumentCode(detail.classification_suggestion.art, l)} ·{" "}
-                            {localizeDocumentCode(detail.classification_suggestion.category, l)}
+                            {documentCategoryValueLabel(
+                              detail.classification_suggestion.category,
+                              categories,
+                              lang,
+                              l,
+                            )}
                           </span>
                         </div>
                       ) : null}
@@ -6231,7 +6620,7 @@ function StaffDocumentsPage({
                             <option value="">{t.documents_choose_category}</option>
                             {categories.map((category) => (
                               <option key={category.key} value={category.key}>
-                                {localizeDocumentCode(category.key, l) || category.label}
+                                {documentCategoryOptionLabel(category, lang, true)}
                               </option>
                             ))}
                           </NativeComboboxSelect>
