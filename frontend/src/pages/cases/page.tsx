@@ -772,9 +772,18 @@ function patientLabel(patient: PatientOption) {
 
 function doctorOptionLabel(doctor: DoctorOption, lang: SpecializationLabelLang) {
   const titlePrefix = doctor.title?.trim() ? `${doctor.title.trim()} ` : "";
-  const specialtyLabel = doctorSpecialtyLabel(doctor, lang);
-  const specialty = specialtyLabel ? ` - ${specialtyLabel}` : "";
-  return `${doctor.provider_name} | ${titlePrefix}${doctor.name}${specialty}`;
+  const doctorName = `${titlePrefix}${doctor.name}`.trim();
+  const provider = doctor.provider_name.trim();
+  const providerLabel = provider
+    ? `${lang === "de" ? "Klinik" : "Клиника"}: ${provider}`
+    : "";
+  return [doctorName, providerLabel].filter(Boolean).join(" · ");
+}
+
+function doctorOptionSearchText(doctor: DoctorOption, lang: SpecializationLabelLang) {
+  return [doctorOptionLabel(doctor, lang), doctorSpecialtyLabel(doctor, lang)]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 const CASE_DATE_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
@@ -901,6 +910,86 @@ function bannerText(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+function sectionSaveErrorText(error: unknown, fallback: string) {
+  const message = bannerText(error, fallback);
+  const normalized = message.toLowerCase();
+  const lang = getLang();
+
+  if (normalized.includes("doctor not found")) {
+    return lang === "de"
+      ? "Der ausgewählte Arzt ist nicht mehr verfügbar. Bitte wählen Sie den Arzt erneut aus."
+      : "Выбранный врач больше недоступен. Выберите врача ещё раз.";
+  }
+
+  if (normalized.includes("invalid date")) {
+    return lang === "de"
+      ? "Bitte prüfen Sie das Datum. Erwartetes Format: JJJJ-MM-TT."
+      : "Проверьте дату. Ожидаемый формат: ГГГГ-ММ-ДД.";
+  }
+
+  return message;
+}
+
+const CASE_DOCTOR_OPTION_SEPARATOR = "::provider::";
+
+function caseDoctorOptionValue(doctor: DoctorOption) {
+  return `${doctor.id}${CASE_DOCTOR_OPTION_SEPARATOR}${doctor.provider_id}`;
+}
+
+function splitCaseDoctorSelection(value?: string | null) {
+  const raw = (value ?? "").trim();
+  if (!raw || raw === "__none__") return { doctorId: "", providerId: "" };
+  const [doctorId, providerId = ""] = raw.split(CASE_DOCTOR_OPTION_SEPARATOR);
+  return { doctorId, providerId };
+}
+
+function findCaseDoctorBySelection(value: string | null | undefined, doctors: DoctorOption[]) {
+  const { doctorId, providerId } = splitCaseDoctorSelection(value);
+  if (!doctorId) return null;
+  if (providerId) {
+    return doctors.find((doctor) => doctor.id === doctorId && doctor.provider_id === providerId) ?? null;
+  }
+  return doctors.find((doctor) => doctor.id === doctorId) ?? null;
+}
+
+function caseDoctorSelectValue(
+  value: string | null | undefined,
+  providerContext: string | null | undefined,
+  doctors: DoctorOption[],
+) {
+  const { doctorId, providerId } = splitCaseDoctorSelection(value);
+  if (!doctorId) return "__none__";
+  if (providerId) return `${doctorId}${CASE_DOCTOR_OPTION_SEPARATOR}${providerId}`;
+
+  const matches = doctors.filter((doctor) => doctor.id === doctorId);
+  if (matches.length === 0) return doctorId;
+
+  const normalizedProviderContext = providerContext?.trim().toLocaleLowerCase();
+  const providerMatch = normalizedProviderContext
+    ? matches.find((doctor) => {
+        const providerName = doctor.provider_name.trim().toLocaleLowerCase();
+        return (
+          providerName === normalizedProviderContext ||
+          normalizedProviderContext.includes(providerName)
+        );
+      })
+    : null;
+
+  return caseDoctorOptionValue(providerMatch ?? matches[0]);
+}
+
+function caseDoctorPayloadId(value: string | null | undefined, doctors: DoctorOption[]) {
+  const { doctorId, providerId } = splitCaseDoctorSelection(value);
+  if (!doctorId) return null;
+  if (providerId) {
+    return doctors.some((doctor) => doctor.id === doctorId && doctor.provider_id === providerId)
+      ? doctorId
+      : null;
+  }
+  if (doctors.length > 0 && !doctors.some((doctor) => doctor.id === doctorId)) return null;
+  return doctorId;
+}
+
 function sanitizeVorerkrankungen(items: VorerkrankungItem[]) {
   return items.flatMap((item) => {
     const erkrankung = item.erkrankung.trim();
@@ -924,21 +1013,21 @@ function sanitizeAllergien(items: AllergieItem[]) {
   });
 }
 
-function sanitizeOperationen(items: OperationItem[]) {
+function sanitizeOperationen(items: OperationItem[], doctors: DoctorOption[]) {
   return items.flatMap((item) => {
     const grund = item.grund.trim();
     if (!grund) return [];
     return [{
       datum: toOptionalText(item.datum ?? ""),
       grund,
-      arzt_id: toOptionalText(item.arzt_id ?? ""),
+      arzt_id: caseDoctorPayloadId(item.arzt_id ?? "", doctors),
       arzt: toOptionalText(item.arzt ?? ""),
       notiz: toOptionalText(item.notiz ?? ""),
     }];
   });
 }
 
-function sanitizeMedikamente(items: MedikamentItem[]) {
+function sanitizeMedikamente(items: MedikamentItem[], doctors: DoctorOption[]) {
   return items.flatMap((item) => {
     const handelsname = item.handelsname.trim();
     if (!handelsname) return [];
@@ -953,7 +1042,7 @@ function sanitizeMedikamente(items: MedikamentItem[]) {
       anmerkung: toOptionalText(item.anmerkung ?? ""),
       grund: toOptionalText(item.grund ?? ""),
       seit: toOptionalText(item.seit ?? ""),
-      verordnender_arzt_id: toOptionalText(item.verordnender_arzt_id ?? ""),
+      verordnender_arzt_id: caseDoctorPayloadId(item.verordnender_arzt_id ?? "", doctors),
       verordnender_arzt: toOptionalText(item.verordnender_arzt ?? ""),
       med_typ: toOptionalText(item.med_typ ?? "") ?? "permanent",
       expiry_date: toOptionalText(item.expiry_date ?? ""),
@@ -2016,7 +2105,7 @@ function useCasesPageContent({
     } catch (error) {
       setSectionErrors((current) => ({
         ...current,
-        [key]: bannerText(error, fallbackMessage),
+        [key]: sectionSaveErrorText(error, fallbackMessage),
       }));
     } finally {
       setSectionBusy("");
@@ -2033,7 +2122,7 @@ function useCasesPageContent({
         patient_id: createForm.patientId,
         hauptanfragegrund: toOptionalText(createForm.hauptanfragegrund),
         aktuelle_anamnese: toOptionalText(createForm.aktuelleAnamnese),
-        zuweiser_doctor_id: toOptionalText(createForm.zuweiserDoctorId),
+        zuweiser_doctor_id: caseDoctorPayloadId(createForm.zuweiserDoctorId, doctors),
         zuweiser: toOptionalText(createForm.zuweiser),
       });
       setCreateOpen(false);
@@ -2137,7 +2226,7 @@ function useCasesPageContent({
         saveCaseOverview(detail.id, {
           hauptanfragegrund: toOptionalText(overviewForm.hauptanfragegrund),
           aktuelle_anamnese: toOptionalText(overviewForm.aktuelle_anamnese),
-          zuweiser_doctor_id: toOptionalText(overviewForm.zuweiser_doctor_id),
+          zuweiser_doctor_id: caseDoctorPayloadId(overviewForm.zuweiser_doctor_id, doctors),
           zuweiser: toOptionalText(overviewForm.zuweiser),
         }),
       t.common_failed_update,
@@ -2174,7 +2263,7 @@ function useCasesPageContent({
     await runSectionSave(
       "operationen",
       () =>
-        saveCaseOperationen(detail.id, { items: sanitizeOperationen(operationen) }),
+        saveCaseOperationen(detail.id, { items: sanitizeOperationen(operationen, doctors) }),
       t.common_failed_update,
     );
   }
@@ -2185,7 +2274,7 @@ function useCasesPageContent({
     await runSectionSave(
       "medikamente",
       () =>
-        saveCaseMedikamente(detail.id, { items: sanitizeMedikamente(medikamente) }),
+        saveCaseMedikamente(detail.id, { items: sanitizeMedikamente(medikamente, doctors) }),
       t.common_failed_update,
     );
   }
@@ -2594,24 +2683,29 @@ function useCasesPageContent({
                 <Panel title={t.common_doctor}>
                   <Field label={t.cases_referrer}>
                     <NativeComboboxSelect
-                      value={createForm.zuweiserDoctorId || "__none__"}
+                      value={caseDoctorSelectValue(createForm.zuweiserDoctorId, null, doctors)}
 
 
                       onChange={(event) => {
-                        const doctorId = event.target.value && event.target.value !== "__none__" ? event.target.value : "";
-                        const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
+                        const selectedDoctor = findCaseDoctorBySelection(event.target.value, doctors);
                         setCreateForm((current) => ({
                           ...current,
-                          zuweiserDoctorId: doctorId,
-                          zuweiser: selectedDoctor ? selectedDoctor.name : current.zuweiser,
+                          zuweiserDoctorId: selectedDoctor ? caseDoctorOptionValue(selectedDoctor) : "",
+                          zuweiser: selectedDoctor
+                            ? doctorOptionLabel(selectedDoctor, lang)
+                            : current.zuweiser,
                         }));
                       }} className={selectClassName}>
                         <option value="__none__">{t.common_not_set}</option>
-                        {doctors.map((doctor) => (
-                          <option key={doctor.id} value={doctor.id}>
-                            {doctorOptionLabel(doctor, lang)}
-                          </option>
-                        ))}
+                        {doctors.map((doctor) => {
+                          const value = caseDoctorOptionValue(doctor);
+                          const label = doctorOptionLabel(doctor, lang);
+                          return (
+                            <option key={value} value={value} data-search-text={doctorOptionSearchText(doctor, lang)}>
+                              {label}
+                            </option>
+                          );
+                        })}
                       </NativeComboboxSelect>
                   </Field>
 
@@ -2800,24 +2894,29 @@ function useCasesPageContent({
                       </Field>
                       <Field label={t.cases_referrer}>
                         <NativeComboboxSelect
-                          value={overviewForm.zuweiser_doctor_id || "__none__"}
+                          value={caseDoctorSelectValue(overviewForm.zuweiser_doctor_id, null, doctors)}
 
 
                           onChange={(event) => {
-                            const doctorId = event.target.value && event.target.value !== "__none__" ? event.target.value : "";
-                            const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
+                            const selectedDoctor = findCaseDoctorBySelection(event.target.value, doctors);
                             setOverviewForm((current) => ({
                               ...current,
-                              zuweiser_doctor_id: doctorId,
-                              zuweiser: selectedDoctor ? selectedDoctor.name : current.zuweiser,
+                              zuweiser_doctor_id: selectedDoctor ? caseDoctorOptionValue(selectedDoctor) : "",
+                              zuweiser: selectedDoctor
+                                ? doctorOptionLabel(selectedDoctor, lang)
+                                : current.zuweiser,
                             }));
                           }} className={selectClassName}>
                             <option value="__none__">{t.common_not_set}</option>
-                            {doctors.map((doctor) => (
-                              <option key={doctor.id} value={doctor.id}>
-                                {doctorOptionLabel(doctor, lang)}
-                              </option>
-                            ))}
+                            {doctors.map((doctor) => {
+                              const value = caseDoctorOptionValue(doctor);
+                              const label = doctorOptionLabel(doctor, lang);
+                              return (
+                                <option key={value} value={value} data-search-text={doctorOptionSearchText(doctor, lang)}>
+                                  {label}
+                                </option>
+                              );
+                            })}
                           </NativeComboboxSelect>
                       </Field>
                       <Field label={t.cases_clinical_referrer_label}>
@@ -3132,27 +3231,35 @@ function useCasesPageContent({
                         <Field label={t.cases_reason} required><Input value={item.grund} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_clinical_doctor_registry}>
                           <NativeComboboxSelect
-                            value={item.arzt_id || "__none__"}
+                            value={caseDoctorSelectValue(
+                              item.arzt_id,
+                              [item.arzt_provider_name, item.arzt].filter(Boolean).join(" "),
+                              doctors,
+                            )}
 
 
                             onChange={(event) => {
-                              const doctorId = event.target.value && event.target.value !== "__none__" ? event.target.value : "";
-                              const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
+                              const selectedDoctor = findCaseDoctorBySelection(event.target.value, doctors);
                               setOperationen((current) =>
                                 updateItemAtIndex(current, index, {
-                                  arzt_id: doctorId,
+                                  arzt_id: selectedDoctor ? caseDoctorOptionValue(selectedDoctor) : "",
+                                  arzt_provider_name: selectedDoctor?.provider_name ?? null,
                                   arzt: selectedDoctor
-                                    ? selectedDoctor.name
+                                    ? doctorOptionLabel(selectedDoctor, lang)
                                     : (current[index]?.arzt ?? ""),
                                 }),
                               );
                             }} className={selectClassName}>
                               <option value="__none__">{t.common_not_set}</option>
-                              {doctors.map((doctor) => (
-                                <option key={doctor.id} value={doctor.id}>
-                                  {doctorOptionLabel(doctor, lang)}
-                                </option>
-                              ))}
+                              {doctors.map((doctor) => {
+                                const value = caseDoctorOptionValue(doctor);
+                                const label = doctorOptionLabel(doctor, lang);
+                                return (
+                                  <option key={value} value={value} data-search-text={doctorOptionSearchText(doctor, lang)}>
+                                    {label}
+                                  </option>
+                                );
+                              })}
                             </NativeComboboxSelect>
                         </Field>
                         <Field label={t.cases_clinical_doctor_label}><Input value={item.arzt ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder={t.cases_clinical_legacy_manual_fallback} /></Field>
@@ -3240,27 +3347,37 @@ function useCasesPageContent({
                         <Field label={t.cases_reason}><Input value={item.grund ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_clinical_doctor_registry}>
                           <NativeComboboxSelect
-                            value={item.verordnender_arzt_id || "__none__"}
+                            value={caseDoctorSelectValue(
+                              item.verordnender_arzt_id,
+                              [item.verordnender_arzt_provider_name, item.verordnender_arzt]
+                                .filter(Boolean)
+                                .join(" "),
+                              doctors,
+                            )}
 
 
                             onChange={(event) => {
-                              const doctorId = event.target.value && event.target.value !== "__none__" ? event.target.value : "";
-                              const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
+                              const selectedDoctor = findCaseDoctorBySelection(event.target.value, doctors);
                               setMedikamente((current) =>
                                 updateItemAtIndex(current, index, {
-                                  verordnender_arzt_id: doctorId,
+                                  verordnender_arzt_id: selectedDoctor ? caseDoctorOptionValue(selectedDoctor) : "",
+                                  verordnender_arzt_provider_name: selectedDoctor?.provider_name ?? null,
                                   verordnender_arzt: selectedDoctor
-                                    ? selectedDoctor.name
+                                    ? doctorOptionLabel(selectedDoctor, lang)
                                     : (current[index]?.verordnender_arzt ?? ""),
                                 }),
                               );
                             }} className={selectClassName}>
                               <option value="__none__">{t.common_not_set}</option>
-                              {doctors.map((doctor) => (
-                                <option key={doctor.id} value={doctor.id}>
-                                  {doctorOptionLabel(doctor, lang)}
-                                </option>
-                              ))}
+                              {doctors.map((doctor) => {
+                                const value = caseDoctorOptionValue(doctor);
+                                const label = doctorOptionLabel(doctor, lang);
+                                return (
+                                  <option key={value} value={value} data-search-text={doctorOptionSearchText(doctor, lang)}>
+                                    {label}
+                                  </option>
+                                );
+                              })}
                             </NativeComboboxSelect>
                         </Field>
                         <Field label={t.cases_clinical_doctor_label}><Input value={item.verordnender_arzt ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { verordnender_arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder={t.cases_clinical_legacy_manual_fallback} /></Field>

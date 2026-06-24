@@ -122,9 +122,6 @@ export function LinkedProviderSheetLayer({
   error,
   fallbackTitle,
   formatDateTimeLabel,
-  onOpenPatient,
-  onOpenAppointment,
-  onOpenOrder,
 }: LinkedProviderSheetLayerProps) {
   if (!open) return null;
 
@@ -148,9 +145,6 @@ export function LinkedProviderSheetLayer({
         error={error}
         fallbackTitle={fallbackTitle}
         formatDateTimeLabel={formatDateTimeLabel}
-        onOpenPatient={onOpenPatient}
-        onOpenAppointment={onOpenAppointment}
-        onOpenOrder={onOpenOrder}
       />
     </Suspense>
   );

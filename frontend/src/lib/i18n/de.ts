@@ -229,7 +229,7 @@ export const de = {
     "Wählen Sie einen Anbieter aus, um den Registerbereich zu öffnen.",
   providers_no_access_title: "Klinik- und Arztregister",
   providers_no_access_body:
-    "Dieser Bereich ist auf CEO, Patientenmanager, Concierge, Billing und Sales beschränkt, weil er die Klinikkoordination und die Sicht auf externe Partner steuert.",
+    "Dieser Bereich ist auf CEO, Patientenmanager, Concierge, Abrechnung und Vertrieb beschränkt, weil er die Klinikkoordination und die Sicht auf externe Partner steuert.",
   providers_create_description:
     "Legen Sie die nächste Klinik oder den nächsten Servicepartner direkt mit Vertragsnotizen, Kontaktdaten und Fachkontext an.",
   providers_edit_restricted_note:
@@ -560,15 +560,15 @@ export const de = {
     "Wartet auf Freigabe durch Teamlead",
   appointments_report_no_reviewer_recorded: "Kein Prüfer erfasst",
   appointments_report_reviewer_notes: "Prüfnotizen",
-  appointments_report_billing_sync: "Billing-Sync",
+  appointments_report_billing_sync: "Abrechnungssync",
   appointments_billing_sync_synced:
     "Automatisch in Auftragsleistungen übernommen",
   appointments_billing_sync_missing_catalog:
     "Katalogeintrag interpreter_hours fehlt",
   appointments_billing_sync_missing_order:
     "Termin ist keinem Auftrag zugeordnet",
-  appointments_billing_sync_pending: "Freigegeben, Billing-Sync ausstehend",
-  appointments_billing_sync_none: "Noch kein Billing-Sync-Status",
+  appointments_billing_sync_pending: "Freigegeben, Abrechnungssync ausstehend",
+  appointments_billing_sync_none: "Noch kein Abrechnungssync-Status",
   appointments_timeline_appointment_created: "Termin erstellt",
   appointments_timeline_scheduled_slot: "Termin geplant",
   appointments_timeline_interpreter_pending: "Dolmetscher ausstehend",
@@ -601,7 +601,7 @@ export const de = {
   dash_daily_ops: "Tagesbetrieb",
   phase_discovery: "Discovery",
   phase_execution: "Durchführung",
-  phase_followup: "Follow-up",
+  phase_followup: "Nachsorge",
 
   settings_title: "Systemeinstellungen",
   settings_subtitle: "Token-Konfiguration und Sitzungsverwaltung",
@@ -1191,7 +1191,7 @@ export const de = {
   documents_delete_file_description:
     "Die gespeicherte Datei kontrolliert entfernen, aktive Freigaben widerrufen und die Dokumentzeile als archivierten Verlaufseintrag erhalten.",
   documents_delete_file_hint:
-    "Diese Aktion entfernt die Binärdatei vom Datenträger, widerruft aktive Shares und macht Download/Vorschau dauerhaft unzugänglich. Metadaten und Versionshistorie bleiben als Audit-Trail erhalten.",
+    "Diese Aktion entfernt die Binärdatei vom Datenträger, widerruft aktive Freigaben und macht Herunterladen/Vorschau dauerhaft unzugänglich. Metadaten und Versionshistorie bleiben als Prüfspur erhalten.",
   documents_delete_file_reason: "Löschgrund",
   documents_delete_file_reason_placeholder:
     "Warum wird die gespeicherte Datei entfernt?",
@@ -1313,13 +1313,13 @@ export const de = {
   documents_select_provider: "Provider auswählen",
   documents_share_message: "Begleitnachricht",
   documents_share_message_placeholder:
-    "Kurzer Kontext für Klinik, Arzt oder Service Provider…",
+    "Kurzer Kontext für Klinik, Arzt oder Leistungserbringer…",
   documents_share_message_required:
     "Provider-Freigaben benötigen eine Begleitnachricht.",
   documents_detail_description:
     "Metadaten, Kontext und Freigabeverlauf für die ausgewählte Datei.",
   documents_loading_document: "Dokument wird geladen…",
-  documents_unknown_uploader: "Unbekannter Uploader",
+  documents_unknown_uploader: "Unbekannter Hochladender",
   documents_updated: "Aktualisiert",
   documents_version_chain: "Versionskette",
   documents_archived: "archiviert",
@@ -1351,7 +1351,7 @@ export const de = {
   documents_released: "Freigegeben",
   documents_revoke: "Widerrufen",
   documents_portal_trail_hint:
-    "Die Freigabe erzeugt einen portalspezifischen Freigabeverlauf und hält den Bestätigungsstatus im Audit-Flow.",
+    "Die Freigabe erzeugt einen portalspezifischen Freigabeverlauf und hält den Bestätigungsstatus im Prüfablauf.",
   documents_workspace_heading: "Dokumenten-Workspace",
   documents_workspace_intro:
     "Dateien hochladen, klassifizieren, freigeben und gegen Patienten, Aufträge und Termine nachverfolgen.",
@@ -1359,9 +1359,9 @@ export const de = {
   documents_generate_from_template: "Aus Vorlage generieren",
   documents_intake_queue: "Dokumenten-Inbox",
   documents_intake_interpreter_hint:
-    "Dolmetscher-Uploads und andere Intake-Dateien, die noch eine Kategorieprüfung brauchen.",
+    "Dolmetscher-Dateien und andere Intake-Dateien, die noch eine Kategorieprüfung brauchen.",
   documents_intake_general_hint:
-    "Unklassifizierte Uploads und Portaldateien, die noch eine Kategorieprüfung brauchen.",
+    "Unklassifizierte hochgeladene Dateien und Portaldateien, die noch eine Kategorieprüfung brauchen.",
   documents_pending: "ausstehend",
   documents_loading_intake_queue: "Intake-Inbox wird geladen…",
   documents_no_intake_pending:
@@ -1381,13 +1381,13 @@ export const de = {
   documents_confidence_high: "hoch",
   documents_unclassified: "Nicht klassifiziert",
   documents_upload_interpreter_hint:
-    "Dolmetscher-Uploads werden als interne Entwurfsdokumente gespeichert und an die Teamlead-Prüfung weitergeleitet.",
+    "Dolmetscher-Dateien werden als interne Entwurfsdokumente gespeichert und an die Teamlead-Prüfung weitergeleitet.",
   documents_upload_teamlead_hint:
-    "Dieser Upload wird als internes Dokument gespeichert. Teamlead-Uploads zeigen hier keine vollständigen Dokumentverwaltungs-Steuerungen.",
+    "Diese Datei wird als internes Dokument gespeichert. Teamlead-Dateien zeigen hier keine vollständigen Dokumentverwaltungs-Steuerungen.",
   documents_auto_classification_optional:
-    "Optional. Leer lassen für Auto-Klassifizierung.",
+    "Optional. Leer lassen für automatische Klassifizierung.",
   documents_popup_blocked:
-    "Pop-ups zulassen, um die Dokumentvorschau zu öffnen.",
+    "Pop-up-Fenster zulassen, um die Dokumentvorschau zu öffnen.",
   documents_failed_load_documents: "Dokumente konnten nicht geladen werden.",
   documents_failed_load_intake_queue:
     "Dokumenten-Inbox konnte nicht geladen werden.",
@@ -1402,7 +1402,7 @@ export const de = {
   documents_uploaded: "Dokument hochgeladen.",
   documents_failed_upload: "Dokument konnte nicht hochgeladen werden.",
   documents_classification_applied_released:
-    "Klassifizierung übernommen und Dolmetscher-Upload freigegeben.",
+    "Klassifizierung übernommen und Dolmetscher-Datei freigegeben.",
   documents_classification_applied: "Klassifizierung übernommen.",
   documents_failed_apply_classification:
     "Dokumentklassifizierung konnte nicht übernommen werden.",
@@ -1433,7 +1433,7 @@ export const de = {
   documents_save_type_required: "Dokumenttyp ist erforderlich.",
   documents_metadata_updated_notice: "Dokument-Metadaten aktualisiert.",
   documents_review_released_notice:
-    "Dolmetscher-Upload geprüft und freigegeben.",
+    "Dolmetscher-Datei geprüft und freigegeben.",
   documents_failed_save: "Speichern fehlgeschlagen.",
   documents_choose_user_target: "Benutzerziel auswählen.",
   documents_choose_provider_target: "Provider-Ziel auswählen.",

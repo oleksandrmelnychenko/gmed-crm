@@ -335,7 +335,7 @@ const revenueReportsTextDe = {
         billing: {
           title: "Abrechnungs-KPI-Scorecard",
           description:
-            "Rechnungsdurchsatz, Inkassodisziplin und Zahlerstruktur aus dem aktuellen Billing-Modell.",
+            "Rechnungsdurchsatz, Inkassodisziplin und Zahlerstruktur aus dem aktuellen Abrechnungsmodell.",
           trackedInvoices: (count: number) => `${count} erfasste Rechnungen`,
           invoices30d: "Rechnungen / 30 T.",
           openReceivables: "Offene Forderungen",
@@ -397,13 +397,13 @@ const revenueReportsTextDe = {
             `${plans} Zahlungspläne / ${escalated} eskaliert`,
           followupTitle: "Nachsorge-Prognose",
           followupDescription:
-            "Meilensteine, die in den nächsten 30 Tagen auf Basis des aktuellen Follow-up-Status fällig werden.",
+            "Meilensteine, die in den nächsten 30 Tagen auf Basis des aktuellen Nachsorgestatus fällig werden.",
           activeFollowupOrders: "Aktive Nachsorge-Aufträge",
           oneWeekOneMonthSixMonth: "1W / 1M / 6M",
           doctorPackageResults: "Arzt / Paketende / Ergebnisse",
           clinicCapacityTitle: "Klinikauslastung nächste 30 Tage",
           clinicCapacityDescription:
-            "Vorausschauende Kliniklast aus geplanten/bestätigten Terminen und Follow-up-Bedarf.",
+            "Vorausschauende Kliniklast aus geplanten/bestätigten Terminen und Nachsorgebedarf.",
           clinicCapacityBadge: (clinics: number, appointments: number) =>
             `${clinics} Kliniken / ${appointments} Termine`,
           doctors: (count: number) => `${count} Ärzte`,
@@ -414,7 +414,7 @@ const revenueReportsTextDe = {
         clinicReport: {
           title: "Klinikbericht",
           description:
-            "Medizinische Partnerkliniken nach jüngster Aktivität, erbrachten Leistungen, Antwortgeschwindigkeit und Qualitätsindikatoren aus Feedback und Follow-up-Abschluss.",
+            "Medizinische Partnerkliniken nach jüngster Aktivität, erbrachten Leistungen, Antwortgeschwindigkeit und Qualitätsindikatoren aus Feedback und Nachsorgeabschluss.",
           empty: "Noch keine Daten für den Klinikbericht verfügbar.",
         },
         serviceTypeReport: {
@@ -452,7 +452,7 @@ const revenueReportsTextDe = {
         doctors: {
           title: "Arzt-Drill-down",
           description:
-            "Arztbezogene Aktivität, Patientenreichweite, Antwortgeschwindigkeit und Qualitätssignale aus direktem Feedback und Follow-up-Ausführung. Klinik-Drill-down grenzt auf einen Anbieter ein.",
+            "Arztbezogene Aktivität, Patientenreichweite, Antwortgeschwindigkeit und Qualitätssignale aus direktem Feedback und Nachsorgeausführung. Klinik-Drill-down grenzt auf einen Anbieter ein.",
           empty: "Für den gewählten Scope sind noch keine Arzt-Drill-down-Daten verfügbar.",
         },
         visibility: {
@@ -472,7 +472,7 @@ const revenueReportsTextDe = {
           clinicResponseTime: "Klinik-Reaktionszeit",
           doctorResponseTime: "Arzt-Reaktionszeit",
           writtenFindings: "Schriftliche Befunde",
-          followupCompletion: "Follow-up-Abschluss",
+          followupCompletion: "Nachsorgeabschluss",
           clinicalOutcome: "Klinisches Ergebnis",
           experienceBundle: "Erlebnisbündel",
           answeredOpen: (answered: number, open: number) =>
@@ -525,7 +525,7 @@ export type RevenueReportsText = typeof revenueReportsTextDe;
 const revenueReportsTextRu: RevenueReportsText = {
         accessTitle: "Отчёты",
         accessDescription:
-          "Это рабочее пространство доступно только руководству, ассистенту CEO, пациент-менеджерам, биллингу и sales.",
+          "Это рабочее пространство доступно только руководству, ассистенту CEO, менеджерам пациентов, бухгалтерии и отделу продаж.",
         loadingWorkspace: "Загрузка рабочего пространства отчётов...",
         analytics: "Аналитика",
         workspaceTitle: "Рабочее пространство отчётов",
@@ -575,7 +575,7 @@ const revenueReportsTextRu: RevenueReportsText = {
         billing: {
           title: "Сводка KPI биллинга",
           description:
-            "Пропускная способность счетов, платёжная дисциплина и структура плательщиков из текущей billing-модели.",
+            "Пропускная способность счетов, платёжная дисциплина и структура плательщиков из текущей модели расчётов.",
           trackedInvoices: (count: number) => `${count} отслеживаемых счетов`,
           invoices30d: "Счета / 30 дн.",
           openReceivables: "Открытая дебиторка",
@@ -866,7 +866,7 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_vat_category_standard: "Стандартная",
   finance_catalog_vat_category_zero_rated: "Нулевая ставка",
   finance_catalog_vat_category_exempt: "Освобождено",
-  finance_catalog_vat_category_reverse_charge: "Reverse Charge",
+  finance_catalog_vat_category_reverse_charge: "Обратное начисление НДС",
   finance_catalog_vat_category_custom: "Индивидуальная",
   finance_catalog_vat_source_catalog: "Каталог услуг",
   finance_catalog_vat_source_tax_profile: "Налоговый профиль",
@@ -1072,7 +1072,7 @@ export const revenueRu: RevenueTranslations = {
   revenue_invoices_current_payer: "Текущий плательщик",
   revenue_invoices_payer_relation_id: "ID связи плательщика",
   revenue_invoices_contact_name: "Контактное имя",
-  revenue_invoices_email: "Email",
+  revenue_invoices_email: "Электронная почта",
   revenue_invoices_phone: "Телефон",
   revenue_invoices_relationship: "Отношение",
   revenue_invoices_payer_notes: "Примечания по плательщику",

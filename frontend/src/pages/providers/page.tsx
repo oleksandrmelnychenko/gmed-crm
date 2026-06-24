@@ -48,7 +48,7 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
-import { formatUiText, uiText, useLang } from "@/lib/i18n";
+import { formatUiText, uiText, useLang, type TranslationKey, type Translations } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
@@ -3296,23 +3296,9 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
                   <LinkedPatientsSection
                     detail={detail}
-                    onOpenPatient={(patientId) => staffGo(`/patients?patient=${patientId}`)}
-                    onOpenAppointments={(patientId) =>
-                      staffGo(`/appointments?patient=${patientId}&provider=${detail.id}`)
-                    }
                   />
                   <InteractionHistorySection
                     detail={detail}
-                    onOpenPatient={(patientId) => staffGo(`/patients?patient=${patientId}`)}
-                    onOpenAppointments={(patientId) =>
-                      staffGo(`/appointments?patient=${patientId}&provider=${detail.id}`)
-                    }
-                    onOpenAppointment={(appointmentId) =>
-                      staffGo(`/appointments?appointment=${appointmentId}`)
-                    }
-                    onOpenOrder={(orderId, patientId) =>
-                      staffGo(`/orders/${orderId}${patientId ? `?patient=${patientId}` : ""}`)
-                    }
                   />
               </div>
             </div>
@@ -4042,23 +4028,9 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
                 <LinkedPatientsSection
                   detail={detail}
-                  onOpenPatient={(patientId) => staffGo(`/patients?patient=${patientId}`)}
-                  onOpenAppointments={(patientId) =>
-                    staffGo(`/appointments?patient=${patientId}&provider=${detail.id}`)
-                  }
                 />
                 <InteractionHistorySection
                   detail={detail}
-                  onOpenPatient={(patientId) => staffGo(`/patients?patient=${patientId}`)}
-                  onOpenAppointments={(patientId) =>
-                    staffGo(`/appointments?patient=${patientId}&provider=${detail.id}`)
-                  }
-                  onOpenAppointment={(appointmentId) =>
-                    staffGo(`/appointments?appointment=${appointmentId}`)
-                  }
-                  onOpenOrder={(orderId, patientId) =>
-                    staffGo(`/orders/${orderId}${patientId ? `?patient=${patientId}` : ""}`)
-                  }
                 />
                 </div>
               </AdminSheetScaffold>
@@ -7174,12 +7146,8 @@ function ServiceSection({
 }
 function LinkedPatientsSection({
   detail,
-  onOpenPatient,
-  onOpenAppointments,
 }: {
   detail: ProviderDetail;
-  onOpenPatient: (patientId: string) => void;
-  onOpenAppointments: (patientId: string) => void;
 }) {
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
@@ -7212,7 +7180,7 @@ function LinkedPatientsSection({
               key={patient.id}
               className="overflow-hidden rounded-[1.4rem] border border-border bg-card"
             >
-              <div className="grid gap-3 p-3.5 lg:grid-cols-[minmax(0,1fr)_270px_160px]">
+              <div className="grid gap-3 p-3.5 lg:grid-cols-[minmax(0,1fr)_270px]">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">{patientLabel(patient)}</p>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -7234,27 +7202,6 @@ function LinkedPatientsSection({
                     <p className="mt-1 text-lg font-semibold leading-none text-foreground">{patient.concierge_count}</p>
                   </div>
                 </div>
-
-                <div className="flex flex-col justify-end gap-2 border-t border-dashed border-border pt-3 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                    onClick={() => onOpenPatient(patient.id)}
-                  >
-                    {l("patients_open_patient")}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                    onClick={() => onOpenAppointments(patient.id)}
-                  >
-                    {l("providers_appointments")}
-                  </Button>
-                </div>
               </div>
             </div>
           ))}
@@ -7263,20 +7210,87 @@ function LinkedPatientsSection({
   );
 }
 
+const INTERACTION_KIND_LABEL_KEYS = {
+  appointment: "interaction_appointment",
+  concierge_service: "activity_entity_concierge_service",
+  service: "interaction_service",
+  activity: "interaction_activity",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const INTERACTION_STATUS_LABEL_KEYS = {
+  planned: "operations_status_planned",
+  scheduled: "operations_status_planned",
+  requested: "documents_requested",
+  booked: "operations_status_booked",
+  confirmed: "operations_status_confirmed",
+  in_progress: "operations_status_in_progress",
+  in_service: "operations_status_in_service",
+  completed: "common_completed",
+  cancelled: "invoices_workspace_status_cancelled",
+  draft: "invoices_workspace_status_draft",
+  delivered: "operations_status_delivered",
+  approved: "operations_status_approved",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const INTERACTION_TYPE_LABEL_KEYS = {
+  medical: "providers_type_medical",
+  non_medical: "providers_type_non_medical",
+  internal: "operations_status_internal",
+  hotel: "services_type_hotel",
+  transfer: "services_type_transfer",
+  vip_terminal: "services_type_vip_terminal",
+  flight: "services_type_flight",
+  chauffeur: "services_type_chauffeur",
+  translation_support: "services_type_translation_support",
+  other: "services_type_other",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const AUTO_CREATED_NON_MEDICAL_NOTE = "auto-created from non-medical appointment";
+
+function normalizeInteractionCode(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function interactionLabel(
+  value: string | null | undefined,
+  labelKeys: Partial<Record<string, TranslationKey>>,
+  translations: Translations,
+) {
+  const normalized = normalizeInteractionCode(value);
+  if (!normalized) return translations.common_not_set;
+  const labelKey = labelKeys[normalized];
+  return labelKey ? translations[labelKey] : humanizeCode(normalized);
+}
+
+function interactionKindLabel(value: string | null | undefined, translations: Translations) {
+  return interactionLabel(value, INTERACTION_KIND_LABEL_KEYS, translations);
+}
+
+function interactionStatusLabel(value: string | null | undefined, translations: Translations) {
+  return interactionLabel(value, INTERACTION_STATUS_LABEL_KEYS, translations);
+}
+
+function interactionTypeLabel(value: string | null | undefined, translations: Translations) {
+  return interactionLabel(value, INTERACTION_TYPE_LABEL_KEYS, translations);
+}
+
+function interactionNoteLabel(value: string | null | undefined, lang: "de" | "ru") {
+  const note = value?.trim();
+  if (!note) return null;
+  if (note.toLowerCase() === AUTO_CREATED_NON_MEDICAL_NOTE) {
+    return lang === "de"
+      ? "Automatisch aus einem nicht-medizinischen Termin erstellt."
+      : "Автоматически создано из немедицинского приёма.";
+  }
+  return note;
+}
+
 function InteractionHistorySection({
   detail,
-  onOpenPatient,
-  onOpenAppointments,
-  onOpenAppointment,
-  onOpenOrder,
 }: {
   detail: ProviderDetail;
-  onOpenPatient: (patientId: string) => void;
-  onOpenAppointments: (patientId: string) => void;
-  onOpenAppointment: (appointmentId: string) => void;
-  onOpenOrder: (orderId: string, patientId?: string | null) => void;
 }) {
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   return (
     <section className={providerDetailPanelClassName}>
@@ -7303,7 +7317,7 @@ function InteractionHistorySection({
       ) : (
         <div className="mt-4 space-y-3 pl-6">
           {detail.interactions.map((item, index) => {
-            const patientRouteId = item.patient_uuid ?? "";
+            const notes = interactionNoteLabel(item.notes, lang);
             return (
               <div
                 key={item.id}
@@ -7323,18 +7337,18 @@ function InteractionHistorySection({
                   </span>
                 </div>
                 <div className="rounded-[1.4rem] border border-zinc-200 p-4">
-                  <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_160px]">
+                  <div className="grid gap-4">
                     <div className="min-w-0 space-y-4">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="outline" className="rounded-full border-zinc-200 text-zinc-700">
-                          {humanizeCode(item.kind)}
+                          {interactionKindLabel(item.kind, t)}
                         </Badge>
                         <Badge variant="outline" className="rounded-full border-zinc-200 text-zinc-700">
-                          {humanizeCode(item.status)}
+                          {interactionStatusLabel(item.status, t)}
                         </Badge>
                         {item.appointment_type ? (
                           <Badge variant="outline" className="rounded-full border-zinc-200 text-zinc-700">
-                            {humanizeCode(item.appointment_type)}
+                            {interactionTypeLabel(item.appointment_type, t)}
                           </Badge>
                         ) : null}
                       </div>
@@ -7354,57 +7368,11 @@ function InteractionHistorySection({
                         </div>
                       </div>
 
-                      {item.notes ? (
+                      {notes ? (
                         <div className="rounded-xl border border-border/60 px-3 py-2 text-sm leading-6 text-zinc-700">
                           <span className="mb-1 block text-xs text-muted-foreground">{l("patients_note")}</span>
-                          {item.notes}
+                          {notes}
                         </div>
-                      ) : null}
-                    </div>
-                    <div className="flex flex-col justify-end gap-2 border-t border-dashed border-border pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                        disabled={!patientRouteId}
-                        onClick={() => onOpenPatient(patientRouteId)}
-                      >
-                        {l("orders_patient")}
-                      </Button>
-                      {item.kind === "appointment" ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                          onClick={() => onOpenAppointment(item.id)}
-                        >
-                          {l("providers_appointment")}
-                        </Button>
-                      ) : null}
-                      {item.kind !== "appointment" ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                          disabled={!patientRouteId}
-                          onClick={() => onOpenAppointments(patientRouteId)}
-                        >
-                          {l("providers_appointments")}
-                        </Button>
-                      ) : null}
-                      {item.order_id ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                          onClick={() => onOpenOrder(item.order_id!, patientRouteId)}
-                        >
-                          {l("patients_order")}
-                        </Button>
                       ) : null}
                     </div>
                   </div>

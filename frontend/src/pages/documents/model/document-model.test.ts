@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildStandardDocumentName,
+  buildStandardDocumentNameFromMetadata,
   buildDocumentsPath,
   detailToEditForm,
   emptyGenerateForm,
@@ -98,6 +99,40 @@ describe("buildStandardDocumentName", () => {
         source: "Extern",
       }),
     ).toBe("SONST-Freitext-Extern");
+  });
+});
+
+describe("buildStandardDocumentNameFromMetadata", () => {
+  it("uses operational metadata before legacy provider/source fields", () => {
+    expect(
+      buildStandardDocumentNameFromMetadata({
+        category: "finance",
+        art: "Rechnung",
+        documentDate: "2026-06-30",
+        sourcePerson: "Frau Schmidt",
+        sourceInstitution: "Klinikum Rechts der Isar",
+        legacySource: "Alte Quelle",
+        legacySourceInstitution: "Legacy Klinik",
+        addresseePerson: "Anna Müller",
+        addresseeInstitution: "GMED",
+        patientAddressee: "P-20260630",
+      }),
+    ).toBe(
+      "FIN-Rechnung vom 30.06.2026-Frau Schmidt, Klinikum Rechts der Isar-Anna Müller, GMED",
+    );
+  });
+
+  it("falls back to legacy source and patient addressee when metadata is empty", () => {
+    expect(
+      buildStandardDocumentNameFromMetadata({
+        category: "administrative",
+        art: "Terminbestätigung",
+        fallbackDocumentDate: "2026-06-30",
+        legacySource: "GMED",
+        legacySourceInstitution: "GMED Agentur",
+        patientAddressee: "Anna Müller",
+      }),
+    ).toBe("ADMIN-Terminbestätigung vom 30.06.2026-GMED, GMED Agentur-Anna Müller");
   });
 });
 

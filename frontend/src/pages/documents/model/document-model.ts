@@ -125,6 +125,21 @@ export type StandardDocumentNameInput = {
   addressee?: string | null;
 };
 
+export type StandardDocumentNameMetadataInput = Omit<
+  StandardDocumentNameInput,
+  "documentDate" | "source" | "addressee"
+> & {
+  documentDate?: string | Date | null;
+  fallbackDocumentDate?: string | Date | null;
+  sourcePerson?: string | null;
+  sourceInstitution?: string | null;
+  legacySource?: string | null;
+  legacySourceInstitution?: string | null;
+  addresseePerson?: string | null;
+  addresseeInstitution?: string | null;
+  patientAddressee?: string | null;
+};
+
 const DOCUMENT_ART_LABELS: Record<string, string> = {
   appointment_confirmation: "Terminbestätigung",
   consent_data_release: "Einverständniserklärung",
@@ -146,6 +161,20 @@ function normalizeDocumentLookup(value?: string | null) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
+}
+
+export function compactDocumentParty(...parts: Array<string | null | undefined>) {
+  const seen = new Set<string>();
+  return parts
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .filter((part) => {
+      const key = part.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(", ");
 }
 
 function cleanDocumentNamePart(value?: string | null) {
@@ -303,6 +332,26 @@ export function buildStandardDocumentName(input: StandardDocumentNameInput) {
   ]
     .filter(Boolean)
     .join("-");
+}
+
+export function buildStandardDocumentNameFromMetadata(
+  input: StandardDocumentNameMetadataInput,
+) {
+  const source =
+    compactDocumentParty(input.sourcePerson, input.sourceInstitution) ||
+    compactDocumentParty(input.legacySource, input.legacySourceInstitution);
+  const addressee =
+    compactDocumentParty(input.addresseePerson, input.addresseeInstitution) ||
+    cleanDocumentNamePart(input.patientAddressee);
+
+  return buildStandardDocumentName({
+    category: input.category,
+    art: input.art,
+    isMedical: input.isMedical,
+    documentDate: input.documentDate || input.fallbackDocumentDate,
+    source,
+    addressee,
+  });
 }
 
 export function formatConfidenceLabel(

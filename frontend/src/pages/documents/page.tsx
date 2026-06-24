@@ -126,7 +126,7 @@ import {
 import {
   STATUS_OPTIONS,
   VISIBILITY_OPTIONS,
-  buildStandardDocumentName,
+  buildStandardDocumentNameFromMetadata,
   buildDocumentsPath,
   canManageDocumentIntake,
   canManageDocuments,
@@ -135,6 +135,7 @@ import {
   canUploadDocuments,
   canViewDocumentShares,
   canViewDocuments,
+  compactDocumentParty,
   detailToEditForm,
   emptyGenerateForm,
   emptyUploadForm,
@@ -195,20 +196,6 @@ const documentListRowHeightOverrides = {
 
 function runtimeTranslations() {
   return translateCatalog(getLang());
-}
-
-function compactDocumentParty(...parts: Array<string | null | undefined>) {
-  const seen = new Set<string>();
-  return parts
-    .map((part) => part?.trim())
-    .filter((part): part is string => Boolean(part))
-    .filter((part) => {
-      const key = part.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .join(", ");
 }
 
 function runtimeLocale() {
@@ -2091,13 +2078,19 @@ function StaffDocumentsPage({
         formData.append("appointment_id", uploadForm.appointmentId);
       const uploadAutoName =
         uploadForm.autoName.trim() ||
-        buildStandardDocumentName({
+        buildStandardDocumentNameFromMetadata({
           category: uploadForm.category,
           art: uploadForm.art,
           isMedical: uploadForm.isMedical,
-          documentDate: new Date(),
-          source: compactDocumentParty(uploadForm.ursprung, uploadForm.klinik),
-          addressee: patientDocumentAddresseeLabel(
+          documentDate: uploadForm.documentDate,
+          fallbackDocumentDate: new Date(),
+          sourcePerson: uploadForm.sourcePerson,
+          sourceInstitution: uploadForm.sourceInstitution,
+          legacySource: uploadForm.ursprung,
+          legacySourceInstitution: uploadForm.klinik,
+          addresseePerson: uploadForm.addresseePerson,
+          addresseeInstitution: uploadForm.addresseeInstitution,
+          patientAddressee: patientDocumentAddresseeLabel(
             uploadForm.patientId,
             patients,
           ),
@@ -2373,16 +2366,20 @@ function StaffDocumentsPage({
     setGenerateBusy(true);
     setGenerateError("");
     try {
-      const generatedStandardName = buildStandardDocumentName({
+      const generatedStandardName = buildStandardDocumentNameFromMetadata({
         category: selectedTemplate.category,
         art: selectedTemplate.default_auto_name || selectedTemplate.art,
         isMedical: selectedTemplate.is_medical,
-        documentDate: new Date(),
-        source:
-          compactDocumentParty(generateForm.ursprung, generateForm.klinik) ||
-          selectedTemplate.provider_name ||
-          "GMED",
-        addressee: patientDocumentAddresseeLabel(generateForm.patientId, patients),
+        documentDate: generateForm.documentDate,
+        fallbackDocumentDate: new Date(),
+        sourcePerson: generateForm.sourcePerson,
+        sourceInstitution: generateForm.sourceInstitution,
+        legacySource: generateForm.ursprung,
+        legacySourceInstitution:
+          generateForm.klinik || selectedTemplate.provider_name || "GMED",
+        addresseePerson: generateForm.addresseePerson,
+        addresseeInstitution: generateForm.addresseeInstitution,
+        patientAddressee: patientDocumentAddresseeLabel(generateForm.patientId, patients),
       });
       const explicitAutoName = generateForm.autoName.trim();
       const defaultAutoName = selectedTemplate.default_auto_name.trim();

@@ -1421,7 +1421,7 @@ export function PatientClinicalTab({
             className="h-8 rounded-lg"
             onClick={() => void downloadApiFile(`/patients/${patientId}/medikationsplan.pdf`, "medikationsplan.pdf")}
           >
-            {tx("Medikationsplan (PDF)", "Medikationsplan (PDF)")}
+            {tx("Медикаментозный план (PDF)", "Medikationsplan (PDF)")}
           </Button>
           <Button
             type="button"

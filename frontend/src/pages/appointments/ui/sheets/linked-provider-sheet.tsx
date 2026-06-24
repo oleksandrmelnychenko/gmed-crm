@@ -1,7 +1,6 @@
 import { memo } from "react";
 import { LoaderCircle } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import {
   Banner,
   CountBadge,
@@ -13,7 +12,7 @@ import {
   StatusBadge,
   tokens,
 } from "@/components/ui-shell";
-import { useLang } from "@/lib/i18n";
+import { useLang, type TranslationKey, type Translations } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { appointmentPreviewInfoCardClassName } from "@/pages/appointments/appearance/surface-appearance";
 import { appointmentText } from "@/pages/appointments/model/labels";
@@ -21,17 +20,87 @@ import { AppointmentPreviewSheet } from "@/pages/appointments/ui/shared/workspac
 import { specializationSummaryForItems } from "@/pages/providers/model/specialization-labels";
 import type { ProviderDetail as ProviderSheetDetail } from "@/pages/providers";
 
-function humanizeLinkedCode(value: string | null | undefined) {
-  if (!value) {
-    return appointmentText("appointments_not_set");
+const LINKED_INTERACTION_KIND_LABEL_KEYS = {
+  appointment: "interaction_appointment",
+  concierge_service: "activity_entity_concierge_service",
+  service: "interaction_service",
+  activity: "interaction_activity",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const LINKED_INTERACTION_STATUS_LABEL_KEYS = {
+  planned: "operations_status_planned",
+  scheduled: "operations_status_planned",
+  requested: "documents_requested",
+  booked: "operations_status_booked",
+  confirmed: "operations_status_confirmed",
+  in_progress: "operations_status_in_progress",
+  in_service: "operations_status_in_service",
+  completed: "common_completed",
+  cancelled: "invoices_workspace_status_cancelled",
+  draft: "invoices_workspace_status_draft",
+  delivered: "operations_status_delivered",
+  approved: "operations_status_approved",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const LINKED_INTERACTION_TYPE_LABEL_KEYS = {
+  medical: "providers_type_medical",
+  non_medical: "providers_type_non_medical",
+  internal: "operations_status_internal",
+  hotel: "services_type_hotel",
+  transfer: "services_type_transfer",
+  vip_terminal: "services_type_vip_terminal",
+  flight: "services_type_flight",
+  chauffeur: "services_type_chauffeur",
+  translation_support: "services_type_translation_support",
+  other: "services_type_other",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const AUTO_CREATED_NON_MEDICAL_NOTE = "auto-created from non-medical appointment";
+
+function normalizeLinkedInteractionCode(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function fallbackLinkedInteractionLabel(value: string) {
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function linkedInteractionLabel(
+  value: string | null | undefined,
+  labelKeys: Partial<Record<string, TranslationKey>>,
+  translations: Translations,
+) {
+  const normalized = normalizeLinkedInteractionCode(value);
+  if (!normalized) return appointmentText("appointments_not_set");
+  const labelKey = labelKeys[normalized];
+  return labelKey ? translations[labelKey] : fallbackLinkedInteractionLabel(normalized);
+}
+
+function linkedInteractionKindLabel(value: string | null | undefined, translations: Translations) {
+  return linkedInteractionLabel(value, LINKED_INTERACTION_KIND_LABEL_KEYS, translations);
+}
+
+function linkedInteractionStatusLabel(value: string | null | undefined, translations: Translations) {
+  return linkedInteractionLabel(value, LINKED_INTERACTION_STATUS_LABEL_KEYS, translations);
+}
+
+function linkedInteractionTypeLabel(value: string | null | undefined, translations: Translations) {
+  return linkedInteractionLabel(value, LINKED_INTERACTION_TYPE_LABEL_KEYS, translations);
+}
+
+function linkedInteractionNoteLabel(value: string | null | undefined, lang: "de" | "ru") {
+  const note = value?.trim();
+  if (!note) return null;
+  if (note.toLowerCase() === AUTO_CREATED_NON_MEDICAL_NOTE) {
+    return lang === "de"
+      ? "Automatisch aus einem nicht-medizinischen Termin erstellt."
+      : "Автоматически создано из немедицинского приёма.";
   }
-  const parts: string[] = [];
-  for (const part of value.split("_")) {
-    if (part) {
-      parts.push(part.charAt(0).toUpperCase() + part.slice(1));
-    }
-  }
-  return parts.join(" ");
+  return note;
 }
 
 function linkedProviderAddress(detail: ProviderSheetDetail) {
@@ -161,11 +230,9 @@ function LinkedProviderOverviewSection({
 function LinkedProviderPatientsSection({
   detail,
   formatDateTimeLabel,
-  onOpenPatient,
 }: {
   detail: ProviderSheetDetail;
   formatDateTimeLabel: (value?: string | null) => string;
-  onOpenPatient: (patientId: string) => void;
 }) {
   const { t } = useLang();
   return (
@@ -208,17 +275,6 @@ function LinkedProviderPatientsSection({
                   </CountBadge>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 rounded-lg"
-                  onClick={() => onOpenPatient(patient.id)}
-                >
-                  {appointmentText("appointments_patient")}
-                </Button>
-              </div>
             </ListItem>
           ))}
         </div>
@@ -230,17 +286,12 @@ function LinkedProviderPatientsSection({
 function LinkedProviderInteractionsSection({
   detail,
   formatDateTimeLabel,
-  onOpenPatient,
-  onOpenAppointment,
-  onOpenOrder,
 }: {
   detail: ProviderSheetDetail;
   formatDateTimeLabel: (value?: string | null) => string;
-  onOpenPatient: (patientId: string) => void;
-  onOpenAppointment: (appointmentId: string) => void;
-  onOpenOrder: (orderId: string, patientId?: string | null) => void;
 }) {
   const notSet = appointmentText("appointments_not_set");
+  const { lang, t } = useLang();
 
   return (
     <Section
@@ -254,21 +305,21 @@ function LinkedProviderInteractionsSection({
       ) : (
         <div className="space-y-3">
           {detail.interactions.map((item) => {
-            const patientRouteId = item.patient_uuid ?? "";
+            const notes = linkedInteractionNoteLabel(item.notes, lang);
             return (
               <ListItem key={item.id} className="space-y-3">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap gap-2">
                       <StatusBadge tone="neutral">
-                        {humanizeLinkedCode(item.kind)}
+                        {linkedInteractionKindLabel(item.kind, t)}
                       </StatusBadge>
                       <StatusBadge status={item.status}>
-                        {humanizeLinkedCode(item.status)}
+                        {linkedInteractionStatusLabel(item.status, t)}
                       </StatusBadge>
                       {item.appointment_type ? (
                         <StatusBadge tone="info">
-                          {humanizeLinkedCode(item.appointment_type)}
+                          {linkedInteractionTypeLabel(item.appointment_type, t)}
                         </StatusBadge>
                       ) : null}
                     </div>
@@ -299,51 +350,16 @@ function LinkedProviderInteractionsSection({
                   </div>
                 </div>
 
-                {item.notes ? (
+                {notes ? (
                   <div
                     className={cn(
                       "rounded-xl px-4 py-3 text-sm leading-6 text-foreground",
                       tokens.surface.mutedCard,
                     )}
                   >
-                    {item.notes}
+                    {notes}
                   </div>
                 ) : null}
-
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 rounded-lg"
-                    disabled={!patientRouteId}
-                    onClick={() => onOpenPatient(patientRouteId)}
-                  >
-                    {appointmentText("appointments_patient")}
-                  </Button>
-                  {item.kind === "appointment" ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 rounded-lg"
-                      onClick={() => onOpenAppointment(item.id)}
-                    >
-                      {appointmentText("appointments_appointment_3")}
-                    </Button>
-                  ) : null}
-                  {item.order_id ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 rounded-lg"
-                      onClick={() => onOpenOrder(item.order_id!, patientRouteId)}
-                    >
-                      {appointmentText("appointments_order")}
-                    </Button>
-                  ) : null}
-                </div>
               </ListItem>
             );
           })}
@@ -361,9 +377,6 @@ export type LinkedProviderSheetProps = {
   error: string;
   fallbackTitle: string;
   formatDateTimeLabel: (value?: string | null) => string;
-  onOpenPatient: (patientId: string) => void;
-  onOpenAppointment: (appointmentId: string) => void;
-  onOpenOrder: (orderId: string, patientId?: string | null) => void;
 };
 
 function LinkedProviderSheet({
@@ -374,9 +387,6 @@ function LinkedProviderSheet({
   error,
   fallbackTitle,
   formatDateTimeLabel,
-  onOpenPatient,
-  onOpenAppointment,
-  onOpenOrder,
 }: LinkedProviderSheetProps) {
   return (
     <AppointmentPreviewSheet
@@ -400,14 +410,10 @@ function LinkedProviderSheet({
           <LinkedProviderPatientsSection
             detail={detail}
             formatDateTimeLabel={formatDateTimeLabel}
-            onOpenPatient={onOpenPatient}
           />
           <LinkedProviderInteractionsSection
             detail={detail}
             formatDateTimeLabel={formatDateTimeLabel}
-            onOpenPatient={onOpenPatient}
-            onOpenAppointment={onOpenAppointment}
-            onOpenOrder={onOpenOrder}
           />
         </>
       ) : error ? (

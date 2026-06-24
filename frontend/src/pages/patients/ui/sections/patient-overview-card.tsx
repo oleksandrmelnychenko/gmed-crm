@@ -308,7 +308,7 @@ export function PatientOverviewCard({
           />
           <DemoItem label={tx("Пол", "Geschlecht")} value={genderText(gender, tx)} />
           <DemoItem label={tx("Телефон", "Telefon")} value={phone ?? ""} />
-          <DemoItem label="Email" value={email ?? ""} />
+          <DemoItem label={tx("Электронная почта", "E-Mail")} value={email ?? ""} />
         </div>
       ) : null}
       <div className="grid gap-x-5 gap-y-3 lg:grid-cols-[minmax(0,1fr)_14rem]">

@@ -43,9 +43,9 @@ export const ru = {
   login_password: "Пароль",
   login_submit: "Войти",
   login_loading: "Вход...",
-  login_error_invalid: "Неверный email или пароль",
-  login_error_email_required: "Email обязателен",
-  login_error_email_invalid: "Неверный формат email",
+  login_error_invalid: "Неверная электронная почта или пароль",
+  login_error_email_required: "Электронная почта обязательна",
+  login_error_email_invalid: "Неверный формат электронной почты",
   login_error_password_required: "Пароль обязателен",
   login_error_password_short: "Минимум 8 символов",
   login_error_password_long: "Пароль слишком длинный",
@@ -227,7 +227,7 @@ export const ru = {
     "Выберите провайдера, чтобы открыть реестровое рабочее пространство.",
   providers_no_access_title: "Реестр клиник и врачей",
   providers_no_access_body:
-    "Этот раздел доступен только CEO, менеджерам пациентов, консьержам, billing и sales, потому что он управляет координацией клиник и видимостью внешних партнёров.",
+    "Этот раздел доступен только CEO, менеджерам пациентов, консьержам, бухгалтерии и отделу продаж, потому что он управляет координацией клиник и видимостью внешних партнёров.",
   providers_create_description:
     "Добавьте следующую клинику или сервисного партнёра сразу с примечаниями по договору, контактами и профильным контекстом.",
   providers_edit_restricted_note:
@@ -615,7 +615,7 @@ export const ru = {
   settings_agency_care_of: "Строка c/o",
   settings_agency_address: "Адрес агентства",
   settings_agency_phone: "Телефон агентства",
-  settings_agency_email: "Email агентства",
+  settings_agency_email: "Электронная почта агентства",
   settings_agency_hint:
     "Эти данные используются на стикерах пациента и в печатных блоках пациента.",
   settings_document_requirements: "Обязательные документы",
@@ -1312,7 +1312,7 @@ export const ru = {
   documents_select_provider: "Выберите провайдера",
   documents_share_message: "Сопроводительное сообщение",
   documents_share_message_placeholder:
-    "Короткий контекст для клиники, врача или service provider…",
+    "Короткий контекст для клиники, врача или поставщика услуг…",
   documents_share_message_required:
     "Для публикации провайдеру нужно сопроводительное сообщение.",
   documents_detail_description:
