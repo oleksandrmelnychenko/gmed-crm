@@ -6077,7 +6077,7 @@ function HeroInfoTableRow({
   children: ReactNode;
 }) {
   return (
-    <div className="grid min-w-0 content-start gap-2 border border-border/70 px-3 py-2.5 sm:grid-cols-[9rem_minmax(0,1fr)]">
+    <div className="grid min-w-0 content-start gap-2 px-3 py-2.5 sm:grid-cols-[9rem_minmax(0,1fr)]">
       <div className="flex min-w-0 items-start gap-2 text-xs font-medium text-foreground">
         <Icon className="mt-0.5 size-3.5 shrink-0 text-foreground/75" />
         <span className="min-w-0 truncate">{label}</span>
@@ -6242,7 +6242,7 @@ function ProviderSheetHero({
               </Badge>
             ) : null}
           </div>
-          <div className="mt-5 grid overflow-hidden rounded-lg bg-card md:grid-cols-2">
+          <div className="mt-5 grid overflow-hidden rounded-lg border border-border/70 bg-card md:grid-cols-2">
             <HeroInfoTableRow icon={MapPin} label={l("patients_address")}>
               {addressLine || providerMeta(detail) || t.common_not_set}
             </HeroInfoTableRow>
