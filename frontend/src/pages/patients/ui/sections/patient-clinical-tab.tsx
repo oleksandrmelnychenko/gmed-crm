@@ -44,6 +44,7 @@ import {
   savePatientMedications,
   savePatientNarrative,
   savePatientProcedures,
+  savePatientVerlauf,
   updatePatientRecommendation,
   type AllDoctorOption,
   type ClinicalAttribution,
@@ -52,6 +53,7 @@ import {
   type ClinicalMedication,
   type ClinicalNarrative,
   type ClinicalProcedure,
+  type ClinicalVerlaufEntry,
   type ClinicalWarning,
   type ClinicalWarningKind,
   type PatientRecommendation,
@@ -74,6 +76,7 @@ export function clinicalMedicalProviderRows(providers: ProviderSummary[]): Provi
 }
 
 type ClinicalSectionGroup = { key: string; label: string };
+type ClinicalSectionTone = "neutral" | "danger" | "warning";
 type IndexedClinicalItem<T> = { item: T; index: number };
 type MedicationHoldDraft = Pick<ClinicalMedication, "on_hold" | "hold_until" | "hold_note">;
 type MedicationHoldEditor = {
@@ -158,6 +161,15 @@ function blankWarning(kind: ClinicalWarningKind): ClinicalWarning {
   return { kind, label: "", reaction: null, severity: null, note: null };
 }
 
+function blankVerlaufEntry(): ClinicalVerlaufEntry {
+  return {
+    provider_id: null,
+    provider_name: null,
+    occurred_on: null,
+    note: "",
+  };
+}
+
 /**
  * Empty string -> null. Does NOT trim, so spaces stay typeable in controlled
  * inputs (trimming on every keystroke strips the just-typed trailing space and
@@ -236,6 +248,32 @@ function groupedClinicalItems<T>(
   return remaining.length > 0
     ? [...sections, { key: "other", label: fallbackLabel, rows: remaining }]
     : sections;
+}
+
+function clinicalSectionToneClasses(tone: ClinicalSectionTone) {
+  const addButton = "border-orange-500 bg-orange-500 text-white hover:border-orange-600 hover:bg-orange-600 hover:text-white";
+  if (tone === "danger") {
+    return {
+      section: "border-border/70 bg-card",
+      header: "border-border/60",
+      row: "border-rose-300 bg-rose-50/40",
+      addButton,
+    };
+  }
+  if (tone === "warning") {
+    return {
+      section: "border-border/70 bg-card",
+      header: "border-border/60",
+      row: "border-orange-300 bg-orange-50/40",
+      addButton,
+    };
+  }
+  return {
+    section: "border-border/70 bg-card",
+    header: "border-border/60",
+    row: "border-border/50 bg-background",
+    addButton: "",
+  };
 }
 
 export function PatientMedicationTable({
@@ -462,6 +500,7 @@ function ClinicalSection<T extends { id?: string | null }>({
   tx,
   groups,
   groupOf,
+  tone = "neutral",
 }: {
   title: string;
   count?: ReactNode;
@@ -478,6 +517,7 @@ function ClinicalSection<T extends { id?: string | null }>({
   /** When provided, rows render under sub-headers (a Haupt/Neben-style tree). */
   groups?: ClinicalSectionGroup[];
   groupOf?: (item: T) => string;
+  tone?: ClinicalSectionTone;
 }) {
   const [list, setList] = useState<T[]>(items);
   const [editing, setEditing] = useState<{ index: number | null; draft: T } | null>(null);
@@ -544,10 +584,15 @@ function ClinicalSection<T extends { id?: string | null }>({
       </div>
     ) : null;
 
+  const toneClasses = clinicalSectionToneClasses(tone);
+
   const renderRow = (item: T, index: number) => (
     <div
       key={item.id ?? index}
-      className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2.5 rounded-lg border border-border/50 bg-background px-3 py-2"
+      className={cn(
+        "grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2.5 rounded-lg border px-3 py-2",
+        toneClasses.row,
+      )}
     >
       <div className="min-w-0">{rowView ? rowView(item) : null}</div>
       {renderActions(item, index)}
@@ -557,8 +602,8 @@ function ClinicalSection<T extends { id?: string | null }>({
   const indexed = list.map((item, index) => ({ item, index }));
 
   return (
-    <section className="rounded-xl border border-border/70 bg-card">
-      <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
+    <section className={cn("rounded-xl border", toneClasses.section)}>
+      <header className={cn("flex items-center justify-between gap-3 border-b px-4 py-3", toneClasses.header)}>
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold text-foreground">{title}</h3>
           {count ?? <Badge variant="outline" className="rounded-full text-[11px]">{list.length}</Badge>}
@@ -568,7 +613,7 @@ function ClinicalSection<T extends { id?: string | null }>({
             type="button"
             size="sm"
             variant="outline"
-            className="h-8 rounded-lg"
+            className={cn("h-8 rounded-lg", toneClasses.addButton)}
             onClick={() => setEditing({ index: null, draft: blank() })}
           >
             <Plus className="size-3.5" />
@@ -1309,6 +1354,7 @@ export function PatientClinicalTab({
   const [medications, setMedications] = useState<ClinicalMedication[]>([]);
   const [examinations, setExaminations] = useState<ClinicalExamination[]>([]);
   const [procedures, setProcedures] = useState<ClinicalProcedure[]>([]);
+  const [verlauf, setVerlauf] = useState<ClinicalVerlaufEntry[]>([]);
   const [narrative, setNarrative] = useState<ClinicalNarrative>(blankNarrative());
   const [recommendations, setRecommendations] = useState<PatientRecommendation[]>([]);
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
@@ -1344,6 +1390,7 @@ export function PatientClinicalTab({
         setMedications(clinical.medications ?? []);
         setExaminations(clinical.examinations ?? []);
         setProcedures(clinical.procedures ?? []);
+        setVerlauf(clinical.verlauf ?? []);
         setNarrative(clinical.narrative ?? blankNarrative());
         setRecommendations(recs ?? []);
         setProviders(clinicalMedicalProviderRows(providerRows ?? []));
@@ -1482,6 +1529,7 @@ export function PatientClinicalTab({
         blank={() => blankWarning("allergie")}
         isValid={(w) => w.label.trim() !== ""}
         canManage={canManage}
+        tone="warning"
         tx={tx}
         onSave={async (next) => {
           await savePatientClinicalWarnings(patientId, "allergie", next);
@@ -1490,18 +1538,18 @@ export function PatientClinicalTab({
         rowView={(w) => (
           <div className="min-w-0 space-y-1">
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-              <span className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">{w.label}</span>
+              <span className="min-w-0 max-w-full break-words text-sm font-medium text-orange-950">{w.label}</span>
               {w.severity ? (
-                <span className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">
+                <span className="min-w-0 max-w-full break-words text-[11px] text-orange-800">
                   {w.severity}
                 </span>
               ) : null}
             </div>
             {w.reaction ? (
-              <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{w.reaction}</p>
+              <p className="min-w-0 max-w-full break-words text-[11px] text-orange-800">{w.reaction}</p>
             ) : null}
             {w.note ? (
-              <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{w.note}</p>
+              <p className="min-w-0 max-w-full break-words text-[11px] text-orange-800">{w.note}</p>
             ) : null}
           </div>
         )}
@@ -1549,6 +1597,7 @@ export function PatientClinicalTab({
         blank={() => blankWarning("cave")}
         isValid={(w) => w.label.trim() !== ""}
         canManage={canManage}
+        tone="danger"
         tx={tx}
         onSave={async (next) => {
           await savePatientClinicalWarnings(patientId, "cave", next);
@@ -1556,9 +1605,11 @@ export function PatientClinicalTab({
         }}
         rowView={(w) => (
           <div className="min-w-0 space-y-1">
-            <span className="block min-w-0 max-w-full break-words text-sm font-medium text-foreground">{w.label}</span>
+            <span className="block min-w-0 max-w-full break-words text-sm font-medium text-rose-950">
+              {w.label}
+            </span>
             {w.note ? (
-              <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{w.note}</p>
+              <p className="min-w-0 max-w-full break-words text-[11px] text-rose-800">{w.note}</p>
             ) : null}
           </div>
         )}
@@ -1685,6 +1736,82 @@ export function PatientClinicalTab({
           setVersion((current) => current + 1);
         }}
         loadHistory={() => fetchNarrativeHistory(patientId)}
+      />
+
+      {/* ---- Verlauf ---- */}
+      <ClinicalSection<ClinicalVerlaufEntry>
+        title={tx("Течение", "Verlauf")}
+        items={verlauf}
+        blank={blankVerlaufEntry}
+        isValid={(item) => item.note.trim() !== ""}
+        canManage={canManage}
+        tx={tx}
+        onSave={async (next) => {
+          await savePatientVerlauf(patientId, next);
+          setVerlauf(next);
+        }}
+        rowView={(item) => (
+          <div className="min-w-0 space-y-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              {item.occurred_on ? (
+                <span className="rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
+                  {item.occurred_on}
+                </span>
+              ) : null}
+              {item.provider_name ? (
+                <span className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">
+                  {item.provider_name}
+                </span>
+              ) : null}
+            </div>
+            <p className="min-w-0 max-w-full whitespace-pre-line break-words text-sm text-foreground">
+              {item.note}
+            </p>
+          </div>
+        )}
+        form={(draft, set) => (
+          <div className="space-y-2">
+            <div className="grid gap-2 md:grid-cols-2">
+              <Field label={tx("Дата", "Datum")}>
+                <Input
+                  type="date"
+                  value={draft.occurred_on ?? ""}
+                  onChange={(e) => set({ occurred_on: blankToNull(e.target.value) })}
+                  className={inputClass}
+                />
+              </Field>
+              <Field label={tx("Провайдер", "Anbieter")}>
+                <NativeComboboxSelect
+                  value={draft.provider_id ?? ""}
+                  aria-label={tx("Провайдер", "Anbieter")}
+                  className={inputClass}
+                  onChange={(event) => {
+                    const id = event.target.value || null;
+                    const provider = providers.find((p) => p.id === id);
+                    set({
+                      provider_id: id,
+                      provider_name: provider?.name ?? null,
+                    });
+                  }}
+                >
+                  <option value="">—</option>
+                  {providers.map((provider) => (
+                    <option key={provider.id} value={provider.id}>
+                      {provider.name}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </Field>
+            </div>
+            <Field label={tx("Заметки", "Notizen")}>
+              <textarea
+                value={draft.note}
+                onChange={(e) => set({ note: e.target.value })}
+                className={cn(inputClass, "h-28 py-2")}
+              />
+            </Field>
+          </div>
+        )}
       />
 
       {/* ---- Medications (Medikationsplan) ---- */}

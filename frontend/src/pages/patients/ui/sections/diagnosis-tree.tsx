@@ -22,7 +22,11 @@ type Bilingual = (ru: string, de: string) => string;
 type DiagnosisKind = "main" | "secondary" | "prozedur";
 
 const inputClass =
-  "h-9 w-full rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
+  "h-9 w-full rounded-lg border border-border bg-transparent px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
+const rootAddActionClass =
+  "border border-orange-500 bg-orange-500 text-white shadow-sm hover:border-orange-600 hover:bg-orange-600 hover:text-white";
+const childAddActionClass =
+  "border border-border/70 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground";
 
 /**
  * A working node mirrors `ClinicalDiagnosis` but always carries a stable client
@@ -69,7 +73,7 @@ function allowedChildKinds(kind: DiagnosisKind): DiagnosisKind[] {
     case "main":
       return ["secondary", "prozedur"];
     case "secondary":
-      return ["secondary", "prozedur"];
+      return ["prozedur"];
     case "prozedur":
       return ["prozedur"];
     default:
@@ -87,6 +91,72 @@ function kindLabel(kind: DiagnosisKind, tx: Bilingual): string {
       return tx("Процедура", "Prozedur");
     default:
       return kind;
+  }
+}
+
+function kindPillClass(kind: DiagnosisKind): string {
+  switch (kind) {
+    case "main":
+      return "border-sky-300 bg-sky-50 text-sky-700";
+    case "secondary":
+      return "border-violet-300 bg-violet-50 text-violet-700";
+    case "prozedur":
+      return "border-emerald-300 bg-emerald-50 text-emerald-700";
+    default:
+      return "border-border bg-transparent text-muted-foreground";
+  }
+}
+
+function diagnosisRowClass(kind: DiagnosisKind): string {
+  switch (kind) {
+    case "main":
+      return "border-sky-300 bg-sky-50/40";
+    case "secondary":
+      return "border-violet-300 bg-violet-50/40";
+    case "prozedur":
+      return "border-emerald-300 bg-emerald-50/40";
+    default:
+      return "border-border/70";
+  }
+}
+
+function childActionLabel(kind: DiagnosisKind, tx: Bilingual): string {
+  switch (kind) {
+    case "secondary":
+      return tx("Поддиагноз", "Unterdiagnose");
+    case "prozedur":
+      return tx("Процедура к этому", "Prozedur dazu");
+    default:
+      return kindLabel(kind, tx);
+  }
+}
+
+function certaintyLabel(
+  certainty: ClinicalDiagnosis["certainty"],
+  tx: Bilingual,
+): string | null {
+  switch (certainty) {
+    case "verdacht":
+      return "V.a.";
+    case "bestaetigt":
+      return tx("Подтверждён", "Bestätigt");
+    case "zustand_nach":
+      return "Z.n.";
+    default:
+      return null;
+  }
+}
+
+function certaintyPillClass(certainty: ClinicalDiagnosis["certainty"]): string {
+  switch (certainty) {
+    case "verdacht":
+      return "border-amber-300 bg-amber-50 text-amber-800";
+    case "bestaetigt":
+      return "border-teal-300 bg-teal-50 text-teal-800";
+    case "zustand_nach":
+      return "border-indigo-300 bg-indigo-50 text-indigo-800";
+    default:
+      return "border-border bg-transparent text-muted-foreground";
   }
 }
 
@@ -345,32 +415,44 @@ function DiagnosisRow({
 }) {
   const children = childrenByParent.get(node.cid) ?? [];
   const chron = chronifizierungLabel(node.chronifizierung, tx);
+  const certainty = node.kind === "prozedur" ? null : certaintyLabel(node.certainty, tx);
   const attribution = attributionLine(node, lang);
   const childKinds = allowedChildKinds(node.kind);
   const code = node.kind === "prozedur" ? node.ops_code : node.icd_code;
 
   return (
-    <div>
+    <div className="relative">
+      {depth > 0 ? (
+        <span
+          aria-hidden="true"
+          className="absolute -left-4 top-5 h-px w-4 bg-border/70"
+        />
+      ) : null}
       <div
-        className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-lg border border-border/50 bg-background px-3 py-2"
-        style={{ marginLeft: depth * 20 }}
+        className={cn(
+          "grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-lg border px-3 py-2",
+          diagnosisRowClass(node.kind),
+        )}
       >
         <div className="min-w-0 space-y-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span
-              className={cn(
-                "rounded-full border px-2 py-0.5 text-[10px]",
-                node.kind === "main"
-                  ? "border-sky-300 bg-sky-50 text-sky-700"
-                  : node.kind === "prozedur"
-                    ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                    : "border-border bg-muted/30 text-muted-foreground",
-              )}
+              className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium", kindPillClass(node.kind))}
             >
               {kindLabel(node.kind, tx)}
             </span>
+            {certainty ? (
+              <span
+                className={cn(
+                  "rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                  certaintyPillClass(node.certainty),
+                )}
+              >
+                {certainty}
+              </span>
+            ) : null}
             <span className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
-              {displayLabel(node)}
+              {node.label}
             </span>
             {code ? (
               <span className="min-w-0 max-w-full break-words font-mono text-[11px] text-muted-foreground">
@@ -405,12 +487,12 @@ function DiagnosisRow({
                 type="button"
                 size="sm"
                 variant="ghost"
-                className="h-7 rounded-md px-2 text-[11px]"
-                title={`${tx("Добавить", "Hinzufügen")}: ${kindLabel(childKind, tx)}`}
+                className={cn("h-7 rounded-md px-2 text-[11px]", childAddActionClass)}
+                title={`${childActionLabel(childKind, tx)} ${tx("под", "unter")}: ${displayLabel(node)}`}
                 onClick={() => onAddChild(node, childKind)}
               >
                 <Plus className="size-3.5" />
-                {kindLabel(childKind, tx)}
+                {childActionLabel(childKind, tx)}
               </Button>
             ))}
             <Button
@@ -439,7 +521,7 @@ function DiagnosisRow({
         ) : null}
       </div>
       {children.length > 0 ? (
-        <div className="mt-2 space-y-2">
+        <div className="relative mt-2 ml-4 space-y-2 border-l border-border/70 pl-4">
           {children.map((child) => (
             <DiagnosisRow
               key={child.cid}
@@ -466,6 +548,7 @@ function DiagnosisForm({
   allDoctors,
   lang,
   tx,
+  parentLabel,
   set,
 }: {
   draft: WorkingNode;
@@ -473,12 +556,20 @@ function DiagnosisForm({
   allDoctors: AllDoctorOption[];
   lang: string;
   tx: Bilingual;
+  parentLabel: string | null;
   set: (patch: Partial<WorkingNode>) => void;
 }) {
   const isDiagnosis = draft.kind === "main" || draft.kind === "secondary";
 
   return (
     <div className="space-y-3">
+      {parentLabel ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          {tx("Запись будет вложена под", "Eintrag wird untergeordnet zu")}:{" "}
+          <span className="font-medium">{parentLabel}</span>
+        </div>
+      ) : null}
+
       <Field label={tx("Диагноз", "Diagnose")}>
         <Input
           value={draft.label}
@@ -568,7 +659,7 @@ function DiagnosisForm({
       </Field>
 
       {isDiagnosis ? (
-        <div className="space-y-2 rounded-lg border border-border/50 bg-muted/20 p-3">
+        <div className="space-y-2 rounded-lg border border-border/50 p-3">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             {tx("Лечащий врач", "Behandelnder Arzt")}
           </p>
@@ -625,7 +716,7 @@ function DiagnosisForm({
         </div>
       ) : null}
 
-      <div className="space-y-2 rounded-lg border border-border/50 bg-muted/20 p-3">
+      <div className="space-y-2 rounded-lg border border-border/50 p-3">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           {tx("Кто поставил/провёл", "Wer gestellt/durchgeführt")}
         </p>
@@ -735,8 +826,8 @@ export function DiagnosisTreeSection({
   const set = (patch: Partial<WorkingNode>) =>
     setEditing((current) => (current ? { ...current, draft: { ...current.draft, ...patch } } : current));
 
-  function openAddRoot() {
-    setEditing({ mode: "add", draft: blankNode("main", null) });
+  function openAddRoot(kind: Extract<DiagnosisKind, "main" | "secondary">) {
+    setEditing({ mode: "add", draft: blankNode(kind, null) });
   }
 
   function openAddChild(parent: WorkingNode, kind: DiagnosisKind) {
@@ -785,22 +876,39 @@ export function DiagnosisTreeSection({
     ? editing.draft.label.trim() !== "" &&
       (editing.draft.source_mode !== "extern" || Boolean(editing.draft.external_country))
     : false;
+  const editingParent =
+    editing?.draft.parent_cid != null
+      ? nodes.find((node) => node.cid === editing.draft.parent_cid) ?? null
+      : null;
+  const editingParentLabel = editingParent ? displayLabel(editingParent) : null;
 
   return (
-    <section className="rounded-xl border border-border/70 bg-card">
+    <section className="rounded-xl border border-border/70">
       <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
         <h3 className="text-sm font-semibold text-foreground">{tx("Диагнозы", "Diagnosen")}</h3>
         {canManage ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-8 rounded-lg"
-            onClick={openAddRoot}
-          >
-            <Plus className="size-3.5" />
-            {tx("Добавить основной диагноз", "Hauptdiagnose hinzufügen")}
-          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className={cn("h-8 rounded-lg", rootAddActionClass)}
+              onClick={() => openAddRoot("main")}
+            >
+              <Plus className="size-3.5" />
+              {tx("Добавить основной", "Hauptdiagnose hinzufügen")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className={cn("h-8 rounded-lg", rootAddActionClass)}
+              onClick={() => openAddRoot("secondary")}
+            >
+              <Plus className="size-3.5" />
+              {tx("Добавить сопутствующий", "Nebendiagnose hinzufügen")}
+            </Button>
+          </div>
         ) : null}
       </header>
 
@@ -834,7 +942,13 @@ export function DiagnosisTreeSection({
           width="form-heavy"
           title={
             editing?.mode === "add"
-              ? `${tx("Добавить", "Hinzufügen")}: ${editing ? kindLabel(editing.draft.kind, tx) : ""}`
+              ? editingParentLabel
+                ? `${tx("Добавить вложенный", "Untergeordnet hinzufügen")}: ${
+                    editing ? kindLabel(editing.draft.kind, tx) : ""
+                  }`
+                : `${tx("Добавить", "Hinzufügen")}: ${
+                    editing ? kindLabel(editing.draft.kind, tx) : ""
+                  }`
               : `${tx("Редактировать", "Bearbeiten")}: ${editing ? kindLabel(editing.draft.kind, tx) : ""}`
           }
           footer={
@@ -867,6 +981,7 @@ export function DiagnosisTreeSection({
               allDoctors={allDoctors}
               lang={lang}
               tx={tx}
+              parentLabel={editingParentLabel}
               set={set}
             />
           ) : null}

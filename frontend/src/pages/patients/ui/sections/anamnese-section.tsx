@@ -13,14 +13,13 @@ type Bilingual = (ru: string, de: string) => string;
 const inputClass =
   "h-9 w-full rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
 
-/** The 6 narrative fields (no untersuchungsbefund) in display order. */
+/** The narrative fields (no untersuchungsbefund / Verlauf) in display order. */
 type NarrativeFieldKey =
   | "anamnese_aktuelle"
   | "anamnese_vorgeschichte"
   | "anamnese_vegetative"
   | "anamnese_sozial"
-  | "beurteilung"
-  | "verlauf";
+  | "beurteilung";
 
 function narrativeFields(tx: Bilingual): Array<{ key: NarrativeFieldKey; label: string }> {
   return [
@@ -29,7 +28,6 @@ function narrativeFields(tx: Bilingual): Array<{ key: NarrativeFieldKey; label: 
     { key: "anamnese_vegetative", label: tx("Вегетативный анамнез", "Vegetative Anamnese") },
     { key: "anamnese_sozial", label: tx("Социальный анамнез", "Sozialanamnese") },
     { key: "beurteilung", label: tx("Оценка", "Beurteilung") },
-    { key: "verlauf", label: tx("Течение", "Verlauf") },
   ];
 }
 
@@ -42,7 +40,6 @@ function blankVersion(): ClinicalNarrative {
     anamnese_vegetative: null,
     anamnese_sozial: null,
     beurteilung: null,
-    verlauf: null,
     is_active: true,
     created_at: null,
     updated_at: null,
@@ -57,7 +54,6 @@ function versionSnippet(version: ClinicalNarrative): string {
     "anamnese_vegetative",
     "anamnese_sozial",
     "beurteilung",
-    "verlauf",
   ];
   for (const key of keys) {
     const value = version[key];

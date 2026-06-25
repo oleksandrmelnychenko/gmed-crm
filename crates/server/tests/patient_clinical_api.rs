@@ -1088,6 +1088,11 @@ async fn patient_clinical_narrative_upserts() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert!(body["narrative"].is_null());
+    assert!(
+        body["verlauf"]
+            .as_array()
+            .is_some_and(|items| items.is_empty())
+    );
 
     let (status, _) = json_request(
         &app,
@@ -1124,9 +1129,15 @@ async fn patient_clinical_narrative_upserts() {
         body["narrative"]["beurteilung"],
         "Verdacht auf ambulant erworbene Pneumonie."
     );
-    assert!(body["narrative"]["verlauf"].is_null());
+    assert!(
+        !body["narrative"]
+            .as_object()
+            .expect("narrative object")
+            .contains_key("verlauf")
+    );
 
-    // Second save upserts the same row (no duplicate, value replaced).
+    // Second narrative save creates a new Anamnese version; Verlauf is a
+    // separate dated entity and is no longer accepted as an Anamnese field.
     let (status, _) = json_request(
         &app,
         "POST",
@@ -1134,7 +1145,6 @@ async fn patient_clinical_narrative_upserts() {
         &pm_bearer,
         Some(json!({
             "anamnese_aktuelle": "Beschwerden gebessert.",
-            "verlauf": "Komplikationsloser Verlauf.",
         })),
     )
     .await;
@@ -1153,9 +1163,48 @@ async fn patient_clinical_narrative_upserts() {
         body["narrative"]["anamnese_aktuelle"],
         "Beschwerden gebessert."
     );
-    assert_eq!(body["narrative"]["verlauf"], "Komplikationsloser Verlauf.");
+    assert!(
+        !body["narrative"]
+            .as_object()
+            .expect("narrative object")
+            .contains_key("verlauf")
+    );
     // Fields omitted from the second payload are cleared by the upsert.
     assert!(body["narrative"]["beurteilung"].is_null());
+
+    let provider_id = seed_provider(&pool, &tag).await;
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/verlauf"),
+        &pm_bearer,
+        Some(json!({
+            "items": [{
+                "occurred_on": "2026-06-24",
+                "provider_id": provider_id,
+                "note": "Komplikationsloser Verlauf."
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["verlauf"][0]["occurred_on"], "2026-06-24");
+    let provider_id_text = provider_id.to_string();
+    assert_eq!(
+        body["verlauf"][0]["provider_id"].as_str(),
+        Some(provider_id_text.as_str())
+    );
+    assert_eq!(body["verlauf"][0]["note"], "Komplikationsloser Verlauf.");
 
     let count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM patient_clinical_narrative WHERE patient_id = $1")

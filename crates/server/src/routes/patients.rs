@@ -54,6 +54,7 @@ pub fn router() -> Router<AppState> {
             "/patients/{patient_id}/narrative/history",
             get(list_patient_narrative_history),
         )
+        .route("/patients/{patient_id}/verlauf", post(save_patient_verlauf))
         .route(
             "/patients/{patient_id}/procedures",
             post(save_patient_procedures),
@@ -5538,6 +5539,7 @@ async fn get_patient_timeline(
                        WHEN 'save_patient_procedures' THEN 'Therapie aktualisiert'
                        WHEN 'save_patient_clinical_warnings' THEN 'Allergien/CAVE aktualisiert'
                        WHEN 'save_patient_narrative' THEN 'Anamnese aktualisiert'
+                       WHEN 'save_patient_verlauf' THEN 'Verlauf aktualisiert'
                        ELSE 'Klinisches Profil aktualisiert'
                    END AS title,
                    'clinical'::text AS category,
@@ -5551,7 +5553,8 @@ async fn get_patient_timeline(
               AND al.action IN (
                   'save_patient_diagnoses', 'save_patient_medications',
                   'save_patient_examinations', 'save_patient_procedures',
-                  'save_patient_clinical_warnings', 'save_patient_narrative'
+                  'save_patient_clinical_warnings', 'save_patient_narrative',
+                  'save_patient_verlauf'
               )
         "#;
     let events_cte = if can_view_clinical {
@@ -6952,10 +6955,28 @@ fn clinical_parse_uuid(value: Option<String>) -> Result<Option<Uuid>, axum::resp
     }
 }
 
+fn clinical_parse_date(
+    value: Option<String>,
+    field_name: &str,
+) -> Result<Option<chrono::NaiveDate>, axum::response::Response> {
+    match clinical_opt_text(value) {
+        None => Ok(None),
+        Some(raw) => chrono::NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
+            .map(Some)
+            .map_err(|_| {
+                err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    &format!("{field_name} must be YYYY-MM-DD"),
+                )
+            }),
+    }
+}
+
 /// Serialize one `patient_clinical_narrative` version row to API JSON. The row
-/// must have been selected with: id, the 6 anamnese/beurteilung/verlauf text
-/// fields, is_active, created_at and updated_at. `untersuchungsbefund` is no
-/// longer part of the contract (the column is kept in the DB but unused).
+/// must have been selected with: id, the 5 anamnese/beurteilung text fields,
+/// is_active, created_at and updated_at. `untersuchungsbefund` and legacy
+/// `verlauf` are no longer part of the contract (columns are kept in the DB but
+/// unused).
 fn narrative_version_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
     json!({
         "id": row.get::<Uuid, _>("id").to_string(),
@@ -6964,10 +6985,19 @@ fn narrative_version_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "anamnese_vegetative": row.get::<Option<String>, _>("anamnese_vegetative"),
         "anamnese_sozial": row.get::<Option<String>, _>("anamnese_sozial"),
         "beurteilung": row.get::<Option<String>, _>("beurteilung"),
-        "verlauf": row.get::<Option<String>, _>("verlauf"),
         "is_active": row.get::<bool, _>("is_active"),
         "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
         "updated_at": row.get::<chrono::DateTime<chrono::Utc>, _>("updated_at").to_rfc3339(),
+    })
+}
+
+fn verlauf_row_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    json!({
+        "id": row.get::<Uuid, _>("id"),
+        "provider_id": row.get::<Option<Uuid>, _>("provider_id"),
+        "provider_name": row.get::<Option<String>, _>("provider_name"),
+        "occurred_on": row.get::<Option<chrono::NaiveDate>, _>("occurred_on").map(|value| value.to_string()),
+        "note": row.get::<String, _>("note"),
     })
 }
 
@@ -7385,10 +7415,29 @@ async fn get_patient_clinical(
         .map(&warning_json)
         .collect::<Vec<_>>();
 
+    let verlauf_rows = sqlx::query(
+        r#"SELECT v.id, v.provider_id, p.name AS provider_name, v.occurred_on, v.note
+           FROM patient_clinical_verlauf v
+           LEFT JOIN providers p ON p.id = v.provider_id
+           WHERE v.patient_id = $1
+           ORDER BY v.sort_order, v.occurred_on, v.created_at"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "load patient verlauf");
+        load_fail()
+    })?;
+    let verlauf = verlauf_rows
+        .iter()
+        .map(verlauf_row_json)
+        .collect::<Vec<_>>();
+
     // The active version of the patient's Anamnese (one row per patient is active).
     let narrative_row = sqlx::query(
         r#"SELECT id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
-                  beurteilung, verlauf, is_active, created_at, updated_at
+                  beurteilung, is_active, created_at, updated_at
            FROM patient_clinical_narrative
            WHERE patient_id = $1 AND is_active
            ORDER BY updated_at DESC
@@ -7411,6 +7460,7 @@ async fn get_patient_clinical(
         "procedures": procedures,
         "allergien": allergien,
         "cave": cave,
+        "verlauf": verlauf,
         "narrative": narrative,
     })))
 }
@@ -7868,8 +7918,6 @@ struct PatientNarrativeInput {
     anamnese_sozial: Option<String>,
     #[serde(default)]
     beurteilung: Option<String>,
-    #[serde(default)]
-    verlauf: Option<String>,
     /// Whether this version becomes the patient's active version. Defaults true.
     #[serde(default)]
     is_active: Option<bool>,
@@ -7900,7 +7948,6 @@ async fn save_patient_narrative(
     let vegetative = clinical_opt_text(body.anamnese_vegetative);
     let sozial = clinical_opt_text(body.anamnese_sozial);
     let beurteilung = clinical_opt_text(body.beurteilung);
-    let verlauf = clinical_opt_text(body.verlauf);
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -7946,17 +7993,15 @@ async fn save_patient_narrative(
                        anamnese_vegetative = $3,
                        anamnese_sozial = $4,
                        beurteilung = $5,
-                       verlauf = $6,
-                       is_active = $7,
+                       is_active = $6,
                        updated_at = now()
-                   WHERE id = $8 AND patient_id = $9"#,
+                   WHERE id = $7 AND patient_id = $8"#,
             )
             .bind(&aktuelle)
             .bind(&vorgeschichte)
             .bind(&vegetative)
             .bind(&sozial)
             .bind(&beurteilung)
-            .bind(&verlauf)
             .bind(want_active)
             .bind(id)
             .bind(patient_uuid)
@@ -7979,8 +8024,8 @@ async fn save_patient_narrative(
             if let Err(e) = sqlx::query(
                 r#"INSERT INTO patient_clinical_narrative
                        (id, patient_id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative,
-                        anamnese_sozial, beurteilung, verlauf, is_active)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#,
+                        anamnese_sozial, beurteilung, is_active)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
             )
             .bind(new_id)
             .bind(patient_uuid)
@@ -7989,7 +8034,6 @@ async fn save_patient_narrative(
             .bind(&vegetative)
             .bind(&sozial)
             .bind(&beurteilung)
-            .bind(&verlauf)
             .bind(want_active)
             .execute(&mut *tx)
             .await
@@ -8005,7 +8049,7 @@ async fn save_patient_narrative(
     // consistent with what was committed.
     let saved_row = match sqlx::query(
         r#"SELECT id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
-                  beurteilung, verlauf, is_active, created_at, updated_at
+                  beurteilung, is_active, created_at, updated_at
            FROM patient_clinical_narrative
            WHERE id = $1"#,
     )
@@ -8060,7 +8104,7 @@ async fn list_patient_narrative_history(
 
     let rows = match sqlx::query(
         r#"SELECT id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
-                  beurteilung, verlauf, is_active, created_at, updated_at
+                  beurteilung, is_active, created_at, updated_at
            FROM patient_clinical_narrative
            WHERE patient_id = $1
            ORDER BY updated_at DESC"#,
@@ -8078,6 +8122,109 @@ async fn list_patient_narrative_history(
 
     let versions: Vec<serde_json::Value> = rows.iter().map(narrative_version_json).collect();
     Json(versions).into_response()
+}
+
+#[derive(Deserialize)]
+struct PatientVerlaufSave {
+    items: Vec<PatientVerlaufItem>,
+}
+
+#[derive(Deserialize)]
+struct PatientVerlaufItem {
+    #[serde(default)]
+    provider_id: Option<String>,
+    #[serde(default)]
+    occurred_on: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+async fn save_patient_verlauf(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+    Json(body): Json<PatientVerlaufSave>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+        return e;
+    }
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin patient verlauf tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    if let Err(e) = sqlx::query("DELETE FROM patient_clinical_verlauf WHERE patient_id = $1")
+        .bind(patient_uuid)
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient verlauf");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    let mut saved = 0i32;
+    for item in body.items {
+        let Some(note) = clinical_opt_text(item.note) else {
+            continue;
+        };
+        let occurred_on = match clinical_parse_date(item.occurred_on, "occurred_on") {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+        let provider_id = match clinical_resolve_attribution(&state, item.provider_id, None).await {
+            Ok((provider_id, _)) => provider_id,
+            Err(resp) => return resp,
+        };
+
+        if let Err(e) = sqlx::query(
+            r#"INSERT INTO patient_clinical_verlauf
+                   (patient_id, provider_id, occurred_on, note, sort_order)
+               VALUES ($1, $2, $3, $4, $5)"#,
+        )
+        .bind(patient_uuid)
+        .bind(provider_id)
+        .bind(occurred_on)
+        .bind(&note)
+        .bind(saved)
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "insert patient verlauf");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        saved += 1;
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient verlauf");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "save_patient_verlauf",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({}),
+    ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.clinical_updated",
+        patient_uuid,
+        json!({ "section": "verlauf" }),
+    )
+    .await;
+    Json(json!({ "ok": true, "count": saved })).into_response()
 }
 
 #[derive(Deserialize)]
@@ -8605,7 +8752,7 @@ async fn get_patient_clinical_pdf(
     // Beurteilung / Verlauf from a clinical document without any signal.
     let narrative = match sqlx::query(
         r#"SELECT anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
-                  untersuchungsbefund, beurteilung, verlauf
+                  untersuchungsbefund, beurteilung
            FROM patient_clinical_narrative
            WHERE patient_id = $1 AND is_active
            ORDER BY updated_at DESC
@@ -8616,6 +8763,21 @@ async fn get_patient_clinical_pdf(
     .await
     {
         Ok(row) => row,
+        Err(_) => return fail(),
+    };
+
+    let verlauf_rows = match sqlx::query(
+        r#"SELECT v.occurred_on, v.note, p.name AS provider_name
+           FROM patient_clinical_verlauf v
+           LEFT JOIN providers p ON p.id = v.provider_id
+           WHERE v.patient_id = $1
+           ORDER BY v.sort_order, v.occurred_on, v.created_at"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
         Err(_) => return fail(),
     };
 
@@ -8725,7 +8887,7 @@ async fn get_patient_clinical_pdf(
         }
     }
 
-    // ---- Anamnese / Befund / Beurteilung / Verlauf ----
+    // ---- Anamnese / Befund / Beurteilung ----
     if let Some(row) = &narrative {
         for (col, header) in [
             ("anamnese_aktuelle", "Aktuelle Anamnese"),
@@ -8734,7 +8896,6 @@ async fn get_patient_clinical_pdf(
             ("anamnese_sozial", "Sozialanamnese"),
             ("untersuchungsbefund", "Untersuchungsbefund"),
             ("beurteilung", "Beurteilung"),
-            ("verlauf", "Verlauf"),
         ] {
             if let Some(text) = row
                 .try_get::<Option<String>, _>(col)
@@ -8745,6 +8906,33 @@ async fn get_patient_clinical_pdf(
                 pdf.text(header, 9.0, true, true, 0.0, 2.0, 0.5);
                 pdf.text(&text, 10.5, false, false, 0.0, 0.0, 0.5);
             }
+        }
+    }
+
+    if !verlauf_rows.is_empty() {
+        pdf.heading("Verlauf");
+        for row in &verlauf_rows {
+            let date = row
+                .try_get::<Option<chrono::NaiveDate>, _>("occurred_on")
+                .ok()
+                .flatten()
+                .map(|value| value.format("%d.%m.%Y").to_string());
+            let provider = row
+                .try_get::<Option<String>, _>("provider_name")
+                .ok()
+                .flatten();
+            let note = row.try_get::<String, _>("note").unwrap_or_default();
+            let prefix = [date, provider]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" · ");
+            let line = if prefix.is_empty() {
+                note
+            } else {
+                format!("{prefix}: {note}")
+            };
+            pdf.text(&format!("• {line}"), 10.5, false, false, 3.0, 0.0, 0.5);
         }
     }
 

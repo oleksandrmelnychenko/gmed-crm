@@ -130,6 +130,30 @@ function SubBullets({ items }: { items: string[] }) {
   );
 }
 
+function SubLines({ items }: { items: string[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="mt-0.5 space-y-0 text-[11px] leading-snug text-muted-foreground">
+      {items.map((item, index) => (
+        <div key={index}>{item}</div>
+      ))}
+    </div>
+  );
+}
+
+function certaintyClass(certainty: ClinicalDiagnosis["certainty"]): string {
+  switch (certainty) {
+    case "verdacht":
+      return "text-amber-700";
+    case "bestaetigt":
+      return "text-teal-700";
+    case "zustand_nach":
+      return "text-indigo-700";
+    default:
+      return "text-foreground";
+  }
+}
+
 function computeAge(birthDate: string | null | undefined): number | null {
   if (!birthDate) return null;
   const born = new Date(birthDate);
@@ -251,7 +275,7 @@ export function PatientOverviewCard({
   // Completed ("erfolg") recommendations drop off the overview list.
   const activeRecommendations = recommendations.filter((rec) => rec.lifecycle_status !== "erfolg");
 
-  const renderDiagnosis = (item: ClinicalDiagnosis) => {
+  const renderDiagnosis = (item: ClinicalDiagnosis, depth = 0) => {
     const isProzedur = item.kind === "prozedur";
     const laterality = lateralityLabel(item.laterality, tx);
     const code = isProzedur ? item.ops_code : item.icd_code;
@@ -261,26 +285,34 @@ export function PatientOverviewCard({
     sub.push(...splitLines(item.note));
     const children = childrenOf(item);
     return (
-      <li key={nodeKey(item) ?? item.label} className="leading-snug">
-        <span className="flex flex-wrap items-baseline gap-x-1.5">
-          <span className="text-[13px] font-medium text-foreground">
-            {certaintyPrefix(item.certainty)}
-            {item.label}
-            {laterality ? ` ${laterality}` : ""}
-          </span>
-          {code ? (
-            <span className="font-mono text-[10px] text-muted-foreground">{code}</span>
-          ) : null}
-          {item.status && item.status !== "active" ? (
-            <span className={cn("text-[10px] font-medium", diagnosisStatusClass(item.status))}>
-              {diagnosisStatusLabel(item.status, tx)}
+      <li key={nodeKey(item) ?? item.label} className="relative leading-snug">
+        {depth >= 0 ? (
+          <span
+            aria-hidden="true"
+            className="absolute -left-3 top-2.5 h-px w-2.5 bg-border/70"
+          />
+        ) : null}
+        <div className="py-0.5">
+          <span className="flex flex-wrap items-baseline gap-x-1.5">
+            <span className={cn("text-[13px] font-medium", certaintyClass(item.certainty))}>
+              {certaintyPrefix(item.certainty)}
+              {item.label}
+              {laterality ? ` ${laterality}` : ""}
             </span>
-          ) : null}
-        </span>
-        <SubBullets items={sub} />
+            {code ? (
+              <span className="font-mono text-[10px] text-muted-foreground">{code}</span>
+            ) : null}
+            {item.status && item.status !== "active" ? (
+              <span className={cn("text-[10px] font-medium", diagnosisStatusClass(item.status))}>
+                {diagnosisStatusLabel(item.status, tx)}
+              </span>
+            ) : null}
+          </span>
+          <SubLines items={sub} />
+        </div>
         {children.length > 0 ? (
-          <ul className="mt-0.5 ml-3.5 list-disc space-y-1 marker:text-muted-foreground/40">
-            {children.map((child) => renderDiagnosis(child))}
+          <ul className="relative mt-1 ml-3 space-y-1 border-l border-border/70 pl-3">
+            {children.map((child) => renderDiagnosis(child, depth + 1))}
           </ul>
         ) : null}
       </li>
@@ -317,10 +349,10 @@ export function PatientOverviewCard({
             <div className="min-w-0">
               <ColumnTitle count={allergyCount || undefined}>{tx("Аллергии", "Allergien")}</ColumnTitle>
               {allergien.length > 0 ? (
-                <ul className="space-y-0.5 text-[13px] font-medium leading-snug text-rose-700">
+                <ul className="space-y-0.5 text-[13px] font-medium leading-snug text-orange-700">
                   {allergien.map((item, index) => (
                     <li key={item.id ?? index}>
-                      {item.label}
+                      <span>{item.label}</span>
                       {item.reaction ? (
                         <span className="font-normal text-muted-foreground"> · {item.reaction}</span>
                       ) : null}
@@ -328,9 +360,11 @@ export function PatientOverviewCard({
                   ))}
                 </ul>
               ) : allergyItems.length > 0 ? (
-                <ul className="space-y-0.5 text-[13px] font-medium leading-snug text-rose-700">
+                <ul className="space-y-0.5 text-[13px] font-medium leading-snug text-orange-700">
                   {allergyItems.map((item, index) => (
-                    <li key={index}>{item}</li>
+                    <li key={index}>
+                      <span>{item}</span>
+                    </li>
                   ))}
                 </ul>
               ) : (
@@ -343,7 +377,7 @@ export function PatientOverviewCard({
                   <ul className="space-y-0.5 text-[13px] font-medium leading-snug text-rose-700">
                     {cave.map((item, index) => (
                       <li key={item.id ?? index}>
-                        {item.label}
+                        <span>{item.label}</span>
                         {item.note ? (
                           <span className="font-normal text-muted-foreground"> · {item.note}</span>
                         ) : null}
@@ -359,7 +393,7 @@ export function PatientOverviewCard({
               {diagnoses.length === 0 ? (
                 dash
               ) : (
-                <ul className="list-disc space-y-1 pl-3.5 marker:text-muted-foreground/50">
+                <ul className="relative space-y-1 border-l border-border/70 pl-3">
                   {rootDiagnoses.map((d) => renderDiagnosis(d))}
                 </ul>
               )}

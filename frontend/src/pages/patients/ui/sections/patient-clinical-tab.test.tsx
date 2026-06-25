@@ -237,6 +237,58 @@ describe("DiagnosisTreeSection", () => {
     expect(html).toContain("break-words font-mono");
     expect(html).toContain("break-words text-[11px] text-muted-foreground");
   });
+
+  it("separates root diagnosis actions from nested child actions", () => {
+    const html = renderToStaticMarkup(
+      <DiagnosisTreeSection
+        allDoctors={[]}
+        canManage
+        items={[
+          diagnosis({ id: "main-1", kind: "main", label: "Appendizitis" }),
+          diagnosis({ id: "secondary-1", kind: "secondary", label: "Appendektomie" }),
+        ]}
+        lang="de"
+        onSave={async () => undefined}
+        providers={[]}
+      />,
+    );
+
+    expect(html).toContain("Hauptdiagnose hinzufügen");
+    expect(html).toContain("Nebendiagnose hinzufügen");
+    expect(html).toContain("Unterdiagnose");
+    expect(html).toContain("Prozedur dazu");
+    expect(html).toContain("border-orange-500 bg-orange-500 text-white");
+    expect(html.match(/border-orange-500/g)).toHaveLength(2);
+    expect(html).not.toContain("title=\"Unterdiagnose unter: Appendektomie\"");
+  });
+
+  it("renders nested diagnoses as a visible tree", () => {
+    const html = renderToStaticMarkup(
+      <DiagnosisTreeSection
+        allDoctors={[]}
+        canManage
+        items={[
+          diagnosis({ id: "parent-1", kind: "main", label: "Appendizitis" }),
+          diagnosis({
+            id: "child-1",
+            kind: "secondary",
+            label: "Appendektomie",
+            parent_id: "parent-1",
+          }),
+        ]}
+        lang="de"
+        onSave={async () => undefined}
+        providers={[]}
+      />,
+    );
+
+    expect(html).toContain("border-l border-border/70 pl-4");
+    expect(html).toContain("absolute -left-4 top-5 h-px w-4");
+    expect(html).toContain("border-violet-300 bg-violet-50 text-violet-700");
+    expect(html).toContain("border-violet-300 bg-violet-50/40");
+    expect(html).not.toContain("bg-muted/10");
+    expect(html).not.toContain("bg-muted/20");
+  });
 });
 
 describe("PatientRecommendationsSection", () => {
