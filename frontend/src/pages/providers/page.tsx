@@ -205,8 +205,10 @@ const providerDetailPanelClassName = cn(
   "space-y-2.5 rounded-xl border",
   providerDetailSectionClassName,
 );
-const contactAddButtonClassName =
+const providerPrimaryActionButtonClassName =
   "h-8 rounded-lg border-[var(--brand)] bg-[var(--brand)] px-3 text-white shadow-sm hover:bg-[var(--brand)]/90 hover:text-white focus-visible:ring-[var(--brand)]/30";
+const contactAddButtonClassName =
+  providerPrimaryActionButtonClassName;
 const textareaClassName = shellTextareaClass;
 const DEFAULT_PROVIDER_SORT: SortStack = [{ field: "provider", dir: "asc" }];
 const LEGACY_PROVIDER_TABLE_QUERY_KEYS = ["filters", "sort", "density", "hide"] as const;
@@ -5972,19 +5974,65 @@ function ProviderOverviewSection({
   );
 }
 
-function HeroInfoLine({
+function HeroInfoTableRow({
   icon: Icon,
+  label,
   children,
-  wrap = false,
 }: {
   icon: typeof MapPin;
+  label: ReactNode;
   children: ReactNode;
-  wrap?: boolean;
 }) {
   return (
-    <div className={cn("flex min-w-0 gap-2", wrap ? "items-start" : "items-center")}>
-      <Icon className="size-3.5 shrink-0 text-foreground/75" />
-      <div className={cn("min-w-0 max-w-full", "break-words")}>{children}</div>
+    <div className="grid gap-2 border-b border-border/60 px-3 py-2.5 last:border-b-0 sm:grid-cols-[11rem_minmax(0,1fr)]">
+      <div className="flex min-w-0 items-center gap-2 text-xs font-medium text-foreground">
+        <Icon className="size-3.5 shrink-0 text-foreground/75" />
+        <span className="min-w-0 truncate">{label}</span>
+      </div>
+      <div className="min-w-0 break-words text-sm font-semibold leading-5 text-foreground">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function HeroAvailabilityTable({
+  value,
+}: {
+  value: string | null | undefined;
+}) {
+  const { t, lang } = useLang();
+  const rows = formatWeeklyAvailabilityDisplayItems(value, lang);
+  if (rows.length === 0) return <span>{t.common_not_set}</span>;
+
+  return (
+    <div className="grid max-w-md gap-1 text-sm font-medium leading-5 text-foreground">
+      {rows.map((row, index) => {
+        if (row.freeText || !row.day) {
+          return (
+            <div key={`${row.label}-${index}`} className="break-words">
+              {row.label}
+            </div>
+          );
+        }
+
+        const dayLabel = weeklyAvailabilityDayLabel(row.day, lang);
+        const valueLabel = row.label.startsWith(dayLabel)
+          ? row.label.slice(dayLabel.length).trim()
+          : row.label;
+
+        return (
+          <div
+            key={`${row.day}-${index}`}
+            className="grid min-w-0 grid-cols-[2.25rem_minmax(0,1fr)] gap-3"
+          >
+            <span className="font-semibold text-foreground">{dayLabel}</span>
+            <span className="min-w-0 break-words tabular-nums text-foreground">
+              {valueLabel || t.common_not_set}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -6093,65 +6141,49 @@ function ProviderSheetHero({
               </Badge>
             ) : null}
           </div>
-          <div className="mt-5 grid gap-x-6 gap-y-4 text-xs text-foreground sm:grid-cols-2">
-            <HeroInfoLine icon={MapPin} wrap>
+          <div className="mt-5 overflow-hidden rounded-lg border border-border/70 bg-card">
+            <HeroInfoTableRow icon={MapPin} label={l("patients_address")}>
               {addressLine || providerMeta(detail) || t.common_not_set}
-            </HeroInfoLine>
-            <HeroInfoLine icon={Phone}>
+            </HeroInfoTableRow>
+            <HeroInfoTableRow icon={Phone} label={t.field_phone}>
               {detail.phone || t.common_not_set}
-            </HeroInfoLine>
-            <HeroInfoLine icon={Mail}>
+            </HeroInfoTableRow>
+            <HeroInfoTableRow icon={Mail} label={t.field_email}>
               {detail.email || t.common_not_set}
-            </HeroInfoLine>
-            <HeroInfoLine icon={CalendarClock} wrap>
-              <WeeklyAvailabilityBadgeList value={detail.opening_hours} />
-            </HeroInfoLine>
-            <HeroInfoLine icon={Star} wrap>
+            </HeroInfoTableRow>
+            <HeroInfoTableRow icon={CalendarClock} label={l("providers_opening_hours")}>
+              <HeroAvailabilityTable value={detail.opening_hours} />
+            </HeroInfoTableRow>
+            <HeroInfoTableRow icon={Star} label={t.providers_internal_rating}>
               <span className="break-words">
-                {t.providers_internal_rating}:{" "}
-                <span className="font-semibold text-foreground">
-                  {formatProviderRating(detail.internal_rating, t.common_not_set)}
-                </span>
+                {formatProviderRating(detail.internal_rating, t.common_not_set)}
                 {detail.internal_rating_note ? (
-                  <span> · {detail.internal_rating_note}</span>
+                  <span className="font-medium"> · {detail.internal_rating_note}</span>
                 ) : null}
               </span>
-            </HeroInfoLine>
-            <HeroInfoLine icon={BadgeCheck} wrap>
-              <span className="break-words">
-                <span className="font-semibold text-foreground">
-                  {detail.tax_id || t.common_not_set}
-                </span>
-                {insuranceTypeLine ? (
-                  <span className="mt-1.5 flex min-w-0 items-start gap-1.5 text-foreground">
-                    <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-foreground/75" />
-                    <span className="min-w-0 break-words">
-                      {t.patients_insurance_type}:{" "}
-                      <span className="font-medium text-foreground">
-                        {insuranceTypeLine}
-                      </span>
-                    </span>
-                  </span>
-                ) : null}
-              </span>
-            </HeroInfoLine>
-            <HeroInfoLine icon={Stethoscope}>
+            </HeroInfoTableRow>
+            <HeroInfoTableRow icon={BadgeCheck} label={l("providers_tax_id")}>
+              {detail.tax_id || t.common_not_set}
+            </HeroInfoTableRow>
+            {isMedical ? (
+              <HeroInfoTableRow icon={ShieldCheck} label={t.patients_insurance_type}>
+                {insuranceTypeLine || t.common_not_set}
+              </HeroInfoTableRow>
+            ) : null}
+            <HeroInfoTableRow icon={Stethoscope} label={t.providers_fachbereich}>
               {specializationLine || t.common_not_set}
-            </HeroInfoLine>
+            </HeroInfoTableRow>
           </div>
         </div>
         <div className="flex flex-col justify-start gap-4 border-t border-dashed border-border/70 pt-3 text-left md:border-l md:border-t-0 md:pl-5 md:pt-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-            {l("providers_actions")}
-          </p>
           {permissions.canManageRegistry ? (
             <div className="flex flex-col gap-2">
               {onEdit ? (
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="default"
                   size="sm"
-                  className="h-8 w-full justify-center rounded-lg gap-1.5 border-orange-200 bg-orange-50/60 text-orange-700 hover:border-orange-300 hover:bg-orange-100 hover:text-orange-800"
+                  className={cn(providerPrimaryActionButtonClassName, "w-full justify-center gap-1.5")}
                   onClick={onEdit}
                 >
                   <Pencil className="size-3.5" />
@@ -6337,9 +6369,9 @@ function DoctorSection({
           <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
-              variant="outline"
+              variant="default"
               size="sm"
-              className="h-8 justify-center rounded-lg bg-muted/20"
+              className={cn(providerPrimaryActionButtonClassName, "justify-center gap-1.5")}
               onClick={onNew}
             >
               <Plus className="size-3.5" />
@@ -6470,9 +6502,9 @@ function ContactPersonCard({
         <div className="flex flex-col items-stretch justify-end gap-2 border-t border-dashed border-border pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
           <Button
             type="button"
-            variant="outline"
+            variant="default"
             size="sm"
-            className="h-8 w-full justify-center rounded-lg bg-muted/20"
+            className={cn(providerPrimaryActionButtonClassName, "w-full justify-center")}
             onClick={() => onEdit(contact)}
           >
             {l("patients_edit")}
@@ -6703,9 +6735,9 @@ function DoctorSummaryActions({
         <>
           <Button
             type="button"
-            variant="outline"
+            variant="default"
             size="sm"
-            className="h-8 w-full justify-center rounded-lg bg-muted/20"
+            className={cn(providerPrimaryActionButtonClassName, "w-full justify-center")}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -6932,9 +6964,9 @@ function DoctorRelationshipCard({
         <div className="flex flex-col justify-end gap-2 border-t border-dashed border-border pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
           <Button
             type="button"
-            variant="outline"
+            variant="default"
             size="sm"
-            className="h-8 w-full justify-center rounded-lg bg-muted/20"
+            className={cn(providerPrimaryActionButtonClassName, "w-full justify-center")}
             disabled={relationshipBusy}
             onClick={() => onEditRelationship(doctorId, relationship)}
           >
@@ -7107,9 +7139,9 @@ function StaffSection({
                     <div className="flex flex-col justify-end gap-2 border-t border-dashed border-border pt-3 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
                       <Button
                         type="button"
-                        variant="outline"
+                        variant="default"
                         size="sm"
-                        className="h-8 w-full justify-center rounded-lg bg-muted/20"
+                        className={cn(providerPrimaryActionButtonClassName, "w-full justify-center")}
                         onClick={(event) => {
                           event.stopPropagation();
                           onEdit(staff);
@@ -7240,9 +7272,9 @@ function ServiceSection({
                   <div className="flex flex-col justify-end gap-2 border-t border-dashed border-border pt-3 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="default"
                       size="sm"
-                      className="h-8 w-full justify-center rounded-lg bg-muted/20"
+                      className={cn(providerPrimaryActionButtonClassName, "w-full justify-center")}
                       onClick={() => onEdit(service)}
                     >
                       {l("patients_edit")}
