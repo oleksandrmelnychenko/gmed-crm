@@ -4397,12 +4397,6 @@ function ProviderProfileReadOnlySection({ detail }: { detail: ProviderDetail }) 
   const taxonomyLine = taxonomyLeafLabel(detail.taxonomy_node, detail.taxonomy_path, lang);
   const specializationLine = specializationText(detail.specializations, detail.fachbereich, lang);
   const insuranceLine = insuranceProviderText(detail.insurance_providers);
-  const addressLine = [
-    detail.address_street,
-    detail.address_zip,
-    detail.address_city,
-    detail.address_country,
-  ].filter(Boolean).join(", ");
   const attributeRows = taxonomyAttributeReadOnlyRows(detail, lang);
 
   return (
@@ -4448,21 +4442,10 @@ function ProviderProfileReadOnlySection({ detail }: { detail: ProviderDetail }) 
         </Section>
       ) : null}
 
-      <Section className={providerDetailSectionClassName} title={l("patients_address")}>
-        <div className="grid gap-x-8 gap-y-1 lg:grid-cols-2">
-          <ReadOnlyLine label={t.providers_street} value={detail.address_street || fallback} />
-          <ReadOnlyLine label={t.providers_zip} value={detail.address_zip || fallback} />
-          <ReadOnlyLine label={t.providers_city} value={detail.address_city || fallback} />
-          <ReadOnlyLine label={t.providers_country} value={detail.address_country || fallback} />
-          <ReadOnlyLine label={l("patients_address")} value={addressLine || fallback} />
-        </div>
-      </Section>
-
       <Section className={providerDetailSectionClassName} title={l("patients_contact")}>
         <div className="space-y-3">
           <div className="grid gap-x-8 gap-y-1 lg:grid-cols-2">
             <ReadOnlyLine label={t.providers_website} value={detail.website || fallback} wrap />
-            <ReadOnlyLine label={l("providers_tax_id")} value={detail.tax_id || fallback} />
           </div>
           <ReadOnlyContacts
             contacts={detail.contacts}
