@@ -88,6 +88,7 @@ describe("buildPatientColumns", () => {
 
     expect(DEFAULT_PATIENT_HIDDEN_COLUMNS).not.toContain("functional_labels");
     expect(labelsIndex).toBe(patientIndex + 1);
+    expect(labelsColumn?.width).toBeGreaterThanOrEqual(320);
 
     const patientHtml = renderToStaticMarkup(<>{patientColumn?.render?.(row)}</>);
     const labelsHtml = renderToStaticMarkup(<>{labelsColumn?.render?.(row)}</>);
@@ -96,6 +97,8 @@ describe("buildPatientColumns", () => {
     expect(patientHtml).not.toContain("data-patient-functional-label");
     expect(labelsHtml).toContain('data-patient-cell-render="functional_labels"');
     expect(labelsHtml).toContain('data-patient-functional-label="vip"');
-    expect(labelsHtml).toContain("+1");
+    expect(labelsHtml).toContain('data-patient-functional-label="high_risk"');
+    expect(labelsHtml).toContain('data-patient-functional-label="fall_risk"');
+    expect(labelsHtml).not.toContain("+1");
   });
 });

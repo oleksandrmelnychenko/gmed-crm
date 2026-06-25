@@ -227,7 +227,7 @@ export function buildPatientColumns(
       filterType: "tag_array",
       filterOptions: dyn.labels,
       searchable: true,
-      width: 180,
+      width: 320,
       group: "identity",
       render: (p: PatientSummary) => (
         <TagListCell
@@ -237,7 +237,7 @@ export function buildPatientColumns(
           classNameForValue={functionalLabelChipClass}
           dataValueAttribute={normalizeFunctionalLabel}
           emptyLabel={tr.common_not_set}
-          maxVisible={2}
+          maxVisible={4}
         />
       ),
     },

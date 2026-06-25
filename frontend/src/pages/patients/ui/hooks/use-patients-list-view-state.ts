@@ -36,6 +36,9 @@ import {
 } from "../patients-columns";
 
 type QueryPatch = Record<string, string | null>;
+type QuerySyncOptions = {
+  replace?: boolean;
+};
 
 export function usePatientsListViewState() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -83,14 +86,6 @@ export function usePatientsListViewState() {
   const deferredSearch = useDeferredValue(filters.search);
   const [listVersion, setListVersion] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
-  const [detailOpen, setDetailOpen] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return Boolean(new URLSearchParams(window.location.search).get("patient"));
-  });
-  const [selectedId, setSelectedId] = useState(() => {
-    if (typeof window === "undefined") return "";
-    return new URLSearchParams(window.location.search).get("patient") ?? "";
-  });
   const [detailVersion, setDetailVersion] = useState(0);
   const [helpOpen, setHelpOpen] = useState(false);
   const [, startFilterTransition] = useTransition();
@@ -117,18 +112,24 @@ export function usePatientsListViewState() {
   );
   const [density, setDensity] = useLocalStorage<DensityLevel>("patients.density", "comfortable");
   const viewMode = useResponsiveViewMode();
+  const patientParam = searchParams.get("patient") ?? "";
+  const detailOpen = Boolean(patientParam);
+  const selectedId = patientParam;
 
-  const syncQuery = useCallback((next: QueryPatch) => {
-    const params = new URLSearchParams(searchParams);
-    Object.entries(next).forEach(([key, value]) => {
-      if (value) {
-        params.set(key, value);
-      } else {
-        params.delete(key);
-      }
-    });
-    setSearchParams(params, { replace: true });
-  }, [searchParams, setSearchParams]);
+  const syncQuery = useCallback(
+    (next: QueryPatch, options: QuerySyncOptions = {}) => {
+      const params = new URLSearchParams(searchParams);
+      Object.entries(next).forEach(([key, value]) => {
+        if (value) {
+          params.set(key, value);
+        } else {
+          params.delete(key);
+        }
+      });
+      setSearchParams(params, { replace: options.replace ?? true });
+    },
+    [searchParams, setSearchParams],
+  );
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -174,17 +175,13 @@ export function usePatientsListViewState() {
   }, []);
 
   const handleDetailOpenChange = useCallback((open: boolean) => {
-    setDetailOpen(open);
     if (!open) {
-      setSelectedId("");
-      syncQuery({ patient: null });
+      syncQuery({ patient: null }, { replace: false });
     }
   }, [syncQuery]);
 
   const openPatient = useCallback((patientId: string) => {
-    setSelectedId(patientId);
-    setDetailOpen(true);
-    syncQuery({ patient: patientId });
+    syncQuery({ patient: patientId }, { replace: false });
   }, [syncQuery]);
 
   const clearAllFilters = useCallback(() => {

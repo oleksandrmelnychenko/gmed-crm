@@ -782,8 +782,13 @@ function useContractsPageContent() {
     [agencyServiceFilters.activeOnly],
   );
 
-  const syncQuery = (patch: Record<string, string | null | undefined>) => {
-    setSearchParams((current) => buildSearchParams(current, patch), { replace: true });
+  const syncQuery = (
+    patch: Record<string, string | null | undefined>,
+    options: { replace?: boolean } = {},
+  ) => {
+    setSearchParams((current) => buildSearchParams(current, patch), {
+      replace: options.replace ?? true,
+    });
   };
 
   const filteredOrderOptions = useMemo(() => {
@@ -796,6 +801,31 @@ function useContractsPageContent() {
     const priced = agencyServices.filter((item) => Number(item.unit_price ?? 0) > 0).length;
     return { total: agencyServices.length, active, priced };
   }, [agencyServices]);
+
+  const contractParam = searchParams.get("contract") ?? "";
+  const quoteParam = searchParams.get("quote") ?? "";
+
+  useEffect(() => {
+    if (contractParam) {
+      if (selectedContractId !== contractParam) setSelectedContractId(contractParam);
+      if (selectedQuoteId) setSelectedQuoteId("");
+      return;
+    }
+    if (quoteParam) {
+      if (selectedQuoteId !== quoteParam) setSelectedQuoteId(quoteParam);
+      if (selectedContractId) setSelectedContractId("");
+      return;
+    }
+    if (selectedContractId) setSelectedContractId("");
+    if (selectedQuoteId) setSelectedQuoteId("");
+  }, [
+    contractParam,
+    quoteParam,
+    selectedContractId,
+    selectedQuoteId,
+    setSelectedContractId,
+    setSelectedQuoteId,
+  ]);
 
   // Client-side search over the LOCALIZED labels (German-folded), since the server only
   // knows the stored English names.
@@ -1816,13 +1846,13 @@ function useContractsPageContent() {
   function openContract(contractId: string) {
     setSelectedQuoteId("");
     setSelectedContractId(contractId);
-    syncQuery({ contract: contractId, quote: null });
+    syncQuery({ contract: contractId, quote: null }, { replace: false });
   }
 
   function openQuote(quoteId: string) {
     setSelectedContractId("");
     setSelectedQuoteId(quoteId);
-    syncQuery({ quote: quoteId, contract: null });
+    syncQuery({ quote: quoteId, contract: null }, { replace: false });
   }
 
   if (!permissions.canViewPage) {
@@ -2631,7 +2661,7 @@ function useContractsPageContent() {
             setSelectedContractId("");
             setContractDetail(null);
             setContractDetailError(null);
-            syncQuery({ contract: null });
+            syncQuery({ contract: null }, { replace: false });
           }
         }}
       >
@@ -2852,7 +2882,7 @@ function useContractsPageContent() {
             setSelectedQuoteId("");
             setQuoteDetail(null);
             setQuoteDetailError(null);
-            syncQuery({ quote: null });
+            syncQuery({ quote: null }, { replace: false });
           }
         }}
       >

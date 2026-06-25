@@ -2281,10 +2281,18 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   useEffect(() => {
     if (detailPageMode) return;
     const providerParam = searchParams.get("provider") ?? "";
+    if (!providerParam) {
+      if (detailOpen || selectedId) {
+        setSelectedId("");
+        setDetailOpen(false);
+        setDetail(null);
+      }
+      return;
+    }
     if (providerParam && providerParam !== selectedId) {
       openProviderFromQuery(providerParam);
     }
-  }, [detailPageMode, openProviderFromQuery, searchParams, selectedId]);
+  }, [detailOpen, detailPageMode, openProviderFromQuery, searchParams, selectedId]);
 
   useEffect(() => {
     if (!permissions.canViewPage || detailPageMode) {
@@ -4825,10 +4833,6 @@ function PaginatedLinkedPatientsGrid({
   const pagePatients = patients.slice(pageStart, pageStart + pageSize);
   const pageEnd = pageStart + pagePatients.length;
 
-  useEffect(() => {
-    setPageIndex((current) => Math.min(current, totalPages - 1));
-  }, [totalPages]);
-
   return (
     <div className={className}>
       <div className="grid gap-2 sm:grid-cols-2">
@@ -4856,7 +4860,7 @@ function PaginatedLinkedPatientsGrid({
               title={t.pagination_previous}
               onClick={(event) => {
                 event.stopPropagation();
-                setPageIndex((current) => Math.max(0, current - 1));
+                setPageIndex(Math.max(0, safePageIndex - 1));
               }}
             >
               <ChevronLeft className="size-3.5" />
@@ -4874,7 +4878,7 @@ function PaginatedLinkedPatientsGrid({
               title={t.pagination_next}
               onClick={(event) => {
                 event.stopPropagation();
-                setPageIndex((current) => Math.min(totalPages - 1, current + 1));
+                setPageIndex(Math.min(totalPages - 1, safePageIndex + 1));
               }}
             >
               <ChevronRight className="size-3.5" />

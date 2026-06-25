@@ -585,8 +585,18 @@ function useLeadsPageContent() {
 
   useEffect(() => {
     const leadParam = searchParams.get("lead") ?? "";
-    if (!leadParam) return;
     dispatchDetailState((current) => {
+      if (!leadParam) {
+        if (!current.detailOpen && !current.selectedLeadId) {
+          return {};
+        }
+        return {
+          selectedLeadId: "",
+          detailOpen: false,
+          detail: null,
+          detailError: "",
+        };
+      }
       if (current.detailOpen && current.selectedLeadId === leadParam) {
         return {};
       }
@@ -706,14 +716,14 @@ function useLeadsPageContent() {
     }));
   }, [detail, user?.role]);
 
-  function syncLeadQuery(leadId?: string) {
+  function syncLeadQuery(leadId?: string, options: { replace?: boolean } = {}) {
     const params = new URLSearchParams(searchParams);
     if (leadId) {
       params.set("lead", leadId);
     } else {
       params.delete("lead");
     }
-    setSearchParams(params, { replace: true });
+    setSearchParams(params, { replace: options.replace ?? true });
   }
 
   function openLeadDetail(leadId: string) {
@@ -722,14 +732,14 @@ function useLeadsPageContent() {
     }
     setSelectedLeadId(leadId);
     setDetailOpen(true);
-    syncLeadQuery(leadId);
+    syncLeadQuery(leadId, { replace: false });
   }
 
   function openLeadDetailTab(leadId: string, tab: LeadPaneTab) {
     setPaneTab(tab);
     setSelectedLeadId(leadId);
     setDetailOpen(true);
-    syncLeadQuery(leadId);
+    syncLeadQuery(leadId, { replace: false });
   }
 
   function reload() {
@@ -2189,7 +2199,7 @@ function useLeadsPageContent() {
           open={detailOpen}
           onOpenChange={(open) => {
             setDetailOpen(open);
-            if (!open) syncLeadQuery();
+            if (!open) syncLeadQuery(undefined, { replace: false });
           }}
         >
           <SheetContent

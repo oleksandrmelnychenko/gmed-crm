@@ -1351,7 +1351,7 @@ function useStaffAppointmentsPageContent() {
     syncQuery({
       appointment: id,
       detailTab: nextDetailTab,
-    });
+    }, { replace: false });
   }, [
     defaultDetailTabForAppointment,
     dismissCalendarQuickActionMenu,

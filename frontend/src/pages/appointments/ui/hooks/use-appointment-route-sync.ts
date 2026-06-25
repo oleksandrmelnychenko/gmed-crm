@@ -15,6 +15,10 @@ type SetSearchParams = (
   navigateOptions?: { replace?: boolean },
 ) => void;
 
+type QuerySyncOptions = {
+  replace?: boolean;
+};
+
 type UseAppointmentQueryActionsOptions = {
   searchParams: URLSearchParams;
   setSearchParams: SetSearchParams;
@@ -43,7 +47,7 @@ export function useAppointmentQueryActions({
   setOperationalScope,
 }: UseAppointmentQueryActionsOptions) {
   const syncQuery = useCallback(
-    (next: Record<string, string | null>) => {
+    (next: Record<string, string | null>, options: QuerySyncOptions = {}) => {
       const params = new URLSearchParams(searchParams);
       Object.entries(next).forEach(([key, value]) => {
         if (value) {
@@ -52,7 +56,7 @@ export function useAppointmentQueryActions({
           params.delete(key);
         }
       });
-      setSearchParams(params, { replace: true });
+      setSearchParams(params, { replace: options.replace ?? true });
     },
     [searchParams, setSearchParams],
   );

@@ -695,8 +695,13 @@ function useStaffInvoicesPageContent() {
   const deferredSearch = useDeferredValue(filters.search);
   const effectiveFilters = useMemo(() => ({ ...filters, search: deferredSearch }), [filters, deferredSearch]);
 
-  const syncQuery = (patch: Record<string, string | null | undefined>) => {
-    setSearchParams((current) => buildSearchParams(current, patch), { replace: true });
+  const syncQuery = (
+    patch: Record<string, string | null | undefined>,
+    options: { replace?: boolean } = {},
+  ) => {
+    setSearchParams((current) => buildSearchParams(current, patch), {
+      replace: options.replace ?? true,
+    });
   };
 
   const filteredOrders = useMemo(() => {
@@ -726,6 +731,12 @@ function useStaffInvoicesPageContent() {
     filters.quoteId !== "" ||
     filters.status !== "" ||
     filters.invoiceType !== "";
+  const invoiceParam = searchParams.get("invoice") ?? "";
+
+  useEffect(() => {
+    if (selectedInvoiceId === invoiceParam) return;
+    setSelectedInvoiceId(invoiceParam);
+  }, [invoiceParam, selectedInvoiceId]);
 
   useDebouncedRealtimeSubscription(STAFF_INVOICE_REALTIME_EVENTS, (_event, events) => {
     if (!access.canView) return;
@@ -1295,7 +1306,7 @@ function useStaffInvoicesPageContent() {
       setCreateError(null);
       setReloadToken((current) => current + 1);
       setSelectedInvoiceId(created.id);
-      syncQuery({ invoice: created.id });
+      syncQuery({ invoice: created.id }, { replace: false });
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : t.common_error);
     } finally {
@@ -1390,7 +1401,7 @@ function useStaffInvoicesPageContent() {
 
   function openInvoice(invoiceId: string) {
     setSelectedInvoiceId(invoiceId);
-    syncQuery({ invoice: invoiceId });
+    syncQuery({ invoice: invoiceId }, { replace: false });
   }
 
   if (!access.canView) {
@@ -1959,7 +1970,7 @@ function useStaffInvoicesPageContent() {
           setVisibilityError(null);
           setPayerError(null);
           setDetailError(null);
-          syncQuery({ invoice: null });
+          syncQuery({ invoice: null }, { replace: false });
         }
       }}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
