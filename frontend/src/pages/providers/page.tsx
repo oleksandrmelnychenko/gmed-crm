@@ -5985,8 +5985,8 @@ function HeroInfoTableRow({
 }) {
   return (
     <div className="grid gap-2 border-b border-border/60 px-3 py-2.5 last:border-b-0 sm:grid-cols-[11rem_minmax(0,1fr)]">
-      <div className="flex min-w-0 items-center gap-2 text-xs font-medium text-foreground">
-        <Icon className="size-3.5 shrink-0 text-foreground/75" />
+      <div className="flex min-w-0 items-start gap-2 text-xs font-medium text-foreground">
+        <Icon className="mt-0.5 size-3.5 shrink-0 text-foreground/75" />
         <span className="min-w-0 truncate">{label}</span>
       </div>
       <div className="min-w-0 break-words text-sm font-semibold leading-5 text-foreground">
