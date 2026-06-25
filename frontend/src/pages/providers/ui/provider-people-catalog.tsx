@@ -930,8 +930,8 @@ function FiltersBar({
   };
 
   return (
-    <div className="space-y-2">
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <div>
+      <div className="grid gap-x-2 gap-y-1.5 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-6">
         <label className="min-w-0">
           <FieldLabel>{labels.common_search ?? localizedFallback(lang, "Suchen", "Поиск")}</FieldLabel>
           <div className="relative">
@@ -1060,19 +1060,21 @@ function FiltersBar({
             ))}
           </SelectField>
         ) : null}
-      </div>
-
-      <div className="flex justify-end">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8 justify-center rounded-md bg-background px-2 text-xs"
-          onClick={reset}
-        >
-          <RotateCcw className="size-3.5" />
-          {labels.common_reset ?? localizedFallback(lang, "Zurücksetzen", "Сбросить")}
-        </Button>
+        <div className="min-w-0 self-end">
+          <FieldLabel>
+            <span aria-hidden="true">&nbsp;</span>
+          </FieldLabel>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 w-full justify-center rounded-md bg-background px-2 text-xs"
+            onClick={reset}
+          >
+            <RotateCcw className="size-3.5" />
+            {labels.common_reset ?? localizedFallback(lang, "Zurücksetzen", "Сбросить")}
+          </Button>
+        </div>
       </div>
     </div>
   );
