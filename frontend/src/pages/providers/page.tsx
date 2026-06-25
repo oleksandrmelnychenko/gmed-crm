@@ -6651,37 +6651,39 @@ function DoctorCard({
   const subrole = doctor.subrole?.trim() ?? "";
 
   return (
-    <details className="group overflow-hidden rounded-[1.4rem] border border-border bg-card">
-      <DoctorCardSummary
-        busy={busy}
-        canManage={canManage}
-        contacts={contacts}
-        doctor={doctor}
-        roleLabel={roleLabel}
-        specializations={specializations}
-        insuranceProviders={insuranceProviders}
-        subrole={subrole}
-        onOpen={onOpen}
-        onDelete={onDelete}
-        onEdit={onEdit}
-        onNewRelationship={onNewRelationship}
-      />
-      <DoctorMetrics
-        doctor={doctor}
-        specializations={specializations}
-        insuranceProviders={insuranceProviders}
-      />
+    <div className="overflow-hidden rounded-[1.4rem] border border-border bg-card">
+      <details className="group">
+        <DoctorCardSummary
+          busy={busy}
+          canManage={canManage}
+          contacts={contacts}
+          doctor={doctor}
+          roleLabel={roleLabel}
+          specializations={specializations}
+          insuranceProviders={insuranceProviders}
+          subrole={subrole}
+          onOpen={onOpen}
+          onDelete={onDelete}
+          onEdit={onEdit}
+          onNewRelationship={onNewRelationship}
+        />
+        <DoctorMetrics
+          doctor={doctor}
+          specializations={specializations}
+          insuranceProviders={insuranceProviders}
+        />
+        <DoctorRelationships
+          canManage={canManage}
+          doctor={doctor}
+          relationshipBusy={relationshipBusy}
+          onDeleteRelationship={onDeleteRelationship}
+          onEditRelationship={onEditRelationship}
+          onOpenProvider={onOpenProvider}
+          onNewRelationship={onNewRelationship}
+        />
+      </details>
       <DoctorCardLinkedPatients patients={doctor.linked_patients ?? []} />
-      <DoctorRelationships
-        canManage={canManage}
-        doctor={doctor}
-        relationshipBusy={relationshipBusy}
-        onDeleteRelationship={onDeleteRelationship}
-        onEditRelationship={onEditRelationship}
-        onOpenProvider={onOpenProvider}
-        onNewRelationship={onNewRelationship}
-      />
-    </details>
+    </div>
   );
 }
 
