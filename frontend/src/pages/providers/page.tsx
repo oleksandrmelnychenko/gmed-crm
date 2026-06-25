@@ -3851,6 +3851,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   value={filters.insuranceProvider}
                   items={insuranceProviders}
                   compact
+                  useInsuranceTypes
                   disabled={permissions.forceNonMedical || filters.providerType === "non_medical"}
                   onChange={(nextValue) => setServerFilter("insuranceProvider", nextValue, "insurance")}
                 />
@@ -6026,8 +6027,15 @@ function HeroAvailabilityTable({
             key={`${row.day}-${index}`}
             className="grid min-w-0 grid-cols-[2.25rem_minmax(0,1fr)] gap-3"
           >
-            <span className="font-semibold text-foreground">{dayLabel}</span>
-            <span className="min-w-0 break-words tabular-nums text-foreground">
+            <span className={cn("font-semibold", row.closed ? "text-orange-800" : "text-foreground")}>
+              {dayLabel}
+            </span>
+            <span
+              className={cn(
+                "min-w-0 break-words tabular-nums",
+                row.closed ? "text-orange-800" : "text-foreground",
+              )}
+            >
               {valueLabel || t.common_not_set}
             </span>
           </div>
