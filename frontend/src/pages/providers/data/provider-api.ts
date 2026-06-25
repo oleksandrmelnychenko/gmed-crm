@@ -154,6 +154,7 @@ export function fetchProviders(path: string) {
       internal_rating_note: provider.internal_rating_note ?? null,
       specializations: arrayOrEmpty<ProviderSummary["specializations"][number]>(provider.specializations).map(normalizeSpecializationItem),
       insurance_providers: arrayOrEmpty<ProviderSummary["insurance_providers"][number]>(provider.insurance_providers).map(normalizeInsuranceProviderItem),
+      doctor_insurance_providers: arrayOrEmpty<InsuranceProviderItem>(provider.doctor_insurance_providers).map(normalizeInsuranceProviderItem),
     }));
   });
 }

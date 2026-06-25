@@ -14,6 +14,7 @@ function contactRow(overrides: Partial<ProviderPeopleRow> = {}): ProviderPeopleR
     fachbereich: null,
     first_name: "Max",
     gender: "male",
+    insurance_providers: [],
     languages: [],
     last_interaction_at: null,
     last_name: "Kontakt",
@@ -48,6 +49,7 @@ describe("ProviderPeopleCatalog", () => {
         filters={{
           fachbereich: "",
           gender: "",
+          insuranceProvider: "",
           patientId: "",
           personType: "",
           providerId: "",
@@ -70,5 +72,51 @@ describe("ProviderPeopleCatalog", () => {
     expect(html).not.toContain("Herr");
     expect(html).not.toContain("Dr.");
     expect(html).not.toContain("Врач");
+  });
+
+  it("hides clinical columns and specialty values in forced non-medical mode", () => {
+    const html = renderToStaticMarkup(
+      <ProviderPeopleCatalog
+        forceNonMedical
+        filters={{
+          fachbereich: "",
+          gender: "",
+          insuranceProvider: "",
+          patientId: "",
+          personType: "",
+          providerId: "",
+          providerType: "non_medical",
+          role: "",
+          search: "",
+          specialization: "",
+          taxonomyNodeId: "",
+        }}
+        rows={[
+          contactRow({
+            fachbereich: "cardiology",
+            specializations: [
+              {
+                id: "spec-1",
+                code: "cardiology",
+                name_en: "Cardiology",
+                name_de: "Kardiologie",
+                name_ru: "Кардиология",
+                is_active: true,
+                sort_order: 1,
+              },
+            ],
+          }),
+        ]}
+        onFiltersChange={() => undefined}
+        onOpenPerson={() => undefined}
+        onOpenProvider={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Max Kontakt");
+    expect(html).not.toContain("Специализация");
+    expect(html).not.toContain("Специализации");
+    expect(html).not.toContain("Кардиология");
+    expect(html).not.toContain("Cardiology");
   });
 });

@@ -1,5 +1,7 @@
 import type { ProviderTaxonomyNode, ProviderType } from "@/pages/providers/model/types";
 
+type InsuranceCoverageItem = { id?: string | null; name?: string | null };
+
 /** Minimal shape needed to match a provider against a type + taxonomy category. */
 export type ProviderTaxonomyCarrier = {
   id: string;
@@ -13,8 +15,19 @@ export type ProviderTaxonomyCarrier = {
   taxonomy_node?: { id?: string | null } | null;
   taxonomy_path?: Array<{ id?: string | null }>;
   /** Insurances this provider accepts (medical providers only). */
-  insurance_providers?: Array<{ id?: string | null; name?: string | null }>;
+  insurance_providers?: InsuranceCoverageItem[];
+  /** Insurances accepted by doctors linked to this provider relationship. */
+  doctor_insurance_providers?: InsuranceCoverageItem[];
+  doctors?: Array<{ insurance_providers?: InsuranceCoverageItem[] } | null>;
 };
+
+function providerInsuranceCoverageItems(provider: ProviderTaxonomyCarrier) {
+  return [
+    ...(provider.insurance_providers ?? []),
+    ...(provider.doctor_insurance_providers ?? []),
+    ...(provider.doctors ?? []).flatMap((doctor) => doctor?.insurance_providers ?? []),
+  ];
+}
 
 /** Deduped {id,name} list of every insurance accepted by the given providers. */
 export function collectInsuranceOptions<TProvider extends ProviderTaxonomyCarrier>(
@@ -22,7 +35,7 @@ export function collectInsuranceOptions<TProvider extends ProviderTaxonomyCarrie
 ): Array<{ id: string; name: string }> {
   const byId = new Map<string, string>();
   for (const provider of providers) {
-    for (const item of provider.insurance_providers ?? []) {
+    for (const item of providerInsuranceCoverageItems(provider)) {
       const id = (item?.id ?? "").trim();
       if (!id || byId.has(id)) continue;
       byId.set(id, (item?.name ?? "").trim() || id);
@@ -39,7 +52,7 @@ export function providerMatchesInsurance(
 ): boolean {
   const selected = insuranceId.trim();
   if (!selected) return true;
-  return (provider.insurance_providers ?? []).some(
+  return providerInsuranceCoverageItems(provider).some(
     (item) => (item?.id ?? "").trim() === selected,
   );
 }

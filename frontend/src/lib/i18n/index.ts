@@ -225,6 +225,7 @@ export interface Translations
   providers_subtitle: string;
   providers_new: string;
   providers_detail: string;
+  providers_name_placeholder: string;
   providers_select_hint: string;
   providers_select_to_open_workspace: string;
   providers_no_access_title: string;

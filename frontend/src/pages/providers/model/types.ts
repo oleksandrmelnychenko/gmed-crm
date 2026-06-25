@@ -148,6 +148,7 @@ export type ProviderSummary = {
   taxonomy_attributes?: Record<string, unknown>;
   specializations: SpecializationItem[];
   insurance_providers: InsuranceProviderItem[];
+  doctor_insurance_providers?: InsuranceProviderItem[];
   is_active: boolean;
   has_contract: boolean;
   doctor_count: number;

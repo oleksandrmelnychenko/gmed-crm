@@ -23,14 +23,26 @@ function publish() {
   listeners.forEach((l) => l(items));
 }
 
+function scheduleAutoDismiss(id: number, duration: number) {
+  if (duration <= 0) return;
+  const previous = timers.get(id);
+  if (previous !== undefined) window.clearTimeout(previous);
+  timers.set(id, window.setTimeout(() => remove(id), duration));
+}
+
 function add(message: string, kind: ToastKind, duration = 3500) {
+  // Collapse rapid duplicates (e.g. clicking Save repeatedly): if an identical
+  // toast is already visible, just refresh its dismiss timer instead of
+  // stacking another copy.
+  const existing = items.find((i) => i.message === message && i.kind === kind);
+  if (existing) {
+    scheduleAutoDismiss(existing.id, duration);
+    return;
+  }
   const id = ++seq;
   items = [...items, { id, message, kind, duration }];
   publish();
-  if (duration > 0) {
-    const timerId = window.setTimeout(() => remove(id), duration);
-    timers.set(id, timerId);
-  }
+  scheduleAutoDismiss(id, duration);
 }
 
 function remove(id: number) {

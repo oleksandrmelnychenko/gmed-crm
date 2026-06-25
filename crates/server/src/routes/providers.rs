@@ -947,10 +947,11 @@ async fn list_providers(
                 );
             }
         };
-        let (specializations, taxonomy, insurance_providers) = tokio::join!(
+        let (specializations, taxonomy, insurance_providers, doctor_insurance_providers) = tokio::join!(
             load_provider_specializations_json(&state, id),
             load_provider_taxonomy_json(&state, id),
             load_provider_insurances_json(&state, id),
+            load_provider_doctor_insurances_json(&state, id),
         );
         let specializations = match specializations {
             Ok(items) => items,
@@ -961,6 +962,10 @@ async fn list_providers(
             Err(resp) => return resp,
         };
         let insurance_providers = match insurance_providers {
+            Ok(items) => items,
+            Err(resp) => return resp,
+        };
+        let doctor_insurance_providers = match doctor_insurance_providers {
             Ok(items) => items,
             Err(resp) => return resp,
         };
@@ -989,6 +994,7 @@ async fn list_providers(
             "taxonomy_attributes": row.try_get::<Value, _>("taxonomy_attributes").unwrap_or_else(|_| json!({})),
             "specializations": specializations,
             "insurance_providers": insurance_providers,
+            "doctor_insurance_providers": doctor_insurance_providers,
             "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
             "has_contract": row.try_get::<bool, _>("has_contract").unwrap_or(false),
             "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
@@ -5936,6 +5942,41 @@ async fn load_provider_insurances_json(
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to load provider insurance providers",
+        )
+    })?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "name": row.try_get::<String, _>("name").unwrap_or_default(),
+                "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+            })
+        })
+        .collect())
+}
+
+async fn load_provider_doctor_insurances_json(
+    state: &AppState,
+    provider_id: Uuid,
+) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT DISTINCT ip.id, ip.name, ip.is_active
+           FROM provider_doctor_links l
+           JOIN provider_doctor_insurances di ON di.doctor_id = l.doctor_id
+           JOIN insurance_providers ip ON ip.id = di.insurance_provider_id
+           WHERE l.provider_id = $1
+           ORDER BY ip.name"#,
+    )
+    .bind(provider_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, provider_id = %provider_id, "Failed to load provider doctor insurance providers");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load provider doctor insurance providers",
         )
     })?;
 

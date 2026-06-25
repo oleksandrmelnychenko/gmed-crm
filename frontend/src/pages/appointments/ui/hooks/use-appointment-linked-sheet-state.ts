@@ -1,11 +1,14 @@
 import { useCallback, useState } from "react";
 
+import { buildLinkedOrderWorkspaceHref } from "@/pages/appointments/model/linked-navigation";
 import type { LinkedPreviewKind } from "@/pages/appointments/model/types";
 
 type UseAppointmentLinkedSheetStateOptions = {
   detailId: string | null;
   detailPatientId: string | null;
+  detailOrderId: string | null;
   detailProviderId: string | null;
+  staffGo: (href: string) => void;
   preloadPatientSheet: () => void;
   preloadProviderSheet: () => void;
   preloadCasesSheet: () => void;
@@ -16,7 +19,9 @@ type UseAppointmentLinkedSheetStateOptions = {
 export function useAppointmentLinkedSheetState({
   detailId,
   detailPatientId,
+  detailOrderId,
   detailProviderId,
+  staffGo,
   preloadPatientSheet,
   preloadProviderSheet,
   preloadCasesSheet,
@@ -123,6 +128,11 @@ export function useAppointmentLinkedSheetState({
         openLinkedPatientById(detailPatientId ?? "");
         return;
       }
+      if (kind === "order") {
+        const href = buildLinkedOrderWorkspaceHref(detailOrderId, detailPatientId);
+        if (href) staffGo(href);
+        return;
+      }
       if (kind === "provider") {
         openLinkedProviderById(detailProviderId ?? "");
         return;
@@ -149,12 +159,14 @@ export function useAppointmentLinkedSheetState({
     },
     [
       detailPatientId,
+      detailOrderId,
       detailProviderId,
       openLinkedCasesSheet,
       openLinkedDocumentsSheet,
       openLinkedPatientById,
       openLinkedProviderById,
       preloadLinkedRecordsSheet,
+      staffGo,
     ],
   );
 

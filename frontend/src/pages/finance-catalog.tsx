@@ -994,6 +994,9 @@ function useFinanceCatalogPageContent() {
         valid_from: packageForm.validFrom || null,
         valid_to: packageForm.validTo || null,
         items: packageForm.items.map((item) => ({
+          id: item.formKey.startsWith("package-item-form-")
+            ? null
+            : item.formKey,
           agency_service_id: item.agencyServiceId || null,
           description: item.description.trim(),
           service_key: item.serviceKey.trim() || null,

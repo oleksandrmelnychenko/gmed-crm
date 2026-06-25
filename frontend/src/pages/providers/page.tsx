@@ -115,6 +115,7 @@ import {
   patientLabel,
   personGenderLabel,
   providerMeta,
+  providerLoadErrorMessage,
   providerOrganizationLevelLabel,
   providerPermissions,
   providerToForm,
@@ -2194,7 +2195,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   }, []);
 
   const applyProviderListError = useCallback((error: unknown) => {
-    setListError(error instanceof Error ? error.message : t.common_failed_load);
+    setListError(providerLoadErrorMessage(error, t.common_failed_load));
   }, [t.common_failed_load]);
 
   const finishProviderListLoad = useCallback(() => {
@@ -2216,7 +2217,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   }, []);
 
   const applyProviderDetailError = useCallback((error: unknown) => {
-    setDetailError(error instanceof Error ? error.message : t.common_failed_load);
+    setDetailError(providerLoadErrorMessage(error, t.common_failed_load));
   }, [t.common_failed_load]);
 
   const finishProviderDetailLoad = useCallback(() => {
@@ -2320,7 +2321,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         if (cancelled) return;
         dispatchPageState({
           peopleBusy: false,
-          peopleError: error instanceof Error ? error.message : t.common_failed_load,
+          peopleError: providerLoadErrorMessage(error, t.common_failed_load),
         });
       });
 
@@ -2374,7 +2375,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         setExistingDoctorOptions([]);
         setExistingDoctorOptionsBusy(false);
         setExistingDoctorOptionsError(
-          error instanceof Error ? error.message : t.common_failed_load,
+          providerLoadErrorMessage(error, t.common_failed_load),
         );
       });
 
@@ -2813,7 +2814,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       setRelationshipTargetDoctors(providerDetail.doctors);
     } catch (error) {
       if (relationshipTargetDoctorsRequestRef.current !== requestId) return;
-      setRelationshipError(error instanceof Error ? error.message : t.common_failed_update);
+      setRelationshipError(providerLoadErrorMessage(error, t.common_failed_load));
       setRelationshipTargetDoctors([]);
     } finally {
       if (relationshipTargetDoctorsRequestRef.current === requestId) {
@@ -3873,7 +3874,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               <AdminSheetScaffold
                 title={detail.name || t.providers_detail}
                 description={t.providers_subtitle}
-                hideHeader={detail.provider_type === "non_medical"}
+                hideHeader
                 footer={(
                   <SheetActionsFooter>
                     <Button
@@ -7548,7 +7549,7 @@ function ProviderProfileFields({
     ? lang === "de"
       ? "Servicepartner"
       : "Сервисный партнёр"
-    : t.providers_title;
+    : t.providers_name_placeholder;
 
   return (
     <>

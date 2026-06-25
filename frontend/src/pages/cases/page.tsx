@@ -155,7 +155,11 @@ type CaseTextSnippetFormState = {
   is_active: boolean;
 };
 
-type MedikamentItem = {
+type ClientRowIdentity = {
+  cid?: string | null;
+};
+
+type MedikamentItem = ClientRowIdentity & {
   id?: string | null;
   handelsname: string;
   wirkstoff?: string | null;
@@ -178,7 +182,7 @@ type MedikamentItem = {
   pending_expiry_notification_sent_at?: string | null;
 };
 
-type PainItem = {
+type PainItem = ClientRowIdentity & {
   lokalisierung: string;
   seit_wann?: string | null;
   ursache?: string | null;
@@ -428,6 +432,7 @@ type FieldProps = {
   children: ReactNode;
   required?: boolean;
   hint?: string;
+  error?: string;
 };
 
 type BannerProps = {
@@ -522,6 +527,40 @@ function caseStatusLabel(
   return formatEnumLabelFromKeys(status, CASE_STATUS_LABEL_KEYS, tr);
 }
 
+let caseClinicalRowSequence = 0;
+
+function createCaseClinicalRowId(prefix: "medication" | "pain") {
+  caseClinicalRowSequence += 1;
+  const randomId = globalThis.crypto?.randomUUID?.();
+  return `${prefix}-${randomId ?? caseClinicalRowSequence.toString(36)}`;
+}
+
+function existingClientRowId(item: ClientRowIdentity) {
+  return item.cid?.trim() || "";
+}
+
+function existingServerRowId(item: { id?: string | null }) {
+  return item.id?.trim() || "";
+}
+
+function withClientRowId<T extends ClientRowIdentity>(
+  item: T,
+  prefix: "medication" | "pain",
+): T {
+  if (existingClientRowId(item)) return item;
+  return { ...item, cid: createCaseClinicalRowId(prefix) };
+}
+
+function ensureMedikamentClientRowIds(items: MedikamentItem[]) {
+  return items.map((item) =>
+    existingServerRowId(item) ? item : withClientRowId(item, "medication"),
+  );
+}
+
+function ensurePainClientRowIds(items: PainItem[]) {
+  return items.map((item) => withClientRowId(item, "pain"));
+}
+
 function blankVorerkrankung(): VorerkrankungItem {
   return { erkrankung: "", erstdiagnose: "", notiz: "" };
 }
@@ -536,6 +575,7 @@ function blankOperation(): OperationItem {
 
 function blankMedikament(): MedikamentItem {
   return {
+    cid: createCaseClinicalRowId("medication"),
     handelsname: "",
     wirkstoff: "",
     dosis: "",
@@ -555,6 +595,7 @@ function blankMedikament(): MedikamentItem {
 
 function blankPainItem(): PainItem {
   return {
+    cid: createCaseClinicalRowId("pain"),
     lokalisierung: "",
     seit_wann: "",
     ursache: "",
@@ -592,25 +633,12 @@ function operationItemKey(item: OperationItem) {
   ].join("|");
 }
 
-function medikamentItemKey(item: MedikamentItem) {
-  return [
-    item.id ?? "",
-    item.handelsname,
-    item.wirkstoff ?? "",
-    item.dosis ?? "",
-    item.seit ?? "",
-    item.verordnender_arzt_id ?? "",
-  ].join("|");
+function medikamentItemKey(item: MedikamentItem, index: number) {
+  return existingServerRowId(item) || existingClientRowId(item) || `medikament-${index}`;
 }
 
-function painItemKey(item: PainItem) {
-  return [
-    item.lokalisierung,
-    item.seit_wann ?? "",
-    item.ursache ?? "",
-    item.qualitaet ?? "",
-    item.nrs_aktuell ?? "",
-  ].join("|");
+function painItemKey(item: PainItem, index: number) {
+  return existingClientRowId(item) || `pain-${index}`;
 }
 
 function symptomItemKey(item: SymptomItem) {
@@ -898,6 +926,60 @@ function painNrsValidationMessage(items: PainItem[]) {
   return getLang() === "de"
     ? "NRS-Werte müssen ganze Zahlen von 0 bis 10 sein."
     : "Значения NRS должны быть целыми числами от 0 до 10.";
+}
+
+function requiredClinicalItemMessage(section: "medikamente" | "pain") {
+  const lang = getLang();
+  if (section === "medikamente") {
+    return lang === "de"
+      ? "Bitte geben Sie für jede Medikamentenzeile einen Handelsnamen ein oder entfernen Sie leere Zeilen."
+      : "Укажите торговое название в каждой строке медикаментов или удалите пустые строки.";
+  }
+
+  return lang === "de"
+    ? "Bitte geben Sie für jede Schmerzzeile eine Lokalisation ein oder entfernen Sie leere Zeilen."
+    : "Укажите локализацию в каждой строке боли или удалите пустые строки.";
+}
+
+function requiredClinicalFieldMessage() {
+  return getLang() === "de" ? "Pflichtfeld." : "Обязательное поле.";
+}
+
+function medicationRequiredValidationMessage(items: MedikamentItem[]) {
+  return items.some((item) => !item.handelsname.trim())
+    ? requiredClinicalItemMessage("medikamente")
+    : "";
+}
+
+function painRequiredValidationMessage(items: PainItem[]) {
+  return items.some((item) => !item.lokalisierung.trim())
+    ? requiredClinicalItemMessage("pain")
+    : "";
+}
+
+function painValidationMessage(items: PainItem[]) {
+  return painRequiredValidationMessage(items) || painNrsValidationMessage(items);
+}
+
+function medicationRequiredFieldError(
+  item: MedikamentItem,
+  sectionError: string | undefined,
+) {
+  return sectionError && !item.handelsname.trim() ? requiredClinicalFieldMessage() : "";
+}
+
+function painRequiredFieldError(
+  item: PainItem,
+  sectionError: string | undefined,
+) {
+  return sectionError && !item.lokalisierung.trim() ? requiredClinicalFieldMessage() : "";
+}
+
+function requiredInputClassName(error: string) {
+  return cn(
+    "h-10 rounded-xl bg-white",
+    error ? "border-rose-300 focus:border-rose-400 focus:ring-rose-200" : "",
+  );
 }
 
 function countFilled(items: Array<{ [key: string]: unknown }>, key: string) {
@@ -1931,8 +2013,8 @@ function useCasesPageContent({
     setVorerkrankungen(item.vorerkrankungen);
     setAllergien(item.allergien);
     setOperationen(item.operationen);
-    setMedikamente(item.medikamente);
-    setPainRecords(item.pain_records);
+    setMedikamente(ensureMedikamentClientRowIds(item.medikamente));
+    setPainRecords(ensurePainClientRowIds(item.pain_records));
     setSymptome(item.symptome);
     setCardiology({
       ...blankCardiology(),
@@ -2292,6 +2374,11 @@ function useCasesPageContent({
   async function handleSaveMedikamente(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!detail) return;
+    const validationError = medicationRequiredValidationMessage(medikamente);
+    if (validationError) {
+      setSectionErrors((current) => ({ ...current, medikamente: validationError }));
+      return;
+    }
     await runSectionSave(
       "medikamente",
       () =>
@@ -2312,7 +2399,7 @@ function useCasesPageContent({
   async function handleSavePain(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!detail) return;
-    const validationError = painNrsValidationMessage(painRecords);
+    const validationError = painValidationMessage(painRecords);
     if (validationError) {
       setSectionErrors((current) => ({ ...current, pain: validationError }));
       return;
@@ -3297,10 +3384,12 @@ function useCasesPageContent({
                 </ItemEditorSection>
 
                 <ItemEditorSection title={t.cases_medication} description={t.cases_subtitle} count={countFilled(medikamente, "handelsname")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "medikamente"} error={sectionErrors.medikamente ?? ""} canEdit={permissions.canEdit} onAdd={() => setMedikamente((current) => [...current, blankMedikament()])} onSave={handleSaveMedikamente}>
-                  {medikamente.map((item, index) => (
-                    <div key={medikamentItemKey(item)} className="rounded-xl border border-border bg-muted/20 p-4">
+                  {medikamente.map((item, index) => {
+                    const handelsnameError = medicationRequiredFieldError(item, sectionErrors.medikamente);
+                    return (
+                    <div key={medikamentItemKey(item, index)} className="rounded-xl border border-border bg-muted/20 p-4">
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                        <Field label={t.cases_medications} required><Input value={item.handelsname} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { handelsname: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_medications} required error={handelsnameError}><Input value={item.handelsname} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { handelsname: event.target.value }))} className={requiredInputClassName(handelsnameError)} aria-invalid={Boolean(handelsnameError)} /></Field>
                         <Field label={t.cases_medications}><Input value={item.wirkstoff ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { wirkstoff: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.documents_category}>
                           <NativeComboboxSelect
@@ -3465,14 +3554,17 @@ function useCasesPageContent({
                         <Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setMedikamente((current) => removeItemAtIndex(current, index))}>{t.cases_clinical_remove}</Button>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </ItemEditorSection>
 
                 <ItemEditorSection title={t.cases_pain} description={t.cases_subtitle} count={countFilled(painRecords, "lokalisierung")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "pain"} error={sectionErrors.pain ?? ""} canEdit={permissions.canEdit} onAdd={() => setPainRecords((current) => [...current, blankPainItem()])} onSave={handleSavePain}>
-                  {painRecords.map((item, index) => (
-                    <div key={painItemKey(item)} className="rounded-xl border border-border bg-muted/20 p-4">
+                  {painRecords.map((item, index) => {
+                    const lokalisierungError = painRequiredFieldError(item, sectionErrors.pain);
+                    return (
+                    <div key={painItemKey(item, index)} className="rounded-xl border border-border bg-muted/20 p-4">
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        <Field label={t.appointments_location} required><Input value={item.lokalisierung} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { lokalisierung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.appointments_location} required error={lokalisierungError}><Input value={item.lokalisierung} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { lokalisierung: event.target.value }))} className={requiredInputClassName(lokalisierungError)} aria-invalid={Boolean(lokalisierungError)} /></Field>
                         <Field label={t.providers_service_valid_from}><Input value={item.seit_wann ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { seit_wann: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_preconditions}><Input value={item.ursache ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { ursache: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
                         <Field label={t.cases_symptoms}><Input value={item.qualitaet ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { qualitaet: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
@@ -3487,7 +3579,8 @@ function useCasesPageContent({
                       </div>
                       <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setPainRecords((current) => removeItemAtIndex(current, index))}>{t.cases_clinical_remove}</Button></div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </ItemEditorSection>
 
                 <ItemEditorSection title={t.cases_symptoms} description={t.cases_subtitle} count={countFilled(symptome, "beschreibung")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "symptome"} error={sectionErrors.symptome ?? ""} canEdit={permissions.canEdit} onAdd={() => setSymptome((current) => [...current, blankSymptom()])} onSave={handleSaveSymptome}>
@@ -4396,6 +4489,19 @@ export function CasesPage(...args: Parameters<typeof useCasesPageContent>) {
   return useCasesPageContent(...args);
 }
 
+export const casesClinicalEditorTestUtils = {
+  blankMedikament,
+  blankPainItem,
+  ensureMedikamentClientRowIds,
+  ensurePainClientRowIds,
+  medicationRequiredValidationMessage,
+  painValidationMessage,
+  sanitizeMedikamente,
+  sanitizePainRecords,
+  medikamentItemKey,
+  painItemKey,
+};
+
 function MetricCard({ label, value, description, icon }: MetricCardProps) {
   return (
     <div className="rounded-xl border border-border bg-card p-3.5">
@@ -4447,14 +4553,17 @@ function Panel({ title, description, action, children, className, accent = true,
   );
 }
 
-function Field({ label, children, hint }: FieldProps) {
+function Field({ label, children, hint, required = false, error = "" }: FieldProps) {
   return (
     <div className="space-y-1.5">
       <label className="block text-[11.5px] font-medium leading-tight text-muted-foreground">
         {label}
+        {required ? <span aria-hidden="true" className="ml-1 text-rose-500">*</span> : null}
       </label>
       {children}
-      {hint ? (
+      {error ? (
+        <span className="text-xs leading-snug text-rose-600">{error}</span>
+      ) : hint ? (
         <span className="text-xs leading-snug text-muted-foreground">{hint}</span>
       ) : null}
     </div>

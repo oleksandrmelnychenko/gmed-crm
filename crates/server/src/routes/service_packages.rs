@@ -46,6 +46,7 @@ pub fn router() -> Router<AppState> {
 
 #[derive(Deserialize)]
 struct ServicePackageItemInput {
+    id: Option<Uuid>,
     agency_service_id: Option<Uuid>,
     service_key: Option<String>,
     description: String,
@@ -370,36 +371,87 @@ async fn replace_package_items(
     package_id: Uuid,
     items: &[ServicePackageItemInput],
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM service_package_items WHERE package_id = $1")
-        .bind(package_id)
-        .execute(&mut **tx)
-        .await?;
+    let mut retained_ids = Vec::with_capacity(items.len());
 
     for (index, item) in items.iter().enumerate() {
         let description = item.description.trim();
         let service_key = normalize_optional(item.service_key.as_deref());
         let unit_label =
             normalize_optional(item.unit_label.as_deref()).unwrap_or_else(|| "unit".to_string());
-        sqlx::query(
-            r#"INSERT INTO service_package_items (
-                    package_id, agency_service_id, service_key, description,
-                    included_quantity, unit_label, overage_unit_price_net,
-                    tax_profile_id, requires_patient_approval, sort_order
-               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"#,
-        )
-        .bind(package_id)
-        .bind(item.agency_service_id)
-        .bind(service_key)
-        .bind(description)
-        .bind(item.included_quantity.unwrap_or(Decimal::ONE).round_dp(2))
-        .bind(unit_label)
-        .bind(item.overage_unit_price_net.map(|value| value.round_dp(2)))
-        .bind(item.tax_profile_id)
-        .bind(item.requires_patient_approval.unwrap_or(false))
-        .bind(index as i32)
-        .execute(&mut **tx)
-        .await?;
+        let item_id = if let Some(item_id) = item.id {
+            let result = sqlx::query(
+                r#"UPDATE service_package_items
+                   SET agency_service_id = $3,
+                       service_key = $4,
+                       description = $5,
+                       included_quantity = $6,
+                       unit_label = $7,
+                       overage_unit_price_net = $8,
+                       tax_profile_id = $9,
+                       requires_patient_approval = $10,
+                       sort_order = $11
+                   WHERE id = $1 AND package_id = $2"#,
+            )
+            .bind(item_id)
+            .bind(package_id)
+            .bind(item.agency_service_id)
+            .bind(service_key)
+            .bind(description)
+            .bind(item.included_quantity.unwrap_or(Decimal::ONE).round_dp(2))
+            .bind(unit_label)
+            .bind(item.overage_unit_price_net.map(|value| value.round_dp(2)))
+            .bind(item.tax_profile_id)
+            .bind(item.requires_patient_approval.unwrap_or(false))
+            .bind(index as i32)
+            .execute(&mut **tx)
+            .await?;
+
+            if result.rows_affected() == 0 {
+                return Err(sqlx::Error::RowNotFound);
+            }
+
+            item_id
+        } else {
+            let row = sqlx::query(
+                r#"INSERT INTO service_package_items (
+                        package_id, agency_service_id, service_key, description,
+                        included_quantity, unit_label, overage_unit_price_net,
+                        tax_profile_id, requires_patient_approval, sort_order
+                   ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                   RETURNING id"#,
+            )
+            .bind(package_id)
+            .bind(item.agency_service_id)
+            .bind(service_key)
+            .bind(description)
+            .bind(item.included_quantity.unwrap_or(Decimal::ONE).round_dp(2))
+            .bind(unit_label)
+            .bind(item.overage_unit_price_net.map(|value| value.round_dp(2)))
+            .bind(item.tax_profile_id)
+            .bind(item.requires_patient_approval.unwrap_or(false))
+            .bind(index as i32)
+            .fetch_one(&mut **tx)
+            .await?;
+
+            row.try_get::<Uuid, _>("id")?
+        };
+        retained_ids.push(item_id);
     }
+
+    sqlx::query(
+        r#"DELETE FROM service_package_items spi
+           WHERE spi.package_id = $1
+             AND NOT (spi.id = ANY($2::uuid[]))
+             AND NOT EXISTS (
+                SELECT 1
+                FROM service_package_consumptions spc
+                WHERE spc.package_item_id = spi.id
+             )"#,
+    )
+    .bind(package_id)
+    .bind(&retained_ids)
+    .execute(&mut **tx)
+    .await?;
 
     Ok(())
 }
@@ -435,8 +487,44 @@ fn validate_package_items(
 
 async fn validate_package_item_references(
     state: &AppState,
+    package_id: Option<Uuid>,
     items: &[ServicePackageItemInput],
 ) -> Result<(), axum::response::Response> {
+    let package_item_ids = items
+        .iter()
+        .filter_map(|item| item.id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if !package_item_ids.is_empty() {
+        let Some(package_id) = package_id else {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Package item id is only valid when updating a service package",
+            ));
+        };
+        let found = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM service_package_items WHERE package_id = $1 AND id = ANY($2)",
+        )
+        .bind(package_id)
+        .bind(&package_item_ids)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, package_id = %package_id, "validate service package item ids");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate package item ids",
+            )
+        })?;
+        if found != package_item_ids.len() as i64 {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Package item not found",
+            ));
+        }
+    }
+
     let tax_profile_ids = items
         .iter()
         .filter_map(|item| item.tax_profile_id)
@@ -538,7 +626,7 @@ async fn create_service_package(
     if let Err(resp) = validate_package_items(&items) {
         return resp;
     }
-    if let Err(resp) = validate_package_item_references(&state, &items).await {
+    if let Err(resp) = validate_package_item_references(&state, None, &items).await {
         return resp;
     }
     let base_price_net = body.base_price_net.unwrap_or(Decimal::ZERO);
@@ -663,7 +751,7 @@ async fn update_service_package(
     if let Err(resp) = validate_package_items(&items) {
         return resp;
     }
-    if let Err(resp) = validate_package_item_references(&state, &items).await {
+    if let Err(resp) = validate_package_item_references(&state, Some(package_id), &items).await {
         return resp;
     }
     let base_price_net = body.base_price_net.unwrap_or(Decimal::ZERO);

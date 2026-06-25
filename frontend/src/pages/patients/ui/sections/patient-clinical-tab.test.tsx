@@ -252,7 +252,7 @@ describe("PatientRecommendationsSection", () => {
       />,
     );
 
-    expect(html).toContain("Рекомендация");
+    expect(html).toContain("Добавить рекомендацию");
     expect(html).not.toContain(">Empfehlung<");
   });
 });

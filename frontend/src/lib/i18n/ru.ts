@@ -223,6 +223,7 @@ export const ru = {
   providers_subtitle: "Управление провайдерами, сотрудниками и каталогом услуг",
   providers_new: "Новый провайдер",
   providers_detail: "Детали провайдера",
+  providers_name_placeholder: "Название провайдера",
   providers_select_to_open_workspace:
     "Выберите провайдера, чтобы открыть реестровое рабочее пространство.",
   providers_no_access_title: "Реестр клиник и врачей",

@@ -29,6 +29,10 @@ export type {
 } from "@/pages/appointments/model/types";
 export { normalizeAppointmentWorkspaceTab } from "@/pages/appointments/model/workspace-tabs";
 
+const LEGACY_CONCIERGE_TRANSFER_COMPLETED_SOURCES = [
+  "Completed airport arrival step. Driver waited at hotel lobby and escorted patient to admission desk. Completed concierge-linked transfer.",
+] as const;
+
 export function appointmentPermissions(
   role?: string,
 ): AppointmentPermissions {
@@ -394,10 +398,11 @@ function localizeKnownTimelineText(
 ) {
   if (!value) return value ?? "";
   const normalized = value.trim();
-  if (
-    normalized ===
-    labels.appointments_legacy_concierge_transfer_completed_source
-  ) {
+  const conciergeTransferSources = [
+    labels.appointments_legacy_concierge_transfer_completed_source,
+    ...LEGACY_CONCIERGE_TRANSFER_COMPLETED_SOURCES,
+  ];
+  if (conciergeTransferSources.some((source) => normalized === source.trim())) {
     return labels.appointments_timeline_concierge_transfer_completed;
   }
   for (const item of prefixLabels) {

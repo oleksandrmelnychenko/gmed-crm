@@ -226,6 +226,22 @@ async fn providers_list_supports_provider_and_doctor_insurance_filters() {
     );
     assert!(!items.iter().any(|row| row["id"] == provider_id.to_string()));
     assert!(!items.iter().any(|row| row["id"] == decoy_id.to_string()));
+    let row = items
+        .iter()
+        .find(|row| row["id"] == doctor_provider_id.to_string())
+        .expect("doctor-insured provider row must be present");
+    assert_eq!(
+        row["doctor_insurance_providers"][0]["name"],
+        format!("Doctor Insurance {tag}")
+    );
+    assert_eq!(
+        row["insurance_providers"]
+            .as_array()
+            .expect("direct provider insurances")
+            .len(),
+        0,
+        "doctor coverage should not be flattened into direct provider insurance"
+    );
 
     let (status, body) = json_request(
         &app,

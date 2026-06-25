@@ -851,6 +851,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             <LazyPatientDocumentsTab
               l={l}
               patientId={id}
+              patient={detail}
               commonNotSet={t.common_not_set}
               commonUnknown={t.common_unknown}
               documentsFilenameLabel={documentsFilenameLabel}

@@ -43,7 +43,6 @@ import { DocumentsGrid } from "@/components/documents-grid";
 import { localizeDocumentCode } from "@/lib/required-document-labels";
 import {
   DOCUMENT_BINDING_FIELDS,
-  buildBindingsPayload,
   prefillDocumentBindingsFromText,
 } from "@/pages/documents/model/document-bindings";
 import { localizeTextBlock } from "@/pages/documents/model/text-block-labels";
@@ -127,6 +126,8 @@ import {
   STATUS_OPTIONS,
   VISIBILITY_OPTIONS,
   buildStandardDocumentNameFromMetadata,
+  buildGeneratedDocumentManualTextDraft,
+  buildGenerateDocumentPayload,
   buildDocumentsPath,
   canManageDocumentIntake,
   canManageDocuments,
@@ -135,7 +136,6 @@ import {
   canUploadDocuments,
   canViewDocumentShares,
   canViewDocuments,
-  compactDocumentParty,
   detailToEditForm,
   emptyGenerateForm,
   emptyUploadForm,
@@ -266,206 +266,6 @@ function documentCategoryValueLabel(
   return category
     ? documentCategoryOptionLabel(category, lang)
     : localizeDocumentCode(value, l);
-}
-
-function draftValue(value: string | null | undefined) {
-  return (value ?? "").trim();
-}
-
-function draftBinding(
-  form: GenerateFormState,
-  key: string,
-  fallback = "____________",
-) {
-  return draftValue(form.bindings[key]) || fallback;
-}
-
-function draftDate(value: string | null | undefined, fallback = "____________") {
-  const raw = draftValue(value);
-  return raw ? formatDate(raw) : fallback;
-}
-
-function draftMultiline(value: string | null | undefined) {
-  return draftValue(value)
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
-function draftPipeRows(value: string | null | undefined) {
-  return draftMultiline(value).map((line) =>
-    line.split("|").map((part) => part.trim()).filter(Boolean),
-  );
-}
-
-function joinDraftLines(lines: Array<string | false | null | undefined>) {
-  return lines
-    .filter((line): line is string => line !== false && line !== null && line !== undefined)
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function buildKnownGeneratedDocumentDraft(input: {
-  template: DocumentTemplate;
-  form: GenerateFormState;
-  patientLabel: string;
-  orderNumber?: string;
-  appointment?: AppointmentOption | null;
-}) {
-  const { template, form, patientLabel, orderNumber, appointment } = input;
-  const title = form.titleOverride.trim() || template.label;
-  const patient = patientLabel || "____________";
-  const signPlace = draftBinding(form, "sign_place", "München");
-  const signDate = draftDate(form.bindings.sign_date || form.documentDate);
-  const recipient =
-    draftMultiline(form.bindings.recipient_block).join("\n") ||
-    "An die Bundespolizei / Grenzschutz";
-  const clinics = draftPipeRows(form.bindings.clinics_text);
-  const clinicText = clinics.length
-    ? clinics.map(([name, address]) => [name, address].filter(Boolean).join(", ")).join("; ")
-    : "den vereinbarten Kliniken";
-  const contactPhones = draftValue(form.bindings.contact_phones);
-  const passportNumber = draftValue(form.bindings.passport_number);
-  const passportValidUntil = draftValue(form.bindings.passport_valid_until);
-  const orderDate = draftDate(form.bindings.order_date || form.documentDate);
-  const contractDate = draftDate(form.bindings.contract_date);
-  const payerName = draftBinding(form, "payer_name", "____________");
-  const serviceRows = draftPipeRows(form.bindings.service_lines_text);
-
-  switch (template.id) {
-    case "appointment_confirmation": {
-      const firstExamination = draftDate(form.bindings.period_from, "in Kürze");
-      const passportLine = passportNumber
-        ? `Reisepass-Nr.: ${passportNumber}${
-            passportValidUntil
-              ? `, gültig bis ${draftDate(passportValidUntil)}`
-              : ""
-          }`
-        : "";
-      return joinDraftLines([
-        `Date: ${signDate}`,
-        "Pages: 1",
-        "Doc.-ID: automatisch",
-        "Originator: GMED",
-        `For: ${patient}`,
-        "Project: TB-V2",
-        "",
-        recipient,
-        "",
-        `${signPlace}, ${signDate}`,
-        "",
-        `Terminbestätigung für ${patient}`,
-        passportLine,
-        "",
-        "Sehr geehrte Damen und Herren,",
-        `hiermit bestätigen wir, dass ${patient} sämtliche Termine für Diagnostik und Behandlung in ${clinicText} wahrnehmen wird.`,
-        `Die ersten Untersuchungen finden am ${firstExamination} statt.`,
-        "Die Behandlung wurde in Deutschland begonnen und soll nun fortgesetzt werden. Dolmetscher und Transfer sind organisiert.",
-        "Die Kostenfrage wurde mit dem Patienten geklärt. Es fallen keine Kosten für die Bundesrepublik Deutschland an.",
-        contactPhones
-          ? `Für Rückfragen stehen wir Ihnen gerne unter ${contactPhones} zur Verfügung.`
-          : "Für Rückfragen stehen wir Ihnen gerne zur Verfügung.",
-        "",
-        "Mit freundlichen Grüßen,",
-        "",
-        "c/o GMED",
-        "Geschäftsführer",
-      ]);
-    }
-    case "visa_invitation_letter": {
-      const appointmentText = appointment
-        ? `Geplanter Termin: ${formatDate(appointment.date)}${
-            appointment.time_start ? ` um ${appointment.time_start}` : ""
-          }${appointment.title ? `, ${appointment.title}` : ""}.`
-        : "";
-      const passportClause = passportNumber
-        ? `, Reisepass-Nr. ${passportNumber}${
-            passportValidUntil
-              ? `, gültig bis ${draftDate(passportValidUntil)}`
-              : ""
-          }`
-        : "";
-      return joinDraftLines([
-        title,
-        "",
-        recipient,
-        "",
-        `${signPlace}, ${signDate}`,
-        "",
-        `Hiermit bestätigen wir, dass ${patient}${passportClause} zur medizinischen Koordination und Vorstellung eingeladen ist.`,
-        appointmentText,
-        `Vorgesehene Einrichtung(en): ${clinicText}.`,
-        orderNumber ? `Interne Koordinationsnummer: ${orderNumber}.` : "",
-        "Dieses Schreiben dient zur Vorlage bei Botschaft oder Konsulat im Rahmen des Visumantrags.",
-        contactPhones
-          ? `Für Rückfragen stehen wir Ihnen gerne unter ${contactPhones} zur Verfügung.`
-          : "Für Rückfragen stehen wir Ihnen gerne zur Verfügung.",
-      ]);
-    }
-    case "single_order": {
-      const specialties = draftBinding(form, "specialties", "den vereinbarten Fachbereichen");
-      const purpose =
-        draftValue(form.bindings.examination_purpose) ||
-        "ausführliche medizinische Untersuchung";
-      return joinDraftLines([
-        title,
-        orderNumber || draftValue(form.bindings.order_number)
-          ? `Auftragsnummer: ${orderNumber || form.bindings.order_number}`
-          : "",
-        "",
-        `Einzelauftrag vom ${orderDate} zum Rahmendienstleistungsvertrag vom ${contractDate}.`,
-        "",
-        "zwischen",
-        patient,
-        "und",
-        "GMED",
-        "",
-        "§ 1 Leistungsumfang",
-        `Individuelle Beratung und Informationsvermittlung für ${specialties} mit dem Zweck, sich einer ${purpose} zu unterziehen.`,
-        "Administrative Unterstützung bei der Zusammenstellung und Übermittlung medizinischer Unterlagen.",
-        "Koordination von Terminen, Dolmetschern, Transfer und nachgelagerten Prozessen.",
-        draftValue(form.bindings.order_components),
-      ]);
-    }
-    case "cost_coverage_declaration": {
-      const services = serviceRows.map(([description, fee, quantity, total]) =>
-        [description, fee, quantity, total].filter(Boolean).join(" | "),
-      );
-      return joinDraftLines([
-        title,
-        "",
-        `Kostenübernehmer: ${payerName}`,
-        `Auftraggeber: ${patient}`,
-        `Einzelauftrag vom: ${orderDate}`,
-        `Rahmendienstleistungsvertrag vom: ${contractDate}`,
-        "",
-        "Der Kostenübernehmer erklärt sich bereit, sämtliche im Zusammenhang mit dem genannten Einzelauftrag entstehenden Kosten gegenüber GMED zu übernehmen.",
-        services.length ? "Leistungen:" : "",
-        ...services.map((line) => `- ${line}`),
-        "",
-        `${signPlace}, ${signDate}`,
-      ]);
-    }
-    case "cost_estimate": {
-      const services = serviceRows.map(([description, range]) =>
-        [description, range].filter(Boolean).join(" | "),
-      );
-      return joinDraftLines([
-        title,
-        "",
-        `Patient: ${patient}`,
-        `Datum: ${orderDate}`,
-        services.length ? "Voraussichtliche Leistungen:" : "",
-        ...services.map((line) => `- ${line}`),
-        draftValue(form.bindings.estimate_total)
-          ? `Gesamt: ${form.bindings.estimate_total}`
-          : "",
-      ]);
-    }
-    default:
-      return null;
-  }
 }
 
 function labelFromOptions<T extends string>(
@@ -1532,78 +1332,30 @@ function StaffDocumentsPage({
       (item) => item.id === generateForm.appointmentId,
     );
     const patientLabel = patient ? patientOptionLabel(patient) : "";
-    const knownDraft = buildKnownGeneratedDocumentDraft({
+    const patientAddressee = patient
+      ? patientDocumentAddresseeLabel(patient.id, patients)
+      : "";
+    return buildGeneratedDocumentManualTextDraft({
       template: selectedTemplate,
       form: generateForm,
       patientLabel,
+      patientAddressee,
       orderNumber: order?.order_number,
       appointment,
+      availableTemplateBlocks,
+      lang,
+      labels: {
+        documentDate: metaText.documentDate,
+        sourceInstitution: metaText.sourceInstitution,
+        addresseePerson: metaText.addresseePerson,
+        ordersPatient: t.orders_patient,
+        ordersTitle: t.orders_title,
+        appointmentsTitle: t.appointments_title,
+        sectionBindings: t.documents_section_bindings,
+        textBlocks: t.documents_text_blocks,
+      },
+      formatDisplayDate: formatDate,
     });
-    if (knownDraft) return knownDraft;
-
-    const lines: string[] = [];
-    const title = generateForm.titleOverride.trim() || selectedTemplate.label;
-    lines.push(title);
-    lines.push("");
-    lines.push(`${metaText.documentDate}: ${generateForm.documentDate || new Date().toISOString().slice(0, 10)}`);
-    if (patientLabel) lines.push(`${t.orders_patient}: ${patientLabel}`);
-    if (order) lines.push(`${t.orders_title}: ${order.order_number}`);
-    if (appointment) {
-      lines.push(
-        `${t.appointments_title}: ${appointment.title} · ${formatDate(appointment.date)}${
-          appointment.time_start ? ` · ${appointment.time_start}` : ""
-        }`,
-      );
-    }
-    const source = compactDocumentParty(
-      generateForm.sourcePerson || generateForm.ursprung,
-      generateForm.sourceInstitution || generateForm.klinik,
-    );
-    if (source) lines.push(`${metaText.sourceInstitution}: ${source}`);
-    const addressee =
-      compactDocumentParty(
-        generateForm.addresseePerson,
-        generateForm.addresseeInstitution,
-      ) || patientDocumentAddresseeLabel(generateForm.patientId, patients);
-    if (addressee) lines.push(`${metaText.addresseePerson}: ${addressee}`);
-
-    if (generateForm.introduction.trim()) {
-      lines.push("");
-      lines.push(generateForm.introduction.trim());
-    }
-
-    const bindingFields = DOCUMENT_BINDING_FIELDS[selectedTemplate.id] ?? [];
-    const bindingLines = bindingFields
-      .map((field) => {
-        const value = generateForm.bindings[field.key]?.trim();
-        return value ? `${field.label}: ${value}` : "";
-      })
-      .filter(Boolean);
-    if (bindingLines.length > 0) {
-      lines.push("");
-      lines.push(t.documents_section_bindings);
-      lines.push(...bindingLines);
-    }
-
-    const selectedBlocks = availableTemplateBlocks.filter((block) =>
-      generateForm.textBlockKeys.includes(block.key),
-    );
-    if (selectedBlocks.length > 0) {
-      lines.push("");
-      lines.push(t.documents_text_blocks);
-      for (const block of selectedBlocks) {
-        const textBlock = localizeTextBlock(block.key, lang, block);
-        lines.push(textBlock.label);
-        if (textBlock.description) lines.push(textBlock.description);
-      }
-    }
-
-    if (generateForm.closingNote.trim()) {
-      lines.push("");
-      lines.push(generateForm.closingNote.trim());
-    }
-
-    return lines.join("\n").trim();
   }, [
     availableTemplateBlocks,
     generateAppointments,
@@ -2366,62 +2118,14 @@ function StaffDocumentsPage({
     setGenerateBusy(true);
     setGenerateError("");
     try {
-      const generatedStandardName = buildStandardDocumentNameFromMetadata({
-        category: selectedTemplate.category,
-        art: selectedTemplate.default_auto_name || selectedTemplate.art,
-        isMedical: selectedTemplate.is_medical,
-        documentDate: generateForm.documentDate,
-        fallbackDocumentDate: new Date(),
-        sourcePerson: generateForm.sourcePerson,
-        sourceInstitution: generateForm.sourceInstitution,
-        legacySource: generateForm.ursprung,
-        legacySourceInstitution:
-          generateForm.klinik || selectedTemplate.provider_name || "GMED",
-        addresseePerson: generateForm.addresseePerson,
-        addresseeInstitution: generateForm.addresseeInstitution,
-        patientAddressee: patientDocumentAddresseeLabel(generateForm.patientId, patients),
-      });
-      const explicitAutoName = generateForm.autoName.trim();
-      const defaultAutoName = selectedTemplate.default_auto_name.trim();
-      const generatedAutoName =
-        !explicitAutoName || explicitAutoName === defaultAutoName
-          ? generatedStandardName || explicitAutoName
-          : explicitAutoName;
-      const response = await generateDocument({
-        template_id: selectedTemplate.id,
-        patient_id: generateForm.patientId,
-        order_id: generateForm.orderId || null,
-        appointment_id: generateForm.appointmentId || null,
-        auto_name: generatedAutoName || null,
-        status: generateForm.status,
-        visibility: generateForm.visibility,
-        language: generateForm.language || null,
-        replace_document_id: generateForm.replaceDocumentId || null,
-        title_override: generateForm.titleOverride.trim() || null,
-        introduction: generateForm.introduction.trim() || null,
-        closing_note: generateForm.closingNote.trim() || null,
-        klinik: generateForm.klinik.trim() || null,
-        ursprung: generateForm.ursprung.trim() || null,
-        document_direction: generateForm.documentDirection,
-        document_variant: generateForm.documentVariant,
-        document_language: generateForm.documentLanguage || generateForm.language || null,
-        access_category: generateForm.accessCategory,
-        document_date: generateForm.documentDate || null,
-        source_person: generateForm.sourcePerson.trim() || null,
-        source_institution: generateForm.sourceInstitution.trim() || null,
-        addressee_person: generateForm.addresseePerson.trim() || null,
-        addressee_institution: generateForm.addresseeInstitution.trim() || null,
-        financial_status: generateForm.financialStatus || null,
-        payment_due_date: generateForm.paymentDueDate || null,
-        payment_date: generateForm.paymentDate || null,
-        payment_method: generateForm.paymentMethod || null,
-        notes: generateForm.notes.trim() || null,
-        manual_text: generateForm.manualTextDirty
-          ? displayedGeneratedManualText.trim() || null
-          : null,
-        text_block_keys: generateForm.textBlockKeys,
-        bindings: buildBindingsPayload(selectedTemplate.id, generateForm.bindings),
-      });
+      const response = await generateDocument(
+        buildGenerateDocumentPayload({
+          template: selectedTemplate,
+          form: generateForm,
+          patients,
+          displayedManualText: displayedGeneratedManualText,
+        }),
+      );
       setTemplateOpen(false);
       setNotice(
         t.documents_generated_version.replace(

@@ -441,7 +441,7 @@ function buildPeopleColumns(
   const notSet = labels.common_not_set ?? "-";
   const providerLabel = providerCatalogLabel(labels, lang, forceNonMedical);
 
-  return [
+  const columns: ColumnDef<ProviderPeopleRow>[] = [
     {
       id: "person",
       label: uiLabel(uiText, "providers_people_person", localizedFallback(lang, "Person", "Человек")),
@@ -619,6 +619,8 @@ function buildPeopleColumns(
       ),
     },
   ];
+
+  return forceNonMedical ? columns.filter((column) => column.group !== "clinical") : columns;
 }
 
 function FieldLabel({ children }: { children: ReactNode }) {
@@ -1179,12 +1181,14 @@ function MobilePeopleCards({
           </div>
 
           <div className="mt-2.5 space-y-1.5 text-xs text-muted-foreground">
-            <p className="break-words">
-              <span className="font-medium text-foreground/75">
-                {labels.providers_fachbereich ?? localizedFallback(lang, "Fachbereich", "Специализация")}:{" "}
-              </span>
-              {specializationSummary(row, lang, labels.common_not_set ?? "-")}
-            </p>
+            {!forceNonMedical ? (
+              <p className="break-words">
+                <span className="font-medium text-foreground/75">
+                  {labels.providers_fachbereich ?? localizedFallback(lang, "Fachbereich", "Специализация")}:{" "}
+                </span>
+                {specializationSummary(row, lang, labels.common_not_set ?? "-")}
+              </p>
+            ) : null}
             <p className="break-words">
               <span className="font-medium text-foreground/75">
                 {uiLabel(uiText, "providers_contacts", localizedFallback(lang, "Kontakte", "Контакты"))}:{" "}

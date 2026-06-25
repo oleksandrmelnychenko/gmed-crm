@@ -147,6 +147,21 @@ describe("collectInsuranceOptions", () => {
   it("returns an empty list when no provider carries insurance", () => {
     expect(collectInsuranceOptions([provider("a", "medical", [])])).toEqual([]);
   });
+
+  it("includes insurance carried by linked doctors without merging it into provider coverage", () => {
+    const providerWithDoctorCoverage: ProviderTaxonomyCarrier = {
+      id: "doctor-provider",
+      name: "Doctor Provider",
+      provider_type: "medical",
+      insurance_providers: [{ id: "i1", name: "AOK" }],
+      doctor_insurance_providers: [{ id: "i2", name: "TK" }],
+    };
+
+    expect(collectInsuranceOptions([providerWithDoctorCoverage])).toEqual([
+      { id: "i1", name: "AOK" },
+      { id: "i2", name: "TK" },
+    ]);
+  });
 });
 
 describe("providerMatchesInsurance", () => {
@@ -159,6 +174,34 @@ describe("providerMatchesInsurance", () => {
     const p = insured("a", [{ id: "i1", name: "AOK" }]);
     expect(providerMatchesInsurance(p, "i1")).toBe(true);
     expect(providerMatchesInsurance(p, "i2")).toBe(false);
+  });
+
+  it("matches insurance from linked-doctor coverage on provider summaries", () => {
+    const p: ProviderTaxonomyCarrier = {
+      id: "a",
+      name: "Clinic",
+      provider_type: "medical",
+      insurance_providers: [],
+      doctor_insurance_providers: [{ id: "i2", name: "TK" }],
+    };
+
+    expect(providerMatchesInsurance(p, "i2")).toBe(true);
+    expect(providerMatchesInsurance(p, "i1")).toBe(false);
+  });
+
+  it("matches nested doctor insurance when a detailed provider is used in a picker", () => {
+    const p: ProviderTaxonomyCarrier = {
+      id: "a",
+      name: "Clinic",
+      provider_type: "medical",
+      insurance_providers: [],
+      doctors: [
+        { insurance_providers: [{ id: "i3", name: "BKK" }] },
+        { insurance_providers: [] },
+      ],
+    };
+
+    expect(providerMatchesInsurance(p, "i3")).toBe(true);
   });
 
   it("is false when the provider has no insurance coverage", () => {

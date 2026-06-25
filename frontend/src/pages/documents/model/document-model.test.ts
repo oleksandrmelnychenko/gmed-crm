@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildGeneratedDocumentManualTextDraft,
+  buildGenerateDocumentPayload,
   buildStandardDocumentName,
   buildStandardDocumentNameFromMetadata,
   buildDocumentsPath,
@@ -9,7 +11,40 @@ import {
   emptyUploadForm,
   patientDocumentAddresseeLabel,
 } from "./document-model";
-import type { DocumentItem, PatientOption } from "./types";
+import type { DocumentItem, DocumentTemplate, GenerateFormState, PatientOption } from "./types";
+
+function template(overrides: Partial<DocumentTemplate> = {}): DocumentTemplate {
+  return {
+    art: "appointment_confirmation",
+    category: "clinic_correspondence",
+    default_auto_name: "appointment_confirmation",
+    default_status: "active",
+    default_visibility: "patient_visible",
+    description: "Appointment confirmation",
+    id: "appointment_confirmation",
+    is_medical: false,
+    label: "Terminbestätigung",
+    supported_languages: ["de"],
+    text_block_keys: [],
+    ...overrides,
+  };
+}
+
+function generateForm(overrides: Partial<GenerateFormState> = {}): GenerateFormState {
+  return {
+    ...emptyGenerateForm("p1"),
+    templateId: "appointment_confirmation",
+    autoName: "appointment_confirmation",
+    status: "active",
+    visibility: "patient_visible",
+    language: "de",
+    documentLanguage: "de",
+    documentDate: "2026-06-25",
+    sourceInstitution: "GMED",
+    addresseePerson: "Anna Müller",
+    ...overrides,
+  };
+}
 
 describe("buildStandardDocumentName", () => {
   it("builds the requested medical specialty document naming pattern", () => {
@@ -146,6 +181,138 @@ describe("patientDocumentAddresseeLabel", () => {
     expect(patientDocumentAddresseeLabel("p1", patients)).toBe("Anna Müller");
     expect(patientDocumentAddresseeLabel("p2", patients)).toBe("GM-002");
     expect(patientDocumentAddresseeLabel("missing", patients)).toBe("");
+  });
+});
+
+describe("buildGenerateDocumentPayload", () => {
+  const patients: PatientOption[] = [
+    { id: "p1", patient_id: "GM-001", first_name: "Anna", last_name: "Müller" },
+  ];
+
+  it("builds the compliant generated document payload for patient shortcuts", () => {
+    const payload = buildGenerateDocumentPayload({
+      template: template(),
+      form: generateForm({
+        bindings: {
+          passport_number: " MA1234567 ",
+          passport_valid_until: "2050-01-01",
+        },
+      }),
+      patients,
+    });
+
+    expect(payload).toMatchObject({
+      template_id: "appointment_confirmation",
+      patient_id: "p1",
+      auto_name: "ADMIN-Terminbestätigung vom 25.06.2026-GMED-Anna Müller",
+      status: "active",
+      visibility: "patient_visible",
+      language: "de",
+      document_direction: "outgoing",
+      document_variant: "original",
+      document_language: "de",
+      access_category: "patient",
+      document_date: "2026-06-25",
+      source_institution: "GMED",
+      addressee_person: "Anna Müller",
+      manual_text: null,
+      text_block_keys: [],
+      bindings: {
+        passport_number: "MA1234567",
+        passport_valid_until: "2050-01-01",
+      },
+    });
+  });
+
+  it("sends manual_text only after the generated draft was edited", () => {
+    expect(
+      buildGenerateDocumentPayload({
+        template: template(),
+        form: generateForm({ manualText: "Edited text", manualTextDirty: false }),
+        patients,
+        displayedManualText: "Edited text",
+      }).manual_text,
+    ).toBeNull();
+
+    expect(
+      buildGenerateDocumentPayload({
+        template: template(),
+        form: generateForm({ manualText: "Edited text", manualTextDirty: true }),
+        patients,
+        displayedManualText: "Edited text",
+      }).manual_text,
+    ).toBe("Edited text");
+  });
+
+  it("keeps an explicitly edited filename instead of regenerating auto_name", () => {
+    expect(
+      buildGenerateDocumentPayload({
+        template: template(),
+        form: generateForm({ autoName: "Custom patient letter" }),
+        patients,
+      }).auto_name,
+    ).toBe("Custom patient letter");
+  });
+});
+
+describe("buildGeneratedDocumentManualTextDraft", () => {
+  it("exposes the generated document text before submit", () => {
+    const draft = buildGeneratedDocumentManualTextDraft({
+      template: template({
+        id: "generic_patient_letter",
+        art: "Patientenbrief",
+        label: "Patientenbrief",
+      }),
+      form: generateForm({
+        templateId: "generic_patient_letter",
+        titleOverride: "Vorbereitung",
+        introduction: "Bitte nüchtern erscheinen.",
+        bindings: { unknown: "ignored" },
+      }),
+      patientLabel: "GM-001 · Anna Müller",
+      lang: "de",
+      labels: {
+        appointmentsTitle: "Termin",
+        documentDate: "Dokumentdatum",
+        sourceInstitution: "Quelle",
+        addresseePerson: "Adressat",
+        ordersPatient: "Patient",
+        ordersTitle: "Auftrag",
+        sectionBindings: "Vorlagenfelder",
+        textBlocks: "Textbausteine",
+      },
+    });
+
+    expect(draft).toContain("Vorbereitung");
+    expect(draft).toContain("Dokumentdatum: 2026-06-25");
+    expect(draft).toContain("Patient: GM-001 · Anna Müller");
+    expect(draft).toContain("Quelle: GMED");
+    expect(draft).toContain("Adressat: Anna Müller");
+    expect(draft).toContain("Bitte nüchtern erscheinen.");
+  });
+
+  it("uses the patient addressee instead of the UI patient label inside known drafts", () => {
+    const draft = buildGeneratedDocumentManualTextDraft({
+      template: template(),
+      form: generateForm(),
+      patientLabel: "GM-001 · Anna Müller",
+      patientAddressee: "Anna Müller",
+      lang: "de",
+      labels: {
+        appointmentsTitle: "Termin",
+        documentDate: "Dokumentdatum",
+        sourceInstitution: "Quelle",
+        addresseePerson: "Adressat",
+        ordersPatient: "Patient",
+        ordersTitle: "Auftrag",
+        sectionBindings: "Vorlagenfelder",
+        textBlocks: "Textbausteine",
+      },
+    });
+
+    expect(draft).toContain("For: Anna Müller");
+    expect(draft).toContain("Terminbestätigung für Anna Müller");
+    expect(draft).not.toContain("GM-001 · Anna Müller");
   });
 });
 

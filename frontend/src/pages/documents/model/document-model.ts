@@ -1,4 +1,6 @@
 import type {
+  AppointmentOption,
+  DocumentAccessCategory,
   DocumentItem,
   DocumentStatus,
   DocumentTemplate,
@@ -7,9 +9,15 @@ import type {
   FiltersState,
   GenerateFormState,
   PatientOption,
+  TemplateTextBlock,
   UploadFormState,
 } from "./types";
-import { formatUnknownValue, type Translations } from "@/lib/i18n";
+import { formatUnknownValue, type Lang, type Translations } from "@/lib/i18n";
+import {
+  DOCUMENT_BINDING_FIELDS,
+  buildBindingsPayload,
+} from "./document-bindings";
+import { localizeTextBlock } from "./text-block-labels";
 
 export const STATUS_OPTIONS: DocumentStatus[] = ["draft", "active", "archived"];
 export const VISIBILITY_OPTIONS: DocumentVisibility[] = [
@@ -352,6 +360,434 @@ export function buildStandardDocumentNameFromMetadata(
     source,
     addressee,
   });
+}
+
+type DraftFormatDate = (value?: string | null) => string;
+
+function fallbackDraftFormatDate(value?: string | null) {
+  return formatDocumentDate(value) || value || "";
+}
+
+function draftValue(value: string | null | undefined) {
+  return (value ?? "").trim();
+}
+
+function draftBinding(
+  form: GenerateFormState,
+  key: string,
+  fallback = "____________",
+) {
+  return draftValue(form.bindings[key]) || fallback;
+}
+
+function draftDate(
+  value: string | null | undefined,
+  formatDisplayDate: DraftFormatDate,
+  fallback = "____________",
+) {
+  const raw = draftValue(value);
+  return raw ? formatDisplayDate(raw) : fallback;
+}
+
+function draftMultiline(value: string | null | undefined) {
+  return draftValue(value)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function draftPipeRows(value: string | null | undefined) {
+  return draftMultiline(value).map((line) =>
+    line.split("|").map((part) => part.trim()).filter(Boolean),
+  );
+}
+
+function joinDraftLines(lines: Array<string | false | null | undefined>) {
+  return lines
+    .filter((line): line is string => line !== false && line !== null && line !== undefined)
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function buildKnownGeneratedDocumentDraft(
+  input: {
+    template: DocumentTemplate;
+    form: GenerateFormState;
+    patientLabel: string;
+    patientAddressee?: string;
+    orderNumber?: string | null;
+    appointment?: AppointmentOption | null;
+  },
+  formatDisplayDate: DraftFormatDate,
+) {
+  const { template, form, patientLabel, patientAddressee, orderNumber, appointment } = input;
+  const title = form.titleOverride.trim() || template.label;
+  const patient = patientAddressee?.trim() || patientLabel || "____________";
+  const signPlace = draftBinding(form, "sign_place", "München");
+  const signDate = draftDate(form.bindings.sign_date || form.documentDate, formatDisplayDate);
+  const recipient =
+    draftMultiline(form.bindings.recipient_block).join("\n") ||
+    "An die Bundespolizei / Grenzschutz";
+  const clinics = draftPipeRows(form.bindings.clinics_text);
+  const clinicText = clinics.length
+    ? clinics.map(([name, address]) => [name, address].filter(Boolean).join(", ")).join("; ")
+    : "den vereinbarten Kliniken";
+  const contactPhones = draftValue(form.bindings.contact_phones);
+  const passportNumber = draftValue(form.bindings.passport_number);
+  const passportValidUntil = draftValue(form.bindings.passport_valid_until);
+  const orderDate = draftDate(form.bindings.order_date || form.documentDate, formatDisplayDate);
+  const contractDate = draftDate(form.bindings.contract_date, formatDisplayDate);
+  const payerName = draftBinding(form, "payer_name", "____________");
+  const serviceRows = draftPipeRows(form.bindings.service_lines_text);
+
+  switch (template.id) {
+    case "appointment_confirmation": {
+      const firstExamination = draftDate(form.bindings.period_from, formatDisplayDate, "in Kürze");
+      const passportLine = passportNumber
+        ? `Reisepass-Nr.: ${passportNumber}${
+            passportValidUntil
+              ? `, gültig bis ${draftDate(passportValidUntil, formatDisplayDate)}`
+              : ""
+          }`
+        : "";
+      return joinDraftLines([
+        `Date: ${signDate}`,
+        "Pages: 1",
+        "Doc.-ID: automatisch",
+        "Originator: GMED",
+        `For: ${patient}`,
+        "Project: TB-V2",
+        "",
+        recipient,
+        "",
+        `${signPlace}, ${signDate}`,
+        "",
+        `Terminbestätigung für ${patient}`,
+        passportLine,
+        "",
+        "Sehr geehrte Damen und Herren,",
+        `hiermit bestätigen wir, dass ${patient} sämtliche Termine für Diagnostik und Behandlung in ${clinicText} wahrnehmen wird.`,
+        `Die ersten Untersuchungen finden am ${firstExamination} statt.`,
+        "Die Behandlung wurde in Deutschland begonnen und soll nun fortgesetzt werden. Dolmetscher und Transfer sind organisiert.",
+        "Die Kostenfrage wurde mit dem Patienten geklärt. Es fallen keine Kosten für die Bundesrepublik Deutschland an.",
+        contactPhones
+          ? `Für Rückfragen stehen wir Ihnen gerne unter ${contactPhones} zur Verfügung.`
+          : "Für Rückfragen stehen wir Ihnen gerne zur Verfügung.",
+        "",
+        "Mit freundlichen Grüßen,",
+        "",
+        "c/o GMED",
+        "Geschäftsführer",
+      ]);
+    }
+    case "visa_invitation_letter": {
+      const appointmentText = appointment
+        ? `Geplanter Termin: ${formatDisplayDate(appointment.date)}${
+            appointment.time_start ? ` um ${appointment.time_start}` : ""
+          }${appointment.title ? `, ${appointment.title}` : ""}.`
+        : "";
+      const passportClause = passportNumber
+        ? `, Reisepass-Nr. ${passportNumber}${
+            passportValidUntil
+              ? `, gültig bis ${draftDate(passportValidUntil, formatDisplayDate)}`
+              : ""
+          }`
+        : "";
+      return joinDraftLines([
+        title,
+        "",
+        recipient,
+        "",
+        `${signPlace}, ${signDate}`,
+        "",
+        `Hiermit bestätigen wir, dass ${patient}${passportClause} zur medizinischen Koordination und Vorstellung eingeladen ist.`,
+        appointmentText,
+        `Vorgesehene Einrichtung(en): ${clinicText}.`,
+        orderNumber ? `Interne Koordinationsnummer: ${orderNumber}.` : "",
+        "Dieses Schreiben dient zur Vorlage bei Botschaft oder Konsulat im Rahmen des Visumantrags.",
+        contactPhones
+          ? `Für Rückfragen stehen wir Ihnen gerne unter ${contactPhones} zur Verfügung.`
+          : "Für Rückfragen stehen wir Ihnen gerne zur Verfügung.",
+      ]);
+    }
+    case "single_order": {
+      const specialties = draftBinding(form, "specialties", "den vereinbarten Fachbereichen");
+      const purpose =
+        draftValue(form.bindings.examination_purpose) ||
+        "ausführliche medizinische Untersuchung";
+      return joinDraftLines([
+        title,
+        orderNumber || draftValue(form.bindings.order_number)
+          ? `Auftragsnummer: ${orderNumber || form.bindings.order_number}`
+          : "",
+        "",
+        `Einzelauftrag vom ${orderDate} zum Rahmendienstleistungsvertrag vom ${contractDate}.`,
+        "",
+        "zwischen",
+        patient,
+        "und",
+        "GMED",
+        "",
+        "§ 1 Leistungsumfang",
+        `Individuelle Beratung und Informationsvermittlung für ${specialties} mit dem Zweck, sich einer ${purpose} zu unterziehen.`,
+        "Administrative Unterstützung bei der Zusammenstellung und Übermittlung medizinischer Unterlagen.",
+        "Koordination von Terminen, Dolmetschern, Transfer und nachgelagerten Prozessen.",
+        draftValue(form.bindings.order_components),
+      ]);
+    }
+    case "cost_coverage_declaration": {
+      const services = serviceRows.map(([description, fee, quantity, total]) =>
+        [description, fee, quantity, total].filter(Boolean).join(" | "),
+      );
+      return joinDraftLines([
+        title,
+        "",
+        `Kostenübernehmer: ${payerName}`,
+        `Auftraggeber: ${patient}`,
+        `Einzelauftrag vom: ${orderDate}`,
+        `Rahmendienstleistungsvertrag vom: ${contractDate}`,
+        "",
+        "Der Kostenübernehmer erklärt sich bereit, sämtliche im Zusammenhang mit dem genannten Einzelauftrag entstehenden Kosten gegenüber GMED zu übernehmen.",
+        services.length ? "Leistungen:" : "",
+        ...services.map((line) => `- ${line}`),
+        "",
+        `${signPlace}, ${signDate}`,
+      ]);
+    }
+    case "cost_estimate": {
+      const services = serviceRows.map(([description, range]) =>
+        [description, range].filter(Boolean).join(" | "),
+      );
+      return joinDraftLines([
+        title,
+        "",
+        `Patient: ${patient}`,
+        `Datum: ${orderDate}`,
+        services.length ? "Voraussichtliche Leistungen:" : "",
+        ...services.map((line) => `- ${line}`),
+        draftValue(form.bindings.estimate_total)
+          ? `Gesamt: ${form.bindings.estimate_total}`
+          : "",
+      ]);
+    }
+    default:
+      return null;
+  }
+}
+
+export type GeneratedDocumentDraftLabels = {
+  documentDate: string;
+  sourceInstitution: string;
+  addresseePerson: string;
+  ordersPatient: string;
+  ordersTitle: string;
+  appointmentsTitle: string;
+  sectionBindings: string;
+  textBlocks: string;
+};
+
+export function buildGeneratedDocumentManualTextDraft(input: {
+  template: DocumentTemplate;
+  form: GenerateFormState;
+  patientLabel?: string;
+  patientAddressee?: string;
+  orderNumber?: string | null;
+  appointment?: AppointmentOption | null;
+  availableTemplateBlocks?: TemplateTextBlock[];
+  lang: Lang;
+  labels: GeneratedDocumentDraftLabels;
+  formatDisplayDate?: DraftFormatDate;
+}) {
+  const formatDisplayDate = input.formatDisplayDate ?? fallbackDraftFormatDate;
+  const patientLabel = input.patientLabel ?? "";
+  const knownDraft = buildKnownGeneratedDocumentDraft(
+    {
+      template: input.template,
+      form: input.form,
+      patientLabel,
+      patientAddressee: input.patientAddressee,
+      orderNumber: input.orderNumber,
+      appointment: input.appointment,
+    },
+    formatDisplayDate,
+  );
+  if (knownDraft) return knownDraft;
+
+  const { form, labels, template } = input;
+  const lines: string[] = [];
+  const title = form.titleOverride.trim() || template.label;
+  lines.push(title);
+  lines.push("");
+  lines.push(`${labels.documentDate}: ${form.documentDate || new Date().toISOString().slice(0, 10)}`);
+  if (patientLabel) lines.push(`${labels.ordersPatient}: ${patientLabel}`);
+  if (input.orderNumber) lines.push(`${labels.ordersTitle}: ${input.orderNumber}`);
+  if (input.appointment) {
+    lines.push(
+      `${labels.appointmentsTitle}: ${input.appointment.title} · ${formatDisplayDate(input.appointment.date)}${
+        input.appointment.time_start ? ` · ${input.appointment.time_start}` : ""
+      }`,
+    );
+  }
+  const source = compactDocumentParty(
+    form.sourcePerson || form.ursprung,
+    form.sourceInstitution || form.klinik,
+  );
+  if (source) lines.push(`${labels.sourceInstitution}: ${source}`);
+  const addressee =
+    compactDocumentParty(form.addresseePerson, form.addresseeInstitution) ||
+    input.patientAddressee ||
+    patientLabel;
+  if (addressee) lines.push(`${labels.addresseePerson}: ${addressee}`);
+
+  if (form.introduction.trim()) {
+    lines.push("");
+    lines.push(form.introduction.trim());
+  }
+
+  const bindingFields = DOCUMENT_BINDING_FIELDS[template.id] ?? [];
+  const bindingLines = bindingFields
+    .map((field) => {
+      const value = form.bindings[field.key]?.trim();
+      return value ? `${field.label}: ${value}` : "";
+    })
+    .filter(Boolean);
+  if (bindingLines.length > 0) {
+    lines.push("");
+    lines.push(labels.sectionBindings);
+    lines.push(...bindingLines);
+  }
+
+  const availableTemplateBlocks = input.availableTemplateBlocks ?? [];
+  const selectedBlocks = availableTemplateBlocks.filter((block) =>
+    form.textBlockKeys.includes(block.key),
+  );
+  if (selectedBlocks.length > 0) {
+    lines.push("");
+    lines.push(labels.textBlocks);
+    for (const block of selectedBlocks) {
+      const textBlock = localizeTextBlock(block.key, input.lang, block);
+      lines.push(textBlock.label);
+      if (textBlock.description) lines.push(textBlock.description);
+    }
+  }
+
+  if (form.closingNote.trim()) {
+    lines.push("");
+    lines.push(form.closingNote.trim());
+  }
+
+  return lines.join("\n").trim();
+}
+
+export function buildGenerateDocumentAutoName(input: {
+  template: DocumentTemplate;
+  form: GenerateFormState;
+  patients?: PatientOption[];
+  fallbackDate?: string | Date | null;
+}) {
+  const generatedStandardName = buildStandardDocumentNameFromMetadata({
+    category: input.template.category,
+    art: input.template.default_auto_name || input.template.art,
+    isMedical: input.template.is_medical,
+    documentDate: input.form.documentDate,
+    fallbackDocumentDate: input.fallbackDate ?? new Date(),
+    sourcePerson: input.form.sourcePerson,
+    sourceInstitution: input.form.sourceInstitution,
+    legacySource: input.form.ursprung,
+    legacySourceInstitution:
+      input.form.klinik || input.template.provider_name || "GMED",
+    addresseePerson: input.form.addresseePerson,
+    addresseeInstitution: input.form.addresseeInstitution,
+    patientAddressee: patientDocumentAddresseeLabel(
+      input.form.patientId,
+      input.patients ?? [],
+    ),
+  });
+  const explicitAutoName = input.form.autoName.trim();
+  const defaultAutoName = input.template.default_auto_name.trim();
+  return !explicitAutoName || explicitAutoName === defaultAutoName
+    ? generatedStandardName || explicitAutoName
+    : explicitAutoName;
+}
+
+export function resolveGeneratedDocumentAccessCategory(
+  template: DocumentTemplate,
+  fallback: DocumentAccessCategory = "patient",
+): DocumentAccessCategory {
+  const category = normalizeDocumentLookup(template.category);
+  const templateId = normalizeDocumentLookup(template.id);
+  if (
+    template.is_medical ||
+    category.startsWith("medical") ||
+    ["treatment_plan", "medication_summary"].includes(templateId) ||
+    ["treatment_plan", "medication_summary"].includes(category)
+  ) {
+    return "medical";
+  }
+  if (
+    category.startsWith("finance") ||
+    ["cost_coverage_declaration", "cost_estimate"].includes(templateId)
+  ) {
+    return "financial";
+  }
+  if (
+    category.startsWith("official") ||
+    category === "visa_invitation_letter" ||
+    templateId === "visa_invitation_letter"
+  ) {
+    return "authority";
+  }
+  if (category.startsWith("personal")) return "patient";
+  if (template.default_visibility === "patient_visible") return "patient";
+  return fallback;
+}
+
+export function buildGenerateDocumentPayload(input: {
+  template: DocumentTemplate;
+  form: GenerateFormState;
+  patients?: PatientOption[];
+  displayedManualText?: string;
+  fallbackDate?: string | Date | null;
+}): Record<string, unknown> {
+  const { form, template } = input;
+  const manualText = (input.displayedManualText ?? form.manualText).trim();
+  return {
+    template_id: template.id,
+    patient_id: form.patientId || null,
+    order_id: form.orderId || null,
+    appointment_id: form.appointmentId || null,
+    auto_name: buildGenerateDocumentAutoName(input) || null,
+    status: form.status,
+    visibility: form.visibility,
+    language: form.language || null,
+    replace_document_id: form.replaceDocumentId || null,
+    title_override: form.titleOverride.trim() || null,
+    introduction: form.introduction.trim() || null,
+    closing_note: form.closingNote.trim() || null,
+    klinik: form.klinik.trim() || null,
+    ursprung: form.ursprung.trim() || null,
+    document_direction: form.documentDirection,
+    document_variant: form.documentVariant,
+    document_language: form.documentLanguage || form.language || null,
+    access_category: resolveGeneratedDocumentAccessCategory(
+      template,
+      form.accessCategory,
+    ),
+    document_date: form.documentDate || null,
+    source_person: form.sourcePerson.trim() || null,
+    source_institution: form.sourceInstitution.trim() || null,
+    addressee_person: form.addresseePerson.trim() || null,
+    addressee_institution: form.addresseeInstitution.trim() || null,
+    financial_status: form.financialStatus || null,
+    payment_due_date: form.paymentDueDate || null,
+    payment_date: form.paymentDate || null,
+    payment_method: form.paymentMethod || null,
+    notes: form.notes.trim() || null,
+    manual_text: manualText || null,
+    text_block_keys: form.textBlockKeys,
+    bindings: buildBindingsPayload(template.id, form.bindings),
+  };
 }
 
 export function formatConfidenceLabel(

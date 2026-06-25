@@ -95,6 +95,7 @@ import { useAppointmentLinkedSheetState } from "@/pages/appointments/ui/hooks/us
 import { useAppointmentOverlayState } from "@/pages/appointments/ui/hooks/use-appointment-overlay-state";
 import { useAppointmentSchedulerControls } from "@/pages/appointments/ui/hooks/use-appointment-scheduler-controls";
 import { useAppointmentWorkspaceSession } from "@/pages/appointments/ui/hooks/use-appointment-workspace-session";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { AppointmentsPageChrome } from "@/pages/appointments/ui/scheduler/appointments-page-chrome";
 import {
   AppointmentsSchedulerSurface,
@@ -267,6 +268,7 @@ function createStaffAppointmentsPageFieldPatch<K extends keyof StaffAppointments
 function useStaffAppointmentsPageContent() {
   const { user } = useAuth();
   const { t, lang } = useLang();
+  const { staffGo } = useStaffNavigate();
   const tr = t as unknown as Record<string, string>;
   const [searchParams, setSearchParams] = useSearchParams();
   const detailTab = normalizeAppointmentWorkspaceTab(
@@ -411,7 +413,9 @@ function useStaffAppointmentsPageContent() {
   } = useAppointmentLinkedSheetState({
     detailId: detail?.id ?? null,
     detailPatientId: detail?.patient_id ?? null,
+    detailOrderId: detail?.order_id ?? null,
     detailProviderId: detail?.provider_id ?? null,
+    staffGo,
     preloadPatientSheet: preloadLinkedPatientSheet,
     preloadProviderSheet: preloadLinkedProviderSheet,
     preloadCasesSheet: preloadLinkedCasesSheet,

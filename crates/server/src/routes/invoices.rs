@@ -167,6 +167,13 @@ struct QuoteInvoiceContext {
     notes: Option<String>,
 }
 
+struct InvoiceCreationSnapshot {
+    total_net: Decimal,
+    total_vat: Decimal,
+    total_gross: Decimal,
+    line_items: Value,
+}
+
 struct InvoiceDunningContext {
     invoice_id: Uuid,
     patient_id: Uuid,
@@ -485,6 +492,16 @@ fn value_to_decimal(value: &Value) -> Decimal {
         Value::Number(number) => Decimal::from_str(&number.to_string()).unwrap_or(Decimal::ZERO),
         _ => Decimal::ZERO,
     }
+}
+
+fn compute_invoice_line_parts(
+    quantity: Decimal,
+    unit_price_net: Decimal,
+    vat_rate: Decimal,
+) -> (Decimal, Decimal, Decimal) {
+    let line_net = (quantity * unit_price_net).round_dp(2);
+    let line_vat = (line_net * vat_rate / Decimal::new(100, 0)).round_dp(2);
+    (line_net, line_vat, (line_net + line_vat).round_dp(2))
 }
 
 fn proportional_share(amount: Decimal, part: Decimal, total: Decimal) -> Decimal {
@@ -2062,6 +2079,162 @@ async fn load_quote_invoice_context(
     }))
 }
 
+async fn build_invoice_snapshot_with_approved_package_overages(
+    state: &AppState,
+    ctx: &QuoteInvoiceContext,
+) -> Result<InvoiceCreationSnapshot, axum::response::Response> {
+    let mut total_net = ctx.total_net;
+    let mut total_vat = ctx.total_vat;
+    let mut total_gross = ctx.total_gross;
+    let mut line_items = ctx.line_items.as_array().cloned().unwrap_or_default();
+
+    let overage_rows = sqlx::query(
+        r#"SELECT spc.id AS consumption_id,
+                  spc.patient_service_package_id,
+                  spc.package_item_id,
+                  spc.order_id,
+                  spc.order_leistung_id,
+                  spc.overage_quantity,
+                  sp.name AS package_name,
+                  spi.agency_service_id,
+                  COALESCE(NULLIF(spi.description, ''), c.service_name, sp.name, 'Package overage') AS item_description,
+                  COALESCE(NULLIF(spi.unit_label, ''), 'unit') AS unit_label,
+                  COALESCE(spi.overage_unit_price_net, c.unit_price, 0) AS unit_price_net,
+                  COALESCE(item_tp.vat_rate, c.vat_rate, package_tp.vat_rate, 0) AS vat_rate,
+                  CASE
+                    WHEN item_tp.id IS NOT NULL THEN item_tp.id
+                    WHEN c.vat_rate IS NOT NULL THEN NULL
+                    ELSE package_tp.id
+                  END AS tax_profile_id,
+                  CASE
+                    WHEN item_tp.id IS NOT NULL THEN item_tp.profile_key
+                    WHEN c.vat_rate IS NOT NULL THEN NULL
+                    ELSE package_tp.profile_key
+                  END AS tax_profile_key,
+                  CASE
+                    WHEN item_tp.id IS NOT NULL THEN item_tp.name
+                    WHEN c.vat_rate IS NOT NULL THEN NULL
+                    ELSE package_tp.name
+                  END AS tax_profile_name
+           FROM service_package_consumptions spc
+           JOIN patient_service_packages psp ON psp.id = spc.patient_service_package_id
+           JOIN service_packages sp ON sp.id = psp.package_id
+           LEFT JOIN service_package_items spi ON spi.id = spc.package_item_id
+           LEFT JOIN agency_service_catalog c ON c.id = spi.agency_service_id
+           LEFT JOIN tax_profiles item_tp ON item_tp.id = spi.tax_profile_id
+           LEFT JOIN tax_profiles package_tp ON package_tp.id = sp.tax_profile_id
+           WHERE psp.patient_id = $1
+             AND spc.order_id = $2
+             AND spc.invoice_id IS NULL
+             AND spc.overage_quantity > 0
+             AND spc.approval_status = 'approved'
+           ORDER BY spc.created_at, spc.id"#,
+    )
+    .bind(ctx.patient_id)
+    .bind(ctx.order_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, order_id = %ctx.order_id, "load approved package overages for invoice");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load approved package overages",
+        )
+    })?;
+
+    for row in overage_rows {
+        let quantity = row
+            .try_get::<Decimal, _>("overage_quantity")
+            .unwrap_or(Decimal::ZERO)
+            .round_dp(2);
+        if quantity <= Decimal::ZERO {
+            continue;
+        }
+
+        let unit_price_net = row
+            .try_get::<Decimal, _>("unit_price_net")
+            .unwrap_or(Decimal::ZERO)
+            .round_dp(2);
+        if unit_price_net <= Decimal::ZERO {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Approved package overage is missing a charge price",
+            ));
+        }
+
+        let vat_rate = row
+            .try_get::<Decimal, _>("vat_rate")
+            .unwrap_or(Decimal::ZERO)
+            .round_dp(2);
+        let (line_net, line_vat, line_gross) =
+            compute_invoice_line_parts(quantity, unit_price_net, vat_rate);
+        let package_name = row.try_get::<String, _>("package_name").unwrap_or_default();
+        let item_description = row
+            .try_get::<String, _>("item_description")
+            .unwrap_or_else(|_| "Package overage".to_string());
+        let tax_profile_id = row
+            .try_get::<Option<Uuid>, _>("tax_profile_id")
+            .unwrap_or_default();
+        let tax_profile_key = row
+            .try_get::<Option<String>, _>("tax_profile_key")
+            .unwrap_or_default();
+        let tax_profile_name = row
+            .try_get::<Option<String>, _>("tax_profile_name")
+            .unwrap_or_default();
+        let agency_service_id = row
+            .try_get::<Option<Uuid>, _>("agency_service_id")
+            .unwrap_or_default();
+        let vat_source = if tax_profile_id.is_some() {
+            "tax_profile"
+        } else if agency_service_id.is_some() {
+            "catalog"
+        } else {
+            "manual"
+        };
+        let vat_rate_label = decimal_to_string(vat_rate);
+
+        total_net = (total_net + line_net).round_dp(2);
+        total_vat = (total_vat + line_vat).round_dp(2);
+        total_gross = (total_gross + line_gross).round_dp(2);
+
+        line_items.push(json!({
+            "description": format!("Package overage: {package_name} - {item_description}"),
+            "quantity": decimal_to_string(quantity),
+            "unit": row.try_get::<String, _>("unit_label").unwrap_or_else(|_| "unit".to_string()),
+            "unit_price": decimal_to_string(unit_price_net),
+            "vat_rate": vat_rate_label,
+            "line_net": decimal_to_string(line_net),
+            "line_vat": decimal_to_string(line_vat),
+            "line_gross": decimal_to_string(line_gross),
+            "is_cost_passthrough": false,
+            "source": "service_package_overage",
+            "source_package_consumption_id": row.try_get::<Uuid, _>("consumption_id").unwrap_or_default(),
+            "patient_service_package_id": row.try_get::<Uuid, _>("patient_service_package_id").unwrap_or_default(),
+            "package_item_id": row.try_get::<Option<Uuid>, _>("package_item_id").unwrap_or_default(),
+            "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
+            "order_leistung_id": row.try_get::<Option<Uuid>, _>("order_leistung_id").unwrap_or_default(),
+            "vat_source": vat_source,
+            "tax_profile_id": tax_profile_id,
+            "tax_profile_key": tax_profile_key,
+            "tax_profile_name": tax_profile_name,
+            "tax_profile_vat_rate": tax_profile_id.map(|_| vat_rate_label.clone()),
+            "vat_source_explanation": vat_source_explanation(
+                vat_source,
+                tax_profile_name.as_deref(),
+                tax_profile_key.as_deref(),
+                Some(&vat_rate_label),
+            ),
+        }));
+    }
+
+    Ok(InvoiceCreationSnapshot {
+        total_net,
+        total_vat,
+        total_gross,
+        line_items: Value::Array(line_items),
+    })
+}
+
 async fn load_invoice_dunning_context(
     state: &AppState,
     invoice_id: Uuid,
@@ -2986,6 +3159,11 @@ async fn list_my_invoices(
                       AND d.uploaded_by = $1
                       AND d.ursprung = 'patient_portal'
                       AND d.art = 'payment_proof'
+                      AND (
+                           d.auto_name ILIKE '%' || i.invoice_number || '%'
+                        OR COALESCE(d.notes, '') ILIKE '%' || i.invoice_number || '%'
+                        OR COALESCE(d.notes, '') ILIKE '%' || i.id::text || '%'
+                      )
                   ), 0) AS payment_proof_count,
                   (
                     SELECT max(d.created_at)
@@ -2995,6 +3173,11 @@ async fn list_my_invoices(
                       AND d.uploaded_by = $1
                       AND d.ursprung = 'patient_portal'
                       AND d.art = 'payment_proof'
+                      AND (
+                           d.auto_name ILIKE '%' || i.invoice_number || '%'
+                        OR COALESCE(d.notes, '') ILIKE '%' || i.invoice_number || '%'
+                        OR COALESCE(d.notes, '') ILIKE '%' || i.id::text || '%'
+                      )
                   ) AS last_payment_proof_at
            FROM invoices i
            JOIN orders o ON o.id = i.order_id
@@ -3106,6 +3289,12 @@ async fn get_my_invoice(
         return err(StatusCode::NOT_FOUND, "Invoice not found");
     }
 
+    let invoice_number = invoice
+        .get("invoice_number")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+
     let proof_row = match sqlx::query(
         r#"SELECT COALESCE(count(*)::bigint, 0) AS payment_proof_count,
                   max(created_at) AS last_payment_proof_at
@@ -3114,7 +3303,12 @@ async fn get_my_invoice(
              AND order_id = $2
              AND uploaded_by = $3
              AND ursprung = 'patient_portal'
-             AND art = 'payment_proof'"#,
+             AND art = 'payment_proof'
+             AND (
+                  auto_name ILIKE '%' || $4 || '%'
+               OR COALESCE(notes, '') ILIKE '%' || $4 || '%'
+               OR COALESCE(notes, '') ILIKE '%' || $5::text || '%'
+             )"#,
     )
     .bind(patient_id)
     .bind(
@@ -3124,6 +3318,8 @@ async fn get_my_invoice(
             .and_then(|value| Uuid::parse_str(value).ok()),
     )
     .bind(auth.user_id)
+    .bind(invoice_number)
+    .bind(invoice_id)
     .fetch_one(&state.db)
     .await
     {
@@ -3608,6 +3804,12 @@ async fn create_invoice_from_quote(
         return resp;
     }
 
+    let invoice_snapshot =
+        match build_invoice_snapshot_with_approved_package_overages(&state, &ctx).await {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+
     let seq: i64 = match sqlx::query_scalar("SELECT nextval('invoice_number_seq')")
         .fetch_one(&state.db)
         .await
@@ -3639,10 +3841,10 @@ async fn create_invoice_from_quote(
     .bind(invoice_number.clone())
     .bind(invoice_type.clone())
     .bind(due_date)
-    .bind(ctx.total_net)
-    .bind(ctx.total_vat)
-    .bind(ctx.total_gross)
-    .bind(ctx.line_items.clone())
+    .bind(invoice_snapshot.total_net)
+    .bind(invoice_snapshot.total_vat)
+    .bind(invoice_snapshot.total_gross)
+    .bind(invoice_snapshot.line_items.clone())
     .bind(notes)
     .bind(auth.user_id)
     .fetch_one(&state.db)

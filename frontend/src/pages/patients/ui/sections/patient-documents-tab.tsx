@@ -17,6 +17,7 @@ import {
   localizeRequiredDocumentLabel,
 } from "@/lib/required-document-labels";
 import { cn } from "@/lib/utils";
+import type { PatientOption as DocumentPatientOption } from "@/pages/documents/model/types";
 
 import type { DocumentAlerts, DocumentItem } from "../../model/detail-tab-types";
 import { FormSection } from "../shared/patient-form-primitives";
@@ -26,10 +27,18 @@ import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
 type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
 type DateFormatter = (value?: string | null, fallback?: string) => string;
+type PatientDocumentContext = {
+  id: string;
+  patient_id: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  languages?: string[];
+};
 
 type PatientDocumentsTabProps = {
   l: LocalizeFn;
   patientId: string | undefined;
+  patient?: PatientDocumentContext;
   commonNotSet: string;
   commonUnknown: string;
   documentsFilenameLabel: string;
@@ -140,6 +149,7 @@ function DocumentsOverviewSection({
 export function PatientDocumentsTab({
   l,
   patientId,
+  patient,
   commonNotSet,
   commonUnknown,
   documentsFilenameLabel,
@@ -168,6 +178,19 @@ export function PatientDocumentsTab({
   formatDate,
 }: PatientDocumentsTabProps) {
   const [generateOpen, setGenerateOpen] = useState(false);
+  const generatePatient = useMemo<DocumentPatientOption | undefined>(
+    () =>
+      patient
+        ? {
+            id: patient.id,
+            patient_id: patient.patient_id,
+            first_name: patient.first_name ?? undefined,
+            last_name: patient.last_name ?? undefined,
+            languages: patient.languages,
+          }
+        : undefined,
+    [patient],
+  );
   const documentStatusCounts = useMemo(() => {
     const counts = new Map<string, number>();
 
@@ -435,6 +458,7 @@ export function PatientDocumentsTab({
         <PatientDocumentGenerateDialog
           open={generateOpen}
           patientId={patientId}
+          patient={generatePatient}
           onOpenChange={setGenerateOpen}
           onGenerated={onDocumentGenerated}
         />

@@ -267,6 +267,37 @@ async fn seed_supporting_document(
     .unwrap();
 }
 
+async fn seed_payment_proof_document(
+    pool: &PgPool,
+    document_id: Uuid,
+    patient_id: Uuid,
+    order_id: Uuid,
+    uploaded_by: Uuid,
+    auto_name: &str,
+    notes: Option<&str>,
+) {
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, patient_id, order_id, auto_name, original_filename, art, category,
+                status, visibility, is_medical, version_root_document_id, version_number,
+                uploaded_by, ursprung, notes
+           ) VALUES (
+                $1, $2, $3, $4, 'proof.pdf', 'payment_proof', 'finance',
+                'active', 'patient_visible', false, $1, 1,
+                $5, 'patient_portal', $6
+           )"#,
+    )
+    .bind(document_id)
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(auto_name)
+    .bind(uploaded_by)
+    .bind(notes)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 async fn create_quote(app: &axum::Router, bearer: &str, order_id: Uuid) -> Value {
     let (status, body) = json_request(
         app,
@@ -528,6 +559,94 @@ async fn patient_invoice_amount_redaction_hides_api_amounts_and_blocks_pdf() {
 }
 
 #[tokio::test]
+async fn patient_portal_payment_proofs_are_scoped_to_invoice_number() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("invoice-proof-scope");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let invoice_one_id = seed_sent_invoice_direct(
+        &pool,
+        order_id,
+        patient_id,
+        billing_id,
+        &format!("{tag}-one"),
+    )
+    .await;
+    let invoice_two_id = seed_sent_invoice_direct(
+        &pool,
+        order_id,
+        patient_id,
+        billing_id,
+        &format!("{tag}-two"),
+    )
+    .await;
+    let invoice_one_number: String =
+        sqlx::query_scalar("SELECT invoice_number FROM invoices WHERE id = $1")
+            .bind(invoice_one_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    let proof_name = format!("Payment proof {invoice_one_number}");
+    let proof_notes = format!("invoice:{invoice_one_id}");
+    seed_payment_proof_document(
+        &pool,
+        Uuid::new_v4(),
+        patient_id,
+        order_id,
+        patient_user_id,
+        &proof_name,
+        Some(&proof_notes),
+    )
+    .await;
+
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+    let (status, invoices) =
+        json_request(&app, "GET", "/api/v1/me/invoices", &patient_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let invoice_items = invoices.as_array().unwrap();
+    let invoice_one = invoice_items
+        .iter()
+        .find(|item| item["id"].as_str() == Some(&invoice_one_id.to_string()))
+        .expect("first invoice in portal list");
+    let invoice_two = invoice_items
+        .iter()
+        .find(|item| item["id"].as_str() == Some(&invoice_two_id.to_string()))
+        .expect("second invoice in portal list");
+    assert_eq!(invoice_one["payment_proof_count"], 1);
+    assert_eq!(invoice_two["payment_proof_count"], 0);
+
+    let (status, detail_one) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/me/invoices/{invoice_one_id}"),
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail_one["payment_proof_count"], 1);
+
+    let (status, detail_two) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/me/invoices/{invoice_two_id}"),
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail_two["payment_proof_count"], 0);
+}
+
+#[tokio::test]
 async fn package_consumption_tracks_overage_approval_and_invoice_linkage() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
@@ -549,6 +668,12 @@ async fn package_consumption_tracks_overage_approval_and_invoice_linkage() {
     )
     .await;
 
+    let standard_profile_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM tax_profiles WHERE profile_key = 'standard_vat'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
     let (status, package) = json_request(
         &app,
         "POST",
@@ -562,6 +687,8 @@ async fn package_consumption_tracks_overage_approval_and_invoice_linkage() {
                 "description": "Included interpreter hour",
                 "included_quantity": 1,
                 "unit_label": "hour",
+                "overage_unit_price_net": 50,
+                "tax_profile_id": standard_profile_id,
                 "requires_patient_approval": false
             }]
         })),
@@ -638,6 +765,25 @@ async fn package_consumption_tracks_overage_approval_and_invoice_linkage() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(decision["updated_count"], 1);
 
+    let (status, pending_consumption) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/patients/{patient_id}/service-packages/{patient_service_package_id}/consume"
+        ),
+        &billing_bearer,
+        Some(json!({
+            "package_item_id": package_item_id,
+            "order_id": order_id,
+            "quantity": 1,
+            "notes": "third hour still pending approval"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(pending_consumption["overage_quantity"], "1");
+    assert_eq!(pending_consumption["approval_status"], "pending");
+
     let quote = create_quote(&app, &billing_bearer, order_id).await;
     let invoice = create_invoice(
         &app,
@@ -648,14 +794,170 @@ async fn package_consumption_tracks_overage_approval_and_invoice_linkage() {
     )
     .await;
     let invoice_id = Uuid::parse_str(invoice["id"].as_str().unwrap()).unwrap();
-    let linked_invoice_id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT invoice_id FROM service_package_consumptions WHERE patient_service_package_id = $1",
+    assert_eq!(invoice["total_net"], "150");
+    assert_eq!(invoice["total_vat"], "28.5");
+    assert_eq!(invoice["total_gross"], "178.5");
+    let lines = invoice["line_items"].as_array().unwrap();
+    assert_eq!(lines.len(), 2);
+    let overage_line = lines
+        .iter()
+        .find(|line| line["source"].as_str() == Some("service_package_overage"))
+        .expect("approved overage invoice line");
+    assert_eq!(overage_line["quantity"], "1");
+    assert_eq!(overage_line["unit_price"], "50");
+    assert_eq!(overage_line["vat_rate"], "19");
+    assert_eq!(overage_line["line_net"], "50");
+    assert_eq!(overage_line["line_vat"], "9.5");
+    assert_eq!(overage_line["line_gross"], "59.5");
+
+    let links = sqlx::query(
+        "SELECT approval_status, invoice_id FROM service_package_consumptions WHERE patient_service_package_id = $1 ORDER BY created_at",
+    )
+    .bind(Uuid::parse_str(patient_service_package_id).unwrap())
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let approved_link = links
+        .iter()
+        .find(|row| row.try_get::<String, _>("approval_status").unwrap() == "approved")
+        .expect("approved consumption");
+    assert_eq!(
+        approved_link
+            .try_get::<Option<Uuid>, _>("invoice_id")
+            .unwrap(),
+        Some(invoice_id)
+    );
+    let pending_link = links
+        .iter()
+        .find(|row| row.try_get::<String, _>("approval_status").unwrap() == "pending")
+        .expect("pending consumption");
+    assert_eq!(
+        pending_link
+            .try_get::<Option<Uuid>, _>("invoice_id")
+            .unwrap(),
+        None
+    );
+}
+
+#[tokio::test]
+async fn service_package_update_preserves_consumed_item_references() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("package-item-history");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let (status, package) = json_request(
+        &app,
+        "POST",
+        "/api/v1/service-packages",
+        &billing_bearer,
+        Some(json!({
+            "package_key": format!("pkg_history_{tag}"),
+            "name": "Package item history",
+            "base_price_net": 100,
+            "items": [{
+                "description": "Historical interpreter hour",
+                "included_quantity": 2,
+                "unit_label": "hour",
+                "requires_patient_approval": false
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let package_id = package["id"].as_str().unwrap();
+    let package_item_id = package["items"][0]["id"].as_str().unwrap();
+
+    let (status, assigned) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/service-packages"),
+        &billing_bearer,
+        Some(json!({
+            "package_id": package_id,
+            "order_id": order_id
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let patient_service_package_id = assigned["id"].as_str().unwrap();
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/patients/{patient_id}/service-packages/{patient_service_package_id}/consume"
+        ),
+        &billing_bearer,
+        Some(json!({
+            "package_item_id": package_item_id,
+            "order_id": order_id,
+            "quantity": 1
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, updated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/service-packages/{package_id}"),
+        &billing_bearer,
+        Some(json!({
+            "package_key": format!("pkg_history_{tag}"),
+            "name": "Package item history updated",
+            "base_price_net": 120,
+            "items": [{
+                "id": package_item_id,
+                "description": "Historical interpreter hour edited",
+                "included_quantity": 3,
+                "unit_label": "hour",
+                "requires_patient_approval": false
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(updated["items"][0]["id"], package_item_id);
+    assert_eq!(
+        updated["items"][0]["description"],
+        "Historical interpreter hour edited"
+    );
+
+    let linked_item_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT package_item_id FROM service_package_consumptions WHERE patient_service_package_id = $1",
     )
     .bind(Uuid::parse_str(patient_service_package_id).unwrap())
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(linked_invoice_id, Some(invoice_id));
+    assert_eq!(
+        linked_item_id,
+        Some(Uuid::parse_str(package_item_id).unwrap())
+    );
+
+    let (status, packages) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/service-packages"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let package_line = packages
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["package_item_id"].as_str() == Some(package_item_id))
+        .expect("consumed package item remains visible");
+    assert_eq!(package_line["used_quantity"], "1");
 }
 
 #[tokio::test]

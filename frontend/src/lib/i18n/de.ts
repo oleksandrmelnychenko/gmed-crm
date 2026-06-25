@@ -223,6 +223,7 @@ export const de = {
   providers_subtitle: "Provider, Mitarbeitende und Leistungskatalog verwalten",
   providers_new: "Neuer Provider",
   providers_detail: "Provider-Details",
+  providers_name_placeholder: "Name des Providers",
   providers_select_hint:
     "Provider auswählen, um Ärzte, Leistungen und Patienten zu verwalten.",
   providers_select_to_open_workspace:

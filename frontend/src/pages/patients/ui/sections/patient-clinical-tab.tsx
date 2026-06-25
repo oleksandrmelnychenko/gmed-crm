@@ -1015,7 +1015,7 @@ export function PatientRecommendationsSection({
             onClick={() => setEditing(blankRecommendationDraft())}
           >
             <Plus className="size-3.5" />
-            {tx("Рекомендация", "Empfehlung")}
+            {tx("Добавить рекомендацию", "Empfehlung hinzufügen")}
           </Button>
         ) : null}
       </header>

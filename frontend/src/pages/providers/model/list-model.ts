@@ -204,6 +204,13 @@ export function formatDoctorTitleValue(value: string | null | undefined) {
   return joinDoctorTitleValue(splitDoctorTitleValue(value));
 }
 
+export function providerLoadErrorMessage(error: unknown, localizedFallback: string) {
+  const fallback = localizedFallback.trim();
+  if (fallback) return fallback;
+  void error;
+  return translateCatalog(getLang()).common_failed_load;
+}
+
 function germanPersonSalutation(gender: ProviderPersonGender) {
   if (gender === "male") return "Herr";
   if (gender === "female") return "Frau";
@@ -495,7 +502,7 @@ function normalizeAvailabilityIntervals(
 }
 
 function weeklyAvailabilityClosedLabel(lang: Lang) {
-  return lang === "de" ? "Geschlossen" : "Вихідний";
+  return lang === "de" ? "Geschlossen" : "Закрыто";
 }
 
 function formatWeeklyAvailabilityIntervalList(
@@ -1355,7 +1362,7 @@ function taxonomyAttributeFilterValueParts(key: string, raw: string | number | b
   if (!value) return [];
   if (key !== "cuisine") return [value];
   return value
-    .split(/[,./]+/u)
+    .split(/[,./;&\n\r]+/u)
     .map((part) => part.trim())
     .filter(Boolean);
 }

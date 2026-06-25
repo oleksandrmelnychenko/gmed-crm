@@ -22,6 +22,7 @@ import {
   formatWeeklyAvailabilityValue,
   normalizeAvailabilityEditorIntervals,
   parseWeeklyAvailability,
+  providerLoadErrorMessage,
   splitDoctorTitleValue,
   taxonomyAttributeValueOptions,
   taxonomyAttributeValue,
@@ -209,6 +210,11 @@ describe("taxonomyAttributeValueOptions", () => {
           },
           {
             ...baseProvider,
+            id: "provider-10",
+            taxonomy_attributes: { cuisine: "Sushi; Ramen & Barbecue\nSeafood" },
+          },
+          {
+            ...baseProvider,
             id: "provider-6",
             taxonomy_attributes: { cuisine: "Bayerische Kueche/Mediterrane Kueche" },
           },
@@ -225,13 +231,33 @@ describe("taxonomyAttributeValueOptions", () => {
     ).toEqual([
       "Amerikanische",
       "Asiatische Kueche Mediterrane Kueche",
+      "Barbecue",
       "Bayerische Kueche",
       "Fine dining",
       "Fruehstueck",
       "Mediterrane Kueche",
+      "Ramen",
       "Seafood",
       "Steak House",
+      "Sushi",
     ]);
+  });
+});
+
+describe("providerLoadErrorMessage", () => {
+  it("uses the localized fallback instead of leaking raw transport errors", () => {
+    expect(providerLoadErrorMessage(new Error("Failed to fetch"), "Ошибка загрузки")).toBe(
+      "Ошибка загрузки",
+    );
+    expect(
+      providerLoadErrorMessage(
+        new Error("NetworkError when attempting to fetch resource."),
+        "Fehler beim Laden",
+      ),
+    ).toBe("Fehler beim Laden");
+    expect(providerLoadErrorMessage(new Error("Failed to fetch"), "")).not.toContain(
+      "Failed",
+    );
   });
 });
 
@@ -785,11 +811,11 @@ describe("weekly availability helpers", () => {
     expect(items.map((item) => item.label)).toEqual([
       "Пн 09:00-18:00",
       "Вт 09:00-18:00",
-      "Ср (Вихідний)",
-      "Чт (Вихідний)",
-      "Пт (Вихідний)",
-      "Сб (Вихідний)",
-      "Вс (Вихідний)",
+      "Ср (Закрыто)",
+      "Чт (Закрыто)",
+      "Пт (Закрыто)",
+      "Сб (Закрыто)",
+      "Вс (Закрыто)",
     ]);
     expect(items.filter((item) => item.closed).map((item) => item.day)).toEqual([
       "wed",
@@ -802,13 +828,13 @@ describe("weekly availability helpers", () => {
 
   it("shows every day as closed when no availability was selected", () => {
     expect(formatWeeklyAvailabilityDisplayItems("", "ru").map((item) => item.label)).toEqual([
-      "Пн (Вихідний)",
-      "Вт (Вихідний)",
-      "Ср (Вихідний)",
-      "Чт (Вихідний)",
-      "Пт (Вихідний)",
-      "Сб (Вихідний)",
-      "Вс (Вихідний)",
+      "Пн (Закрыто)",
+      "Вт (Закрыто)",
+      "Ср (Закрыто)",
+      "Чт (Закрыто)",
+      "Пт (Закрыто)",
+      "Сб (Закрыто)",
+      "Вс (Закрыто)",
     ]);
   });
 
