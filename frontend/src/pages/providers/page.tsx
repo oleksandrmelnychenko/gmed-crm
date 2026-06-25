@@ -4798,26 +4798,6 @@ function DoctorLinkedPatientsSection({ patients }: { patients: LinkedPatient[] }
                     {l("providers_last_interaction")}: {compactDateTime(patient.last_interaction_at, t.common_not_set)}
                   </p>
                 </div>
-                <div className="flex shrink-0 flex-wrap gap-1.5">
-                  <Badge
-                    variant="outline"
-                    className="rounded-full border-border bg-muted/20 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                  >
-                    {patient.appointment_count} {l("providers_appointments")}
-                  </Badge>
-                  <Badge
-                    variant="outline"
-                    className="rounded-full border-border bg-muted/20 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                  >
-                    {patient.leistung_count} {l("appointments_services")}
-                  </Badge>
-                  <Badge
-                    variant="outline"
-                    className="rounded-full border-border bg-muted/20 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                  >
-                    {patient.concierge_count} {t.appointments_linked_concierge}
-                  </Badge>
-                </div>
               </div>
             </div>
           ))}
@@ -7024,26 +7004,6 @@ function DoctorCardLinkedPatients({ patients }: { patients: LinkedPatient[] }) {
               <p className="mt-1 text-xs text-muted-foreground">
                 {l("providers_last_interaction")}: {compactDateTime(patient.last_interaction_at, t.common_not_set)}
               </p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                <Badge
-                  variant="outline"
-                  className="rounded-full border-border bg-card px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                >
-                  {patient.appointment_count} {l("providers_appointments")}
-                </Badge>
-                <Badge
-                  variant="outline"
-                  className="rounded-full border-border bg-card px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                >
-                  {patient.leistung_count} {l("appointments_services")}
-                </Badge>
-                <Badge
-                  variant="outline"
-                  className="rounded-full border-border bg-card px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                >
-                  {patient.concierge_count} {t.appointments_linked_concierge}
-                </Badge>
-              </div>
             </div>
           ))}
         </div>
@@ -7548,7 +7508,7 @@ function LinkedPatientsSection({
               key={patient.id}
               className="overflow-hidden rounded-[1.4rem] border border-border bg-card"
             >
-              <div className="grid gap-3 p-3.5 lg:grid-cols-[minmax(0,1fr)_270px]">
+              <div className="p-3.5">
                 <div className="min-w-0">
                   <PatientProfileLink patient={patient} className="max-w-full text-sm">
                     {patientLabel(patient)}
@@ -7561,21 +7521,6 @@ function LinkedPatientsSection({
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
                     {l("providers_last_interaction")}: {compactDateTime(patient.last_interaction_at, t.common_not_set)}
                   </p>
-                </div>
-
-                <div className="grid grid-cols-3 overflow-hidden rounded-xl border border-border/70">
-                  <div className="border-r border-border px-3 py-2">
-                    <p className="text-xs text-muted-foreground">{l("providers_appointments")}</p>
-                    <p className="mt-1 text-lg font-semibold leading-none text-foreground">{patient.appointment_count}</p>
-                  </div>
-                  <div className="border-r border-border px-3 py-2">
-                    <p className="text-xs text-muted-foreground">{l("appointments_services")}</p>
-                    <p className="mt-1 text-lg font-semibold leading-none text-foreground">{patient.leistung_count}</p>
-                  </div>
-                  <div className="px-3 py-2">
-                    <p className="text-xs text-muted-foreground">{t.appointments_linked_concierge}</p>
-                    <p className="mt-1 text-lg font-semibold leading-none text-foreground">{patient.concierge_count}</p>
-                  </div>
                 </div>
               </div>
             </div>
@@ -8595,7 +8540,7 @@ function DoctorProfileFields({
   insuranceProviders: InsuranceProviderItem[];
   onChange: (field: keyof DoctorFormState, value: string) => void;
 }) {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   const doctorRoleOptions: Array<{ value: Exclude<DoctorFormState["roleCode"], "">; label: string }> = [
     { value: "clinical_director", label: l("providers_doctor_role_clinical_director") },
@@ -8706,10 +8651,11 @@ function DoctorProfileFields({
             placeholder={l("providers_doctor_schwerpunkt_placeholder")}
           />
         </Field>
-        <Field label={insuranceProviderFieldLabel(lang)}>
+        <Field label={t.patients_insurance_type}>
           <InsuranceProviderMultiSelect
             value={form.insuranceProviders}
             items={insuranceProviders}
+            useInsuranceTypes
             onChange={(nextValue) => onChange("insuranceProviders", nextValue)}
           />
         </Field>
