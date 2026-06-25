@@ -491,8 +491,8 @@ function normalizeAvailabilityIntervals(
 ) {
   const seen = new Set<string>();
   return intervals.flatMap((interval) => {
-    const start = interval.start.trim();
-    const end = interval.end.trim();
+    const start = String(interval.start ?? "").trim();
+    const end = String(interval.end ?? "").trim();
     const comment = interval.comment ?? "";
     const key = `${start}-${end}-${comment}`;
     if (!start || !end || seen.has(key)) return [];
@@ -722,7 +722,7 @@ export function formatWeeklyAvailabilityDisplay(
   value: string | null | undefined,
   lang: Lang,
 ) {
-  const source = (value ?? "").trim();
+  const source = (typeof value === "string" ? value : "").trim();
   if (!source) return "";
   const formatted = formatWeeklyAvailabilityRows(
     parseWeeklyAvailability(source),
@@ -736,38 +736,45 @@ export function formatWeeklyAvailabilityDisplayItems(
   value: string | null | undefined,
   lang: Lang,
 ): WeeklyAvailabilityDisplayItem[] {
-  const source = (value ?? "").trim();
-  const schedule = parseWeeklyAvailability(source);
-  const hasStructuredHours = schedule.some((row) => {
-    const intervals = row.enabled ? normalizeAvailabilityIntervals(row.intervals) : [];
-    return intervals.length > 0;
-  });
+  // Defensive: a malformed or non-string opening_hours value (e.g. one provider
+  // whose data came through as an object/array) must never throw and crash the
+  // whole page — fall back to free text / empty instead.
+  const source = (typeof value === "string" ? value : "").trim();
+  try {
+    const schedule = parseWeeklyAvailability(source);
+    const hasStructuredHours = schedule.some((row) => {
+      const intervals = row.enabled ? normalizeAvailabilityIntervals(row.intervals) : [];
+      return intervals.length > 0;
+    });
 
-  if (source && !hasStructuredHours) {
-    return [{ label: source, closed: false, freeText: true }];
-  }
-
-  const closedLabel = weeklyAvailabilityClosedLabel(lang);
-  return WEEKLY_AVAILABILITY_DAYS.map((day) => {
-    const row = schedule.find((item) => item.day === day);
-    const dayLabel = weeklyAvailabilityDayLabel(day, lang);
-    const intervals = row?.enabled ? normalizeAvailabilityIntervals(row.intervals) : [];
-    if (intervals.length === 0) {
-      return {
-        day,
-        label: `${dayLabel} (${closedLabel})`,
-        closed: true,
-      };
+    if (source && !hasStructuredHours) {
+      return [{ label: source, closed: false, freeText: true }];
     }
 
-    return {
-      day,
-      label: `${dayLabel} ${formatWeeklyAvailabilityIntervalList(intervals, {
-        displayMidnightEndAs24: true,
-      })}`,
-      closed: false,
-    };
-  });
+    const closedLabel = weeklyAvailabilityClosedLabel(lang);
+    return WEEKLY_AVAILABILITY_DAYS.map((day) => {
+      const row = schedule.find((item) => item.day === day);
+      const dayLabel = weeklyAvailabilityDayLabel(day, lang);
+      const intervals = row?.enabled ? normalizeAvailabilityIntervals(row.intervals) : [];
+      if (intervals.length === 0) {
+        return {
+          day,
+          label: `${dayLabel} (${closedLabel})`,
+          closed: true,
+        };
+      }
+
+      return {
+        day,
+        label: `${dayLabel} ${formatWeeklyAvailabilityIntervalList(intervals, {
+          displayMidnightEndAs24: true,
+        })}`,
+        closed: false,
+      };
+    });
+  } catch {
+    return source ? [{ label: source, closed: false, freeText: true }] : [];
+  }
 }
 
 const COMPACT_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-GB", {
