@@ -208,7 +208,7 @@ pub(crate) async fn bootstrap_default_service(
     .bind(title.clone())
     .bind(ctx.starts_at)
     .bind(ctx.ends_at)
-    .bind(Some("Auto-created from non-medical appointment".to_string()))
+    .bind(Some("Automatisch aus nichtmedizinischem Termin erstellt".to_string()))
     .bind(created_by)
     .fetch_one(&state.db)
     .await
@@ -281,7 +281,7 @@ pub(crate) async fn mark_services_ready_for_billing(
         .bind(ctx.title.clone())
         .bind(ctx.starts_at)
         .bind(ctx.ends_at)
-        .bind(Some("Auto-created during appointment completion for billing handoff".to_string()))
+        .bind(Some("Automatisch beim Terminabschluss für die Abrechnung erstellt".to_string()))
         .bind(created_by)
         .fetch_one(&state.db)
         .await

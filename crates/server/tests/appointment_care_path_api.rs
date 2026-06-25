@@ -391,7 +391,7 @@ async fn create_appointment_rejects_provider_type_mismatch() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(
-        body["message"], "Provider type does not match appointment type",
+        body["message"], "Providertyp passt nicht zum Termintyp",
         "{body}"
     );
 
@@ -437,7 +437,7 @@ async fn create_appointment_rejects_provider_type_mismatch() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(
-        body["message"], "Provider type does not match appointment type",
+        body["message"], "Providertyp passt nicht zum Termintyp",
         "{body}"
     );
 }

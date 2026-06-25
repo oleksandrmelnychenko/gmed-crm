@@ -5545,20 +5545,20 @@ async fn sync_completed_medical_appointment_to_billing(
         .unwrap_or_default();
 
     let mut notes = vec![
-        format!("Auto-created from completed medical appointment {appointment_id}"),
-        format!("Appointment: {appointment_title}"),
-        format!("Date: {appointment_date}"),
-        format!("Catalog key: {}", catalog_item.service_key),
+        format!("Automatisch aus abgeschlossenem medizinischem Termin {appointment_id} erstellt"),
+        format!("Termin: {appointment_title}"),
+        format!("Datum: {appointment_date}"),
+        format!("Katalogschlüssel: {}", catalog_item.service_key),
     ];
     if let Some(provider_name) = provider_name.as_deref()
         && !provider_name.trim().is_empty()
     {
-        notes.push(format!("Provider: {provider_name}"));
+        notes.push(format!("Anbieter: {provider_name}"));
     }
     if let Some(doctor_name) = doctor_name.as_deref()
         && !doctor_name.trim().is_empty()
     {
-        notes.push(format!("Doctor: {doctor_name}"));
+        notes.push(format!("Arzt: {doctor_name}"));
     }
 
     let result = sqlx::query(
@@ -5700,13 +5700,13 @@ async fn sync_interpreter_report_billing_candidates(
         let notes = {
             let mut parts = vec![
                 format!(
-                    "Auto-created from approved interpreter report {}",
+                    "Automatisch aus freigegebenem Dolmetscherbericht {} erstellt",
                     candidate.report_id
                 ),
-                format!("Interpreter: {}", candidate.interpreter_name),
-                format!("Hours: {}", candidate.hours.normalize()),
-                format!("Appointment: {}", candidate.appointment_id),
-                format!("Catalog key: {}", catalog_item.service_key),
+                format!("Dolmetscher: {}", candidate.interpreter_name),
+                format!("Stunden: {}", candidate.hours.normalize()),
+                format!("Termin: {}", candidate.appointment_id),
+                format!("Katalogschlüssel: {}", catalog_item.service_key),
             ];
             if let Some(text) = candidate.report_text.as_ref().map(|value| value.trim())
                 && !text.is_empty()
@@ -7331,7 +7331,7 @@ async fn validate_provider_doctor_context(
         if provider_type != appointment_type {
             return Err(err(
                 StatusCode::UNPROCESSABLE_ENTITY,
-                "Provider type does not match appointment type",
+                "Providertyp passt nicht zum Termintyp",
             ));
         }
     }

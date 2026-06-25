@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useState,
   type Dispatch,
   type ReactNode,
@@ -93,6 +94,12 @@ export function CaseItemList<T>({
     setSheet({ mode: "closed" });
     setSheetError("");
   }, []);
+
+  useEffect(() => {
+    if (sheet.mode !== "closed" && sectionError) {
+      setSheetError(sectionError);
+    }
+  }, [sectionError, sheet.mode]);
 
   const updateField = useCallback(
     <K extends keyof T>(field: K, value: T[K]) => {

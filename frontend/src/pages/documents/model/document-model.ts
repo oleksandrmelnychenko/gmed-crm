@@ -454,11 +454,11 @@ function buildKnownGeneratedDocumentDraft(
           }`
         : "";
       return joinDraftLines([
-        `Date: ${signDate}`,
-        "Pages: 1",
+        `Datum: ${signDate}`,
+        "Seiten: 1",
         "Doc.-ID: automatisch",
-        "Originator: GMED",
-        `For: ${patient}`,
+        "Ersteller: GMED",
+        `Für: ${patient}`,
         "Project: TB-V2",
         "",
         recipient,

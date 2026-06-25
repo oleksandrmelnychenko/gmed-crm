@@ -35,12 +35,15 @@ type TaxonomyTreeOption = {
   depth: number;
 };
 
-const DEFAULT_LEVEL_PLACEHOLDERS: Record<ProviderTaxonomyNode["level"], string> = {
-  category: "Provider type",
-  group: "Category",
-  subgroup: "Subcategory",
-  type: "Type",
-};
+function defaultLevelPlaceholder(level: ProviderTaxonomyNode["level"], lang: "de" | "ru") {
+  const labels: Record<ProviderTaxonomyNode["level"], { de: string; ru: string }> = {
+    category: { de: "Providertyp", ru: "Тип провайдера" },
+    group: { de: "Kategorie", ru: "Категория" },
+    subgroup: { de: "Unterkategorie", ru: "Подкатегория" },
+    type: { de: "Typ", ru: "Тип" },
+  };
+  return labels[level][lang];
+}
 
 export function ProviderTaxonomyCascadeSelect({
   id,
@@ -115,7 +118,8 @@ export function ProviderTaxonomyCascadeSelect({
         <option value="">{allLabel ?? placeholder}</option>
         {treeOptions.map(({ node, depth }) => {
           const disabledOption = mode === "leaf" && !providerTaxonomyIsLeafSelection(node);
-          const levelPlaceholder = levelPlaceholders?.[node.level] ?? DEFAULT_LEVEL_PLACEHOLDERS[node.level];
+          const levelPlaceholder =
+            levelPlaceholders?.[node.level] ?? defaultLevelPlaceholder(node.level, lang);
           const label = providerTaxonomyNodeLabel(node, lang);
           const searchText = providerTaxonomyVisiblePathForNodeId(nodes, node.id, providerType)
             .map((pathNode) => providerTaxonomyNodeLabel(pathNode, lang))

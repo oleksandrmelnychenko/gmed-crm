@@ -13035,7 +13035,7 @@ fn build_appointment_confirmation_pdf(
     );
     let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
 
-    // --- Header meta table (Date / Pages / Doc.-ID / Originator / For / Project) ---
+    // --- Header meta table (Datum / Seiten / Doc.-ID / Ersteller / Für / Project) ---
     let meta_date = if context.sign_date.is_some() {
         fmt_de_date(context.sign_date)
     } else {
@@ -13065,11 +13065,11 @@ fn build_appointment_confirmation_pdf(
         }
     };
     for (label, value) in [
-        ("Date:", meta_date.as_str()),
-        ("Pages:", "1"),
+        ("Datum:", meta_date.as_str()),
+        ("Seiten:", "1"),
         ("Doc.-ID:", meta_doc_id.as_str()),
-        ("Originator:", meta_originator.as_str()),
-        ("For:", meta_for.as_str()),
+        ("Ersteller:", meta_originator.as_str()),
+        ("Für:", meta_for.as_str()),
         ("Project:", "TB-V2"),
     ] {
         layout.text_block(

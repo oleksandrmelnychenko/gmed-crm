@@ -340,7 +340,7 @@ describe("buildGeneratedDocumentManualTextDraft", () => {
       },
     });
 
-    expect(draft).toContain("For: Anna Müller");
+    expect(draft).toContain("Für: Anna Müller");
     expect(draft).toContain("Terminbestätigung für Anna Müller");
     expect(draft).not.toContain("GM-001 · Anna Müller");
   });

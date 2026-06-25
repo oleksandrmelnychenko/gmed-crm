@@ -4295,19 +4295,19 @@ struct ProviderTemplatePayload {
 
 const DOCTOR_TITLE_PARSE_ORDER: [&str; 6] =
     ["Priv.-Doz.", "Dipl.-Med.", "Dr. med.", "Prof.", "Dr.", "PD"];
-const DOCTOR_TITLE_VALIDATION_MESSAGE: &str = "Doctor title must use academic titles: Prof., Priv.-Doz., PD, Dr. med., Dr. or Dipl.-Med. Use gender for Herr/Frau.";
+const DOCTOR_TITLE_VALIDATION_MESSAGE: &str = "Arzttitel muss akademische Titel verwenden: Prof., Priv.-Doz., PD, Dr. med., Dr. oder Dipl.-Med. Herr/Frau bitte über Geschlecht pflegen.";
 
 fn normalize_provider_payload(
     body: UpsertProviderRequest,
 ) -> Result<ProviderPayload, &'static str> {
     let name = body.name.trim().to_string();
     if name.is_empty() || name.len() > 255 {
-        return Err("Provider name is required (max 255)");
+        return Err("Providername ist erforderlich (max. 255 Zeichen)");
     }
 
     let provider_type = body.provider_type.trim().to_string();
     if !is_valid_provider_type(&provider_type) {
-        return Err("Provider type must be medical or non_medical");
+        return Err("Providertyp muss medical oder non_medical sein");
     }
     let explicit_specializations = body.specializations.is_some();
     let mut specializations = normalize_string_list(body.specializations);

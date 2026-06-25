@@ -362,25 +362,20 @@ function templateGroupKey(template: DocumentTemplate): string {
   return template.category || "generated";
 }
 
-function templateGroupLabel(key: string): string {
-  switch (key) {
-    case "contract":
-      return "Verträge";
-    case "finance":
-      return "Finanzen";
-    case "consent":
-      return "Einwilligungen";
-    case "clinic_correspondence":
-      return "Korrespondenz";
-    case "administrative":
-      return "Administrativ";
-    case "medical":
-      return "Medizinisch";
-    case "provider":
-      return "Anbieter-Vorlagen";
-    default:
-      return "Generiert";
-  }
+function templateGroupLabel(key: string, lang: "de" | "ru"): string {
+  const labels: Record<string, { de: string; ru: string }> = {
+    contract: { de: "Verträge", ru: "Договоры" },
+    finance: { de: "Finanzen", ru: "Финансы" },
+    consent: { de: "Einwilligungen", ru: "Согласия" },
+    clinic_correspondence: { de: "Korrespondenz", ru: "Корреспонденция" },
+    administrative: { de: "Administrativ", ru: "Административные" },
+    medical: { de: "Medizinisch", ru: "Медицинские" },
+    provider: { de: "Anbieter-Vorlagen", ru: "Шаблоны провайдеров" },
+    generated: { de: "Generiert", ru: "Сгенерированные" },
+  };
+  const label = labels[key];
+  if (label) return label[lang];
+  return labels.generated[lang];
 }
 
 function groupTemplatesForSelect(
@@ -3263,7 +3258,7 @@ function StaffDocumentsPage({
                 >
                   <option value="">{t.documents_select_template}</option>
                   {groupTemplatesForSelect(templates).map(([groupKey, items]) => (
-                    <optgroup key={groupKey} label={templateGroupLabel(groupKey)}>
+                    <optgroup key={groupKey} label={templateGroupLabel(groupKey, lang)}>
                       {items.map((template) => (
                         <option key={template.id} value={template.id}>
                           {template.provider_name

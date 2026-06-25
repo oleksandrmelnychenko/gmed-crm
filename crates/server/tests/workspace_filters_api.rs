@@ -3223,7 +3223,7 @@ async fn completed_medical_appointment_auto_creates_order_leistung_from_agency_c
         leistungen[0]["notes"]
             .as_str()
             .unwrap_or_default()
-            .contains("Auto-created from completed medical appointment")
+            .contains("Automatisch aus abgeschlossenem medizinischem Termin")
     );
 
     let (status, _) = json_request(
