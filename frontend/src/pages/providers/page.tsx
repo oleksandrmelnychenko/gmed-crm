@@ -25,6 +25,7 @@ import {
   Phone,
   Plus,
   Search,
+  ShieldCheck,
   SlidersHorizontal,
   Star,
   Stethoscope,
@@ -37,6 +38,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { LanguageMultiSelect, languageLabel } from "@/components/ui/language-multi-select";
 import {
@@ -392,6 +394,16 @@ function insuranceProviderPlaceholder(lang: "de" | "ru") {
   return lang === "de" ? "Versicherung auswählen" : "Выбрать страховую";
 }
 
+const INSURANCE_TYPE_OPTION_VALUES = ["private", "public", "self_pay", "foreign"] as const;
+
+function insuranceTypeLabel(value: string, t: Translations) {
+  if (value === "private") return t.insurance_private;
+  if (value === "public") return t.insurance_public;
+  if (value === "self_pay") return t.insurance_self_pay;
+  if (value === "foreign") return t.insurance_foreign;
+  return value;
+}
+
 function specializationRuLabel(item: SpecializationItem) {
   return specializationLabelForItem(item, "ru");
 }
@@ -594,12 +606,14 @@ function InsuranceProviderMultiSelect({
   items,
   disabled,
   compact = false,
+  useInsuranceTypes = false,
   onChange,
 }: {
   value: string;
   items: InsuranceProviderItem[];
   disabled?: boolean;
   compact?: boolean;
+  useInsuranceTypes?: boolean;
   onChange: (value: string) => void;
 }) {
   const { t, lang } = useLang();
@@ -609,6 +623,13 @@ function InsuranceProviderMultiSelect({
     [selected],
   );
   const options = useMemo(() => {
+    if (useInsuranceTypes) {
+      return INSURANCE_TYPE_OPTION_VALUES.map((option) => ({
+        key: option,
+        value: option,
+        label: insuranceTypeLabel(option, t),
+      }));
+    }
     const seen = new Set<string>();
     return items.flatMap((item) => {
       const label = item.name.trim();
@@ -618,18 +639,27 @@ function InsuranceProviderMultiSelect({
       seen.add(key);
       return [{ key: item.id || key, value: label, label }];
     });
-  }, [items, selectedKeys]);
+  }, [items, selectedKeys, t, useInsuranceTypes]);
   const availableOptions = options.filter(
     (option) => !selectedKeys.has(normalizeInsuranceProviderKey(option.value)),
   );
-  const selectPlaceholder = insuranceProviderPlaceholder(lang);
-  const selectedTitle = selected.join(", ");
+  const selectPlaceholder = useInsuranceTypes
+    ? t.patients_insurance_type
+    : insuranceProviderPlaceholder(lang);
+  const selectedCountLabel = useInsuranceTypes
+    ? t.patients_insurance_type
+    : insuranceProviderFieldLabel(lang);
+  const selectedLabels = useMemo(
+    () => selected.map((item) => (useInsuranceTypes ? insuranceTypeLabel(item, t) : item)),
+    [selected, t, useInsuranceTypes],
+  );
+  const selectedTitle = selectedLabels.join(", ");
   const compactPlaceholder =
     selected.length === 0
       ? selectPlaceholder
       : selected.length === 1
-        ? selected[0] ?? selectPlaceholder
-        : `${insuranceProviderFieldLabel(lang)}: ${selected.length}`;
+        ? selectedLabels[0] ?? selectPlaceholder
+        : `${selectedCountLabel}: ${selected.length}`;
   const compactSelectedOptionValues = useMemo(
     () =>
       options
@@ -721,7 +751,9 @@ function InsuranceProviderMultiSelect({
               variant="secondary"
               className="h-7 max-w-full gap-1.5 rounded-full px-2.5 text-[12px] font-medium"
             >
-              <span className="min-w-0 truncate">{item}</span>
+              <span className="min-w-0 truncate">
+                {useInsuranceTypes ? insuranceTypeLabel(item, t) : item}
+              </span>
               {!disabled ? (
                 <button
                   type="button"
@@ -1534,6 +1566,12 @@ type ProvidersPageState = {
   staffError: string;
 };
 
+type RelationshipDeleteTarget = {
+  sourceDoctorId: string;
+  relationshipId: string;
+  doctorName: string;
+};
+
 type ProvidersPagePatch =
   | Partial<ProvidersPageState>
   | ((current: ProvidersPageState) => Partial<ProvidersPageState>);
@@ -1891,6 +1929,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   const [existingDoctorOptions, setExistingDoctorOptions] = useState<ProviderPeopleRow[]>([]);
   const [existingDoctorOptionsBusy, setExistingDoctorOptionsBusy] = useState(false);
   const [existingDoctorOptionsError, setExistingDoctorOptionsError] = useState("");
+  const [relationshipDeleteTarget, setRelationshipDeleteTarget] =
+    useState<RelationshipDeleteTarget | null>(null);
   const setProvidersPageField = <K extends keyof ProvidersPageState>(
     field: K,
     value: SetStateAction<ProvidersPageState[K]>,
@@ -2900,24 +2940,70 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     }
   }
 
-  async function handleDeleteDoctorRelationship(
+  function handleDeleteDoctorRelationship(
     sourceDoctorId: string,
     relationshipId: string,
     doctorName: string,
   ) {
     if (!detail) return;
-    if (!window.confirm(formatUiText(l("providers_relationship_delete_confirm"), { name: doctorName }))) {
-      return;
-    }
+    setRelationshipError("");
+    setRelationshipDeleteTarget({ sourceDoctorId, relationshipId, doctorName });
+  }
 
+  function removeDoctorRelationshipLocally(
+    sourceDoctorId: string,
+    relationshipId: string,
+  ) {
+    setDetail((current) =>
+      current
+        ? {
+            ...current,
+            doctors: current.doctors.map((doctor) =>
+              doctor.id === sourceDoctorId
+                ? {
+                    ...doctor,
+                    relationships: doctor.relationships.filter(
+                      (relationship) => relationship.id !== relationshipId,
+                    ),
+                  }
+                : doctor,
+            ),
+          }
+        : current,
+    );
+    setDoctorDetailView((current) =>
+      current?.source === "provider" && current.doctor.id === sourceDoctorId
+        ? {
+            ...current,
+            doctor: {
+              ...current.doctor,
+              relationships: current.doctor.relationships.filter(
+                (relationship) => relationship.id !== relationshipId,
+              ),
+            },
+          }
+        : current,
+    );
+  }
+
+  async function confirmDeleteDoctorRelationship() {
+    if (!detail || !relationshipDeleteTarget || relationshipBusy) return;
+    const target = relationshipDeleteTarget;
     setRelationshipBusy(true);
     setRelationshipError("");
+    setRelationshipDeleteTarget(null);
+    removeDoctorRelationshipLocally(target.sourceDoctorId, target.relationshipId);
 
     try {
-      await deleteProviderDoctorRelationship(detail.id, sourceDoctorId, relationshipId);
+      await deleteProviderDoctorRelationship(
+        detail.id,
+        target.sourceDoctorId,
+        target.relationshipId,
+      );
       refreshDetail();
     } catch (error) {
       setRelationshipError(error instanceof Error ? error.message : t.common_failed_update);
+      refreshDetail();
     } finally {
       setRelationshipBusy(false);
     }
@@ -3172,6 +3258,24 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     }
   }
 
+  const relationshipDeleteConfirmDialog = (
+    <DirtyDismissConfirmDialog
+      open={Boolean(relationshipDeleteTarget)}
+      title={lang === "ru" ? "Удалить связь врачей?" : "Arztbeziehung löschen?"}
+      message={
+        relationshipDeleteTarget
+          ? formatUiText(l("providers_relationship_delete_confirm"), {
+              name: relationshipDeleteTarget.doctorName,
+            })
+          : ""
+      }
+      cancelLabel={t.common_cancel}
+      confirmLabel={t.common_delete}
+      onCancel={() => setRelationshipDeleteTarget(null)}
+      onConfirm={confirmDeleteDoctorRelationship}
+    />
+  );
+
   if (!permissions.canViewPage) {
     return (
       <div className="space-y-6">
@@ -3225,6 +3329,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     busy={doctorBusy}
                     relationshipBusy={relationshipBusy}
                     canManage={permissions.canManageRegistry}
+                    onOpenProvider={openProvider}
                     onNew={() => {
                       setDoctorError("");
                       setDoctorForm(blankDoctorForm());
@@ -3466,6 +3571,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             onToggleActive={handleToggleStaffRole}
           />
         ) : null}
+
+        {relationshipDeleteConfirmDialog}
       </>
     );
   }
@@ -3958,6 +4065,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   busy={doctorBusy}
                   relationshipBusy={relationshipBusy}
                   canManage={permissions.canManageRegistry}
+                  onOpenProvider={openProvider}
                   onNew={() => {
                     setDoctorError("");
                     setDoctorForm(blankDoctorForm());
@@ -4177,6 +4285,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           onToggleActive={handleToggleStaffRole}
         />
       ) : null}
+
+      {relationshipDeleteConfirmDialog}
     </>
   );
 }
@@ -4329,11 +4439,11 @@ function ReadOnlyContacts({
   );
 }
 
-function readOnlyValue(value: unknown, fallback: string) {
-  if (value === null || value === undefined) return fallback;
-  if (typeof value === "string") return value.trim() || fallback;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return fallback;
+function formatProviderRating(value: number | null | undefined, fallback: string) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  const bounded = Math.max(0, Math.min(5, value));
+  const formatted = Number.isInteger(bounded) ? String(bounded) : bounded.toFixed(1);
+  return `${formatted}/5`;
 }
 
 function contractReadOnlyValue(value: unknown, fallback: string) {
@@ -5873,7 +5983,7 @@ function HeroInfoLine({
 }) {
   return (
     <div className={cn("flex min-w-0 gap-2", wrap ? "items-start" : "items-center")}>
-      <Icon className="size-3.5 shrink-0 text-muted-foreground/65" />
+      <Icon className="size-3.5 shrink-0 text-foreground/75" />
       <div className={cn("min-w-0 max-w-full", "break-words")}>{children}</div>
     </div>
   );
@@ -5914,6 +6024,7 @@ function ProviderSheetHero({
     detail.legal_name && detail.legal_name !== detail.name ? detail.legal_name : null,
     providerMeta(detail),
   ].filter(Boolean).join(" - ");
+  const insuranceTypeLine = insuranceTypeText(detail.insurance_providers, t);
   const specializationLine = specializationText(detail.specializations, detail.fachbereich, lang);
   const taxonomyLine = taxonomyLeafLabel(detail.taxonomy_node, detail.taxonomy_path, lang);
 
@@ -5982,7 +6093,7 @@ function ProviderSheetHero({
               </Badge>
             ) : null}
           </div>
-          <div className="mt-5 grid gap-x-6 gap-y-4 text-xs text-muted-foreground sm:grid-cols-2">
+          <div className="mt-5 grid gap-x-6 gap-y-4 text-xs text-foreground sm:grid-cols-2">
             <HeroInfoLine icon={MapPin} wrap>
               {addressLine || providerMeta(detail) || t.common_not_set}
             </HeroInfoLine>
@@ -5999,15 +6110,30 @@ function ProviderSheetHero({
               <span className="break-words">
                 {t.providers_internal_rating}:{" "}
                 <span className="font-semibold text-foreground">
-                  {readOnlyValue(detail.internal_rating, t.common_not_set)}
+                  {formatProviderRating(detail.internal_rating, t.common_not_set)}
                 </span>
                 {detail.internal_rating_note ? (
                   <span> · {detail.internal_rating_note}</span>
                 ) : null}
               </span>
             </HeroInfoLine>
-            <HeroInfoLine icon={BadgeCheck}>
-              {detail.tax_id || t.common_not_set}
+            <HeroInfoLine icon={BadgeCheck} wrap>
+              <span className="break-words">
+                <span className="font-semibold text-foreground">
+                  {detail.tax_id || t.common_not_set}
+                </span>
+                {insuranceTypeLine ? (
+                  <span className="mt-1.5 flex min-w-0 items-start gap-1.5 text-foreground">
+                    <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-foreground/75" />
+                    <span className="min-w-0 break-words">
+                      {t.patients_insurance_type}:{" "}
+                      <span className="font-medium text-foreground">
+                        {insuranceTypeLine}
+                      </span>
+                    </span>
+                  </span>
+                ) : null}
+              </span>
             </HeroInfoLine>
             <HeroInfoLine icon={Stethoscope}>
               {specializationLine || t.common_not_set}
@@ -6111,6 +6237,24 @@ function insuranceProviderText(items: { name?: string | null }[] | undefined) {
     .join(", ");
 }
 
+function insuranceTypeText(
+  items: { name?: string | null }[] | undefined,
+  t: Translations,
+) {
+  const seen = new Set<string>();
+  return (items ?? [])
+    .flatMap((item) => {
+      const raw = item.name?.trim();
+      if (!raw) return [];
+      const label = insuranceTypeLabel(raw, t);
+      const key = normalizeInsuranceProviderKey(label);
+      if (seen.has(key)) return [];
+      seen.add(key);
+      return [label];
+    })
+    .join(", ");
+}
+
 function contactSummary(
   contacts: { contact_kind: string; contact_type: string; value: string; is_primary?: boolean }[] | undefined,
   fallbackPhone?: string | null,
@@ -6147,6 +6291,7 @@ function DoctorSection({
   busy,
   relationshipBusy,
   canManage,
+  onOpenProvider,
   onNew,
   onOpen,
   onEdit,
@@ -6159,6 +6304,7 @@ function DoctorSection({
   busy: boolean;
   relationshipBusy: boolean;
   canManage: boolean;
+  onOpenProvider: (providerId: string) => void;
   onNew: () => void;
   onOpen: (doctor: DoctorSummary) => void;
   onEdit: (doctor: DoctorSummary) => void;
@@ -6225,6 +6371,7 @@ function DoctorSection({
                 onDeleteRelationship={onDeleteRelationship}
                 onEdit={onEdit}
                 onEditRelationship={onEditRelationship}
+                onOpenProvider={onOpenProvider}
                 onNewRelationship={onNewRelationship}
               />
             ) : (
@@ -6353,6 +6500,7 @@ function DoctorCard({
   canManage,
   relationshipBusy,
   onOpen,
+  onOpenProvider,
   onDelete,
   onDeleteRelationship,
   onEdit,
@@ -6364,6 +6512,7 @@ function DoctorCard({
   canManage: boolean;
   relationshipBusy: boolean;
   onOpen: (doctor: DoctorSummary) => void;
+  onOpenProvider: (providerId: string) => void;
   onDelete: (doctorId: string, doctorName: string) => void;
   onDeleteRelationship: (sourceDoctorId: string, relationshipId: string, doctorName: string) => void;
   onEdit: (doctor: DoctorSummary) => void;
@@ -6404,6 +6553,7 @@ function DoctorCard({
         relationshipBusy={relationshipBusy}
         onDeleteRelationship={onDeleteRelationship}
         onEditRelationship={onEditRelationship}
+        onOpenProvider={onOpenProvider}
         onNewRelationship={onNewRelationship}
       />
     </details>
@@ -6663,6 +6813,7 @@ function DoctorRelationships({
   relationshipBusy,
   onDeleteRelationship,
   onEditRelationship,
+  onOpenProvider,
   onNewRelationship,
 }: {
   canManage: boolean;
@@ -6670,6 +6821,7 @@ function DoctorRelationships({
   relationshipBusy: boolean;
   onDeleteRelationship: (sourceDoctorId: string, relationshipId: string, doctorName: string) => void;
   onEditRelationship: (sourceDoctorId: string, relationship: DoctorRelationship) => void;
+  onOpenProvider: (providerId: string) => void;
   onNewRelationship: (sourceDoctorId: string) => void;
 }) {
   const { t } = useLang();
@@ -6709,6 +6861,7 @@ function DoctorRelationships({
               relationshipBusy={relationshipBusy}
               onDeleteRelationship={onDeleteRelationship}
               onEditRelationship={onEditRelationship}
+              onOpenProvider={onOpenProvider}
             />
           ))}
         </div>
@@ -6724,6 +6877,7 @@ function DoctorRelationshipCard({
   relationshipBusy,
   onDeleteRelationship,
   onEditRelationship,
+  onOpenProvider,
 }: {
   doctorId: string;
   canManage: boolean;
@@ -6731,13 +6885,19 @@ function DoctorRelationshipCard({
   relationshipBusy: boolean;
   onDeleteRelationship: (sourceDoctorId: string, relationshipId: string, doctorName: string) => void;
   onEditRelationship: (sourceDoctorId: string, relationship: DoctorRelationship) => void;
+  onOpenProvider: (providerId: string) => void;
 }) {
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
 
   return (
     <div className="grid gap-3 rounded-lg border border-border/70 bg-muted/10 p-3 md:grid-cols-[minmax(0,1fr)_160px]">
-      <div className="min-w-0">
+      <button
+        type="button"
+        className="min-w-0 rounded-md text-left transition hover:bg-card/70 focus:outline-none focus:ring-2 focus:ring-ring/30"
+        title={`${l("providers_open_provider")}: ${relationship.target_provider_name}`}
+        onClick={() => onOpenProvider(relationship.target_provider_id)}
+      >
         <p className="text-sm font-semibold text-foreground">
           {relationship.target_doctor_title ? `${relationship.target_doctor_title} ` : ""}
           {relationship.target_doctor_name}
@@ -6767,7 +6927,7 @@ function DoctorRelationshipCard({
         <p className="mt-2 text-xs leading-snug text-muted-foreground">
           {relationship.description || relationship.notes || t.common_not_set}
         </p>
-      </div>
+      </button>
       {canManage ? (
         <div className="flex flex-col justify-end gap-2 border-t border-dashed border-border pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
           <Button
@@ -7717,11 +7877,12 @@ function ProviderProfileFields({
               </Button>
             </div>
           ) : null}
-          <Field label={insuranceProviderFieldLabel(lang)}>
+          <Field label={t.patients_insurance_type}>
             <InsuranceProviderMultiSelect
               value={form.insuranceProviders}
               items={insuranceProviders}
               disabled={disabled}
+              useInsuranceTypes
               onChange={(nextValue) => onChange("insuranceProviders", nextValue)}
             />
           </Field>
