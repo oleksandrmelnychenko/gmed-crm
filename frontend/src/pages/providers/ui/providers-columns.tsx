@@ -10,6 +10,7 @@ import {
 } from "../model/list-model";
 import { specializationSummaryForItems } from "../model/specialization-labels";
 import { ProviderCategoryIcon } from "./provider-category-icon";
+import { ProviderStatusPill } from "./provider-status-pill";
 import type { ProviderOrganizationLevel, ProviderSummary, ProviderTaxonomyNode } from "../model/types";
 
 export type ProviderTreeMeta = {
@@ -246,20 +247,6 @@ function ProviderTypeBadge({
   );
 }
 
-function StatusPill({ active, tr }: { active: boolean; tr: Record<string, string> }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11.5px] font-medium",
-        active ? "bg-emerald-50 text-emerald-700" : "bg-neutral-100 text-neutral-600",
-      )}
-    >
-      <span className={cn("size-1.5 rounded-full", active ? "bg-emerald-500" : "bg-neutral-400")} />
-      {active ? (tr.common_active ?? commonNotSet(tr)) : (tr.common_inactive ?? commonNotSet(tr))}
-    </span>
-  );
-}
-
 function ContractBadge({
   hasContract,
   tr,
@@ -303,7 +290,7 @@ export function buildProviderColumns(
       sortable: true,
       width: 112,
       group: "identity",
-      render: (provider) => <StatusPill active={provider.is_active} tr={tr} />,
+      render: (provider) => <ProviderStatusPill active={provider.is_active} labels={tr} />,
     },
     {
       id: "provider",

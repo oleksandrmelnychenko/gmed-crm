@@ -9,6 +9,7 @@ import {
   providerTypeLabel,
 } from "../model/list-model";
 import type { ProviderDetail } from "../model/types";
+import { ProviderStatusPill } from "./provider-status-pill";
 
 type ProviderChildrenSectionProps = {
   children: ProviderDetail["children"];
@@ -16,36 +17,8 @@ type ProviderChildrenSectionProps = {
   onOpenProvider: (providerId: string) => void;
 };
 
-function uiLabel(labels: Record<string, string>, key: string, fallback: string) {
-  return labels[key] ?? fallback;
-}
-
 function localizedFallback(lang: "de" | "ru", de: string, ru: string) {
   return lang === "de" ? de : ru;
-}
-
-function StatusBadge({
-  active,
-  lang,
-  labels,
-}: {
-  active: boolean;
-  lang: "de" | "ru";
-  labels: Record<string, string>;
-}) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-medium",
-        active ? "bg-emerald-50 text-emerald-700" : "bg-neutral-100 text-neutral-600",
-      )}
-    >
-      <span className={cn("size-1.5 rounded-full", active ? "bg-emerald-500" : "bg-neutral-400")} />
-      {active
-        ? uiLabel(labels, "common_active", localizedFallback(lang, "Aktiv", "Активно"))
-        : uiLabel(labels, "common_inactive", localizedFallback(lang, "Inaktiv", "Неактивно"))}
-    </span>
-  );
 }
 
 export function ProviderChildrenSection({
@@ -123,7 +96,7 @@ export function ProviderChildrenSection({
                       >
                         {providerTypeLabel(child.provider_type, labels)}
                       </Badge>
-                      <StatusBadge active={child.is_active} lang={lang} labels={labels} />
+                      <ProviderStatusPill active={child.is_active} labels={labels} />
                     </span>
                   </span>
                 </span>

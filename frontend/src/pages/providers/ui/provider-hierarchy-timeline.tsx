@@ -6,6 +6,7 @@ import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { ProviderCategoryIcon } from "./provider-category-icon";
+import { ProviderStatusPill } from "./provider-status-pill";
 import { providerTypeLabel } from "../model/list-model";
 import { specializationLabelForItem, specializationLabelForValue } from "../model/specialization-labels";
 import type { ProviderOrganizationLevel, ProviderSummary, SpecializationItem } from "../model/types";
@@ -127,26 +128,6 @@ function providerTypeTone(provider: ProviderSummary) {
   return provider.provider_type === "medical"
     ? "border-sky-200 bg-sky-50 text-sky-700"
     : "border-violet-200 bg-violet-50 text-violet-700";
-}
-
-function ProviderStatusBadge({
-  active,
-  tr,
-}: {
-  active: boolean;
-  tr: Record<string, string>;
-}) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-medium",
-        active ? "bg-emerald-50 text-emerald-700" : "bg-neutral-100 text-neutral-600",
-      )}
-    >
-      <span className={cn("size-1.5 rounded-full", active ? "bg-emerald-500" : "bg-neutral-400")} />
-      {active ? (tr.common_active ?? "active") : (tr.common_inactive ?? "inactive")}
-    </span>
-  );
 }
 
 function compareProviders(a: ProviderSummary, b: ProviderSummary) {
@@ -517,7 +498,7 @@ function TimelineNode({
               >
                 {providerTypeLabel(provider.provider_type, tr)}
               </Badge>
-              <ProviderStatusBadge active={provider.is_active} tr={tr} />
+              <ProviderStatusPill active={provider.is_active} labels={tr} />
               <Badge
                 variant="outline"
                 className={cn("rounded-full text-[10px]", contractTone(provider))}

@@ -43,6 +43,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { LanguageMultiSelect, languageLabel } from "@/components/ui/language-multi-select";
+import { StatusActionPill } from "@/components/status-action-pill";
 import {
   AdminInlineMetric,
   AdminSheetScaffold,
@@ -177,6 +178,7 @@ import type {
 import { ProviderHierarchyTimeline } from "./ui/provider-hierarchy-timeline";
 import { ProviderChildrenSection } from "./ui/provider-children-section";
 import { ProviderPeopleCatalog } from "./ui/provider-people-catalog";
+import { ProviderStatusPill } from "./ui/provider-status-pill";
 import { useProvidersListTableModel } from "./ui/hooks/use-providers-list-table-model";
 import {
   PageHeader,
@@ -6268,8 +6270,8 @@ function ProviderSheetHero({
   detail: ProviderDetail;
   providerActionBusy: string | null;
   permissions: ProviderPermissions;
-  onActivate: () => void;
-  onDeactivate: () => void;
+  onActivate: () => Promise<void>;
+  onDeactivate: () => Promise<void>;
   onDelete: () => void;
   onEdit?: () => void;
 }) {
@@ -6299,17 +6301,18 @@ function ProviderSheetHero({
         <div className="min-w-0">
           <div className="mb-2 flex items-center gap-3">
             <span className="h-px w-8 bg-border" />
-            <Badge
-              variant="outline"
-              className={cn(
-                "rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.08em]",
-                detail.is_active
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                  : "border-zinc-200 bg-zinc-50 text-zinc-600",
-              )}
-            >
-              {detail.is_active ? t.common_active : t.common_inactive}
-            </Badge>
+            {permissions.canManageRegistry ? (
+              <StatusActionPill
+                isActive={detail.is_active}
+                activeLabel={t.common_active}
+                inactiveLabel={t.common_inactive}
+                toggleActiveLabel={l("providers_deactivate")}
+                toggleInactiveLabel={l("providers_activate")}
+                onToggle={() => (detail.is_active ? onDeactivate() : onActivate())}
+              />
+            ) : (
+              <ProviderStatusPill active={detail.is_active} labels={tr} />
+            )}
           </div>
           <h2 className="break-words text-xl font-semibold leading-tight text-foreground">
             {detail.name}
@@ -6401,32 +6404,6 @@ function ProviderSheetHero({
                   {l("patients_edit")}
                 </Button>
               ) : null}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                disabled={providerActionBusy === "activate" || detail.is_active}
-                onClick={onActivate}
-              >
-                {providerActionBusy === "activate" ? (
-                  <LoaderCircle className="size-3.5 animate-spin" />
-                ) : null}
-                {l("providers_activate")}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 w-full justify-center rounded-lg bg-muted/20"
-                disabled={providerActionBusy === "deactivate" || !detail.is_active}
-                onClick={onDeactivate}
-              >
-                {providerActionBusy === "deactivate" ? (
-                  <LoaderCircle className="size-3.5 animate-spin" />
-                ) : null}
-                {l("providers_deactivate")}
-              </Button>
               <Button
                 type="button"
                 variant="outline"
