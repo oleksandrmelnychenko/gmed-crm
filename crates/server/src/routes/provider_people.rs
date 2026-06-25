@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::Row;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::auth::middleware::AuthUser;
@@ -388,11 +389,27 @@ async fn load_doctor_people(
         )
     })?;
 
+    let doctor_keys: Vec<(Uuid, Uuid)> = rows
+        .iter()
+        .map(|row| {
+            (
+                row.try_get::<Uuid, _>("provider_id").unwrap_or_default(),
+                row.try_get::<Uuid, _>("id").unwrap_or_default(),
+            )
+        })
+        .collect();
+    let linked_patients_by_doctor = load_doctor_linked_patients_map(state, &doctor_keys).await?;
+
     Ok(rows
         .into_iter()
         .map(|row| {
             let doctor_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
             let provider_id = row.try_get::<Uuid, _>("provider_id").unwrap_or_default();
+            let linked_patients = linked_patients_by_doctor
+                .get(&(provider_id, doctor_id))
+                .cloned()
+                .unwrap_or_default();
+            let linked_patient_count = linked_patients.len() as i64;
             let phone = row
                 .try_get::<Option<String>, _>("phone")
                 .unwrap_or_default();
@@ -443,6 +460,7 @@ async fn load_doctor_people(
                 "phone": phone,
                 "email": email,
                 "contacts": contacts,
+                "linked_patients": linked_patients,
                 "department": Value::Null,
                 "status": Value::Null,
                 "is_active": true,
@@ -450,12 +468,218 @@ async fn load_doctor_people(
                 "licensing_country": row.try_get::<Option<String>, _>("licensing_country").unwrap_or_default(),
                 "licensing_valid_until": row.try_get::<Option<chrono::NaiveDate>, _>("licensing_valid_until").unwrap_or_default().map(|value| value.to_string()),
                 "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
-                "patient_count": row.try_get::<i64, _>("patient_count").unwrap_or_default(),
+                "patient_count": linked_patient_count,
                 "appointment_count": row.try_get::<i64, _>("appointment_count").unwrap_or_default(),
                 "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
             })
         })
         .collect())
+}
+
+async fn load_doctor_linked_patients_map(
+    state: &AppState,
+    doctor_keys: &[(Uuid, Uuid)],
+) -> Result<HashMap<(Uuid, Uuid), Vec<Value>>, axum::response::Response> {
+    if doctor_keys.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let provider_ids: Vec<Uuid> = doctor_keys
+        .iter()
+        .map(|(provider_id, _)| *provider_id)
+        .collect();
+    let doctor_ids: Vec<Uuid> = doctor_keys
+        .iter()
+        .map(|(_, doctor_id)| *doctor_id)
+        .collect();
+    let rows = sqlx::query(
+        r#"WITH requested AS (
+                SELECT DISTINCT provider_id, doctor_id
+                FROM unnest($1::uuid[], $2::uuid[]) AS request(provider_id, doctor_id)
+            ),
+            links AS (
+                SELECT r.provider_id,
+                       r.doctor_id,
+                       a.patient_id,
+                       COUNT(*)::bigint AS appointment_count,
+                       0::bigint AS leistung_count,
+                       0::bigint AS concierge_count,
+                       MAX((a.date::timestamp + COALESCE(a.time_start, TIME '00:00')) AT TIME ZONE 'UTC') AS last_interaction_at
+                FROM requested r
+                JOIN appointments a
+                  ON a.provider_id = r.provider_id
+                 AND a.doctor_id = r.doctor_id
+                GROUP BY r.provider_id, r.doctor_id, a.patient_id
+
+                UNION ALL
+
+                SELECT r.provider_id,
+                       r.doctor_id,
+                       o.patient_id,
+                       0::bigint AS appointment_count,
+                       COUNT(*)::bigint AS leistung_count,
+                       0::bigint AS concierge_count,
+                       MAX(COALESCE(ol.approved_at, ol.delivered_at, ol.created_at)) AS last_interaction_at
+                FROM requested r
+                JOIN order_leistungen ol
+                  ON ol.provider_id = r.provider_id
+                 AND ol.doctor_id = r.doctor_id
+                JOIN orders o ON o.id = ol.order_id
+                GROUP BY r.provider_id, r.doctor_id, o.patient_id
+
+                UNION ALL
+
+                SELECT r.provider_id,
+                       r.doctor_id,
+                       pd.patient_id,
+                       0::bigint AS appointment_count,
+                       0::bigint AS leistung_count,
+                       0::bigint AS concierge_count,
+                       MAX(pd.created_at) AS last_interaction_at
+                FROM requested r
+                JOIN patient_diagnoses pd
+                  ON pd.doctor_id = r.doctor_id
+                  OR pd.treating_doctor_id = r.doctor_id
+                GROUP BY r.provider_id, r.doctor_id, pd.patient_id
+
+                UNION ALL
+
+                SELECT r.provider_id,
+                       r.doctor_id,
+                       pm.patient_id,
+                       0::bigint AS appointment_count,
+                       0::bigint AS leistung_count,
+                       0::bigint AS concierge_count,
+                       MAX(pm.created_at) AS last_interaction_at
+                FROM requested r
+                JOIN patient_medications pm
+                  ON pm.provider_id = r.provider_id
+                 AND pm.doctor_id = r.doctor_id
+                GROUP BY r.provider_id, r.doctor_id, pm.patient_id
+
+                UNION ALL
+
+                SELECT r.provider_id,
+                       r.doctor_id,
+                       pe.patient_id,
+                       0::bigint AS appointment_count,
+                       0::bigint AS leistung_count,
+                       0::bigint AS concierge_count,
+                       MAX(pe.created_at) AS last_interaction_at
+                FROM requested r
+                JOIN patient_examinations pe
+                  ON pe.provider_id = r.provider_id
+                 AND pe.doctor_id = r.doctor_id
+                GROUP BY r.provider_id, r.doctor_id, pe.patient_id
+
+                UNION ALL
+
+                SELECT r.provider_id,
+                       r.doctor_id,
+                       pp.patient_id,
+                       0::bigint AS appointment_count,
+                       0::bigint AS leistung_count,
+                       0::bigint AS concierge_count,
+                       MAX(pp.created_at) AS last_interaction_at
+                FROM requested r
+                JOIN patient_procedures pp
+                  ON pp.provider_id = r.provider_id
+                 AND pp.doctor_id = r.doctor_id
+                GROUP BY r.provider_id, r.doctor_id, pp.patient_id
+
+                UNION ALL
+
+                SELECT r.provider_id,
+                       r.doctor_id,
+                       pr.patient_id,
+                       0::bigint AS appointment_count,
+                       0::bigint AS leistung_count,
+                       0::bigint AS concierge_count,
+                       MAX(pr.created_at) AS last_interaction_at
+                FROM requested r
+                JOIN patient_recommendations pr
+                  ON pr.source_doctor_id = r.doctor_id
+                JOIN provider_doctor_links pdl
+                  ON pdl.provider_id = r.provider_id
+                 AND pdl.doctor_id = pr.source_doctor_id
+                GROUP BY r.provider_id, r.doctor_id, pr.patient_id
+            ),
+            linked AS (
+                SELECT provider_id,
+                       doctor_id,
+                       patient_id,
+                       SUM(appointment_count)::bigint AS appointment_count,
+                       SUM(leistung_count)::bigint AS leistung_count,
+                       SUM(concierge_count)::bigint AS concierge_count,
+                       MAX(last_interaction_at) AS last_interaction_at
+                FROM links
+                GROUP BY provider_id, doctor_id, patient_id
+            ),
+            ranked AS (
+                SELECT l.provider_id,
+                       l.doctor_id,
+                       p.id,
+                       p.patient_id,
+                       p.first_name,
+                       p.last_name,
+                       p.address_street,
+                       p.address_city,
+                       p.address_zip,
+                       p.address_country,
+                       l.appointment_count,
+                       l.leistung_count,
+                       l.concierge_count,
+                       l.last_interaction_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY l.provider_id, l.doctor_id
+                           ORDER BY l.last_interaction_at DESC, p.last_name, p.first_name
+                       ) AS rank
+                FROM linked l
+                JOIN patients p ON p.id = l.patient_id
+            )
+            SELECT provider_id, doctor_id, id, patient_id, first_name, last_name,
+                   address_street, address_city, address_zip, address_country,
+                   appointment_count, leistung_count, concierge_count, last_interaction_at
+            FROM ranked
+            WHERE rank <= 200
+            ORDER BY provider_id, doctor_id, rank"#,
+    )
+    .bind(provider_ids)
+    .bind(doctor_ids)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to load provider people linked patients");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to list provider people",
+        )
+    })?;
+
+    let mut patients_by_doctor: HashMap<(Uuid, Uuid), Vec<Value>> = HashMap::new();
+    for row in rows {
+        let provider_id = row.try_get::<Uuid, _>("provider_id").unwrap_or_default();
+        let doctor_id = row.try_get::<Uuid, _>("doctor_id").unwrap_or_default();
+        patients_by_doctor
+            .entry((provider_id, doctor_id))
+            .or_default()
+            .push(json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "patient_id": row.try_get::<String, _>("patient_id").unwrap_or_default(),
+                "first_name": row.try_get::<String, _>("first_name").unwrap_or_default(),
+                "last_name": row.try_get::<String, _>("last_name").unwrap_or_default(),
+                "address_street": row.try_get::<Option<String>, _>("address_street").unwrap_or_default(),
+                "address_city": row.try_get::<Option<String>, _>("address_city").unwrap_or_default(),
+                "address_zip": row.try_get::<Option<String>, _>("address_zip").unwrap_or_default(),
+                "address_country": row.try_get::<Option<String>, _>("address_country").unwrap_or_default(),
+                "appointment_count": row.try_get::<i64, _>("appointment_count").unwrap_or_default(),
+                "leistung_count": row.try_get::<i64, _>("leistung_count").unwrap_or_default(),
+                "concierge_count": row.try_get::<i64, _>("concierge_count").unwrap_or_default(),
+                "last_interaction_at": row.try_get::<DateTime<Utc>, _>("last_interaction_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+            }));
+    }
+
+    Ok(patients_by_doctor)
 }
 
 #[allow(clippy::too_many_arguments)]

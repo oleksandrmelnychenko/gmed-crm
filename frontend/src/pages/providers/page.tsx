@@ -4381,7 +4381,7 @@ function ReadOnlyAvailabilityLine({
       <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
       <span className="mt-3 h-px min-w-6 flex-1 bg-border/70" />
       <div className="min-w-0 max-w-[70%] flex-1">
-        <WeeklyAvailabilityBadgeList value={value} />
+        <WeeklyAvailabilityBadgeList value={value} className="max-w-md gap-x-1.5 gap-y-1.5" />
       </div>
     </div>
   );
@@ -4593,6 +4593,7 @@ function ProviderDoctorDetailSheet({
   const phone = doctor?.phone ?? row?.phone;
   const email = doctor?.email ?? row?.email;
   const openingHours = doctor?.opening_hours ?? row?.opening_hours;
+  const linkedPatients = doctor?.linked_patients ?? row?.linked_patients ?? [];
   const licenseNumber = doctor?.license_number ?? row?.license_number;
   const licensingCountry = doctor?.licensing_country ?? row?.licensing_country;
   const licensingValidUntil = doctor?.licensing_valid_until ?? row?.licensing_valid_until;
@@ -4678,8 +4679,8 @@ function ProviderDoctorDetailSheet({
             <Section title={l("providers_contacts")}>
               <ReadOnlyContacts contacts={contacts} fallbackPhone={phone} fallbackEmail={email} />
             </Section>
-            {doctor && isMedicalProvider ? (
-              <DoctorLinkedPatientsSection patients={doctor.linked_patients ?? []} />
+            {isMedicalProvider ? (
+              <DoctorLinkedPatientsSection patients={linkedPatients} />
             ) : null}
             {isMedicalProvider ? (
               <Section title={l("providers_license")}>

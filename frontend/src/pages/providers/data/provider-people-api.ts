@@ -12,6 +12,7 @@ import {
 import type {
   PersonContact,
   InsuranceProviderItem,
+  LinkedPatient,
   ProviderPersonGender,
   ProviderType,
   SpecializationItem,
@@ -138,6 +139,28 @@ function normalizeInsuranceProvider(value: unknown): InsuranceProviderItem | nul
   };
 }
 
+function normalizeLinkedPatient(value: unknown): LinkedPatient | null {
+  const raw = objectOrEmpty(value);
+  const id = nullableString(raw.id);
+  const patientId = nullableString(raw.patient_id);
+  if (!id || !patientId) return null;
+
+  return {
+    id,
+    patient_id: patientId,
+    first_name: stringValue(raw.first_name),
+    last_name: stringValue(raw.last_name),
+    address_street: nullableString(raw.address_street),
+    address_city: nullableString(raw.address_city),
+    address_zip: nullableString(raw.address_zip),
+    address_country: nullableString(raw.address_country),
+    appointment_count: numberValue(raw.appointment_count) ?? 0,
+    leistung_count: numberValue(raw.leistung_count) ?? 0,
+    concierge_count: numberValue(raw.concierge_count) ?? 0,
+    last_interaction_at: nullableString(raw.last_interaction_at) ?? "",
+  };
+}
+
 function normalizeCounts(rawCounts: unknown, row: Record<string, unknown>): ProviderPeopleCounts {
   const source = objectOrEmpty(rawCounts);
   const counts: ProviderPeopleCounts = {};
@@ -206,6 +229,10 @@ function normalizeProviderPeopleRow(value: unknown): ProviderPeopleRow {
     contacts: arrayOrEmpty(raw.contacts).flatMap((item) => {
       const contact = normalizeContact(item);
       return contact ? [contact] : [];
+    }),
+    linked_patients: arrayOrEmpty(raw.linked_patients).flatMap((item) => {
+      const patient = normalizeLinkedPatient(item);
+      return patient ? [patient] : [];
     }),
     department: nullableString(raw.department),
     status: normalizeStaffStatus(raw.status),

@@ -263,6 +263,22 @@ async fn provider_people_returns_doctors_staff_counts_and_patient_filter() {
     .execute(&pool)
     .await
     .unwrap();
+    let diagnosis_patient_id = seed_patient(&pool, admin_id, &format!("{tag}-diagnosis")).await;
+    sqlx::query(
+        r#"INSERT INTO patient_diagnoses (
+                patient_id, provider_id, treating_doctor_id,
+                kind, label, certainty, status, source_mode
+           ) VALUES (
+                $1, $2, $3, 'main', $4, 'bestaetigt', 'active', 'intern'
+           )"#,
+    )
+    .bind(diagnosis_patient_id)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .bind(format!("Provider people diagnosis {tag}"))
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let (status, body) = json_request(
         &app,
@@ -285,8 +301,22 @@ async fn provider_people_returns_doctors_staff_counts_and_patient_filter() {
     assert_eq!(doctor["website"], "https://people-doctor.example");
     assert_eq!(doctor["schwerpunkt"], "Interventionelle Kardiologie");
     assert_eq!(doctor["gender"], "female");
-    assert_eq!(doctor["patient_count"], 1);
+    assert_eq!(doctor["patient_count"], 2);
     assert_eq!(doctor["appointment_count"], 1);
+    let linked_patients = doctor["linked_patients"]
+        .as_array()
+        .expect("doctor linked patients");
+    assert_eq!(linked_patients.len(), 2);
+    assert!(
+        linked_patients
+            .iter()
+            .any(|item| item["id"] == patient_id.to_string())
+    );
+    assert!(
+        linked_patients
+            .iter()
+            .any(|item| item["id"] == diagnosis_patient_id.to_string())
+    );
     assert_eq!(doctor["specializations"][0]["code"], "cardiology");
     assert_eq!(
         doctor["contacts"][0]["value"],

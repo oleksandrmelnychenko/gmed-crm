@@ -437,6 +437,7 @@ function buildPeopleColumns(
   uiText: Record<string, string>,
   lang: Lang,
   forceNonMedical: boolean,
+  onOpenProvider: (providerId: string, row: ProviderPeopleRow) => void,
 ): ColumnDef<ProviderPeopleRow>[] {
   const notSet = labels.common_not_set ?? "-";
   const providerLabel = providerCatalogLabel(labels, lang, forceNonMedical);
@@ -496,12 +497,25 @@ function buildPeopleColumns(
       width: 260,
       group: "provider",
       render: (row) => (
-        <div className="min-w-0">
-          <div className="truncate text-xs font-medium text-foreground">{row.provider_name}</div>
+        <button
+          type="button"
+          className="group/provider flex max-w-full flex-col items-start rounded-md px-1.5 py-1 text-left transition hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpenProvider(row.provider_id, row);
+          }}
+        >
+          <span className="flex min-w-0 max-w-full items-center gap-1.5">
+            <Building2 className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate text-xs font-medium text-foreground group-hover/provider:text-[var(--brand)]">
+              {row.provider_name}
+            </span>
+            <ArrowUpRight className="size-3 shrink-0 text-muted-foreground transition group-hover/provider:-translate-y-0.5 group-hover/provider:translate-x-0.5 group-hover/provider:text-[var(--brand)]" />
+          </span>
           <div className="mt-1">
             <ProviderTypeBadge labels={labels} providerType={row.provider_type} />
           </div>
-        </div>
+        </button>
       ),
     },
     {
@@ -1256,8 +1270,8 @@ export function ProviderPeopleCatalog({
     return options.length > 0 ? options : deriveProviderOptions(rows);
   }, [providers, rows]);
   const columns = useMemo(
-    () => buildPeopleColumns(labels, uiText, lang, forceNonMedical),
-    [forceNonMedical, labels, lang, uiText],
+    () => buildPeopleColumns(labels, uiText, lang, forceNonMedical, onOpenProvider),
+    [forceNonMedical, labels, lang, onOpenProvider, uiText],
   );
   const title = forceNonMedical
     ? peopleCatalogTitle(lang, true)
@@ -1321,20 +1335,6 @@ export function ProviderPeopleCatalog({
           loading={loading}
           maxFrozenColumns={2}
           onRowClick={(row) => onOpenPerson(row.person_id, row)}
-          rowActions={(row) => (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              title={uiLabel(uiText, "providers_open_provider", localizedFallback(lang, "Provider öffnen", "Открыть провайдера"))}
-              aria-label={`${uiLabel(uiText, "providers_open_provider", localizedFallback(lang, "Provider öffnen", "Открыть провайдера"))}: ${row.provider_name}`}
-              onClick={() => onOpenProvider(row.provider_id, row)}
-            >
-              <ArrowUpRight className="size-3.5" />
-            </Button>
-          )}
-          rowActionsLabel={labels.table_actions ?? localizedFallback(lang, "Aktionen", "Действия")}
-          rowActionsWidth={48}
           rowId={(row) => `${row.person_type}:${row.person_id}:${row.provider_id}`}
           storageKey="provider-people-catalog"
           tableClassName="min-h-[360px]"

@@ -1,6 +1,7 @@
 import type {
   PersonContact,
   InsuranceProviderItem,
+  LinkedPatient,
   ProviderPersonGender,
   ProviderType,
   SpecializationItem,
@@ -48,6 +49,7 @@ export type ProviderPeopleRow = {
   phone: string | null;
   email: string | null;
   contacts: PersonContact[];
+  linked_patients: LinkedPatient[];
   department: string | null;
   status: "active" | "inactive" | "external" | "unknown";
   license_number: string | null;

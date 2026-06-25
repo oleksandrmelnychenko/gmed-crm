@@ -18,6 +18,7 @@ function contactRow(overrides: Partial<ProviderPeopleRow> = {}): ProviderPeopleR
     languages: [],
     last_interaction_at: null,
     last_name: "Kontakt",
+    linked_patients: [],
     license_number: null,
     licensing_country: null,
     licensing_valid_until: null,

@@ -64,6 +64,7 @@ function providerPeopleDoctorRow(overrides: Partial<ProviderPeopleRow> = {}): Pr
     phone: null,
     email: null,
     contacts: [],
+    linked_patients: [],
     department: null,
     status: "active",
     license_number: null,
