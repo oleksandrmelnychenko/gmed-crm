@@ -6222,7 +6222,7 @@ function HeroInfoTableRow({
   children: ReactNode;
 }) {
   return (
-    <div className="grid min-w-0 content-start gap-4 px-3 py-2.5 sm:grid-cols-[8.25rem_minmax(0,1fr)]">
+    <div className="grid min-w-0 content-start gap-4 px-3 py-2.5 sm:grid-cols-[10.25rem_minmax(0,1fr)]">
       <div className="flex min-w-0 items-start gap-2 text-xs font-medium leading-5 text-foreground">
         <Icon className="mt-0.5 size-3.5 shrink-0 text-foreground/75" />
         <span className="min-w-0 break-words">{label}</span>
