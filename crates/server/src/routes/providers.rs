@@ -7492,6 +7492,72 @@ async fn load_provider_patients_json(
                 WHERE cs.provider_id = $1
                   AND $2::uuid IS NULL
                 GROUP BY cs.patient_id
+
+                UNION ALL
+
+                SELECT pd.patient_id,
+                       0::bigint AS appointment_count,
+                       0::bigint AS leistung_count,
+                       0::bigint AS concierge_count,
+                       MAX(pd.created_at) AS last_interaction_at
+                FROM patient_diagnoses pd
+                WHERE pd.provider_id = $1
+                  AND (
+                    $2::uuid IS NULL
+                    OR pd.doctor_id = $2
+                    OR pd.treating_doctor_id = $2
+                  )
+                GROUP BY pd.patient_id
+
+                UNION ALL
+
+                SELECT pm.patient_id,
+                       0::bigint AS appointment_count,
+                       0::bigint AS leistung_count,
+                       0::bigint AS concierge_count,
+                       MAX(pm.created_at) AS last_interaction_at
+                FROM patient_medications pm
+                WHERE pm.provider_id = $1
+                  AND ($2::uuid IS NULL OR pm.doctor_id = $2)
+                GROUP BY pm.patient_id
+
+                UNION ALL
+
+                SELECT pe.patient_id,
+                       0::bigint AS appointment_count,
+                       0::bigint AS leistung_count,
+                       0::bigint AS concierge_count,
+                       MAX(pe.created_at) AS last_interaction_at
+                FROM patient_examinations pe
+                WHERE pe.provider_id = $1
+                  AND ($2::uuid IS NULL OR pe.doctor_id = $2)
+                GROUP BY pe.patient_id
+
+                UNION ALL
+
+                SELECT pp.patient_id,
+                       0::bigint AS appointment_count,
+                       0::bigint AS leistung_count,
+                       0::bigint AS concierge_count,
+                       MAX(pp.created_at) AS last_interaction_at
+                FROM patient_procedures pp
+                WHERE pp.provider_id = $1
+                  AND ($2::uuid IS NULL OR pp.doctor_id = $2)
+                GROUP BY pp.patient_id
+
+                UNION ALL
+
+                SELECT pr.patient_id,
+                       0::bigint AS appointment_count,
+                       0::bigint AS leistung_count,
+                       0::bigint AS concierge_count,
+                       MAX(pr.created_at) AS last_interaction_at
+                FROM patient_recommendations pr
+                JOIN provider_doctor_links pdl
+                  ON pdl.doctor_id = pr.source_doctor_id
+                 AND pdl.provider_id = $1
+                WHERE ($2::uuid IS NULL OR pr.source_doctor_id = $2)
+                GROUP BY pr.patient_id
             ),
             linked AS (
                 SELECT patient_id,
