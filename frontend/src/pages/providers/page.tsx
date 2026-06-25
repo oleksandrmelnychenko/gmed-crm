@@ -6222,7 +6222,7 @@ function HeroInfoTableRow({
   children: ReactNode;
 }) {
   return (
-    <div className="grid min-w-0 content-start gap-3 px-3 py-2.5 sm:grid-cols-[7.25rem_minmax(0,1fr)]">
+    <div className="grid min-w-0 content-start gap-4 px-3 py-2.5 sm:grid-cols-[8.25rem_minmax(0,1fr)]">
       <div className="flex min-w-0 items-start gap-2 text-xs font-medium leading-5 text-foreground">
         <Icon className="mt-0.5 size-3.5 shrink-0 text-foreground/75" />
         <span className="min-w-0 break-words">{label}</span>
@@ -6243,43 +6243,7 @@ function HeroAvailabilityTable({
   const rows = formatWeeklyAvailabilityDisplayItems(value, lang);
   if (rows.length === 0) return <span>{t.common_not_set}</span>;
 
-  return (
-    <div className="grid max-w-md gap-1 text-sm font-medium leading-5 text-foreground">
-      {rows.map((row, index) => {
-        if (row.freeText || !row.day) {
-          return (
-            <div key={`${row.label}-${index}`} className="break-words">
-              {row.label}
-            </div>
-          );
-        }
-
-        const dayLabel = weeklyAvailabilityDayLabel(row.day, lang);
-        const valueLabel = row.label.startsWith(dayLabel)
-          ? row.label.slice(dayLabel.length).trim()
-          : row.label;
-
-        return (
-          <div
-            key={`${row.day}-${index}`}
-            className="grid min-w-0 grid-cols-[1.65rem_auto] gap-1.5 text-left"
-          >
-            <span className={cn("font-semibold", row.closed ? "text-orange-800" : "text-foreground")}>
-              {dayLabel}
-            </span>
-            <span
-              className={cn(
-                "min-w-0 break-words tabular-nums",
-                row.closed ? "text-orange-800" : "text-foreground",
-              )}
-            >
-              {valueLabel || t.common_not_set}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
+  return <WeeklyAvailabilityBadgeList value={value} className="max-w-md gap-x-1.5 gap-y-1.5" />;
 }
 
 function providerFullAddressLine(detail: ProviderDetail) {
