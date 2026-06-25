@@ -6079,12 +6079,12 @@ function HeroInfoTableRow({
   children: ReactNode;
 }) {
   return (
-    <div className="grid min-w-0 content-start gap-1.5 border border-border/70 px-3 py-2.5">
+    <div className="grid min-w-0 content-start gap-2 border border-border/70 px-3 py-2.5 sm:grid-cols-[9rem_minmax(0,1fr)]">
       <div className="flex min-w-0 items-start gap-2 text-xs font-medium text-foreground">
         <Icon className="mt-0.5 size-3.5 shrink-0 text-foreground/75" />
         <span className="min-w-0 truncate">{label}</span>
       </div>
-      <div className="min-w-0 break-words text-sm font-semibold leading-5 text-foreground">
+      <div className="min-w-0 break-words text-sm font-semibold leading-5 text-foreground sm:text-right">
         {children}
       </div>
     </div>
@@ -6101,7 +6101,7 @@ function HeroAvailabilityTable({
   if (rows.length === 0) return <span>{t.common_not_set}</span>;
 
   return (
-    <div className="grid max-w-md gap-1 text-sm font-medium leading-5 text-foreground">
+    <div className="grid max-w-md gap-1 text-sm font-medium leading-5 text-foreground sm:ml-auto">
       {rows.map((row, index) => {
         if (row.freeText || !row.day) {
           return (
