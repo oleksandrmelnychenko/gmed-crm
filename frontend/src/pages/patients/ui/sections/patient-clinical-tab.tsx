@@ -79,7 +79,6 @@ type MedicationHoldDraft = Pick<ClinicalMedication, "on_hold" | "hold_until" | "
 type MedicationHoldEditor = {
   index: number;
   medication: ClinicalMedication;
-  list: ClinicalMedication[];
   draft: MedicationHoldDraft;
 };
 
@@ -186,6 +185,34 @@ function trimDraftStrings<T>(draft: T): T {
 function attributionLabel(item: ClinicalAttribution): string | null {
   const doctor = [item.doctor_title, item.doctor_name].filter(Boolean).join(" ").trim();
   return [doctor || null, item.provider_name].filter(Boolean).join(" · ") || null;
+}
+
+function allDoctorOptionLabel(doctor: AllDoctorOption): string {
+  const doctorName = [doctor.title, doctor.name].filter(Boolean).join(" ").trim();
+  return [doctorName || doctor.name, doctor.provider_name].filter(Boolean).join(" · ");
+}
+
+function uniqueAllDoctorOptions(doctors: AllDoctorOption[]): AllDoctorOption[] {
+  const byId = new Map<string, { doctor: AllDoctorOption; providers: string[] }>();
+  doctors.forEach((doctor) => {
+    const existing = byId.get(doctor.id);
+    const providerName = doctor.provider_name?.trim();
+    if (!existing) {
+      byId.set(doctor.id, {
+        doctor,
+        providers: providerName ? [providerName] : [],
+      });
+      return;
+    }
+    if (providerName && !existing.providers.includes(providerName)) {
+      existing.providers.push(providerName);
+    }
+  });
+
+  return Array.from(byId.values()).map(({ doctor, providers }) => ({
+    ...doctor,
+    provider_name: providers.length > 0 ? providers.join(", ") : doctor.provider_name,
+  }));
 }
 
 function groupedClinicalItems<T>(
@@ -876,14 +903,15 @@ export function PatientRecommendationsSection({
     const option = RECOMMENDATION_TYPE_OPTIONS.find((o) => o.value === value);
     return option ? tx(option.ru, option.de) : null;
   };
+  const doctorOptions = uniqueAllDoctorOptions(allDoctors);
   const lifecycleLabel = (value: RecommendationLifecycleStatus) => {
     const option = LIFECYCLE_OPTIONS.find((o) => o.value === value);
     return option ? tx(option.ru, option.de) : value;
   };
   const doctorName = (rec: PatientRecommendation) => {
-    if (rec.source_doctor_name) return rec.source_doctor_name;
-    const doctor = allDoctors.find((d) => d.id === rec.source_doctor_id);
-    return doctor ? [doctor.title, doctor.name].filter(Boolean).join(" ") : null;
+    const doctor = doctorOptions.find((d) => d.id === rec.source_doctor_id);
+    if (doctor) return allDoctorOptionLabel(doctor);
+    return rec.source_doctor_name || null;
   };
   const validityLabel = (rec: PatientRecommendation) =>
     [rec.valid_from, rec.valid_to].some(Boolean)
@@ -1119,9 +1147,9 @@ export function PatientRecommendationsSection({
                     onChange={(e) => set({ source_doctor_id: e.target.value || null })}
                   >
                     <option value="">—</option>
-                    {allDoctors.map((doctor) => (
+                    {doctorOptions.map((doctor) => (
                       <option key={doctor.id} value={doctor.id}>
-                        {[doctor.title, doctor.name].filter(Boolean).join(" ")}
+                        {allDoctorOptionLabel(doctor)}
                       </option>
                     ))}
                   </NativeComboboxSelect>
@@ -1342,11 +1370,10 @@ export function PatientClinicalTab({
     ) : null;
   };
 
-  function openMedicationHoldEditor(index: number, medication: ClinicalMedication, list: ClinicalMedication[]) {
+  function openMedicationHoldEditor(index: number, medication: ClinicalMedication) {
     setMedicationHoldEditor({
       index,
       medication,
-      list,
       draft: {
         on_hold: Boolean(medication.on_hold),
         hold_until: medication.hold_until ?? null,
@@ -1372,7 +1399,7 @@ export function PatientClinicalTab({
   async function submitMedicationHoldEditor() {
     if (!medicationHoldEditor) return;
     const draft = medicationHoldEditor.draft;
-    const next = medicationHoldEditor.list.map((item, index) =>
+    const next = medications.map((item, index) =>
       index === medicationHoldEditor.index
         ? trimDraftStrings({
             ...item,
@@ -1685,7 +1712,6 @@ export function PatientClinicalTab({
             groupOf={groupOf}
             canManage={canManage}
             renderActions={(item, index) => {
-              const currentList = indexed.map((row) => row.item);
               return (
                 <div className="flex shrink-0 gap-1">
                   <Button
@@ -1707,7 +1733,7 @@ export function PatientClinicalTab({
                         : tx("Поставить на холд", "Auf Hold setzen")
                     }
                     disabled={medicationHoldBusy}
-                    onClick={() => openMedicationHoldEditor(index, item, currentList)}
+                    onClick={() => openMedicationHoldEditor(index, item)}
                   >
                     {item.on_hold ? <PlayCircle className="size-3.5" /> : <PauseCircle className="size-3.5" />}
                   </Button>
@@ -2046,7 +2072,7 @@ export function PatientClinicalTab({
               <textarea
                 value={draft.result ?? ""}
                 onChange={(e) => set({ result: blankToNull(e.target.value) })}
-                className={cn(inputClass, "h-20 py-2")}
+                className={cn(inputClass, "h-[136px] py-2")}
                 placeholder={tx("Описание результата", "Befundtext")}
               />
             </Field>

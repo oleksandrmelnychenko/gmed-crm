@@ -3428,6 +3428,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
             setDoctorDetailView(null);
             openDoctorRelationshipForm(doctor.id);
           }}
+          onDeleteRelationship={handleDeleteDoctorRelationship}
         />
 
         <ProviderStaffDetailSheet
@@ -4060,6 +4061,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           setDoctorDetailView(null);
           openDoctorRelationshipForm(doctor.id);
         }}
+        onDeleteRelationship={handleDeleteDoctorRelationship}
       />
 
       <ProviderStaffDetailSheet
@@ -4491,6 +4493,7 @@ function ProviderDoctorDetailSheet({
   onOpenChange,
   onEdit,
   onNewRelationship,
+  onDeleteRelationship,
 }: {
   open: boolean;
   view: DoctorDetailView | null;
@@ -4498,6 +4501,7 @@ function ProviderDoctorDetailSheet({
   onOpenChange: (open: boolean) => void;
   onEdit: (view: DoctorDetailView) => void;
   onNewRelationship: (doctor: DoctorSummary) => void;
+  onDeleteRelationship: (sourceDoctorId: string, relationshipId: string, doctorName: string) => void;
 }) {
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
@@ -4623,17 +4627,36 @@ function ProviderDoctorDetailSheet({
                   <p className="text-sm text-muted-foreground">{l("providers_relationships_empty")}</p>
                 ) : (
                   <div className="space-y-2">
-                    {doctor.relationships.map((relationship) => (
-                      <ReadOnlyLine
-                        key={relationship.id}
-                        label={doctorRelationshipTypeLabel(relationship.relationship_type)}
-                        value={[
-                          relationship.target_doctor_title,
-                          relationship.target_doctor_name,
-                          relationship.target_provider_name,
-                        ].filter(Boolean).join(" - ")}
-                      />
-                    ))}
+                    {doctor.relationships.map((relationship) => {
+                      const targetName = [
+                        relationship.target_doctor_title,
+                        relationship.target_doctor_name,
+                        relationship.target_provider_name,
+                      ].filter(Boolean).join(" - ");
+                      return (
+                        <div key={relationship.id} className="flex items-start gap-2">
+                          <div className="min-w-0 flex-1">
+                            <ReadOnlyLine
+                              label={doctorRelationshipTypeLabel(relationship.relationship_type)}
+                              value={targetName}
+                            />
+                          </div>
+                          {canManage ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="mt-1 shrink-0 text-destructive hover:text-destructive"
+                              aria-label={t.common_delete}
+                              title={t.common_delete}
+                              onClick={() => onDeleteRelationship(doctor.id, relationship.id, targetName)}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          ) : null}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </Section>
