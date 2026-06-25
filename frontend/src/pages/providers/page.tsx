@@ -4883,18 +4883,72 @@ function PaginatedLinkedPatientsGrid({
   );
 }
 
-function DoctorLinkedPatientsSection({ patients }: { patients: LinkedPatient[] }) {
+function CollapsibleLinkedPatientsPanel({
+  patients,
+  cardClassName,
+  showMarker = false,
+  emptyContent,
+}: {
+  patients: LinkedPatient[];
+  cardClassName?: string;
+  showMarker?: boolean;
+  emptyContent?: ReactNode;
+}) {
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
+  const [open, setOpen] = useState(false);
 
   return (
-    <Section title={l("providers_linked_patients")}>
-      {patients.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t.providers_no_patients}</p>
-      ) : (
-        <PaginatedLinkedPatientsGrid patients={patients} />
-      )}
-    </Section>
+    <div>
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 rounded-lg text-left transition hover:text-[var(--brand)] focus:outline-none focus:ring-2 focus:ring-ring/30"
+        aria-expanded={open}
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen((current) => !current);
+        }}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          {showMarker ? (
+            <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          ) : null}
+          <span className="truncate text-[13px] font-semibold tracking-tight text-foreground">
+            {l("providers_linked_patients")}
+          </span>
+          <span className="shrink-0 rounded-full border border-border bg-card px-2 py-0.5 text-[11px] font-semibold leading-none text-muted-foreground">
+            {patients.length}
+          </span>
+        </span>
+        <ChevronDown
+          className={cn(
+            "size-4 shrink-0 text-muted-foreground transition-transform",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open ? (
+        patients.length === 0 ? (
+          emptyContent ?? (
+            <p className="mt-2 text-sm text-muted-foreground">{t.providers_no_patients}</p>
+          )
+        ) : (
+          <PaginatedLinkedPatientsGrid
+            patients={patients}
+            className="mt-3"
+            cardClassName={cardClassName}
+          />
+        )
+      ) : null}
+    </div>
+  );
+}
+
+function DoctorLinkedPatientsSection({ patients }: { patients: LinkedPatient[] }) {
+  return (
+    <div className="rounded-xl border border-border/70 bg-card/50 p-3.5">
+      <CollapsibleLinkedPatientsPanel patients={patients} />
+    </div>
   );
 }
 
@@ -6173,7 +6227,7 @@ function HeroInfoTableRow({
         <Icon className="mt-0.5 size-3.5 shrink-0 text-foreground/75" />
         <span className="min-w-0 whitespace-nowrap">{label}</span>
       </div>
-      <div className="min-w-0 break-words pt-0.5 text-sm font-semibold leading-5 text-foreground">
+      <div className="-mt-0.5 min-w-0 break-words text-sm font-semibold leading-5 text-foreground">
         {children}
       </div>
     </div>
@@ -7062,31 +7116,12 @@ function DoctorMetrics({
 }
 
 function DoctorCardLinkedPatients({ patients }: { patients: LinkedPatient[] }) {
-  const { t } = useLang();
-  const l = (key: string) => t.uiText[key] ?? key;
-
   return (
     <div className="border-t border-border bg-card px-4 py-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-medium text-muted-foreground">
-          {l("providers_linked_patients")}
-        </p>
-        <Badge
-          variant="outline"
-          className="rounded-full border-border bg-muted/20 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-        >
-          {patients.length}
-        </Badge>
-      </div>
-      {patients.length === 0 ? (
-        <p className="mt-2 text-sm text-muted-foreground">{t.providers_no_patients}</p>
-      ) : (
-        <PaginatedLinkedPatientsGrid
-          patients={patients}
-          className="mt-3"
-          cardClassName="bg-muted/10"
-        />
-      )}
+      <CollapsibleLinkedPatientsPanel
+        patients={patients}
+        cardClassName="bg-muted/10"
+      />
     </div>
   );
 }
@@ -7557,36 +7592,21 @@ function LinkedPatientsSection({
   detail: ProviderDetail;
 }) {
   const { t } = useLang();
-  const l = (key: string) => t.uiText[key] ?? key;
   return (
     <section className={providerDetailPanelClassName}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-          <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
-            {l("providers_linked_patients")}
-          </h3>
-          <span className="shrink-0 text-xs font-medium text-muted-foreground">
-            {detail.linked_patients.length}
-          </span>
-        </div>
-
-      </div>
-
-      {detail.linked_patients.length === 0 ? (
-        <div className="mt-4">
-          <EmptyPanel
-            title={t.providers_no_patients}
-            text={t.providers_no_patients}
-          />
-        </div>
-      ) : (
-        <PaginatedLinkedPatientsGrid
-          patients={detail.linked_patients}
-          className="mt-4"
-          cardClassName="border-border bg-card"
-        />
-      )}
+      <CollapsibleLinkedPatientsPanel
+        patients={detail.linked_patients}
+        showMarker
+        cardClassName="border-border bg-card"
+        emptyContent={(
+          <div className="mt-4">
+            <EmptyPanel
+              title={t.providers_no_patients}
+              text={t.providers_no_patients}
+            />
+          </div>
+        )}
+      />
     </section>
   );
 }
