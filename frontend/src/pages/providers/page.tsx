@@ -155,6 +155,7 @@ import type {
   DoctorRelationship,
   DoctorSummary,
   InsuranceProviderItem,
+  LinkedPatient,
   ProviderContactFormState,
   ProviderDetail,
   ProviderFilters,
@@ -4656,6 +4657,9 @@ function ProviderDoctorDetailSheet({
             <Section title={l("providers_contacts")}>
               <ReadOnlyContacts contacts={contacts} fallbackPhone={phone} fallbackEmail={email} />
             </Section>
+            {doctor && isMedicalProvider ? (
+              <DoctorLinkedPatientsSection patients={doctor.linked_patients ?? []} />
+            ) : null}
             {isMedicalProvider ? (
               <Section title={l("providers_license")}>
                 <ReadOnlyLine label={l("providers_license_number")} value={licenseNumber || t.common_not_set} />
@@ -4712,6 +4716,86 @@ function ProviderDoctorDetailSheet({
         </AdminSheetScaffold>
       </SheetContent>
     </Sheet>
+  );
+}
+
+function patientProfileHref(patientId: string) {
+  return `/patients/${encodeURIComponent(patientId)}`;
+}
+
+function PatientProfileLink({
+  patient,
+  children,
+  className,
+}: {
+  patient: Pick<LinkedPatient, "id">;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <a
+      href={patientProfileHref(patient.id)}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={cn(
+        "inline-flex min-w-0 items-center gap-1.5 rounded-md text-left font-semibold text-foreground transition hover:text-[var(--brand)] focus:outline-none focus:ring-2 focus:ring-ring/30",
+        className,
+      )}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <span className="min-w-0 truncate">{children}</span>
+      <ArrowUpRight className="size-3.5 shrink-0" />
+    </a>
+  );
+}
+
+function DoctorLinkedPatientsSection({ patients }: { patients: LinkedPatient[] }) {
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+
+  return (
+    <Section title={l("providers_linked_patients")}>
+      {patients.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t.providers_no_patients}</p>
+      ) : (
+        <div className="space-y-2">
+          {patients.map((patient) => (
+            <div key={patient.id} className="rounded-lg border border-border/70 bg-card px-3 py-2.5">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <PatientProfileLink patient={patient} className="max-w-full text-sm">
+                    {patientLabel(patient)}
+                  </PatientProfileLink>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {l("providers_last_interaction")}: {compactDateTime(patient.last_interaction_at, t.common_not_set)}
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-1.5">
+                  <Badge
+                    variant="outline"
+                    className="rounded-full border-border bg-muted/20 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                  >
+                    {patient.appointment_count} {l("providers_appointments")}
+                  </Badge>
+                  <Badge
+                    variant="outline"
+                    className="rounded-full border-border bg-muted/20 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                  >
+                    {patient.leistung_count} {l("appointments_services")}
+                  </Badge>
+                  <Badge
+                    variant="outline"
+                    className="rounded-full border-border bg-muted/20 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                  >
+                    {patient.concierge_count} {t.appointments_linked_concierge}
+                  </Badge>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
   );
 }
 
@@ -6800,6 +6884,7 @@ function DoctorMetrics({
 }) {
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
+  const linkedPatientCount = doctor.linked_patients?.length ?? doctor.patient_count;
 
   return (
     <div className="grid border-t border-border bg-muted/10 sm:grid-cols-2 lg:grid-cols-[1.1fr_1fr_1fr_1fr_0.5fr_0.5fr]">
@@ -6837,7 +6922,7 @@ function DoctorMetrics({
       </div>
       <div className="border-b border-border px-4 py-3 sm:border-b-0 sm:border-r">
         <p className="text-xs text-muted-foreground">{l("providers_patients")}</p>
-        <p className="mt-1 text-sm font-semibold text-foreground">{doctor.patient_count}</p>
+        <p className="mt-1 text-sm font-semibold text-foreground">{linkedPatientCount}</p>
       </div>
       <div className="px-4 py-3">
         <p className="text-xs text-muted-foreground">{l("providers_slots")}</p>
@@ -7345,7 +7430,9 @@ function LinkedPatientsSection({
             >
               <div className="grid gap-3 p-3.5 lg:grid-cols-[minmax(0,1fr)_270px]">
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-foreground">{patientLabel(patient)}</p>
+                  <PatientProfileLink patient={patient} className="max-w-full text-sm">
+                    {patientLabel(patient)}
+                  </PatientProfileLink>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
                     {l("providers_last_interaction")}: {compactDateTime(patient.last_interaction_at, t.common_not_set)}
                   </p>

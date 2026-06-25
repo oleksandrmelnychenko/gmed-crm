@@ -3,6 +3,7 @@ import { apiFetch } from "@/lib/api";
 import type {
   CreateResponse,
   InsuranceProviderItem,
+  LinkedPatient,
   ProviderDetail,
   ProviderStaffRoleItem,
   ProviderSummary,
@@ -95,6 +96,7 @@ function normalizeProviderDetail(raw: ProviderDetail): ProviderDetail {
       insurance_providers: arrayOrEmpty<ProviderDetail["doctors"][number]["insurance_providers"][number]>(doctor.insurance_providers).map(normalizeInsuranceProviderItem),
       contacts: arrayOrEmpty<ProviderDetail["doctors"][number]["contacts"][number]>(doctor.contacts),
       relationships: arrayOrEmpty<ProviderDetail["doctors"][number]["relationships"][number]>(doctor.relationships),
+      linked_patients: arrayOrEmpty<LinkedPatient>(doctor.linked_patients),
     })),
     services: arrayOrEmpty<ProviderDetail["services"][number]>(raw.services).map((service) => ({
       ...service,

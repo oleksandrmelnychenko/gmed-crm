@@ -221,6 +221,7 @@ export type DoctorSummary = {
   gender: ProviderPersonGender;
   opening_hours: string | null;
   relationships: DoctorRelationship[];
+  linked_patients?: LinkedPatient[];
   license_number: string | null;
   licensing_country: string | null;
   licensing_valid_until: string | null;

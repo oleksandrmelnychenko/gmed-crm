@@ -7275,12 +7275,14 @@ async fn load_doctors_json(
     let mut doctors = Vec::with_capacity(rows.len());
     for row in rows {
         let doctor_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
-        let (specializations, insurance_providers) = tokio::join!(
+        let (specializations, insurance_providers, linked_patients) = tokio::join!(
             load_doctor_specializations_json(state, doctor_id),
             load_doctor_insurances_json(state, doctor_id),
+            load_provider_patients_json(state, provider_id, Some(doctor_id)),
         );
         let specializations = specializations?;
         let insurance_providers = insurance_providers?;
+        let linked_patients = linked_patients?;
         let phone = row
             .try_get::<Option<String>, _>("phone")
             .unwrap_or_default();
@@ -7320,6 +7322,7 @@ async fn load_doctors_json(
             "phone": phone,
             "email": email,
             "contacts": contacts,
+            "linked_patients": linked_patients,
             "license_number": row.try_get::<Option<String>, _>("license_number").unwrap_or_default(),
             "licensing_country": row.try_get::<Option<String>, _>("licensing_country").unwrap_or_default(),
             "licensing_valid_until": row.try_get::<Option<chrono::NaiveDate>, _>("licensing_valid_until").unwrap_or_default().map(|v| v.to_string()),
