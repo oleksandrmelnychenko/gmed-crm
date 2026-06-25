@@ -17,6 +17,8 @@ import {
   Building2,
   CalendarClock,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   LoaderCircle,
   Mail,
@@ -208,6 +210,7 @@ const providerDetailPanelClassName = cn(
 );
 const providerPrimaryActionButtonClassName =
   "h-8 rounded-lg border-[var(--brand)] bg-[var(--brand)] px-3 text-white shadow-sm hover:bg-[var(--brand)]/90 hover:text-white focus-visible:ring-[var(--brand)]/30";
+const LINKED_PATIENTS_PAGE_SIZE = 10;
 const contactAddButtonClassName =
   providerPrimaryActionButtonClassName;
 const textareaClassName = shellTextareaClass;
@@ -4772,6 +4775,114 @@ function PatientProfileLink({
   );
 }
 
+function LinkedPatientCard({
+  patient,
+  className,
+}: {
+  patient: LinkedPatient;
+  className?: string;
+}) {
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+  const address = linkedPatientAddress(patient);
+
+  return (
+    <div className={cn("rounded-lg border border-border/70 bg-card px-3 py-2.5", className)}>
+      <PatientProfileLink patient={patient} className="max-w-full text-sm">
+        {patientLabel(patient)}
+      </PatientProfileLink>
+      {address ? (
+        <p className="mt-1 text-xs leading-5 text-foreground">
+          {address}
+        </p>
+      ) : null}
+      <p className="mt-1 text-xs text-muted-foreground">
+        {l("providers_last_interaction")}: {compactDateTime(patient.last_interaction_at, t.common_not_set)}
+      </p>
+    </div>
+  );
+}
+
+function PaginatedLinkedPatientsGrid({
+  patients,
+  className,
+  cardClassName,
+  pageSize = LINKED_PATIENTS_PAGE_SIZE,
+}: {
+  patients: LinkedPatient[];
+  className?: string;
+  cardClassName?: string;
+  pageSize?: number;
+}) {
+  const { t } = useLang();
+  const [pageIndex, setPageIndex] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(patients.length / pageSize));
+  const safePageIndex = Math.min(pageIndex, totalPages - 1);
+  const pageStart = safePageIndex * pageSize;
+  const pagePatients = patients.slice(pageStart, pageStart + pageSize);
+  const pageEnd = pageStart + pagePatients.length;
+
+  useEffect(() => {
+    setPageIndex((current) => Math.min(current, totalPages - 1));
+  }, [totalPages]);
+
+  return (
+    <div className={className}>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {pagePatients.map((patient) => (
+          <LinkedPatientCard
+            key={patient.id}
+            patient={patient}
+            className={cardClassName}
+          />
+        ))}
+      </div>
+      {totalPages > 1 ? (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs font-medium text-muted-foreground">
+            {pageStart + 1}-{pageEnd} / {patients.length}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              className="h-8 w-8 rounded-lg bg-card"
+              disabled={safePageIndex === 0}
+              aria-label={t.pagination_previous}
+              title={t.pagination_previous}
+              onClick={(event) => {
+                event.stopPropagation();
+                setPageIndex((current) => Math.max(0, current - 1));
+              }}
+            >
+              <ChevronLeft className="size-3.5" />
+            </Button>
+            <span className="min-w-14 text-center text-xs font-semibold text-foreground">
+              {safePageIndex + 1} / {totalPages}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              className="h-8 w-8 rounded-lg bg-card"
+              disabled={safePageIndex >= totalPages - 1}
+              aria-label={t.pagination_next}
+              title={t.pagination_next}
+              onClick={(event) => {
+                event.stopPropagation();
+                setPageIndex((current) => Math.min(totalPages - 1, current + 1));
+              }}
+            >
+              <ChevronRight className="size-3.5" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function DoctorLinkedPatientsSection({ patients }: { patients: LinkedPatient[] }) {
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
@@ -4781,27 +4892,7 @@ function DoctorLinkedPatientsSection({ patients }: { patients: LinkedPatient[] }
       {patients.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t.providers_no_patients}</p>
       ) : (
-        <div className="space-y-2">
-          {patients.map((patient) => (
-            <div key={patient.id} className="rounded-lg border border-border/70 bg-card px-3 py-2.5">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <PatientProfileLink patient={patient} className="max-w-full text-sm">
-                    {patientLabel(patient)}
-                  </PatientProfileLink>
-                  {linkedPatientAddress(patient) ? (
-                    <p className="mt-1 text-xs leading-5 text-foreground">
-                      {linkedPatientAddress(patient)}
-                    </p>
-                  ) : null}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {l("providers_last_interaction")}: {compactDateTime(patient.last_interaction_at, t.common_not_set)}
-                  </p>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+        <PaginatedLinkedPatientsGrid patients={patients} />
       )}
     </Section>
   );
@@ -6077,12 +6168,12 @@ function HeroInfoTableRow({
   children: ReactNode;
 }) {
   return (
-    <div className="grid min-w-0 content-start gap-5 px-3 py-2.5 sm:grid-cols-[7.25rem_minmax(0,1fr)]">
-      <div className="flex min-w-0 items-start gap-2 text-xs font-medium text-foreground">
+    <div className="grid min-w-0 content-start gap-4 px-3 py-2.5 sm:grid-cols-[8.75rem_minmax(0,1fr)]">
+      <div className="flex min-w-0 items-start gap-2 text-xs font-medium leading-5 text-foreground">
         <Icon className="mt-0.5 size-3.5 shrink-0 text-foreground/75" />
-        <span className="min-w-0 truncate">{label}</span>
+        <span className="min-w-0 whitespace-nowrap">{label}</span>
       </div>
-      <div className="min-w-0 break-words text-sm font-semibold leading-5 text-foreground">
+      <div className="min-w-0 break-words pt-0.5 text-sm font-semibold leading-5 text-foreground">
         {children}
       </div>
     </div>
@@ -6990,23 +7081,11 @@ function DoctorCardLinkedPatients({ patients }: { patients: LinkedPatient[] }) {
       {patients.length === 0 ? (
         <p className="mt-2 text-sm text-muted-foreground">{t.providers_no_patients}</p>
       ) : (
-        <div className="mt-3 grid gap-2 lg:grid-cols-2">
-          {patients.map((patient) => (
-            <div key={patient.id} className="rounded-lg border border-border/70 bg-muted/10 px-3 py-2.5">
-              <PatientProfileLink patient={patient} className="max-w-full text-sm">
-                {patientLabel(patient)}
-              </PatientProfileLink>
-              {linkedPatientAddress(patient) ? (
-                <p className="mt-1 text-xs leading-5 text-foreground">
-                  {linkedPatientAddress(patient)}
-                </p>
-              ) : null}
-              <p className="mt-1 text-xs text-muted-foreground">
-                {l("providers_last_interaction")}: {compactDateTime(patient.last_interaction_at, t.common_not_set)}
-              </p>
-            </div>
-          ))}
-        </div>
+        <PaginatedLinkedPatientsGrid
+          patients={patients}
+          className="mt-3"
+          cardClassName="bg-muted/10"
+        />
       )}
     </div>
   );
@@ -7502,30 +7581,12 @@ function LinkedPatientsSection({
           />
         </div>
       ) : (
-        <div className="mt-4 space-y-3">
-          {detail.linked_patients.map((patient) => (
-            <div
-              key={patient.id}
-              className="overflow-hidden rounded-[1.4rem] border border-border bg-card"
-            >
-              <div className="p-3.5">
-                <div className="min-w-0">
-                  <PatientProfileLink patient={patient} className="max-w-full text-sm">
-                    {patientLabel(patient)}
-                  </PatientProfileLink>
-                  {linkedPatientAddress(patient) ? (
-                    <p className="mt-1 text-xs leading-5 text-foreground">
-                      {linkedPatientAddress(patient)}
-                    </p>
-                  ) : null}
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    {l("providers_last_interaction")}: {compactDateTime(patient.last_interaction_at, t.common_not_set)}
-                  </p>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>      )}
+        <PaginatedLinkedPatientsGrid
+          patients={detail.linked_patients}
+          className="mt-4"
+          cardClassName="border-border bg-card"
+        />
+      )}
     </section>
   );
 }
