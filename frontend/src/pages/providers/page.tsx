@@ -4723,6 +4723,11 @@ function patientProfileHref(patientId: string) {
   return `/patients/${encodeURIComponent(patientId)}`;
 }
 
+function linkedPatientAddress(patient: Pick<LinkedPatient, "address_street" | "address_city" | "address_zip" | "address_country">) {
+  const cityLine = [patient.address_zip, patient.address_city].filter(Boolean).join(" ");
+  return [patient.address_street, cityLine, patient.address_country].filter(Boolean).join(", ");
+}
+
 function PatientProfileLink({
   patient,
   children,
@@ -4766,6 +4771,11 @@ function DoctorLinkedPatientsSection({ patients }: { patients: LinkedPatient[] }
                   <PatientProfileLink patient={patient} className="max-w-full text-sm">
                     {patientLabel(patient)}
                   </PatientProfileLink>
+                  {linkedPatientAddress(patient) ? (
+                    <p className="mt-1 text-xs leading-5 text-foreground">
+                      {linkedPatientAddress(patient)}
+                    </p>
+                  ) : null}
                   <p className="mt-1 text-xs text-muted-foreground">
                     {l("providers_last_interaction")}: {compactDateTime(patient.last_interaction_at, t.common_not_set)}
                   </p>
@@ -6069,7 +6079,7 @@ function HeroInfoTableRow({
   children: ReactNode;
 }) {
   return (
-    <div className="grid gap-2 border-b border-border/60 px-3 py-2.5 last:border-b-0 sm:grid-cols-[11rem_minmax(0,1fr)]">
+    <div className="grid min-w-0 content-start gap-1.5 border border-border/70 px-3 py-2.5">
       <div className="flex min-w-0 items-start gap-2 text-xs font-medium text-foreground">
         <Icon className="mt-0.5 size-3.5 shrink-0 text-foreground/75" />
         <span className="min-w-0 truncate">{label}</span>
@@ -6167,6 +6177,7 @@ function ProviderSheetHero({
   const insuranceTypeLine = insuranceTypeText(detail.insurance_providers, t);
   const specializationLine = specializationText(detail.specializations, detail.fachbereich, lang);
   const taxonomyLine = taxonomyLeafLabel(detail.taxonomy_node, detail.taxonomy_path, lang);
+  const internalRatingLabel = formatProviderRating(detail.internal_rating, t.common_not_set);
 
   return (
     <section className="relative overflow-hidden rounded-xl border border-border bg-card px-7 py-4">
@@ -6233,7 +6244,7 @@ function ProviderSheetHero({
               </Badge>
             ) : null}
           </div>
-          <div className="mt-5 overflow-hidden rounded-lg border border-border/70 bg-card">
+          <div className="mt-5 grid overflow-hidden rounded-lg bg-card md:grid-cols-2">
             <HeroInfoTableRow icon={MapPin} label={l("patients_address")}>
               {addressLine || providerMeta(detail) || t.common_not_set}
             </HeroInfoTableRow>
@@ -6248,7 +6259,9 @@ function ProviderSheetHero({
             </HeroInfoTableRow>
             <HeroInfoTableRow icon={Star} label={t.providers_internal_rating}>
               <span className="break-words">
-                {formatProviderRating(detail.internal_rating, t.common_not_set)}
+                <span className={detail.internal_rating != null ? "text-orange-600" : undefined}>
+                  {internalRatingLabel}
+                </span>
                 {detail.internal_rating_note ? (
                   <span className="font-medium"> · {detail.internal_rating_note}</span>
                 ) : null}
@@ -6961,6 +6974,11 @@ function DoctorCardLinkedPatients({ patients }: { patients: LinkedPatient[] }) {
               <PatientProfileLink patient={patient} className="max-w-full text-sm">
                 {patientLabel(patient)}
               </PatientProfileLink>
+              {linkedPatientAddress(patient) ? (
+                <p className="mt-1 text-xs leading-5 text-foreground">
+                  {linkedPatientAddress(patient)}
+                </p>
+              ) : null}
               <p className="mt-1 text-xs text-muted-foreground">
                 {l("providers_last_interaction")}: {compactDateTime(patient.last_interaction_at, t.common_not_set)}
               </p>
@@ -7493,6 +7511,11 @@ function LinkedPatientsSection({
                   <PatientProfileLink patient={patient} className="max-w-full text-sm">
                     {patientLabel(patient)}
                   </PatientProfileLink>
+                  {linkedPatientAddress(patient) ? (
+                    <p className="mt-1 text-xs leading-5 text-foreground">
+                      {linkedPatientAddress(patient)}
+                    </p>
+                  ) : null}
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
                     {l("providers_last_interaction")}: {compactDateTime(patient.last_interaction_at, t.common_not_set)}
                   </p>

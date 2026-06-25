@@ -170,6 +170,10 @@ export type LinkedPatient = {
   patient_id: string;
   first_name: string;
   last_name: string;
+  address_street?: string | null;
+  address_city?: string | null;
+  address_zip?: string | null;
+  address_country?: string | null;
   appointment_count: number;
   leistung_count: number;
   concierge_count: number;
