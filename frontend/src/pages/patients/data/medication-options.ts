@@ -2,9 +2,48 @@
 // from Olek's reference ("аркуш 5"). Edit/extend here as the master list changes.
 //
 // Einnahmeform stores the Applikationsform name; Darreichungsform stores the
-// official short code (AMP, FTBL, …) and shows "CODE — Name".
+// official short code (AMP, FTBL, …) and shows the German name.
 
 export type MedicationOption = { value: string; label: string };
+
+function optionLabel(options: readonly MedicationOption[], value: string | null | undefined) {
+  const normalized = value?.trim();
+  if (!normalized) return "";
+  return options.find((option) => option.value === normalized)?.label ?? normalized;
+}
+
+const DARREICHUNGSFORM_PRIORITY_VALUES = [
+  "AMP",
+  "ANSLB",
+  "AUGG",
+  "AUGS",
+  "AUGT",
+  "BTL",
+  "CREM",
+  "FTBL",
+  "FTBM",
+  "GEL",
+  "GELE",
+  "IFIJ",
+  "IFLG",
+  "IJLG",
+  "IJSU",
+] as const;
+
+function prioritizeOptions(
+  options: readonly MedicationOption[],
+  priorityValues: readonly string[],
+) {
+  const byValue = new Map(options.map((option) => [option.value, option]));
+  const prioritySet = new Set(priorityValues);
+  return [
+    ...priorityValues.flatMap((value) => {
+      const option = byValue.get(value);
+      return option ? [option] : [];
+    }),
+    ...options.filter((option) => !prioritySet.has(option.value)),
+  ];
+}
 
 /** Route of administration (Einnahmeform / Applikationsform) — REQUIRED dropdown. */
 export const EINNAHMEFORM_OPTIONS: readonly MedicationOption[] = [
@@ -46,79 +85,88 @@ export const EINNAHMEFORM_OPTIONS: readonly MedicationOption[] = [
 ];
 
 /** Dosage form (Darreichungsform) — REQUIRED dropdown; value = official short code. */
-export const DARREICHUNGSFORM_OPTIONS: readonly MedicationOption[] = [
-  { value: "AMP", label: "AMP — Ampullen" },
-  { value: "AMPD", label: "AMPD — Depotampullen" },
-  { value: "AMPT", label: "AMPT — Trinkampullen" },
-  { value: "ANSLB", label: "ANSLB — Augen- und Nasensalbe" },
-  { value: "AUGG", label: "AUGG — Augengel" },
-  { value: "AUGS", label: "AUGS — Augensalbe" },
-  { value: "AUGT", label: "AUGT — Augentropfen" },
-  { value: "BTL", label: "BTL — Beutel" },
-  { value: "CREM", label: "CREM — Creme" },
-  { value: "DA", label: "DA — Druckgasinhalation" },
-  { value: "DRAG", label: "DRAG — Dragees" },
-  { value: "DSTF", label: "DSTF — Durchstechflasche" },
-  { value: "EDAT", label: "EDAT — Augentropfen (Lösung im Einzeldosisbehältnis)" },
-  { value: "EDGL", label: "EDGL — Augengel (Einzeldosisbehälter)" },
-  { value: "EMUL", label: "EMUL — Emulsion zur Anwendung auf der Haut" },
-  { value: "EMULE", label: "EMULE — Emulsion zum Einnehmen, Emulsion zur gastrointestinalen Anwendung" },
-  { value: "EXPT", label: "EXPT — Expidettäfelchen" },
-  { value: "FTBL", label: "FTBL — Filmtabletten" },
-  { value: "FTBM", label: "FTBM — magensaftresistente Filmtabletten" },
-  { value: "GEL", label: "GEL — Gel" },
-  { value: "GELE", label: "GELE — Gel zum Einnehmen" },
-  { value: "GRAM", label: "GRAM — magensaftresistentes Granulat, magensaftresistentes Granulat zur Herstellung einer Suspension zum Einnehmen" },
-  { value: "GRAN", label: "GRAN — befilmtes Granulat, Granulat, Granulat zur Herstellung einer Lösung / Suspension zum Einnehmen, Granulat zur Herstellung eines Sirups" },
-  { value: "IFIJ", label: "IFIJ — Injektions-/Infusionslösung, Konzentrat und Lösungsmittel zur Herstellung einer Injektions-/Infusionslösung, Konzentrat zur Herstellung einer Injektions-/Infusionslösung" },
-  { value: "IFLG", label: "IFLG — Infusionslösung, Konzentrat zur Herstellung einer Infusionslösung / Infusionsdispersion" },
-  { value: "IJLG", label: "IJLG — Injektionslösung" },
-  { value: "IJSU", label: "IJSU — Injektionssuspension" },
-  { value: "INHK", label: "INHK — Hartkapseln mit Pulver zur Inhalation" },
-  { value: "INHL", label: "INHL — Lösung zur Inhalation" },
-  { value: "INHP", label: "INHP — Pulver zur Inhalation" },
-  { value: "KAPM", label: "KAPM — magensaftresistente Hartkapseln / Kapseln" },
-  { value: "KAPR", label: "KAPR — Retardkapseln, retardierte Hart-/Weichkapseln, Hartkapseln mit veränderter Wirkstofffreisetzung" },
-  { value: "KAPS", label: "KAPS — Kapseln, Hartkapseln, Weichkapseln" },
-  { value: "KGUM", label: "KGUM — wirkstoffhaltige Kaugummis" },
-  { value: "KOMB", label: "KOMB — Kombipackung" },
-  { value: "KTAB", label: "KTAB — Kautabletten" },
-  { value: "LOTI", label: "LOTI — Emulsion zur Anwendung auf der Haut" },
-  { value: "LSG", label: "LSG — Lösung" },
-  { value: "NCREM", label: "NCREM — Nasencreme" },
-  { value: "NGEL", label: "NGEL — Nasengel" },
-  { value: "NSPR", label: "NSPR — Nasenspray" },
-  { value: "PAST", label: "PAST — Paste zur Anwendung auf der Haut" },
-  { value: "PFLA", label: "PFLA — transdermale Pflaster, wirkstoffhaltige Pflaster" },
-  { value: "PLVD", label: "PLVD — einzeldosiertes Pulver zur Inhalation" },
-  { value: "PSTI", label: "PSTI — Pastillen, Lutschpastillen" },
-  { value: "PULV", label: "PULV — Pulver / Pulver für ein Konzentrat / Pulver und Lösungsmittel zur Herstellung einer Injektionslösung / Pulver und Lösungsmittel zur Herstellung einer Injektions- / Infusionslösung" },
-  { value: "PULVE", label: "PULVE — Pulver zum Einnehmen, Pulver zur Herstellung einer Lösung / Suspension zum Einnehmen" },
-  { value: "RGRAM", label: "RGRAM — magensaftresistentes Retardgranulat" },
-  { value: "RGRAN", label: "RGRAN — Retardgranulat" },
-  { value: "RSCHA", label: "RSCHA — Rektalschaum" },
-  { value: "RSUSP", label: "RSUSP — Rektalsuspension" },
-  { value: "SALB", label: "SALB — Salbe, Salbe zur Anwendung auf der Haut/Nasensalbe" },
-  { value: "SCHAU", label: "SCHAU — Schaum zur Anwendung auf der Haut" },
-  { value: "SIRP", label: "SIRP — Sirup" },
-  { value: "SPRY", label: "SPRY — Spray zur Anwendung in der Mundhöhle" },
-  { value: "STABL", label: "STABL — Schmelztabletten" },
-  { value: "STIF", label: "STIF — Stifte zur Anwendung auf der Haut" },
-  { value: "SUPP", label: "SUPP — Zäpfchen" },
-  { value: "SUSP", label: "SUSP — Suspension zum Einnehmen" },
-  { value: "SUTA", label: "SUTA — Sublingualtabletten" },
-  { value: "TABB", label: "TABB — Brausetabletten" },
-  { value: "TABL", label: "TABL — Tabletten" },
-  { value: "TABMD", label: "TABMD — Tabletten mit veränderter Wirkstofffreisetzung" },
-  { value: "TABR", label: "TABR — Retardtabletten" },
-  { value: "TABRM", label: "TABRM — magensaftresistente Retardtabletten" },
-  { value: "TBLL", label: "TBLL — Lutschtabletten" },
-  { value: "TBLM", label: "TBLM — magensaftresistente Tabletten" },
-  { value: "TROP", label: "TROP — Tropfen zum Einnehmen" },
-  { value: "TRSB", label: "TRSB — Trockensubstanz" },
-  { value: "TTAB", label: "TTAB — Tabletten zur Herstellung einer Lösung / Suspension zum Einnehmen" },
-  { value: "UTBL", label: "UTBL — Überzogene Tabletten" },
-  { value: "VACR", label: "VACR — Vaginalcreme" },
-  { value: "VAGT", label: "VAGT — Vaginaltabletten" },
-  { value: "VASP", label: "VASP — Vaginalzäpfchen" },
+const DARREICHUNGSFORM_REFERENCE_OPTIONS: readonly MedicationOption[] = [
+  { value: "AMP", label: "Ampullen" },
+  { value: "AMPD", label: "Depotampullen" },
+  { value: "AMPT", label: "Trinkampullen" },
+  { value: "ANSLB", label: "Augen- und Nasensalbe" },
+  { value: "AUGG", label: "Augengel" },
+  { value: "AUGS", label: "Augensalbe" },
+  { value: "AUGT", label: "Augentropfen" },
+  { value: "BTL", label: "Beutel" },
+  { value: "CREM", label: "Creme" },
+  { value: "DA", label: "Druckgasinhalation" },
+  { value: "DRAG", label: "Dragees" },
+  { value: "DSTF", label: "Durchstechflasche" },
+  { value: "EDAT", label: "Augentropfen (Lösung im Einzeldosisbehältnis)" },
+  { value: "EDGL", label: "Augengel (Einzeldosisbehälter)" },
+  { value: "EMUL", label: "Emulsion zur Anwendung auf der Haut" },
+  { value: "EMULE", label: "Emulsion zum Einnehmen, Emulsion zur gastrointestinalen Anwendung" },
+  { value: "EXPT", label: "Expidettäfelchen" },
+  { value: "FTBL", label: "Filmtabletten" },
+  { value: "FTBM", label: "magensaftresistente Filmtabletten" },
+  { value: "GEL", label: "Gel" },
+  { value: "GELE", label: "Gel zum Einnehmen" },
+  { value: "GRAM", label: "magensaftresistentes Granulat, magensaftresistentes Granulat zur Herstellung einer Suspension zum Einnehmen" },
+  { value: "GRAN", label: "befilmtes Granulat, Granulat, Granulat zur Herstellung einer Lösung / Suspension zum Einnehmen, Granulat zur Herstellung eines Sirups" },
+  { value: "IFIJ", label: "Injektions-/Infusionslösung, Konzentrat und Lösungsmittel zur Herstellung einer Injektions-/Infusionslösung, Konzentrat zur Herstellung einer Injektions-/Infusionslösung" },
+  { value: "IFLG", label: "Infusionslösung, Konzentrat zur Herstellung einer Infusionslösung / Infusionsdispersion" },
+  { value: "IJLG", label: "Injektionslösung" },
+  { value: "IJSU", label: "Injektionssuspension" },
+  { value: "INHK", label: "Hartkapseln mit Pulver zur Inhalation" },
+  { value: "INHL", label: "Lösung zur Inhalation" },
+  { value: "INHP", label: "Pulver zur Inhalation" },
+  { value: "KAPM", label: "magensaftresistente Hartkapseln / Kapseln" },
+  { value: "KAPR", label: "Retardkapseln, retardierte Hart-/Weichkapseln, Hartkapseln mit veränderter Wirkstofffreisetzung" },
+  { value: "KAPS", label: "Kapseln, Hartkapseln, Weichkapseln" },
+  { value: "KGUM", label: "wirkstoffhaltige Kaugummis" },
+  { value: "KOMB", label: "Kombipackung" },
+  { value: "KTAB", label: "Kautabletten" },
+  { value: "LOTI", label: "Emulsion zur Anwendung auf der Haut" },
+  { value: "LSG", label: "Lösung" },
+  { value: "NCREM", label: "Nasencreme" },
+  { value: "NGEL", label: "Nasengel" },
+  { value: "NSPR", label: "Nasenspray" },
+  { value: "PAST", label: "Paste zur Anwendung auf der Haut" },
+  { value: "PFLA", label: "transdermale Pflaster, wirkstoffhaltige Pflaster" },
+  { value: "PLVD", label: "einzeldosiertes Pulver zur Inhalation" },
+  { value: "PSTI", label: "Pastillen, Lutschpastillen" },
+  { value: "PULV", label: "Pulver / Pulver für ein Konzentrat / Pulver und Lösungsmittel zur Herstellung einer Injektionslösung / Pulver und Lösungsmittel zur Herstellung einer Injektions- / Infusionslösung" },
+  { value: "PULVE", label: "Pulver zum Einnehmen, Pulver zur Herstellung einer Lösung / Suspension zum Einnehmen" },
+  { value: "RGRAM", label: "magensaftresistentes Retardgranulat" },
+  { value: "RGRAN", label: "Retardgranulat" },
+  { value: "RSCHA", label: "Rektalschaum" },
+  { value: "RSUSP", label: "Rektalsuspension" },
+  { value: "SALB", label: "Salbe, Salbe zur Anwendung auf der Haut/Nasensalbe" },
+  { value: "SCHAU", label: "Schaum zur Anwendung auf der Haut" },
+  { value: "SIRP", label: "Sirup" },
+  { value: "SPRY", label: "Spray zur Anwendung in der Mundhöhle" },
+  { value: "STABL", label: "Schmelztabletten" },
+  { value: "STIF", label: "Stifte zur Anwendung auf der Haut" },
+  { value: "SUPP", label: "Zäpfchen" },
+  { value: "SUSP", label: "Suspension zum Einnehmen" },
+  { value: "SUTA", label: "Sublingualtabletten" },
+  { value: "TABB", label: "Brausetabletten" },
+  { value: "TABL", label: "Tabletten" },
+  { value: "TABMD", label: "Tabletten mit veränderter Wirkstofffreisetzung" },
+  { value: "TABR", label: "Retardtabletten" },
+  { value: "TABRM", label: "magensaftresistente Retardtabletten" },
+  { value: "TBLL", label: "Lutschtabletten" },
+  { value: "TBLM", label: "magensaftresistente Tabletten" },
+  { value: "TROP", label: "Tropfen zum Einnehmen" },
+  { value: "TRSB", label: "Trockensubstanz" },
+  { value: "TTAB", label: "Tabletten zur Herstellung einer Lösung / Suspension zum Einnehmen" },
+  { value: "UTBL", label: "Überzogene Tabletten" },
+  { value: "VACR", label: "Vaginalcreme" },
+  { value: "VAGT", label: "Vaginaltabletten" },
+  { value: "VASP", label: "Vaginalzäpfchen" },
 ];
+
+export const DARREICHUNGSFORM_OPTIONS: readonly MedicationOption[] = prioritizeOptions(
+  DARREICHUNGSFORM_REFERENCE_OPTIONS,
+  DARREICHUNGSFORM_PRIORITY_VALUES,
+);
+
+export function darreichungsformLabel(value: string | null | undefined) {
+  return optionLabel(DARREICHUNGSFORM_OPTIONS, value);
+}

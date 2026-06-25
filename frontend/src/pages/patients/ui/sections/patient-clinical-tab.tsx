@@ -24,7 +24,11 @@ import type { DoctorOption } from "@/pages/appointments/model/types";
 import { fetchProviders } from "@/pages/providers/data/provider-api";
 import type { ProviderSummary } from "@/pages/providers/model/types";
 
-import { DARREICHUNGSFORM_OPTIONS, EINNAHMEFORM_OPTIONS } from "../../data/medication-options";
+import {
+  DARREICHUNGSFORM_OPTIONS,
+  EINNAHMEFORM_OPTIONS,
+  darreichungsformLabel,
+} from "../../data/medication-options";
 
 import {
   blankNarrative,
@@ -291,7 +295,9 @@ export function PatientMedicationTable({
                       ) : null}
                     </td>
                     <td className={cn(bodyCell, "whitespace-pre-line font-mono")}>{item.staerke || ""}</td>
-                    <td className={cn(bodyCell, "whitespace-pre-line")}>{item.form || ""}</td>
+                    <td className={cn(bodyCell, "whitespace-pre-line")}>
+                      {darreichungsformLabel(item.form)}
+                    </td>
                     <td className={bodyDoseCell}>{doseCell(item.dose_morgens)}</td>
                     <td className={bodyDoseCell}>{doseCell(item.dose_mittags)}</td>
                     <td className={bodyDoseCell}>{doseCell(item.dose_abends)}</td>
