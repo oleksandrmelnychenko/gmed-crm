@@ -289,6 +289,29 @@ describe("DiagnosisTreeSection", () => {
     expect(html).not.toContain("bg-muted/10");
     expect(html).not.toContain("bg-muted/20");
   });
+
+  it("renders Z.n. certainty as plain text instead of a pill", () => {
+    const html = renderToStaticMarkup(
+      <DiagnosisTreeSection
+        allDoctors={[]}
+        canManage
+        items={[
+          diagnosis({
+            certainty: "zustand_nach",
+            id: "diagnosis-zn-1",
+            label: "Appendektomie",
+          }),
+        ]}
+        lang="de"
+        onSave={async () => undefined}
+        providers={[]}
+      />,
+    );
+
+    expect(html).toContain(">Z.n.<");
+    expect(html).toContain("shrink-0 text-sm font-medium text-foreground");
+    expect(html).not.toContain("border-indigo-300 bg-indigo-50 text-indigo-800");
+  });
 });
 
 describe("PatientRecommendationsSection", () => {

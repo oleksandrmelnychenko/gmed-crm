@@ -153,8 +153,6 @@ function certaintyPillClass(certainty: ClinicalDiagnosis["certainty"]): string {
       return "border-amber-300 bg-amber-50 text-amber-800";
     case "bestaetigt":
       return "border-teal-300 bg-teal-50 text-teal-800";
-    case "zustand_nach":
-      return "border-indigo-300 bg-indigo-50 text-indigo-800";
     default:
       return "border-border bg-transparent text-muted-foreground";
   }
@@ -415,7 +413,9 @@ function DiagnosisRow({
 }) {
   const children = childrenByParent.get(node.cid) ?? [];
   const chron = chronifizierungLabel(node.chronifizierung, tx);
-  const certainty = node.kind === "prozedur" ? null : certaintyLabel(node.certainty, tx);
+  const confirmed = node.kind === "prozedur" || node.certainty !== "bestaetigt"
+    ? null
+    : certaintyLabel(node.certainty, tx);
   const attribution = attributionLine(node, lang);
   const childKinds = allowedChildKinds(node.kind);
   const code = node.kind === "prozedur" ? node.ops_code : node.icd_code;
@@ -435,21 +435,12 @@ function DiagnosisRow({
         )}
       >
         <div className="min-w-0 space-y-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span
-              className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium", kindPillClass(node.kind))}
-            >
-              {kindLabel(node.kind, tx)}
-            </span>
-            {certainty ? (
-              <span
-                className={cn(
-                  "rounded-full border px-2 py-0.5 text-[10px] font-medium",
-                  certaintyPillClass(node.certainty),
-                )}
-              >
-                {certainty}
-              </span>
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+            {node.certainty === "verdacht" ? (
+              <span className="shrink-0 text-sm font-medium text-amber-700">V.a.</span>
+            ) : null}
+            {node.certainty === "zustand_nach" ? (
+              <span className="shrink-0 text-sm font-medium text-foreground">Z.n.</span>
             ) : null}
             <span className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
               {node.label}
@@ -457,6 +448,23 @@ function DiagnosisRow({
             {code ? (
               <span className="min-w-0 max-w-full break-words font-mono text-[11px] text-muted-foreground">
                 ({code})
+              </span>
+            ) : null}
+          </div>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <span
+              className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium", kindPillClass(node.kind))}
+            >
+              {kindLabel(node.kind, tx)}
+            </span>
+            {confirmed ? (
+              <span
+                className={cn(
+                  "rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                  certaintyPillClass(node.certainty),
+                )}
+              >
+                {confirmed}
               </span>
             ) : null}
             {chron ? (
@@ -544,6 +552,7 @@ function DiagnosisRow({
 
 function DiagnosisForm({
   draft,
+  nodes,
   providers,
   allDoctors,
   lang,
@@ -552,6 +561,7 @@ function DiagnosisForm({
   set,
 }: {
   draft: WorkingNode;
+  nodes: WorkingNode[];
   providers: ProviderSummary[];
   allDoctors: AllDoctorOption[];
   lang: string;
@@ -560,6 +570,23 @@ function DiagnosisForm({
   set: (patch: Partial<WorkingNode>) => void;
 }) {
   const isDiagnosis = draft.kind === "main" || draft.kind === "secondary";
+  const mainParentOptions = nodes.filter(
+    (node) => node.kind === "main" && node.cid !== draft.cid,
+  );
+  const selectedMainParentCid =
+    draft.parent_cid && mainParentOptions.some((node) => node.cid === draft.parent_cid)
+      ? draft.parent_cid
+      : "";
+
+  function setDiagnosisKind(kind: Extract<DiagnosisKind, "main" | "secondary">) {
+    if (kind === "main") {
+      set({ kind, parent_cid: null, parent_id: null });
+      return;
+    }
+    const nextParentCid =
+      selectedMainParentCid || (mainParentOptions.length === 1 ? mainParentOptions[0].cid : null);
+    set({ kind, parent_cid: nextParentCid, parent_id: null });
+  }
 
   return (
     <div className="space-y-3">
@@ -567,6 +594,67 @@ function DiagnosisForm({
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
           {tx("Запись будет вложена под", "Eintrag wird untergeordnet zu")}:{" "}
           <span className="font-medium">{parentLabel}</span>
+        </div>
+      ) : null}
+
+      {isDiagnosis ? (
+        <div className="space-y-2 rounded-lg border border-border/50 p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {tx("Тип диагноза", "Diagnosetyp")}
+          </p>
+          <div role="radiogroup" className="grid gap-2 sm:grid-cols-2">
+            <label
+              className={cn(
+                "flex items-center gap-2 rounded-md border px-3 py-2 text-sm",
+                draft.kind === "main"
+                  ? "border-sky-300 bg-sky-50/70 text-sky-800"
+                  : "border-border/70 text-muted-foreground",
+              )}
+            >
+              <input
+                type="radio"
+                name={`diagnosis-kind-${draft.cid}`}
+                className="size-4"
+                checked={draft.kind === "main"}
+                onChange={() => setDiagnosisKind("main")}
+              />
+              {tx("Основной", "Hauptdiagnose")}
+            </label>
+            <label
+              className={cn(
+                "flex items-center gap-2 rounded-md border px-3 py-2 text-sm",
+                draft.kind === "secondary"
+                  ? "border-violet-300 bg-violet-50/70 text-violet-800"
+                  : "border-border/70 text-muted-foreground",
+              )}
+            >
+              <input
+                type="radio"
+                name={`diagnosis-kind-${draft.cid}`}
+                className="size-4"
+                checked={draft.kind === "secondary"}
+                onChange={() => setDiagnosisKind("secondary")}
+              />
+              {tx("Сопутствующий", "Nebendiagnose")}
+            </label>
+          </div>
+          {draft.kind === "secondary" ? (
+            <Field label={tx("Под основным диагнозом", "Unter Hauptdiagnose")}>
+              <NativeComboboxSelect
+                value={selectedMainParentCid}
+                aria-label={tx("Под основным диагнозом", "Unter Hauptdiagnose")}
+                className={inputClass}
+                onChange={(event) => set({ parent_cid: event.target.value || null, parent_id: null })}
+              >
+                <option value="">{tx("Без привязки", "Ohne Zuordnung")}</option>
+                {mainParentOptions.map((node) => (
+                  <option key={node.cid} value={node.cid}>
+                    {displayLabel(node)}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+            </Field>
+          ) : null}
         </div>
       ) : null}
 
@@ -827,7 +915,9 @@ export function DiagnosisTreeSection({
     setEditing((current) => (current ? { ...current, draft: { ...current.draft, ...patch } } : current));
 
   function openAddRoot(kind: Extract<DiagnosisKind, "main" | "secondary">) {
-    setEditing({ mode: "add", draft: blankNode(kind, null) });
+    const mainRoots = roots.filter((node) => node.kind === "main");
+    const parentCid = kind === "secondary" && mainRoots.length === 1 ? mainRoots[0].cid : null;
+    setEditing({ mode: "add", draft: blankNode(kind, parentCid) });
   }
 
   function openAddChild(parent: WorkingNode, kind: DiagnosisKind) {
@@ -977,6 +1067,7 @@ export function DiagnosisTreeSection({
           {editing ? (
             <DiagnosisForm
               draft={editing.draft}
+              nodes={nodes}
               providers={providers}
               allDoctors={allDoctors}
               lang={lang}

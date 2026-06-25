@@ -26,6 +26,7 @@ import {
   Plus,
   Search,
   SlidersHorizontal,
+  Star,
   Stethoscope,
   Trash2,
   X,
@@ -3211,9 +3212,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     onEdit={openProviderEditSheet}
                   />
 
-                  {/* ProviderAvailabilitySection is temporarily hidden from the provider detail page. */}
-                  {/* <ProviderAvailabilitySection detail={detail} /> */}
-
                   <ProviderOverviewSection
                     detail={detail}
                     onOpenPatients={() => window.open(`/patients?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
@@ -4216,19 +4214,21 @@ function weeklyAvailabilityBadgeClass(closed: boolean) {
 
 function WeeklyAvailabilityBadgeList({
   value,
+  className,
 }: {
   value: string | null | undefined;
+  className?: string;
 }) {
   const { lang } = useLang();
   const rows = formatWeeklyAvailabilityDisplayItems(value, lang);
 
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className={cn("flex flex-wrap gap-x-2 gap-y-2.5", className)}>
       {rows.map((row, index) => (
         <span
           key={`${row.day ?? "custom"}-${index}`}
           className={cn(
-            "whitespace-nowrap rounded-md border px-2 py-0.5 text-[11px] font-medium",
+            "whitespace-nowrap rounded-md border px-2.5 py-1 text-[11px] font-medium",
             weeklyAvailabilityBadgeClass(row.closed),
           )}
         >
@@ -4367,68 +4367,14 @@ function taxonomyAttributeReadOnlyRows(detail: ProviderDetail, lang: "de" | "ru"
   });
 }
 
-/*
-function ProviderAvailabilitySection({ detail }: { detail: ProviderDetail }) {
-  const { t } = useLang();
-  const l = (key: string) => t.uiText[key] ?? key;
-
-  return (
-    <Section
-      className={providerDetailPanelClassName}
-      showMarker={false}
-      title={
-        <span className="inline-flex min-w-0 items-center gap-2">
-          <CalendarClock className="size-4 shrink-0 text-[var(--brand)]" />
-          {l("providers_opening_hours")}
-        </span>
-      }
-    >
-      <WeeklyAvailabilityBadgeList value={detail.opening_hours} />
-    </Section>
-  );
-}
-*/
-
 function ProviderProfileReadOnlySection({ detail }: { detail: ProviderDetail }) {
   const { t, lang } = useLang();
-  const tr = { ...t.uiText, ...t } as unknown as Record<string, string>;
   const l = (key: string) => t.uiText[key] ?? key;
   const fallback = t.common_not_set;
-  const taxonomyLine = taxonomyLeafLabel(detail.taxonomy_node, detail.taxonomy_path, lang);
-  const specializationLine = specializationText(detail.specializations, detail.fachbereich, lang);
-  const insuranceLine = insuranceProviderText(detail.insurance_providers);
   const attributeRows = taxonomyAttributeReadOnlyRows(detail, lang);
 
   return (
     <div className="space-y-3">
-      <Section className={providerDetailSectionClassName} title={l("providers_provider_profile")}>
-        <div className="grid gap-x-8 gap-y-1 lg:grid-cols-2">
-          <ReadOnlyLine label={l("patients_display_name")} value={detail.name || fallback} wrap />
-          <ReadOnlyLine label={l("providers_legal_name")} value={detail.legal_name || fallback} />
-          <ReadOnlyLine label={t.providers_type} value={providerTypeLabel(detail.provider_type, tr)} />
-          <ReadOnlyLine label={t.providers_category} value={taxonomyLine || fallback} wrap />
-          <ReadOnlyLine
-            label={l("providers_organization_level")}
-            value={providerOrganizationLevelLabel(detail.organization_level)}
-          />
-          <ReadOnlyLine label={l("providers_parent_provider")} value={detail.parent_provider_name || fallback} />
-          <ReadOnlyLine
-            label={lang === "ru" ? "Внутренний рейтинг" : "Interne Bewertung"}
-            value={readOnlyValue(detail.internal_rating, fallback)}
-          />
-          <ReadOnlyLine
-            label={lang === "ru" ? "Заметка к рейтингу" : "Bewertungsnotiz"}
-            value={detail.internal_rating_note || fallback}
-          />
-          {detail.provider_type === "medical" ? (
-            <ReadOnlyLine label={t.providers_fachbereich} value={specializationLine || fallback} />
-          ) : null}
-          {detail.provider_type === "medical" ? (
-            <ReadOnlyLine label={insuranceProviderFieldLabel(lang)} value={insuranceLine || fallback} wrap />
-          ) : null}
-        </div>
-      </Section>
-
       {attributeRows.length > 0 ? (
         <Section
           className={providerDetailSectionClassName}
@@ -6036,7 +5982,7 @@ function ProviderSheetHero({
               </Badge>
             ) : null}
           </div>
-          <div className="mt-4 grid gap-x-6 gap-y-2 text-xs text-muted-foreground sm:grid-cols-2">
+          <div className="mt-5 grid gap-x-6 gap-y-4 text-xs text-muted-foreground sm:grid-cols-2">
             <HeroInfoLine icon={MapPin} wrap>
               {addressLine || providerMeta(detail) || t.common_not_set}
             </HeroInfoLine>
@@ -6046,10 +5992,20 @@ function ProviderSheetHero({
             <HeroInfoLine icon={Mail}>
               {detail.email || t.common_not_set}
             </HeroInfoLine>
-            {/* Availability is temporarily hidden from the provider detail hero. */}
-            {/* <HeroInfoLine icon={CalendarClock} wrap>
+            <HeroInfoLine icon={CalendarClock} wrap>
               <WeeklyAvailabilityBadgeList value={detail.opening_hours} />
-            </HeroInfoLine> */}
+            </HeroInfoLine>
+            <HeroInfoLine icon={Star} wrap>
+              <span className="break-words">
+                {t.providers_internal_rating}:{" "}
+                <span className="font-semibold text-foreground">
+                  {readOnlyValue(detail.internal_rating, t.common_not_set)}
+                </span>
+                {detail.internal_rating_note ? (
+                  <span> · {detail.internal_rating_note}</span>
+                ) : null}
+              </span>
+            </HeroInfoLine>
             <HeroInfoLine icon={BadgeCheck}>
               {detail.tax_id || t.common_not_set}
             </HeroInfoLine>

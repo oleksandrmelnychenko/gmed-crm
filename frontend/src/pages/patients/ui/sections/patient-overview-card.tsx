@@ -141,17 +141,16 @@ function SubLines({ items }: { items: string[] }) {
   );
 }
 
-function certaintyClass(certainty: ClinicalDiagnosis["certainty"]): string {
-  switch (certainty) {
-    case "verdacht":
-      return "text-amber-700";
-    case "bestaetigt":
-      return "text-teal-700";
-    case "zustand_nach":
-      return "text-indigo-700";
-    default:
-      return "text-foreground";
-  }
+function diagnosisKindTextClass(kind: ClinicalDiagnosis["kind"]): string {
+  if (kind === "main") return "text-sky-700";
+  if (kind === "secondary") return "text-violet-700";
+  if (kind === "prozedur") return "text-emerald-700";
+  return "text-foreground";
+}
+
+function certaintyPrefixTextClass(certainty: ClinicalDiagnosis["certainty"]): string {
+  if (certainty === "verdacht") return "text-amber-700";
+  return "text-foreground";
 }
 
 function computeAge(birthDate: string | null | undefined): number | null {
@@ -284,6 +283,7 @@ export function PatientOverviewCard({
     if (item.grade) sub.push(item.grade);
     sub.push(...splitLines(item.note));
     const children = childrenOf(item);
+    const prefix = certaintyPrefix(item.certainty);
     return (
       <li key={nodeKey(item) ?? item.label} className="relative leading-snug">
         {depth >= 0 ? (
@@ -294,8 +294,12 @@ export function PatientOverviewCard({
         ) : null}
         <div className="py-0.5">
           <span className="flex flex-wrap items-baseline gap-x-1.5">
-            <span className={cn("text-[13px] font-medium", certaintyClass(item.certainty))}>
-              {certaintyPrefix(item.certainty)}
+            {prefix ? (
+              <span className={cn("text-[13px] font-medium", certaintyPrefixTextClass(item.certainty))}>
+                {prefix.trim()}
+              </span>
+            ) : null}
+            <span className={cn("text-[13px] font-medium", diagnosisKindTextClass(item.kind))}>
               {item.label}
               {laterality ? ` ${laterality}` : ""}
             </span>
