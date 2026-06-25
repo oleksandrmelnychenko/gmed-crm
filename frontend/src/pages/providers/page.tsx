@@ -6671,6 +6671,7 @@ function DoctorCard({
         specializations={specializations}
         insuranceProviders={insuranceProviders}
       />
+      <DoctorCardLinkedPatients patients={doctor.linked_patients ?? []} />
       <DoctorRelationships
         canManage={canManage}
         doctor={doctor}
@@ -6928,6 +6929,63 @@ function DoctorMetrics({
         <p className="text-xs text-muted-foreground">{l("providers_slots")}</p>
         <p className="mt-1 text-sm font-semibold text-foreground">{doctor.appointment_count}</p>
       </div>
+    </div>
+  );
+}
+
+function DoctorCardLinkedPatients({ patients }: { patients: LinkedPatient[] }) {
+  const { t } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+
+  return (
+    <div className="border-t border-border bg-card px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-medium text-muted-foreground">
+          {l("providers_linked_patients")}
+        </p>
+        <Badge
+          variant="outline"
+          className="rounded-full border-border bg-muted/20 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+        >
+          {patients.length}
+        </Badge>
+      </div>
+      {patients.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">{t.providers_no_patients}</p>
+      ) : (
+        <div className="mt-3 grid gap-2 lg:grid-cols-2">
+          {patients.map((patient) => (
+            <div key={patient.id} className="rounded-lg border border-border/70 bg-muted/10 px-3 py-2.5">
+              <PatientProfileLink patient={patient} className="max-w-full text-sm">
+                {patientLabel(patient)}
+              </PatientProfileLink>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {l("providers_last_interaction")}: {compactDateTime(patient.last_interaction_at, t.common_not_set)}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <Badge
+                  variant="outline"
+                  className="rounded-full border-border bg-card px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                >
+                  {patient.appointment_count} {l("providers_appointments")}
+                </Badge>
+                <Badge
+                  variant="outline"
+                  className="rounded-full border-border bg-card px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                >
+                  {patient.leistung_count} {l("appointments_services")}
+                </Badge>
+                <Badge
+                  variant="outline"
+                  className="rounded-full border-border bg-card px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                >
+                  {patient.concierge_count} {t.appointments_linked_concierge}
+                </Badge>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
