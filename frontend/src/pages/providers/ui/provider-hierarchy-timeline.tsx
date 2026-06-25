@@ -482,7 +482,7 @@ function TimelineNode({
           className="flex min-w-0 flex-1 items-start justify-between gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         >
           <span className="min-w-0 flex-1">
-            <span className="block break-words text-xs font-semibold text-foreground">
+            <span className="block min-w-0 truncate text-xs font-semibold text-foreground" title={provider.name}>
               {provider.name}
             </span>
             <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">

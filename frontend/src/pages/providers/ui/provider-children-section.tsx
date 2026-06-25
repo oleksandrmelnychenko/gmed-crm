@@ -75,7 +75,7 @@ export function ProviderChildrenSection({
                     <Building2 className="size-4" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block min-w-0 max-w-full break-words text-sm font-semibold text-foreground">
+                    <span className="block min-w-0 max-w-full truncate text-sm font-semibold text-foreground" title={child.name}>
                       {child.name}
                     </span>
                     <span className="mt-1.5 flex flex-wrap gap-1.5">

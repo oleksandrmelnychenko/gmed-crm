@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
 
 import {
   fetchPatientClinical,
@@ -269,6 +270,7 @@ export function PatientOverviewCard({
     return pk == null || !known.has(pk);
   });
   const doctors = deriveDoctors([...diagnoses, ...medications]);
+  const doctorSpecializationLabel = (value: string) => specializationLabelForValue(value, [], lang);
   const age = computeAge(birthDate);
   const showDemographics = Boolean(birthDate || gender || phone || email);
   // Completed ("erfolg") recommendations drop off the overview list.
@@ -483,7 +485,9 @@ export function PatientOverviewCard({
               {doctors.map((doctor) => (
                 <li key={doctor.name} className="leading-tight">
                   {doctor.fachbereich ? (
-                    <p className="text-[11px] font-semibold text-sky-700">{doctor.fachbereich}</p>
+                    <p className="text-[11px] font-semibold text-sky-700">
+                      {doctorSpecializationLabel(doctor.fachbereich)}
+                    </p>
                   ) : null}
                   <p className="text-[13px] text-foreground">
                     {[doctor.title, doctor.name].filter(Boolean).join(" ")}

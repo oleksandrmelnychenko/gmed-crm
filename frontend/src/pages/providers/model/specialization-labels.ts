@@ -14,7 +14,9 @@ const KNOWN_SPECIALIZATIONS: [string[], KnownSpecializationLabels][] = [
   [["anesthesiology", "anaesthesiology", "anästhesiologie", "anaesthesiologie", "анестезиология"], { de: "Anästhesiologie", ru: "Анестезиология" }],
   [["cardiology", "kardiologie", "кардиология"], { de: "Kardiologie", ru: "Кардиология" }],
   [["dermatology", "dermatologie", "дерматология"], { de: "Dermatologie", ru: "Дерматология" }],
+  [["dermatology_and_venereology", "dermatologie_und_venerologie", "дерматология_и_венерология"], { de: "Dermatologie und Venerologie", ru: "Дерматология и венерология" }],
   [["endocrinology", "endokrinologie", "эндокринология"], { de: "Endokrinologie", ru: "Эндокринология" }],
+  [["endocrinology_and_diabetology", "endokrinologie_und_diabetologie", "эндокринология_и_диабетология"], { de: "Endokrinologie und Diabetologie", ru: "Эндокринология и диабетология" }],
   [["gastroenterology", "gastroenterologie", "гастроэнтерология"], { de: "Gastroenterologie", ru: "Гастроэнтерология" }],
   [["gynecology", "gynaecology", "gynäkologie", "gynaekologie", "гинекология"], { de: "Gynäkologie", ru: "Гинекология" }],
   [["hematology", "haematology", "hämatologie", "haematologie", "гематология"], { de: "Hämatologie", ru: "Гематология" }],
@@ -37,6 +39,12 @@ const KNOWN_SPECIALIZATION_LABELS = new Map<string, KnownSpecializationLabels>(
 
 export function normalizeSpecializationLabelKey(value: string) {
   return value.trim().toLocaleLowerCase();
+}
+
+function formatUnknownSpecializationValue(value: string) {
+  const normalized = value.trim().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  if (!normalized) return "";
+  return normalized.charAt(0).toLocaleUpperCase() + normalized.slice(1);
 }
 
 function knownSpecializationLabelsForValue(value: string | null | undefined) {
@@ -80,7 +88,7 @@ export function specializationLabelForValue(
   if (match) return specializationLabelForItem(match, lang);
 
   const knownLabels = knownSpecializationLabelsForValue(value);
-  return knownLabels ? knownLabels[lang] : value;
+  return knownLabels ? knownLabels[lang] : formatUnknownSpecializationValue(value);
 }
 
 export function specializationSummaryForItems(

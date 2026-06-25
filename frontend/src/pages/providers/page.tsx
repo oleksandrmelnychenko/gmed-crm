@@ -6299,24 +6299,25 @@ function ProviderSheetHero({
       />
       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_240px] md:items-stretch">
         <div className="min-w-0">
-          <div className="mb-2 flex items-center gap-3">
-            <span className="h-px w-8 bg-border" />
-            {permissions.canManageRegistry ? (
-              <StatusActionPill
-                isActive={detail.is_active}
-                activeLabel={t.common_active}
-                inactiveLabel={t.common_inactive}
-                toggleActiveLabel={l("providers_deactivate")}
-                toggleInactiveLabel={l("providers_activate")}
-                onToggle={() => (detail.is_active ? onDeactivate() : onActivate())}
-              />
-            ) : (
-              <ProviderStatusPill active={detail.is_active} labels={tr} />
-            )}
+          <div className="flex min-w-0 items-center gap-2">
+            <h2 className="min-w-0 truncate text-xl font-semibold leading-tight text-foreground" title={detail.name}>
+              {detail.name}
+            </h2>
+            <span className="shrink-0">
+              {permissions.canManageRegistry ? (
+                <StatusActionPill
+                  isActive={detail.is_active}
+                  activeLabel={t.common_active}
+                  inactiveLabel={t.common_inactive}
+                  toggleActiveLabel={l("providers_deactivate")}
+                  toggleInactiveLabel={l("providers_activate")}
+                  onToggle={() => (detail.is_active ? onDeactivate() : onActivate())}
+                />
+              ) : (
+                <ProviderStatusPill active={detail.is_active} labels={tr} />
+              )}
+            </span>
           </div>
-          <h2 className="break-words text-xl font-semibold leading-tight text-foreground">
-            {detail.name}
-          </h2>
           <p className="mt-1.5 break-words text-sm text-muted-foreground">
             {metaLine || t.common_not_set}
           </p>
