@@ -144,30 +144,30 @@ export const DEFAULT_PATIENT_FILTERS: PatientFilters = {
   insuranceProvider: "",
 };
 
-/** Distinct (case-insensitive), name-sorted insurance providers present on the given patients. */
-export function collectPatientInsuranceOptions(
-  patients: readonly Pick<PatientSummary, "insurance_provider">[],
+const PATIENT_INSURANCE_TYPE_ORDER = ["private", "public", "self_pay", "foreign"] as const;
+
+/** Distinct, ordered insurance types present on the given patients. */
+export function collectPatientInsuranceTypeOptions(
+  patients: readonly Pick<PatientSummary, "insurance_type">[],
 ): string[] {
-  const byKey = new Map<string, string>();
+  const present = new Set<string>();
   for (const patient of patients) {
-    const value = (patient.insurance_provider ?? "").trim();
-    if (!value) continue;
-    const key = value.toLocaleLowerCase();
-    if (!byKey.has(key)) byKey.set(key, value);
+    const value = (patient.insurance_type ?? "").trim();
+    if (PATIENT_INSURANCE_TYPE_ORDER.includes(value as (typeof PATIENT_INSURANCE_TYPE_ORDER)[number])) {
+      present.add(value);
+    }
   }
-  return Array.from(byKey.values()).sort((a, b) =>
-    a.localeCompare(b, undefined, { sensitivity: "base" }),
-  );
+  return PATIENT_INSURANCE_TYPE_ORDER.filter((value) => present.has(value));
 }
 
-/** Keep only patients whose insurance provider matches the selection (case-insensitive). */
-export function filterPatientsByInsurance<
-  T extends Pick<PatientSummary, "insurance_provider">,
->(patients: readonly T[], insuranceProvider: string): T[] {
-  const selected = insuranceProvider.trim().toLocaleLowerCase();
+/** Keep only patients whose insurance type matches the selection. */
+export function filterPatientsByInsuranceType<
+  T extends Pick<PatientSummary, "insurance_type">,
+>(patients: readonly T[], insuranceType: string): T[] {
+  const selected = insuranceType.trim();
   if (!selected) return patients as T[];
   return patients.filter(
-    (patient) => (patient.insurance_provider ?? "").trim().toLocaleLowerCase() === selected,
+    (patient) => (patient.insurance_type ?? "").trim() === selected,
   );
 }
 

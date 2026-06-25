@@ -26,8 +26,8 @@ import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 
 import {
   canAssignTarget,
-  collectPatientInsuranceOptions,
-  filterPatientsByInsurance,
+  collectPatientInsuranceTypeOptions,
+  filterPatientsByInsuranceType,
   patientPermissions,
 } from "./model/list-model";
 import { usePatientDetailSheetData } from "./data/use-patient-detail-sheet-data";
@@ -229,11 +229,11 @@ export function PatientsPage() {
     tr,
   });
   const insuranceOptions = useMemo(
-    () => collectPatientInsuranceOptions(patients),
+    () => collectPatientInsuranceTypeOptions(patients),
     [patients],
   );
   const displayedPatients = useMemo(
-    () => filterPatientsByInsurance(sortedAndFilteredPatients, filters.insuranceProvider),
+    () => filterPatientsByInsuranceType(sortedAndFilteredPatients, filters.insuranceProvider),
     [sortedAndFilteredPatients, filters.insuranceProvider],
   );
   const {

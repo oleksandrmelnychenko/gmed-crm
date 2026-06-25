@@ -18,6 +18,7 @@ import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
 
 import type { PatientSummary } from "../../model/list-model";
+import { getPatientInsuranceLabel } from "../../model/list-formatters";
 
 type ProviderOption = {
   id: string;
@@ -195,10 +196,10 @@ export function PatientsListToolbar({
             onChange={(event) => onInsuranceFilterChange(event.target.value ?? "")}
             className="h-8 w-[170px] bg-background text-[13px]"
           >
-            <option value="">{t.patients_insurance_provider}</option>
-            {insuranceOptions.map((name) => (
-              <option key={name} value={name}>
-                {name}
+            <option value="">{t.patients_insurance_type}</option>
+            {insuranceOptions.map((type) => (
+              <option key={type} value={type}>
+                {getPatientInsuranceLabel(type, t)}
               </option>
             ))}
           </NativeComboboxSelect>
