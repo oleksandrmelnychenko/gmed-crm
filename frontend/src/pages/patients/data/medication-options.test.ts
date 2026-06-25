@@ -25,6 +25,16 @@ describe("medication option reference lists", () => {
 
   it("keeps the full Darreichungsform reference list with official codes", () => {
     expect(DARREICHUNGSFORM_OPTIONS).toHaveLength(74);
+    expect(DARREICHUNGSFORM_OPTIONS.slice(0, 8).map((option) => option.value)).toEqual([
+      "AMP",
+      "AMPD",
+      "AMPT",
+      "ANSLB",
+      "AUGG",
+      "AUGS",
+      "AUGT",
+      "BTL",
+    ]);
     expect(optionLabel(DARREICHUNGSFORM_OPTIONS, "EDAT")).toBe(
       "EDAT — Augentropfen (Lösung im Einzeldosisbehältnis)",
     );

@@ -1741,6 +1741,10 @@ export function PatientClinicalTab({
                       {option.label}
                     </option>
                   ))}
+                  {draft.form &&
+                  !DARREICHUNGSFORM_OPTIONS.some((option) => option.value === draft.form) ? (
+                    <option value={draft.form}>{draft.form}</option>
+                  ) : null}
                 </NativeComboboxSelect>
               </Field>
             </div>
