@@ -6119,7 +6119,7 @@ function HeroAvailabilityTable({
         return (
           <div
             key={`${row.day}-${index}`}
-            className="grid min-w-0 grid-cols-[2.25rem_minmax(0,1fr)] gap-3"
+            className="grid min-w-0 grid-cols-[1.65rem_auto] justify-end gap-1.5 text-left"
           >
             <span className={cn("font-semibold", row.closed ? "text-orange-800" : "text-foreground")}>
               {dayLabel}
