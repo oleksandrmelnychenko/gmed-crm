@@ -6077,12 +6077,12 @@ function HeroInfoTableRow({
   children: ReactNode;
 }) {
   return (
-    <div className="grid min-w-0 content-start gap-2 px-3 py-2.5 sm:grid-cols-[9rem_minmax(0,1fr)]">
+    <div className="grid min-w-0 content-start gap-5 px-3 py-2.5 sm:grid-cols-[7.25rem_minmax(0,1fr)]">
       <div className="flex min-w-0 items-start gap-2 text-xs font-medium text-foreground">
         <Icon className="mt-0.5 size-3.5 shrink-0 text-foreground/75" />
         <span className="min-w-0 truncate">{label}</span>
       </div>
-      <div className="min-w-0 break-words text-sm font-semibold leading-5 text-foreground sm:text-right">
+      <div className="min-w-0 break-words text-sm font-semibold leading-5 text-foreground">
         {children}
       </div>
     </div>
@@ -6099,7 +6099,7 @@ function HeroAvailabilityTable({
   if (rows.length === 0) return <span>{t.common_not_set}</span>;
 
   return (
-    <div className="grid max-w-md gap-1 text-sm font-medium leading-5 text-foreground sm:ml-auto">
+    <div className="grid max-w-md gap-1 text-sm font-medium leading-5 text-foreground">
       {rows.map((row, index) => {
         if (row.freeText || !row.day) {
           return (
@@ -6117,7 +6117,7 @@ function HeroAvailabilityTable({
         return (
           <div
             key={`${row.day}-${index}`}
-            className="grid min-w-0 grid-cols-[1.65rem_auto] justify-end gap-1.5 text-left"
+            className="grid min-w-0 grid-cols-[1.65rem_auto] gap-1.5 text-left"
           >
             <span className={cn("font-semibold", row.closed ? "text-orange-800" : "text-foreground")}>
               {dayLabel}
