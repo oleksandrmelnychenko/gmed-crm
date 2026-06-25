@@ -2878,7 +2878,7 @@ async fn get_doctor(
                 "licensing_country": row.try_get::<Option<String>, _>("licensing_country").unwrap_or_default(),
                 "licensing_valid_until": row.try_get::<Option<chrono::NaiveDate>, _>("licensing_valid_until").unwrap_or_default().map(|v| v.to_string()),
                 "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
-                "patient_count": row.try_get::<i64, _>("patient_count").unwrap_or_default(),
+                "patient_count": linked_patients.len() as i64,
                 "appointment_count": row.try_get::<i64, _>("appointment_count").unwrap_or_default(),
                 "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                 "relationships": relationships,
@@ -7283,6 +7283,7 @@ async fn load_doctors_json(
         let specializations = specializations?;
         let insurance_providers = insurance_providers?;
         let linked_patients = linked_patients?;
+        let linked_patient_count = linked_patients.len() as i64;
         let phone = row
             .try_get::<Option<String>, _>("phone")
             .unwrap_or_default();
@@ -7327,7 +7328,7 @@ async fn load_doctors_json(
             "licensing_country": row.try_get::<Option<String>, _>("licensing_country").unwrap_or_default(),
             "licensing_valid_until": row.try_get::<Option<chrono::NaiveDate>, _>("licensing_valid_until").unwrap_or_default().map(|v| v.to_string()),
             "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
-            "patient_count": row.try_get::<i64, _>("patient_count").unwrap_or_default(),
+            "patient_count": linked_patient_count,
             "appointment_count": row.try_get::<i64, _>("appointment_count").unwrap_or_default(),
             "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
             "relationships": relationships,
@@ -7465,7 +7466,7 @@ async fn load_provider_patients_json(
                        MAX((a.date::timestamp + COALESCE(a.time_start, TIME '00:00')) AT TIME ZONE 'UTC') AS last_interaction_at
                 FROM appointments a
                 WHERE a.provider_id = $1
-                  AND $2::uuid IS NULL
+                  AND ($2::uuid IS NULL OR a.doctor_id = $2)
                 GROUP BY a.patient_id
 
                 UNION ALL
@@ -7478,7 +7479,7 @@ async fn load_provider_patients_json(
                 FROM order_leistungen ol
                 JOIN orders o ON o.id = ol.order_id
                 WHERE ol.provider_id = $1
-                  AND $2::uuid IS NULL
+                  AND ($2::uuid IS NULL OR ol.doctor_id = $2)
                 GROUP BY o.patient_id
 
                 UNION ALL
@@ -7503,7 +7504,7 @@ async fn load_provider_patients_json(
                 FROM patient_diagnoses pd
                 WHERE (
                     ($2::uuid IS NULL AND pd.provider_id = $1)
-                    OR ($2::uuid IS NOT NULL AND pd.treating_doctor_id = $2)
+                    OR ($2::uuid IS NOT NULL AND (pd.doctor_id = $2 OR pd.treating_doctor_id = $2))
                   )
                 GROUP BY pd.patient_id
 
@@ -7516,7 +7517,7 @@ async fn load_provider_patients_json(
                        MAX(pm.created_at) AS last_interaction_at
                 FROM patient_medications pm
                 WHERE pm.provider_id = $1
-                  AND $2::uuid IS NULL
+                  AND ($2::uuid IS NULL OR pm.doctor_id = $2)
                 GROUP BY pm.patient_id
 
                 UNION ALL
@@ -7528,7 +7529,7 @@ async fn load_provider_patients_json(
                        MAX(pe.created_at) AS last_interaction_at
                 FROM patient_examinations pe
                 WHERE pe.provider_id = $1
-                  AND $2::uuid IS NULL
+                  AND ($2::uuid IS NULL OR pe.doctor_id = $2)
                 GROUP BY pe.patient_id
 
                 UNION ALL
@@ -7540,7 +7541,7 @@ async fn load_provider_patients_json(
                        MAX(pp.created_at) AS last_interaction_at
                 FROM patient_procedures pp
                 WHERE pp.provider_id = $1
-                  AND $2::uuid IS NULL
+                  AND ($2::uuid IS NULL OR pp.doctor_id = $2)
                 GROUP BY pp.patient_id
 
                 UNION ALL
@@ -7554,7 +7555,7 @@ async fn load_provider_patients_json(
                 JOIN provider_doctor_links pdl
                   ON pdl.doctor_id = pr.source_doctor_id
                  AND pdl.provider_id = $1
-                WHERE $2::uuid IS NULL
+                WHERE $2::uuid IS NULL OR pr.source_doctor_id = $2
                 GROUP BY pr.patient_id
             ),
             linked AS (

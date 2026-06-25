@@ -212,6 +212,33 @@ async fn seed_doctor(pool: &PgPool, provider_id: Uuid, tag: &str) -> Uuid {
     .unwrap()
 }
 
+async fn seed_patient_diagnosis(
+    pool: &PgPool,
+    patient_id: Uuid,
+    provider_id: Uuid,
+    doctor_id: Option<Uuid>,
+    treating_doctor_id: Option<Uuid>,
+    label: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO patient_diagnoses (
+                patient_id, provider_id, doctor_id, treating_doctor_id,
+                kind, label, certainty, status, source_mode
+           ) VALUES (
+                $1, $2, $3, $4, 'main', $5, 'bestaetigt', 'active', 'intern'
+           )
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .bind(treating_doctor_id)
+    .bind(label)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 async fn seed_service(pool: &PgPool, provider_id: Uuid, name: &str, description: &str) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO service_catalog (
@@ -8780,6 +8807,27 @@ async fn provider_and_doctor_detail_expose_linked_patients_and_interactions() {
     );
     assert!(interactions.iter().any(|item| item["kind"] == "leistung"));
 
+    let diagnosing_patient_id = seed_patient(&pool, admin_id, &format!("{tag}-diagnosing")).await;
+    seed_patient_diagnosis(
+        &pool,
+        diagnosing_patient_id,
+        provider_id,
+        Some(doctor_id),
+        None,
+        &format!("Doctor diagnosed {tag}"),
+    )
+    .await;
+    let treating_patient_id = seed_patient(&pool, admin_id, &format!("{tag}-treating")).await;
+    seed_patient_diagnosis(
+        &pool,
+        treating_patient_id,
+        provider_id,
+        None,
+        Some(doctor_id),
+        &format!("Doctor treating {tag}"),
+    )
+    .await;
+
     let (status, doctor_body) = json_request(
         &app,
         "GET",
@@ -8789,7 +8837,7 @@ async fn provider_and_doctor_detail_expose_linked_patients_and_interactions() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(doctor_body["patient_count"], 1);
+    assert_eq!(doctor_body["patient_count"], 3);
     assert_eq!(doctor_body["appointment_count"], 1);
     assert_eq!(doctor_body["license_number"], format!("LIC-{tag}"));
     assert_eq!(doctor_body["licensing_country"], "DE");
@@ -8802,14 +8850,16 @@ async fn provider_and_doctor_detail_expose_linked_patients_and_interactions() {
         assert_eq!(item["patient_uuid"], patient_id.to_string());
         assert_eq!(item["patient_id"], format!("PT-{tag}"));
     }
-    assert_eq!(
-        doctor_body["linked_patients"]
-            .as_array()
-            .unwrap()
-            .first()
-            .unwrap()["id"],
-        patient_id.to_string()
-    );
+    assert_eq!(doctor_body["linked_patients"].as_array().unwrap().len(), 3);
+    let doctor_patient_ids = doctor_body["linked_patients"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|patient| patient["id"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    assert!(doctor_patient_ids.contains(&patient_id.to_string()));
+    assert!(doctor_patient_ids.contains(&diagnosing_patient_id.to_string()));
+    assert!(doctor_patient_ids.contains(&treating_patient_id.to_string()));
 }
 
 #[tokio::test]

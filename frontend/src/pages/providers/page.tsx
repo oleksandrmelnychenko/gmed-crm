@@ -4320,6 +4320,19 @@ function ReadOnlyLine({
   );
 }
 
+function LabelWithCount({ label, count }: { label: ReactNode; count: number }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span>{label}</span>
+      {count > 0 ? (
+        <span className="rounded-full border border-border bg-card px-1.5 py-0.5 text-[10px] font-semibold leading-none text-foreground">
+          {count}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function weeklyAvailabilityBadgeClass(closed: boolean) {
   return closed
     ? "border-orange-200 bg-orange-50 text-orange-800"
@@ -4569,9 +4582,10 @@ function ProviderDoctorDetailSheet({
   const specializations = doctor
     ? specializationText(doctor.specializations, doctor.fachbereich, lang)
     : specializationText(row?.specializations, row?.fachbereich, lang);
-  const insuranceProviders = doctor
-    ? insuranceProviderText(doctor.insurance_providers)
-    : insuranceProviderText(row?.insurance_providers);
+  const insuranceCoverage = insuranceCoverageSummary(
+    doctor ? doctor.insurance_providers : row?.insurance_providers,
+    t,
+  );
   const contacts = doctor?.contacts ?? row?.contacts;
   const phone = doctor?.phone ?? row?.phone;
   const email = doctor?.email ?? row?.email;
@@ -4634,7 +4648,11 @@ function ProviderDoctorDetailSheet({
                 <ReadOnlyLine label={l("providers_doctor_specializations")} value={specializations || t.common_not_set} />
               ) : null}
               {isMedicalProvider ? (
-                <ReadOnlyLine label={insuranceProviderFieldLabel(lang)} value={insuranceProviders || t.common_not_set} wrap />
+                <ReadOnlyLine
+                  label={<LabelWithCount label={t.patients_insurance_type} count={insuranceCoverage.count} />}
+                  value={insuranceCoverage.text || t.common_not_set}
+                  wrap
+                />
               ) : null}
               {isMedicalProvider ? (
                 <ReadOnlyLine
@@ -6365,16 +6383,7 @@ function specializationText(
   return fallback ? specializationLabelForValue(fallback, specializations ?? [], lang) : "";
 }
 
-function insuranceProviderText(items: { name?: string | null }[] | undefined) {
-  return (items ?? [])
-    .flatMap((item) => {
-      const label = item.name?.trim();
-      return label ? [label] : [];
-    })
-    .join(", ");
-}
-
-function insuranceTypeText(
+function insuranceTypeLabels(
   items: { name?: string | null }[] | undefined,
   t: Translations,
 ) {
@@ -6388,8 +6397,25 @@ function insuranceTypeText(
       if (seen.has(key)) return [];
       seen.add(key);
       return [label];
-    })
-    .join(", ");
+    });
+}
+
+function insuranceTypeText(
+  items: { name?: string | null }[] | undefined,
+  t: Translations,
+) {
+  return insuranceTypeLabels(items, t).join(", ");
+}
+
+function insuranceCoverageSummary(
+  items: { name?: string | null }[] | undefined,
+  t: Translations,
+) {
+  const labels = insuranceTypeLabels(items, t);
+  return {
+    count: labels.length,
+    text: labels.join(", "),
+  };
 }
 
 function contactSummary(
@@ -6656,9 +6682,9 @@ function DoctorCard({
   onEditRelationship: (sourceDoctorId: string, relationship: DoctorRelationship) => void;
   onNewRelationship: (sourceDoctorId: string) => void;
 }) {
-  const { lang } = useLang();
+  const { t, lang } = useLang();
   const specializations = specializationText(doctor.specializations, doctor.fachbereich, lang);
-  const insuranceProviders = insuranceProviderText(doctor.insurance_providers);
+  const insuranceCoverage = insuranceCoverageSummary(doctor.insurance_providers, t);
   const contacts = contactSummary(doctor.contacts, doctor.phone, doctor.email);
   const roleLabel = doctor.role_label || (doctor.role_code ? doctorRoleLabel(doctor.role_code) : "");
   const subrole = doctor.subrole?.trim() ?? "";
@@ -6673,7 +6699,8 @@ function DoctorCard({
           doctor={doctor}
           roleLabel={roleLabel}
           specializations={specializations}
-          insuranceProviders={insuranceProviders}
+          insuranceProviderCount={insuranceCoverage.count}
+          insuranceProviders={insuranceCoverage.text}
           subrole={subrole}
           onOpen={onOpen}
           onDelete={onDelete}
@@ -6683,7 +6710,8 @@ function DoctorCard({
         <DoctorMetrics
           doctor={doctor}
           specializations={specializations}
-          insuranceProviders={insuranceProviders}
+          insuranceProviderCount={insuranceCoverage.count}
+          insuranceProviders={insuranceCoverage.text}
         />
         <DoctorRelationships
           canManage={canManage}
@@ -6705,6 +6733,7 @@ function DoctorCardSummary({
   canManage,
   contacts,
   doctor,
+  insuranceProviderCount,
   roleLabel,
   specializations,
   insuranceProviders,
@@ -6718,6 +6747,7 @@ function DoctorCardSummary({
   canManage: boolean;
   contacts: string;
   doctor: DoctorSummary;
+  insuranceProviderCount: number;
   roleLabel: string;
   specializations: string;
   insuranceProviders: string;
@@ -6765,9 +6795,12 @@ function DoctorCardSummary({
             {insuranceProviders ? (
               <Badge
                 variant="outline"
-                className="max-w-full rounded-full border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"
+                className="max-w-full gap-1.5 rounded-full border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"
               >
                 <span className="truncate">{insuranceProviders}</span>
+                <span className="rounded-full bg-white/75 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-emerald-800">
+                  {insuranceProviderCount}
+                </span>
               </Badge>
             ) : null}
             {subrole ? (
@@ -6891,14 +6924,16 @@ function DoctorSummaryActions({
 
 function DoctorMetrics({
   doctor,
+  insuranceProviderCount,
   specializations,
   insuranceProviders,
 }: {
   doctor: DoctorSummary;
+  insuranceProviderCount: number;
   specializations: string;
   insuranceProviders: string;
 }) {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   const linkedPatientCount = doctor.linked_patients?.length ?? doctor.patient_count;
 
@@ -6911,7 +6946,14 @@ function DoctorMetrics({
         </p>
       </div>
       <div className="border-b border-border px-4 py-3 sm:border-r lg:border-b-0">
-        <p className="text-xs text-muted-foreground">{insuranceProviderFieldLabel(lang)}</p>
+        <div className="flex items-center gap-1.5">
+          <p className="text-xs text-muted-foreground">{t.patients_insurance_type}</p>
+          {insuranceProviderCount > 0 ? (
+            <span className="rounded-full border border-border bg-card px-1.5 py-0.5 text-[10px] font-semibold leading-none text-foreground">
+              {insuranceProviderCount}
+            </span>
+          ) : null}
+        </div>
         <p className="mt-1 text-sm font-semibold text-foreground">
           {insuranceProviders || t.common_not_set}
         </p>
