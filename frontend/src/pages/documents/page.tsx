@@ -143,6 +143,7 @@ import {
   normalizeTemplateLanguage,
   patientDocumentAddresseeLabel,
   patientOptionLabel,
+  resolveGeneratedDocumentAccessCategory,
   resolveTemplateLanguage,
   templateForDocument,
 } from "./model/document-model";
@@ -1672,11 +1673,10 @@ function StaffDocumentsPage({
           : resolveTemplateLanguage(current.patientId, nextTemplate, patients),
         accessCategory: current.templateId
           ? current.accessCategory
-          : nextTemplate.is_medical
-            ? "medical"
-            : nextTemplate.default_visibility === "patient_visible"
-              ? "patient"
-              : current.accessCategory,
+          : resolveGeneratedDocumentAccessCategory(
+              nextTemplate,
+              current.accessCategory,
+            ),
         autoName: current.autoName || nextTemplate.default_auto_name,
         textBlockKeys: current.textBlockKeys.filter((key) =>
           allowedBlocks.has(key),
@@ -1995,11 +1995,10 @@ function StaffDocumentsPage({
         )
           ? current.documentLanguage
           : nextLanguage,
-        accessCategory: template.is_medical
-          ? "medical"
-          : template.default_visibility === "patient_visible"
-            ? "patient"
-            : current.accessCategory,
+        accessCategory: resolveGeneratedDocumentAccessCategory(
+          template,
+          current.accessCategory,
+        ),
         replaceDocumentId:
           detail &&
           current.replaceDocumentId === detail.id &&
@@ -2074,11 +2073,7 @@ function StaffDocumentsPage({
         resolveTemplateLanguage(document.patient_id, template, patients),
       accessCategory:
         document.access_category ??
-        (template.is_medical
-          ? "medical"
-          : template.default_visibility === "patient_visible"
-            ? "patient"
-            : "internal"),
+        resolveGeneratedDocumentAccessCategory(template, "internal"),
       documentDate: document.document_date ?? new Date().toISOString().slice(0, 10),
       sourcePerson: document.source_person ?? "",
       sourceInstitution: document.source_institution ?? document.klinik ?? "GMED",

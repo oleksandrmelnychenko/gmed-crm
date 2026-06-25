@@ -54,6 +54,19 @@ export type DocumentItem = {
   category?: string | null;
   status?: string | null;
   uploaded_by_name?: string | null;
+  document_direction?: string | null;
+  document_variant?: string | null;
+  document_language?: string | null;
+  access_category?: string | null;
+  document_date?: string | null;
+  source_person?: string | null;
+  source_institution?: string | null;
+  addressee_person?: string | null;
+  addressee_institution?: string | null;
+  financial_status?: string | null;
+  payment_due_date?: string | null;
+  payment_date?: string | null;
+  payment_method?: string | null;
   created_at: string;
 };
 

@@ -3703,6 +3703,19 @@ async fn list_patient_documents(
                   COALESCE(d.original_filename, d.auto_name, 'Document') AS filename,
                   COALESCE(d.category, d.art) AS category,
                   d.status,
+                  d.document_direction,
+                  d.document_variant,
+                  d.document_language,
+                  d.access_category,
+                  d.document_date,
+                  d.source_person,
+                  d.source_institution,
+                  d.addressee_person,
+                  d.addressee_institution,
+                  d.financial_status,
+                  d.payment_due_date,
+                  d.payment_date,
+                  d.payment_method,
                   u.name AS uploaded_by_name,
                   d.created_at
            FROM documents d
@@ -3729,6 +3742,19 @@ async fn list_patient_documents(
                 "filename": row.try_get::<String, _>("filename").unwrap_or_default(),
                 "category": row.try_get::<Option<String>, _>("category").unwrap_or_default(),
                 "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                "document_direction": row.try_get::<Option<String>, _>("document_direction").unwrap_or_default(),
+                "document_variant": row.try_get::<Option<String>, _>("document_variant").unwrap_or_default(),
+                "document_language": row.try_get::<Option<String>, _>("document_language").unwrap_or_default(),
+                "access_category": row.try_get::<Option<String>, _>("access_category").unwrap_or_default(),
+                "document_date": row.try_get::<Option<chrono::NaiveDate>, _>("document_date").unwrap_or_default(),
+                "source_person": row.try_get::<Option<String>, _>("source_person").unwrap_or_default(),
+                "source_institution": row.try_get::<Option<String>, _>("source_institution").unwrap_or_default(),
+                "addressee_person": row.try_get::<Option<String>, _>("addressee_person").unwrap_or_default(),
+                "addressee_institution": row.try_get::<Option<String>, _>("addressee_institution").unwrap_or_default(),
+                "financial_status": row.try_get::<Option<String>, _>("financial_status").unwrap_or_default(),
+                "payment_due_date": row.try_get::<Option<chrono::NaiveDate>, _>("payment_due_date").unwrap_or_default(),
+                "payment_date": row.try_get::<Option<chrono::NaiveDate>, _>("payment_date").unwrap_or_default(),
+                "payment_method": row.try_get::<Option<String>, _>("payment_method").unwrap_or_default(),
                 "uploaded_by_name": row.try_get::<Option<String>, _>("uploaded_by_name").unwrap_or_default(),
                 "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
             })
@@ -6966,29 +6992,35 @@ async fn clinical_resolve_attribution(
     };
 
     if let Some(pid) = provider_id {
-        let provider_type: Option<String> =
-            sqlx::query_scalar("SELECT provider_type FROM providers WHERE id = $1")
-                .bind(pid)
-                .fetch_optional(&state.db)
-                .await
-                .map_err(|e| {
-                    tracing::error!(error = %e, provider_id = %pid, "validate clinical provider");
-                    attribution_fail()
-                })?;
-        let Some(provider_type) = provider_type else {
+        let row = sqlx::query("SELECT provider_type, name FROM providers WHERE id = $1")
+            .bind(pid)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, provider_id = %pid, "validate clinical provider");
+                attribution_fail()
+            })?;
+        let Some(row) = row else {
             return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Unknown provider"));
         };
+        let provider_type: String = row.try_get("provider_type").map_err(|e| {
+            tracing::error!(error = %e, provider_id = %pid, "read clinical provider type");
+            attribution_fail()
+        })?;
         if provider_type != "medical" {
+            let name: String = row.try_get("name").unwrap_or_default();
             return Err(err(
                 StatusCode::UNPROCESSABLE_ENTITY,
-                "Clinical attribution requires a medical provider",
+                &format!(
+                    "Clinical attribution requires a medical provider — \"{name}\" is {provider_type}"
+                ),
             ));
         }
     }
 
     if let Some(did) = doctor_id {
         let doc_row = sqlx::query(
-            r#"SELECT p.provider_type
+            r#"SELECT p.provider_type, d.name AS doctor_name, p.name AS provider_name
                    FROM provider_doctors d
                    JOIN providers p ON p.id = d.provider_id
                    WHERE d.id = $1"#,
@@ -7008,9 +7040,13 @@ async fn clinical_resolve_attribution(
             attribution_fail()
         })?;
         if doc_provider_type != "medical" {
+            let doctor_name: String = doc_row.try_get("doctor_name").unwrap_or_default();
+            let provider_name: String = doc_row.try_get("provider_name").unwrap_or_default();
             return Err(err(
                 StatusCode::UNPROCESSABLE_ENTITY,
-                "Clinical attribution requires a medical provider",
+                &format!(
+                    "Clinical attribution requires a medical provider — Dr. \"{doctor_name}\" belongs to {doc_provider_type} provider \"{provider_name}\""
+                ),
             ));
         }
         if let Some(pid) = provider_id {
@@ -7052,7 +7088,7 @@ async fn clinical_resolve_treating_doctor(
     };
 
     let row = sqlx::query(
-        r#"SELECT p.provider_type
+        r#"SELECT p.provider_type, d.name AS doctor_name, p.name AS provider_name
            FROM provider_doctors d
            JOIN providers p ON p.id = d.provider_id
            WHERE d.id = $1"#,
@@ -7082,9 +7118,13 @@ async fn clinical_resolve_treating_doctor(
         )
     })?;
     if provider_type != "medical" {
+        let doctor_name: String = row.try_get("doctor_name").unwrap_or_default();
+        let provider_name: String = row.try_get("provider_name").unwrap_or_default();
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "Treating doctor must belong to a medical provider",
+            &format!(
+                "Treating doctor must belong to a medical provider — Dr. \"{doctor_name}\" belongs to {provider_type} provider \"{provider_name}\""
+            ),
         ));
     }
 

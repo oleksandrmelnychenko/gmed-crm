@@ -16,6 +16,7 @@ import {
   emptyGenerateForm,
   patientDocumentAddresseeLabel,
   patientOptionLabel,
+  resolveGeneratedDocumentAccessCategory,
   resolveTemplateLanguage,
 } from "@/pages/documents/model/document-model";
 import type {
@@ -151,11 +152,10 @@ export function PatientDocumentGenerateDialog({
       visibility: template.default_visibility,
       language: nextLanguage,
       documentLanguage: nextLanguage,
-      accessCategory: template.is_medical
-        ? "medical"
-        : template.default_visibility === "patient_visible"
-          ? "patient"
-          : nextForm.accessCategory,
+      accessCategory: resolveGeneratedDocumentAccessCategory(
+        template,
+        nextForm.accessCategory,
+      ),
       addresseePerson: patientAddressee,
     };
     setForm({

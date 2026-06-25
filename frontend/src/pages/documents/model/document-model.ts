@@ -274,7 +274,9 @@ function standardDocumentCategoryCode(input: StandardDocumentNameInput) {
   }
   if (["insurance", "versicherung"].includes(category)) return "VERS";
   if (["other", "sonstige"].includes(category)) return "SONST";
+  if (category === "administrative_single_order") return "VERTRAG";
   if (
+    category.startsWith("administrative") ||
     [
       "administrative",
       "admin",

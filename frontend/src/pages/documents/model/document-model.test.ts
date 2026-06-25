@@ -63,13 +63,21 @@ describe("buildStandardDocumentName", () => {
   it("maps generated administrative template names into stable filename parts", () => {
     expect(
       buildStandardDocumentName({
-        category: "clinic_correspondence",
+        category: "administrative_appointment_confirmation",
         art: "appointment_confirmation",
         documentDate: "2026-06-04",
         source: "GMED",
         addressee: "A. Müller",
       }),
     ).toBe("ADMIN-Terminbestätigung vom 04.06.2026-GMED-A. Müller");
+
+    expect(
+      buildStandardDocumentName({
+        category: "administrative_single_order",
+        art: "single_order",
+        documentDate: "2026-06-04",
+      }),
+    ).toBe("VERTRAG-Einzelauftrag vom 04.06.2026");
   });
 
   it("keeps finance documents in the finance prefix even with German labels", () => {
@@ -224,7 +232,7 @@ describe("buildGenerateDocumentPayload", () => {
     });
   });
 
-  it("sends manual_text only after the generated draft was edited", () => {
+  it("sends the displayed generated text as the authoritative PDF text", () => {
     expect(
       buildGenerateDocumentPayload({
         template: template(),
@@ -232,16 +240,38 @@ describe("buildGenerateDocumentPayload", () => {
         patients,
         displayedManualText: "Edited text",
       }).manual_text,
-    ).toBeNull();
+    ).toBe("Edited text");
 
     expect(
       buildGenerateDocumentPayload({
         template: template(),
-        form: generateForm({ manualText: "Edited text", manualTextDirty: true }),
+        form: generateForm({ manualText: "Form fallback text", manualTextDirty: true }),
         patients,
-        displayedManualText: "Edited text",
       }).manual_text,
-    ).toBe("Edited text");
+    ).toBe("Form fallback text");
+  });
+
+  it("resolves generated finance templates to financial access", () => {
+    const payload = buildGenerateDocumentPayload({
+      template: template({
+        id: "cost_coverage_declaration",
+        art: "cost_coverage_declaration",
+        category: "finance_cost_coverage",
+        default_auto_name: "Kostenübernahmeerklärung",
+        default_visibility: "internal",
+      }),
+      form: generateForm({
+        accessCategory: "patient",
+        autoName: "Kostenübernahmeerklärung",
+      }),
+      patients,
+      displayedManualText: "Kostenübernahme text",
+    });
+
+    expect(payload.access_category).toBe("financial");
+    expect(payload.auto_name).toBe(
+      "FIN-Kostenübernahmeerklärung vom 25.06.2026-GMED-Anna Müller",
+    );
   });
 
   it("keeps an explicitly edited filename instead of regenerating auto_name", () => {

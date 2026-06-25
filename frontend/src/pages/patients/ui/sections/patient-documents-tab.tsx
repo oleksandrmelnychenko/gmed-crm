@@ -16,6 +16,7 @@ import {
   localizeDocumentCode,
   localizeRequiredDocumentLabel,
 } from "@/lib/required-document-labels";
+import { useLang, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { PatientOption as DocumentPatientOption } from "@/pages/documents/model/types";
 
@@ -27,6 +28,7 @@ import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
 type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
 type DateFormatter = (value?: string | null, fallback?: string) => string;
+type LocalizedLabel = { de: string; ru: string };
 type PatientDocumentContext = {
   id: string;
   patient_id: string;
@@ -66,6 +68,91 @@ type PatientDocumentsTabProps = {
   statusLabel: StatusLabelFn;
   formatDate: DateFormatter;
 };
+
+const DOCUMENT_META_LABELS = {
+  documentDate: { de: "Dokumentdatum", ru: "Дата документа" },
+  flow: { de: "Fluss", ru: "Поток" },
+  language: { de: "Sprache", ru: "Язык" },
+  access: { de: "Zugriff", ru: "Доступ" },
+  financial: { de: "Finanzen", ru: "Финансы" },
+  source: { de: "Quelle", ru: "Источник" },
+  addressee: { de: "Adressat", ru: "Адресат" },
+  payment: { de: "Zahlung", ru: "Оплата" },
+  metadata: { de: "Metadaten", ru: "Метаданные" },
+  parties: { de: "Quelle / Adressat", ru: "Источник / адресат" },
+} satisfies Record<string, LocalizedLabel>;
+
+const DOCUMENT_DIRECTION_LABELS = {
+  incoming: { de: "Eingehend", ru: "Входящий" },
+  outgoing: { de: "Ausgehend", ru: "Исходящий" },
+} satisfies Record<string, LocalizedLabel>;
+
+const DOCUMENT_VARIANT_LABELS = {
+  original: { de: "Original", ru: "Оригинал" },
+  translation: { de: "Uebersetzung", ru: "Перевод" },
+} satisfies Record<string, LocalizedLabel>;
+
+const DOCUMENT_ACCESS_LABELS = {
+  internal: { de: "Intern", ru: "Внутренний" },
+  patient: { de: "Patient", ru: "Пациент" },
+  provider: { de: "Provider", ru: "Провайдер" },
+  authority: { de: "Behoerde", ru: "Ведомство" },
+  financial: { de: "Finanziell", ru: "Финансовый" },
+  medical: { de: "Medizinisch", ru: "Медицинский" },
+  other: { de: "Sonstiges", ru: "Другое" },
+} satisfies Record<string, LocalizedLabel>;
+
+const DOCUMENT_FINANCIAL_LABELS = {
+  open: { de: "Offen", ru: "Открыт" },
+  in_progress: { de: "In Bearbeitung", ru: "В работе" },
+  paid: { de: "Bezahlt", ru: "Оплачен" },
+  overdue: { de: "Ueberfaellig", ru: "Просрочен" },
+  billed_to_patient: { de: "An Patient berechnet", ru: "Выставлен пациенту" },
+  reimbursed: { de: "Erstattet", ru: "Возмещен" },
+} satisfies Record<string, LocalizedLabel>;
+
+const DOCUMENT_PAYMENT_LABELS = {
+  cash: { de: "Bar", ru: "Наличные" },
+  bank_transfer: { de: "Ueberweisung", ru: "Перевод" },
+  card: { de: "Karte", ru: "Карта" },
+  other: { de: "Sonstiges", ru: "Другое" },
+} satisfies Record<string, LocalizedLabel>;
+
+const DOCUMENT_LANGUAGE_LABELS = {
+  de: { de: "Deutsch", ru: "Немецкий" },
+  ru: { de: "Russisch", ru: "Русский" },
+  uk: { de: "Ukrainisch", ru: "Украинский" },
+  en: { de: "Englisch", ru: "Английский" },
+} satisfies Record<string, LocalizedLabel>;
+
+function metaLabel(key: keyof typeof DOCUMENT_META_LABELS, lang: Lang) {
+  return DOCUMENT_META_LABELS[key][lang === "de" ? "de" : "ru"];
+}
+
+function localizedMetaValue(
+  value: string | null | undefined,
+  labels: Record<string, LocalizedLabel>,
+  lang: Lang,
+  fallback: string,
+) {
+  const key = value?.trim();
+  if (!key) return fallback;
+  return labels[key]?.[lang === "de" ? "de" : "ru"] ?? key.replace(/_/g, " ");
+}
+
+function compactParty(...parts: Array<string | null | undefined>) {
+  const seen = new Set<string>();
+  return parts
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .filter((part) => {
+      const key = part.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(", ");
+}
 
 type DocumentsOverviewSectionProps = {
   l: LocalizeFn;
@@ -177,6 +264,7 @@ export function PatientDocumentsTab({
   statusLabel,
   formatDate,
 }: PatientDocumentsTabProps) {
+  const { lang } = useLang();
   const [generateOpen, setGenerateOpen] = useState(false);
   const generatePatient = useMemo<DocumentPatientOption | undefined>(
     () =>
@@ -201,6 +289,77 @@ export function PatientDocumentsTab({
 
     return counts;
   }, [documents]);
+  const documentMetaRows = (doc: DocumentItem) => {
+    const flow = [
+      localizedMetaValue(
+        doc.document_direction,
+        DOCUMENT_DIRECTION_LABELS,
+        lang,
+        "",
+      ),
+      localizedMetaValue(doc.document_variant, DOCUMENT_VARIANT_LABELS, lang, ""),
+      localizedMetaValue(doc.document_language, DOCUMENT_LANGUAGE_LABELS, lang, ""),
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    const financial = [
+      localizedMetaValue(doc.financial_status, DOCUMENT_FINANCIAL_LABELS, lang, ""),
+      doc.payment_due_date
+        ? `${metaLabel("payment", lang)} ${formatDate(doc.payment_due_date)}`
+        : "",
+      doc.payment_date
+        ? `${formatDate(doc.payment_date)}${
+            doc.payment_method
+              ? ` · ${localizedMetaValue(
+                  doc.payment_method,
+                  DOCUMENT_PAYMENT_LABELS,
+                  lang,
+                  "",
+                )}`
+              : ""
+          }`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    return [
+      {
+        label: metaLabel("documentDate", lang),
+        value: doc.document_date ? formatDate(doc.document_date) : commonNotSet,
+      },
+      {
+        label: metaLabel("flow", lang),
+        value: flow || commonNotSet,
+      },
+      {
+        label: metaLabel("access", lang),
+        value: localizedMetaValue(
+          doc.access_category,
+          DOCUMENT_ACCESS_LABELS,
+          lang,
+          commonNotSet,
+        ),
+      },
+      {
+        label: metaLabel("financial", lang),
+        value: financial || commonNotSet,
+      },
+    ];
+  };
+  const documentPartyRows = (doc: DocumentItem) => [
+    {
+      label: metaLabel("source", lang),
+      value:
+        compactParty(doc.source_person, doc.source_institution) || commonNotSet,
+    },
+    {
+      label: metaLabel("addressee", lang),
+      value:
+        compactParty(doc.addressee_person, doc.addressee_institution) ||
+        commonNotSet,
+    },
+  ];
 
   return (
     <TabsContent value="documents" className="space-y-4 mt-4 min-h-[400px]">
@@ -374,82 +533,125 @@ export function PatientDocumentsTab({
         ) : (
           <>
             <div className="space-y-1.5 md:hidden">
-              {filteredDocuments.map((doc) => (
-                <button
-                  key={doc.id}
-                  type="button"
-                  onClick={() =>
-                    void downloadApiFile(
-                      `/documents/${doc.id}/download`,
-                      doc.filename || "document",
-                    )
-                  }
-                  className="block w-full rounded-xl border border-border/50 bg-card px-4 py-2.5 text-left transition-colors hover:border-border hover:bg-muted/30"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="break-words text-sm font-medium text-foreground">{doc.filename}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {doc.category ? localizeDocumentCode(doc.category, l) : commonNotSet}
-                      </p>
+              {filteredDocuments.map((doc) => {
+                const metaRows = documentMetaRows(doc);
+                const partyRows = documentPartyRows(doc);
+                return (
+                  <button
+                    key={doc.id}
+                    type="button"
+                    onClick={() =>
+                      void downloadApiFile(
+                        `/documents/${doc.id}/download`,
+                        doc.filename || "document",
+                      )
+                    }
+                    className="block w-full rounded-xl border border-border/50 bg-card px-4 py-2.5 text-left transition-colors hover:border-border hover:bg-muted/30"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="break-words text-sm font-medium text-foreground">{doc.filename}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {doc.category ? localizeDocumentCode(doc.category, l) : commonNotSet}
+                        </p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "shrink-0 rounded-full text-[10px]",
+                          statusColors[doc.status ?? ""] ?? "border-border/60 bg-muted/25 text-muted-foreground",
+                        )}
+                      >
+                        {doc.status ? statusLabel(doc.status) : commonNotSet}
+                      </Badge>
                     </div>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "shrink-0 rounded-full text-[10px]",
-                        statusColors[doc.status ?? ""] ?? "border-border/60 bg-muted/25 text-muted-foreground",
-                      )}
-                    >
-                      {doc.status ? statusLabel(doc.status) : commonNotSet}
-                    </Badge>
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                    <span>{doc.uploaded_by_name ?? commonUnknown}</span>
-                    <span>· {formatDate(doc.created_at)}</span>
-                  </div>
-                </button>
-              ))}
+                    <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
+                      {[...metaRows, ...partyRows].map((row) => (
+                        <p key={row.label} className="break-words leading-5">
+                          <span className="font-medium text-foreground/75">{row.label}:</span>{" "}
+                          {row.value}
+                        </p>
+                      ))}
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                      <span>{doc.uploaded_by_name ?? commonUnknown}</span>
+                      <span>· {formatDate(doc.created_at)}</span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
             <div className="hidden overflow-hidden rounded-xl border border-border/50 bg-card md:block">
-              <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3 border-b border-border/60 bg-card px-4 py-2.5 font-mono">
-                {[documentsFilenameLabel, appointmentsTypeLabel, usersStatusLabel, patientsAssignedByLabel, usersCreatedLabel].map((label) => (
+              <div className="grid grid-cols-[minmax(180px,1.5fr)_minmax(120px,0.8fr)_minmax(200px,1.2fr)_minmax(220px,1.3fr)_minmax(100px,0.7fr)_minmax(150px,0.8fr)] gap-3 border-b border-border/60 bg-card px-4 py-2.5 font-mono">
+                {[
+                  documentsFilenameLabel,
+                  appointmentsTypeLabel,
+                  metaLabel("metadata", lang),
+                  metaLabel("parties", lang),
+                  usersStatusLabel,
+                  usersCreatedLabel,
+                ].map((label) => (
                   <span key={label} className="truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/80">
                     {label}
                   </span>
                 ))}
               </div>
-              {filteredDocuments.map((doc, idx) => (
-                <button
-                  key={doc.id}
-                  type="button"
-                  onClick={() =>
-                    void downloadApiFile(
-                      `/documents/${doc.id}/download`,
-                      doc.filename || "document",
-                    )
-                  }
-                  className={cn(
-                    "grid w-full grid-cols-[2fr_1fr_1fr_1fr_1fr] items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/45 focus-visible:bg-muted/45 focus-visible:outline-none",
-                    idx < filteredDocuments.length - 1 && "border-b border-border/45",
-                  )}
-                >
-                  <span className="min-w-0 truncate text-sm font-medium text-foreground">{doc.filename}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {doc.category ? localizeDocumentCode(doc.category, l) : commonNotSet}
-                  </span>
-                  <Badge
-                    variant="outline"
+              {filteredDocuments.map((doc, idx) => {
+                const metaRows = documentMetaRows(doc);
+                const partyRows = documentPartyRows(doc);
+                return (
+                  <button
+                    key={doc.id}
+                    type="button"
+                    onClick={() =>
+                      void downloadApiFile(
+                        `/documents/${doc.id}/download`,
+                        doc.filename || "document",
+                      )
+                    }
                     className={cn(
-                      "rounded-full text-[10px] w-fit",
-                      statusColors[doc.status ?? ""] ?? "border-border/60 bg-muted/25 text-muted-foreground",
+                      "grid w-full grid-cols-[minmax(180px,1.5fr)_minmax(120px,0.8fr)_minmax(200px,1.2fr)_minmax(220px,1.3fr)_minmax(100px,0.7fr)_minmax(150px,0.8fr)] items-start gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/45 focus-visible:bg-muted/45 focus-visible:outline-none",
+                      idx < filteredDocuments.length - 1 && "border-b border-border/45",
                     )}
                   >
-                    {doc.status ? statusLabel(doc.status) : commonNotSet}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">{doc.uploaded_by_name ?? commonUnknown}</span>
-                  <span className="text-xs text-muted-foreground/80">{formatDate(doc.created_at)}</span>
-                </button>
-              ))}
+                    <span className="min-w-0 break-words text-sm font-medium text-foreground">{doc.filename}</span>
+                    <span className="break-words text-xs text-muted-foreground">
+                      {doc.category ? localizeDocumentCode(doc.category, l) : commonNotSet}
+                    </span>
+                    <span className="grid gap-1 text-xs text-muted-foreground">
+                      {metaRows.map((row) => (
+                        <span key={row.label} className="break-words leading-5">
+                          <span className="font-medium text-foreground/75">{row.label}:</span>{" "}
+                          {row.value}
+                        </span>
+                      ))}
+                    </span>
+                    <span className="grid gap-1 text-xs text-muted-foreground">
+                      {partyRows.map((row) => (
+                        <span key={row.label} className="break-words leading-5">
+                          <span className="font-medium text-foreground/75">{row.label}:</span>{" "}
+                          {row.value}
+                        </span>
+                      ))}
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "rounded-full text-[10px] w-fit",
+                        statusColors[doc.status ?? ""] ?? "border-border/60 bg-muted/25 text-muted-foreground",
+                      )}
+                    >
+                      {doc.status ? statusLabel(doc.status) : commonNotSet}
+                    </Badge>
+                    <span className="grid gap-1 text-xs text-muted-foreground/80">
+                      <span>{formatDate(doc.created_at)}</span>
+                      <span className="break-words">
+                        {patientsAssignedByLabel}: {doc.uploaded_by_name ?? commonUnknown}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </>
         )}
