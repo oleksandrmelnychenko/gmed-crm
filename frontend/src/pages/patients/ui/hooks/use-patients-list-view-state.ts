@@ -108,7 +108,7 @@ export function usePatientsListViewState() {
   const [hiddenColumns, setHiddenColumns] = useVersionedLocalStorage<string[]>(
     "patients.hiddenColumns",
     DEFAULT_PATIENT_HIDDEN_COLUMNS,
-    1,
+    2,
   );
   const [frozenColumns, setFrozenColumns] = useVersionedLocalStorage<string[]>(
     "patients.frozenColumns",

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { PatientSummary } from "../model/list-model";
 
-import { buildPatientColumns } from "./patients-columns";
+import { DEFAULT_PATIENT_HIDDEN_COLUMNS, buildPatientColumns } from "./patients-columns";
 
 const translations = {
   common_active: "Активен",
@@ -74,24 +74,28 @@ describe("buildPatientColumns", () => {
     expect(html).toContain("justify-center");
   });
 
-  it("keeps patient labels on one clipped row so they do not cover the name", () => {
+  it("renders patient labels in a separate visible column", () => {
     const columns = buildPatientColumns(translations, []);
     const patientColumn = columns.find((column) => column.id === "patient");
+    const labelsColumn = columns.find((column) => column.id === "functional_labels");
+    const patientIndex = columns.findIndex((column) => column.id === "patient");
+    const labelsIndex = columns.findIndex((column) => column.id === "functional_labels");
+    const row = patient({
+      first_name: "Alexandra Alexandra Alexandra",
+      functional_labels: ["vip", "high_risk", "fall_risk"],
+      last_name: "Grau Grau Grau Grau",
+    });
 
-    const html = renderToStaticMarkup(
-      <>
-        {patientColumn?.render?.(
-          patient({
-            first_name: "Alexandra Alexandra Alexandra",
-            functional_labels: ["vip", "high_risk", "fall_risk"],
-            last_name: "Grau Grau Grau Grau",
-          }),
-        )}
-      </>,
-    );
+    expect(DEFAULT_PATIENT_HIDDEN_COLUMNS).not.toContain("functional_labels");
+    expect(labelsIndex).toBe(patientIndex + 1);
 
-    expect(html).toContain("line-clamp-2");
-    expect(html).toContain("flex-nowrap");
-    expect(html).toContain("+1");
+    const patientHtml = renderToStaticMarkup(<>{patientColumn?.render?.(row)}</>);
+    const labelsHtml = renderToStaticMarkup(<>{labelsColumn?.render?.(row)}</>);
+
+    expect(patientHtml).toContain("line-clamp-2");
+    expect(patientHtml).not.toContain("data-patient-functional-label");
+    expect(labelsHtml).toContain('data-patient-cell-render="functional_labels"');
+    expect(labelsHtml).toContain('data-patient-functional-label="vip"');
+    expect(labelsHtml).toContain("+1");
   });
 });

@@ -134,7 +134,6 @@ export const DEFAULT_PATIENT_HIDDEN_COLUMNS: string[] = [
   "nationality",
   "residence_country",
   "languages",
-  "functional_labels",
   "assigned_provider",
   "address_city",
 ];
@@ -218,10 +217,28 @@ export function buildPatientColumns(
           <div className="line-clamp-2 min-w-0 break-words text-xs font-medium leading-4 text-foreground">
             {patientDisplayName(p)}
           </div>
-          {p.functional_labels?.length ? (
-            <FunctionalLabelSummary labels={p.functional_labels} />
-          ) : null}
         </div>
+      ),
+    },
+    {
+      id: "functional_labels",
+      label: translatedOrUiText(tr, "patients_functional_labels"),
+      accessor: (p: PatientSummary) => p.functional_labels,
+      filterType: "tag_array",
+      filterOptions: dyn.labels,
+      searchable: true,
+      width: 180,
+      group: "identity",
+      render: (p: PatientSummary) => (
+        <TagListCell
+          renderId="functional_labels"
+          values={p.functional_labels ?? []}
+          format={humanizeFunctionalLabel}
+          classNameForValue={functionalLabelChipClass}
+          dataValueAttribute={normalizeFunctionalLabel}
+          emptyLabel={tr.common_not_set}
+          maxVisible={2}
+        />
       ),
     },
     {
@@ -406,27 +423,6 @@ export function buildPatientColumns(
       ),
     },
     {
-      id: "functional_labels",
-      label: translatedOrUiText(tr, "patients_functional_labels"),
-      accessor: (p: PatientSummary) => p.functional_labels,
-      filterType: "tag_array",
-      filterOptions: dyn.labels,
-      searchable: true,
-      width: 200,
-      group: "metadata",
-      render: (p: PatientSummary) => (
-        <TagListCell
-          renderId="functional_labels"
-          values={p.functional_labels ?? []}
-          format={humanizeFunctionalLabel}
-          classNameForValue={functionalLabelChipClass}
-          dataValueAttribute={normalizeFunctionalLabel}
-          emptyLabel={tr.common_not_set}
-          maxVisible={2}
-        />
-      ),
-    },
-    {
       id: "created_at",
       label: translatedOrUiText(tr, "patients_created_at"),
       accessor: (p: PatientSummary) => p.created_at,
@@ -538,40 +534,6 @@ function TagListCell({
       ))}
       {hiddenCount > 0 ? (
         <span className="shrink-0 rounded-md bg-muted/70 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-          +{hiddenCount}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-function FunctionalLabelSummary({
-  labels,
-  maxVisible = 2,
-}: {
-  labels: readonly string[];
-  maxVisible?: number;
-}) {
-  const normalized = labels.filter(Boolean);
-  const visible = normalized.slice(0, maxVisible);
-  const hiddenCount = normalized.length - visible.length;
-
-  return (
-    <div className="flex min-w-0 flex-nowrap items-center gap-1 overflow-hidden">
-      {visible.map((label) => (
-        <span
-          key={label}
-          data-patient-functional-label={normalizeFunctionalLabel(label)}
-          className={cn(
-            "max-w-[6.75rem] shrink truncate rounded-full border px-1.5 py-0.5 text-[10px] font-semibold leading-3",
-            functionalLabelChipClass(label),
-          )}
-        >
-          {humanizeFunctionalLabel(label)}
-        </span>
-      ))}
-      {hiddenCount > 0 ? (
-        <span className="shrink-0 rounded-full border border-border bg-muted/70 px-1.5 py-0.5 text-[10px] font-semibold leading-3 text-muted-foreground">
           +{hiddenCount}
         </span>
       ) : null}
