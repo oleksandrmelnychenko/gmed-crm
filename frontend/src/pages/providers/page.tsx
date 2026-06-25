@@ -6222,10 +6222,10 @@ function HeroInfoTableRow({
   children: ReactNode;
 }) {
   return (
-    <div className="grid min-w-0 content-start gap-4 px-3 py-2.5 sm:grid-cols-[8.75rem_minmax(0,1fr)]">
+    <div className="grid min-w-0 content-start gap-3 px-3 py-2.5 sm:grid-cols-[7.25rem_minmax(0,1fr)]">
       <div className="flex min-w-0 items-start gap-2 text-xs font-medium leading-5 text-foreground">
         <Icon className="mt-0.5 size-3.5 shrink-0 text-foreground/75" />
-        <span className="min-w-0 whitespace-nowrap">{label}</span>
+        <span className="min-w-0 break-words">{label}</span>
       </div>
       <div className="-mt-0.5 min-w-0 break-words text-sm font-semibold leading-5 text-foreground">
         {children}
@@ -6402,9 +6402,7 @@ function ProviderSheetHero({
             </HeroInfoTableRow>
             <HeroInfoTableRow icon={Star} label={t.providers_internal_rating}>
               <span className="break-words">
-                <span className={detail.internal_rating != null ? "text-orange-600" : undefined}>
-                  {internalRatingLabel}
-                </span>
+                <span>{internalRatingLabel}</span>
                 {detail.internal_rating_note ? (
                   <span className="font-medium"> · {detail.internal_rating_note}</span>
                 ) : null}
