@@ -7420,7 +7420,7 @@ async fn get_patient_clinical(
            FROM patient_clinical_verlauf v
            LEFT JOIN providers p ON p.id = v.provider_id
            WHERE v.patient_id = $1
-           ORDER BY v.sort_order, v.occurred_on, v.created_at"#,
+           ORDER BY v.occurred_on ASC NULLS LAST, v.created_at, v.sort_order"#,
     )
     .bind(patient_uuid)
     .fetch_all(&state.db)
@@ -8771,7 +8771,7 @@ async fn get_patient_clinical_pdf(
            FROM patient_clinical_verlauf v
            LEFT JOIN providers p ON p.id = v.provider_id
            WHERE v.patient_id = $1
-           ORDER BY v.sort_order, v.occurred_on, v.created_at"#,
+           ORDER BY v.occurred_on ASC NULLS LAST, v.created_at, v.sort_order"#,
     )
     .bind(patient_uuid)
     .fetch_all(&state.db)
