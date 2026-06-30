@@ -413,6 +413,8 @@ export function PatientOverviewCard({
                 <ul className="list-disc space-y-1 pl-3.5 marker:text-muted-foreground/50">
                   {activeRecommendations.map((rec) => {
                     const sub: string[] = [];
+                    if (rec.recommended_on)
+                      sub.push(`${tx("Дата рекомендации", "Empfehlungsdatum")}: ${rec.recommended_on}`);
                     if (rec.recommendation_type) sub.push(rec.recommendation_type);
                     sub.push(...splitLines(rec.description));
                     if (rec.due_at) sub.push(rec.due_at);
