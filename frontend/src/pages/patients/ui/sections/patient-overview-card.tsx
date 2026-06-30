@@ -16,6 +16,23 @@ import {
 
 type Bilingual = (ru: string, de: string) => string;
 
+const RECOMMENDATION_TYPE_LABELS: Record<string, { ru: string; de: string }> = {
+  consultation: { ru: "Консультация", de: "Konsultation" },
+  document: { ru: "Документ", de: "Dokument" },
+  follow_up: { ru: "Контрольный визит", de: "Kontrolltermin" },
+  imaging: { ru: "Визуализация", de: "Bildgebung" },
+  lab_test: { ru: "Лабораторный анализ", de: "Laboruntersuchung" },
+  medication_review: { ru: "Проверка медикаментов", de: "Medikationsprüfung" },
+  other: { ru: "Другое", de: "Sonstiges" },
+};
+
+function recommendationTypeLabel(value: string | null, tx: Bilingual): string | null {
+  if (!value) return null;
+  const label = RECOMMENDATION_TYPE_LABELS[value];
+  if (label) return tx(label.ru, label.de);
+  return value.replace(/_/g, " ");
+}
+
 function diagnosisStatusLabel(status: DiagnosisStatus | undefined, tx: Bilingual) {
   if (status === "chronic") return tx("хрон.", "chron.");
   if (status === "resolved") return tx("разрешено", "abgeheilt");
@@ -139,6 +156,39 @@ function SubLines({ items }: { items: string[] }) {
         <div key={index}>{item}</div>
       ))}
     </div>
+  );
+}
+
+export function PatientRecommendationOverviewItem({
+  rec,
+  tx,
+}: {
+  rec: PatientRecommendation;
+  tx: Bilingual;
+}) {
+  const sub: string[] = [];
+  const type = recommendationTypeLabel(rec.recommendation_type, tx);
+  if (type) sub.push(type);
+  sub.push(...splitLines(rec.description));
+  if (rec.due_at) sub.push(rec.due_at);
+
+  return (
+    <li className="leading-snug">
+      <span className="text-[13px] font-medium text-foreground">{rec.title}</span>
+      {rec.recommended_on ? (
+        <span className="ml-1.5 text-[11px] font-medium text-foreground">· {rec.recommended_on}</span>
+      ) : null}
+      {rec.lifecycle_status === "nicht_erfolgt" ? (
+        <span className="ml-1 text-[10px] font-medium text-rose-600">
+          ({tx("не выполнено", "nicht erfolgt")})
+        </span>
+      ) : rec.lifecycle_status === "unbekannt" ? (
+        <span className="ml-1 text-[10px] text-muted-foreground">
+          ({tx("статус неизвестен", "unbekannt")})
+        </span>
+      ) : null}
+      <SubBullets items={sub} />
+    </li>
   );
 }
 
@@ -411,29 +461,9 @@ export function PatientOverviewCard({
                 dash
               ) : (
                 <ul className="list-disc space-y-1 pl-3.5 marker:text-muted-foreground/50">
-                  {activeRecommendations.map((rec) => {
-                    const sub: string[] = [];
-                    if (rec.recommended_on)
-                      sub.push(`${tx("Дата рекомендации", "Empfehlungsdatum")}: ${rec.recommended_on}`);
-                    if (rec.recommendation_type) sub.push(rec.recommendation_type);
-                    sub.push(...splitLines(rec.description));
-                    if (rec.due_at) sub.push(rec.due_at);
-                    return (
-                      <li key={rec.id} className="leading-snug">
-                        <span className="text-[13px] font-medium text-foreground">{rec.title}</span>
-                        {rec.lifecycle_status === "nicht_erfolgt" ? (
-                          <span className="ml-1 text-[10px] font-medium text-rose-600">
-                            ({tx("не выполнено", "nicht erfolgt")})
-                          </span>
-                        ) : rec.lifecycle_status === "unbekannt" ? (
-                          <span className="ml-1 text-[10px] text-muted-foreground">
-                            ({tx("статус неизвестен", "unbekannt")})
-                          </span>
-                        ) : null}
-                        <SubBullets items={sub} />
-                      </li>
-                    );
-                  })}
+                  {activeRecommendations.map((rec) => (
+                    <PatientRecommendationOverviewItem key={rec.id} rec={rec} tx={tx} />
+                  ))}
                 </ul>
               )}
             </div>

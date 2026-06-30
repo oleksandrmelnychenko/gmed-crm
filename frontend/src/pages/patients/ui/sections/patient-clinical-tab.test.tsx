@@ -15,6 +15,7 @@ import {
   PatientRecommendationsSection,
   clinicalMedicalProviderRows,
 } from "./patient-clinical-tab";
+import { PatientRecommendationOverviewItem } from "./patient-overview-card";
 
 function provider(overrides: Partial<ProviderSummary> = {}): ProviderSummary {
   return {
@@ -329,5 +330,31 @@ describe("PatientRecommendationsSection", () => {
 
     expect(html).toContain("Добавить рекомендацию");
     expect(html).not.toContain(">Empfehlung<");
+  });
+});
+
+describe("PatientRecommendationOverviewItem", () => {
+  it("keeps the recommendation date beside the title and labels the type", () => {
+    const html = renderToStaticMarkup(
+      <ul>
+        <PatientRecommendationOverviewItem
+          rec={recommendation({
+            description: "bis zur Wiedererlangung des alltäglichen Aktivitätsniveaus",
+            recommendation_type: "follow_up",
+            recommended_on: "2026-06-03",
+            title: "Thromboseprophylaxe",
+          })}
+          tx={(ru) => ru}
+        />
+      </ul>,
+    );
+
+    expect(html).toContain("Thromboseprophylaxe");
+    expect(html).toContain("2026-06-03");
+    expect(html).toContain("Контрольный визит");
+    expect(html).not.toContain("Дата рекомендации");
+    expect(html).not.toContain("follow_up");
+    expect(html.indexOf("2026-06-03")).toBeGreaterThan(html.indexOf("Thromboseprophylaxe"));
+    expect(html.indexOf("2026-06-03")).toBeLessThan(html.indexOf("bis zur"));
   });
 });
