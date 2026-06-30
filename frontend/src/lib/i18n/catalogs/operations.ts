@@ -393,6 +393,7 @@ export interface OperationsTranslations {
   lead_locale: string;
   lead_submitted_at: string;
   lead_from_website_wizard: string;
+  lead_from_website_contact_form: string;
   lead_healthcare_consent_available: string;
   lead_privacy_practices_accepted: string;
   lead_save_gate_data: string;
@@ -920,6 +921,7 @@ export const operationsRu: OperationsTranslations = {
   lead_locale: "Локаль",
   lead_submitted_at: "Отправлено",
   lead_from_website_wizard: "Из мастера на сайте",
+  lead_from_website_contact_form: "Из контактной формы сайта",
   lead_healthcare_consent_available: "Согласие на медицинскую обработку есть",
   lead_privacy_practices_accepted: "Правила приватности приняты",
   lead_save_gate_data: "Сохранить данные гейта",
@@ -1460,6 +1462,7 @@ export const operationsDe: OperationsTranslations = {
   lead_locale: "Locale",
   lead_submitted_at: "Eingereicht am",
   lead_from_website_wizard: "Aus dem Website-Assistenten",
+  lead_from_website_contact_form: "Aus dem Website-Kontaktformular",
   lead_healthcare_consent_available: "Medizinische Einwilligung liegt vor",
   lead_privacy_practices_accepted: "Datenschutzpraxis akzeptiert",
   lead_save_gate_data: "Gate-Daten speichern",

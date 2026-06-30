@@ -182,7 +182,8 @@ async fn public_lead_intake_stores_contact_form_submissions_as_leads() {
     // The public intake route reads the shared token from process env.
     // Integration tests in this crate do not otherwise mutate this key.
     unsafe {
-        std::env::set_var("LEAD_INTAKE_TOKEN", token);
+        std::env::remove_var("LEAD_INTAKE_TOKEN");
+        std::env::set_var("GMED_LEAD_INTAKE_TOKEN", token);
     }
 
     let (status, created) = public_multipart_request(

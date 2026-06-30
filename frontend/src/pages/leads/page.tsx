@@ -1066,11 +1066,21 @@ function useLeadsPageContent() {
                   </div>
                 </section>
 
-                {detail.intake_source === "visitor_facade" ? (
+                {detail.intake_source === "visitor_facade" || detail.intake_source === "website_contact" ? (
                   <section className={cardClass("p-4")}>
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-700">
-                        {t.lead_from_website_wizard}
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full",
+                          detail.intake_source === "website_contact"
+                            ? "border-amber-200 bg-amber-50 text-amber-700"
+                            : "border-sky-200 bg-sky-50 text-sky-700",
+                        )}
+                      >
+                        {detail.intake_source === "website_contact"
+                          ? t.lead_from_website_contact_form
+                          : t.lead_from_website_wizard}
                       </Badge>
                       {detail.flow ? (
                         <Badge variant="outline" className="rounded-full">

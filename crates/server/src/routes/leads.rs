@@ -1641,10 +1641,14 @@ fn required_env(name: &str) -> Option<String> {
         .and_then(|v| if v.trim().is_empty() { None } else { Some(v) })
 }
 
+fn required_env_any(names: &[&str]) -> Option<String> {
+    names.iter().find_map(|name| required_env(name))
+}
+
 #[allow(clippy::result_large_err)]
 fn check_shared_token(headers: &HeaderMap) -> Result<(), axum::response::Response> {
-    let Some(expected) = required_env("LEAD_INTAKE_TOKEN") else {
-        tracing::error!("LEAD_INTAKE_TOKEN not configured");
+    let Some(expected) = required_env_any(&["LEAD_INTAKE_TOKEN", "GMED_LEAD_INTAKE_TOKEN"]) else {
+        tracing::error!("LEAD_INTAKE_TOKEN / GMED_LEAD_INTAKE_TOKEN not configured");
         return Err(err(
             StatusCode::SERVICE_UNAVAILABLE,
             "Intake endpoint not configured",
