@@ -1,9 +1,10 @@
 import { useEffect, useState, type JSX } from "react";
 
 import { Button } from "@/components/ui/button";
+import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
-import { Copy, Pencil, Plus } from "lucide-react";
+import { Copy, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { PatientSheetScaffold } from "@/pages/patients/ui/shared/patient-sheet-scaffold";
 import type { ClinicalNarrative } from "@/pages/patients/data/patient-clinical";
@@ -91,12 +92,14 @@ export function AnamneseSection({
   active,
   canManage,
   lang,
+  onDelete,
   onSave,
   loadHistory,
 }: {
   active: ClinicalNarrative | null;
   canManage: boolean;
   lang: string;
+  onDelete?: (id: string) => Promise<unknown>;
   onSave: (n: ClinicalNarrative) => Promise<unknown>;
   loadHistory: () => Promise<ClinicalNarrative[]>;
 }): JSX.Element {
@@ -105,6 +108,8 @@ export function AnamneseSection({
 
   const [editing, setEditing] = useState<ClinicalNarrative | null>(null);
   const [busy, setBusy] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<ClinicalNarrative | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<ClinicalNarrative[]>([]);
@@ -158,6 +163,25 @@ export function AnamneseSection({
       );
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function confirmDelete() {
+    const id = deleteTarget?.id;
+    if (!id || !onDelete) return;
+
+    setDeleteBusy(true);
+    try {
+      await onDelete(id);
+      setHistory((current) => current.filter((version) => version.id !== id));
+      setEditing((current) => (current?.id === id ? null : current));
+      setDeleteTarget(null);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : tx("Не удалось удалить", "Löschen fehlgeschlagen"),
+      );
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
@@ -217,6 +241,19 @@ export function AnamneseSection({
                     <Pencil className="size-3.5" />
                     {tx("Редактировать", "Bearbeiten")}
                   </Button>
+                  {active.id && onDelete ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="size-8 rounded-lg border-rose-200 p-0 text-rose-700 hover:bg-rose-50"
+                      aria-label={tx("Удалить анамнез", "Anamnese löschen")}
+                      title={tx("Удалить анамнез", "Anamnese löschen")}
+                      onClick={() => setDeleteTarget(active)}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  ) : null}
                 </>
               ) : null}
             </>
@@ -348,6 +385,19 @@ export function AnamneseSection({
                           >
                             <Pencil className="size-3.5" />
                           </Button>
+                          {version.id && onDelete ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="size-7 rounded-md p-0 text-rose-700 hover:bg-rose-50"
+                              aria-label={tx("Удалить анамнез", "Anamnese löschen")}
+                              title={tx("Удалить анамнез", "Anamnese löschen")}
+                              onClick={() => setDeleteTarget(version)}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          ) : null}
                         </div>
                       ) : null}
                     </li>
@@ -425,6 +475,23 @@ export function AnamneseSection({
           </div>
         ) : null}
       </PatientSheetScaffold>
+
+      <DirtyDismissConfirmDialog
+        open={Boolean(deleteTarget)}
+        title={tx("Удалить анамнез?", "Anamnese löschen?")}
+        message={tx(
+          "Версия анамнеза будет удалена. Если она активная, система выберет последнюю доступную версию.",
+          "Diese Anamnese-Version wird gelöscht. Wenn sie aktiv ist, wählt das System die letzte verfügbare Version.",
+        )}
+        cancelLabel={tx("Отмена", "Abbrechen")}
+        confirmLabel={deleteBusy ? tx("Удаление…", "Löschen…") : tx("Удалить", "Löschen")}
+        onCancel={() => {
+          if (!deleteBusy) setDeleteTarget(null);
+        }}
+        onConfirm={() => {
+          if (!deleteBusy) void confirmDelete();
+        }}
+      />
     </section>
   );
 }

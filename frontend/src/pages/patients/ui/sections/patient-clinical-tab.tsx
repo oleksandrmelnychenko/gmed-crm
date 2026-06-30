@@ -38,8 +38,8 @@ import {
 } from "../../data/medication-options";
 
 import {
-  blankNarrative,
   createPatientRecommendation,
+  deletePatientNarrative,
   deletePatientRecommendation,
   fetchAllDoctors,
   fetchNarrativeHistory,
@@ -1529,7 +1529,7 @@ export function PatientClinicalTab({
   const [examinations, setExaminations] = useState<ClinicalExamination[]>([]);
   const [procedures, setProcedures] = useState<ClinicalProcedure[]>([]);
   const [verlauf, setVerlauf] = useState<ClinicalVerlaufEntry[]>([]);
-  const [narrative, setNarrative] = useState<ClinicalNarrative>(blankNarrative());
+  const [narrative, setNarrative] = useState<ClinicalNarrative | null>(null);
   const [recommendations, setRecommendations] = useState<PatientRecommendation[]>([]);
   const [vitalsHistory, setVitalsHistory] = useState<PatientVitalMeasurement[]>([]);
   const [riskScores, setRiskScores] = useState<PatientRiskScore[]>([]);
@@ -1576,7 +1576,7 @@ export function PatientClinicalTab({
         setExaminations(clinical.examinations ?? []);
         setProcedures(clinical.procedures ?? []);
         setVerlauf((current) => mergeVerlaufDoctorAttribution(clinical.verlauf ?? [], current));
-        setNarrative(clinical.narrative ?? blankNarrative());
+        setNarrative(clinical.narrative ?? null);
         setRecommendations(recs ?? []);
         setProviders(clinicalMedicalProviderRows(providerRows ?? []));
         setAllDoctors(doctorRows ?? []);
@@ -1949,6 +1949,11 @@ export function PatientClinicalTab({
         onSave={async (next) => {
           const saved = await savePatientNarrative(patientId, next);
           setNarrative(saved);
+          setVersion((current) => current + 1);
+        }}
+        onDelete={async (narrativeId) => {
+          const activeNarrative = await deletePatientNarrative(patientId, narrativeId);
+          setNarrative(activeNarrative);
           setVersion((current) => current + 1);
         }}
         loadHistory={() => fetchNarrativeHistory(patientId)}

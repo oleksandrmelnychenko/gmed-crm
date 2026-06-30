@@ -327,6 +327,12 @@ export function savePatientNarrative(patientId: string, narrative: ClinicalNarra
   });
 }
 
+export function deletePatientNarrative(patientId: string, narrativeId: string) {
+  return postJson<ClinicalNarrative | null>(
+    `/patients/${patientId}/narrative/${narrativeId}/delete`,
+  );
+}
+
 export function savePatientVerlauf(patientId: string, items: ClinicalVerlaufEntry[]) {
   return postJson(`/patients/${patientId}/verlauf`, {
     items: items.map((item) => ({

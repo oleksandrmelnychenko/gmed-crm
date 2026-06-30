@@ -58,6 +58,10 @@ pub fn router() -> Router<AppState> {
             "/patients/{patient_id}/narrative/history",
             get(list_patient_narrative_history),
         )
+        .route(
+            "/patients/{patient_id}/narrative/{narrative_id}/delete",
+            post(delete_patient_narrative),
+        )
         .route("/patients/{patient_id}/verlauf", post(save_patient_verlauf))
         .route(
             "/patients/{patient_id}/procedures",
@@ -5692,6 +5696,7 @@ async fn get_patient_timeline(
                        WHEN 'save_patient_procedures' THEN 'Therapie aktualisiert'
                        WHEN 'save_patient_clinical_warnings' THEN 'Allergien/CAVE aktualisiert'
                        WHEN 'save_patient_narrative' THEN 'Anamnese aktualisiert'
+                       WHEN 'delete_patient_narrative' THEN 'Anamnese gelöscht'
                        WHEN 'save_patient_verlauf' THEN 'Verlauf aktualisiert'
                        ELSE 'Klinisches Profil aktualisiert'
                    END AS title,
@@ -5707,7 +5712,7 @@ async fn get_patient_timeline(
                   'save_patient_diagnoses', 'save_patient_medications',
                   'save_patient_examinations', 'save_patient_procedures',
                   'save_patient_clinical_warnings', 'save_patient_narrative',
-                  'save_patient_verlauf'
+                  'delete_patient_narrative', 'save_patient_verlauf'
               )
         "#;
     let events_cte = if can_view_clinical {
@@ -8282,6 +8287,127 @@ async fn list_patient_narrative_history(
 
     let versions: Vec<serde_json::Value> = rows.iter().map(narrative_version_json).collect();
     Json(versions).into_response()
+}
+
+async fn delete_patient_narrative(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((patient_uuid, narrative_uuid)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+        return e;
+    }
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin patient narrative delete tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    if let Err(e) = sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
+        .bind(patient_uuid.to_string())
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "lock patient narrative delete");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    let deleted = match sqlx::query(
+        "DELETE FROM patient_clinical_narrative WHERE id = $1 AND patient_id = $2 RETURNING id",
+    )
+    .bind(narrative_uuid)
+    .bind(patient_uuid)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, narrative_id = %narrative_uuid, "delete patient narrative");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if deleted.is_none() {
+        return err(StatusCode::NOT_FOUND, "Version not found");
+    }
+
+    let active_row = match sqlx::query(
+        r#"SELECT id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
+                  beurteilung, is_active, created_at, updated_at
+           FROM patient_clinical_narrative
+           WHERE patient_id = $1 AND is_active = true
+           ORDER BY updated_at DESC
+           LIMIT 1"#,
+    )
+    .bind(patient_uuid)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "reload active patient narrative after delete");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    let active_row = if active_row.is_some() {
+        active_row
+    } else {
+        match sqlx::query(
+            r#"UPDATE patient_clinical_narrative
+               SET is_active = true
+               WHERE id = (
+                   SELECT id
+                   FROM patient_clinical_narrative
+                   WHERE patient_id = $1
+                   ORDER BY updated_at DESC, created_at DESC
+                   LIMIT 1
+               )
+               RETURNING id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
+                         beurteilung, is_active, created_at, updated_at"#,
+        )
+        .bind(patient_uuid)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(row) => row,
+            Err(e) => {
+                tracing::error!(error = %e, patient_id = %patient_uuid, "activate fallback patient narrative after delete");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    };
+
+    let active = active_row.as_ref().map(narrative_version_json);
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient narrative delete");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "delete_patient_narrative",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({ "narrative_id": narrative_uuid.to_string() }),
+    ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.clinical_updated",
+        patient_uuid,
+        json!({ "section": "narrative" }),
+    )
+    .await;
+    Json(active).into_response()
 }
 
 #[derive(Deserialize)]

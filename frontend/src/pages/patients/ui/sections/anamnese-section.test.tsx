@@ -40,6 +40,7 @@ describe("AnamneseSection", () => {
         canManage
         lang="ru"
         loadHistory={async () => []}
+        onDelete={async () => undefined}
         onSave={async () => undefined}
       />,
     );
@@ -47,6 +48,7 @@ describe("AnamneseSection", () => {
     expect(html).toContain("Последнее обновление");
     expect(html).toContain("Активная версия");
     expect(html).toContain("Копировать");
+    expect(html).toContain("Удалить анамнез");
     expect(html).toContain("Актуальный анамнез");
   });
 });

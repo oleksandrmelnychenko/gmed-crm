@@ -1222,7 +1222,10 @@ async fn patient_clinical_narrative_upserts() {
         body["verlauf"][0]["doctor_name"].as_str(),
         Some(expected_doctor_name.as_str())
     );
-    assert_eq!(body["verlauf"][0]["doctor_title"].as_str(), Some("Dr. med."));
+    assert_eq!(
+        body["verlauf"][0]["doctor_title"].as_str(),
+        Some("Dr. med.")
+    );
     assert_eq!(
         body["verlauf"][0]["doctor_fachbereich"].as_str(),
         Some("Orthopaedie und Unfallchirurgie")
@@ -1238,6 +1241,80 @@ async fn patient_clinical_narrative_upserts() {
     // Anamnese is now versioned: the second save keeps the old (inactive) row
     // and adds a new active one, so two rows remain (not one upsert).
     assert_eq!(count, 2);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/narrative/history"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let versions = body.as_array().expect("narrative history array");
+    assert_eq!(versions.len(), 2);
+    let active_id = versions
+        .iter()
+        .find(|version| version["is_active"].as_bool() == Some(true))
+        .and_then(|version| version["id"].as_str())
+        .expect("active narrative id")
+        .to_string();
+    let inactive_id = versions
+        .iter()
+        .find(|version| version["is_active"].as_bool() == Some(false))
+        .and_then(|version| version["id"].as_str())
+        .expect("inactive narrative id")
+        .to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/narrative/{active_id}/delete"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["id"].as_str(), Some(inactive_id.as_str()));
+    assert_eq!(body["is_active"], true);
+    assert_eq!(
+        body["anamnese_aktuelle"],
+        "Fieber und Husten seit zwei Tagen."
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["narrative"]["id"].as_str(), Some(inactive_id.as_str()));
+    assert_eq!(body["narrative"]["is_active"], true);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/narrative/{inactive_id}/delete"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.is_null());
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["narrative"].is_null());
 }
 
 #[tokio::test]
