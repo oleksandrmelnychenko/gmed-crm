@@ -14,31 +14,16 @@ import {
 import { AdminInlineMetric } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  CountBadge,
-  EmptyCell,
-} from "@/components/ui-shell";
 import type { Translations } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import type { PatientLegalStatus } from "../../model/legal-status";
 import type { PatientDetail } from "../../model/list-model";
-import type {
-  PatientCardEntry,
-  PatientMedicalOrder,
-  PatientRiskScore,
-  PatientVitalMeasurement,
-} from "../../model/detail-resource-types";
 import { LegalStatusPill } from "../shared/legal-status-pill";
 import { FormSection, humanizeFunctionalLabel } from "../shared/patient-form-primitives";
 
 const loadPatientLegalPreviewSheets = () => import("../sheets/patient-legal-preview-sheets");
 const loadPatientLegalStatusSheet = () => import("../sheets/patient-legal-status-sheet");
-const loadPatientVitalsSheet = () => import("../sheets/patient-vitals-sheet");
-const loadPatientCaveNotesSheet = () => import("../sheets/patient-cave-notes-sheet");
-const loadPatientCardEntrySheet = () => import("../sheets/patient-card-entry-sheet");
-const loadPatientMedicalOrderSheet = () => import("../sheets/patient-medical-order-sheet");
-const loadPatientRiskScoreSheet = () => import("../sheets/patient-risk-score-sheet");
 const loadPatientNotesSheet = () => import("../sheets/patient-notes-sheet");
 
 const LazyPatientDocumentsPreviewSheet = lazy(async () => {
@@ -61,31 +46,6 @@ const LazyPatientLegalStatusSheet = lazy(async () => {
   return { default: mod.PatientLegalStatusSheet };
 });
 
-const LazyPatientVitalsSheet = lazy(async () => {
-  const mod = await loadPatientVitalsSheet();
-  return { default: mod.PatientVitalsSheet };
-});
-
-const LazyPatientCaveNotesSheet = lazy(async () => {
-  const mod = await loadPatientCaveNotesSheet();
-  return { default: mod.PatientCaveNotesSheet };
-});
-
-const LazyPatientCardEntrySheet = lazy(async () => {
-  const mod = await loadPatientCardEntrySheet();
-  return { default: mod.PatientCardEntrySheet };
-});
-
-const LazyPatientMedicalOrderSheet = lazy(async () => {
-  const mod = await loadPatientMedicalOrderSheet();
-  return { default: mod.PatientMedicalOrderSheet };
-});
-
-const LazyPatientRiskScoreSheet = lazy(async () => {
-  const mod = await loadPatientRiskScoreSheet();
-  return { default: mod.PatientRiskScoreSheet };
-});
-
 const LazyPatientNotesSheet = lazy(async () => {
   const mod = await loadPatientNotesSheet();
   return { default: mod.PatientNotesSheet };
@@ -93,13 +53,8 @@ const LazyPatientNotesSheet = lazy(async () => {
 
 type LocalizeFn = (key: string) => string;
 type DateFormatter = (value?: string | null, fallback?: string) => string;
-type DateTimeFormatter = (value?: string | null, fallback?: string) => string;
 type StatusLabelFn = (status: string) => string;
 type FieldValueFn = (value: string | string[] | null | undefined, fallback: string) => string;
-type NumberFormatter = (
-  value?: number | null,
-  options?: Intl.NumberFormatOptions,
-) => string | null;
 type ToggleHandler = (open: boolean) => void;
 type PatientProfileContact = NonNullable<PatientDetail["contacts"]>[number];
 type LegalStatusChecklistItem = {
@@ -286,34 +241,19 @@ type PatientProfileTabProps = {
   profileControls: {
     canEditPatientProfile: boolean;
     canExportPatientCompliance: boolean;
-    canManagePatientCardEntries: boolean;
-    canManagePatientMedicalOrders: boolean;
-    canManagePatientRiskScores: boolean;
-    canManagePatientVitals: boolean;
     canOpenComplianceWorkspace: boolean;
     canViewContracts: boolean;
     canViewDocuments: boolean;
     canViewInvoices: boolean;
-    hasClinicalSurface: boolean;
   };
-  cardEntries: PatientCardEntry[];
-  cardEntrySheetOpen: boolean;
-  caveSheetOpen: boolean;
-  clinicalSurfaceItemCount: number;
   complianceExportBusy: boolean;
   contractsPreviewOpen: boolean;
   detail: PatientDetail;
   docsPreviewOpen: boolean;
   fieldValue: FieldValueFn;
   formatDate: DateFormatter;
-  formatDateTime: DateTimeFormatter;
-  formatVitalNumber: NumberFormatter;
   genderLabel: (value: string | null | undefined, tr: Record<string, string>) => string;
   handleExportPatientCompliance: () => void | Promise<void>;
-  handleUpdatePatientMedicalOrderStatus: (
-    orderId: string,
-    nextStatus: "completed" | "cancelled",
-  ) => void | Promise<void>;
   id?: string;
   insuranceLabel: (value: string | null | undefined, tr: Record<string, string>) => string;
   invoicesPreviewOpen: boolean;
@@ -326,51 +266,28 @@ type PatientProfileTabProps = {
     ratio: number;
   };
   legalStatusSheetOpen: boolean;
-  medicalOrderActionId: string;
-  medicalOrderSheetOpen: boolean;
-  medicalOrders: PatientMedicalOrder[];
   notesSheetOpen: boolean;
-  onCardEntrySheetOpenChange: ToggleHandler;
-  onCaveSheetOpenChange: ToggleHandler;
   onContractsPreviewOpenChange: ToggleHandler;
   onDocsPreviewOpenChange: ToggleHandler;
   onInvoicesPreviewOpenChange: ToggleHandler;
   onLegalStatusSheetOpenChange: ToggleHandler;
-  onMedicalOrderSheetOpenChange: ToggleHandler;
   onNotesSheetOpenChange: ToggleHandler;
-  onRiskScoreSheetOpenChange: ToggleHandler;
-  onVitalsSheetOpenChange: ToggleHandler;
   openProfileEditor: () => void;
-  patientCardEntryCategoryBadgeClass: (category: string) => string;
-  patientCardEntryCategoryLabel: (category: string) => string;
   patientDetailStatusLabel: StatusLabelFn;
-  patientMedicalOrderTypeLabel: (orderType: string) => string;
-  patientRiskScoreTypeLabel: (scoreType: string) => string;
   reload: () => void;
-  riskScoreSheetOpen: boolean;
-  riskScores: PatientRiskScore[];
   staffGo: (to: string) => void;
-  statusBadgeClasses: Record<string, string>;
   t: Translations;
   tr: Record<string, string>;
-  vitalsHistory: PatientVitalMeasurement[];
-  vitalsSheetOpen: boolean;
 };
 
 function usePatientProfileTabContent({
   profileControls,
-  cardEntries,
-  cardEntrySheetOpen,
-  caveSheetOpen,
   complianceExportBusy,
   contractsPreviewOpen,
   detail,
   docsPreviewOpen,
   fieldValue,
-  formatDateTime,
-  formatVitalNumber,
   handleExportPatientCompliance,
-  handleUpdatePatientMedicalOrderStatus,
   id,
   insuranceLabel,
   invoicesPreviewOpen,
@@ -379,42 +296,21 @@ function usePatientProfileTabContent({
   legalStatusChecklist,
   legalStatusCompletion,
   legalStatusSheetOpen,
-  medicalOrderActionId,
-  medicalOrderSheetOpen,
-  medicalOrders,
   notesSheetOpen,
-  onCardEntrySheetOpenChange,
-  onCaveSheetOpenChange,
   onContractsPreviewOpenChange,
   onDocsPreviewOpenChange,
   onInvoicesPreviewOpenChange,
   onLegalStatusSheetOpenChange,
-  onMedicalOrderSheetOpenChange,
   onNotesSheetOpenChange,
-  onRiskScoreSheetOpenChange,
-  onVitalsSheetOpenChange,
   openProfileEditor,
-  patientCardEntryCategoryBadgeClass,
-  patientCardEntryCategoryLabel,
   patientDetailStatusLabel,
-  patientMedicalOrderTypeLabel,
-  patientRiskScoreTypeLabel,
   reload,
-  riskScoreSheetOpen,
-  riskScores,
-  statusBadgeClasses,
   t,
   tr,
-  vitalsHistory,
-  vitalsSheetOpen,
 }: PatientProfileTabProps) {
   const {
     canEditPatientProfile,
     canExportPatientCompliance,
-    canManagePatientCardEntries,
-    canManagePatientMedicalOrders,
-    canManagePatientRiskScores,
-    canManagePatientVitals,
     canOpenComplianceWorkspace,
     canViewContracts,
     canViewDocuments,
@@ -440,31 +336,6 @@ function usePatientProfileTabContent({
   function handleLegalStatusSheetOpenChange(open: boolean) {
     if (open) void loadPatientLegalStatusSheet();
     onLegalStatusSheetOpenChange(open);
-  }
-
-  function handleVitalsSheetOpenChange(open: boolean) {
-    if (open) void loadPatientVitalsSheet();
-    onVitalsSheetOpenChange(open);
-  }
-
-  function handleCaveSheetOpenChange(open: boolean) {
-    if (open) void loadPatientCaveNotesSheet();
-    onCaveSheetOpenChange(open);
-  }
-
-  function handleCardEntrySheetOpenChange(open: boolean) {
-    if (open) void loadPatientCardEntrySheet();
-    onCardEntrySheetOpenChange(open);
-  }
-
-  function handleMedicalOrderSheetOpenChange(open: boolean) {
-    if (open) void loadPatientMedicalOrderSheet();
-    onMedicalOrderSheetOpenChange(open);
-  }
-
-  function handleRiskScoreSheetOpenChange(open: boolean) {
-    if (open) void loadPatientRiskScoreSheet();
-    onRiskScoreSheetOpenChange(open);
   }
 
   function handleNotesSheetOpenChange(open: boolean) {
@@ -763,501 +634,7 @@ function usePatientProfileTabContent({
           />
         </Suspense>
       ) : null}
-      {id && canManagePatientVitals && vitalsSheetOpen ? (
-        <Suspense fallback={null}>
-          <LazyPatientVitalsSheet
-            patientId={id}
-            open={vitalsSheetOpen}
-            onOpenChange={handleVitalsSheetOpenChange}
-            onSaved={reload}
-          />
-        </Suspense>
-      ) : null}
-      {id && canEditPatientProfile && caveSheetOpen ? (
-        <Suspense fallback={null}>
-          <LazyPatientCaveNotesSheet
-            patientId={id}
-            initial={detail.clinical_warnings ?? ""}
-            open={caveSheetOpen}
-            onOpenChange={handleCaveSheetOpenChange}
-            onSaved={reload}
-          />
-        </Suspense>
-      ) : null}
 
-      {canManagePatientVitals || detail.clinical_warnings || vitalsHistory.length > 0 ? (
-        <div className="space-y-6">
-          <FormSection
-            title={t.patient_profile_cave_notes}
-            accessory={
-              canEditPatientProfile ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-8 rounded-lg gap-1.5"
-                  onClick={() => handleCaveSheetOpenChange(true)}
-                >
-                  <Pencil className="size-3.5" />
-                  {t.patient_profile_update}
-                </Button>
-              ) : null
-            }
-          >
-            <div className="rounded-xl border border-rose-200 bg-rose-50/70 p-4">
-              {detail.clinical_warnings ? (
-                <p className="whitespace-pre-wrap text-sm text-rose-900">{detail.clinical_warnings}</p>
-              ) : (
-                <p className="text-sm text-rose-700">
-                  {t.patient_profile_no_active_cave_notes_documented}
-                </p>
-              )}
-            </div>
-          </FormSection>
-
-          <FormSection
-            title={t.patient_profile_vitals_history}
-            accessory={
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="rounded-full border-border/60 bg-muted/25 text-foreground">
-                  {vitalsHistory.length} {l("patients_entries_count_label")}
-                </Badge>
-                {canManagePatientVitals ? (
-                  <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleVitalsSheetOpenChange(true)}>
-                    <Plus className="size-3.5" />
-                    {t.patient_profile_add}
-                  </Button>
-                ) : null}
-              </div>
-            }
-          >
-            {vitalsHistory.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-6 text-sm text-muted-foreground">
-                {t.patient_profile_no_vitals_have_been_recorded_for_this_patient_yet}
-              </div>
-            ) : null}
-
-            {vitalsHistory.length > 0 ? (
-              <div className="max-h-[540px] overflow-y-auto rounded-xl border border-border bg-card">
-                {vitalsHistory.map((item) => {
-                  const vitalMetrics = [
-                    item.bp_systolic != null && item.bp_diastolic != null
-                      ? {
-                          label: l("patients_bp"),
-                          value: `${formatVitalNumber(item.bp_systolic, { maximumFractionDigits: 0 }) ?? t.common_not_set}/${
-                            formatVitalNumber(item.bp_diastolic, { maximumFractionDigits: 0 }) ?? t.common_not_set
-                          }`,
-                        }
-                      : null,
-                    item.heart_rate != null
-                      ? {
-                          label: l("patients_heart_rate"),
-                          value: formatVitalNumber(item.heart_rate, { maximumFractionDigits: 0 }) ?? t.common_not_set,
-                        }
-                      : null,
-                    item.weight_kg != null
-                      ? {
-                          label: l("patients_weight"),
-                          value: `${formatVitalNumber(item.weight_kg) ?? t.common_not_set} kg`,
-                        }
-                      : null,
-                    item.height_cm != null
-                      ? {
-                          label: l("patients_height"),
-                          value: `${formatVitalNumber(item.height_cm) ?? t.common_not_set} cm`,
-                        }
-                      : null,
-                    item.bmi != null
-                      ? {
-                          label: l("patients_bmi_label"),
-                          value: formatVitalNumber(item.bmi) ?? t.common_not_set,
-                        }
-                      : null,
-                  ].filter((metric): metric is { label: string; value: string } => Boolean(metric));
-
-                  return (
-                    <div
-                      key={item.id}
-                      className="grid gap-3 border-b border-border/60 px-4 py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_minmax(220px,auto)] md:items-center"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                          <p className="text-sm font-medium text-foreground">
-                            {formatDateTime(item.measured_at, t.common_not_set)}
-                          </p>
-                          <span className="size-1 rounded-full bg-muted-foreground/35" />
-                          <span className="text-xs text-muted-foreground">
-                            {t.patient_profile_recorded_by} {item.recorded_by_name ?? t.common_unknown}
-                          </span>
-                        </div>
-                        {item.notes ? (
-                          <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
-                            {item.notes}
-                          </p>
-                        ) : null}
-                      </div>
-                      <div className="flex min-w-0 flex-wrap gap-1.5 md:justify-end">
-                        {vitalMetrics.length > 0 ? (
-                          vitalMetrics.map((metric) => (
-                            <span
-                              key={metric.label}
-                              className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/25 px-2 py-1 text-xs text-muted-foreground"
-                            >
-                              <span>{metric.label}</span>
-                              <span className="font-medium text-foreground">{metric.value}</span>
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : null}
-          </FormSection>
-        </div>
-      ) : null}
-
-      {canManagePatientCardEntries || cardEntries.length > 0 ? (
-        <FormSection
-          title={t.patient_profile_clinical_card_log}
-          accessory={
-            <div className="flex items-center gap-2">
-              <CountBadge>
-                {cardEntries.length} {l("patients_entries_count_label")}
-              </CountBadge>
-              {canManagePatientCardEntries ? (
-                <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleCardEntrySheetOpenChange(true)}>
-                  <Plus className="size-3.5" />
-                  {t.patient_profile_add}
-                </Button>
-              ) : null}
-            </div>
-          }
-        >
-          {cardEntries.length === 0 ? (
-            <EmptyCell>{t.patient_profile_no_clinical_card_log_entries_have_been_recorded_for_this_patient}</EmptyCell>
-          ) : (
-            <div className="space-y-3">
-              {cardEntries.slice(0, 6).map((entry) => (
-                <article
-                  key={entry.id}
-                  className="rounded-xl border border-border bg-card"
-                >
-                  <div className="grid gap-4 p-4 md:grid-cols-[minmax(0,1fr)_180px]">
-                    <div className="min-w-0">
-                      <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <span className="h-px w-8 bg-border" />
-                        <Badge
-                          variant="outline"
-                          className={cn("rounded-full text-[10px]", patientCardEntryCategoryBadgeClass(entry.category))}
-                        >
-                          {patientCardEntryCategoryLabel(entry.category)}
-                        </Badge>
-                        {entry.source ? (
-                          <Badge
-                            variant="outline"
-                            className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
-                          >
-                            {t.patient_profile_source}:{" "}
-                            <span className="ml-1 font-semibold text-foreground">{entry.source}</span>
-                          </Badge>
-                        ) : null}
-                      </div>
-
-                      <p className="mt-3 whitespace-pre-wrap text-sm font-medium leading-6 text-foreground">
-                        {entry.content}
-                      </p>
-                    </div>
-
-                    <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
-                      <div>
-                        <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                          {l("patients_entry")}
-                        </span>
-                        <p className="mt-2 text-sm font-semibold leading-5 text-foreground">
-                          {formatDateTime(entry.entry_date, t.common_not_set)}
-                        </p>
-                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                          {entry.author_name ?? t.common_unknown}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </FormSection>
-      ) : null}
-
-      {canManagePatientCardEntries && id && cardEntrySheetOpen ? (
-        <Suspense fallback={null}>
-          <LazyPatientCardEntrySheet
-            patientId={id}
-            open={cardEntrySheetOpen}
-            onOpenChange={handleCardEntrySheetOpenChange}
-            onSaved={reload}
-          />
-        </Suspense>
-      ) : null}
-
-      {canManagePatientMedicalOrders || medicalOrders.length > 0 ? (
-        <FormSection
-          title={t.patient_profile_medical_orders}
-          accessory={
-            <div className="flex items-center gap-2">
-              <CountBadge>
-                {medicalOrders.length} {l("patients_orders_count_label")}
-              </CountBadge>
-              {canManagePatientMedicalOrders ? (
-                <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleMedicalOrderSheetOpenChange(true)}>
-                  <Plus className="size-3.5" />
-                  {t.patient_profile_add}
-                </Button>
-              ) : null}
-            </div>
-          }
-        >
-          {medicalOrders.length === 0 ? (
-            <EmptyCell>{t.patient_profile_no_medical_orders_have_been_recorded_for_this_patient_yet}</EmptyCell>
-          ) : (
-            <div className="space-y-3">
-              {medicalOrders.map((order) => (
-                <article
-                  key={order.id}
-                  className="rounded-xl border border-border bg-card"
-                >
-                  <div className="grid gap-4 p-4 md:grid-cols-[minmax(0,1fr)_180px]">
-                    <div className="min-w-0">
-                      <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <span className="h-px w-8 bg-border" />
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "rounded-full text-[10px]",
-                            statusBadgeClasses[order.status] ?? "border-border/60 bg-muted/25 text-muted-foreground",
-                          )}
-                        >
-                          {patientDetailStatusLabel(order.status)}
-                        </Badge>
-                        <Badge
-                          variant="outline"
-                          className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
-                        >
-                          {patientMedicalOrderTypeLabel(order.order_type)}
-                        </Badge>
-                      </div>
-
-                      <h3 className="mt-3 text-base font-semibold leading-6 text-foreground">
-                        {order.title}
-                      </h3>
-                      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1.5 text-xs leading-5">
-                        <span className="inline-flex items-baseline gap-1">
-                          <span className="text-muted-foreground">{t.patient_profile_ordered_by}</span>
-                          <span className="font-medium text-foreground">
-                            {order.ordered_by_name ?? t.common_unknown}
-                          </span>
-                        </span>
-                        {order.due_date ? (
-                          <span className="inline-flex items-baseline gap-1">
-                            <span className="text-muted-foreground">{t.patient_profile_due}</span>
-                            <span className="font-medium tabular-nums text-foreground">{order.due_date}</span>
-                          </span>
-                        ) : null}
-                        {order.source ? (
-                          <span className="inline-flex min-w-0 items-baseline gap-1">
-                            <span className="shrink-0 text-muted-foreground">{t.patient_profile_source}</span>
-                            <span className="min-w-0 break-words font-medium text-foreground">{order.source}</span>
-                          </span>
-                        ) : null}
-                      </div>
-                      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
-                        {order.instructions}
-                      </p>
-                    </div>
-
-                    <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
-                      <div>
-                        <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                          {l("patients_order_date")}
-                        </span>
-                        <p className="mt-2 text-sm font-semibold leading-5 text-foreground">
-                          {formatDateTime(order.order_date, t.common_not_set)}
-                        </p>
-                      </div>
-
-                      {canManagePatientMedicalOrders && order.status === "active" ? (
-                        <div className="flex flex-col gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="justify-center rounded-lg"
-                            disabled={medicalOrderActionId === order.id}
-                            onClick={() => void handleUpdatePatientMedicalOrderStatus(order.id, "completed")}
-                          >
-                            {medicalOrderActionId === order.id ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-                            {t.patient_profile_complete}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="justify-center rounded-lg"
-                            disabled={medicalOrderActionId === order.id}
-                            onClick={() => void handleUpdatePatientMedicalOrderStatus(order.id, "cancelled")}
-                          >
-                            {medicalOrderActionId === order.id ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-                            {t.patient_profile_cancel}
-                          </Button>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </FormSection>
-      ) : null}
-
-      {canManagePatientMedicalOrders && id && medicalOrderSheetOpen ? (
-        <Suspense fallback={null}>
-          <LazyPatientMedicalOrderSheet
-            patientId={id}
-            open={medicalOrderSheetOpen}
-            onOpenChange={handleMedicalOrderSheetOpenChange}
-            onSaved={reload}
-          />
-        </Suspense>
-      ) : null}
-
-      {canManagePatientRiskScores || riskScores.length > 0 ? (
-        <FormSection
-          title={t.patient_profile_risk_scores}
-          accessory={
-            <div className="flex items-center gap-2">
-              <CountBadge>
-                {riskScores.length} {l("patients_scores_count_label")}
-              </CountBadge>
-              {canManagePatientRiskScores ? (
-                <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleRiskScoreSheetOpenChange(true)}>
-                  <Plus className="size-3.5" />
-                  {t.patient_profile_add}
-                </Button>
-              ) : null}
-            </div>
-          }
-        >
-          {riskScores.length === 0 ? (
-            <EmptyCell>{t.patient_profile_no_risk_scores_have_been_recorded_for_this_patient_yet}</EmptyCell>
-          ) : (
-            <div className="space-y-3">
-              {riskScores.map((score) => {
-                const scoreValue = formatVitalNumber(score.score_value) ?? t.common_not_set;
-                const scaleValue = score.scale_max != null ? formatVitalNumber(score.scale_max) : null;
-
-                return (
-                  <article
-                    key={score.id}
-                    className="rounded-xl border border-border bg-card"
-                  >
-                    <div className="grid gap-4 p-4 md:grid-cols-[minmax(0,1fr)_180px]">
-                      <div className="min-w-0">
-                        <div className="flex min-w-0 flex-wrap items-center gap-2">
-                          <span className="h-px w-8 bg-border" />
-                          <Badge
-                            variant="outline"
-                            className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
-                          >
-                            {l("patients_risk_assessment")}
-                          </Badge>
-                        </div>
-
-                        <h3 className="mt-3 text-base font-semibold leading-6 text-foreground">
-                          {patientRiskScoreTypeLabel(score.score_type)}
-                        </h3>
-                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1.5 text-xs leading-5">
-                          <span className="inline-flex items-baseline gap-1">
-                            <span className="text-muted-foreground">{t.patient_profile_recorded_by}</span>
-                            <span className="font-medium text-foreground">
-                              {score.recorded_by_name ?? t.common_unknown}
-                            </span>
-                          </span>
-                          {score.source ? (
-                            <span className="inline-flex min-w-0 items-baseline gap-1">
-                              <span className="shrink-0 text-muted-foreground">{t.patient_profile_source}</span>
-                              <span className="min-w-0 break-words font-medium text-foreground">{score.source}</span>
-                            </span>
-                          ) : null}
-                        </div>
-
-                        {score.interpretation ? (
-                          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
-                            {score.interpretation}
-                          </p>
-                        ) : null}
-
-                        {score.inputs ? (
-                          <details className="mt-3 rounded-lg border border-border/60">
-                            <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
-                              {t.patient_profile_inputs}
-                            </summary>
-                            <pre className="overflow-x-auto whitespace-pre-wrap border-t border-border/60 px-3 py-2 text-[12px] text-foreground">
-                              {JSON.stringify(score.inputs, null, 2)}
-                            </pre>
-                          </details>
-                        ) : null}
-                      </div>
-
-                      <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
-                        <div>
-                          <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                            {l("patients_risk_score")}
-                          </span>
-                          <p className="mt-2 text-lg font-semibold leading-none text-foreground">
-                            {scoreValue}
-                            {scaleValue ? (
-                              <span className="text-sm font-medium text-muted-foreground"> / {scaleValue}</span>
-                            ) : null}
-                          </p>
-                          {scaleValue ? (
-                            <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                              {l("patients_scale")} {scaleValue}
-                            </p>
-                          ) : null}
-                        </div>
-
-                        <div>
-                          <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                            {l("patients_computed")}
-                          </span>
-                          <p className="mt-2 text-sm font-semibold leading-5 text-foreground">
-                            {formatDateTime(score.computed_at, t.common_not_set)}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </FormSection>
-      ) : null}
-
-      {canManagePatientRiskScores && id && riskScoreSheetOpen ? (
-        <Suspense fallback={null}>
-          <LazyPatientRiskScoreSheet
-            patientId={id}
-            open={riskScoreSheetOpen}
-            onOpenChange={handleRiskScoreSheetOpenChange}
-            onSaved={reload}
-          />
-        </Suspense>
-      ) : null}
 
       <FormSection
         title={t.patients_notes}

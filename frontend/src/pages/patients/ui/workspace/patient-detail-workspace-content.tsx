@@ -40,12 +40,6 @@ import type {
 } from "../../model/detail-tab-types";
 import type { PatientLegalStatus } from "../../model/legal-status";
 import type { PatientAssignment, PatientDetail, PatientsDictionary, StaffOption } from "../../model/list-model";
-import type {
-  PatientCardEntry,
-  PatientMedicalOrder,
-  PatientRiskScore,
-  PatientVitalMeasurement,
-} from "../../model/detail-resource-types";
 import {
   functionalLabelChipClass,
   humanizeFunctionalLabel,
@@ -173,7 +167,6 @@ type DateFormatter = (value?: string | null, fallback?: string) => string;
 type DateTimeFormatter = (value?: string | null, fallback?: string) => string;
 type MoneyFormatter = (value?: string | null, currency?: string) => string;
 type FieldValueFn = (value: string | string[] | null | undefined, fallback: string) => string;
-type NumberFormatter = (value?: number | null, options?: Intl.NumberFormatOptions) => string | null;
 
 type WorkflowFormState = {
   itemText: string;
@@ -220,10 +213,6 @@ type PatientDetailWorkspaceContentProps = {
   canManageContracts: boolean;
   canManageDocuments: boolean;
   canManageInvoices: boolean;
-  canManagePatientCardEntries: boolean;
-  canManagePatientMedicalOrders: boolean;
-  canManagePatientRiskScores: boolean;
-  canManagePatientVitals: boolean;
   canManageRelations: boolean;
   canManageWorkflowChecklist: boolean;
   canOpenComplianceWorkspace: boolean;
@@ -233,11 +222,7 @@ type PatientDetailWorkspaceContentProps = {
   canViewContracts: boolean;
   canViewDocuments: boolean;
   canViewInvoices: boolean;
-  cardEntries: PatientCardEntry[];
-  cardEntrySheetOpen: boolean;
   cases: CaseItem[];
-  caveSheetOpen: boolean;
-  clinicalSurfaceItemCount: number;
   complianceExportBusy: boolean;
   contractExpiringSoonCount: number;
   contractPendingCount: number;
@@ -268,14 +253,11 @@ type PatientDetailWorkspaceContentProps = {
   formatDate: DateFormatter;
   formatDateTime: DateTimeFormatter;
   formatMoney: MoneyFormatter;
-  formatVitalNumber: NumberFormatter;
   formInputClassName: string;
   genderLabel: (value: string | null | undefined, tr: PatientsDictionary) => string;
   groupedTimeline: Array<{ key: string; label: string; items: PatientTimelineItem[] }>;
   handleExportPatientCompliance: () => void | Promise<void>;
   handleTabChange: (nextTab: string) => void;
-  handleUpdatePatientMedicalOrderStatus: (orderId: string, nextStatus: "completed" | "cancelled") => void | Promise<void>;
-  hasClinicalSurface: boolean;
   hasDocumentFilters: boolean;
   hasTimelineFilters: boolean;
   id?: string;
@@ -299,15 +281,10 @@ type PatientDetailWorkspaceContentProps = {
   };
   legalStatusSheetOpen: boolean;
   localizedTimelineRangeOptions: TimelineRangeOption[];
-  medicalOrderActionId: string;
-  medicalOrderSheetOpen: boolean;
-  medicalOrders: PatientMedicalOrder[];
   moneyValueNumber: (value?: string | null) => number;
   notesSheetOpen: boolean;
   onAppointmentSheetOpenChange: (open: boolean) => void;
   onAssign: () => void;
-  onCardEntrySheetOpenChange: (open: boolean) => void;
-  onCaveSheetOpenChange: (open: boolean) => void;
   onContractsPreviewOpenChange: (open: boolean) => void;
   onCreateContract: () => void;
   onCreateRelation: () => void;
@@ -321,7 +298,6 @@ type PatientDetailWorkspaceContentProps = {
   onInvoicesPreviewOpenChange: (open: boolean) => void;
   onLegalStatusSheetOpenChange: (open: boolean) => void;
   onManageInvoice: (invoice: InvoiceItem) => void;
-  onMedicalOrderSheetOpenChange: (open: boolean) => void;
   onNotesSheetOpenChange: (open: boolean) => void;
   onOpenAppointment: (appointmentId: string) => void;
   onOpenCase: (caseId: string) => void;
@@ -335,7 +311,6 @@ type PatientDetailWorkspaceContentProps = {
   onResetDocumentFilters: () => void;
   onResetTimelineFilters: () => void;
   onRevokeAssignment: (item: PatientAssignment) => void;
-  onRiskScoreSheetOpenChange: (open: boolean) => void;
   onSelectedAssigneeChange: (value: string) => void;
   onTimelineCategoryFilterChange: (value: string) => void;
   onTimelineEntityFilterChange: (value: string) => void;
@@ -344,7 +319,6 @@ type PatientDetailWorkspaceContentProps = {
   onTimelineSearchChange: (value: string) => void;
   onTimelineSourceFilterChange: (value: string) => void;
   onTogglePatientActivation: () => Promise<void>;
-  onVitalsSheetOpenChange: (open: boolean) => void;
   onWorkflowCompleteItem: (itemId: string) => void | Promise<void>;
   onWorkflowDueDateChange: (value: string) => void;
   onWorkflowItemTextChange: (value: string) => void;
@@ -353,28 +327,21 @@ type PatientDetailWorkspaceContentProps = {
   onWorkflowSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
   orderPhaseLabel: (value: string) => string;
   orders: OrderItem[];
-  patientCardEntryCategoryBadgeClass: (category: string) => string;
-  patientCardEntryCategoryLabel: (category: string) => string;
   patientDetailStatusLabel: (status: string) => string;
   patientLabelBusy: boolean;
-  patientMedicalOrderTypeLabel: (orderType: string) => string;
   patientName: (detail: PatientDetail) => string;
-  patientRiskScoreTypeLabel: (scoreType: string) => string;
   priorityBadgeClass: (priority: string) => string;
   priorityLabel: (priority: string) => string;
   relationTypeLabel: (value: string) => string;
   relations: RelationItem[];
   reload: () => void;
   requiredDocumentFulfilledCount: number;
-  riskScoreSheetOpen: boolean;
-  riskScores: PatientRiskScore[];
   roleColors: Record<string, string>;
   roleLabel: (value: string | null | undefined, tr: PatientsDictionary) => string;
   selectedAssignee: string;
   servicePackages: PatientServicePackageItem[];
   staffGo: (to: string) => void;
   statusColors: Record<string, string>;
-  statusBadgeClasses: Record<string, string>;
   t: Translations;
   tabActionError: string;
   tabError: string;
@@ -395,8 +362,6 @@ type PatientDetailWorkspaceContentProps = {
   timelineSummary: PatientTimelineSummary;
   timelineTotal: number;
   tr: PatientsDictionary;
-  vitalsHistory: PatientVitalMeasurement[];
-  vitalsSheetOpen: boolean;
   workflowBusy: boolean;
   workflowChecklist: WorkflowChecklistResponse | null;
   workflowChecklistGroups: WorkflowChecklistGroup[];
@@ -422,10 +387,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     canManageContracts,
     canManageDocuments,
     canManageInvoices,
-    canManagePatientCardEntries,
-    canManagePatientMedicalOrders,
-    canManagePatientRiskScores,
-    canManagePatientVitals,
     canManageRelations,
     canManageWorkflowChecklist,
     canOpenComplianceWorkspace,
@@ -435,11 +396,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     canViewContracts,
     canViewDocuments,
     canViewInvoices,
-    cardEntries,
-    cardEntrySheetOpen,
     cases,
-    caveSheetOpen,
-    clinicalSurfaceItemCount,
     complianceExportBusy,
     contractExpiringSoonCount,
     contractPendingCount,
@@ -470,14 +427,11 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     formatDate,
     formatDateTime,
     formatMoney,
-    formatVitalNumber,
     formInputClassName,
     genderLabel,
     groupedTimeline,
     handleExportPatientCompliance,
     handleTabChange,
-    handleUpdatePatientMedicalOrderStatus,
-    hasClinicalSurface,
     hasDocumentFilters,
     hasTimelineFilters,
     id,
@@ -497,15 +451,10 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     legalStatusCompletion,
     legalStatusSheetOpen,
     localizedTimelineRangeOptions,
-    medicalOrderActionId,
-    medicalOrderSheetOpen,
-    medicalOrders,
     moneyValueNumber,
     notesSheetOpen,
     onAppointmentSheetOpenChange,
     onAssign,
-    onCardEntrySheetOpenChange,
-    onCaveSheetOpenChange,
     onContractsPreviewOpenChange,
     onCreateContract,
     onCreateRelation,
@@ -519,7 +468,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     onInvoicesPreviewOpenChange,
     onLegalStatusSheetOpenChange,
     onManageInvoice,
-    onMedicalOrderSheetOpenChange,
     onNotesSheetOpenChange,
     onOpenAppointment,
     onOpenCase,
@@ -533,7 +481,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     onResetDocumentFilters,
     onResetTimelineFilters,
     onRevokeAssignment,
-    onRiskScoreSheetOpenChange,
     onSelectedAssigneeChange,
     onTimelineCategoryFilterChange,
     onTimelineEntityFilterChange,
@@ -542,7 +489,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     onTimelineSearchChange,
     onTimelineSourceFilterChange,
     onTogglePatientActivation,
-    onVitalsSheetOpenChange,
     onWorkflowCompleteItem,
     onWorkflowDueDateChange,
     onWorkflowItemTextChange,
@@ -551,28 +497,21 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     onWorkflowSubmit,
     orderPhaseLabel,
     orders,
-    patientCardEntryCategoryBadgeClass,
-    patientCardEntryCategoryLabel,
     patientDetailStatusLabel,
     patientLabelBusy,
-    patientMedicalOrderTypeLabel,
     patientName,
-    patientRiskScoreTypeLabel,
     priorityBadgeClass,
     priorityLabel,
     relationTypeLabel,
     relations,
     reload,
     requiredDocumentFulfilledCount,
-    riskScoreSheetOpen,
-    riskScores,
     roleColors,
     roleLabel,
     selectedAssignee,
     servicePackages,
     staffGo,
     statusColors,
-    statusBadgeClasses,
     t,
     tabActionError,
     tabError,
@@ -593,8 +532,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     timelineSummary,
     timelineTotal,
     tr,
-    vitalsHistory,
-    vitalsSheetOpen,
     workflowBusy,
     workflowChecklist,
     workflowChecklistGroups,
@@ -695,31 +632,19 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               profileControls={{
                 canEditPatientProfile,
                 canExportPatientCompliance,
-                canManagePatientCardEntries,
-                canManagePatientMedicalOrders,
-                canManagePatientRiskScores,
-                canManagePatientVitals,
                 canOpenComplianceWorkspace,
                 canViewContracts,
                 canViewDocuments,
                 canViewInvoices,
-                hasClinicalSurface,
               }}
-              cardEntries={cardEntries}
-              cardEntrySheetOpen={cardEntrySheetOpen}
-              caveSheetOpen={caveSheetOpen}
-              clinicalSurfaceItemCount={clinicalSurfaceItemCount}
               complianceExportBusy={complianceExportBusy}
               contractsPreviewOpen={contractsPreviewOpen}
               detail={detail}
               docsPreviewOpen={docsPreviewOpen}
               fieldValue={fieldValue}
               formatDate={formatDate}
-              formatDateTime={formatDateTime}
-              formatVitalNumber={formatVitalNumber}
               genderLabel={genderLabel}
               handleExportPatientCompliance={handleExportPatientCompliance}
-              handleUpdatePatientMedicalOrderStatus={handleUpdatePatientMedicalOrderStatus}
               id={id}
               insuranceLabel={insuranceLabel}
               invoicesPreviewOpen={invoicesPreviewOpen}
@@ -728,35 +653,18 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               legalStatusChecklist={legalStatusChecklist}
               legalStatusCompletion={legalStatusCompletion}
               legalStatusSheetOpen={legalStatusSheetOpen}
-              medicalOrderActionId={medicalOrderActionId}
-              medicalOrderSheetOpen={medicalOrderSheetOpen}
-              medicalOrders={medicalOrders}
               notesSheetOpen={notesSheetOpen}
-              onCardEntrySheetOpenChange={onCardEntrySheetOpenChange}
-              onCaveSheetOpenChange={onCaveSheetOpenChange}
               onContractsPreviewOpenChange={onContractsPreviewOpenChange}
               onDocsPreviewOpenChange={onDocsPreviewOpenChange}
               onInvoicesPreviewOpenChange={onInvoicesPreviewOpenChange}
               onLegalStatusSheetOpenChange={onLegalStatusSheetOpenChange}
-              onMedicalOrderSheetOpenChange={onMedicalOrderSheetOpenChange}
               onNotesSheetOpenChange={onNotesSheetOpenChange}
-              onRiskScoreSheetOpenChange={onRiskScoreSheetOpenChange}
-              onVitalsSheetOpenChange={onVitalsSheetOpenChange}
               openProfileEditor={onOpenProfileEditor}
-              patientCardEntryCategoryBadgeClass={patientCardEntryCategoryBadgeClass}
-              patientCardEntryCategoryLabel={patientCardEntryCategoryLabel}
               patientDetailStatusLabel={patientDetailStatusLabel}
-              patientMedicalOrderTypeLabel={patientMedicalOrderTypeLabel}
-              patientRiskScoreTypeLabel={patientRiskScoreTypeLabel}
               reload={reload}
-              riskScoreSheetOpen={riskScoreSheetOpen}
-              riskScores={riskScores}
               staffGo={staffGo}
-              statusBadgeClasses={statusBadgeClasses}
               t={t}
               tr={tr}
-              vitalsHistory={vitalsHistory}
-              vitalsSheetOpen={vitalsSheetOpen}
             />
             </div>
           ) : null}

@@ -1,7 +1,9 @@
-import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, lazy, Suspense, useEffect, useState, type FormEvent, type ReactNode } from "react";
 
+import { apiFetch } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CountBadge, EmptyCell } from "@/components/ui-shell";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   Dialog,
@@ -23,6 +25,10 @@ import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import type { DoctorOption } from "@/pages/appointments/model/types";
 import { fetchProviders } from "@/pages/providers/data/provider-api";
 import type { ProviderSummary } from "@/pages/providers/model/types";
+import type {
+  PatientRiskScore,
+  PatientVitalMeasurement,
+} from "../../model/detail-resource-types";
 
 import {
   DARREICHUNGSFORM_OPTIONS,
@@ -64,7 +70,69 @@ import { AnamneseSection } from "./anamnese-section";
 import { DiagnosisTreeSection } from "./diagnosis-tree";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
+const loadPatientVitalsSheet = () => import("../sheets/patient-vitals-sheet");
+const loadPatientRiskScoreSheet = () => import("../sheets/patient-risk-score-sheet");
+
+const LazyPatientVitalsSheet = lazy(async () => {
+  const mod = await loadPatientVitalsSheet();
+  return { default: mod.PatientVitalsSheet };
+});
+
+const LazyPatientRiskScoreSheet = lazy(async () => {
+  const mod = await loadPatientRiskScoreSheet();
+  return { default: mod.PatientRiskScoreSheet };
+});
+
 type Bilingual = (ru: string, de: string) => string;
+
+const PATIENT_RISK_SCORE_TYPE_LABELS: Record<string, { ru: string; de: string }> = {
+  cha2ds2_vasc: { ru: "CHA₂DS₂-VASc", de: "CHA₂DS₂-VASc" },
+  has_bled: { ru: "HAS-BLED", de: "HAS-BLED" },
+  framingham: { ru: "Framingham", de: "Framingham" },
+  fall_risk: { ru: "Риск падения", de: "Sturzrisiko" },
+  frailty: { ru: "Старческая астения", de: "Gebrechlichkeit" },
+  nutrition_risk: { ru: "Риск нарушения питания", de: "Ernährungsrisiko" },
+  other: { ru: "Другое", de: "Sonstiges" },
+};
+
+const PATIENT_VITAL_NUMBER_FORMATTERS: Record<string, Intl.NumberFormat> = {
+  '{"maximumFractionDigits":0}': new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }),
+  '{"maximumFractionDigits":1}': new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }),
+};
+
+function formatVitalNumber(
+  value: number | null | undefined,
+  options: Intl.NumberFormatOptions = { maximumFractionDigits: 1 },
+) {
+  if (value == null || Number.isNaN(value)) return null;
+  try {
+    const formatterKey = JSON.stringify(options);
+    return PATIENT_VITAL_NUMBER_FORMATTERS[formatterKey]?.format(value) ?? `${value}`;
+  } catch {
+    return `${value}`;
+  }
+}
+
+function patientRiskScoreTypeLabel(scoreType: string, tx: Bilingual): string {
+  const entry = PATIENT_RISK_SCORE_TYPE_LABELS[scoreType];
+  if (entry) return tx(entry.ru, entry.de);
+  return scoreType;
+}
+
+function patientVitalDateTime(value: string | null | undefined, fallback: string): string {
+  if (!value) return fallback;
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
 
 const inputClass =
   "h-9 w-full rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
@@ -1357,11 +1425,15 @@ export function PatientClinicalTab({
   const [verlauf, setVerlauf] = useState<ClinicalVerlaufEntry[]>([]);
   const [narrative, setNarrative] = useState<ClinicalNarrative>(blankNarrative());
   const [recommendations, setRecommendations] = useState<PatientRecommendation[]>([]);
+  const [vitalsHistory, setVitalsHistory] = useState<PatientVitalMeasurement[]>([]);
+  const [riskScores, setRiskScores] = useState<PatientRiskScore[]>([]);
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
   const [allDoctors, setAllDoctors] = useState<AllDoctorOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [version, setVersion] = useState(0);
+  const [vitalsSheetOpen, setVitalsSheetOpen] = useState(false);
+  const [riskScoreSheetOpen, setRiskScoreSheetOpen] = useState(false);
   const [medicationHoldEditor, setMedicationHoldEditor] = useState<MedicationHoldEditor | null>(null);
   const [medicationHoldBusy, setMedicationHoldBusy] = useState(false);
 
@@ -1381,8 +1453,14 @@ export function PatientClinicalTab({
       fetchPatientRecommendations(patientId).catch(() => [] as PatientRecommendation[]),
       fetchProviders(CLINICAL_PROVIDER_QUERY).catch(() => [] as ProviderSummary[]),
       fetchAllDoctors().catch(() => [] as AllDoctorOption[]),
+      apiFetch<{ items: PatientVitalMeasurement[] }>(`/patients/${patientId}/vitals`).catch(() => ({
+        items: [] as PatientVitalMeasurement[],
+      })),
+      apiFetch<{ items: PatientRiskScore[] }>(`/patients/${patientId}/risk-scores`).catch(() => ({
+        items: [] as PatientRiskScore[],
+      })),
     ])
-      .then(([clinical, recs, providerRows, doctorRows]) => {
+      .then(([clinical, recs, providerRows, doctorRows, vitals, scores]) => {
         if (!active) return;
         setAllergien(clinical.allergien ?? []);
         setCave(clinical.cave ?? []);
@@ -1395,6 +1473,8 @@ export function PatientClinicalTab({
         setRecommendations(recs ?? []);
         setProviders(clinicalMedicalProviderRows(providerRows ?? []));
         setAllDoctors(doctorRows ?? []);
+        setVitalsHistory(Array.isArray(vitals?.items) ? vitals.items : []);
+        setRiskScores(Array.isArray(scores?.items) ? scores.items : []);
         setError("");
       })
       .catch((err: unknown) => {
@@ -1467,6 +1547,18 @@ export function PatientClinicalTab({
     } finally {
       setMedicationHoldBusy(false);
     }
+  }
+
+  function reloadVitals() {
+    apiFetch<{ items: PatientVitalMeasurement[] }>(`/patients/${patientId}/vitals`)
+      .then((res) => setVitalsHistory(Array.isArray(res?.items) ? res.items : []))
+      .catch(() => setVersion((current) => current + 1));
+  }
+
+  function reloadRiskScores() {
+    apiFetch<{ items: PatientRiskScore[] }>(`/patients/${patientId}/risk-scores`)
+      .then((res) => setRiskScores(Array.isArray(res?.items) ? res.items : []))
+      .catch(() => setVersion((current) => current + 1));
   }
 
   if (loading) {
@@ -2212,6 +2304,260 @@ export function PatientClinicalTab({
           </div>
         )}
       />
+
+      {/* ---- Vitalwerte-Verlauf (moved from Profile) ---- */}
+      {(canManage || vitalsHistory.length > 0) && (
+      <section className="rounded-xl border border-border/70 bg-card">
+        <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-foreground">{tx("История показателей", "Vitalwerte-Verlauf")}</h3>
+            <Badge variant="outline" className="rounded-full border-border/60 bg-muted/25 text-foreground">
+              {vitalsHistory.length} {tx("Записи", "Einträge")}
+            </Badge>
+          </div>
+          {canManage ? (
+            <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => setVitalsSheetOpen(true)}>
+              <Plus className="size-3.5" />
+              {tx("Добавить", "Hinzufügen")}
+            </Button>
+          ) : null}
+        </header>
+
+        <div className="space-y-3 p-3">
+          {vitalsHistory.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-6 text-sm text-muted-foreground">
+              {tx(
+                "Для этого пациента пока не зафиксированы показатели.",
+                "Für diesen Patienten wurden noch keine Vitalwerte dokumentiert.",
+              )}
+            </div>
+          ) : null}
+
+          {vitalsHistory.length > 0 ? (
+            <div className="max-h-[540px] overflow-y-auto rounded-xl border border-border bg-card">
+              {vitalsHistory.map((item) => {
+                const notSet = tx("Не указано", "Nicht gesetzt");
+                const vitalMetrics = [
+                  item.bp_systolic != null && item.bp_diastolic != null
+                    ? {
+                        label: tx("АД", "RR"),
+                        value: `${formatVitalNumber(item.bp_systolic, { maximumFractionDigits: 0 }) ?? notSet}/${
+                          formatVitalNumber(item.bp_diastolic, { maximumFractionDigits: 0 }) ?? notSet
+                        }`,
+                      }
+                    : null,
+                  item.heart_rate != null
+                    ? {
+                        label: tx("ЧСС", "Herzfrequenz"),
+                        value: formatVitalNumber(item.heart_rate, { maximumFractionDigits: 0 }) ?? notSet,
+                      }
+                    : null,
+                  item.weight_kg != null
+                    ? {
+                        label: tx("Вес", "Gewicht"),
+                        value: `${formatVitalNumber(item.weight_kg) ?? notSet} kg`,
+                      }
+                    : null,
+                  item.height_cm != null
+                    ? {
+                        label: tx("Рост", "Größe"),
+                        value: `${formatVitalNumber(item.height_cm) ?? notSet} cm`,
+                      }
+                    : null,
+                  item.bmi != null
+                    ? {
+                        label: tx("BMI", "BMI"),
+                        value: formatVitalNumber(item.bmi) ?? notSet,
+                      }
+                    : null,
+                ].filter((metric): metric is { label: string; value: string } => Boolean(metric));
+
+                return (
+                  <div
+                    key={item.id}
+                    className="grid gap-3 border-b border-border/60 px-4 py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_minmax(220px,auto)] md:items-center"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                        <p className="text-sm font-medium text-foreground">
+                          {patientVitalDateTime(item.measured_at, notSet)}
+                        </p>
+                        <span className="size-1 rounded-full bg-muted-foreground/35" />
+                        <span className="text-xs text-muted-foreground">
+                          {tx("Записал", "Erfasst von")} {item.recorded_by_name ?? tx("Неизвестно", "Unbekannt")}
+                        </span>
+                      </div>
+                      {item.notes ? (
+                        <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
+                          {item.notes}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="flex min-w-0 flex-wrap gap-1.5 md:justify-end">
+                      {vitalMetrics.length > 0 ? (
+                        vitalMetrics.map((metric) => (
+                          <span
+                            key={metric.label}
+                            className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/25 px-2 py-1 text-xs text-muted-foreground"
+                          >
+                            <span>{metric.label}</span>
+                            <span className="font-medium text-foreground">{metric.value}</span>
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-xs text-muted-foreground">{notSet}</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      </section>
+      )}
+
+      {/* ---- Risikoscores (moved from Profile) ---- */}
+      {(canManage || riskScores.length > 0) && (
+      <section className="rounded-xl border border-border/70 bg-card">
+        <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-foreground">{tx("Риск-скоры", "Risikoscores")}</h3>
+            <CountBadge>
+              {riskScores.length} {tx("Оценки", "Scores")}
+            </CountBadge>
+          </div>
+          {canManage ? (
+            <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => setRiskScoreSheetOpen(true)}>
+              <Plus className="size-3.5" />
+              {tx("Добавить", "Hinzufügen")}
+            </Button>
+          ) : null}
+        </header>
+
+        <div className="space-y-3 p-3">
+          {riskScores.length === 0 ? (
+            <EmptyCell>
+              {tx(
+                "Для этого пациента пока нет риск-скоров.",
+                "Für diesen Patienten wurden noch keine Risikoscores erfasst.",
+              )}
+            </EmptyCell>
+          ) : (
+            <div className="space-y-3">
+              {riskScores.map((score) => {
+                const notSet = tx("Не указано", "Nicht gesetzt");
+                const scoreValue = formatVitalNumber(score.score_value) ?? notSet;
+                const scaleValue = score.scale_max != null ? formatVitalNumber(score.scale_max) : null;
+
+                return (
+                  <article key={score.id} className="rounded-xl border border-border bg-card">
+                    <div className="grid gap-4 p-4 md:grid-cols-[minmax(0,1fr)_180px]">
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <span className="h-px w-8 bg-border" />
+                          <Badge
+                            variant="outline"
+                            className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
+                          >
+                            {tx("Риск-оценка", "Risikobewertung")}
+                          </Badge>
+                        </div>
+
+                        <h3 className="mt-3 text-base font-semibold leading-6 text-foreground">
+                          {patientRiskScoreTypeLabel(score.score_type, tx)}
+                        </h3>
+                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1.5 text-xs leading-5">
+                          <span className="inline-flex items-baseline gap-1">
+                            <span className="text-muted-foreground">{tx("Записал", "Erfasst von")}</span>
+                            <span className="font-medium text-foreground">
+                              {score.recorded_by_name ?? tx("Неизвестно", "Unbekannt")}
+                            </span>
+                          </span>
+                          {score.source ? (
+                            <span className="inline-flex min-w-0 items-baseline gap-1">
+                              <span className="shrink-0 text-muted-foreground">{tx("Источник", "Quelle")}</span>
+                              <span className="min-w-0 break-words font-medium text-foreground">{score.source}</span>
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {score.interpretation ? (
+                          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                            {score.interpretation}
+                          </p>
+                        ) : null}
+
+                        {score.inputs ? (
+                          <details className="mt-3 rounded-lg border border-border/60">
+                            <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
+                              {tx("Входные данные", "Eingaben")}
+                            </summary>
+                            <pre className="overflow-x-auto whitespace-pre-wrap border-t border-border/60 px-3 py-2 text-[12px] text-foreground">
+                              {JSON.stringify(score.inputs, null, 2)}
+                            </pre>
+                          </details>
+                        ) : null}
+                      </div>
+
+                      <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
+                        <div>
+                          <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                            {tx("Оценка риска", "Risikowert")}
+                          </span>
+                          <p className="mt-2 text-lg font-semibold leading-none text-foreground">
+                            {scoreValue}
+                            {scaleValue ? (
+                              <span className="text-sm font-medium text-muted-foreground"> / {scaleValue}</span>
+                            ) : null}
+                          </p>
+                          {scaleValue ? (
+                            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                              {tx("Шкала", "Skala")} {scaleValue}
+                            </p>
+                          ) : null}
+                        </div>
+
+                        <div>
+                          <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                            {tx("Дата расчета", "Berechnet")}
+                          </span>
+                          <p className="mt-2 text-sm font-semibold leading-5 text-foreground">
+                            {patientVitalDateTime(score.computed_at, notSet)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </section>
+      )}
+
+      {canManage && vitalsSheetOpen ? (
+        <Suspense fallback={null}>
+          <LazyPatientVitalsSheet
+            patientId={patientId}
+            open={vitalsSheetOpen}
+            onOpenChange={setVitalsSheetOpen}
+            onSaved={reloadVitals}
+          />
+        </Suspense>
+      ) : null}
+
+      {canManage && riskScoreSheetOpen ? (
+        <Suspense fallback={null}>
+          <LazyPatientRiskScoreSheet
+            patientId={patientId}
+            open={riskScoreSheetOpen}
+            onOpenChange={setRiskScoreSheetOpen}
+            onSaved={reloadRiskScores}
+          />
+        </Suspense>
+      ) : null}
 
       {/* ---- Recommendations (Empfehlungen) — admin CRUD ---- */}
       <PatientRecommendationsSection

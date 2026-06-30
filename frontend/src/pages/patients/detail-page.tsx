@@ -75,7 +75,6 @@ import {
   revokePatientAssignment,
   updateFrameworkContractStatus,
   updateInvoiceStatus,
-  updatePatientMedicalOrderLifecycle,
 } from "./data/patient-detail-mutations";
 import {
   assignPatient,
@@ -227,11 +226,6 @@ const PATIENT_MONEY_FORMATTERS: Record<string, Intl.NumberFormat> = {
   }),
 };
 
-const PATIENT_VITAL_NUMBER_FORMATTERS: Record<string, Intl.NumberFormat> = {
-  '{"maximumFractionDigits":0}': new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }),
-  '{"maximumFractionDigits":1}': new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }),
-};
-
 function uniqueSortedNonEmpty(values: Iterable<string | null | undefined>) {
   const uniqueValues = new Set<string>();
   for (const value of values) {
@@ -307,18 +301,6 @@ function toDateTimeLocal(value?: string | null) {
   return shifted.toISOString().slice(0, 16);
 }
 
-function formatVitalNumber(
-  value: number | null | undefined,
-  options: Intl.NumberFormatOptions = { maximumFractionDigits: 1 },
-) {
-  if (value == null || Number.isNaN(value)) return null;
-  try {
-    const formatterKey = JSON.stringify(options);
-    return PATIENT_VITAL_NUMBER_FORMATTERS[formatterKey]?.format(value) ?? `${value}`;
-  } catch {
-    return `${value}`;
-  }
-}
 
 function parseOptionalNumberInput(value: string) {
   const trimmed = value.trim();
@@ -532,46 +514,6 @@ function blankPatientCardEntryForm(): PatientCardEntryFormState {
   };
 }
 
-function patientCardEntryCategoryLabel(category: string) {
-  switch (category) {
-    case "medical_update":
-      return patientDetailText("patients_detail_medical_update");
-    case "patient_report":
-      return patientDetailText("patients_detail_patient_report");
-    case "provider_report":
-      return patientDetailText("patients_detail_provider_report");
-    case "treatment_note":
-      return patientDetailText("patients_detail_treatment_note");
-    case "followup_note":
-      return patientDetailText("patients_detail_follow_up_note");
-    case "warning":
-      return patientDetailText("patients_detail_warning");
-    case "other":
-      return patientDetailText("patients_detail_other_2");
-    default:
-      return patientDetailUnknownEnumLabel(category);
-  }
-}
-
-function patientCardEntryCategoryBadgeClass(category: string) {
-  switch (category) {
-    case "medical_update":
-      return "border-amber-200 bg-amber-50 text-amber-700";
-    case "patient_report":
-      return "border-sky-200 bg-sky-50 text-sky-700";
-    case "provider_report":
-      return "border-teal-200 bg-teal-50 text-teal-700";
-    case "treatment_note":
-      return "border-emerald-200 bg-emerald-50 text-emerald-700";
-    case "followup_note":
-      return "border-violet-200 bg-violet-50 text-violet-700";
-    case "warning":
-      return "border-rose-200 bg-rose-50 text-rose-700";
-    default:
-      return "border-zinc-200 bg-zinc-50 text-zinc-700";
-  }
-}
-
 function blankPatientMedicalOrderForm(): PatientMedicalOrderFormState {
   return {
     orderDate: toDateTimeLocal(new Date().toISOString()),
@@ -581,27 +523,6 @@ function blankPatientMedicalOrderForm(): PatientMedicalOrderFormState {
     dueDate: "",
     source: "",
   };
-}
-
-function patientMedicalOrderTypeLabel(orderType: string) {
-  switch (orderType) {
-    case "physiotherapy":
-      return patientDetailText("patients_detail_physiotherapy");
-    case "diet":
-      return patientDetailText("patients_detail_diet");
-    case "lab_recheck":
-      return patientDetailText("patients_detail_lab_recheck");
-    case "imaging":
-      return patientDetailText("patients_detail_imaging");
-    case "medication_followup":
-      return patientDetailText("patients_detail_medication_follow_up");
-    case "procedure":
-      return patientDetailText("patients_detail_procedure_2");
-    case "other":
-      return patientDetailText("patients_detail_other_3");
-    default:
-      return patientDetailUnknownEnumLabel(orderType);
-  }
 }
 
 function blankPatientRiskScoreForm(): PatientRiskScoreFormState {
@@ -614,27 +535,6 @@ function blankPatientRiskScoreForm(): PatientRiskScoreFormState {
     source: "",
     inputsJson: "",
   };
-}
-
-function patientRiskScoreTypeLabel(scoreType: string) {
-  switch (scoreType) {
-    case "cha2ds2_vasc":
-      return patientDetailText("patients_label_score_cha2ds2_vasc");
-    case "has_bled":
-      return patientDetailText("patients_label_score_has_bled");
-    case "framingham":
-      return patientDetailText("patients_label_score_framingham");
-    case "fall_risk":
-      return patientDetailText("patients_detail_fall_risk");
-    case "frailty":
-      return patientDetailText("patients_detail_frailty");
-    case "nutrition_risk":
-      return patientDetailText("patients_detail_nutrition_risk");
-    case "other":
-      return patientDetailText("patients_detail_other_4");
-    default:
-      return patientDetailUnknownEnumLabel(scoreType);
-  }
 }
 
 function workflowChecklistLabel(key: string) {
@@ -903,12 +803,6 @@ const ROLE_COLORS: Record<string, string> = {
   patient: "bg-emerald-100 text-emerald-700",
 };
 
-const STATUS_BADGE_CLASSES: Record<string, string> = {
-  active: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  completed: "border-sky-200 bg-sky-50 text-sky-700",
-  cancelled: "border-rose-200 bg-rose-50 text-rose-700",
-};
-
 const PATIENT_DETAIL_REALTIME_EVENTS = [
   "patient.updated",
   "patient.assigned",
@@ -985,17 +879,11 @@ type PatientDetailPageState = {
   tabVersion: number;
   tabActionError: string;
   profileEditorOpen: boolean;
-  cardEntrySheetOpen: boolean;
   docsPreviewOpen: boolean;
   contractsPreviewOpen: boolean;
   invoicesPreviewOpen: boolean;
   legalStatusSheetOpen: boolean;
-  vitalsSheetOpen: boolean;
-  caveSheetOpen: boolean;
   notesSheetOpen: boolean;
-  medicalOrderActionId: string;
-  medicalOrderSheetOpen: boolean;
-  riskScoreSheetOpen: boolean;
   appointmentSheetOpen: boolean;
   relationEditorOpen: boolean;
   editingRelation: RelationItem | null;
@@ -1109,17 +997,11 @@ function usePatientDetailPageContent() {
       tabVersion: 0,
       tabActionError: "",
       profileEditorOpen: false,
-      cardEntrySheetOpen: false,
       docsPreviewOpen: false,
       contractsPreviewOpen: false,
       invoicesPreviewOpen: false,
       legalStatusSheetOpen: false,
-      vitalsSheetOpen: false,
-      caveSheetOpen: false,
       notesSheetOpen: false,
-      medicalOrderActionId: "",
-      medicalOrderSheetOpen: false,
-      riskScoreSheetOpen: false,
       appointmentSheetOpen: false,
       relationEditorOpen: false,
       editingRelation: null,
@@ -1162,17 +1044,11 @@ function usePatientDetailPageContent() {
     tabVersion,
     tabActionError,
     profileEditorOpen,
-    cardEntrySheetOpen,
     docsPreviewOpen,
     contractsPreviewOpen,
     invoicesPreviewOpen,
     legalStatusSheetOpen,
-    vitalsSheetOpen,
-    caveSheetOpen,
     notesSheetOpen,
-    medicalOrderActionId,
-    medicalOrderSheetOpen,
-    riskScoreSheetOpen,
     appointmentSheetOpen,
     relationEditorOpen,
     editingRelation,
@@ -1220,8 +1096,6 @@ function usePatientDetailPageContent() {
     setPageField("tabActionError", value);
   const setProfileEditorOpen = (value: SetStateAction<boolean>) =>
     setPageField("profileEditorOpen", value);
-  const setCardEntrySheetOpen = (value: SetStateAction<boolean>) =>
-    setPageField("cardEntrySheetOpen", value);
   const setDocsPreviewOpen = (value: SetStateAction<boolean>) =>
     setPageField("docsPreviewOpen", value);
   const setContractsPreviewOpen = (value: SetStateAction<boolean>) =>
@@ -1230,18 +1104,8 @@ function usePatientDetailPageContent() {
     setPageField("invoicesPreviewOpen", value);
   const setLegalStatusSheetOpen = (value: SetStateAction<boolean>) =>
     setPageField("legalStatusSheetOpen", value);
-  const setVitalsSheetOpen = (value: SetStateAction<boolean>) =>
-    setPageField("vitalsSheetOpen", value);
-  const setCaveSheetOpen = (value: SetStateAction<boolean>) =>
-    setPageField("caveSheetOpen", value);
   const setNotesSheetOpen = (value: SetStateAction<boolean>) =>
     setPageField("notesSheetOpen", value);
-  const setMedicalOrderActionId = (value: SetStateAction<string>) =>
-    setPageField("medicalOrderActionId", value);
-  const setMedicalOrderSheetOpen = (value: SetStateAction<boolean>) =>
-    setPageField("medicalOrderSheetOpen", value);
-  const setRiskScoreSheetOpen = (value: SetStateAction<boolean>) =>
-    setPageField("riskScoreSheetOpen", value);
   const setAppointmentSheetOpen = (value: SetStateAction<boolean>) =>
     setPageField("appointmentSheetOpen", value);
   const setRelationEditorOpen = (value: SetStateAction<boolean>) =>
@@ -1320,10 +1184,6 @@ function usePatientDetailPageContent() {
     user?.role === "ceo" ||
     user?.role === "patient_manager" ||
     user?.role === "it_admin";
-  const canManagePatientVitals = canEditPatientProfile;
-  const canManagePatientCardEntries = canEditPatientProfile;
-  const canManagePatientMedicalOrders = canEditPatientProfile;
-  const canManagePatientRiskScores = canEditPatientProfile;
   const canExportPatientCompliance =
     user?.role === "ceo" ||
     user?.role === "patient_manager" ||
@@ -1344,19 +1204,11 @@ function usePatientDetailPageContent() {
   const deferredTimelineSearch = useDeferredValue(timelineSearch);
   const {
     assignments,
-    cardEntries,
     coreError,
     detail,
     loading,
-    medicalOrders,
-    riskScores,
     staff,
-    vitalsHistory,
   } = usePatientDetailCoreData({
-    canManagePatientCardEntries,
-    canManagePatientMedicalOrders,
-    canManagePatientRiskScores,
-    canManagePatientVitals,
     id,
     version,
   });
@@ -2177,27 +2029,6 @@ function usePatientDetailPageContent() {
     }
   }
 
-  async function handleUpdatePatientMedicalOrderStatus(
-    medicalOrderId: string,
-    status: "completed" | "cancelled"
-  ) {
-    if (!id) return;
-
-    setMedicalOrderActionId(medicalOrderId);
-    setTabActionError("");
-    try {
-      await updatePatientMedicalOrderLifecycle(id, medicalOrderId, status);
-      toast.success(status === "completed"
-        ? l("patients_order_completed")
-        : l("patients_order_cancelled"));
-      reload();
-    } catch (error) {
-      setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
-    } finally {
-      setMedicalOrderActionId("");
-    }
-  }
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -2220,19 +2051,6 @@ function usePatientDetailPageContent() {
   }
 
   const initials = patientName(detail).split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("");
-  const hasClinicalSurface =
-    canManagePatientVitals ||
-    Boolean(detail.clinical_warnings) ||
-    vitalsHistory.length > 0 ||
-    cardEntries.length > 0 ||
-    medicalOrders.length > 0 ||
-    riskScores.length > 0;
-  const clinicalSurfaceItemCount =
-    vitalsHistory.length +
-    cardEntries.length +
-    medicalOrders.length +
-    riskScores.length +
-    (detail.clinical_warnings ? 1 : 0);
   const workflowItemCount = workflowChecklist?.items.length ?? 0;
   const handleTogglePatientActivation = async () => {
     try {
@@ -2282,10 +2100,6 @@ function usePatientDetailPageContent() {
         canManageContracts={canManageContracts}
         canManageDocuments={canManageDocuments}
         canManageInvoices={canManageInvoices}
-        canManagePatientCardEntries={canManagePatientCardEntries}
-        canManagePatientMedicalOrders={canManagePatientMedicalOrders}
-        canManagePatientRiskScores={canManagePatientRiskScores}
-        canManagePatientVitals={canManagePatientVitals}
         canManageRelations={canManageRelations}
         canManageWorkflowChecklist={canManageWorkflowChecklist}
         canOpenComplianceWorkspace={canOpenComplianceWorkspace}
@@ -2295,11 +2109,7 @@ function usePatientDetailPageContent() {
         canViewContracts={canViewContracts}
         canViewDocuments={canViewDocuments}
         canViewInvoices={canViewInvoices}
-        cardEntries={cardEntries}
-        cardEntrySheetOpen={cardEntrySheetOpen}
         cases={cases}
-        caveSheetOpen={caveSheetOpen}
-        clinicalSurfaceItemCount={clinicalSurfaceItemCount}
         complianceExportBusy={complianceExportBusy}
         contractExpiringSoonCount={contractExpiringSoonCount}
         contractPendingCount={contractPendingCount}
@@ -2330,14 +2140,11 @@ function usePatientDetailPageContent() {
         formatDate={fmtDate}
         formatDateTime={fmtDateTime}
         formatMoney={fmtMoney}
-        formatVitalNumber={formatVitalNumber}
         formInputClassName={formInputClassName}
         genderLabel={genderLbl}
         groupedTimeline={groupedTimeline}
         handleExportPatientCompliance={handleExportPatientCompliance}
         handleTabChange={handleTabChange}
-        handleUpdatePatientMedicalOrderStatus={handleUpdatePatientMedicalOrderStatus}
-        hasClinicalSurface={hasClinicalSurface}
         hasDocumentFilters={hasDocumentFilters}
         hasTimelineFilters={hasTimelineFilters}
         id={id}
@@ -2357,15 +2164,10 @@ function usePatientDetailPageContent() {
         legalStatusCompletion={legalStatusCompletion}
         legalStatusSheetOpen={legalStatusSheetOpen}
         localizedTimelineRangeOptions={localizedTimelineRangeOptions}
-        medicalOrderActionId={medicalOrderActionId}
-        medicalOrderSheetOpen={medicalOrderSheetOpen}
-        medicalOrders={medicalOrders}
         moneyValueNumber={moneyValueNumber}
         notesSheetOpen={notesSheetOpen}
         onAppointmentSheetOpenChange={setAppointmentSheetOpen}
         onAssign={handleAssign}
-        onCardEntrySheetOpenChange={setCardEntrySheetOpen}
-        onCaveSheetOpenChange={setCaveSheetOpen}
         onContractsPreviewOpenChange={setContractsPreviewOpen}
         onCreateContract={openCreateContract}
         onCreateRelation={openCreateRelation}
@@ -2379,7 +2181,6 @@ function usePatientDetailPageContent() {
         onInvoicesPreviewOpenChange={setInvoicesPreviewOpen}
         onLegalStatusSheetOpenChange={setLegalStatusSheetOpen}
         onManageInvoice={openInvoiceManager}
-        onMedicalOrderSheetOpenChange={setMedicalOrderSheetOpen}
         onNotesSheetOpenChange={setNotesSheetOpen}
         onOpenAppointment={(appointmentId) => { staffGo(`/appointments?appointment=${appointmentId}`); }}
         onOpenCase={openCaseWorkspace}
@@ -2407,7 +2208,6 @@ function usePatientDetailPageContent() {
           setTimelineOffset(0);
         }}
         onRevokeAssignment={handleRevokeAssignment}
-        onRiskScoreSheetOpenChange={setRiskScoreSheetOpen}
         onSelectedAssigneeChange={setSelectedAssignee}
         onTimelineCategoryFilterChange={(value) => {
           setTimelineCategoryFilter(value);
@@ -2431,7 +2231,6 @@ function usePatientDetailPageContent() {
           setTimelineOffset(0);
         }}
         onTogglePatientActivation={handleTogglePatientActivation}
-        onVitalsSheetOpenChange={setVitalsSheetOpen}
         onWorkflowCompleteItem={handleCompleteWorkflowItem}
         onWorkflowDueDateChange={(value) => {
           setWorkflowForm((current) => ({ ...current, dueDate: value }));
@@ -2448,28 +2247,21 @@ function usePatientDetailPageContent() {
         onWorkflowSubmit={handleAddWorkflowItem}
         orderPhaseLabel={orderPhaseLabel}
         orders={orders}
-        patientCardEntryCategoryBadgeClass={patientCardEntryCategoryBadgeClass}
-        patientCardEntryCategoryLabel={patientCardEntryCategoryLabel}
         patientDetailStatusLabel={patientDetailStatusLabel}
         patientLabelBusy={patientLabelBusy}
-        patientMedicalOrderTypeLabel={patientMedicalOrderTypeLabel}
         patientName={patientName}
-        patientRiskScoreTypeLabel={patientRiskScoreTypeLabel}
         priorityBadgeClass={priorityBadgeClass}
         priorityLabel={priorityLabel}
         relationTypeLabel={relationTypeLabel}
         relations={relations}
         reload={reload}
         requiredDocumentFulfilledCount={requiredDocumentFulfilledCount}
-        riskScoreSheetOpen={riskScoreSheetOpen}
-        riskScores={riskScores}
         roleColors={ROLE_COLORS}
         roleLabel={roleLbl}
         selectedAssignee={selectedAssignee}
         servicePackages={servicePackages}
         staffGo={staffGo}
         statusColors={STATUS_COLORS}
-        statusBadgeClasses={STATUS_BADGE_CLASSES}
         t={t}
         tabActionError={tabActionError}
         tabError={tabError}
@@ -2490,8 +2282,6 @@ function usePatientDetailPageContent() {
         timelineSummary={timelineSummary}
         timelineTotal={timelineTotal}
         tr={tr}
-        vitalsHistory={vitalsHistory}
-        vitalsSheetOpen={vitalsSheetOpen}
         workflowBusy={workflowBusy}
         workflowChecklist={workflowChecklist}
         workflowChecklistGroups={workflowChecklistGroups}
