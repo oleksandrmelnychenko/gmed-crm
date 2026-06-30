@@ -144,6 +144,26 @@ async fn list_users(
                     'concierge'
                 )
              )
+             -- Hide external/unspecified provider staff (Внешний / не указано):
+             -- they must not appear in the Users & Roles table.
+             AND NOT (
+                EXISTS (
+                    SELECT 1
+                    FROM provider_person_contacts pc
+                    JOIN provider_staff s ON s.id = pc.staff_id
+                    WHERE pc.contact_kind = 'email'
+                      AND lower(btrim(pc.value)) = lower(btrim(users.email))
+                      AND s.status IN ('external', 'unknown')
+                )
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM provider_person_contacts pc
+                    JOIN provider_staff s ON s.id = pc.staff_id
+                    WHERE pc.contact_kind = 'email'
+                      AND lower(btrim(pc.value)) = lower(btrim(users.email))
+                      AND s.status IN ('active', 'inactive')
+                )
+             )
            ORDER BY is_active DESC, created_at DESC"#,
     )
     .bind(search_pattern)
@@ -222,6 +242,13 @@ async fn create_user(
 
     if let Err(msg) = validate_create(&body) {
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, msg));
+    }
+
+    if email_is_blocked_external_staff(&state.db, &body.email).await {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "External contractors cannot be created as user accounts",
+        ));
     }
 
     let hash = match password::hash_password(&body.password) {
@@ -534,6 +561,52 @@ async fn reset_password(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to reset password",
             ))
+        }
+    }
+}
+
+/// Returns true when `email` belongs to a provider-directory staff person whose
+/// employment status is external (`Внешний`) or unspecified (`unknown` / не указано),
+/// and who is not also recorded as internal staff (`active`/`inactive`) anywhere.
+///
+/// External contractors must never hold a usable login account: they cannot be
+/// created ([`create_user`]), are hidden from the Users & Roles list
+/// ([`list_users`]), and are refused at login (`auth::login`) — even if a `users`
+/// row already exists. People with no entry in the provider staff directory
+/// (e.g. CEO, IT admin) are never matched and are unaffected.
+///
+/// Fails open (returns `false`) on a DB error so a transient failure cannot lock
+/// out every account; the broader query failure is logged.
+pub(crate) async fn email_is_blocked_external_staff(db: &sqlx::PgPool, email: &str) -> bool {
+    match sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT
+            EXISTS (
+                SELECT 1
+                FROM provider_person_contacts pc
+                JOIN provider_staff s ON s.id = pc.staff_id
+                WHERE pc.contact_kind = 'email'
+                  AND lower(btrim(pc.value)) = lower(btrim($1))
+                  AND s.status IN ('external', 'unknown')
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM provider_person_contacts pc
+                JOIN provider_staff s ON s.id = pc.staff_id
+                WHERE pc.contact_kind = 'email'
+                  AND lower(btrim(pc.value)) = lower(btrim($1))
+                  AND s.status IN ('active', 'inactive')
+            )
+        "#,
+    )
+    .bind(email)
+    .fetch_one(db)
+    .await
+    {
+        Ok(blocked) => blocked,
+        Err(e) => {
+            tracing::error!(error = %e, "external-staff login gate query failed");
+            false
         }
     }
 }

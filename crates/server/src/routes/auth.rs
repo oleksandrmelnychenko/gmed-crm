@@ -207,6 +207,28 @@ async fn login(
         return err(StatusCode::FORBIDDEN, "forbidden", "Account is deactivated");
     }
 
+    // External contractors / staff with unspecified status (Внешний / не указано)
+    // must never sign in, even if a `users` row already exists for them.
+    if crate::routes::users::email_is_blocked_external_staff(&state.db, &body.email).await {
+        state.audit_sender.try_send(audit::auth_event(
+            "login_blocked",
+            Some(user.id),
+            ip_hash_opt(&state, ip.as_deref()),
+            json!({ "reason": "external_contractor" }),
+        ));
+        metrics::counter!(
+            LOGIN_ATTEMPTS_TOTAL,
+            "outcome" => "blocked",
+            "reason" => "external_contractor",
+        )
+        .increment(1);
+        return err(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "Account is not permitted to sign in",
+        );
+    }
+
     if let Some(locked_until) = user.locked_until
         && locked_until > chrono::Utc::now()
     {
