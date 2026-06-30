@@ -18,24 +18,8 @@ import {
 
 type Bilingual = (ru: string, de: string) => string;
 
-const RECOMMENDATION_TYPE_LABELS: Record<string, { ru: string; de: string }> = {
-  consultation: { ru: "Консультация", de: "Konsultation" },
-  document: { ru: "Документ", de: "Dokument" },
-  follow_up: { ru: "Контрольный визит", de: "Kontrolltermin" },
-  imaging: { ru: "Визуализация", de: "Bildgebung" },
-  lab_test: { ru: "Лабораторный анализ", de: "Laboruntersuchung" },
-  medication_review: { ru: "Проверка медикаментов", de: "Medikationsprüfung" },
-  other: { ru: "Другое", de: "Sonstiges" },
-};
 const datePillClass =
   "inline-flex items-center rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700";
-
-function recommendationTypeLabel(value: string | null, tx: Bilingual): string | null {
-  if (!value) return null;
-  const label = RECOMMENDATION_TYPE_LABELS[value];
-  if (label) return tx(label.ru, label.de);
-  return value.replace(/_/g, " ");
-}
 
 function recommendationDoctorLabel(
   rec: PatientRecommendation,
@@ -186,9 +170,7 @@ export function PatientRecommendationOverviewItem({
   tx: Bilingual;
 }) {
   const sub: string[] = [];
-  const type = recommendationTypeLabel(rec.recommendation_type, tx);
   const doctor = recommendationDoctorLabel(rec, lang, tx);
-  if (type) sub.push(type);
   if (doctor) sub.push(doctor);
   sub.push(...splitLines(rec.description));
   if (rec.due_at) sub.push(rec.due_at);

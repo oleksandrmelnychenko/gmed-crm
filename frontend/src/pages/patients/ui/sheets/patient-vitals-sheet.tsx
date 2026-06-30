@@ -164,7 +164,7 @@ export function PatientVitalsSheet({
       maxWidthClassName="sm:max-w-[540px]"
       onSubmit={handleSubmit}
       title={
-        <span className="flex w-full items-center justify-between gap-2">
+        <span className="inline-flex max-w-full flex-wrap items-center gap-2 pr-2">
           <span>
             {initialMeasurement?.id ? t.common_edit : l("patients_add_vital_measurement")}
           </span>

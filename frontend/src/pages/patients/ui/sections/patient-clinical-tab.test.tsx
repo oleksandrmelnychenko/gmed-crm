@@ -439,7 +439,7 @@ describe("mergeVerlaufDoctorAttribution", () => {
 });
 
 describe("PatientRecommendationOverviewItem", () => {
-  it("keeps the recommendation date beside the title and labels the type", () => {
+  it("keeps the recommendation date beside the title without showing the type", () => {
     const html = renderToStaticMarkup(
       <ul>
         <PatientRecommendationOverviewItem
@@ -457,7 +457,7 @@ describe("PatientRecommendationOverviewItem", () => {
 
     expect(html).toContain("Thromboseprophylaxe");
     expect(html).toContain("2026-06-03");
-    expect(html).toContain("Контрольный визит");
+    expect(html).not.toContain("Контрольный визит");
     expect(html).not.toContain("Дата рекомендации");
     expect(html).not.toContain("follow_up");
     expect(html.indexOf("2026-06-03")).toBeGreaterThan(html.indexOf("Thromboseprophylaxe"));
