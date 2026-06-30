@@ -377,6 +377,31 @@ describe("PatientRecommendationsSection", () => {
     expect(html).toContain("text-foreground\">Prof. Dr. med. Herr Philipp Niemeyer");
     expect(html).toContain("(Ортопедия и травматология)");
   });
+
+  it("highlights recommendation validity period and reminder date", () => {
+    const html = renderToStaticMarkup(
+      <PatientRecommendationsSection
+        allDoctors={[]}
+        canManage
+        lang="ru"
+        onReload={() => undefined}
+        patientId="patient-1"
+        recommendations={[
+          recommendation({
+            reminder_at: "2026-07-01",
+            valid_from: "2026-06-01",
+            valid_to: "2026-09-01",
+          }),
+        ]}
+        tx={(ru) => ru}
+      />,
+    );
+
+    expect(html).toContain("Период: 2026-06-01 – 2026-09-01");
+    expect(html).toContain("border-emerald-300 bg-emerald-50");
+    expect(html).toContain("Дата напоминания: 2026-07-01");
+    expect(html).toContain("border-amber-300 bg-amber-50");
+  });
 });
 
 describe("mergeVerlaufDoctorAttribution", () => {

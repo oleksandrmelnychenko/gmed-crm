@@ -139,8 +139,16 @@ const inputClass =
   "h-9 w-full rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
 const datePillClass =
   "inline-flex items-center rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700";
+const periodPillClass =
+  "inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700";
+const reminderPillClass =
+  "inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700";
 
 export const CLINICAL_PROVIDER_QUERY = "/providers?active_only=true&provider_type=medical";
+
+function dateOnly(value: string | null | undefined): string | null {
+  return value ? value.slice(0, 10) : null;
+}
 
 export function clinicalMedicalProviderRows(providers: ProviderSummary[]): ProviderSummary[] {
   return providers.filter((provider) => provider.provider_type === "medical");
@@ -1114,10 +1122,7 @@ export function PatientRecommendationsSection({
     [rec.valid_from, rec.valid_to].some(Boolean)
       ? `${rec.valid_from ?? "…"} – ${rec.valid_to ?? "…"}`
       : null;
-  const recommendationDateLabels = (rec: PatientRecommendation) =>
-    [rec.recommended_on, validityLabel(rec), rec.due_at ? rec.due_at.slice(0, 10) : null].filter(
-      (value): value is string => Boolean(value),
-    );
+  const dueAtLabel = (rec: PatientRecommendation) => dateOnly(rec.due_at);
 
   const isValid = (draft: RecommendationDraft) => draft.title.trim() !== "";
 
@@ -1189,11 +1194,18 @@ export function PatientRecommendationsSection({
           <Badge variant="outline" className={cn("rounded-full text-[10px]", lifecycleBadgeClass(rec.lifecycle_status))}>
             {lifecycleLabel(rec.lifecycle_status)}
           </Badge>
-          {recommendationDateLabels(rec).map((date, index) => (
-            <span key={`${date}-${index}`} className={datePillClass}>
-              {date}
+          {rec.recommended_on ? <span className={datePillClass}>{rec.recommended_on}</span> : null}
+          {validityLabel(rec) ? (
+            <span className={periodPillClass}>
+              {tx("Период", "Zeitraum")}: {validityLabel(rec)}
             </span>
-          ))}
+          ) : null}
+          {rec.reminder_at ? (
+            <span className={reminderPillClass}>
+              {tx("Дата напоминания", "Erinnerungsdatum")}: {dateOnly(rec.reminder_at)}
+            </span>
+          ) : null}
+          {dueAtLabel(rec) ? <span className={datePillClass}>{dueAtLabel(rec)}</span> : null}
         </div>
         {rec.description ? (
           <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{rec.description}</p>
