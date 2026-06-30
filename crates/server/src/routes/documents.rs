@@ -8,7 +8,7 @@ use std::{
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Extension, Multipart, Path, Query, State},
+    extract::{DefaultBodyLimit, Extension, Multipart, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -1075,8 +1075,20 @@ const DOCUMENT_TEXT_BLOCKS: &[TextBlockDefinition] = &[
 ];
 
 pub fn router() -> Router<AppState> {
-    Router::new()
+    // Multipart document uploads carry the file body itself. axum's default
+    // request body limit is 2 MB (see `axum::extract::Multipart`), which would
+    // reject larger uploads with 413 *before* the handler's own MAX_FILE_SIZE
+    // (25 MB) check ever runs. Raise the limit on just the upload routes —
+    // sized to MAX_FILE_SIZE plus headroom for the remaining multipart fields
+    // and boundary overhead — so files up to MAX_FILE_SIZE are accepted; every
+    // other document endpoint keeps axum's conservative default.
+    let upload_routes = Router::new()
         .route("/me/documents/upload", post(upload_my_document))
+        .route("/documents/upload", post(upload_document))
+        .layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024));
+
+    Router::new()
+        .merge(upload_routes)
         .route("/me/documents/uploads", get(list_my_uploaded_documents))
         .route(
             "/me/documents/uploads/{id}/download",
@@ -1084,7 +1096,6 @@ pub fn router() -> Router<AppState> {
         )
         .route("/documents", get(list_documents))
         .route("/documents/intake-queue", get(list_document_intake_queue))
-        .route("/documents/upload", post(upload_document))
         .route("/documents/templates", get(list_document_templates))
         .route("/documents/generate", post(generate_document))
         .route("/documents/meta/staff", get(list_document_staff))

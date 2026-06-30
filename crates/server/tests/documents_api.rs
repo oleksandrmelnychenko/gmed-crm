@@ -784,6 +784,64 @@ async fn document_upload_without_explicit_art_is_auto_classified_from_filename()
     );
 }
 
+/// Regression: axum's `Multipart` defaults to a 2 MB request-body limit, so an
+/// upload larger than 2 MB was rejected with 413 *before* the handler's own
+/// `MAX_FILE_SIZE` (25 MB) check could run. The `/documents/upload` route now
+/// raises that limit, so a multi-megabyte file uploaded *without* an explicit
+/// name still succeeds and is auto-named from its filename.
+#[tokio::test]
+async fn large_document_upload_without_name_succeeds_and_is_auto_named() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-large");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+
+    // 3 MB: larger than axum's 2 MB multipart default, smaller than MAX_FILE_SIZE.
+    let mut big_pdf = b"%PDF-1.4\n".to_vec();
+    big_pdf.resize(3 * 1024 * 1024, b' ');
+    let file_name = format!("grosser-scan-{tag}.pdf");
+
+    // Deliberately omit `auto_name`: the name must be formed automatically.
+    let (status, upload_body) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &admin_bearer,
+        &[
+            ("patient_id", patient_id.to_string()),
+            ("appointment_id", appointment_id.to_string()),
+            ("status", "active".to_string()),
+            ("visibility", "internal".to_string()),
+        ],
+        &file_name,
+        "application/pdf",
+        &big_pdf,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "upload above the 2 MB default must not 413"
+    );
+    assert_eq!(upload_body["file_size"].as_i64(), Some(big_pdf.len() as i64));
+
+    let document_id = Uuid::parse_str(upload_body["id"].as_str().unwrap()).unwrap();
+    let (status, detail_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail_body["auto_name"], file_name);
+}
+
 #[tokio::test]
 async fn uncategorized_uploads_land_in_document_intake_queue() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
