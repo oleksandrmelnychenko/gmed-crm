@@ -29,6 +29,9 @@ export interface Lead {
   country: string | null;
   intake_source: string | null;
   flow: string | null;
+  lead_type?: string | null;
+  console_promoted_at?: string | null;
+  console_promoted_by?: string | null;
   qualification_status: string;
   compliance_status?: string;
   /**

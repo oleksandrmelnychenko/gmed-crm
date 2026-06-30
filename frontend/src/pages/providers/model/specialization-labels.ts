@@ -23,6 +23,15 @@ const KNOWN_SPECIALIZATIONS: [string[], KnownSpecializationLabels][] = [
   [["internal_medicine", "internal medicine", "innere medizin", "внутренняя медицина"], { de: "Innere Medizin", ru: "Внутренняя медицина" }],
   [["neurology", "neurologie", "неврология"], { de: "Neurologie", ru: "Неврология" }],
   [["oncology", "onkologie", "онкология"], { de: "Onkologie", ru: "Онкология" }],
+  [
+    [
+      "orthopaedie_und_unfallchirurgie",
+      "orthopädie und unfallchirurgie",
+      "orthopaedie und unfallchirurgie",
+      "ортопедия и травматология",
+    ],
+    { de: "Orthopädie und Unfallchirurgie", ru: "Ортопедия и травматология" },
+  ],
   [["orthopedics", "orthopaedics", "orthopädie", "orthopaedie", "ортопедия"], { de: "Orthopädie", ru: "Ортопедия" }],
   [["pediatrics", "paediatrics", "pädiatrie", "paediatrie", "педиатрия"], { de: "Pädiatrie", ru: "Педиатрия" }],
   [["psychiatry", "psychiatrie", "психиатрия"], { de: "Psychiatrie", ru: "Психиатрия" }],
@@ -38,7 +47,7 @@ const KNOWN_SPECIALIZATION_LABELS = new Map<string, KnownSpecializationLabels>(
 );
 
 export function normalizeSpecializationLabelKey(value: string) {
-  return value.trim().toLocaleLowerCase();
+  return value.trim().toLocaleLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
 }
 
 function formatUnknownSpecializationValue(value: string) {

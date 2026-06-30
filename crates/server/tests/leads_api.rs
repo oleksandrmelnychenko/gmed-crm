@@ -182,7 +182,7 @@ async fn public_lead_intake_stores_contact_form_submissions_as_leads() {
     // The public intake route reads the shared token from process env.
     // Integration tests in this crate do not otherwise mutate this key.
     unsafe {
-        std::env::remove_var("LEAD_INTAKE_TOKEN");
+        std::env::set_var("LEAD_INTAKE_TOKEN", token);
         std::env::set_var("GMED_LEAD_INTAKE_TOKEN", token);
     }
 
@@ -234,6 +234,7 @@ async fn public_lead_intake_stores_contact_form_submissions_as_leads() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(detail["source"], "Website Contact Form");
     assert_eq!(detail["intake_source"], "website_contact");
+    assert_eq!(detail["lead_type"], "form");
     assert_eq!(detail["flow"], "contact");
     assert_eq!(detail["email"], "ada.contact@example.com");
     assert_eq!(detail["phone"], "+49123456789");
@@ -241,6 +242,111 @@ async fn public_lead_intake_stores_contact_form_submissions_as_leads() {
         detail["message"],
         "I need a call about treatment coordination."
     );
+
+    let (status, list) =
+        json_request(&app, "GET", "/api/v1/leads?lead_type=form", &pm, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = list.as_array().expect("leads list array");
+    assert!(items.iter().any(|item| item["id"] == lead_id));
+
+    let (status, promoted) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/promote-console"),
+        &pm,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(promoted["lead_type"], "console");
+
+    let (status, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["lead_type"], "console");
+    assert_eq!(detail["intake_source"], "website_contact");
+    assert!(detail["console_promoted_at"].as_str().is_some());
+
+    let (status, list) =
+        json_request(&app, "GET", "/api/v1/leads?lead_type=console", &pm, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = list.as_array().expect("leads list array");
+    assert!(items.iter().any(|item| item["id"] == lead_id));
+}
+
+#[tokio::test]
+async fn public_lead_intake_stores_wizard_submissions_as_questionnaire_leads() {
+    let Some(app) = test_app().await else { return };
+    let token = "test-lead-intake-token";
+    unsafe {
+        std::env::set_var("LEAD_INTAKE_TOKEN", token);
+        std::env::set_var("GMED_LEAD_INTAKE_TOKEN", token);
+    }
+
+    let (status, created) = public_multipart_request(
+        &app,
+        "/api/v1/public/lead-intake",
+        token,
+        json!({
+            "version": 1,
+            "source": "website_wizard",
+            "flow": "medical",
+            "submittedAt": "2026-05-27T12:00:00Z",
+            "locale": "de",
+            "payload": {
+                "firstName": "Grace",
+                "lastName": "Hopper",
+                "email": "grace.questionnaire@example.com",
+                "phones": [{ "number": "+49111222333", "type": "mobile" }],
+                "services": ["medical_treatment"],
+                "primaryConcernText": "Full medical intake questionnaire.",
+                "consentAutomatedContact": true,
+                "consentHealthcare": true,
+                "consentOptOut": false,
+                "consentPrivacyPractices": true
+            }
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED);
+    let lead_id = created["lead_id"].as_str().expect("lead_id");
+
+    let pm = app.auth_header("patient_manager");
+    let (status, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["source"], "Website Wizard");
+    assert_eq!(detail["intake_source"], "visitor_facade");
+    assert_eq!(detail["lead_type"], "questionnaire");
+
+    let (status, list) = json_request(
+        &app,
+        "GET",
+        "/api/v1/leads?lead_type=questionnaire",
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = list.as_array().expect("leads list array");
+    assert!(items.iter().any(|item| item["id"] == lead_id));
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/promote-console"),
+        &pm,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["lead_type"], "console");
+    assert_eq!(detail["intake_source"], "visitor_facade");
 }
 
 // ── Auth / RBAC tests ───────────────────────────────────────
@@ -385,6 +491,19 @@ async fn create_and_get_lead() {
     assert_eq!(body["last_name"], "Lead");
     assert_eq!(body["email"], "test@example.com");
     assert_eq!(body["qualification_status"], "new");
+    assert_eq!(body["lead_type"], "console");
+
+    let (status, list) = json_request(
+        &app,
+        "GET",
+        "/api/v1/leads?lead_type=console",
+        &app.auth_header("sales"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = list.as_array().expect("leads list array");
+    assert!(items.iter().any(|item| item["id"] == lead_id));
 }
 
 #[tokio::test]

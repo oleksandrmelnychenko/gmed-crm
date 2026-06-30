@@ -34,6 +34,10 @@ pub fn router() -> Router<AppState> {
         .route("/leads", get(list_leads).post(create_lead))
         .route("/leads/{lead_id}", get(get_lead))
         .route("/leads/{lead_id}/update", post(update_lead))
+        .route(
+            "/leads/{lead_id}/promote-console",
+            post(promote_lead_to_console),
+        )
         .route("/leads/{lead_id}/qualify", post(qualify_lead))
         .route("/leads/{lead_id}/convert", post(convert_lead))
         .route("/leads/{lead_id}/failed-flow", post(resolve_failed_lead))
@@ -102,6 +106,7 @@ struct ListLeadsQuery {
     source: Option<String>,
     country: Option<String>,
     intake_source: Option<String>,
+    lead_type: Option<String>,
     flow: Option<String>,
     include_archived: Option<bool>,
 }
@@ -120,6 +125,11 @@ async fn list_leads(
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status");
     }
+    if let Some(ref lead_type) = query.lead_type
+        && !is_valid_lead_type(lead_type)
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid lead_type");
+    }
 
     let include_archived = query.include_archived.unwrap_or(false);
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
@@ -131,7 +141,7 @@ async fn list_leads(
                   intake_source, flow, qualification_status, compliance_status,
                   converted_patient_id, date_of_birth, legal_sex,
                   consent_privacy_practices, consent_healthcare,
-                  submitted_at, created_at,
+                  submitted_at, created_at, console_promoted_at, console_promoted_by,
                   failed_outcome_status, failed_reason, failed_processed_at,
                   (SELECT COUNT(*) FROM lead_attachments a WHERE a.lead_id = leads.id) AS attachment_count
            FROM leads
@@ -152,7 +162,18 @@ async fn list_leads(
              AND ($4::text = '%%' OR COALESCE(source, '') ILIKE $4)
              AND ($5::text = '%%' OR COALESCE(country, '') ILIKE $5)
              AND ($6::text IS NULL OR intake_source = $6)
-             AND ($7::text IS NULL OR flow = $7)
+             AND ($7::text IS NULL OR
+                CASE
+                  WHEN console_promoted_at IS NOT NULL THEN 'console'
+                  WHEN lower(replace(COALESCE(intake_source, ''), '-', '_')) IN ('manual', 'crm_manual', 'console') THEN 'console'
+                  WHEN lower(replace(COALESCE(intake_source, ''), '-', '_')) IN ('website_contact', 'website_form', 'contact_form')
+                    OR lower(replace(COALESCE(source, ''), ' ', '_')) IN ('website_contact_form', 'contact_form')
+                    OR lower(COALESCE(flow, '')) = 'contact' THEN 'form'
+                  WHEN lower(replace(COALESCE(intake_source, ''), '-', '_')) IN ('visitor_facade', 'website_wizard', 'wizard', 'questionnaire', 'oprosnik')
+                    OR lower(replace(COALESCE(source, ''), ' ', '_')) IN ('website_wizard', 'visitor_facade') THEN 'questionnaire'
+                  ELSE 'console'
+                END = $7)
+             AND ($8::text IS NULL OR flow = $8)
            ORDER BY created_at DESC
            LIMIT 200"#,
     )
@@ -162,6 +183,7 @@ async fn list_leads(
     .bind(source_pattern)
     .bind(country_pattern)
     .bind(query.intake_source)
+    .bind(query.lead_type)
     .bind(query.flow)
     .fetch_all(&state.db)
     .await
@@ -186,6 +208,19 @@ async fn list_leads(
                     "country": r.try_get::<Option<String>, _>("country").unwrap_or_default(),
                     "intake_source": r.try_get::<Option<String>, _>("intake_source").unwrap_or_default(),
                     "flow": r.try_get::<Option<String>, _>("flow").unwrap_or_default(),
+                    "lead_type": lead_type_from_origin(
+                        r.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("console_promoted_at")
+                            .unwrap_or_default()
+                            .is_some(),
+                        r.try_get::<Option<String>, _>("intake_source").unwrap_or_default().as_deref(),
+                        r.try_get::<Option<String>, _>("source").unwrap_or_default().as_deref(),
+                        r.try_get::<Option<String>, _>("flow").unwrap_or_default().as_deref(),
+                    ),
+                    "console_promoted_at": r
+                        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("console_promoted_at")
+                        .unwrap_or_default()
+                        .map(|value| value.to_rfc3339()),
+                    "console_promoted_by": r.try_get::<Option<Uuid>, _>("console_promoted_by").unwrap_or_default(),
                     "qualification_status": r.try_get::<String, _>("qualification_status").unwrap_or_default(),
                     "compliance_status": r.try_get::<String, _>("compliance_status").unwrap_or_default(),
                     "qualification_ready": readiness.qualification_ready,
@@ -225,6 +260,64 @@ fn is_valid_lead_status(value: &str) -> bool {
         value,
         "new" | "in_progress" | "qualified" | "not_qualified" | "converted" | "archived"
     )
+}
+
+fn is_valid_lead_type(value: &str) -> bool {
+    matches!(value, "form" | "questionnaire" | "console")
+}
+
+fn normalize_lead_origin(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['-', ' '], "_")
+}
+
+fn lead_type_from_origin(
+    console_promoted: bool,
+    intake_source: Option<&str>,
+    source: Option<&str>,
+    flow: Option<&str>,
+) -> &'static str {
+    if console_promoted {
+        return "console";
+    }
+
+    let intake_source = intake_source.map(normalize_lead_origin);
+    let source = source.map(normalize_lead_origin);
+    let flow = flow.map(normalize_lead_origin);
+
+    if intake_source
+        .as_deref()
+        .is_some_and(|value| matches!(value, "manual" | "crm_manual" | "console"))
+    {
+        return "console";
+    }
+
+    if intake_source
+        .as_deref()
+        .is_some_and(|value| matches!(value, "website_contact" | "website_form" | "contact_form"))
+        || source
+            .as_deref()
+            .is_some_and(|value| matches!(value, "website_contact_form" | "contact_form"))
+        || flow.as_deref() == Some("contact")
+    {
+        return "form";
+    }
+
+    if intake_source.as_deref().is_some_and(|value| {
+        matches!(
+            value,
+            "visitor_facade" | "website_wizard" | "wizard" | "questionnaire" | "oprosnik"
+        )
+    }) || source
+        .as_deref()
+        .is_some_and(|value| matches!(value, "website_wizard" | "visitor_facade"))
+    {
+        return "questionnaire";
+    }
+
+    "console"
 }
 
 fn is_valid_compliance_status(value: &str) -> bool {
@@ -599,6 +692,7 @@ async fn get_lead(
                   consent_automated_contact, consent_healthcare,
                   consent_opt_out, consent_privacy_practices,
                   raw_payload, intake_source, flow, locale, submitted_at,
+                  console_promoted_at, console_promoted_by,
                   compliance_status, qualification_status, converted_patient_id,
                   failed_outcome_status, failed_from_status, failed_reason, failed_note,
                   failed_processed_at, failed_processed_by,
@@ -790,6 +884,41 @@ async fn get_lead(
     );
     obj.insert("intake_source".into(), s_opt(&row, "intake_source"));
     obj.insert("flow".into(), s_opt(&row, "flow"));
+    obj.insert(
+        "lead_type".into(),
+        Value::String(
+            lead_type_from_origin(
+                row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("console_promoted_at")
+                    .unwrap_or_default()
+                    .is_some(),
+                row.try_get::<Option<String>, _>("intake_source")
+                    .unwrap_or_default()
+                    .as_deref(),
+                row.try_get::<Option<String>, _>("source")
+                    .unwrap_or_default()
+                    .as_deref(),
+                row.try_get::<Option<String>, _>("flow")
+                    .unwrap_or_default()
+                    .as_deref(),
+            )
+            .to_string(),
+        ),
+    );
+    obj.insert(
+        "console_promoted_at".into(),
+        rfc(row
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("console_promoted_at")
+            .ok()
+            .flatten()),
+    );
+    obj.insert(
+        "console_promoted_by".into(),
+        row.try_get::<Option<Uuid>, _>("console_promoted_by")
+            .ok()
+            .flatten()
+            .map(|id| json!(id))
+            .unwrap_or(Value::Null),
+    );
     obj.insert("locale".into(), s_opt(&row, "locale"));
     obj.insert(
         "submitted_at".into(),
@@ -995,6 +1124,148 @@ async fn update_lead(
         Ok(_) => err(StatusCode::NOT_FOUND, "Lead not found"),
         Err(e) => {
             tracing::error!(error = %e, lead_id = %lead_id, "update lead");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
+    }
+}
+
+async fn promote_lead_to_console(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
+        return e;
+    }
+
+    let current = match sqlx::query(
+        r#"SELECT intake_source, source, flow, qualification_status,
+                  failed_outcome_status, converted_patient_id, console_promoted_at
+           FROM leads
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
+        Err(e) => {
+            tracing::error!(error = %e, lead_id = %lead_id, "load lead before console promotion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    let failed_outcome_status = current
+        .try_get::<String, _>("failed_outcome_status")
+        .unwrap_or_else(|_| "none".to_string());
+    if failed_outcome_status == "delete_anonymized" {
+        return err(
+            StatusCode::CONFLICT,
+            "Deleted leads cannot be promoted to console",
+        );
+    }
+
+    if current
+        .try_get::<Option<Uuid>, _>("converted_patient_id")
+        .unwrap_or_default()
+        .is_some()
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Converted leads cannot be promoted to console",
+        );
+    }
+
+    let previous_type = lead_type_from_origin(
+        current
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("console_promoted_at")
+            .unwrap_or_default()
+            .is_some(),
+        current
+            .try_get::<Option<String>, _>("intake_source")
+            .unwrap_or_default()
+            .as_deref(),
+        current
+            .try_get::<Option<String>, _>("source")
+            .unwrap_or_default()
+            .as_deref(),
+        current
+            .try_get::<Option<String>, _>("flow")
+            .unwrap_or_default()
+            .as_deref(),
+    );
+
+    match sqlx::query(
+        r#"UPDATE leads
+           SET console_promoted_at = COALESCE(console_promoted_at, now()),
+               console_promoted_by = COALESCE(console_promoted_by, $2),
+               created_by = COALESCE(created_by, $2),
+               updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(auth.user_id)
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {
+            state.audit_sender.try_send(audit::domain_event(
+                "promote_lead_to_console",
+                Some(auth.user_id),
+                "lead",
+                Some(lead_id),
+                json!({
+                    "previous_lead_type": previous_type,
+                    "lead_type": "console",
+                }),
+            ));
+
+            let qualification_status = current
+                .try_get::<String, _>("qualification_status")
+                .unwrap_or_else(|_| "new".to_string());
+            if let Err(resp) = crate::routes::workflow_lifecycle::record_event(
+                &state,
+                crate::routes::workflow_lifecycle::RecordEvent {
+                    entity_type: "lead",
+                    entity_id: lead_id,
+                    from_stage: Some(&qualification_status),
+                    to_stage: &qualification_status,
+                    transition_kind: "promoted_to_console",
+                    changed_by: Some(auth.user_id),
+                    note: Some("Lead promoted into console workflow"),
+                    metadata: json!({
+                        "previous_lead_type": previous_type,
+                        "lead_type": "console",
+                    }),
+                },
+            )
+            .await
+            {
+                return resp;
+            }
+
+            crate::realtime::publish_lead_event(
+                &state,
+                Some(auth.user_id),
+                "lead.promoted_to_console",
+                lead_id,
+                json!({
+                    "previous_lead_type": previous_type,
+                    "lead_type": "console",
+                }),
+            )
+            .await;
+
+            Json(json!({
+                "ok": true,
+                "lead_type": "console",
+            }))
+            .into_response()
+        }
+        Ok(_) => err(StatusCode::NOT_FOUND, "Lead not found"),
+        Err(e) => {
+            tracing::error!(error = %e, lead_id = %lead_id, "promote lead to console");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
         }
     }
@@ -1673,6 +1944,15 @@ fn str_opt(v: &Value) -> Option<String> {
     }
 }
 
+fn str_opt_without_zero_placeholder(v: &Value) -> Option<String> {
+    let s = v.as_str()?.trim();
+    if s.is_empty() || s.chars().all(|c| c == '0') {
+        None
+    } else {
+        Some(s.to_string())
+    }
+}
+
 fn yes_no_to_bool(v: &Value) -> Option<bool> {
     match v.as_str()?.trim().to_ascii_lowercase().as_str() {
         "yes" | "true" => Some(true),
@@ -1690,7 +1970,9 @@ fn date_opt(v: &Value) -> Option<NaiveDate> {
     if s.is_empty() {
         return None;
     }
-    NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
+    ["%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"]
+        .into_iter()
+        .find_map(|format| NaiveDate::parse_from_str(s, format).ok())
 }
 
 fn string_array(v: &Value) -> Vec<String> {
@@ -1936,8 +2218,8 @@ async fn ingest_lead_intake(
     .bind(str_opt(&payload["country"]))
     .bind(str_opt(&payload["streetAddress"]))
     .bind(str_opt(&payload["city"]))
-    .bind(str_opt(&payload["state"]))
-    .bind(str_opt(&payload["zipCode"]))
+    .bind(str_opt_without_zero_placeholder(&payload["state"]))
+    .bind(str_opt_without_zero_placeholder(&payload["zipCode"]))
     .bind(str_opt(&payload["primaryLanguage"]))
     .bind(yes_no_to_bool(&payload["needsInterpreter"]))
     .bind(str_opt(&payload["location"]))

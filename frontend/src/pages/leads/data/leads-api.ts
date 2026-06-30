@@ -49,6 +49,10 @@ export function updateLeadGate(leadId: string, payload: JsonPayload) {
   return postJson<void>(`/leads/${leadId}/update`, payload);
 }
 
+export function promoteLeadToConsole(leadId: string) {
+  return postJson<void>(`/leads/${leadId}/promote-console`, {});
+}
+
 export function resolveFailedLead(leadId: string, payload: JsonPayload) {
   return postJson<void>(`/leads/${leadId}/failed-flow`, payload);
 }

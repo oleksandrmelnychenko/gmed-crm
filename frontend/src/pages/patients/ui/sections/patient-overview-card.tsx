@@ -8,7 +8,9 @@ import {
   fetchPatientClinical,
   fetchPatientRecommendations,
   type ClinicalDiagnosis,
+  type ClinicalExamination,
   type ClinicalMedication,
+  type ClinicalProcedure,
   type ClinicalWarning,
   type DiagnosisStatus,
   type PatientRecommendation,
@@ -25,12 +27,27 @@ const RECOMMENDATION_TYPE_LABELS: Record<string, { ru: string; de: string }> = {
   medication_review: { ru: "Проверка медикаментов", de: "Medikationsprüfung" },
   other: { ru: "Другое", de: "Sonstiges" },
 };
+const datePillClass =
+  "inline-flex items-center rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700";
 
 function recommendationTypeLabel(value: string | null, tx: Bilingual): string | null {
   if (!value) return null;
   const label = RECOMMENDATION_TYPE_LABELS[value];
   if (label) return tx(label.ru, label.de);
   return value.replace(/_/g, " ");
+}
+
+function recommendationDoctorLabel(
+  rec: PatientRecommendation,
+  lang: "de" | "ru",
+  tx: Bilingual,
+): string | null {
+  const doctor = [rec.source_doctor_title, rec.source_doctor_name].filter(Boolean).join(" ").trim();
+  if (!doctor && !rec.source_doctor_fachbereich) return null;
+  const fachbereich = rec.source_doctor_fachbereich
+    ? `(${specializationLabelForValue(rec.source_doctor_fachbereich, [], lang)})`
+    : null;
+  return `${tx("Назначил", "Verordnet von")}: ${[doctor || null, fachbereich].filter(Boolean).join(" ")}`;
 }
 
 function diagnosisStatusLabel(status: DiagnosisStatus | undefined, tx: Bilingual) {
@@ -92,7 +109,7 @@ type OverviewDoctor = {
   provider: string | null;
 };
 
-function deriveDoctors(
+export function deriveDoctors(
   sources: {
     doctor_name: string | null;
     doctor_title: string | null;
@@ -161,14 +178,18 @@ function SubLines({ items }: { items: string[] }) {
 
 export function PatientRecommendationOverviewItem({
   rec,
+  lang,
   tx,
 }: {
   rec: PatientRecommendation;
+  lang: "de" | "ru";
   tx: Bilingual;
 }) {
   const sub: string[] = [];
   const type = recommendationTypeLabel(rec.recommendation_type, tx);
+  const doctor = recommendationDoctorLabel(rec, lang, tx);
   if (type) sub.push(type);
+  if (doctor) sub.push(doctor);
   sub.push(...splitLines(rec.description));
   if (rec.due_at) sub.push(rec.due_at);
 
@@ -176,7 +197,7 @@ export function PatientRecommendationOverviewItem({
     <li className="leading-snug">
       <span className="text-[13px] font-medium text-foreground">{rec.title}</span>
       {rec.recommended_on ? (
-        <span className="ml-1.5 text-[11px] font-medium text-foreground">· {rec.recommended_on}</span>
+        <span className={cn(datePillClass, "ml-1.5")}>{rec.recommended_on}</span>
       ) : null}
       {rec.lifecycle_status === "nicht_erfolgt" ? (
         <span className="ml-1 text-[10px] font-medium text-rose-600">
@@ -271,6 +292,8 @@ export function PatientOverviewCard({
   const [cave, setCave] = useState<ClinicalWarning[]>([]);
   const [diagnoses, setDiagnoses] = useState<ClinicalDiagnosis[]>([]);
   const [medications, setMedications] = useState<ClinicalMedication[]>([]);
+  const [examinations, setExaminations] = useState<ClinicalExamination[]>([]);
+  const [procedures, setProcedures] = useState<ClinicalProcedure[]>([]);
   const [recommendations, setRecommendations] = useState<PatientRecommendation[]>([]);
 
   useEffect(() => {
@@ -285,6 +308,8 @@ export function PatientOverviewCard({
       setCave(clinical?.cave ?? []);
       setDiagnoses(clinical?.diagnoses ?? []);
       setMedications(clinical?.medications ?? []);
+      setExaminations(clinical?.examinations ?? []);
+      setProcedures(clinical?.procedures ?? []);
       setRecommendations(recs ?? []);
     });
     return () => {
@@ -319,7 +344,7 @@ export function PatientOverviewCard({
     const pk = parentKey(d);
     return pk == null || !known.has(pk);
   });
-  const doctors = deriveDoctors([...diagnoses, ...medications]);
+  const doctors = deriveDoctors([...diagnoses, ...medications, ...examinations, ...procedures]);
   const doctorSpecializationLabel = (value: string) => specializationLabelForValue(value, [], lang);
   const age = computeAge(birthDate);
   const showDemographics = Boolean(birthDate || gender || phone || email);
@@ -462,7 +487,7 @@ export function PatientOverviewCard({
               ) : (
                 <ul className="list-disc space-y-1 pl-3.5 marker:text-muted-foreground/50">
                   {activeRecommendations.map((rec) => (
-                    <PatientRecommendationOverviewItem key={rec.id} rec={rec} tx={tx} />
+                    <PatientRecommendationOverviewItem key={rec.id} rec={rec} lang={lang} tx={tx} />
                   ))}
                 </ul>
               )}

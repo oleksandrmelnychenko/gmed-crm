@@ -295,6 +295,10 @@ export interface OperationsTranslations {
   lead_legal_sex_male: string;
   lead_legal_sex_diverse: string;
   lead_legal_sex_no_entry: string;
+  lead_type: string;
+  lead_type_form: string;
+  lead_type_questionnaire: string;
+  lead_type_console: string;
   lead_source_manual: string;
   lead_source_agent: string;
   lead_source_website: string;
@@ -387,6 +391,8 @@ export interface OperationsTranslations {
   lead_language_fa: string;
   lead_language_pl: string;
   lead_language_ru: string;
+  lead_language_uk: string;
+  lead_language_es: string;
   lead_language_zh: string;
   lead_needs_interpreter: string;
   lead_flow: string;
@@ -394,6 +400,15 @@ export interface OperationsTranslations {
   lead_submitted_at: string;
   lead_from_website_wizard: string;
   lead_from_website_contact_form: string;
+  lead_intake_sheet_title: string;
+  lead_intake_sheet_description: string;
+  lead_contact_form_snapshot: string;
+  lead_questionnaire_snapshot: string;
+  lead_promote_to_console: string;
+  lead_promoting_to_console: string;
+  lead_promote_to_console_description: string;
+  lead_promote_to_console_success: string;
+  lead_console_promoted_at: string;
   lead_healthcare_consent_available: string;
   lead_privacy_practices_accepted: string;
   lead_save_gate_data: string;
@@ -424,6 +439,25 @@ export interface OperationsTranslations {
   lead_currently_in_treatment: string;
   lead_health_risk_for_travel: string;
   lead_services: string;
+  lead_option_program_standard: string;
+  lead_option_program_care: string;
+  lead_option_program_reserve: string;
+  lead_option_service_driver: string;
+  lead_option_service_concierge: string;
+  lead_option_service_medical_transport: string;
+  lead_option_service_air_ambulance: string;
+  lead_option_service_business_aviation: string;
+  lead_option_service_none: string;
+  lead_option_service_not_sure: string;
+  lead_option_location_eu: string;
+  lead_option_location_germany: string;
+  lead_option_location_eu_not_germany: string;
+  lead_option_location_outside_eu: string;
+  lead_option_preferred_no_preference: string;
+  lead_option_preferred_munich: string;
+  lead_option_preferred_berlin: string;
+  lead_option_preferred_hamburg: string;
+  lead_option_preferred_cologne: string;
   lead_option_cardiology_fast_track: string;
   lead_option_concierge_support: string;
   lead_option_dental_reconstruction: string;
@@ -446,6 +480,8 @@ export interface OperationsTranslations {
   lead_option_insurance_no: string;
   lead_option_insurance_not_sure: string;
   lead_option_visit_asap: string;
+  lead_option_visit_next_few_months: string;
+  lead_option_visit_not_sure: string;
   lead_option_visit_within_4_weeks: string;
   lead_option_visit_within_6_weeks: string;
   lead_option_visit_within_8_weeks: string;
@@ -812,6 +848,10 @@ export const operationsRu: OperationsTranslations = {
   lead_legal_sex_male: "Мужской",
   lead_legal_sex_diverse: "Другое",
   lead_legal_sex_no_entry: "Без записи",
+  lead_type: "Тип лида",
+  lead_type_form: "Форма",
+  lead_type_questionnaire: "Опросник",
+  lead_type_console: "Консоль",
   lead_source_manual: "Вручную",
   lead_source_agent: "Агент",
   lead_source_website: "Сайт",
@@ -915,6 +955,8 @@ export const operationsRu: OperationsTranslations = {
   lead_language_fa: "Персидский",
   lead_language_pl: "Польский",
   lead_language_ru: "Русский",
+  lead_language_uk: "Украинский",
+  lead_language_es: "Испанский",
   lead_language_zh: "Китайский",
   lead_needs_interpreter: "Нужен переводчик",
   lead_flow: "Процесс",
@@ -922,6 +964,17 @@ export const operationsRu: OperationsTranslations = {
   lead_submitted_at: "Отправлено",
   lead_from_website_wizard: "Из мастера на сайте",
   lead_from_website_contact_form: "Из контактной формы сайта",
+  lead_intake_sheet_title: "Входящий лид",
+  lead_intake_sheet_description:
+    "Это короткая входящая заявка. Проверьте данные и переведите её в консольного лида для полного процесса.",
+  lead_contact_form_snapshot: "Короткая форма",
+  lead_questionnaire_snapshot: "Опросник",
+  lead_promote_to_console: "Перевести в консоль",
+  lead_promoting_to_console: "Переводим...",
+  lead_promote_to_console_description:
+    "После перехода откроется полный шаблон консольного лида с квалификацией, процессом и конверсией.",
+  lead_promote_to_console_success: "Лид переведён в консольный формат.",
+  lead_console_promoted_at: "Переведён в консоль",
   lead_healthcare_consent_available: "Согласие на медицинскую обработку есть",
   lead_privacy_practices_accepted: "Правила приватности приняты",
   lead_save_gate_data: "Сохранить данные гейта",
@@ -954,6 +1007,25 @@ export const operationsRu: OperationsTranslations = {
   lead_currently_in_treatment: "Сейчас проходит лечение",
   lead_health_risk_for_travel: "Риск для поездки по здоровью",
   lead_services: "Услуги",
+  lead_option_program_standard: "GMED Standard",
+  lead_option_program_care: "GMED Care",
+  lead_option_program_reserve: "GMED Reserve",
+  lead_option_service_driver: "Услуги водителя и трансфер",
+  lead_option_service_concierge: "Консьерж-сервис",
+  lead_option_service_medical_transport: "Наземный медицинский транспорт",
+  lead_option_service_air_ambulance: "Санитарная авиация",
+  lead_option_service_business_aviation: "Организация чартерных перелетов",
+  lead_option_service_none: "Ничего из перечисленного",
+  lead_option_service_not_sure: "Пока не знаю",
+  lead_option_location_eu: "Евросоюз",
+  lead_option_location_germany: "Германия",
+  lead_option_location_eu_not_germany: "Страна Евросоюза (кроме Германии)",
+  lead_option_location_outside_eu: "Страна за пределами Евросоюза",
+  lead_option_preferred_no_preference: "Нет предпочтений",
+  lead_option_preferred_munich: "Мюнхен",
+  lead_option_preferred_berlin: "Берлин",
+  lead_option_preferred_hamburg: "Гамбург",
+  lead_option_preferred_cologne: "Кёльн",
   lead_option_cardiology_fast_track: "Ускоренная кардиология",
   lead_option_concierge_support: "Консьерж-сопровождение",
   lead_option_dental_reconstruction: "Стоматологическая реконструкция",
@@ -976,6 +1048,8 @@ export const operationsRu: OperationsTranslations = {
   lead_option_insurance_no: "Нет",
   lead_option_insurance_not_sure: "Не уверен",
   lead_option_visit_asap: "Как можно скорее",
+  lead_option_visit_next_few_months: "В ближайшие месяцы",
+  lead_option_visit_not_sure: "Сроки не определены",
   lead_option_visit_within_4_weeks: "В течение 4 недель",
   lead_option_visit_within_6_weeks: "В течение 6 недель",
   lead_option_visit_within_8_weeks: "В течение 8 недель",
@@ -1348,6 +1422,10 @@ export const operationsDe: OperationsTranslations = {
   lead_legal_sex_male: "Männlich",
   lead_legal_sex_diverse: "Divers",
   lead_legal_sex_no_entry: "Kein Eintrag",
+  lead_type: "Lead-Typ",
+  lead_type_form: "Formular",
+  lead_type_questionnaire: "Fragebogen",
+  lead_type_console: "Konsole",
   lead_source_manual: "Manuell",
   lead_source_agent: "Agent",
   lead_source_website: "Website",
@@ -1456,6 +1534,8 @@ export const operationsDe: OperationsTranslations = {
   lead_language_fa: "Persisch",
   lead_language_pl: "Polnisch",
   lead_language_ru: "Russisch",
+  lead_language_uk: "Ukrainisch",
+  lead_language_es: "Spanisch",
   lead_language_zh: "Chinesisch",
   lead_needs_interpreter: "Dolmetscher erforderlich",
   lead_flow: "Flow",
@@ -1463,6 +1543,17 @@ export const operationsDe: OperationsTranslations = {
   lead_submitted_at: "Eingereicht am",
   lead_from_website_wizard: "Aus dem Website-Assistenten",
   lead_from_website_contact_form: "Aus dem Website-Kontaktformular",
+  lead_intake_sheet_title: "Eingehender Lead",
+  lead_intake_sheet_description:
+    "Dies ist eine kurze eingehende Anfrage. Daten prüfen und danach in den Konsolen-Lead für den vollständigen Prozess überführen.",
+  lead_contact_form_snapshot: "Kurzformular",
+  lead_questionnaire_snapshot: "Fragebogen",
+  lead_promote_to_console: "In Konsole übernehmen",
+  lead_promoting_to_console: "Wird übernommen...",
+  lead_promote_to_console_description:
+    "Danach öffnet sich der vollständige Konsolen-Lead mit Qualifikation, Workflow und Konvertierung.",
+  lead_promote_to_console_success: "Lead wurde in den Konsolenmodus übernommen.",
+  lead_console_promoted_at: "In Konsole übernommen",
   lead_healthcare_consent_available: "Medizinische Einwilligung liegt vor",
   lead_privacy_practices_accepted: "Datenschutzpraxis akzeptiert",
   lead_save_gate_data: "Gate-Daten speichern",
@@ -1495,6 +1586,25 @@ export const operationsDe: OperationsTranslations = {
   lead_currently_in_treatment: "Aktuell in Behandlung",
   lead_health_risk_for_travel: "Gesundheitsrisiko für Reise",
   lead_services: "Leistungen",
+  lead_option_program_standard: "GMED Standard",
+  lead_option_program_care: "GMED Care",
+  lead_option_program_reserve: "GMED Reserve",
+  lead_option_service_driver: "Limousinenservice und privater Fahrer",
+  lead_option_service_concierge: "Concierge-Services",
+  lead_option_service_medical_transport: "Bodengebundener medizinischer Transport",
+  lead_option_service_air_ambulance: "Ambulanzflug",
+  lead_option_service_business_aviation: "Business Jet / Privatflugzeug",
+  lead_option_service_none: "Keinen der genannten Services",
+  lead_option_service_not_sure: "Ich bin mir noch nicht sicher",
+  lead_option_location_eu: "EU",
+  lead_option_location_germany: "In Deutschland",
+  lead_option_location_eu_not_germany: "Im EU-Ausland (nicht Deutschland)",
+  lead_option_location_outside_eu: "Außerhalb der EU",
+  lead_option_preferred_no_preference: "Keine Präferenz",
+  lead_option_preferred_munich: "München",
+  lead_option_preferred_berlin: "Berlin",
+  lead_option_preferred_hamburg: "Hamburg",
+  lead_option_preferred_cologne: "Köln",
   lead_option_cardiology_fast_track: "Kardiologie Fast Track",
   lead_option_concierge_support: "Concierge-Begleitung",
   lead_option_dental_reconstruction: "Zahnrekonstruktion",
@@ -1517,6 +1627,8 @@ export const operationsDe: OperationsTranslations = {
   lead_option_insurance_no: "Nein",
   lead_option_insurance_not_sure: "Nicht sicher",
   lead_option_visit_asap: "So bald wie möglich",
+  lead_option_visit_next_few_months: "In den nächsten Monaten",
+  lead_option_visit_not_sure: "Steht noch nicht fest",
   lead_option_visit_within_4_weeks: "Innerhalb von 4 Wochen",
   lead_option_visit_within_6_weeks: "Innerhalb von 6 Wochen",
   lead_option_visit_within_8_weeks: "Innerhalb von 8 Wochen",

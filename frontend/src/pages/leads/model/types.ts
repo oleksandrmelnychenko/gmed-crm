@@ -5,6 +5,7 @@ export type LeadListItem = Lead;
 export type LeadFilters = {
   search: string;
   status: string;
+  leadType: string;
   email: string;
   phone: string;
   source: string;

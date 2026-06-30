@@ -13,6 +13,7 @@ import { toast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import type { PatientVitalMeasurement } from "@/pages/patients/model/detail-resource-types";
 import { FormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
@@ -42,6 +43,24 @@ function blankForm(): FormState {
     heightCm: "",
     bmi: "",
     notes: "",
+  };
+}
+
+function numberToForm(value: number | null | undefined): string {
+  return value == null ? "" : String(value);
+}
+
+function formFromMeasurement(measurement: PatientVitalMeasurement | null | undefined): FormState {
+  if (!measurement) return blankForm();
+  return {
+    measuredAt: toLocalDateTimeInput(new Date(measurement.measured_at)),
+    bpSystolic: numberToForm(measurement.bp_systolic),
+    bpDiastolic: numberToForm(measurement.bp_diastolic),
+    heartRate: numberToForm(measurement.heart_rate),
+    weightKg: numberToForm(measurement.weight_kg),
+    heightCm: numberToForm(measurement.height_cm),
+    bmi: numberToForm(measurement.bmi),
+    notes: measurement.notes ?? "",
   };
 }
 
@@ -75,11 +94,13 @@ const vitalsTextareaClassName = cn(textareaClass, "min-h-[80px]");
 
 export function PatientVitalsSheet({
   patientId,
+  initialMeasurement,
   open,
   onOpenChange,
   onSaved,
 }: {
   patientId: string;
+  initialMeasurement?: PatientVitalMeasurement | null;
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onSaved: () => void;
@@ -90,8 +111,8 @@ export function PatientVitalsSheet({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!open) setForm(blankForm());
-  }, [open]);
+    setForm(open ? formFromMeasurement(initialMeasurement) : blankForm());
+  }, [initialMeasurement, open]);
 
   const bmiPreview = useMemo(
     () => computeBmi(form.weightKg, form.heightCm),
@@ -110,7 +131,10 @@ export function PatientVitalsSheet({
 
     setBusy(true);
     try {
-      await apiFetch(`/patients/${patientId}/vitals`, {
+      const endpoint = initialMeasurement?.id
+        ? `/patients/${patientId}/vitals/${initialMeasurement.id}/update`
+        : `/patients/${patientId}/vitals`;
+      await apiFetch(endpoint, {
         method: "POST",
         body: JSON.stringify({
           measured_at: measuredAt.toISOString(),
@@ -142,7 +166,7 @@ export function PatientVitalsSheet({
       title={
         <span className="flex w-full items-center justify-between gap-2">
           <span>
-            {l("patients_add_vital_measurement")}
+            {initialMeasurement?.id ? t.common_edit : l("patients_add_vital_measurement")}
           </span>
           {bmiPreview != null ? (
             <Badge

@@ -84,6 +84,7 @@ import {
   fetchLeadDetail,
   fetchLeadStats,
   fetchLeads,
+  promoteLeadToConsole,
   resolveFailedLead,
   updateLeadGate,
   updateLeadStatus,
@@ -92,6 +93,7 @@ import {
   COMPLIANCE_OPTIONS,
   DEFAULT_FILTERS,
   LEGAL_SEX_OPTIONS,
+  LEAD_TYPE_OPTIONS,
   STATUS_OPTIONS,
   blankFailedLeadResolutionForm,
   blankLeadForm,
@@ -103,13 +105,18 @@ import {
   filterLeadsByContact,
   formatDate,
   formatSize,
+  leadLocationDetailedLabel,
+  leadLocationLabel,
   leadSourceLabel,
   leadStageLabel,
+  leadTypeFromLead,
+  leadTypeLabel,
   leadReadinessCheckLabel,
   leadReadinessReasonLabel,
   leadInsuranceCoverageLabel,
   leadLanguageLabel,
   leadMedicalRecordsLabel,
+  leadPreferredLocationLabel,
   leadProgramServiceLabel,
   leadTransitionKindLabel,
   leadVisitTimingLabel,
@@ -134,10 +141,12 @@ const LEAD_DEFAULT_FROZEN_COLUMNS = ["lead"];
 const LEAD_MAX_FROZEN_COLUMNS = 2;
 const FAILED_OUTCOME_OPTIONS = ["archived", "delete_anonymized"] as const;
 type LeadPaneTab = "overview" | "process" | "qualification" | "details";
+type LeadTypeTone = "warning" | "brand" | "info" | "neutral";
 const LEAD_REALTIME_EVENTS = [
   "lead.created",
   "lead.updated",
   "lead.status_changed",
+  "lead.promoted_to_console",
   "lead.converted",
   "lead.failed_resolved",
 ] as const;
@@ -149,6 +158,18 @@ function titleWithDot(title: ReactNode) {
       <span>{title}</span>
     </span>
   );
+}
+
+function leadTypeTone(type: string): LeadTypeTone {
+  if (type === "form") return "warning";
+  if (type === "questionnaire") return "brand";
+  if (type === "console") return "info";
+  return "neutral";
+}
+
+function omitZeroPlaceholder(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  return trimmed && /^0+$/.test(trimmed) ? null : value;
 }
 
 function cardClass(extra?: string) {
@@ -272,21 +293,23 @@ function useLeadsPageContent() {
   const failedLoadMessage = t.common_failed_load;
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => leadPermissions(user?.role), [user?.role]);
-  type PersistedLeadFilters = Pick<LeadFilters, "status" | "source" | "country" | "includeArchived">;
+  type PersistedLeadFilters = Pick<LeadFilters, "status" | "leadType" | "source" | "country" | "includeArchived">;
   const [persistedLeadFilters, setPersistedLeadFilters] = useSecurePersistedState<PersistedLeadFilters>(
     "leads.filters",
     {
       status: DEFAULT_FILTERS.status,
+      leadType: DEFAULT_FILTERS.leadType,
       source: DEFAULT_FILTERS.source,
       country: DEFAULT_FILTERS.country,
       includeArchived: DEFAULT_FILTERS.includeArchived,
     },
     {
-      schemaVersion: 1,
+      schemaVersion: 2,
       validate: (value): value is PersistedLeadFilters =>
         Boolean(value) &&
         typeof value === "object" &&
         typeof (value as Record<string, unknown>).status === "string" &&
+        typeof (value as Record<string, unknown>).leadType === "string" &&
         typeof (value as Record<string, unknown>).source === "string" &&
         typeof (value as Record<string, unknown>).country === "string" &&
         typeof (value as Record<string, unknown>).includeArchived === "string",
@@ -295,6 +318,7 @@ function useLeadsPageContent() {
   const [filters, setFiltersState] = useState<LeadFilters>(() => ({
     ...DEFAULT_FILTERS,
     status: persistedLeadFilters.status,
+    leadType: persistedLeadFilters.leadType,
     source: persistedLeadFilters.source,
     country: persistedLeadFilters.country,
     includeArchived: persistedLeadFilters.includeArchived,
@@ -305,6 +329,7 @@ function useLeadsPageContent() {
         const next = typeof value === "function" ? (value as (p: LeadFilters) => LeadFilters)(prev) : value;
         setPersistedLeadFilters({
           status: next.status,
+          leadType: next.leadType,
           source: next.source,
           country: next.country,
           includeArchived: next.includeArchived,
@@ -474,6 +499,27 @@ function useLeadsPageContent() {
         width: 260,
         pinned: "left",
         render: (row) => <span className="text-sm font-medium text-foreground">{`${row.first_name} ${row.last_name}`.trim()}</span>,
+      },
+      {
+        id: "lead_type",
+        label: t.lead_type,
+        accessor: (row) => leadTypeFromLead(row),
+        filterType: "enum",
+        filterOptions: LEAD_TYPE_OPTIONS.map((type) => ({
+          value: type,
+          label: leadTypeLabel(type, t),
+        })),
+        group: "origin",
+        sortable: true,
+        width: 170,
+        render: (row) => {
+          const type = leadTypeFromLead(row);
+          return (
+            <StatusBadge tone={leadTypeTone(type)}>
+              {leadTypeLabel(type, t)}
+            </StatusBadge>
+          );
+        },
       },
       {
         id: "status",
@@ -807,6 +853,28 @@ function useLeadsPageContent() {
     }
   }
 
+  async function promoteToConsole(leadId: string) {
+    setActionBusy(`promote-console:${leadId}`);
+    setError("");
+    setDetailError("");
+    setSuccessMessage("");
+    try {
+      await promoteLeadToConsole(leadId);
+      clearApiCache("/leads");
+      clearApiCache(`/leads/${leadId}`);
+      setPaneTab("overview");
+      setSuccessMessage(t.lead_promote_to_console_success);
+      reload();
+    } catch (actionError) {
+      const message =
+        actionError instanceof Error ? actionError.message : t.common_failed_update;
+      setError(message);
+      setDetailError(message);
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
   async function confirmConvertLead(leadId: string) {
     setActionBusy(`convert:${leadId}`);
     setError("");
@@ -904,7 +972,16 @@ function useLeadsPageContent() {
   const anyQuickFilterActive =
     filters.search.trim() !== "" ||
     filters.status !== "" ||
+    filters.leadType !== "" ||
     filters.includeArchived !== "false";
+  const detailLeadType = detail ? leadTypeFromLead(detail) : "console";
+  const detailIsConsoleLead = detailLeadType === "console";
+  const detailIsIntakeLead = Boolean(detail) && !detailIsConsoleLead;
+  const detailCanPromoteToConsole =
+    Boolean(detail) &&
+    detailIsIntakeLead &&
+    detail?.failed_outcome.status !== "delete_anonymized" &&
+    !detail?.converted_patient_id;
 
   const paneTabs: Array<{
     key: LeadPaneTab;
@@ -916,7 +993,7 @@ function useLeadsPageContent() {
     { key: "details", label: t.lead_tab_details },
   ];
 
-  const leadWorkflow = detail
+  const leadWorkflow = detail && detailIsConsoleLead
     ? (() => {
         const qualificationChecks = detail.readiness.checks.filter(
           (check) => check.blocking_for === "qualification",
@@ -948,7 +1025,7 @@ function useLeadsPageContent() {
         };
       })()
     : null;
-  const detailConversionGate = detail
+  const detailConversionGate = detail && detailIsConsoleLead
     ? computeLeadConversionGate(
         {
           qualification_status: detail.qualification_status,
@@ -972,7 +1049,25 @@ function useLeadsPageContent() {
           <h2 className="min-w-0 text-base font-medium text-foreground">
             {detail ? `${detail.first_name} ${detail.last_name}` : t.leads_title}
           </h2>
-          {detail && permissions.canConvert && !leadWorkflow?.leadConverted ? (
+          {detail && detailCanPromoteToConsole ? (
+            <Button
+              type="button"
+              size="sm"
+              className="shrink-0"
+              disabled={Boolean(actionBusy)}
+              title={t.lead_promote_to_console_description}
+              onClick={() => void promoteToConsole(detail.id)}
+            >
+              {actionBusy === `promote-console:${detail.id}` ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <ArrowRight className="size-4" />
+              )}
+              {actionBusy === `promote-console:${detail.id}`
+                ? t.lead_promoting_to_console
+                : t.lead_promote_to_console}
+            </Button>
+          ) : detail && detailIsConsoleLead && permissions.canConvert && !leadWorkflow?.leadConverted ? (
             <Button
               type="button"
               size="sm"
@@ -994,7 +1089,8 @@ function useLeadsPageContent() {
             </Button>
           ) : null}
         </div>
-        <div className="mt-2 flex flex-wrap gap-1">
+        {detailIsConsoleLead ? (
+          <div className="mt-2 flex flex-wrap gap-1">
           {paneTabs.map((tab) => {
             const isActive = paneTab === tab.key;
             return (
@@ -1014,7 +1110,8 @@ function useLeadsPageContent() {
               </button>
             );
           })}
-        </div>
+          </div>
+        ) : null}
       </div>
       <div className="flex-1 overflow-y-auto space-y-4 px-5 py-4">
         <div className="space-y-4 rounded-xl">
@@ -1028,6 +1125,210 @@ function useLeadsPageContent() {
               <Banner tone="error">{detailError}</Banner>
             </div>
           ) : detail ? (
+            detailIsIntakeLead ? (
+              <div className="space-y-4">
+                <section className={cardClass("p-4")}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge tone={leadTypeTone(detailLeadType)}>
+                      {leadTypeLabel(detail, t)}
+                    </StatusBadge>
+                    <StatusBadge tone={leadStatusTone(detail.qualification_status)}>
+                      {statusLabel(detail.qualification_status, t)}
+                    </StatusBadge>
+                    {detail.submitted_at ? (
+                      <Badge variant="outline" className="rounded-full">
+                        {t.lead_submitted_at} {formatDate(detail.submitted_at, locale, t.common_not_set)}
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <h2 className="mt-4 text-2xl font-semibold text-zinc-950">
+                    {detail.first_name} {detail.last_name}
+                  </h2>
+                </section>
+
+                <section className={cardClass("p-4")}>
+                  <SectionTitle>{t.lead_intake_sheet_title}</SectionTitle>
+                  <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
+                    <DetailCard
+                      label={t.lead_full_name}
+                      value={dashOrValue(
+                        [
+                          detail.first_name,
+                          detail.middle_name,
+                          detail.last_name,
+                          detail.suffix,
+                        ]
+                          .filter(Boolean)
+                          .join(" "),
+                        t,
+                      )}
+                    />
+                    <DetailCard label={t.patients_email} value={detail.email || t.common_not_set} />
+                    <DetailCard label={t.field_phone} value={detail.phone || t.common_not_set} />
+                    <DetailCard label="WhatsApp" value={dashOrValue(detail.whatsapp_number, t)} />
+                    <DetailCard label={t.leads_source} value={leadSourceLabel(detail.source, t)} />
+                    <DetailCard label={t.providers_country} value={dashOrValue(detail.country, t)} />
+                    <DetailCard label={t.field_birth_date} value={formatDate(detail.date_of_birth, locale, t.common_not_set)} />
+                    <DetailCard label={t.lead_legal_sex} value={legalSexLabel(detail.legal_sex, t)} />
+                    {detail.locale ? (
+                      <DetailCard label={t.lead_locale} value={detail.locale} />
+                    ) : null}
+                    {detail.flow ? (
+                      <DetailCard label={t.lead_flow} value={detail.flow} />
+                    ) : null}
+                  </div>
+                  <div className="mt-4 flex justify-end">
+                    <Button
+                      type="button"
+                      disabled={Boolean(actionBusy)}
+                      onClick={() => void promoteToConsole(detail.id)}
+                    >
+                      {actionBusy === `promote-console:${detail.id}` ? (
+                        <LoaderCircle className="size-4 animate-spin" />
+                      ) : (
+                        <ArrowRight className="size-4" />
+                      )}
+                      {actionBusy === `promote-console:${detail.id}`
+                        ? t.lead_promoting_to_console
+                        : t.lead_promote_to_console}
+                    </Button>
+                  </div>
+                </section>
+
+                {detailLeadType === "form" ? (
+                  <section className={cardClass("p-4")}>
+                    {detail.message ? (
+                      <div className="rounded-xl bg-zinc-50 px-4 py-3 text-sm leading-6 text-zinc-700 whitespace-pre-wrap">
+                        {detail.message}
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-sm text-zinc-500">{t.common_not_set}</p>
+                    )}
+                  </section>
+                ) : null}
+
+                {detailLeadType === "questionnaire" ? (
+                  <>
+                    {(detail.street_address || detail.city || omitZeroPlaceholder(detail.state) || omitZeroPlaceholder(detail.zip_code)) ? (
+                      <section className={cardClass("p-4")}>
+                        <SectionTitle>{t.lead_section_address}</SectionTitle>
+                        <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
+                          <DetailCard label={t.providers_street} value={dashOrValue(detail.street_address, t)} />
+                          <DetailCard label={t.providers_city} value={dashOrValue(detail.city, t)} />
+                          <DetailCard label={t.lead_state_region} value={dashOrValue(omitZeroPlaceholder(detail.state), t)} />
+                          <DetailCard label={t.lead_zip_code} value={dashOrValue(omitZeroPlaceholder(detail.zip_code), t)} />
+                        </div>
+                      </section>
+                    ) : null}
+
+                    <section className={cardClass("p-4")}>
+                      <SectionTitle>{t.lead_questionnaire_snapshot}</SectionTitle>
+                      <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
+                        <DetailCard label={t.lead_primary_language} value={leadLanguageLabel(detail.primary_language, t)} />
+                        <DetailCard label={t.lead_needs_interpreter} value={yesNo(detail.needs_interpreter, t)} />
+                        <DetailCard label={t.lead_location} value={leadLocationLabel(detail.location, t)} />
+                        <DetailCard label={t.lead_location_detailed} value={leadLocationDetailedLabel(detail.location_detailed, t)} />
+                        <DetailCard label={t.lead_wants_membership} value={yesNo(detail.wants_membership, t)} />
+                        <DetailCard label={t.lead_selected_program} value={leadProgramServiceLabel(detail.selected_program, t)} />
+                        <DetailCard label={t.lead_can_travel} value={yesNo(detail.can_travel, t)} />
+                        <DetailCard label={t.lead_has_medical_records} value={leadMedicalRecordsLabel(detail.has_medical_records, t)} />
+                        <DetailCard label={t.lead_records_in_accepted_language} value={yesNo(detail.records_in_accepted_language, t)} />
+                        <DetailCard label={t.lead_has_travel_documents} value={yesNo(detail.has_travel_documents, t)} />
+                        <DetailCard label={t.lead_currently_in_treatment} value={yesNo(detail.currently_in_treatment, t)} />
+                        <DetailCard label={t.lead_health_risk_for_travel} value={yesNo(detail.has_health_risk_for_travel, t)} />
+                        <DetailCard
+                          label={t.lead_services}
+                          value={
+                            detail.services && detail.services.length > 0
+                              ? detail.services.map((service) => leadProgramServiceLabel(service, t)).join(", ")
+                              : t.common_not_set
+                          }
+                        />
+                        <DetailCard label={t.lead_has_insurance} value={yesNo(detail.has_insurance, t)} />
+                        <DetailCard label={t.lead_insurance_covers_germany} value={leadInsuranceCoverageLabel(detail.insurance_covers_germany, t)} />
+                        <DetailCard label={t.lead_preferred_location} value={leadPreferredLocationLabel(detail.preferred_location, t)} />
+                        <DetailCard label={t.lead_visit_timing} value={leadVisitTimingLabel(detail.visit_timing, t)} />
+                        <DetailCard label={t.lead_email_consent} value={yesNo(detail.email_consent, t)} />
+                        <DetailCard label={t.lead_whatsapp_consent} value={yesNo(detail.whatsapp_consent, t)} />
+                        <DetailCard label={t.lead_consent_automated_contact} value={yesNo(detail.consent_automated_contact, t)} />
+                        <DetailCard label={t.lead_consent_healthcare} value={yesNo(detail.consent_healthcare, t)} />
+                        <DetailCard label={t.lead_consent_opt_out} value={yesNo(detail.consent_opt_out, t)} />
+                        <DetailCard label={t.lead_consent_privacy_practices} value={yesNo(detail.consent_privacy_practices, t)} />
+                      </div>
+                    </section>
+
+                    {(detail.primary_concern_text || detail.additional_concerns || detail.message) ? (
+                      <section className={cardClass("p-4")}>
+                        <SectionTitle>{t.lead_section_health_concern}</SectionTitle>
+                        {detail.primary_concern_text ? (
+                          <div className="mt-4 rounded-xl bg-zinc-50 px-4 py-3 text-sm leading-6 text-zinc-700 whitespace-pre-wrap">
+                            {detail.primary_concern_text}
+                          </div>
+                        ) : null}
+                        {detail.additional_concerns ? (
+                          <div className="mt-3 rounded-xl bg-zinc-50 px-4 py-3 text-sm leading-6 text-zinc-700 whitespace-pre-wrap">
+                            {detail.additional_concerns}
+                          </div>
+                        ) : null}
+                        {detail.message ? (
+                          <div className="mt-3 rounded-xl bg-zinc-50 px-4 py-3 text-sm leading-6 text-zinc-700 whitespace-pre-wrap">
+                            {detail.message}
+                          </div>
+                        ) : null}
+                      </section>
+                    ) : null}
+                  </>
+                ) : null}
+
+                {detail.attachments && detail.attachments.length > 0 ? (
+                  <section className={cardClass("p-4")}>
+                    <SectionTitle>
+                      {`${t.lead_attachments} (${detail.attachments.length})`}
+                    </SectionTitle>
+                    <ul className="mt-4 space-y-1.5">
+                      {detail.attachments.map((file) => (
+                        <li
+                          key={file.id}
+                          className="flex items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm"
+                        >
+                          <div>
+                            <div className="font-medium text-zinc-800">{file.file_name}</div>
+                            <div className="text-xs text-zinc-500">
+                              {dashOrValue(file.content_type, t)} - {formatSize(file.size_bytes)}
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={async () => {
+                              try {
+                                const blob = await downloadLeadAttachment(detail.id, file.id);
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement("a");
+                                a.href = url;
+                                a.download = file.file_name;
+                                document.body.appendChild(a);
+                                a.click();
+                                a.remove();
+                                URL.revokeObjectURL(url);
+                              } catch (downloadErr) {
+                                setDetailError(
+                                  downloadErr instanceof Error
+                                    ? downloadErr.message
+                                    : t.lead_download_attachment_failed
+                                );
+                              }
+                            }}
+                          >
+                            {t.lead_download_attachment}
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : null}
+              </div>
+            ) : (
             <div className="space-y-5">
             {paneTab === "overview" ? (
               <>
@@ -1061,8 +1362,15 @@ function useLeadsPageContent() {
                   <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                     <DetailCard label={t.patients_email} value={detail.email || t.common_not_set} />
                     <DetailCard label={t.field_phone} value={detail.phone || t.common_not_set} />
+                    <DetailCard label={t.lead_type} value={leadTypeLabel(detail, t)} />
                     <DetailCard label={t.leads_source} value={leadSourceLabel(detail.source, t)} />
                     <DetailCard label={t.providers_country} value={detail.country || t.common_not_set} />
+                    {detail.console_promoted_at ? (
+                      <DetailCard
+                        label={t.lead_console_promoted_at}
+                        value={formatDate(detail.console_promoted_at, locale, t.common_not_set)}
+                      />
+                    ) : null}
                   </div>
                 </section>
 
@@ -1129,8 +1437,8 @@ function useLeadsPageContent() {
                   <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                     <DetailCard label={t.providers_country} value={dashOrValue(detail.country, t)} />
                     <DetailCard label={t.providers_city} value={dashOrValue(detail.city, t)} />
-                    <DetailCard label={t.lead_state_region} value={dashOrValue(detail.state, t)} />
-                    <DetailCard label={t.lead_zip_code} value={dashOrValue(detail.zip_code, t)} />
+                    <DetailCard label={t.lead_state_region} value={dashOrValue(omitZeroPlaceholder(detail.state), t)} />
+                    <DetailCard label={t.lead_zip_code} value={dashOrValue(omitZeroPlaceholder(detail.zip_code), t)} />
                     <DetailCard label={t.providers_street} value={dashOrValue(detail.street_address, t)} />
                   </div>
                 </section>
@@ -1784,8 +2092,8 @@ function useLeadsPageContent() {
                   <section className={cardClass("p-4")}>
                     <SectionTitle>{t.lead_section_eligibility_path}</SectionTitle>
                     <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
-                      <DetailCard label={t.lead_location} value={dashOrValue(detail.location, t)} />
-                      <DetailCard label={t.lead_location_detailed} value={dashOrValue(detail.location_detailed, t)} />
+                      <DetailCard label={t.lead_location} value={leadLocationLabel(detail.location, t)} />
+                      <DetailCard label={t.lead_location_detailed} value={leadLocationDetailedLabel(detail.location_detailed, t)} />
                       <DetailCard label={t.lead_wants_membership} value={yesNo(detail.wants_membership, t)} />
                       <DetailCard
                         label={t.lead_selected_program}
@@ -1850,7 +2158,7 @@ function useLeadsPageContent() {
                   <section className={cardClass("p-4")}>
                     <SectionTitle>{t.lead_section_wrap_up}</SectionTitle>
                     <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
-                      <DetailCard label={t.lead_preferred_location} value={dashOrValue(detail.preferred_location, t)} />
+                      <DetailCard label={t.lead_preferred_location} value={leadPreferredLocationLabel(detail.preferred_location, t)} />
                       <DetailCard label={t.lead_visit_timing} value={leadVisitTimingLabel(detail.visit_timing, t)} />
                     </div>
                     {detail.message ? (
@@ -1934,6 +2242,7 @@ function useLeadsPageContent() {
               </>
             ) : null}
             </div>
+            )
           ) : (
             <div className="flex min-h-[320px] items-center justify-center text-sm text-zinc-500">
               {t.lead_select_from_queue}
@@ -2048,6 +2357,22 @@ function useLeadsPageContent() {
             </NativeComboboxSelect>
 
             <NativeComboboxSelect
+              value={filters.leadType || "__all__"}
+              onChange={(event) => {
+                const leadType = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
+                setFilters((current) => ({ ...current, leadType }));
+              }}
+              className={cn(selectClassName, "h-8 w-[170px] bg-background text-[13px]")}
+            >
+              <option value="__all__">{t.lead_type}</option>
+              {LEAD_TYPE_OPTIONS.map((type) => (
+                <option key={type} value={type}>
+                  {leadTypeLabel(type, t)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+
+            <NativeComboboxSelect
               value={filters.includeArchived || "false"}
               onChange={(event) => {
                 const includeArchived = event.target.value === "true" ? "true" : "false";
@@ -2112,6 +2437,35 @@ function useLeadsPageContent() {
             rowActionsLabel={t.users_actions || t.common_actions}
             rowActionsWidth={224}
             rowActions={(row) => {
+              const rowLeadType = leadTypeFromLead(row);
+              const canPromoteRowToConsole =
+                rowLeadType !== "console" &&
+                row.failed_outcome?.status !== "delete_anonymized" &&
+                row.qualification_status !== "converted";
+              if (canPromoteRowToConsole) {
+                return (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 rounded-md px-2 text-[11px]"
+                    disabled={Boolean(actionBusy)}
+                    title={t.lead_promote_to_console_description}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void promoteToConsole(row.id);
+                    }}
+                  >
+                    {actionBusy === `promote-console:${row.id}` ? (
+                      <LoaderCircle className="size-3 animate-spin" />
+                    ) : (
+                      <ArrowRight className="size-3" />
+                    )}
+                    {t.lead_promote_to_console}
+                  </Button>
+                );
+              }
+
               const canQualify =
                 row.qualification_status === "new" || row.qualification_status === "in_progress";
               const {

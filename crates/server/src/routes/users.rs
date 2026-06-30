@@ -145,23 +145,45 @@ async fn list_users(
                 )
              )
              -- Hide external/unspecified provider staff (Внешний / не указано):
-             -- they must not appear in the Users & Roles table.
+             -- they must not appear in the Users & Roles table. External
+             -- interpreter profiles follow the same rule.
              AND NOT (
-                EXISTS (
-                    SELECT 1
-                    FROM provider_person_contacts pc
-                    JOIN provider_staff s ON s.id = pc.staff_id
-                    WHERE pc.contact_kind = 'email'
-                      AND lower(btrim(pc.value)) = lower(btrim(users.email))
-                      AND s.status IN ('external', 'unknown')
+                (
+                    EXISTS (
+                        SELECT 1
+                        FROM provider_person_contacts pc
+                        JOIN provider_staff s ON s.id = pc.staff_id
+                        WHERE pc.contact_kind = 'email'
+                          AND lower(btrim(pc.value)) = lower(btrim(users.email))
+                          AND s.status IN ('external', 'unknown')
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM provider_person_contacts pc
+                        JOIN provider_staff s ON s.id = pc.staff_id
+                        WHERE pc.contact_kind = 'email'
+                          AND lower(btrim(pc.value)) = lower(btrim(users.email))
+                          AND s.status IN ('active', 'inactive')
+                    )
                 )
-                AND NOT EXISTS (
+                OR EXISTS (
                     SELECT 1
-                    FROM provider_person_contacts pc
-                    JOIN provider_staff s ON s.id = pc.staff_id
-                    WHERE pc.contact_kind = 'email'
-                      AND lower(btrim(pc.value)) = lower(btrim(users.email))
-                      AND s.status IN ('active', 'inactive')
+                    FROM interpreter_profile_details d
+                    WHERE d.user_id = users.id
+                      AND d.employment_kind = 'external'
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM interpreter_profiles p
+                    WHERE p.user_id = users.id
+                      AND p.profile->>'employmentKind' = 'external'
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM interpreter_standalone_profiles sp
+                    WHERE sp.email IS NOT NULL
+                      AND lower(btrim(sp.email)) = lower(btrim(users.email))
+                      AND COALESCE(sp.profile->>'employmentKind', 'external') = 'external'
                 )
              )
            ORDER BY is_active DESC, created_at DESC"#,
@@ -573,30 +595,57 @@ async fn reset_password(
 /// created ([`create_user`]), are hidden from the Users & Roles list
 /// ([`list_users`]), and are refused at login (`auth::login`) — even if a `users`
 /// row already exists. People with no entry in the provider staff directory
-/// (e.g. CEO, IT admin) are never matched and are unaffected.
+/// or interpreter external directory (e.g. CEO, IT admin) are never matched and
+/// are unaffected.
 ///
 /// Fails open (returns `false`) on a DB error so a transient failure cannot lock
 /// out every account; the broader query failure is logged.
 pub(crate) async fn email_is_blocked_external_staff(db: &sqlx::PgPool, email: &str) -> bool {
     match sqlx::query_scalar::<_, bool>(
         r#"
-        SELECT
-            EXISTS (
-                SELECT 1
-                FROM provider_person_contacts pc
-                JOIN provider_staff s ON s.id = pc.staff_id
-                WHERE pc.contact_kind = 'email'
-                  AND lower(btrim(pc.value)) = lower(btrim($1))
-                  AND s.status IN ('external', 'unknown')
+        SELECT (
+            (
+                EXISTS (
+                    SELECT 1
+                    FROM provider_person_contacts pc
+                    JOIN provider_staff s ON s.id = pc.staff_id
+                    WHERE pc.contact_kind = 'email'
+                      AND lower(btrim(pc.value)) = lower(btrim($1))
+                      AND s.status IN ('external', 'unknown')
+                )
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM provider_person_contacts pc
+                    JOIN provider_staff s ON s.id = pc.staff_id
+                    WHERE pc.contact_kind = 'email'
+                      AND lower(btrim(pc.value)) = lower(btrim($1))
+                      AND s.status IN ('active', 'inactive')
+                )
             )
-            AND NOT EXISTS (
+            OR EXISTS (
                 SELECT 1
-                FROM provider_person_contacts pc
-                JOIN provider_staff s ON s.id = pc.staff_id
-                WHERE pc.contact_kind = 'email'
-                  AND lower(btrim(pc.value)) = lower(btrim($1))
-                  AND s.status IN ('active', 'inactive')
+                FROM users u
+                JOIN interpreter_profile_details d ON d.user_id = u.id
+                WHERE lower(btrim(u.email)) = lower(btrim($1))
+                  AND u.role IN ('interpreter', 'teamlead_interpreter')
+                  AND d.employment_kind = 'external'
             )
+            OR EXISTS (
+                SELECT 1
+                FROM users u
+                JOIN interpreter_profiles p ON p.user_id = u.id
+                WHERE lower(btrim(u.email)) = lower(btrim($1))
+                  AND u.role IN ('interpreter', 'teamlead_interpreter')
+                  AND p.profile->>'employmentKind' = 'external'
+            )
+            OR EXISTS (
+                SELECT 1
+                FROM interpreter_standalone_profiles sp
+                WHERE sp.email IS NOT NULL
+                  AND lower(btrim(sp.email)) = lower(btrim($1))
+                  AND COALESCE(sp.profile->>'employmentKind', 'external') = 'external'
+            )
+        )
         "#,
     )
     .bind(email)

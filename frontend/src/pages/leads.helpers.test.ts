@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { computeLeadConversionGate, filterLeadsByContact } from "./leads.helpers";
+import {
+  computeLeadConversionGate,
+  filterLeadsByContact,
+  leadLanguageLabel,
+  leadTypeFromLead,
+} from "./leads.helpers";
 import type { Lead } from "@/lib/api/types";
 
 function lead(overrides: Partial<Lead> = {}): Lead {
@@ -154,5 +159,72 @@ describe("filterLeadsByContact", () => {
   it("handles leads with null contact values safely", () => {
     const out = filterLeadsByContact(rows, { email: "none@none", phone: "000" });
     expect(out).toHaveLength(0);
+  });
+});
+
+describe("leadTypeFromLead", () => {
+  it("classifies short website contact forms as form leads", () => {
+    expect(
+      leadTypeFromLead(
+        lead({
+          intake_source: "website_contact",
+          source: "Website Contact Form",
+          flow: "contact",
+        }),
+      ),
+    ).toBe("form");
+  });
+
+  it("classifies the full website questionnaire separately", () => {
+    expect(
+      leadTypeFromLead(
+        lead({
+          intake_source: "visitor_facade",
+          source: "Website Wizard",
+          flow: "medical",
+        }),
+      ),
+    ).toBe("questionnaire");
+  });
+
+  it("classifies manually entered CRM leads as console leads", () => {
+    expect(
+      leadTypeFromLead(
+        lead({
+          intake_source: "manual",
+          source: "Referral",
+          flow: null,
+        }),
+      ),
+    ).toBe("console");
+  });
+
+  it("keeps original intake metadata but treats promoted intake leads as console leads", () => {
+    expect(
+      leadTypeFromLead(
+        lead({
+          intake_source: "visitor_facade",
+          source: "Website Wizard",
+          flow: "medical",
+          console_promoted_at: "2026-06-30T12:00:00Z",
+        }),
+      ),
+    ).toBe("console");
+  });
+});
+
+describe("leadLanguageLabel", () => {
+  it("labels current website language values", () => {
+    expect(leadLanguageLabel("English")).toBe("Английский");
+    expect(leadLanguageLabel("Ukrainian")).toBe("Украинский");
+    expect(leadLanguageLabel("Russian")).toBe("Русский");
+    expect(leadLanguageLabel("Spanish")).toBe("Испанский");
+  });
+
+  it("also labels compact language codes", () => {
+    expect(leadLanguageLabel("EN")).toBe("Английский");
+    expect(leadLanguageLabel("UK")).toBe("Украинский");
+    expect(leadLanguageLabel("RU")).toBe("Русский");
+    expect(leadLanguageLabel("ES")).toBe("Испанский");
   });
 });

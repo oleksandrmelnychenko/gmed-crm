@@ -32,6 +32,10 @@ pub fn router() -> Router<AppState> {
             "/patients/{patient_id}/vitals",
             get(list_patient_vitals).post(create_patient_vital_measurement),
         )
+        .route(
+            "/patients/{patient_id}/vitals/{measurement_id}/update",
+            post(update_patient_vital_measurement),
+        )
         .route("/patients/{patient_id}/clinical", get(get_patient_clinical))
         .route("/doctors", get(list_all_doctors))
         .route(
@@ -2484,6 +2488,155 @@ async fn create_patient_vital_measurement(
     Json(json!({
         "id": row.get::<Uuid, _>("id"),
         "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+        "ok": true,
+    }))
+    .into_response()
+}
+
+async fn update_patient_vital_measurement(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((patient_uuid, measurement_uuid)): Path<(Uuid, Uuid)>,
+    Json(body): Json<CreatePatientVitalMeasurementRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(_) => {
+            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update patient vitals",
+            );
+        }
+    }
+
+    let measured_at = match parse_vital_measurement_timestamp(&body.measured_at) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let bp_systolic = match validate_optional_positive_float("bp_systolic", body.bp_systolic) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let bp_diastolic = match validate_optional_positive_float("bp_diastolic", body.bp_diastolic) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let heart_rate = match validate_optional_positive_int("heart_rate", body.heart_rate) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let weight_kg = match validate_optional_positive_float("weight_kg", body.weight_kg) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let height_cm = match validate_optional_positive_float("height_cm", body.height_cm) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let provided_bmi = match validate_optional_positive_float("bmi", body.bmi) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let notes = match normalize_optional_text(body.notes, "notes", 2000) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
+    if bp_systolic.is_some() ^ bp_diastolic.is_some() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Both bp_systolic and bp_diastolic are required together",
+        );
+    }
+
+    let bmi = provided_bmi.or_else(|| match (weight_kg, height_cm) {
+        (Some(weight), Some(height_cm)) => {
+            let height_m = height_cm / 100.0;
+            if height_m > 0.0 {
+                Some(((weight / (height_m * height_m)) * 10.0).round() / 10.0)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    });
+
+    if bp_systolic.is_none()
+        && bp_diastolic.is_none()
+        && heart_rate.is_none()
+        && weight_kg.is_none()
+        && height_cm.is_none()
+        && bmi.is_none()
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "At least one vital measurement is required",
+        );
+    }
+
+    let updated = match sqlx::query(
+        r#"UPDATE patient_vital_measurements
+           SET measured_at = $1,
+               bp_systolic = $2,
+               bp_diastolic = $3,
+               heart_rate = $4,
+               weight_kg = $5,
+               height_cm = $6,
+               bmi = $7,
+               notes = $8
+           WHERE id = $9 AND patient_id = $10"#,
+    )
+    .bind(measured_at)
+    .bind(bp_systolic)
+    .bind(bp_diastolic)
+    .bind(heart_rate)
+    .bind(weight_kg)
+    .bind(height_cm)
+    .bind(bmi)
+    .bind(notes.clone())
+    .bind(measurement_uuid)
+    .bind(patient_uuid)
+    .execute(&state.db)
+    .await
+    {
+        Ok(done) => done,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, measurement_id = %measurement_uuid, "Failed to update patient vitals");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update patient vitals",
+            );
+        }
+    };
+
+    if updated.rows_affected() == 0 {
+        return err(StatusCode::NOT_FOUND, "Vital measurement not found");
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "update_patient_vitals",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({
+            "measurement_id": measurement_uuid,
+            "measured_at": measured_at.to_rfc3339(),
+            "has_blood_pressure": bp_systolic.is_some(),
+            "has_heart_rate": heart_rate.is_some(),
+            "has_weight": weight_kg.is_some(),
+            "has_height": height_cm.is_some(),
+            "has_notes": notes.is_some(),
+        }),
+    ));
+
+    Json(json!({
+        "id": measurement_uuid,
         "ok": true,
     }))
     .into_response()
@@ -6996,6 +7149,10 @@ fn verlauf_row_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "id": row.get::<Uuid, _>("id"),
         "provider_id": row.get::<Option<Uuid>, _>("provider_id"),
         "provider_name": row.get::<Option<String>, _>("provider_name"),
+        "doctor_id": row.get::<Option<Uuid>, _>("doctor_id"),
+        "doctor_name": row.get::<Option<String>, _>("doctor_name"),
+        "doctor_title": row.get::<Option<String>, _>("doctor_title"),
+        "doctor_fachbereich": row.get::<Option<String>, _>("doctor_fachbereich"),
         "occurred_on": row.get::<Option<chrono::NaiveDate>, _>("occurred_on").map(|value| value.to_string()),
         "note": row.get::<String, _>("note"),
     })
@@ -7416,9 +7573,12 @@ async fn get_patient_clinical(
         .collect::<Vec<_>>();
 
     let verlauf_rows = sqlx::query(
-        r#"SELECT v.id, v.provider_id, p.name AS provider_name, v.occurred_on, v.note
+        r#"SELECT v.id, v.provider_id, p.name AS provider_name,
+                  v.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich,
+                  v.occurred_on, v.note
            FROM patient_clinical_verlauf v
            LEFT JOIN providers p ON p.id = v.provider_id
+           LEFT JOIN provider_doctors dr ON dr.id = v.doctor_id
            WHERE v.patient_id = $1
            ORDER BY v.occurred_on ASC NULLS LAST, v.created_at, v.sort_order"#,
     )
@@ -8134,6 +8294,8 @@ struct PatientVerlaufItem {
     #[serde(default)]
     provider_id: Option<String>,
     #[serde(default)]
+    doctor_id: Option<String>,
+    #[serde(default)]
     occurred_on: Option<String>,
     #[serde(default)]
     note: Option<String>,
@@ -8180,18 +8342,20 @@ async fn save_patient_verlauf(
             Ok(value) => value,
             Err(resp) => return resp,
         };
-        let provider_id = match clinical_resolve_attribution(&state, item.provider_id, None).await {
-            Ok((provider_id, _)) => provider_id,
-            Err(resp) => return resp,
-        };
+        let (provider_id, doctor_id) =
+            match clinical_resolve_attribution(&state, item.provider_id, item.doctor_id).await {
+                Ok(pair) => pair,
+                Err(resp) => return resp,
+            };
 
         if let Err(e) = sqlx::query(
             r#"INSERT INTO patient_clinical_verlauf
-                   (patient_id, provider_id, occurred_on, note, sort_order)
-               VALUES ($1, $2, $3, $4, $5)"#,
+                   (patient_id, provider_id, doctor_id, occurred_on, note, sort_order)
+               VALUES ($1, $2, $3, $4, $5, $6)"#,
         )
         .bind(patient_uuid)
         .bind(provider_id)
+        .bind(doctor_id)
         .bind(occurred_on)
         .bind(&note)
         .bind(saved)

@@ -3,7 +3,7 @@ import { useEffect, useState, type JSX } from "react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
-import { Pencil, Plus } from "lucide-react";
+import { Copy, Pencil, Plus } from "lucide-react";
 
 import { PatientSheetScaffold } from "@/pages/patients/ui/shared/patient-sheet-scaffold";
 import type { ClinicalNarrative } from "@/pages/patients/data/patient-clinical";
@@ -12,6 +12,8 @@ type Bilingual = (ru: string, de: string) => string;
 
 const inputClass =
   "h-9 w-full rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
+const datePillClass =
+  "inline-flex items-center rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700";
 
 /** The narrative fields (no untersuchungsbefund / Verlauf) in display order. */
 type NarrativeFieldKey =
@@ -46,6 +48,16 @@ function blankVersion(): ClinicalNarrative {
   };
 }
 
+export function copyNarrativeVersion(version: ClinicalNarrative): ClinicalNarrative {
+  return {
+    ...version,
+    id: null,
+    is_active: true,
+    created_at: null,
+    updated_at: null,
+  };
+}
+
 /** First non-empty field, used as a one-line preview in the history list. */
 function versionSnippet(version: ClinicalNarrative): string {
   const keys: NarrativeFieldKey[] = [
@@ -69,6 +81,10 @@ function formatTimestamp(value: string | null | undefined): string {
   if (!value) return "";
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+}
+
+function versionDate(version: ClinicalNarrative): string {
+  return formatTimestamp(version.updated_at ?? version.created_at) || "—";
 }
 
 export function AnamneseSection({
@@ -181,15 +197,27 @@ export function AnamneseSection({
                 {tx("Новая версия", "Neue Version")}
               </Button>
               {active ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-8 rounded-lg"
-                  onClick={() => setEditing({ ...active })}
-                >
-                  <Pencil className="size-3.5" />
-                  {tx("Редактировать", "Bearbeiten")}
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 rounded-lg"
+                    onClick={() => setEditing(copyNarrativeVersion(active))}
+                  >
+                    <Copy className="size-3.5" />
+                    {tx("Копировать", "Kopieren")}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 rounded-lg"
+                    onClick={() => setEditing({ ...active })}
+                  >
+                    <Pencil className="size-3.5" />
+                    {tx("Редактировать", "Bearbeiten")}
+                  </Button>
+                </>
               ) : null}
             </>
           ) : null}
@@ -197,17 +225,47 @@ export function AnamneseSection({
       </header>
 
       <div className="space-y-2.5 p-3">
-        {active && activeNonEmpty.length > 0 ? (
-          <dl className="grid gap-2.5 md:grid-cols-2">
-            {activeNonEmpty.map((field) => (
-              <div key={field.key} className="min-w-0">
-                <dt className="mb-1 text-[11px] font-medium text-muted-foreground">{field.label}</dt>
-                <dd className="whitespace-pre-line break-words text-sm text-foreground">
-                  {active[field.key]}
-                </dd>
+        {active ? (
+          <div className="space-y-3">
+            <div className="grid gap-2.5 rounded-lg border border-border/50 bg-background px-3 py-2.5 md:grid-cols-2">
+              <div className="min-w-0">
+                <p className="text-[11px] font-medium text-muted-foreground">
+                  {tx("Последнее обновление", "Letzte Aktualisierung")}
+                </p>
+                <p className="mt-1">
+                  <span className={datePillClass}>
+                    {versionDate(active)}
+                  </span>
+                </p>
               </div>
-            ))}
-          </dl>
+              <div className="min-w-0">
+                <p className="text-[11px] font-medium text-muted-foreground">
+                  {tx("Статус", "Status")}
+                </p>
+                <p className="mt-1">
+                  <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                    {tx("Активная версия", "Aktive Version")}
+                  </span>
+                </p>
+              </div>
+            </div>
+            {activeNonEmpty.length > 0 ? (
+              <dl className="grid gap-2.5 md:grid-cols-2">
+                {activeNonEmpty.map((field) => (
+                  <div key={field.key} className="min-w-0">
+                    <dt className="mb-1 text-[11px] font-medium text-muted-foreground">{field.label}</dt>
+                    <dd className="whitespace-pre-line break-words text-sm text-foreground">
+                      {active[field.key]}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            ) : (
+              <p className="px-1 py-4 text-center text-xs text-muted-foreground">
+                {tx("Пока нет анамнеза", "Noch keine Anamnese")}
+              </p>
+            )}
+          </div>
         ) : (
           <p className="px-1 py-4 text-center text-xs text-muted-foreground">
             {tx("Пока нет анамнеза", "Noch keine Anamnese")}
@@ -234,38 +292,63 @@ export function AnamneseSection({
                       key={version.id ?? `${version.updated_at}`}
                       className="flex items-start justify-between gap-2.5 rounded-lg border border-border/50 bg-card px-3 py-2"
                     >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-[11px] text-muted-foreground">
-                            {formatTimestamp(version.updated_at)}
-                          </span>
+                      <div className="grid min-w-0 flex-1 gap-2 md:grid-cols-[10rem_minmax(0,1fr)]">
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-medium uppercase text-muted-foreground">
+                            {tx("Последнее обновление", "Letzte Aktualisierung")}
+                          </p>
+                          <p className="mt-1">
+                            <span className={datePillClass}>
+                              {versionDate(version)}
+                            </span>
+                          </p>
                           <span
                             className={cn(
-                              "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                              "mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium",
                               version.is_active
                                 ? "bg-emerald-50 text-emerald-700"
                                 : "bg-muted text-muted-foreground",
                             )}
                           >
-                            {version.is_active ? tx("активна", "aktiv") : tx("неактивна", "inaktiv")}
+                            {version.is_active
+                              ? tx("Активная версия", "Aktive Version")
+                              : tx("Архивная версия", "Archivversion")}
                           </span>
                         </div>
-                        {snippet ? (
-                          <p className="mt-0.5 min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{snippet}</p>
-                        ) : null}
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-medium uppercase text-muted-foreground">
+                            {tx("Содержимое", "Inhalt")}
+                          </p>
+                          <p className="mt-0.5 min-w-0 max-w-full break-words text-[11px] text-muted-foreground">
+                            {snippet || tx("Без текста", "Ohne Text")}
+                          </p>
+                        </div>
                       </div>
                       {canManage ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="size-7 shrink-0 rounded-md p-0"
-                          aria-label={tx("Редактировать", "Bearbeiten")}
-                          title={tx("Редактировать", "Bearbeiten")}
-                          onClick={() => setEditing({ ...version })}
-                        >
-                          <Pencil className="size-3.5" />
-                        </Button>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="size-7 rounded-md p-0"
+                            aria-label={tx("Копировать", "Kopieren")}
+                            title={tx("Копировать", "Kopieren")}
+                            onClick={() => setEditing(copyNarrativeVersion(version))}
+                          >
+                            <Copy className="size-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="size-7 rounded-md p-0"
+                            aria-label={tx("Редактировать", "Bearbeiten")}
+                            title={tx("Редактировать", "Bearbeiten")}
+                            onClick={() => setEditing({ ...version })}
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
+                        </div>
                       ) : null}
                     </li>
                   );

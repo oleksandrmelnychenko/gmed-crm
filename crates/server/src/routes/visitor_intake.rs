@@ -63,6 +63,15 @@ fn str_opt(v: &Value) -> Option<String> {
     }
 }
 
+fn str_opt_without_zero_placeholder(v: &Value) -> Option<String> {
+    let s = v.as_str()?.trim();
+    if s.is_empty() || s.chars().all(|c| c == '0') {
+        None
+    } else {
+        Some(s.to_string())
+    }
+}
+
 fn yes_no_to_bool(v: &Value) -> Option<bool> {
     match v.as_str()?.trim().to_ascii_lowercase().as_str() {
         "yes" | "true" => Some(true),
@@ -80,7 +89,9 @@ fn date_opt(v: &Value) -> Option<NaiveDate> {
     if s.is_empty() {
         return None;
     }
-    NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
+    ["%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"]
+        .into_iter()
+        .find_map(|format| NaiveDate::parse_from_str(s, format).ok())
 }
 
 fn string_array(v: &Value) -> Vec<String> {
@@ -319,8 +330,8 @@ async fn ingest_visitor_intake(
     .bind(str_opt(&payload["country"]))
     .bind(str_opt(&payload["streetAddress"]))
     .bind(str_opt(&payload["city"]))
-    .bind(str_opt(&payload["state"]))
-    .bind(str_opt(&payload["zipCode"]))
+    .bind(str_opt_without_zero_placeholder(&payload["state"]))
+    .bind(str_opt_without_zero_placeholder(&payload["zipCode"]))
     .bind(str_opt(&payload["primaryLanguage"]))
     .bind(yes_no_to_bool(&payload["needsInterpreter"]))
     .bind(str_opt(&payload["location"]))

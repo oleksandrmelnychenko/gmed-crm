@@ -10,6 +10,9 @@ describe("specializationLabelForValue", () => {
     expect(specializationLabelForValue("endokrinologie_und_diabetologie", [], "ru")).toBe(
       "Эндокринология и диабетология",
     );
+    expect(specializationLabelForValue("Orthopaedie und unfallchirurgie", [], "ru")).toBe(
+      "Ортопедия и травматология",
+    );
     expect(specializationLabelForValue("kardiologie", [], "ru")).toBe("Кардиология");
   });
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type {
   ClinicalDiagnosis,
+  ClinicalVerlaufEntry,
   ClinicalMedication,
   PatientRecommendation,
 } from "@/pages/patients/data/patient-clinical";
@@ -13,9 +14,12 @@ import {
   CLINICAL_PROVIDER_QUERY,
   PatientMedicationTable,
   PatientRecommendationsSection,
+  attributionLabel,
+  clinicalSpecializationLabel,
   clinicalMedicalProviderRows,
+  mergeVerlaufDoctorAttribution,
 } from "./patient-clinical-tab";
-import { PatientRecommendationOverviewItem } from "./patient-overview-card";
+import { PatientRecommendationOverviewItem, deriveDoctors } from "./patient-overview-card";
 
 function provider(overrides: Partial<ProviderSummary> = {}): ProviderSummary {
   return {
@@ -119,7 +123,9 @@ function recommendation(overrides: Partial<PatientRecommendation> = {}): Patient
     reminder_at: null,
     reminder_lead_days: null,
     source_doctor_id: null,
+    source_doctor_fachbereich: null,
     source_doctor_name: null,
+    source_doctor_title: null,
     status: null,
     title: "Kontrolle",
     valid_from: null,
@@ -129,6 +135,22 @@ function recommendation(overrides: Partial<PatientRecommendation> = {}): Patient
 }
 
 describe("PatientMedicationTable", () => {
+  it("renders clinical attribution with translated doctor specialization", () => {
+    const attribution = {
+      doctor_fachbereich: "Orthopaedie und unfallchirurgie",
+      doctor_id: "doctor-1",
+      doctor_name: "Philipp Niemeyer",
+      doctor_title: "Prof. Dr. med. Herr",
+      provider_id: "provider-1",
+      provider_name: "Klinik",
+    };
+
+    expect(attributionLabel(attribution, "ru")).toBe(
+      "Prof. Dr. med. Herr Philipp Niemeyer (Ортопедия и травматология) · Klinik",
+    );
+    expect(clinicalSpecializationLabel(attribution, "ru")).toBe("Ортопедия и травматология");
+  });
+
   it("loads and keeps only medical providers for clinical attribution fields", () => {
     expect(CLINICAL_PROVIDER_QUERY).toContain("provider_type=medical");
     expect(CLINICAL_PROVIDER_QUERY).toContain("active_only=true");
@@ -321,6 +343,7 @@ describe("PatientRecommendationsSection", () => {
       <PatientRecommendationsSection
         allDoctors={[]}
         canManage
+        lang="ru"
         onReload={() => undefined}
         patientId="patient-1"
         recommendations={[recommendation()]}
@@ -330,6 +353,63 @@ describe("PatientRecommendationsSection", () => {
 
     expect(html).toContain("Добавить рекомендацию");
     expect(html).not.toContain(">Empfehlung<");
+  });
+
+  it("renders the recommending doctor in foreground text", () => {
+    const html = renderToStaticMarkup(
+      <PatientRecommendationsSection
+        allDoctors={[]}
+        canManage
+        lang="ru"
+        onReload={() => undefined}
+        patientId="patient-1"
+        recommendations={[
+          recommendation({
+            source_doctor_fachbereich: "Orthopaedie und unfallchirurgie",
+            source_doctor_name: "Philipp Niemeyer",
+            source_doctor_title: "Prof. Dr. med. Herr",
+          }),
+        ]}
+        tx={(ru) => ru}
+      />,
+    );
+
+    expect(html).toContain("text-foreground\">Prof. Dr. med. Herr Philipp Niemeyer");
+    expect(html).toContain("(Ортопедия и травматология)");
+  });
+});
+
+describe("mergeVerlaufDoctorAttribution", () => {
+  it("keeps the selected Verlauf doctor when a refetch returns provider-only rows", () => {
+    const serverRows: ClinicalVerlaufEntry[] = [
+      {
+        doctor_fachbereich: null,
+        doctor_id: null,
+        doctor_name: null,
+        doctor_title: null,
+        id: "verlauf-1",
+        note: "Kontrolle nach OP",
+        occurred_on: "2026-06-30",
+        provider_id: "provider-1",
+        provider_name: "Klinik München",
+      },
+    ];
+    const fallbackRows: ClinicalVerlaufEntry[] = [
+      {
+        ...serverRows[0],
+        doctor_fachbereich: "kardiologie",
+        doctor_id: "doctor-1",
+        doctor_name: "Ulrich Hölzenbein",
+        doctor_title: "Dr. med. Herr",
+      },
+    ];
+
+    expect(mergeVerlaufDoctorAttribution(serverRows, fallbackRows)[0]).toMatchObject({
+      doctor_fachbereich: "kardiologie",
+      doctor_id: "doctor-1",
+      doctor_name: "Ulrich Hölzenbein",
+      doctor_title: "Dr. med. Herr",
+    });
   });
 });
 
@@ -344,6 +424,7 @@ describe("PatientRecommendationOverviewItem", () => {
             recommended_on: "2026-06-03",
             title: "Thromboseprophylaxe",
           })}
+          lang="ru"
           tx={(ru) => ru}
         />
       </ul>,
@@ -356,5 +437,51 @@ describe("PatientRecommendationOverviewItem", () => {
     expect(html).not.toContain("follow_up");
     expect(html.indexOf("2026-06-03")).toBeGreaterThan(html.indexOf("Thromboseprophylaxe"));
     expect(html.indexOf("2026-06-03")).toBeLessThan(html.indexOf("bis zur"));
+  });
+
+  it("shows the recommending doctor specialization", () => {
+    const html = renderToStaticMarkup(
+      <ul>
+        <PatientRecommendationOverviewItem
+          rec={recommendation({
+            source_doctor_fachbereich: "Orthopaedie und unfallchirurgie",
+            source_doctor_name: "Philipp Niemeyer",
+            source_doctor_title: "Prof. Dr. med. Herr",
+            title: "Kontrolle",
+          })}
+          lang="ru"
+          tx={(ru) => ru}
+        />
+      </ul>,
+    );
+
+    expect(html).toContain("Назначил: Prof. Dr. med. Herr Philipp Niemeyer");
+    expect(html).toContain("(Ортопедия и травматология)");
+  });
+});
+
+describe("deriveDoctors", () => {
+  it("keeps doctors from examinations and procedures in the overview list", () => {
+    const doctors = deriveDoctors([
+      {
+        doctor_fachbereich: "Orthopaedie und Unfallchirurgie",
+        doctor_name: "Philipp Niemeyer",
+        doctor_title: "Prof. Dr. med. Herr",
+        provider_name: "Checkup provider",
+      },
+      {
+        doctor_fachbereich: "Orthopaedie und Unfallchirurgie",
+        doctor_name: "Philipp Niemeyer",
+        doctor_title: "Prof. Dr. med. Herr",
+        provider_name: "Checkup provider",
+      },
+    ]);
+
+    expect(doctors).toHaveLength(1);
+    expect(doctors[0]).toMatchObject({
+      fachbereich: "Orthopaedie und Unfallchirurgie",
+      name: "Philipp Niemeyer",
+      title: "Prof. Dr. med. Herr",
+    });
   });
 });

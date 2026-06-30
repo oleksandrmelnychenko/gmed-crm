@@ -1173,6 +1173,13 @@ async fn patient_clinical_narrative_upserts() {
     assert!(body["narrative"]["beurteilung"].is_null());
 
     let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_provider_doctor(&pool, provider_id, &format!("{tag}-verlauf")).await;
+    sqlx::query("UPDATE provider_doctors SET fachbereich = $1 WHERE id = $2")
+        .bind("Orthopaedie und Unfallchirurgie")
+        .bind(doctor_id)
+        .execute(&pool)
+        .await
+        .unwrap();
     let (status, _) = json_request(
         &app,
         "POST",
@@ -1182,6 +1189,7 @@ async fn patient_clinical_narrative_upserts() {
             "items": [{
                 "occurred_on": "2026-06-24",
                 "provider_id": provider_id,
+                "doctor_id": doctor_id,
                 "note": "Komplikationsloser Verlauf."
             }]
         })),
@@ -1203,6 +1211,21 @@ async fn patient_clinical_narrative_upserts() {
     assert_eq!(
         body["verlauf"][0]["provider_id"].as_str(),
         Some(provider_id_text.as_str())
+    );
+    let doctor_id_text = doctor_id.to_string();
+    assert_eq!(
+        body["verlauf"][0]["doctor_id"].as_str(),
+        Some(doctor_id_text.as_str())
+    );
+    let expected_doctor_name = format!("Doctor {tag}-verlauf");
+    assert_eq!(
+        body["verlauf"][0]["doctor_name"].as_str(),
+        Some(expected_doctor_name.as_str())
+    );
+    assert_eq!(body["verlauf"][0]["doctor_title"].as_str(), Some("Dr. med."));
+    assert_eq!(
+        body["verlauf"][0]["doctor_fachbereich"].as_str(),
+        Some("Orthopaedie und Unfallchirurgie")
     );
     assert_eq!(body["verlauf"][0]["note"], "Komplikationsloser Verlauf.");
 

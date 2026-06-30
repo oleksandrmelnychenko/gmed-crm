@@ -24,6 +24,7 @@ import { PauseCircle, Pencil, PlayCircle, Plus, Trash2 } from "lucide-react";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import type { DoctorOption } from "@/pages/appointments/model/types";
 import { fetchProviders } from "@/pages/providers/data/provider-api";
+import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
 import type { ProviderSummary } from "@/pages/providers/model/types";
 import type {
   PatientRiskScore,
@@ -136,6 +137,8 @@ function patientVitalDateTime(value: string | null | undefined, fallback: string
 
 const inputClass =
   "h-9 w-full rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
+const datePillClass =
+  "inline-flex items-center rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700";
 
 export const CLINICAL_PROVIDER_QUERY = "/providers?active_only=true&provider_type=medical";
 
@@ -231,11 +234,52 @@ function blankWarning(kind: ClinicalWarningKind): ClinicalWarning {
 
 function blankVerlaufEntry(): ClinicalVerlaufEntry {
   return {
-    provider_id: null,
-    provider_name: null,
+    ...blankAttribution(),
     occurred_on: null,
     note: "",
   };
+}
+
+function hasDoctorAttribution(item: ClinicalAttribution): boolean {
+  return Boolean(item.doctor_id || item.doctor_name || item.doctor_title || item.doctor_fachbereich);
+}
+
+function verlaufFallbackKey(item: ClinicalVerlaufEntry): string {
+  return [
+    item.occurred_on ?? "",
+    item.provider_id ?? "",
+    item.note.trim(),
+  ].join("|");
+}
+
+export function mergeVerlaufDoctorAttribution(
+  serverRows: ClinicalVerlaufEntry[],
+  fallbackRows: ClinicalVerlaufEntry[],
+): ClinicalVerlaufEntry[] {
+  if (fallbackRows.length === 0) return serverRows;
+  const fallbackById = new Map(
+    fallbackRows
+      .filter((row) => row.id && hasDoctorAttribution(row))
+      .map((row) => [row.id, row] as const),
+  );
+  const fallbackByKey = new Map(
+    fallbackRows
+      .filter((row) => hasDoctorAttribution(row))
+      .map((row) => [verlaufFallbackKey(row), row] as const),
+  );
+
+  return serverRows.map((row) => {
+    if (hasDoctorAttribution(row)) return row;
+    const fallback = (row.id ? fallbackById.get(row.id) : null) ?? fallbackByKey.get(verlaufFallbackKey(row));
+    if (!fallback) return row;
+    return {
+      ...row,
+      doctor_id: fallback.doctor_id,
+      doctor_name: fallback.doctor_name,
+      doctor_title: fallback.doctor_title,
+      doctor_fachbereich: fallback.doctor_fachbereich,
+    };
+  });
 }
 
 /**
@@ -262,14 +306,56 @@ function trimDraftStrings<T>(draft: T): T {
   return out as T;
 }
 
-function attributionLabel(item: ClinicalAttribution): string | null {
+export function attributionLabel(item: ClinicalAttribution, lang?: "de" | "ru"): string | null {
   const doctor = [item.doctor_title, item.doctor_name].filter(Boolean).join(" ").trim();
-  return [doctor || null, item.provider_name].filter(Boolean).join(" · ") || null;
+  const fachbereich = clinicalSpecializationLabel(item, lang);
+  const doctorWithFachbereich = [
+    doctor || null,
+    fachbereich ? `(${fachbereich})` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return [doctorWithFachbereich || null, item.provider_name].filter(Boolean).join(" · ") || null;
+}
+
+export function clinicalSpecializationLabel(
+  item: ClinicalAttribution,
+  lang?: "de" | "ru",
+): string | null {
+  const fachbereich = item.doctor_fachbereich?.trim();
+  if (!fachbereich) return null;
+  return lang ? specializationLabelForValue(fachbereich, [], lang) : fachbereich;
 }
 
 function allDoctorOptionLabel(doctor: AllDoctorOption): string {
   const doctorName = [doctor.title, doctor.name].filter(Boolean).join(" ").trim();
   return [doctorName || doctor.name, doctor.provider_name].filter(Boolean).join(" · ");
+}
+
+function recommendationDoctorLabel(
+  rec: PatientRecommendation,
+  doctorOptions: AllDoctorOption[],
+  lang: "de" | "ru",
+): string | null {
+  const option = doctorOptions.find((doctor) => doctor.id === rec.source_doctor_id);
+  const doctor = [
+    rec.source_doctor_title ?? option?.title ?? null,
+    rec.source_doctor_name ?? option?.name ?? null,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const fachbereich = rec.source_doctor_fachbereich ?? option?.fachbereich ?? null;
+  const doctorWithFachbereich = [
+    doctor || null,
+    fachbereich ? `(${specializationLabelForValue(fachbereich, [], lang)})` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return [doctorWithFachbereich || null, option?.provider_name ?? null]
+    .filter(Boolean)
+    .join(" · ") || null;
 }
 
 function uniqueAllDoctorOptions(doctors: AllDoctorOption[]): AllDoctorOption[] {
@@ -604,8 +690,8 @@ function ClinicalSection<T extends { id?: string | null }>({
   async function persist(next: T[]) {
     setBusy(true);
     try {
-      await onSave(next);
-      setList(next);
+      const saved = await onSave(next);
+      setList(Array.isArray(saved) ? (saved as T[]) : next);
       setEditing(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : tx("Не удалось сохранить", "Speichern fehlgeschlagen"));
@@ -995,6 +1081,7 @@ export function PatientRecommendationsSection({
   allDoctors,
   patientId,
   canManage,
+  lang,
   onReload,
   tx,
 }: {
@@ -1002,6 +1089,7 @@ export function PatientRecommendationsSection({
   allDoctors: AllDoctorOption[];
   patientId: string;
   canManage: boolean;
+  lang: "de" | "ru";
   onReload: () => void;
   tx: Bilingual;
 }) {
@@ -1021,15 +1109,15 @@ export function PatientRecommendationsSection({
     const option = LIFECYCLE_OPTIONS.find((o) => o.value === value);
     return option ? tx(option.ru, option.de) : value;
   };
-  const doctorName = (rec: PatientRecommendation) => {
-    const doctor = doctorOptions.find((d) => d.id === rec.source_doctor_id);
-    if (doctor) return allDoctorOptionLabel(doctor);
-    return rec.source_doctor_name || null;
-  };
+  const doctorName = (rec: PatientRecommendation) => recommendationDoctorLabel(rec, doctorOptions, lang);
   const validityLabel = (rec: PatientRecommendation) =>
     [rec.valid_from, rec.valid_to].some(Boolean)
       ? `${rec.valid_from ?? "…"} – ${rec.valid_to ?? "…"}`
       : null;
+  const recommendationDateLabels = (rec: PatientRecommendation) =>
+    [rec.recommended_on, validityLabel(rec), rec.due_at ? rec.due_at.slice(0, 10) : null].filter(
+      (value): value is string => Boolean(value),
+    );
 
   const isValid = (draft: RecommendationDraft) => draft.title.trim() !== "";
 
@@ -1101,13 +1189,19 @@ export function PatientRecommendationsSection({
           <Badge variant="outline" className={cn("rounded-full text-[10px]", lifecycleBadgeClass(rec.lifecycle_status))}>
             {lifecycleLabel(rec.lifecycle_status)}
           </Badge>
+          {recommendationDateLabels(rec).map((date, index) => (
+            <span key={`${date}-${index}`} className={datePillClass}>
+              {date}
+            </span>
+          ))}
         </div>
         {rec.description ? (
           <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{rec.description}</p>
         ) : null}
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
-          {doctorName(rec) ? <span className="min-w-0 max-w-full break-words">{doctorName(rec)}</span> : null}
-          {validityLabel(rec) ? <span className="min-w-0 max-w-full break-words">{validityLabel(rec)}</span> : null}
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
+          {doctorName(rec) ? (
+            <span className="min-w-0 max-w-full break-words text-foreground">{doctorName(rec)}</span>
+          ) : null}
         </div>
       </div>
       {canManage ? (
@@ -1433,6 +1527,7 @@ export function PatientClinicalTab({
   const [error, setError] = useState("");
   const [version, setVersion] = useState(0);
   const [vitalsSheetOpen, setVitalsSheetOpen] = useState(false);
+  const [vitalsEditor, setVitalsEditor] = useState<PatientVitalMeasurement | null>(null);
   const [riskScoreSheetOpen, setRiskScoreSheetOpen] = useState(false);
   const [medicationHoldEditor, setMedicationHoldEditor] = useState<MedicationHoldEditor | null>(null);
   const [medicationHoldBusy, setMedicationHoldBusy] = useState(false);
@@ -1468,7 +1563,7 @@ export function PatientClinicalTab({
         setMedications(clinical.medications ?? []);
         setExaminations(clinical.examinations ?? []);
         setProcedures(clinical.procedures ?? []);
-        setVerlauf(clinical.verlauf ?? []);
+        setVerlauf((current) => mergeVerlaufDoctorAttribution(clinical.verlauf ?? [], current));
         setNarrative(clinical.narrative ?? blankNarrative());
         setRecommendations(recs ?? []);
         setProviders(clinicalMedicalProviderRows(providerRows ?? []));
@@ -1489,10 +1584,38 @@ export function PatientClinicalTab({
   }, [patientId, version]);
 
   const attributionRow = (item: ClinicalAttribution) => {
-    const label = attributionLabel(item);
+    const label = attributionLabel(item, lang);
     return label ? (
-      <p className="mt-0.5 min-w-0 max-w-full break-words text-[11px] text-muted-foreground">
+      <p className="mt-0.5 min-w-0 max-w-full break-words text-[11px] text-foreground">
         {tx("Назначил", "Verordnet von")}: {label}
+      </p>
+    ) : null;
+  };
+
+  const verlaufAttributionRow = (item: ClinicalVerlaufEntry) => {
+    const hasDoctor = Boolean(item.doctor_id || item.doctor_name || item.doctor_title || item.doctor_fachbereich);
+    if (hasDoctor) {
+      const doctor = [item.doctor_title, item.doctor_name].filter(Boolean).join(" ").trim();
+      const specialty = clinicalSpecializationLabel(item, lang);
+      const label = [doctor || null, item.provider_name].filter(Boolean).join(" · ");
+      return (
+        <div className="mt-0.5 min-w-0 space-y-0.5 text-[11px]">
+          {label ? (
+            <p className="min-w-0 max-w-full break-words text-foreground">
+              {tx("Назначил", "Verordnet von")}: {label}
+            </p>
+          ) : null}
+          {specialty ? (
+            <p className="min-w-0 max-w-full break-words text-foreground">
+              {tx("Специализация", "Fachbereich")}: {specialty}
+            </p>
+          ) : null}
+        </div>
+      );
+    }
+    return item.provider_name ? (
+      <p className="mt-0.5 min-w-0 max-w-full break-words text-[11px] text-muted-foreground">
+        {tx("Провайдер", "Anbieter")}: {item.provider_name}
       </p>
     ) : null;
   };
@@ -1835,12 +1958,21 @@ export function PatientClinicalTab({
         title={tx("Течение", "Verlauf")}
         items={verlauf}
         blank={blankVerlaufEntry}
-        isValid={(item) => item.note.trim() !== ""}
+        isValid={(item) => item.note.trim() !== "" && (!item.provider_id || Boolean(item.doctor_id))}
         canManage={canManage}
         tx={tx}
         onSave={async (next) => {
           await savePatientVerlauf(patientId, next);
-          setVerlauf(next);
+          try {
+            const clinical = await fetchPatientClinical(patientId);
+            const saved = mergeVerlaufDoctorAttribution(clinical.verlauf ?? [], next);
+            setVerlauf(saved);
+            return saved;
+          } catch {
+            setVerlauf(next);
+            setVersion((current) => current + 1);
+            return next;
+          }
         }}
         rowView={(item) => (
           <div className="min-w-0 space-y-1">
@@ -1850,15 +1982,11 @@ export function PatientClinicalTab({
                   {item.occurred_on}
                 </span>
               ) : null}
-              {item.provider_name ? (
-                <span className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">
-                  {item.provider_name}
-                </span>
-              ) : null}
             </div>
             <p className="min-w-0 max-w-full whitespace-pre-line break-words text-sm text-foreground">
               {item.note}
             </p>
+            {verlaufAttributionRow(item)}
           </div>
         )}
         form={(draft, set) => (
@@ -1872,29 +2000,13 @@ export function PatientClinicalTab({
                   className={inputClass}
                 />
               </Field>
-              <Field label={tx("Провайдер", "Anbieter")}>
-                <NativeComboboxSelect
-                  value={draft.provider_id ?? ""}
-                  aria-label={tx("Провайдер", "Anbieter")}
-                  className={inputClass}
-                  onChange={(event) => {
-                    const id = event.target.value || null;
-                    const provider = providers.find((p) => p.id === id);
-                    set({
-                      provider_id: id,
-                      provider_name: provider?.name ?? null,
-                    });
-                  }}
-                >
-                  <option value="">—</option>
-                  {providers.map((provider) => (
-                    <option key={provider.id} value={provider.id}>
-                      {provider.name}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </Field>
             </div>
+            <ProviderDoctorFields
+              value={draft}
+              providers={providers}
+              tx={tx}
+              onChange={(attr) => set(attr as Partial<ClinicalVerlaufEntry>)}
+            />
             <Field label={tx("Заметки", "Notizen")}>
               <textarea
                 value={draft.note}
@@ -2220,7 +2332,7 @@ export function PatientClinicalTab({
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
               <span className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">{e.title}</span>
               {e.performed_on ? (
-                <span className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">
+                <span className={datePillClass}>
                   {e.performed_on}
                 </span>
               ) : null}
@@ -2316,7 +2428,14 @@ export function PatientClinicalTab({
             </Badge>
           </div>
           {canManage ? (
-            <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => setVitalsSheetOpen(true)}>
+            <Button
+              size="sm"
+              className="h-8 rounded-lg gap-1.5"
+              onClick={() => {
+                setVitalsEditor(null);
+                setVitalsSheetOpen(true);
+              }}
+            >
               <Plus className="size-3.5" />
               {tx("Добавить", "Hinzufügen")}
             </Button>
@@ -2393,20 +2512,38 @@ export function PatientClinicalTab({
                         </p>
                       ) : null}
                     </div>
-                    <div className="flex min-w-0 flex-wrap gap-1.5 md:justify-end">
-                      {vitalMetrics.length > 0 ? (
-                        vitalMetrics.map((metric) => (
-                          <span
-                            key={metric.label}
-                            className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/25 px-2 py-1 text-xs text-muted-foreground"
-                          >
-                            <span>{metric.label}</span>
-                            <span className="font-medium text-foreground">{metric.value}</span>
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-xs text-muted-foreground">{notSet}</span>
-                      )}
+                    <div className="flex min-w-0 items-start gap-2 md:justify-end">
+                      <div className="flex min-w-0 flex-wrap gap-1.5 md:justify-end">
+                        {vitalMetrics.length > 0 ? (
+                          vitalMetrics.map((metric) => (
+                            <span
+                              key={metric.label}
+                              className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/25 px-2 py-1 text-xs text-muted-foreground"
+                            >
+                              <span>{metric.label}</span>
+                              <span className="font-medium text-foreground">{metric.value}</span>
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs text-muted-foreground">{notSet}</span>
+                        )}
+                      </div>
+                      {canManage ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="size-7 shrink-0 rounded-md p-0"
+                          aria-label={tx("Редактировать", "Bearbeiten")}
+                          title={tx("Редактировать", "Bearbeiten")}
+                          onClick={() => {
+                            setVitalsEditor(item);
+                            setVitalsSheetOpen(true);
+                          }}
+                        >
+                          <Pencil className="size-3.5" />
+                        </Button>
+                      ) : null}
                     </div>
                   </div>
                 );
@@ -2444,89 +2581,68 @@ export function PatientClinicalTab({
               )}
             </EmptyCell>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-1.5">
               {riskScores.map((score) => {
                 const notSet = tx("Не указано", "Nicht gesetzt");
                 const scoreValue = formatVitalNumber(score.score_value) ?? notSet;
                 const scaleValue = score.scale_max != null ? formatVitalNumber(score.scale_max) : null;
+                const riskValue = scaleValue ? `${scoreValue} / ${scaleValue}` : scoreValue;
 
                 return (
-                  <article key={score.id} className="rounded-xl border border-border bg-card">
-                    <div className="grid gap-4 p-4 md:grid-cols-[minmax(0,1fr)_180px]">
-                      <div className="min-w-0">
-                        <div className="flex min-w-0 flex-wrap items-center gap-2">
-                          <span className="h-px w-8 bg-border" />
-                          <Badge
-                            variant="outline"
-                            className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
-                          >
-                            {tx("Риск-оценка", "Risikobewertung")}
-                          </Badge>
-                        </div>
-
-                        <h3 className="mt-3 text-base font-semibold leading-6 text-foreground">
+                  <article
+                    key={score.id}
+                    className="grid items-start gap-2.5 rounded-lg border border-border/50 bg-background px-3 py-2 sm:grid-cols-[minmax(0,1fr)_auto]"
+                  >
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                        <span className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
                           {patientRiskScoreTypeLabel(score.score_type, tx)}
-                        </h3>
-                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1.5 text-xs leading-5">
-                          <span className="inline-flex items-baseline gap-1">
-                            <span className="text-muted-foreground">{tx("Записал", "Erfasst von")}</span>
-                            <span className="font-medium text-foreground">
-                              {score.recorded_by_name ?? tx("Неизвестно", "Unbekannt")}
-                            </span>
+                        </span>
+                        <span className={datePillClass}>
+                          {patientVitalDateTime(score.computed_at, notSet)}
+                        </span>
+                      </div>
+
+                      <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px]">
+                        <span className="inline-flex items-baseline gap-1">
+                          <span className="text-muted-foreground">{tx("Записал", "Erfasst von")}</span>
+                          <span className="font-medium text-foreground">
+                            {score.recorded_by_name ?? tx("Неизвестно", "Unbekannt")}
                           </span>
-                          {score.source ? (
-                            <span className="inline-flex min-w-0 items-baseline gap-1">
-                              <span className="shrink-0 text-muted-foreground">{tx("Источник", "Quelle")}</span>
-                              <span className="min-w-0 break-words font-medium text-foreground">{score.source}</span>
-                            </span>
-                          ) : null}
-                        </div>
-
-                        {score.interpretation ? (
-                          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
-                            {score.interpretation}
-                          </p>
-                        ) : null}
-
-                        {score.inputs ? (
-                          <details className="mt-3 rounded-lg border border-border/60">
-                            <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
-                              {tx("Входные данные", "Eingaben")}
-                            </summary>
-                            <pre className="overflow-x-auto whitespace-pre-wrap border-t border-border/60 px-3 py-2 text-[12px] text-foreground">
-                              {JSON.stringify(score.inputs, null, 2)}
-                            </pre>
-                          </details>
+                        </span>
+                        {score.source ? (
+                          <span className="inline-flex min-w-0 items-baseline gap-1">
+                            <span className="shrink-0 text-muted-foreground">{tx("Источник", "Quelle")}</span>
+                            <span className="min-w-0 break-words font-medium text-foreground">{score.source}</span>
+                          </span>
                         ) : null}
                       </div>
 
-                      <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
-                        <div>
-                          <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                            {tx("Оценка риска", "Risikowert")}
-                          </span>
-                          <p className="mt-2 text-lg font-semibold leading-none text-foreground">
-                            {scoreValue}
-                            {scaleValue ? (
-                              <span className="text-sm font-medium text-muted-foreground"> / {scaleValue}</span>
-                            ) : null}
-                          </p>
-                          {scaleValue ? (
-                            <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                              {tx("Шкала", "Skala")} {scaleValue}
-                            </p>
-                          ) : null}
-                        </div>
+                      {score.interpretation ? (
+                        <p className="min-w-0 max-w-full whitespace-pre-wrap break-words text-[11px] text-muted-foreground">
+                          {score.interpretation}
+                        </p>
+                      ) : null}
 
-                        <div>
-                          <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                            {tx("Дата расчета", "Berechnet")}
-                          </span>
-                          <p className="mt-2 text-sm font-semibold leading-5 text-foreground">
-                            {patientVitalDateTime(score.computed_at, notSet)}
-                          </p>
-                        </div>
-                      </div>
+                      {score.inputs ? (
+                        <details className="mt-2 rounded-lg border border-border/50 bg-card">
+                          <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
+                            {tx("Входные данные", "Eingaben")}
+                          </summary>
+                          <pre className="overflow-x-auto whitespace-pre-wrap border-t border-border/50 px-3 py-2 text-[12px] text-foreground">
+                            {JSON.stringify(score.inputs, null, 2)}
+                          </pre>
+                        </details>
+                      ) : null}
+                    </div>
+
+                    <div className="shrink-0 sm:text-right">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        {tx("Оценка риска", "Risikowert")}
+                      </span>
+                      <p className="mt-1 text-base font-semibold leading-none text-foreground">
+                        {riskValue}
+                      </p>
                     </div>
                   </article>
                 );
@@ -2541,8 +2657,12 @@ export function PatientClinicalTab({
         <Suspense fallback={null}>
           <LazyPatientVitalsSheet
             patientId={patientId}
+            initialMeasurement={vitalsEditor}
             open={vitalsSheetOpen}
-            onOpenChange={setVitalsSheetOpen}
+            onOpenChange={(open) => {
+              setVitalsSheetOpen(open);
+              if (!open) setVitalsEditor(null);
+            }}
             onSaved={reloadVitals}
           />
         </Suspense>
@@ -2565,6 +2685,7 @@ export function PatientClinicalTab({
         allDoctors={allDoctors}
         patientId={patientId}
         canManage={canManage}
+        lang={lang}
         tx={tx}
         onReload={() => {
           fetchPatientRecommendations(patientId)

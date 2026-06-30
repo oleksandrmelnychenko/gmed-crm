@@ -19,6 +19,7 @@ import type {
 export const DEFAULT_FILTERS: LeadFilters = {
   search: "",
   status: "",
+  leadType: "",
   email: "",
   phone: "",
   source: "",
@@ -47,6 +48,12 @@ export const LEGAL_SEX_OPTIONS = [
   "male",
   "diverse",
   "no_entry",
+] as const;
+
+export const LEAD_TYPE_OPTIONS = [
+  "form",
+  "questionnaire",
+  "console",
 ] as const;
 
 const LEAD_STATUS_LABEL_KEYS = {
@@ -97,17 +104,51 @@ const LEAD_SOURCE_LABEL_KEYS = {
   other: "lead_source_other",
 } satisfies Partial<Record<string, TranslationKey>>;
 
+const LEAD_TYPE_LABEL_KEYS = {
+  form: "lead_type_form",
+  questionnaire: "lead_type_questionnaire",
+  console: "lead_type_console",
+} satisfies Partial<Record<string, TranslationKey>>;
+
 const LEAD_LANGUAGE_LABEL_KEYS = {
   ar: "lead_language_ar",
   de: "lead_language_de",
   en: "lead_language_en",
+  EN: "lead_language_en",
+  English: "lead_language_en",
+  english: "lead_language_en",
   fa: "lead_language_fa",
   pl: "lead_language_pl",
   ru: "lead_language_ru",
+  RU: "lead_language_ru",
+  Russian: "lead_language_ru",
+  russian: "lead_language_ru",
+  uk: "lead_language_uk",
+  UK: "lead_language_uk",
+  Ukrainian: "lead_language_uk",
+  ukrainian: "lead_language_uk",
+  es: "lead_language_es",
+  ES: "lead_language_es",
+  Spanish: "lead_language_es",
+  spanish: "lead_language_es",
   zh: "lead_language_zh",
 } satisfies Partial<Record<string, TranslationKey>>;
 
 const LEAD_PROGRAM_SERVICE_LABEL_KEYS = {
+  standard: "lead_option_program_standard",
+  care: "lead_option_program_care",
+  reserve: "lead_option_program_reserve",
+  driver: "lead_option_service_driver",
+  concierge: "lead_option_service_concierge",
+  "medical-transport": "lead_option_service_medical_transport",
+  medical_transport: "lead_option_service_medical_transport",
+  "air-ambulance": "lead_option_service_air_ambulance",
+  air_ambulance: "lead_option_service_air_ambulance",
+  "business-aviation": "lead_option_service_business_aviation",
+  business_aviation: "lead_option_service_business_aviation",
+  none: "lead_option_service_none",
+  "not-sure": "lead_option_service_not_sure",
+  not_sure: "lead_option_service_not_sure",
   cardiology_fast_track: "lead_option_cardiology_fast_track",
   concierge_support: "lead_option_concierge_support",
   dental_reconstruction: "lead_option_dental_reconstruction",
@@ -125,6 +166,25 @@ const LEAD_PROGRAM_SERVICE_LABEL_KEYS = {
   urology_second_opinion: "lead_option_urology_second_opinion",
 } satisfies Partial<Record<string, TranslationKey>>;
 
+const LEAD_LOCATION_DETAIL_LABEL_KEYS = {
+  germany: "lead_option_location_germany",
+  eu_not_germany: "lead_option_location_eu_not_germany",
+  outside_eu: "lead_option_location_outside_eu",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const LEAD_LOCATION_LABEL_KEYS = {
+  eu: "lead_option_location_eu",
+  outside_eu: "lead_option_location_outside_eu",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+const LEAD_PREFERRED_LOCATION_LABEL_KEYS = {
+  no_preference: "lead_option_preferred_no_preference",
+  munich: "lead_option_preferred_munich",
+  berlin: "lead_option_preferred_berlin",
+  hamburg: "lead_option_preferred_hamburg",
+  cologne: "lead_option_preferred_cologne",
+} satisfies Partial<Record<string, TranslationKey>>;
+
 const LEAD_MEDICAL_RECORDS_LABEL_KEYS = {
   yes: "lead_option_medical_records_yes",
   no: "lead_option_medical_records_no",
@@ -139,6 +199,8 @@ const LEAD_INSURANCE_COVERAGE_LABEL_KEYS = {
 
 const LEAD_VISIT_TIMING_LABEL_KEYS = {
   asap: "lead_option_visit_asap",
+  next_few_months: "lead_option_visit_next_few_months",
+  not_sure: "lead_option_visit_not_sure",
   within_4_weeks: "lead_option_visit_within_4_weeks",
   within_6_weeks: "lead_option_visit_within_6_weeks",
   within_8_weeks: "lead_option_visit_within_8_weeks",
@@ -287,6 +349,7 @@ export function buildLeadsPath(filters: LeadFilters) {
   const params = new URLSearchParams();
   if (filters.search.trim()) params.set("search", filters.search.trim());
   if (filters.status) params.set("status", filters.status);
+  if (filters.leadType) params.set("lead_type", filters.leadType);
   if (filters.source.trim()) params.set("source", filters.source.trim());
   if (filters.country.trim()) params.set("country", filters.country.trim());
   if (filters.includeArchived) params.set("include_archived", filters.includeArchived);
@@ -346,6 +409,64 @@ export function leadSourceLabel(
   );
 }
 
+function normalizeLeadOrigin(value: string | null | undefined) {
+  return value?.trim().toLowerCase().replace(/[-\s]+/g, "_") ?? "";
+}
+
+export function leadTypeFromLead(
+  lead: Pick<Lead, "lead_type" | "console_promoted_at" | "intake_source" | "source" | "flow">,
+) {
+  if (lead.console_promoted_at) {
+    return "console";
+  }
+
+  const explicitType = normalizeLeadOrigin(lead.lead_type);
+  if (LEAD_TYPE_OPTIONS.includes(explicitType as (typeof LEAD_TYPE_OPTIONS)[number])) {
+    return explicitType;
+  }
+
+  const intakeSource = normalizeLeadOrigin(lead.intake_source);
+  const source = normalizeLeadOrigin(lead.source);
+  const flow = normalizeLeadOrigin(lead.flow);
+
+  if (["manual", "crm_manual", "console"].includes(intakeSource)) {
+    return "console";
+  }
+  if (
+    ["website_contact", "website_form", "contact_form"].includes(intakeSource) ||
+    ["website_contact_form", "contact_form"].includes(source) ||
+    flow === "contact"
+  ) {
+    return "form";
+  }
+  if (
+    ["visitor_facade", "website_wizard", "wizard", "questionnaire", "oprosnik"].includes(intakeSource) ||
+    ["website_wizard", "visitor_facade"].includes(source)
+  ) {
+    return "questionnaire";
+  }
+  return "console";
+}
+
+export function leadTypeLabel(
+  leadOrType:
+    | Pick<Lead, "lead_type" | "console_promoted_at" | "intake_source" | "source" | "flow">
+    | string
+    | null
+    | undefined,
+  translations?: Translations,
+) {
+  const type =
+    typeof leadOrType === "string" || leadOrType == null
+      ? normalizeLeadOrigin(leadOrType)
+      : leadTypeFromLead(leadOrType);
+  return formatEnumLabelFromKeys(
+    type,
+    LEAD_TYPE_LABEL_KEYS,
+    runtimeTranslations(translations),
+  );
+}
+
 export function leadLanguageLabel(
   value: string | null | undefined,
   translations?: Translations,
@@ -364,6 +485,39 @@ export function leadProgramServiceLabel(
   return formatEnumLabelFromKeys(
     value,
     LEAD_PROGRAM_SERVICE_LABEL_KEYS,
+    runtimeTranslations(translations),
+  );
+}
+
+export function leadLocationDetailedLabel(
+  value: string | null | undefined,
+  translations?: Translations,
+) {
+  return formatEnumLabelFromKeys(
+    value,
+    LEAD_LOCATION_DETAIL_LABEL_KEYS,
+    runtimeTranslations(translations),
+  );
+}
+
+export function leadLocationLabel(
+  value: string | null | undefined,
+  translations?: Translations,
+) {
+  return formatEnumLabelFromKeys(
+    value,
+    LEAD_LOCATION_LABEL_KEYS,
+    runtimeTranslations(translations),
+  );
+}
+
+export function leadPreferredLocationLabel(
+  value: string | null | undefined,
+  translations?: Translations,
+) {
+  return formatEnumLabelFromKeys(
+    value,
+    LEAD_PREFERRED_LOCATION_LABEL_KEYS,
     runtimeTranslations(translations),
   );
 }

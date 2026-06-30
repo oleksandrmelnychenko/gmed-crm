@@ -162,11 +162,9 @@ export type ClinicalNarrative = {
   updated_at?: string | null;
 };
 
-export type ClinicalVerlaufEntry = {
+export type ClinicalVerlaufEntry = ClinicalAttribution & {
   /** Server uuid; null/absent for a newly added entry. */
   id?: string | null;
-  provider_id: string | null;
-  provider_name: string | null;
   occurred_on: string | null;
   note: string;
 };
@@ -196,6 +194,8 @@ export type PatientRecommendation = {
   recommendation_type: string | null;
   source_doctor_id: string | null;
   source_doctor_name: string | null;
+  source_doctor_title: string | null;
+  source_doctor_fachbereich: string | null;
   due_at: string | null;
   priority: string | null;
   status: string | null;
@@ -328,7 +328,14 @@ export function savePatientNarrative(patientId: string, narrative: ClinicalNarra
 }
 
 export function savePatientVerlauf(patientId: string, items: ClinicalVerlaufEntry[]) {
-  return postJson(`/patients/${patientId}/verlauf`, { items });
+  return postJson(`/patients/${patientId}/verlauf`, {
+    items: items.map((item) => ({
+      provider_id: item.provider_id,
+      doctor_id: item.doctor_id,
+      occurred_on: item.occurred_on,
+      note: item.note,
+    })),
+  });
 }
 
 export function fetchNarrativeHistory(patientId: string) {
