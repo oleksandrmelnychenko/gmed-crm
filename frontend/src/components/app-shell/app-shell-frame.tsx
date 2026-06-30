@@ -14,7 +14,7 @@ type AppShellFrameProps = {
 
 export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProps) {
   return (
-    <div className="h-screen bg-background p-2 overflow-hidden">
+    <div className="h-dvh bg-background p-2 overflow-hidden">
       <div className="h-full rounded-2xl border border-border bg-card overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.04)] flex flex-col">
         <Topbar />
         <div className="flex-1 flex overflow-hidden gap-[6px] p-[6px] bg-muted/50">

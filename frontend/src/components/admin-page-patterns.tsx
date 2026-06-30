@@ -234,7 +234,7 @@ export function AdminSheetScaffold({
   return (
     <div className={cn("flex flex-1 min-h-0 flex-col", className)}>
       {hideHeader ? null : (
-        <SheetHeader className={cn("shrink-0 px-4 pt-3 pb-1", headerClassName)}>
+        <SheetHeader className={cn("shrink-0 px-4 pt-3 pb-1", headerClassName, "pr-14")}>
           <SheetTitle>{title}</SheetTitle>
         </SheetHeader>
       )}

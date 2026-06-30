@@ -203,7 +203,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[linear-gradient(135deg,#f4f7fb_0%,#eef2f7_36%,#ffffff_100%)] text-foreground">
+    <div className="flex h-dvh items-center justify-center overflow-y-auto bg-[linear-gradient(135deg,#f4f7fb_0%,#eef2f7_36%,#ffffff_100%)] px-4 py-6 text-foreground">
       <div className="relative w-full max-w-lg rounded-3xl bg-white p-10 xl:p-12">
         <div className="mb-8 flex items-start justify-between gap-4">
           <div>

@@ -15,7 +15,7 @@ export function AuthenticatedAppShell() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen text-muted-foreground">
+      <div className="flex h-dvh items-center justify-center overflow-hidden text-muted-foreground">
         {t.common_loading}
       </div>
     );
