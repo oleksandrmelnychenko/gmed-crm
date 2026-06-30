@@ -1947,7 +1947,7 @@ export function PatientClinicalTab({
         title={tx("Течение", "Verlauf")}
         items={verlauf}
         blank={blankVerlaufEntry}
-        isValid={(item) => item.note.trim() !== "" && (!item.provider_id || Boolean(item.doctor_id))}
+        isValid={(item) => item.note.trim() !== ""}
         canManage={canManage}
         tx={tx}
         onSave={async (next) => {
