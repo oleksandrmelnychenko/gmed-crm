@@ -4,6 +4,7 @@ import {
   computeLeadConversionGate,
   filterLeadsByContact,
   leadLanguageLabel,
+  leadSourceLabel,
   leadTypeFromLead,
 } from "./leads.helpers";
 import type { Lead } from "@/lib/api/types";
@@ -226,5 +227,18 @@ describe("leadLanguageLabel", () => {
     expect(leadLanguageLabel("UK")).toBe("Украинский");
     expect(leadLanguageLabel("RU")).toBe("Русский");
     expect(leadLanguageLabel("ES")).toBe("Испанский");
+  });
+});
+
+describe("leadSourceLabel", () => {
+  it("labels backend display source values from public intake", () => {
+    expect(leadSourceLabel("Website Wizard")).toBe("Мастер на сайте");
+    expect(leadSourceLabel("Website Contact Form")).toBe("Форма сайта");
+  });
+
+  it("labels normalized source keys and aliases", () => {
+    expect(leadSourceLabel("website_wizard")).toBe("Мастер на сайте");
+    expect(leadSourceLabel("apply")).toBe("Мастер на сайте");
+    expect(leadSourceLabel("website-contact")).toBe("Форма сайта");
   });
 });

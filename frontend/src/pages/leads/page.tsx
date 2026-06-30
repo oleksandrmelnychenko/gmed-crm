@@ -172,6 +172,33 @@ function omitZeroPlaceholder(value: string | null | undefined) {
   return trimmed && /^0+$/.test(trimmed) ? null : value;
 }
 
+function rawLeadPayloadText(detail: LeadDetail, key: string) {
+  const rawPayload = detail.raw_payload;
+  if (!rawPayload || typeof rawPayload !== "object" || !("payload" in rawPayload)) {
+    return null;
+  }
+  const payload = (rawPayload as { payload?: unknown }).payload;
+  if (!payload || typeof payload !== "object" || !(key in payload)) {
+    return null;
+  }
+  const value = (payload as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function normalizeDisplayDate(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  const dmy = /^(\d{2})[./](\d{2})[./](\d{4})$/.exec(trimmed);
+  if (dmy) {
+    return `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+  }
+  return trimmed;
+}
+
+function leadDetailDateOfBirth(detail: LeadDetail) {
+  return detail.date_of_birth ?? normalizeDisplayDate(rawLeadPayloadText(detail, "dateOfBirth"));
+}
+
 function cardClass(extra?: string) {
   return cn("rounded-xl border border-border bg-card", extra);
 }
@@ -1165,15 +1192,23 @@ function useLeadsPageContent() {
                     />
                     <DetailCard label={t.patients_email} value={detail.email || t.common_not_set} />
                     <DetailCard label={t.field_phone} value={detail.phone || t.common_not_set} />
-                    <DetailCard label="WhatsApp" value={dashOrValue(detail.whatsapp_number, t)} />
                     <DetailCard label={t.leads_source} value={leadSourceLabel(detail.source, t)} />
-                    <DetailCard label={t.providers_country} value={dashOrValue(detail.country, t)} />
-                    <DetailCard label={t.field_birth_date} value={formatDate(detail.date_of_birth, locale, t.common_not_set)} />
-                    <DetailCard label={t.lead_legal_sex} value={legalSexLabel(detail.legal_sex, t)} />
-                    {detail.locale ? (
+                    {detailLeadType === "questionnaire" && detail.whatsapp_number ? (
+                      <DetailCard label="WhatsApp" value={dashOrValue(detail.whatsapp_number, t)} />
+                    ) : null}
+                    {detailLeadType === "questionnaire" ? (
+                      <DetailCard label={t.providers_country} value={dashOrValue(detail.country, t)} />
+                    ) : null}
+                    {detailLeadType === "questionnaire" ? (
+                      <DetailCard label={t.field_birth_date} value={formatDate(leadDetailDateOfBirth(detail), locale, t.common_not_set)} />
+                    ) : null}
+                    {detailLeadType === "questionnaire" ? (
+                      <DetailCard label={t.lead_legal_sex} value={legalSexLabel(detail.legal_sex, t)} />
+                    ) : null}
+                    {detailLeadType === "questionnaire" && detail.locale ? (
                       <DetailCard label={t.lead_locale} value={detail.locale} />
                     ) : null}
-                    {detail.flow ? (
+                    {detailLeadType === "questionnaire" && detail.flow ? (
                       <DetailCard label={t.lead_flow} value={detail.flow} />
                     ) : null}
                   </div>
@@ -1425,7 +1460,7 @@ function useLeadsPageContent() {
                           .join(" ")
                       )}
                     />
-                    <DetailCard label={t.field_birth_date} value={dashOrValue(detail.date_of_birth, t)} />
+                    <DetailCard label={t.field_birth_date} value={formatDate(leadDetailDateOfBirth(detail), locale, t.common_not_set)} />
                     <DetailCard label={t.lead_legal_sex} value={legalSexLabel(detail.legal_sex, t)} />
                     <DetailCard label={t.lead_primary_language} value={leadLanguageLabel(detail.primary_language, t)} />
                     <DetailCard label={t.lead_needs_interpreter} value={yesNo(detail.needs_interpreter, t)} />

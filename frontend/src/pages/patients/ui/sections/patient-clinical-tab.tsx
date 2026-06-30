@@ -1594,23 +1594,12 @@ export function PatientClinicalTab({
 
   const verlaufAttributionRow = (item: ClinicalVerlaufEntry) => {
     const hasDoctor = Boolean(item.doctor_id || item.doctor_name || item.doctor_title || item.doctor_fachbereich);
-    if (hasDoctor) {
-      const doctor = [item.doctor_title, item.doctor_name].filter(Boolean).join(" ").trim();
-      const specialty = clinicalSpecializationLabel(item, lang);
-      const label = [doctor || null, item.provider_name].filter(Boolean).join(" · ");
+    const label = hasDoctor ? attributionLabel(item, lang) : null;
+    if (label) {
       return (
-        <div className="mt-0.5 min-w-0 space-y-0.5 text-[11px]">
-          {label ? (
-            <p className="min-w-0 max-w-full break-words text-foreground">
-              {tx("Назначил", "Verordnet von")}: {label}
-            </p>
-          ) : null}
-          {specialty ? (
-            <p className="min-w-0 max-w-full break-words text-foreground">
-              {tx("Специализация", "Fachbereich")}: {specialty}
-            </p>
-          ) : null}
-        </div>
+        <p className="mt-0.5 min-w-0 max-w-full break-words text-[11px] text-foreground">
+          {tx("Назначил", "Verordnet von")}: {label}
+        </p>
       );
     }
     return item.provider_name ? (

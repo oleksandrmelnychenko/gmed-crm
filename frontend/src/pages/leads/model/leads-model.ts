@@ -89,7 +89,12 @@ const LEAD_SOURCE_LABEL_KEYS = {
   manual: "lead_source_manual",
   agent: "lead_source_agent",
   website: "lead_source_website",
+  apply: "lead_source_website_wizard",
   website_wizard: "lead_source_website_wizard",
+  website_contact: "lead_source_visitor_facade",
+  website_contact_form: "lead_source_visitor_facade",
+  website_form: "lead_source_visitor_facade",
+  contact_form: "lead_source_visitor_facade",
   visitor_facade: "lead_source_visitor_facade",
   referral: "lead_source_referral",
   phone: "lead_source_phone",
@@ -402,8 +407,9 @@ export function leadSourceLabel(
   source: string | null | undefined,
   translations?: Translations,
 ) {
+  const normalizedSource = normalizeLeadOrigin(source);
   return formatEnumLabelFromKeys(
-    source,
+    normalizedSource,
     LEAD_SOURCE_LABEL_KEYS,
     runtimeTranslations(translations),
   );
