@@ -243,3 +243,36 @@ export function orderLinePayload(line: WizardOrderLine): Record<string, unknown>
     vat_rate: numberOrNull(line.vatRate) ?? 0,
   };
 }
+
+/**
+ * Guardian branch (#2/#11): a minor cannot hold a plan alone, so before the
+ * wizard finishes it must capture the legal guardian, recorded as a
+ * `guardian` patient relation. Pure logic so the gate is unit-testable.
+ */
+export type GuardianDraft = { name: string; phone: string };
+
+export function blankGuardian(): GuardianDraft {
+  return { name: "", phone: "" };
+}
+
+export function guardianIsComplete(guardian: GuardianDraft): boolean {
+  return guardian.name.trim().length > 0;
+}
+
+/**
+ * Whether the wizard may finish: an adult can always finish; a minor may only
+ * finish once a guardian has been named (#2/#11).
+ */
+export function canFinishOrder(minor: boolean, guardian: GuardianDraft): boolean {
+  return !minor || guardianIsComplete(guardian);
+}
+
+/** The `POST /patients/{id}/relations` payload for the captured guardian. */
+export function guardianPayload(guardian: GuardianDraft): Record<string, unknown> {
+  return {
+    related_name: guardian.name.trim(),
+    relation_type: "guardian",
+    phone: guardian.phone.trim() || null,
+    is_emergency_contact: true,
+  };
+}

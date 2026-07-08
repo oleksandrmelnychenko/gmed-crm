@@ -3,10 +3,14 @@ import { describe, expect, it } from "vitest";
 import type { LeadDetail } from "@/lib/api/types";
 
 import {
+  blankGuardian,
   blankOrderLine,
   canConvert,
+  canFinishOrder,
   completedSteps,
   costEstimate,
+  guardianIsComplete,
+  guardianPayload,
   draftFromLead,
   isMinor,
   nextStep,
@@ -17,6 +21,7 @@ import {
   resumeStep,
   stepIsComplete,
   wizardUpdatePayload,
+  type GuardianDraft,
   type WizardDraft,
   type WizardOrderLine,
 } from "./lead-wizard.model";
@@ -230,5 +235,33 @@ describe("Phase B order lines (#8)", () => {
       unit_price: 100,
       vat_rate: 19,
     });
+  });
+});
+
+describe("Phase B guardian branch (#2/#11)", () => {
+  function g(overrides: Partial<GuardianDraft> = {}): GuardianDraft {
+    return { ...blankGuardian(), ...overrides };
+  }
+
+  it("a guardian is complete once a name is given", () => {
+    expect(guardianIsComplete(g({ name: "Herr Muster" }))).toBe(true);
+    expect(guardianIsComplete(g())).toBe(false);
+    expect(guardianIsComplete(g({ name: "   " }))).toBe(false);
+  });
+
+  it("an adult can always finish; a minor needs a named guardian", () => {
+    expect(canFinishOrder(false, g())).toBe(true);
+    expect(canFinishOrder(true, g())).toBe(false);
+    expect(canFinishOrder(true, g({ name: "Herr Muster" }))).toBe(true);
+  });
+
+  it("builds a guardian relation payload", () => {
+    expect(guardianPayload(g({ name: " Herr Muster ", phone: " 030-1 " }))).toEqual({
+      related_name: "Herr Muster",
+      relation_type: "guardian",
+      phone: "030-1",
+      is_emergency_contact: true,
+    });
+    expect(guardianPayload(g({ name: "X" })).phone).toBeNull();
   });
 });

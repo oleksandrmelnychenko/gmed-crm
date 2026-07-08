@@ -15,12 +15,17 @@ import {
   updateLeadWizard,
   wizardConvertLead,
 } from "../data/leads-api";
+import { upsertPatientRelation } from "@/pages/patients/data/patient-detail-mutations";
+
 import {
   PHASE_A_STEPS,
+  blankGuardian,
   blankOrderLine,
   canConvert,
+  canFinishOrder,
   costEstimate,
   draftFromLead,
+  guardianPayload,
   isMinor,
   nextStep,
   orderLineIsValid,
@@ -30,6 +35,7 @@ import {
   resumeStep,
   stepIsComplete,
   wizardUpdatePayload,
+  type GuardianDraft,
   type LegalSex,
   type WizardDraft,
   type WizardOrderLine,
@@ -175,6 +181,7 @@ export function LeadWizard({
   const [createdOrderId, setCreatedOrderId] = useState<string | null>(null);
   const [createdPatientId, setCreatedPatientId] = useState<string | null>(null);
   const [orderLines, setOrderLines] = useState<WizardOrderLine[]>([blankOrderLine()]);
+  const [guardian, setGuardian] = useState<GuardianDraft>(blankGuardian());
 
   useEffect(() => {
     if (!open || !leadId) return;
@@ -186,6 +193,7 @@ export function LeadWizard({
     setCreatedOrderId(null);
     setCreatedPatientId(null);
     setOrderLines([blankOrderLine()]);
+    setGuardian(blankGuardian());
     fetchLeadDetail(leadId)
       .then((lead) => {
         if (!active) return;
@@ -280,6 +288,10 @@ export function LeadWizard({
     setError("");
     const billable = orderLines.filter(orderLineIsValid);
     try {
+      // A minor's guardian is recorded before the order is opened (#2/#11).
+      if (minor && createdPatientId) {
+        await upsertPatientRelation(createdPatientId, guardianPayload(guardian));
+      }
       for (const line of billable) {
         await createOrderLeistung(createdOrderId, orderLinePayload(line));
       }
@@ -353,6 +365,34 @@ export function LeadWizard({
                   "Patient angelegt. Bilden Sie den Auftrag: Positionen hinzufügen und Kosten schätzen.",
                 )}
               </div>
+              {minor ? (
+                <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                  <p className="text-sm font-medium text-amber-800">
+                    {tx(
+                      "Пациент — несовершеннолетний. Укажите законного представителя.",
+                      "Minderjährig — bitte gesetzlichen Vertreter angeben.",
+                    )}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field label={tx("ФИО представителя", "Name des Vertreters")}>
+                      <Input
+                        value={guardian.name}
+                        onChange={(event) =>
+                          setGuardian((current) => ({ ...current, name: event.target.value }))
+                        }
+                      />
+                    </Field>
+                    <Field label={tx("Телефон", "Telefon")}>
+                      <Input
+                        value={guardian.phone}
+                        onChange={(event) =>
+                          setGuardian((current) => ({ ...current, phone: event.target.value }))
+                        }
+                      />
+                    </Field>
+                  </div>
+                </div>
+              ) : null}
               <div className="space-y-3">
                 {orderLines.map((line, index) => (
                   <div
@@ -605,7 +645,20 @@ export function LeadWizard({
               <span className="text-xs text-muted-foreground">
                 {tx("Черновик заказа создан", "Auftragsentwurf erstellt")}
               </span>
-              <Button type="button" variant="default" onClick={handleFinishOrder} disabled={busy}>
+              <Button
+                type="button"
+                variant="default"
+                onClick={handleFinishOrder}
+                disabled={busy || !canFinishOrder(minor, guardian)}
+                title={
+                  !canFinishOrder(minor, guardian)
+                    ? tx(
+                        "Для несовершеннолетнего нужен представитель",
+                        "Für Minderjährige ist ein Vertreter erforderlich",
+                      )
+                    : undefined
+                }
+              >
                 {tx("Завершить и открыть заказ", "Abschließen und Auftrag öffnen")}
               </Button>
             </>
