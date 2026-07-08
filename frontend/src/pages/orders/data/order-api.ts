@@ -277,3 +277,91 @@ export function createWorkflowChecklistItem(orderId: string, payload: JsonPayloa
 export function completeWorkflowChecklistItem(orderId: string, itemId: string) {
   return post(`/orders/${orderId}/workflow-checklist/${itemId}/complete`);
 }
+
+export type OrderGroupHead = {
+  id: string;
+  order_number: string;
+  patient_id: string;
+  order_role: string;
+  status: string;
+  total_estimated: string | null;
+  currency: string;
+  payer_patient_relation_id: string | null;
+  payer_contact_name: string | null;
+};
+
+export type OrderGroupSub = {
+  id: string;
+  order_number: string;
+  patient_id: string;
+  status: string;
+  total_estimated: string | null;
+};
+
+export type OrderGroup = {
+  head: OrderGroupHead;
+  subs: OrderGroupSub[];
+  covered_patient_ids: string[];
+  rollup_total_estimated: string | null;
+};
+
+export function normalizeOrderGroup(value: unknown): OrderGroup {
+  const record = asRecord(value);
+  const head = asRecord(record.head);
+  const subs = Array.isArray(record.subs) ? record.subs : [];
+  return {
+    head: {
+      id: stringValue(head.id),
+      order_number: stringValue(head.order_number),
+      patient_id: stringValue(head.patient_id),
+      order_role: stringValue(head.order_role, "standalone"),
+      status: stringValue(head.status),
+      total_estimated: nullableStringValue(head.total_estimated),
+      currency: stringValue(head.currency, "EUR"),
+      payer_patient_relation_id: nullableStringValue(head.payer_patient_relation_id),
+      payer_contact_name: nullableStringValue(head.payer_contact_name),
+    },
+    subs: subs.map((entry) => {
+      const sub = asRecord(entry);
+      return {
+        id: stringValue(sub.id),
+        order_number: stringValue(sub.order_number),
+        patient_id: stringValue(sub.patient_id),
+        status: stringValue(sub.status),
+        total_estimated: nullableStringValue(sub.total_estimated),
+      };
+    }),
+    covered_patient_ids: stringArray(record.covered_patient_ids),
+    rollup_total_estimated: nullableStringValue(record.rollup_total_estimated),
+  };
+}
+
+export async function fetchOrderGroup(orderId: string): Promise<OrderGroup> {
+  return normalizeOrderGroup(await apiFetch<unknown>(`/orders/${orderId}/group`));
+}
+
+export async function groupOrderUnderHead(
+  orderId: string,
+  headOrderId: string,
+): Promise<OrderGroup> {
+  return normalizeOrderGroup(
+    await postJson<unknown>(`/orders/${orderId}/group`, { head_order_id: headOrderId }),
+  );
+}
+
+export async function mergeOrdersIntoHead(
+  orderId: string,
+  sourceOrderIds: string[],
+): Promise<OrderGroup> {
+  return normalizeOrderGroup(
+    await postJson<unknown>(`/orders/${orderId}/merge`, { source_order_ids: sourceOrderIds }),
+  );
+}
+
+export function ungroupOrder(orderId: string) {
+  return post(`/orders/${orderId}/ungroup`);
+}
+
+export function setOrderPayer(orderId: string, payload: JsonPayload) {
+  return postJson<void>(`/orders/${orderId}/payer`, payload);
+}
