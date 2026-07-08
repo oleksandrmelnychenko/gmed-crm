@@ -54,6 +54,8 @@ export type PatientEditFormState = {
   emergencyContactName: string;
   emergencyContactPhone: string;
   emergencyContactRelation: string;
+  passportNumber: string;
+  passportExpiry: string;
   legalStatus: PatientLegalStatus;
   clinicalWarnings: string;
   notes: string;
@@ -121,6 +123,8 @@ export function patientToEditForm(detail: PatientDetail): PatientEditFormState {
     emergencyContactName: detail.emergency_contact_name ?? "",
     emergencyContactPhone: detail.emergency_contact_phone ?? "",
     emergencyContactRelation: detail.emergency_contact_relation ?? "",
+    passportNumber: detail.passport_number ?? "",
+    passportExpiry: detail.passport_expiry ?? "",
     legalStatus: normalizePatientLegalStatus(detail.legal_status),
     clinicalWarnings: detail.clinical_warnings ?? "",
     notes: detail.notes ?? "",

@@ -6294,20 +6294,53 @@ function useOrdersPageContent() {
                                           ? l("orders_vertragsunterlagen_gultig")
                                           : check.key === "debt_clear"
                                             ? l("orders_debt_hold_aufgehoben")
-                                            : check.label}
+                                            : check.key === "passport_valid"
+                                              ? l("orders_recheck_passport_valid")
+                                              : check.label}
                               </span>
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "rounded-full",
-                                  recheckBadgeClass(check.passed),
-                                )}
-                              >
-                                {check.passed
-                                  ? t.common_yes
-                                  : l("orders_aktualisierung_notig")}
-                              </Badge>
+                              {check.key === "passport_valid" &&
+                              (check.status === "expired" ||
+                                check.status === "expiring") ? (
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    "rounded-full",
+                                    check.status === "expired"
+                                      ? "border-rose-200 bg-rose-50 text-rose-700"
+                                      : "border-amber-200 bg-amber-50 text-amber-700",
+                                  )}
+                                >
+                                  {check.status === "expired"
+                                    ? l("orders_recheck_passport_expired")
+                                    : l("orders_recheck_passport_expiring")}
+                                </Badge>
+                              ) : (
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    "rounded-full",
+                                    recheckBadgeClass(check.passed),
+                                  )}
+                                >
+                                  {check.passed
+                                    ? t.common_yes
+                                    : l("orders_aktualisierung_notig")}
+                                </Badge>
+                              )}
                             </div>
+                            {check.key === "passport_valid" &&
+                            check.expiry &&
+                            (check.status === "expired" ||
+                              check.status === "expiring") ? (
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {l("orders_recheck_passport_expires_on")}{" "}
+                                {check.expiry}
+                                {check.status === "expiring" &&
+                                typeof check.days_until_expiry === "number"
+                                  ? ` · ${check.days_until_expiry} ${l("orders_recheck_days")}`
+                                  : ""}
+                              </p>
+                            ) : null}
                           </div>
                         ))}
                       </div>

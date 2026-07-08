@@ -30,6 +30,12 @@ export type PatientDetail = PatientSummary & {
   emergency_contact_name?: string | null;
   emergency_contact_phone?: string | null;
   emergency_contact_relation?: string | null;
+  passport_number?: string | null;
+  passport_expiry?: string | null;
+  passport_status?: "valid" | "expiring" | "expired" | "unknown";
+  passport_expired?: boolean;
+  passport_expiring?: boolean;
+  passport_days_until_expiry?: number | null;
   legal_status?: unknown;
   clinical_warnings?: string | null;
   notes?: string | null;

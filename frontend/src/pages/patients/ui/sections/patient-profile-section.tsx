@@ -456,6 +456,40 @@ function usePatientProfileTabContent({
           <ProfileSummaryLine label={t.patients_emergency_phone} value={fieldValue(detail.emergency_contact_phone, t.common_not_set)} />
           <ProfileSummaryLine label={t.patients_emergency_relation} value={fieldValue(detail.emergency_contact_relation, t.common_not_set)} />
         </ProfileSummaryCard>
+
+        <ProfileSummaryCard title={t.patient_profile_editor_passport}>
+          <ProfileSummaryLine
+            label={t.patient_profile_editor_passport_number}
+            value={fieldValue(detail.passport_number, t.common_not_set)}
+          />
+          <ProfileSummaryLine
+            label={t.patient_profile_editor_passport_expiry}
+            value={
+              detail.passport_expiry ? (
+                <span className="inline-flex flex-wrap items-center justify-end gap-2">
+                  <span>{detail.passport_expiry}</span>
+                  {detail.passport_status === "expired" ||
+                  detail.passport_status === "expiring" ? (
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.08em]",
+                        detail.passport_status === "expired"
+                          ? "border-rose-200 bg-rose-50 text-rose-700"
+                          : "border-amber-200 bg-amber-50 text-amber-700",
+                      )}
+                    >
+                      {detail.passport_status === "expired"
+                        ? t.patient_passport_expired
+                        : t.patient_passport_expiring}
+                    </span>
+                  ) : null}
+                </span>
+              ) : (
+                t.common_not_set
+              )
+            }
+          />
+        </ProfileSummaryCard>
       </div>
 
       <FormSection

@@ -494,6 +494,33 @@ function PatientProfileEditorFormSections({
                   </FormField>
                 </div>
               </FormSection>
+              <FormSection title={dictionary.patient_profile_editor_passport}>
+                <div className="grid gap-2.5 md:grid-cols-2">
+                  <FormField
+                    label={dictionary.patient_profile_editor_passport_number}
+                  >
+                    <Input
+                      value={form.passportNumber}
+                      onChange={(event) =>
+                        updateField("passportNumber", event.target.value)
+                      }
+                      className={formInputClassName}
+                    />
+                  </FormField>
+                  <FormField
+                    label={dictionary.patient_profile_editor_passport_expiry}
+                  >
+                    <Input
+                      type="date"
+                      value={form.passportExpiry}
+                      onChange={(event) =>
+                        updateField("passportExpiry", event.target.value)
+                      }
+                      className={formInputClassName}
+                    />
+                  </FormField>
+                </div>
+              </FormSection>
               <FormSection title={dictionary.patient_profile_editor_insurance}>
                 <div className="grid gap-2.5 md:grid-cols-3">
                   <FormField label={dictionary.patient_profile_editor_insurance_provider}>
@@ -829,6 +856,8 @@ function PatientProfileEditorSheetContent({
           emergency_contact_name: form.emergencyContactName,
           emergency_contact_phone: form.emergencyContactPhone,
           emergency_contact_relation: form.emergencyContactRelation,
+          passport_number: form.passportNumber,
+          passport_expiry: form.passportExpiry,
           legal_status: serializePatientLegalStatus(form.legalStatus),
           clinical_warnings: form.clinicalWarnings,
           notes: form.notes,

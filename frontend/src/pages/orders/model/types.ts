@@ -400,11 +400,16 @@ export type CreateResponse = {
   id: string;
 };
 
+export type PassportComplianceStatus = "valid" | "expiring" | "expired" | "unknown";
+
 type PatientRecheckCheck = {
   key: string;
   label: string;
   passed: boolean;
   blocking_for: string;
+  status?: PassportComplianceStatus;
+  expiry?: string | null;
+  days_until_expiry?: number | null;
 };
 
 type PatientRecheckDocumentAlerts = {
@@ -433,6 +438,11 @@ export type PatientOrderRecheck = {
   document_pack_ready: boolean;
   contract_ready: boolean;
   debt_hold: boolean;
+  passport_status?: PassportComplianceStatus;
+  passport_expired?: boolean;
+  passport_expiring?: boolean;
+  passport_expiry?: string | null;
+  passport_days_until_expiry?: number | null;
   overdue_invoice_count: number;
   outstanding_balance?: string | null;
   debt_management?: {

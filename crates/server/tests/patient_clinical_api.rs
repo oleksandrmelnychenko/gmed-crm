@@ -189,6 +189,7 @@ async fn patient_passport_round_trips_and_flags_expiry() {
     assert_eq!(detail["passport_number"], "X1234567");
     assert_eq!(detail["passport_expiry"], "2020-01-01");
     assert_eq!(detail["passport_expired"], true, "past expiry must flag expired");
+    assert_eq!(detail["passport_status"], "expired");
 
     // Renew to a future date -> no longer expired; number preserved when omitted.
     let (status, _) = json_request(
@@ -216,6 +217,7 @@ async fn patient_passport_round_trips_and_flags_expiry() {
     );
     assert_eq!(detail["passport_expiry"], "2999-12-31");
     assert_eq!(detail["passport_expired"], false);
+    assert_eq!(detail["passport_status"], "valid");
 
     // A malformed date is rejected.
     let (status, _) = json_request(
@@ -227,6 +229,72 @@ async fn patient_passport_round_trips_and_flags_expiry() {
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn patient_passport_expiring_soon_is_a_non_blocking_compliance_warning() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("passport-expiring");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    // A passport expiring inside the 90-day warning window (30 days out).
+    let soon = (chrono::Utc::now().date_naive() + chrono::Duration::days(30)).to_string();
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/update"),
+        &pm_bearer,
+        Some(json!({ "passport_number": "Y7654321", "passport_expiry": soon })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Patient detail flags it as expiring, not expired.
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["passport_status"], "expiring");
+    assert_eq!(detail["passport_expired"], false);
+    assert_eq!(detail["passport_expiring"], true);
+    assert!(detail["passport_days_until_expiry"].as_i64().unwrap() <= 30);
+
+    // The compliance re-check surfaces the same status without blocking orders.
+    let (status, recheck) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/recheck"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{recheck}");
+    assert_eq!(recheck["passport_status"], "expiring");
+    assert_eq!(recheck["passport_expiring"], true);
+    assert_eq!(
+        recheck["can_create_order"], true,
+        "an expiring passport must never block order creation"
+    );
+    let blocking = recheck["blocking_reasons"].as_array().unwrap();
+    assert!(
+        blocking.iter().all(|reason| !reason
+            .as_str()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("passport")),
+        "expiring passport must not be a blocking reason"
+    );
 }
 
 #[tokio::test]

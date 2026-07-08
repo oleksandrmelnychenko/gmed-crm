@@ -4210,6 +4210,34 @@ pub(crate) fn patient_document_alerts_payload(summary: &PatientDocumentAlertsSum
     })
 }
 
+/// Days before expiry at which a passport starts to count as a compliance
+/// warning (#6). A product-tunable window; expiry itself is the hard boundary.
+const PASSPORT_EXPIRY_WARNING_DAYS: i64 = 90;
+
+/// Compliance status of a patient passport relative to `today` (#6):
+/// `expired` (past expiry), `expiring` (within the warning window), `valid`, or
+/// `unknown` (no date on file). Returns the status plus days until expiry
+/// (negative once expired), or `None` when unknown.
+fn passport_compliance_status(
+    passport_expiry: Option<chrono::NaiveDate>,
+    today: chrono::NaiveDate,
+) -> (&'static str, Option<i64>) {
+    match passport_expiry {
+        None => ("unknown", None),
+        Some(expiry) => {
+            let days = (expiry - today).num_days();
+            let status = if days < 0 {
+                "expired"
+            } else if days <= PASSPORT_EXPIRY_WARNING_DAYS {
+                "expiring"
+            } else {
+                "valid"
+            };
+            (status, Some(days))
+        }
+    }
+}
+
 pub(crate) async fn load_patient_recheck_readiness(
     state: &AppState,
     patient_uuid: Uuid,
@@ -4319,6 +4347,10 @@ pub(crate) async fn load_patient_recheck_readiness(
             .unwrap_or(false);
 
     if !requires_recheck {
+        // Passport validity is independent of whether an existing-customer
+        // re-check is due, so report it even on the minimal payload (#6).
+        let (passport_status, passport_days_until_expiry) =
+            passport_compliance_status(passport_expiry, chrono::Utc::now().date_naive());
         return Ok(Some(PatientRecheckReadiness {
             can_create_order: true,
             blocking_reasons: Vec::new(),
@@ -4331,6 +4363,11 @@ pub(crate) async fn load_patient_recheck_readiness(
                 "document_pack_ready": true,
                 "contract_ready": true,
                 "debt_hold": false,
+                "passport_expired": passport_status == "expired",
+                "passport_expiring": passport_status == "expiring",
+                "passport_status": passport_status,
+                "passport_expiry": passport_expiry.map(|value| value.to_string()),
+                "passport_days_until_expiry": passport_days_until_expiry,
                 "overdue_invoice_count": 0,
                 "base_data_missing_fields": [],
                 "blocking_reasons": [],
@@ -4426,9 +4463,12 @@ pub(crate) async fn load_patient_recheck_readiness(
     })?;
 
     let today = chrono::Utc::now().date_naive();
-    // #6: flag an expired passport in compliance (a warning, never a hard gate
-    // on order creation). No passport date on file is treated as "not expired".
-    let passport_expired = passport_expiry.map(|value| value < today).unwrap_or(false);
+    // #6: surface passport expiry in compliance (a warning, never a hard gate on
+    // order creation). No passport date on file is treated as "unknown".
+    let (passport_status, passport_days_until_expiry) =
+        passport_compliance_status(passport_expiry, today);
+    let passport_expired = passport_status == "expired";
+    let passport_expiring = passport_status == "expiring";
     let latest_framework_contract = contract_rows.first().map(|row| {
         json!({
             "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
@@ -4513,6 +4553,9 @@ pub(crate) async fn load_patient_recheck_readiness(
             "label": "Passport not expired",
             "passed": !passport_expired,
             "blocking_for": "none",
+            "status": passport_status,
+            "expiry": passport_expiry.map(|value| value.to_string()),
+            "days_until_expiry": passport_days_until_expiry,
         }),
     ];
 
@@ -4572,6 +4615,10 @@ pub(crate) async fn load_patient_recheck_readiness(
             "contract_ready": contract_ready,
             "debt_hold": debt_hold,
             "passport_expired": passport_expired,
+            "passport_expiring": passport_expiring,
+            "passport_status": passport_status,
+            "passport_expiry": passport_expiry.map(|value| value.to_string()),
+            "passport_days_until_expiry": passport_days_until_expiry,
             "overdue_invoice_count": overdue_invoice_count,
             "debt_management": debt_management.payload,
             "outstanding_balance": debt_management.outstanding_balance.round_dp(2).normalize().to_string(),
@@ -6428,21 +6475,28 @@ fn build_patient_detail_json(
             insert_optional_string(map, "address_zip", patient.address_zip);
             insert_optional_string(map, "address_country", patient.address_country);
             insert_optional_string(map, "passport_number", patient.passport_number);
-            match patient.passport_expiry {
-                Some(expiry) => {
-                    map.insert(
-                        "passport_expiry".to_string(),
-                        Value::String(expiry.to_string()),
-                    );
-                    map.insert(
-                        "passport_expired".to_string(),
-                        Value::Bool(expiry < chrono::Utc::now().date_naive()),
-                    );
-                }
-                None => {
-                    map.insert("passport_expiry".to_string(), Value::Null);
-                    map.insert("passport_expired".to_string(), Value::Bool(false));
-                }
+            {
+                let (status, days) = passport_compliance_status(
+                    patient.passport_expiry,
+                    chrono::Utc::now().date_naive(),
+                );
+                map.insert(
+                    "passport_expiry".to_string(),
+                    patient
+                        .passport_expiry
+                        .map(|expiry| Value::String(expiry.to_string()))
+                        .unwrap_or(Value::Null),
+                );
+                map.insert(
+                    "passport_status".to_string(),
+                    Value::String(status.to_string()),
+                );
+                map.insert("passport_expired".to_string(), Value::Bool(status == "expired"));
+                map.insert("passport_expiring".to_string(), Value::Bool(status == "expiring"));
+                map.insert(
+                    "passport_days_until_expiry".to_string(),
+                    days.map(Value::from).unwrap_or(Value::Null),
+                );
             }
             insert_optional_string(
                 map,

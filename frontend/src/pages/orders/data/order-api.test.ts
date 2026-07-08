@@ -49,6 +49,9 @@ describe("normalizePatientOrderRecheck", () => {
       label: "",
       passed: true,
       blocking_for: "",
+      status: "unknown",
+      expiry: null,
+      days_until_expiry: null,
     });
   });
 });
@@ -92,5 +95,50 @@ describe("normalizeOrderGroup", () => {
     expect(group.subs).toEqual([]);
     expect(group.covered_patient_ids).toEqual([]);
     expect(group.rollup_total_estimated).toBeNull();
+  });
+});
+
+describe("normalizePatientOrderRecheck passport (#6)", () => {
+  it("carries passport status + expiry through the payload and the check", () => {
+    const value = normalizePatientOrderRecheck({
+      requires_recheck: true,
+      can_create_order: true,
+      passport_status: "expiring",
+      passport_expiring: true,
+      passport_expired: false,
+      passport_expiry: "2026-08-01",
+      passport_days_until_expiry: 23,
+      checks: [
+        {
+          key: "passport_valid",
+          label: "Passport not expired",
+          passed: true,
+          blocking_for: "none",
+          status: "expiring",
+          expiry: "2026-08-01",
+          days_until_expiry: 23,
+        },
+      ],
+    });
+
+    expect(value.passport_status).toBe("expiring");
+    expect(value.passport_expiring).toBe(true);
+    expect(value.passport_expiry).toBe("2026-08-01");
+    expect(value.passport_days_until_expiry).toBe(23);
+    const check = value.checks.find((entry) => entry.key === "passport_valid");
+    expect(check?.status).toBe("expiring");
+    expect(check?.expiry).toBe("2026-08-01");
+    expect(check?.days_until_expiry).toBe(23);
+    expect(check?.blocking_for).toBe("none");
+  });
+
+  it("defaults an unknown/absent passport safely", () => {
+    const value = normalizePatientOrderRecheck({ requires_recheck: false, checks: [] });
+
+    expect(value.passport_status).toBe("unknown");
+    expect(value.passport_expiring).toBe(false);
+    expect(value.passport_expired).toBe(false);
+    expect(value.passport_expiry).toBeNull();
+    expect(value.passport_days_until_expiry).toBeNull();
   });
 });

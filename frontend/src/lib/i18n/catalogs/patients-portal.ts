@@ -669,6 +669,13 @@ export interface PatientsPortalTranslations {
   patient_profile_editor_city: string;
   patient_profile_editor_zip: string;
   patient_profile_editor_address_country: string;
+  patient_profile_editor_passport: string;
+  patient_profile_editor_passport_number: string;
+  patient_profile_editor_passport_expiry: string;
+  patient_passport_valid: string;
+  patient_passport_expiring: string;
+  patient_passport_expired: string;
+  patient_passport_expires_on: string;
   patient_profile_editor_insurance: string;
   patient_profile_editor_insurance_provider: string;
   patient_profile_editor_insurance_number: string;
@@ -1512,6 +1519,13 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   patient_profile_editor_city: "Город",
   patient_profile_editor_zip: "Индекс",
   patient_profile_editor_address_country: "Страна адреса",
+  patient_profile_editor_passport: "Паспорт",
+  patient_profile_editor_passport_number: "Номер паспорта",
+  patient_profile_editor_passport_expiry: "Действителен до",
+  patient_passport_valid: "Паспорт действителен",
+  patient_passport_expiring: "Паспорт скоро истекает",
+  patient_passport_expired: "Паспорт просрочен",
+  patient_passport_expires_on: "Истекает",
   patient_profile_editor_insurance: "Страхование",
   patient_profile_editor_insurance_provider: "Страховая компания",
   patient_profile_editor_insurance_number: "Номер полиса",
@@ -2347,6 +2361,13 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   patient_profile_editor_city: "Stadt",
   patient_profile_editor_zip: "PLZ",
   patient_profile_editor_address_country: "Adressland",
+  patient_profile_editor_passport: "Reisepass",
+  patient_profile_editor_passport_number: "Passnummer",
+  patient_profile_editor_passport_expiry: "Gültig bis",
+  patient_passport_valid: "Reisepass gültig",
+  patient_passport_expiring: "Reisepass läuft bald ab",
+  patient_passport_expired: "Reisepass abgelaufen",
+  patient_passport_expires_on: "Gültig bis",
   patient_profile_editor_insurance: "Versicherung",
   patient_profile_editor_insurance_provider: "Versicherer",
   patient_profile_editor_insurance_number: "Versicherungsnummer",

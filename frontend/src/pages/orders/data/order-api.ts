@@ -8,6 +8,7 @@ import type {
   OrderDebtQueueItem,
   OrderDetail,
   OrderSummary,
+  PassportComplianceStatus,
   PatientAssignmentOption,
   PatientOption,
   PatientOrderRecheck,
@@ -73,6 +74,12 @@ function stringArray(value: unknown): string[] {
     : [];
 }
 
+function passportStatusValue(value: unknown): PassportComplianceStatus {
+  return value === "valid" || value === "expiring" || value === "expired"
+    ? value
+    : "unknown";
+}
+
 export function normalizePatientOrderRecheck(value: unknown): PatientOrderRecheck {
   const payload = asRecord(value);
   const documentAlerts = asRecord(payload.document_alerts);
@@ -86,6 +93,10 @@ export function normalizePatientOrderRecheck(value: unknown): PatientOrderRechec
           label: stringValue(check.label),
           passed: booleanValue(check.passed),
           blocking_for: stringValue(check.blocking_for),
+          status: passportStatusValue(check.status),
+          expiry: nullableStringValue(check.expiry),
+          days_until_expiry:
+            typeof check.days_until_expiry === "number" ? check.days_until_expiry : null,
         };
       })
     : [];
@@ -109,6 +120,14 @@ export function normalizePatientOrderRecheck(value: unknown): PatientOrderRechec
     document_pack_ready: booleanValue(payload.document_pack_ready),
     contract_ready: booleanValue(payload.contract_ready),
     debt_hold: booleanValue(payload.debt_hold),
+    passport_status: passportStatusValue(payload.passport_status),
+    passport_expired: booleanValue(payload.passport_expired),
+    passport_expiring: booleanValue(payload.passport_expiring),
+    passport_expiry: nullableStringValue(payload.passport_expiry),
+    passport_days_until_expiry:
+      typeof payload.passport_days_until_expiry === "number"
+        ? payload.passport_days_until_expiry
+        : null,
     overdue_invoice_count: numberValue(payload.overdue_invoice_count),
     outstanding_balance: nullableStringValue(payload.outstanding_balance),
     debt_management:
