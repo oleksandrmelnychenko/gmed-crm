@@ -171,6 +171,7 @@ import type {
   WorkflowChecklistFormState,
   WorkflowChecklistResponse,
 } from "./model/types";
+import { OrderAmendmentsPanel } from "./ui/order-amendments-panel";
 import { OrderGroupPanel } from "./ui/order-group-panel";
 import {
   OrderServiceGroupPanel,
@@ -5316,6 +5317,14 @@ function useOrdersPageContent() {
                       title={lang === "de" ? "Auftragsgruppe" : "Групповой заказ"}
                     >
                       <OrderGroupPanel orderId={orderDetail.id} />
+                    </SectionCard>
+
+                    <SectionCard
+                      title={
+                        lang === "de" ? "Betragsänderungen" : "Изменения суммы"
+                      }
+                    >
+                      <OrderAmendmentsPanel orderId={orderDetail.id} />
                     </SectionCard>
 
                     <SectionCard title={tx.providers_services}>

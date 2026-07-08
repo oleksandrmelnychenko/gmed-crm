@@ -384,3 +384,58 @@ export function ungroupOrder(orderId: string) {
 export function setOrderPayer(orderId: string, payload: JsonPayload) {
   return postJson<void>(`/orders/${orderId}/payer`, payload);
 }
+
+export type OrderAmendment = {
+  id: string;
+  order_id: string;
+  delta_amount: string;
+  currency: string;
+  agreed_note: string;
+  status: string;
+  requested_by: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_note: string | null;
+  created_at: string | null;
+};
+
+export function normalizeOrderAmendment(value: unknown): OrderAmendment {
+  const record = asRecord(value);
+  return {
+    id: stringValue(record.id),
+    order_id: stringValue(record.order_id),
+    delta_amount: stringValue(record.delta_amount, "0"),
+    currency: stringValue(record.currency, "EUR"),
+    agreed_note: stringValue(record.agreed_note),
+    status: stringValue(record.status, "pending"),
+    requested_by: stringValue(record.requested_by),
+    decided_by: nullableStringValue(record.decided_by),
+    decided_at: nullableStringValue(record.decided_at),
+    decision_note: nullableStringValue(record.decision_note),
+    created_at: nullableStringValue(record.created_at),
+  };
+}
+
+export async function fetchOrderAmendments(orderId: string): Promise<OrderAmendment[]> {
+  const rows = await apiFetch<unknown>(`/orders/${orderId}/amendments`);
+  return Array.isArray(rows) ? rows.map(normalizeOrderAmendment) : [];
+}
+
+export function createOrderAmendment(
+  orderId: string,
+  payload: { delta_amount: string; agreed_note: string; currency?: string },
+) {
+  return postJson<unknown>(`/orders/${orderId}/amendments`, payload);
+}
+
+export function decideOrderAmendment(
+  orderId: string,
+  amendmentId: string,
+  decision: "approve" | "reject",
+  note?: string,
+) {
+  return postJson<unknown>(`/orders/${orderId}/amendments/${amendmentId}/decision`, {
+    decision,
+    note: note ?? null,
+  });
+}

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeOrderGroup, normalizePatientOrderRecheck } from "./order-api";
+import {
+  normalizeOrderAmendment,
+  normalizeOrderGroup,
+  normalizePatientOrderRecheck,
+} from "./order-api";
 
 describe("normalizePatientOrderRecheck", () => {
   it("defaults partial re-check payloads to render-safe arrays and objects", () => {
@@ -140,5 +144,37 @@ describe("normalizePatientOrderRecheck passport (#6)", () => {
     expect(value.passport_expired).toBe(false);
     expect(value.passport_expiry).toBeNull();
     expect(value.passport_days_until_expiry).toBeNull();
+  });
+});
+
+describe("normalizeOrderAmendment (#10)", () => {
+  it("fills a render-safe amendment from a full payload", () => {
+    const amendment = normalizeOrderAmendment({
+      id: "amd-1",
+      order_id: "ord-1",
+      delta_amount: "150",
+      currency: "EUR",
+      agreed_note: "3 extra hours agreed",
+      status: "pending",
+      requested_by: "user-1",
+      decided_by: null,
+      decided_at: null,
+      decision_note: null,
+      created_at: "2026-07-09T10:00:00Z",
+    });
+
+    expect(amendment.delta_amount).toBe("150");
+    expect(amendment.status).toBe("pending");
+    expect(amendment.decided_by).toBeNull();
+    expect(amendment.agreed_note).toBe("3 extra hours agreed");
+  });
+
+  it("defaults a garbage payload", () => {
+    const amendment = normalizeOrderAmendment(null);
+
+    expect(amendment.delta_amount).toBe("0");
+    expect(amendment.currency).toBe("EUR");
+    expect(amendment.status).toBe("pending");
+    expect(amendment.decided_at).toBeNull();
   });
 });
