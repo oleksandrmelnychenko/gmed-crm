@@ -5403,3 +5403,77 @@ async fn deleting_document_file_revokes_shares_and_removes_stored_file() {
     assert_eq!(status, StatusCode::OK);
     assert!(refreshed_patient_list.as_array().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn mark_document_signed_records_evidence_and_satisfies_compliance() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-sign");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    // Upload a consent document for the patient.
+    let (status, upload) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &admin_bearer,
+        &[
+            ("patient_id", patient_id.to_string()),
+            ("status", "active".to_string()),
+            ("visibility", "internal".to_string()),
+            ("auto_name", format!("DSGVO {tag}")),
+            ("art", "consent".to_string()),
+        ],
+        &format!("dsgvo-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-consent%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{upload}");
+    let document_id = upload["id"].as_str().unwrap().to_string();
+
+    // Record it as the signed DSGVO evidence.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/mark-signed"),
+        &admin_bearer,
+        Some(json!({ "compliance_kind": "dsgvo" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["compliance_updated"], true);
+    assert_eq!(body["compliance_kind"], "dsgvo");
+
+    // Signature evidence is recorded on the document.
+    let doc_uuid = Uuid::parse_str(&document_id).unwrap();
+    let (kind, signed_by): (Option<String>, Option<Uuid>) = sqlx::query_as(
+        "SELECT compliance_kind, signed_by FROM documents WHERE id = $1 AND signed_at IS NOT NULL",
+    )
+    .bind(doc_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(kind.as_deref(), Some("dsgvo"));
+    assert_eq!(signed_by, Some(admin_id));
+
+    // The compliance flag was flipped atomically on the patient.
+    let dsgvo_signed: Option<bool> =
+        sqlx::query_scalar("SELECT (legal_status->>'dsgvo_signed')::bool FROM patients WHERE id = $1")
+            .bind(patient_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(dsgvo_signed, Some(true));
+
+    // An unknown compliance kind is rejected.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/mark-signed"),
+        &admin_bearer,
+        Some(json!({ "compliance_kind": "nonsense" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}

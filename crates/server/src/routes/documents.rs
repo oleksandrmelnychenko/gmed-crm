@@ -1120,6 +1120,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/documents/{id}/versions", get(list_document_versions))
         .route("/documents/{id}/update", post(update_document))
+        .route("/documents/{id}/mark-signed", post(mark_document_signed))
         .route("/documents/{id}/delete", post(delete_document_file))
         .route("/documents/{id}/download", get(download_document))
         .route(
@@ -1146,6 +1147,133 @@ pub fn router() -> Router<AppState> {
             "/documents/{id}/shares/{share_id}/confirm",
             post(confirm_document_share),
         )
+}
+
+#[derive(Deserialize)]
+struct MarkDocumentSignedRequest {
+    compliance_kind: String,
+    signed_at: Option<String>,
+}
+
+/// Record a document as the signed evidence for a compliance requirement, and
+/// atomically flip the matching flag on the linked patient's `legal_status`
+/// (#13). Replaces the previous two-step dance of "upload a scan" + "separately
+/// tick a compliance checkbox" with one action that leaves an evidence trail.
+async fn mark_document_signed(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(document_id): Path<Uuid>,
+    Json(body): Json<MarkDocumentSignedRequest>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin]) {
+        return resp;
+    }
+
+    let kind = body.compliance_kind.trim();
+    // Which `legal_status` key this signed document satisfies, and the value to
+    // set. `other` records the signature without touching any compliance flag.
+    let flag: Option<(&str, Value)> = match kind {
+        "dsgvo" => Some(("dsgvo_signed", Value::Bool(true))),
+        "confidentiality_release" => Some(("confidentiality_release_signed", Value::Bool(true))),
+        "identity" => Some(("identity_verified", Value::Bool(true))),
+        "framework_contract" => Some(("contract_status", Value::String("signed".to_string()))),
+        "other" => None,
+        _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid compliance_kind"),
+    };
+
+    let signed_at: chrono::DateTime<chrono::Utc> = match body.signed_at.as_deref() {
+        Some(value) if !value.trim().is_empty() => {
+            match chrono::DateTime::parse_from_rfc3339(value.trim()) {
+                Ok(dt) => dt.with_timezone(&chrono::Utc),
+                Err(_) => {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "Invalid signed_at (expected RFC 3339)",
+                    );
+                }
+            }
+        }
+        _ => chrono::Utc::now(),
+    };
+
+    let document = match sqlx::query("SELECT patient_id FROM documents WHERE id = $1")
+        .bind(document_id)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
+        Err(e) => {
+            tracing::error!(error = %e, "load document for mark-signed");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let patient_id: Option<Uuid> = document.try_get("patient_id").ok().flatten();
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin mark-signed tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    if let Err(e) = sqlx::query(
+        "UPDATE documents SET signed_at = $2, signed_by = $3, compliance_kind = $4 WHERE id = $1",
+    )
+    .bind(document_id)
+    .bind(signed_at)
+    .bind(auth.user_id)
+    .bind(kind)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, "record document signature");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    let mut compliance_updated = false;
+    if let (Some(pid), Some((key, value))) = (patient_id, flag) {
+        if let Err(e) = sqlx::query(
+            r#"UPDATE patients
+               SET legal_status = jsonb_set(COALESCE(legal_status, '{}'::jsonb), $2::text[], $3::jsonb, true),
+                   updated_at = now()
+               WHERE id = $1"#,
+        )
+        .bind(pid)
+        .bind(vec![key.to_string()])
+        .bind(value.to_string())
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = %e, "update patient legal_status from signed document");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        compliance_updated = true;
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "commit mark-signed tx");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "mark_document_signed",
+        Some(auth.user_id),
+        "document",
+        Some(document_id),
+        json!({ "compliance_kind": kind, "patient_id": patient_id }),
+    ));
+
+    Json(json!({
+        "ok": true,
+        "document_id": document_id,
+        "signed_at": signed_at.to_rfc3339(),
+        "compliance_kind": kind,
+        "patient_id": patient_id,
+        "compliance_updated": compliance_updated,
+    }))
+    .into_response()
 }
 
 #[derive(Deserialize)]
