@@ -3766,6 +3766,72 @@ async fn list_invoices(
     }
 }
 
+#[derive(Default)]
+struct InheritedInvoicePayer {
+    payer_patient_relation_id: Option<Uuid>,
+    payer_contact_name: Option<String>,
+    payer_contact_email: Option<String>,
+    payer_contact_phone: Option<String>,
+    payer_contact_relationship: Option<String>,
+    payer_notes: Option<String>,
+}
+
+/// The payer a new invoice inherits from its order (#1/#7). When the order is a
+/// sub of a head group, the head's payer wins — e.g. the father who pays for the
+/// whole family — otherwise the order's own payer is used. The free-text contact
+/// always flows through; the patient-relation id is only carried over when it
+/// belongs to the invoice's own patient, since relations are patient-scoped.
+async fn inherited_invoice_payer(
+    db: &sqlx::PgPool,
+    order_id: Uuid,
+    invoice_patient_id: Uuid,
+) -> InheritedInvoicePayer {
+    let Ok(Some(row)) = sqlx::query(
+        r#"SELECT
+               COALESCE(h.payer_patient_relation_id, o.payer_patient_relation_id) AS rel_id,
+               COALESCE(h.payer_contact_name, o.payer_contact_name) AS name,
+               COALESCE(h.payer_contact_email, o.payer_contact_email) AS email,
+               COALESCE(h.payer_contact_phone, o.payer_contact_phone) AS phone,
+               COALESCE(h.payer_contact_relationship, o.payer_contact_relationship) AS relationship,
+               COALESCE(h.payer_notes, o.payer_notes) AS notes
+           FROM orders o
+           LEFT JOIN orders h ON h.id = o.head_order_id
+           WHERE o.id = $1"#,
+    )
+    .bind(order_id)
+    .fetch_optional(db)
+    .await
+    else {
+        return InheritedInvoicePayer::default();
+    };
+
+    let rel_id = match row.try_get::<Option<Uuid>, _>("rel_id").unwrap_or_default() {
+        Some(id) => {
+            let belongs = sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM patient_relations WHERE id = $1 AND patient_id = $2)",
+            )
+            .bind(id)
+            .bind(invoice_patient_id)
+            .fetch_one(db)
+            .await
+            .unwrap_or(false);
+            belongs.then_some(id)
+        }
+        None => None,
+    };
+
+    InheritedInvoicePayer {
+        payer_patient_relation_id: rel_id,
+        payer_contact_name: row.try_get::<Option<String>, _>("name").unwrap_or_default(),
+        payer_contact_email: row.try_get::<Option<String>, _>("email").unwrap_or_default(),
+        payer_contact_phone: row.try_get::<Option<String>, _>("phone").unwrap_or_default(),
+        payer_contact_relationship: row
+            .try_get::<Option<String>, _>("relationship")
+            .unwrap_or_default(),
+        payer_notes: row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+    }
+}
+
 async fn create_invoice_from_quote(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -3826,13 +3892,17 @@ async fn create_invoice_from_quote(
 
     let invoice_number = gen_invoice_number(seq);
     let notes = body.notes.clone().or(ctx.notes.clone());
+    let payer = inherited_invoice_payer(&state.db, ctx.order_id, ctx.patient_id).await;
 
     match sqlx::query(
         r#"INSERT INTO invoices (
                 quote_id, order_id, patient_id, invoice_number, invoice_type, status,
-                due_date, total_net, total_vat, total_gross, line_items, notes, created_by
+                due_date, total_net, total_vat, total_gross, line_items, notes, created_by,
+                payer_patient_relation_id, payer_contact_name, payer_contact_email,
+                payer_contact_phone, payer_contact_relationship, payer_notes
            ) VALUES (
-                $1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10, $11, $12
+                $1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10, $11, $12,
+                $13, $14, $15, $16, $17, $18
            ) RETURNING id"#,
     )
     .bind(ctx.quote_id)
@@ -3847,6 +3917,12 @@ async fn create_invoice_from_quote(
     .bind(invoice_snapshot.line_items.clone())
     .bind(notes)
     .bind(auth.user_id)
+    .bind(payer.payer_patient_relation_id)
+    .bind(payer.payer_contact_name.clone())
+    .bind(payer.payer_contact_email.clone())
+    .bind(payer.payer_contact_phone.clone())
+    .bind(payer.payer_contact_relationship.clone())
+    .bind(payer.payer_notes.clone())
     .fetch_one(&state.db)
     .await
     {

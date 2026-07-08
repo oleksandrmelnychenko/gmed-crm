@@ -480,6 +480,106 @@ async fn invoice_creation_from_quote_marks_order_services_invoiced() {
 }
 
 #[tokio::test]
+async fn invoice_inherits_head_order_payer_with_patient_scoped_relation() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("payer-inherit");
+    let father = seed_patient(&pool, admin_id, &format!("{tag}-f")).await;
+    let child = seed_patient(&pool, admin_id, &format!("{tag}-c")).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, father, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, child, pm_id, admin_id).await;
+
+    let head = seed_order(&pool, father, admin_id, &format!("{tag}-head")).await;
+    let sub = seed_order(&pool, child, admin_id, &format!("{tag}-sub")).await;
+    seed_order_leistung(&pool, head, "Head service", 100.0, "approved").await;
+    seed_order_leistung(&pool, sub, "Sub service", 80.0, "approved").await;
+
+    // The father, as a relation of his own patient record, is the designated payer.
+    let father_relation: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_relations (patient_id, related_name, relation_type)
+           VALUES ($1, 'Familienoberhaupt', 'parent') RETURNING id"#,
+    )
+    .bind(father)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // Group the child's order under the father's, and set the head's payer.
+    sqlx::query("UPDATE orders SET order_role = 'sub', head_order_id = $2 WHERE id = $1")
+        .bind(sub)
+        .bind(head)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"UPDATE orders SET order_role = 'main',
+               payer_patient_relation_id = $2,
+               payer_contact_name = 'Vater zahlt für die Familie',
+               payer_contact_relationship = 'Vater',
+               payer_contact_email = 'vater@example.com'
+           WHERE id = $1"#,
+    )
+    .bind(head)
+    .bind(father_relation)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    // Invoice off the SUB order: the free-text payer flows through, but the
+    // head's relation belongs to the father, not the child, so it is not carried.
+    let sub_quote = create_quote(&app, &pm_bearer, sub).await;
+    let sub_invoice = create_invoice(
+        &app,
+        &billing_bearer,
+        sub_quote["id"].as_str().unwrap(),
+        "final",
+        "2026-05-15",
+    )
+    .await;
+    let sub_invoice_id = Uuid::parse_str(sub_invoice["id"].as_str().unwrap()).unwrap();
+    let (name, relationship, rel): (Option<String>, Option<String>, Option<Uuid>) = sqlx::query_as(
+        "SELECT payer_contact_name, payer_contact_relationship, payer_patient_relation_id
+         FROM invoices WHERE id = $1",
+    )
+    .bind(sub_invoice_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(name.as_deref(), Some("Vater zahlt für die Familie"));
+    assert_eq!(relationship.as_deref(), Some("Vater"));
+    assert_eq!(rel, None, "cross-patient relation must not be inherited");
+
+    // Invoice off the HEAD order itself: now the relation belongs to the invoice
+    // patient (the father), so it is carried through.
+    let head_quote = create_quote(&app, &pm_bearer, head).await;
+    let head_invoice = create_invoice(
+        &app,
+        &billing_bearer,
+        head_quote["id"].as_str().unwrap(),
+        "final",
+        "2026-05-15",
+    )
+    .await;
+    let head_invoice_id = Uuid::parse_str(head_invoice["id"].as_str().unwrap()).unwrap();
+    let (name, rel): (Option<String>, Option<Uuid>) = sqlx::query_as(
+        "SELECT payer_contact_name, payer_patient_relation_id FROM invoices WHERE id = $1",
+    )
+    .bind(head_invoice_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(name.as_deref(), Some("Vater zahlt für die Familie"));
+    assert_eq!(rel, Some(father_relation));
+}
+
+#[tokio::test]
 async fn patient_invoice_amount_redaction_hides_api_amounts_and_blocks_pdf() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
