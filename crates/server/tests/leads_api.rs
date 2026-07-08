@@ -946,3 +946,159 @@ async fn list_leads_conversion_ready_is_false_for_converted_lead() {
         "converted leads must report conversion_ready=false; entry was {entry}"
     );
 }
+
+#[tokio::test]
+async fn wizard_convert_creates_patient_without_compliance() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pool = &app.suite.pool;
+
+    // A lead with identity basics + address, but no compliance and not qualified.
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads
+               (first_name, last_name, email, phone, country, primary_language,
+                date_of_birth, legal_sex, street_address, city, zip_code,
+                qualification_status, compliance_status, intake_source)
+           VALUES ('Anna','Muster','anna@example.com','+49150','DE','de',
+                   DATE '1990-05-01','female','Hauptstr. 1','Berlin','10115',
+                   'new','pending','staff_wizard')
+           RETURNING id"#,
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    let pm = app.auth_header("patient_manager");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/wizard-convert"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "convert-then-comply must succeed without compliance signed: {body}"
+    );
+    let patient_uuid = Uuid::parse_str(body["patient_id"].as_str().unwrap()).unwrap();
+
+    // Lead is now sticky-converted.
+    let (qstatus, cpid): (String, Option<Uuid>) =
+        sqlx::query_as("SELECT qualification_status, converted_patient_id FROM leads WHERE id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(qstatus, "converted");
+    assert_eq!(cpid, Some(patient_uuid));
+
+    // Address carried over to the patient.
+    let (street, city, zip): (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT address_street, address_city, address_zip FROM patients WHERE id = $1",
+    )
+    .bind(patient_uuid)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(street.as_deref(), Some("Hauptstr. 1"));
+    assert_eq!(city.as_deref(), Some("Berlin"));
+    assert_eq!(zip.as_deref(), Some("10115"));
+
+    // Re-conversion is blocked (sticky patient).
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/wizard-convert"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn wizard_convert_requires_identity_basics() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pool = &app.suite.pool;
+
+    // Missing date_of_birth and legal_sex.
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, qualification_status, compliance_status, intake_source)
+           VALUES ('No','Dob','nodob@example.com','new','pending','staff_wizard') RETURNING id"#,
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    let pm = app.auth_header("patient_manager");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/wizard-convert"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn wizard_lead_fields_round_trip_through_update() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pm = app.auth_header("patient_manager");
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({ "first_name": "Test", "last_name": "Wizard", "email": "wiz@example.com" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id = created["id"].as_str().unwrap().to_string();
+
+    // Edit wizard fields (Steps 1-3 + resume state).
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({
+            "primary_concern_text": "Chronic knee pain",
+            "services": ["surgery", "rehab"],
+            "street_address": "Hauptstr. 1",
+            "requested_specialties": ["orthopedics", "surgery"],
+            "wizard_state": { "step": 3, "completed": ["identity", "eligibility"] }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Read them back through get_lead.
+    let (status, lead) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(lead["primary_concern_text"], "Chronic knee pain");
+    assert_eq!(lead["street_address"], "Hauptstr. 1");
+    assert_eq!(lead["requested_specialties"], json!(["orthopedics", "surgery"]));
+    assert_eq!(lead["wizard_state"]["step"], 3);
+
+    // A non-array requested_specialties is rejected.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({ "requested_specialties": { "not": "an array" } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}

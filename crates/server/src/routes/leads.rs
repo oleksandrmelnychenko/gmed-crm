@@ -40,6 +40,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/leads/{lead_id}/qualify", post(qualify_lead))
         .route("/leads/{lead_id}/convert", post(convert_lead))
+        .route("/leads/{lead_id}/wizard-convert", post(wizard_convert_lead))
         .route("/leads/{lead_id}/failed-flow", post(resolve_failed_lead))
         .route(
             "/leads/{lead_id}/attachments/{attachment_id}",
@@ -97,6 +98,20 @@ struct UpdateLeadRequest {
     consent_healthcare: Option<bool>,
     consent_privacy_practices: Option<bool>,
     notes: Option<String>,
+    // Wizard-editable fields (#12): the staff wizard edits far more than the
+    // original gate form. All optional + COALESCE, so partial saves are fine.
+    first_name: Option<String>,
+    last_name: Option<String>,
+    street_address: Option<String>,
+    city: Option<String>,
+    zip_code: Option<String>,
+    needs_interpreter: Option<bool>,
+    primary_concern_text: Option<String>,
+    additional_concerns: Option<String>,
+    selected_program: Option<String>,
+    services: Option<Vec<String>>,
+    requested_specialties: Option<serde_json::Value>,
+    wizard_state: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -696,7 +711,8 @@ async fn get_lead(
                   compliance_status, qualification_status, converted_patient_id,
                   failed_outcome_status, failed_from_status, failed_reason, failed_note,
                   failed_processed_at, failed_processed_by,
-                  notes, user_agent, created_at, updated_at
+                  notes, user_agent, created_at, updated_at,
+                  requested_specialties, wizard_state
            FROM leads
            WHERE id = $1"#,
     )
@@ -944,6 +960,16 @@ async fn get_lead(
             .unwrap_or(Value::Null),
     );
     obj.insert("notes".into(), s_opt(&row, "notes"));
+    obj.insert(
+        "requested_specialties".into(),
+        row.try_get::<Value, _>("requested_specialties")
+            .unwrap_or_else(|_| json!([])),
+    );
+    obj.insert(
+        "wizard_state".into(),
+        row.try_get::<Value, _>("wizard_state")
+            .unwrap_or_else(|_| json!({})),
+    );
     obj.insert("user_agent".into(), s_opt(&row, "user_agent"));
     obj.insert(
         "created_at".into(),
@@ -1036,6 +1062,37 @@ async fn update_lead(
         _ => None,
     };
 
+    let first_name = match body.first_name.as_deref() {
+        Some(value) if value.trim().is_empty() => {
+            return err(StatusCode::UNPROCESSABLE_ENTITY, "first_name cannot be empty");
+        }
+        Some(value) => Some(value.trim().to_string()),
+        None => None,
+    };
+    let last_name = match body.last_name.as_deref() {
+        Some(value) if value.trim().is_empty() => {
+            return err(StatusCode::UNPROCESSABLE_ENTITY, "last_name cannot be empty");
+        }
+        Some(value) => Some(value.trim().to_string()),
+        None => None,
+    };
+    if let Some(ref value) = body.requested_specialties
+        && !value.is_array()
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "requested_specialties must be a JSON array",
+        );
+    }
+    if let Some(ref value) = body.wizard_state
+        && !value.is_object()
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "wizard_state must be a JSON object",
+        );
+    }
+
     if body.email.is_none()
         && body.phone.is_none()
         && body.country.is_none()
@@ -1046,6 +1103,18 @@ async fn update_lead(
         && body.consent_healthcare.is_none()
         && body.consent_privacy_practices.is_none()
         && body.notes.is_none()
+        && body.first_name.is_none()
+        && body.last_name.is_none()
+        && body.street_address.is_none()
+        && body.city.is_none()
+        && body.zip_code.is_none()
+        && body.needs_interpreter.is_none()
+        && body.primary_concern_text.is_none()
+        && body.additional_concerns.is_none()
+        && body.selected_program.is_none()
+        && body.services.is_none()
+        && body.requested_specialties.is_none()
+        && body.wizard_state.is_none()
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "No lead changes supplied");
     }
@@ -1061,7 +1130,19 @@ async fn update_lead(
                compliance_status = COALESCE($8, compliance_status),
                consent_healthcare = COALESCE($9, consent_healthcare),
                consent_privacy_practices = COALESCE($10, consent_privacy_practices),
-               notes = COALESCE($11, notes)
+               notes = COALESCE($11, notes),
+               first_name = COALESCE($12, first_name),
+               last_name = COALESCE($13, last_name),
+               street_address = COALESCE($14, street_address),
+               city = COALESCE($15, city),
+               zip_code = COALESCE($16, zip_code),
+               needs_interpreter = COALESCE($17, needs_interpreter),
+               primary_concern_text = COALESCE($18, primary_concern_text),
+               additional_concerns = COALESCE($19, additional_concerns),
+               selected_program = COALESCE($20, selected_program),
+               services = COALESCE($21, services),
+               requested_specialties = COALESCE($22::jsonb, requested_specialties),
+               wizard_state = COALESCE($23::jsonb, wizard_state)
            WHERE id = $1"#,
     )
     .bind(lead_id)
@@ -1075,6 +1156,18 @@ async fn update_lead(
     .bind(body.consent_healthcare)
     .bind(body.consent_privacy_practices)
     .bind(body.notes.as_deref())
+    .bind(first_name)
+    .bind(last_name)
+    .bind(body.street_address.as_deref())
+    .bind(body.city.as_deref())
+    .bind(body.zip_code.as_deref())
+    .bind(body.needs_interpreter)
+    .bind(body.primary_concern_text.as_deref())
+    .bind(body.additional_concerns.as_deref())
+    .bind(body.selected_program.as_deref())
+    .bind(body.services.as_deref())
+    .bind(body.requested_specialties.as_ref().map(|value| value.to_string()))
+    .bind(body.wizard_state.as_ref().map(|value| value.to_string()))
     .execute(&state.db)
     .await
     {
@@ -1594,6 +1687,215 @@ async fn convert_lead(
         "patient_pid": pid,
     }))
     .into_response()
+}
+
+/// Shared tail for a lead→patient conversion: mark the lead converted (sticky),
+/// self-assign the operator, seed the patient workflow, and emit
+/// audit/lifecycle/realtime events. Returns an error response on a hard failure.
+async fn finalize_lead_conversion(
+    state: &AppState,
+    auth: &AuthUser,
+    lead_id: Uuid,
+    previous_status: &str,
+    patient_id: Uuid,
+    pid: &str,
+) -> Result<(), axum::response::Response> {
+    let _ = sqlx::query(
+        "UPDATE leads SET qualification_status = 'converted', converted_patient_id = $2 WHERE id = $1",
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .execute(&state.db)
+    .await;
+
+    let _ = sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $2)",
+    )
+    .bind(patient_id)
+    .bind(auth.user_id)
+    .execute(&state.db)
+    .await;
+
+    crate::routes::workflow_checklists::ensure_default_patient_workflow(
+        state,
+        patient_id,
+        Some(auth.user_id),
+    )
+    .await?;
+
+    state.audit_sender.try_send(audit::domain_event(
+        "convert_lead",
+        Some(auth.user_id),
+        "lead",
+        Some(lead_id),
+        json!({ "patient_id": patient_id, "patient_pid": pid }),
+    ));
+
+    crate::routes::workflow_lifecycle::record_event(
+        state,
+        crate::routes::workflow_lifecycle::RecordEvent {
+            entity_type: "lead",
+            entity_id: lead_id,
+            from_stage: Some(previous_status),
+            to_stage: "converted",
+            transition_kind: "converted",
+            changed_by: Some(auth.user_id),
+            note: Some("Lead converted to patient"),
+            metadata: json!({ "patient_id": patient_id, "patient_pid": pid }),
+        },
+    )
+    .await?;
+
+    crate::realtime::publish_lead_event(
+        state,
+        Some(auth.user_id),
+        "lead.converted",
+        lead_id,
+        json!({ "patient_id": patient_id, "patient_pid": pid }),
+    )
+    .await;
+    crate::realtime::publish_patient_event(
+        state,
+        Some(auth.user_id),
+        "patient.created",
+        patient_id,
+        json!({ "patient_pid": pid, "source_lead_id": lead_id }),
+    )
+    .await;
+
+    Ok(())
+}
+
+/// Wizard conversion path (convert-then-comply, design decision D2): converts a
+/// lead into a patient once identity basics are present — date of birth, a valid
+/// legal sex, and an email or phone — WITHOUT requiring compliance to be signed
+/// or the lead to be `qualified`. Those steps happen later against the patient
+/// inside the wizard. Carries over the lead's address on top of the standard copy.
+async fn wizard_convert_lead(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
+        return e;
+    }
+
+    let lead = match sqlx::query(
+        r#"SELECT id, first_name, last_name, email, phone, country, primary_language,
+                  date_of_birth, legal_sex, qualification_status, converted_patient_id,
+                  failed_outcome_status, street_address, city, zip_code
+           FROM leads WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(l)) => l,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
+        Err(e) => {
+            tracing::error!(error = %e, "wizard convert lead");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    let converted_patient_id: Option<Uuid> = lead.try_get("converted_patient_id").ok().flatten();
+    if converted_patient_id.is_some() {
+        return err(StatusCode::CONFLICT, "Lead already converted");
+    }
+    let failed_outcome_status: String = lead
+        .try_get("failed_outcome_status")
+        .unwrap_or_else(|_| "none".to_string());
+    if failed_outcome_status != "none" {
+        return err(
+            StatusCode::CONFLICT,
+            "Failed leads cannot be converted into patients",
+        );
+    }
+
+    let date_of_birth: Option<NaiveDate> = lead.try_get("date_of_birth").ok().flatten();
+    let Some(birth_date) = date_of_birth else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Lead is missing date_of_birth; cannot convert to patient",
+        );
+    };
+    let legal_sex: Option<String> = lead.try_get("legal_sex").ok().flatten();
+    let gender = match legal_sex.as_deref() {
+        Some("female") => "female",
+        Some("male") => "male",
+        Some("diverse") | Some("no_entry") => "diverse",
+        _ => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Lead is missing legal_sex; cannot convert to patient",
+            );
+        }
+    };
+    let email: Option<String> = lead.try_get("email").ok().flatten();
+    let phone: Option<String> = lead.try_get("phone").ok().flatten();
+    let has_contact = email.as_deref().is_some_and(|v| !v.trim().is_empty())
+        || phone.as_deref().is_some_and(|v| !v.trim().is_empty());
+    if !has_contact {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Lead needs an email or phone before conversion",
+        );
+    }
+
+    let seq: i64 = sqlx::query_scalar::<_, i64>(r#"SELECT nextval('patient_id_seq')"#)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(0);
+    let pid = format!("P-{}-{:04}", chrono::Utc::now().format("%Y%m%d"), seq);
+
+    let first_name: String = lead.try_get("first_name").unwrap_or_default();
+    let last_name: String = lead.try_get("last_name").unwrap_or_default();
+    let country: Option<String> = lead.try_get("country").ok().flatten();
+    let primary_language: Option<String> = lead.try_get("primary_language").ok().flatten();
+    let languages: Vec<String> = primary_language.into_iter().collect();
+    let street_address: Option<String> = lead.try_get("street_address").ok().flatten();
+    let city: Option<String> = lead.try_get("city").ok().flatten();
+    let zip_code: Option<String> = lead.try_get("zip_code").ok().flatten();
+
+    let patient_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender,
+                                 email, phone_primary, nationality, languages,
+                                 address_street, address_city, address_zip, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id"#,
+    )
+    .bind(&pid)
+    .bind(&first_name)
+    .bind(&last_name)
+    .bind(birth_date)
+    .bind(gender)
+    .bind(email)
+    .bind(phone)
+    .bind(country)
+    .bind(&languages)
+    .bind(street_address)
+    .bind(city)
+    .bind(zip_code)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::error!(error = %e, "wizard create patient from lead");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    let previous_status: String = lead.try_get("qualification_status").unwrap_or_default();
+    if let Err(resp) =
+        finalize_lead_conversion(&state, &auth, lead_id, &previous_status, patient_id, &pid).await
+    {
+        return resp;
+    }
+
+    tracing::info!(by = %auth.user_id, lead = %lead_id, patient = %patient_id, "Lead wizard-converted to patient");
+
+    Json(json!({ "patient_id": patient_id, "patient_pid": pid })).into_response()
 }
 
 async fn resolve_failed_lead(
