@@ -20,6 +20,8 @@ import {
   upsertPatientRelation,
 } from "@/pages/patients/data/patient-detail-mutations";
 import { updatePatient } from "@/pages/patients/data/patient-mutations";
+import { PatientDocumentGenerateDialog } from "@/pages/patients/ui/sheets/patient-document-generate-dialog";
+import type { PatientOption } from "@/pages/documents/model/types";
 
 import {
   PHASE_A_STEPS,
@@ -184,6 +186,8 @@ export function LeadWizard({
   const [phase, setPhase] = useState<"lead" | "order">("lead");
   const [createdOrderId, setCreatedOrderId] = useState<string | null>(null);
   const [createdPatientId, setCreatedPatientId] = useState<string | null>(null);
+  const [createdPatientPid, setCreatedPatientPid] = useState("");
+  const [genDocOpen, setGenDocOpen] = useState(false);
   const [orderLines, setOrderLines] = useState<WizardOrderLine[]>([blankOrderLine()]);
   const [guardian, setGuardian] = useState<GuardianDraft>(blankGuardian());
   const [clinicalWarnings, setClinicalWarnings] = useState("");
@@ -198,6 +202,8 @@ export function LeadWizard({
     setPhase("lead");
     setCreatedOrderId(null);
     setCreatedPatientId(null);
+    setCreatedPatientPid("");
+    setGenDocOpen(false);
     setOrderLines([blankOrderLine()]);
     setGuardian(blankGuardian());
     setClinicalWarnings("");
@@ -258,6 +264,7 @@ export function LeadWizard({
     try {
       const result = await wizardConvertLead(leadId);
       setCreatedPatientId(result.patient_id);
+      setCreatedPatientPid(result.patient_pid);
       // Form the draft order — the goal of the wizard (#8) — carrying the
       // captured concern and requested specialists into needs_description.
       try {
@@ -331,8 +338,19 @@ export function LeadWizard({
 
   const minor = draft ? isMinor(draft.dateOfBirth, new Date()) : false;
   const estimate = costEstimate(orderLines);
+  const patientOption: PatientOption | undefined =
+    createdPatientId && draft
+      ? {
+          id: createdPatientId,
+          patient_id: createdPatientPid,
+          first_name: draft.firstName,
+          last_name: draft.lastName,
+          languages: draft.primaryLanguage ? [draft.primaryLanguage] : [],
+        }
+      : undefined;
 
   return (
+    <>
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="flex w-full flex-col gap-0 overflow-y-auto sm:max-w-xl">
         <header className="border-b border-border/60 pb-4">
@@ -435,6 +453,21 @@ export function LeadWizard({
                   "Rahmenvertrag anlegen",
                 )}
               </label>
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-background p-3">
+                <span className="text-sm text-foreground">
+                  {tx("Комплаенс-документы", "Compliance-Dokumente")}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="ml-auto"
+                  disabled={!createdPatientId}
+                  onClick={() => setGenDocOpen(true)}
+                >
+                  {tx("Сгенерировать документ", "Dokument generieren")}
+                </Button>
+              </div>
               <div className="space-y-3">
                 {orderLines.map((line, index) => (
                   <div
@@ -742,5 +775,12 @@ export function LeadWizard({
         </footer>
       </SheetContent>
     </Sheet>
+    <PatientDocumentGenerateDialog
+      open={genDocOpen}
+      patientId={createdPatientId ?? undefined}
+      patient={patientOption}
+      onOpenChange={setGenDocOpen}
+    />
+    </>
   );
 }
