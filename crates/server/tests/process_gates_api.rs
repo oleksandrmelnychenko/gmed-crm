@@ -1913,3 +1913,128 @@ async fn head_order_groups_subs_rolls_up_and_ungroups() {
     assert_eq!(after["subs"].as_array().unwrap().len(), 0);
     assert_eq!(after["rollup_total_estimated"], "1000");
 }
+
+#[tokio::test]
+async fn merge_orders_folds_groups_flattens_and_is_reversible() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = format!("merge-{}", Uuid::new_v4().simple());
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm = auth_header_for(pm_id, "patient_manager");
+
+    let father = create_patient(&app, &pm, &format!("{tag}-f")).await;
+    let c1 = create_patient(&app, &pm, &format!("{tag}-c1")).await;
+    let c2 = create_patient(&app, &pm, &format!("{tag}-c2")).await;
+    let c3 = create_patient(&app, &pm, &format!("{tag}-c3")).await;
+
+    let target = insert_existing_order(&pool, father, pm_id, &format!("{tag}-T")).await;
+    let b = insert_existing_order(&pool, c1, pm_id, &format!("{tag}-B")).await;
+    let c_main = insert_existing_order(&pool, c2, pm_id, &format!("{tag}-CM")).await;
+    let c_sub = insert_existing_order(&pool, c3, pm_id, &format!("{tag}-CS")).await;
+    for (id, amount) in [(target, 1000), (b, 300), (c_main, 500), (c_sub, 200)] {
+        sqlx::query(&format!("UPDATE orders SET total_estimated = {amount} WHERE id = $1"))
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    // Build a real group C: c_sub under c_main (c_main becomes MAIN).
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{c_sub}/group"),
+        &pm,
+        Some(json!({ "head_order_id": c_main })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Empty source list is rejected.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{target}/merge"),
+        &pm,
+        Some(json!({ "source_order_ids": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Merge the standalone B and the whole group C into the target. Group C is
+    // flattened: c_sub re-parents up to the target too (one level only).
+    let (status, group) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{target}/merge"),
+        &pm,
+        Some(json!({ "source_order_ids": [b, c_main] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{group}");
+    assert_eq!(group["head"]["id"], json!(target.to_string()));
+    assert_eq!(group["head"]["order_role"], "main");
+    assert_eq!(group["subs"].as_array().unwrap().len(), 3);
+    assert_eq!(group["rollup_total_estimated"], "2000");
+    let covered = group["covered_patient_ids"].as_array().unwrap();
+    for p in [father, c1, c2, c3] {
+        assert!(covered.iter().any(|v| v == &json!(p.to_string())), "missing {p}");
+    }
+
+    // The flattened grandchild now resolves to the target as its head.
+    let (status, from_sub) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{c_sub}/group"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(from_sub["head"]["id"], json!(target.to_string()));
+
+    // A sub-order cannot be a merge target (one level only).
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{c_sub}/merge"),
+        &pm,
+        Some(json!({ "source_order_ids": [b] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // Reversible: ungroup c_main -> it reverts to standalone and drops out of the
+    // rollup, while its former grandchild c_sub stays under the target.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{c_main}/ungroup"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, after) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{target}/group"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(after["subs"].as_array().unwrap().len(), 2);
+    assert_eq!(after["rollup_total_estimated"], "1500");
+    let (status, cm_group) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{c_main}/group"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cm_group["head"]["order_role"], "standalone");
+}

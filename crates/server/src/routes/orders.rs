@@ -71,6 +71,7 @@ pub fn router() -> Router<AppState> {
             get(get_order_group).post(group_order),
         )
         .route("/orders/{order_id}/ungroup", post(ungroup_order))
+        .route("/orders/{order_id}/merge", post(merge_orders))
         .route("/orders/{order_id}/payer", post(set_order_payer))
 }
 
@@ -4583,6 +4584,11 @@ struct GroupOrderRequest {
 }
 
 #[derive(Deserialize)]
+struct MergeOrdersRequest {
+    source_order_ids: Vec<Uuid>,
+}
+
+#[derive(Deserialize)]
 struct SetOrderPayerRequest {
     payer_patient_relation_id: Option<Uuid>,
     payer_contact_name: Option<String>,
@@ -4827,6 +4833,136 @@ async fn group_order(
     ));
 
     match order_group_payload(&state.db, body.head_order_id).await {
+        Ok(payload) => Json(payload).into_response(),
+        Err(resp) => resp,
+    }
+}
+
+/// Merge several orders into one MAIN (#4): fold each source order — whether it
+/// is standalone, a sub of another head, or itself a head-with-subs — under the
+/// target, flattening to one level (a merged head's own subs re-parent to the
+/// target too). Reversible: every folded order becomes a plain sub and can be
+/// ungrouped. Any head left empty by the re-parenting reverts to standalone.
+async fn merge_orders(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+    Json(body): Json<MergeOrdersRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
+        return e;
+    }
+
+    // Normalise: drop the target itself and duplicates from the source list.
+    let mut sources: Vec<Uuid> = body
+        .source_order_ids
+        .into_iter()
+        .filter(|id| *id != order_id)
+        .collect();
+    sources.sort();
+    sources.dedup();
+    if sources.is_empty() {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "No orders to merge");
+    }
+
+    let target_role: Option<String> =
+        sqlx::query_scalar("SELECT order_role FROM orders WHERE id = $1")
+            .bind(order_id)
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten();
+    let Some(target_role) = target_role else {
+        return err(StatusCode::NOT_FOUND, "Target order not found");
+    };
+    if target_role == "sub" {
+        return err(
+            StatusCode::CONFLICT,
+            "Target cannot be a sub-order (one level only)",
+        );
+    }
+
+    // Every source must exist.
+    let found: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orders WHERE id = ANY($1)")
+        .bind(&sources)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(0);
+    if found != sources.len() as i64 {
+        return err(StatusCode::NOT_FOUND, "One or more orders to merge not found");
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin merge tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    // Re-parent the subs of any source-head up to the target first (using their
+    // current head = a source id), then fold the sources themselves in.
+    if let Err(e) = sqlx::query(
+        "UPDATE orders SET head_order_id = $1, updated_at = now()
+         WHERE head_order_id = ANY($2) AND id <> $1",
+    )
+    .bind(order_id)
+    .bind(&sources)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, "reparent merged subs");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(e) = sqlx::query(
+        "UPDATE orders SET order_role = 'sub', head_order_id = $1, updated_at = now()
+         WHERE id = ANY($2)",
+    )
+    .bind(order_id)
+    .bind(&sources)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, "fold sources into target");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(e) = sqlx::query(
+        "UPDATE orders SET order_role = 'main', updated_at = now()
+         WHERE id = $1 AND order_role = 'standalone'",
+    )
+    .bind(order_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, "promote merge target");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    // Any head left empty by the re-parenting reverts to standalone.
+    if let Err(e) = sqlx::query(
+        "UPDATE orders o SET order_role = 'standalone', updated_at = now()
+         WHERE o.order_role = 'main' AND o.id <> $1
+           AND NOT EXISTS (SELECT 1 FROM orders s WHERE s.head_order_id = o.id)",
+    )
+    .bind(order_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, "revert empty heads after merge");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "commit merge");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "merge_orders",
+        Some(auth.user_id),
+        "order",
+        Some(order_id),
+        serde_json::json!({ "source_order_ids": sources }),
+    ));
+
+    match order_group_payload(&state.db, order_id).await {
         Ok(payload) => Json(payload).into_response(),
         Err(resp) => resp,
     }
