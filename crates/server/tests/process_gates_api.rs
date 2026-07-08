@@ -1743,3 +1743,74 @@ async fn followup_flow_requires_explicit_milestones_before_order_enters_followup
     .await;
     assert_eq!(status, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn order_amendment_requires_separate_approval_and_updates_total() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = format!("amend-{}", Uuid::new_v4().simple());
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &format!("{tag}-b"), "billing").await;
+    let pm = auth_header_for(pm_id, "patient_manager");
+    let billing = auth_header_for(billing_id, "billing");
+
+    let patient_id = create_patient(&app, &pm, &tag).await;
+    let order_id = insert_existing_order(&pool, patient_id, pm_id, &tag).await;
+    sqlx::query("UPDATE orders SET total_estimated = 1000 WHERE id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Propose +300, recording what was agreed with the patient.
+    let (status, amendment) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/amendments"),
+        &pm,
+        Some(json!({
+            "delta_amount": "300",
+            "agreed_note": "3 extra hours agreed with the patient"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{amendment}");
+    assert_eq!(amendment["status"], "pending");
+    let amendment_id = amendment["id"].as_str().unwrap().to_string();
+
+    // The requester may not approve their own amendment.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/amendments/{amendment_id}/decision"),
+        &pm,
+        Some(json!({ "decision": "approve" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // A different approver approves -> the order total goes 1000 -> 1300.
+    let (status, decided) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/amendments/{amendment_id}/decision"),
+        &billing,
+        Some(json!({ "decision": "approve", "note": "Approved" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{decided}");
+    assert_eq!(decided["amendment"]["status"], "approved");
+    assert_eq!(decided["order_total_estimated"], "1300");
+
+    // Re-deciding a settled amendment conflicts.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/amendments/{amendment_id}/decision"),
+        &billing,
+        Some(json!({ "decision": "reject" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}

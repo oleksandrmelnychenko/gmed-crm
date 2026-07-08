@@ -58,6 +58,14 @@ pub fn router() -> Router<AppState> {
             "/orders/{order_id}/leistungen/{leistung_id}/approve",
             post(approve_leistung),
         )
+        .route(
+            "/orders/{order_id}/amendments",
+            get(list_order_amendments).post(create_order_amendment),
+        )
+        .route(
+            "/orders/{order_id}/amendments/{amendment_id}/decision",
+            post(decide_order_amendment),
+        )
 }
 
 #[derive(Deserialize)]
@@ -4289,6 +4297,278 @@ pub fn spawn_external_invoice_deadline_scheduler(state: AppState) {
             }
         }
     });
+}
+
+#[derive(Deserialize)]
+struct CreateOrderAmendmentRequest {
+    delta_amount: String,
+    agreed_note: String,
+    currency: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DecideOrderAmendmentRequest {
+    decision: String,
+    note: Option<String>,
+}
+
+const ORDER_AMENDMENT_COLUMNS: &str = "id, order_id, delta_amount, currency, agreed_note, status, requested_by, decided_by, decided_at, decision_note, created_at";
+
+fn order_amendment_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    serde_json::json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+        "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_else(|_| Uuid::nil()),
+        "delta_amount": row
+            .try_get::<rust_decimal::Decimal, _>("delta_amount")
+            .map(|value| value.to_string())
+            .unwrap_or_default(),
+        "currency": row.try_get::<String, _>("currency").unwrap_or_default(),
+        "agreed_note": row.try_get::<String, _>("agreed_note").unwrap_or_default(),
+        "status": row.try_get::<String, _>("status").unwrap_or_default(),
+        "requested_by": row.try_get::<Uuid, _>("requested_by").unwrap_or_else(|_| Uuid::nil()),
+        "decided_by": row.try_get::<Option<Uuid>, _>("decided_by").unwrap_or_default(),
+        "decided_at": row
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("decided_at")
+            .unwrap_or_default()
+            .map(|value| value.to_rfc3339()),
+        "decision_note": row.try_get::<Option<String>, _>("decision_note").unwrap_or_default(),
+        "created_at": row
+            .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+            .ok()
+            .map(|value| value.to_rfc3339()),
+    })
+}
+
+/// List an order's amount amendments, newest first (#10).
+async fn list_order_amendments(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
+        return e;
+    }
+    match sqlx::query(&format!(
+        "SELECT {ORDER_AMENDMENT_COLUMNS} FROM order_amendments WHERE order_id = $1 ORDER BY created_at DESC"
+    ))
+    .bind(order_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => Json(rows.iter().map(order_amendment_json).collect::<Vec<_>>()).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "list order amendments");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to list amendments",
+            )
+        }
+    }
+}
+
+/// Propose an amount change to an order, recording WHAT was agreed with the
+/// patient. It stays `pending` (does not touch the order total) until an
+/// approver decides — see [`decide_order_amendment`] (#10).
+async fn create_order_amendment(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+    Json(body): Json<CreateOrderAmendmentRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
+        return e;
+    }
+
+    let Ok(delta) = body.delta_amount.trim().parse::<rust_decimal::Decimal>() else {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid delta_amount");
+    };
+    if delta == rust_decimal::Decimal::ZERO {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "delta_amount must be non-zero",
+        );
+    }
+    let agreed_note = body.agreed_note.trim();
+    if agreed_note.is_empty() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "agreed_note is required (what was agreed with the patient)",
+        );
+    }
+    let currency = body
+        .currency
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("EUR")
+        .to_string();
+
+    let order_exists =
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM orders WHERE id = $1)")
+            .bind(order_id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(false);
+    if !order_exists {
+        return err(StatusCode::NOT_FOUND, "Order not found");
+    }
+
+    match sqlx::query(&format!(
+        "INSERT INTO order_amendments (order_id, delta_amount, currency, agreed_note, requested_by)
+         VALUES ($1, $2, $3, $4, $5) RETURNING {ORDER_AMENDMENT_COLUMNS}"
+    ))
+    .bind(order_id)
+    .bind(delta)
+    .bind(&currency)
+    .bind(agreed_note)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => {
+            let amendment = order_amendment_json(&row);
+            state.audit_sender.try_send(audit::domain_event(
+                "create_order_amendment",
+                Some(auth.user_id),
+                "order",
+                Some(order_id),
+                serde_json::json!({ "delta_amount": delta.to_string(), "currency": currency }),
+            ));
+            (StatusCode::CREATED, Json(amendment)).into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "create order amendment");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create amendment",
+            )
+        }
+    }
+}
+
+/// Approve or reject a pending amendment. Approval applies the delta to the
+/// order's estimated total and must come from someone other than the requester
+/// (the "under approval" rule); rejection leaves the total untouched (#10).
+async fn decide_order_amendment(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((order_id, amendment_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<DecideOrderAmendmentRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
+        return e;
+    }
+
+    let decision = match body.decision.trim() {
+        "approve" => "approved",
+        "reject" => "rejected",
+        _ => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "decision must be 'approve' or 'reject'",
+            );
+        }
+    };
+
+    let existing = match sqlx::query(
+        "SELECT status, delta_amount, requested_by FROM order_amendments WHERE id = $1 AND order_id = $2",
+    )
+    .bind(amendment_id)
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Amendment not found"),
+        Err(e) => {
+            tracing::error!(error = %e, "load order amendment");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    let status: String = existing.try_get("status").unwrap_or_default();
+    if status != "pending" {
+        return err(StatusCode::CONFLICT, "Amendment has already been decided");
+    }
+    let requested_by: Uuid = existing.try_get("requested_by").unwrap_or_else(|_| Uuid::nil());
+    if decision == "approved" && requested_by == auth.user_id {
+        return err(
+            StatusCode::FORBIDDEN,
+            "An amendment must be approved by someone other than its requester",
+        );
+    }
+    let delta: rust_decimal::Decimal = existing.try_get("delta_amount").unwrap_or_default();
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin amendment decision tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    if let Err(e) = sqlx::query(
+        "UPDATE order_amendments SET status = $2, decided_by = $3, decided_at = now(), decision_note = $4 WHERE id = $1",
+    )
+    .bind(amendment_id)
+    .bind(decision)
+    .bind(auth.user_id)
+    .bind(body.note.as_deref())
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, "update order amendment");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    if decision == "approved"
+        && let Err(e) = sqlx::query(
+            "UPDATE orders SET total_estimated = COALESCE(total_estimated, 0) + $2, updated_at = now() WHERE id = $1",
+        )
+        .bind(order_id)
+        .bind(delta)
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(error = %e, "apply amendment to order total");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "commit amendment decision");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "decide_order_amendment",
+        Some(auth.user_id),
+        "order",
+        Some(order_id),
+        serde_json::json!({ "amendment_id": amendment_id, "decision": decision }),
+    ));
+
+    let amendment = sqlx::query(&format!(
+        "SELECT {ORDER_AMENDMENT_COLUMNS} FROM order_amendments WHERE id = $1"
+    ))
+    .bind(amendment_id)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .map(|row| order_amendment_json(&row))
+    .unwrap_or(serde_json::Value::Null);
+    let new_total = sqlx::query_scalar::<_, Option<rust_decimal::Decimal>>(
+        "SELECT total_estimated FROM orders WHERE id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .map(|value| value.to_string());
+
+    Json(serde_json::json!({ "amendment": amendment, "order_total_estimated": new_total }))
+        .into_response()
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
