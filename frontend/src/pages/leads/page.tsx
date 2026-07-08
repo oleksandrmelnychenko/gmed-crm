@@ -134,6 +134,7 @@ import type {
   LeadGateForm,
   LeadListItem,
 } from "./model/types";
+import { LeadWizard } from "./ui/lead-wizard";
 
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
@@ -317,6 +318,7 @@ function useLeadsPageContent() {
     [t],
   );
   const { staffGo } = useStaffNavigate();
+  const [wizardOpen, setWizardOpen] = useState(false);
   const failedLoadMessage = t.common_failed_load;
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => leadPermissions(user?.role), [user?.role]);
@@ -1076,45 +1078,57 @@ function useLeadsPageContent() {
           <h2 className="min-w-0 text-base font-medium text-foreground">
             {detail ? `${detail.first_name} ${detail.last_name}` : t.leads_title}
           </h2>
-          {detail && detailCanPromoteToConsole ? (
-            <Button
-              type="button"
-              size="sm"
-              className="shrink-0"
-              disabled={Boolean(actionBusy)}
-              title={t.lead_promote_to_console_description}
-              onClick={() => void promoteToConsole(detail.id)}
-            >
-              {actionBusy === `promote-console:${detail.id}` ? (
-                <LoaderCircle className="size-4 animate-spin" />
-              ) : (
-                <ArrowRight className="size-4" />
-              )}
-              {actionBusy === `promote-console:${detail.id}`
-                ? t.lead_promoting_to_console
-                : t.lead_promote_to_console}
-            </Button>
-          ) : detail && detailIsConsoleLead && permissions.canConvert && !leadWorkflow?.leadConverted ? (
-            <Button
-              type="button"
-              size="sm"
-              className="shrink-0"
-              disabled={
-                Boolean(actionBusy) ||
-                !detailConversionGate?.canConvert ||
-                detail.failed_outcome.status !== "none"
-              }
-              title={detailConvertDisabledReason}
-              onClick={() => setPendingConvertLead(detail)}
-            >
-              {actionBusy === `convert:${detail.id}` ? (
-                <LoaderCircle className="size-4 animate-spin" />
-              ) : (
-                <UserPlus className="size-4" />
-              )}
-              {t.lead_convert_action}
-            </Button>
-          ) : null}
+          <div className="flex shrink-0 items-center gap-2">
+            {detail && permissions.canConvert && !leadWorkflow?.leadConverted ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setWizardOpen(true)}
+              >
+                {lang === "de" ? "Assistent" : "Мастер"}
+              </Button>
+            ) : null}
+            {detail && detailCanPromoteToConsole ? (
+              <Button
+                type="button"
+                size="sm"
+                className="shrink-0"
+                disabled={Boolean(actionBusy)}
+                title={t.lead_promote_to_console_description}
+                onClick={() => void promoteToConsole(detail.id)}
+              >
+                {actionBusy === `promote-console:${detail.id}` ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <ArrowRight className="size-4" />
+                )}
+                {actionBusy === `promote-console:${detail.id}`
+                  ? t.lead_promoting_to_console
+                  : t.lead_promote_to_console}
+              </Button>
+            ) : detail && detailIsConsoleLead && permissions.canConvert && !leadWorkflow?.leadConverted ? (
+              <Button
+                type="button"
+                size="sm"
+                className="shrink-0"
+                disabled={
+                  Boolean(actionBusy) ||
+                  !detailConversionGate?.canConvert ||
+                  detail.failed_outcome.status !== "none"
+                }
+                title={detailConvertDisabledReason}
+                onClick={() => setPendingConvertLead(detail)}
+              >
+                {actionBusy === `convert:${detail.id}` ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <UserPlus className="size-4" />
+                )}
+                {t.lead_convert_action}
+              </Button>
+            ) : null}
+          </div>
         </div>
         {detailIsConsoleLead ? (
           <div className="mt-2 flex flex-wrap gap-1">
@@ -2717,6 +2731,20 @@ function useLeadsPageContent() {
           </form>
         </SheetContent>
       </Sheet>
+
+      <LeadWizard
+        leadId={selectedLeadId || null}
+        open={wizardOpen}
+        onOpenChange={setWizardOpen}
+        onConverted={(patientId) => {
+          setWizardOpen(false);
+          staffGo(`/patients/${patientId}`);
+        }}
+        onOrderCreated={(orderId) => {
+          setWizardOpen(false);
+          staffGo(`/orders/${orderId}`);
+        }}
+      />
 
       <Dialog
         open={pendingConvertLead !== null}

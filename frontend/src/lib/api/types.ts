@@ -146,6 +146,9 @@ export interface LeadDetail extends Lead {
   has_insurance: boolean | null;
   insurance_covers_germany: string | null;
 
+  requested_specialties: string[];
+  wizard_state: Record<string, unknown> | null;
+
   preferred_location: string | null;
   visit_timing: string | null;
   message: string | null;

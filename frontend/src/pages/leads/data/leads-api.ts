@@ -61,6 +61,21 @@ export function convertLead(leadId: string) {
   return apiConvertLead(leadId);
 }
 
+export type WizardConvertResponse = {
+  patient_id: string;
+  patient_pid: string;
+};
+
+/** Save any subset of the wizard's editable lead fields (#12). */
+export function updateLeadWizard(leadId: string, payload: JsonPayload) {
+  return postJson<void>(`/leads/${leadId}/update`, payload);
+}
+
+/** Convert-then-comply: create the patient from the lead mid-wizard (D2). */
+export function wizardConvertLead(leadId: string) {
+  return postJson<WizardConvertResponse>(`/leads/${leadId}/wizard-convert`, {});
+}
+
 export function downloadLeadAttachment(leadId: string, fileId: string) {
   return apiDownloadLeadAttachment(leadId, fileId);
 }
