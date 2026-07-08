@@ -15,7 +15,10 @@ import {
   updateLeadWizard,
   wizardConvertLead,
 } from "../data/leads-api";
-import { upsertPatientRelation } from "@/pages/patients/data/patient-detail-mutations";
+import {
+  createFrameworkContract,
+  upsertPatientRelation,
+} from "@/pages/patients/data/patient-detail-mutations";
 import { updatePatient } from "@/pages/patients/data/patient-mutations";
 
 import {
@@ -184,6 +187,7 @@ export function LeadWizard({
   const [orderLines, setOrderLines] = useState<WizardOrderLine[]>([blankOrderLine()]);
   const [guardian, setGuardian] = useState<GuardianDraft>(blankGuardian());
   const [clinicalWarnings, setClinicalWarnings] = useState("");
+  const [startContract, setStartContract] = useState(true);
 
   useEffect(() => {
     if (!open || !leadId) return;
@@ -197,6 +201,7 @@ export function LeadWizard({
     setOrderLines([blankOrderLine()]);
     setGuardian(blankGuardian());
     setClinicalWarnings("");
+    setStartContract(true);
     fetchLeadDetail(leadId)
       .then((lead) => {
         if (!active) return;
@@ -300,6 +305,11 @@ export function LeadWizard({
         await updatePatient(createdPatientId, {
           clinical_warnings: clinicalWarnings.trim(),
         });
+      }
+      // Start the framework contract (Rahmenvertrag) as a draft; staff generate
+      // and sign the PDF from the contracts workspace (#8).
+      if (createdPatientId && startContract) {
+        await createFrameworkContract({ patient_id: createdPatientId, status: "draft" });
       }
       for (const line of billable) {
         await createOrderLeistung(createdOrderId, orderLinePayload(line));
@@ -414,6 +424,17 @@ export function LeadWizard({
                   onChange={(event) => setClinicalWarnings(event.target.value)}
                 />
               </Field>
+              <label className="flex items-center gap-2 text-sm text-foreground">
+                <input
+                  type="checkbox"
+                  checked={startContract}
+                  onChange={(event) => setStartContract(event.target.checked)}
+                />
+                {tx(
+                  "Начать рамочный договор (Rahmenvertrag)",
+                  "Rahmenvertrag anlegen",
+                )}
+              </label>
               <div className="space-y-3">
                 {orderLines.map((line, index) => (
                   <div
