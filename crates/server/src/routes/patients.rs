@@ -236,6 +236,8 @@ struct UpdatePatientRequest {
     emergency_contact_name: Option<Value>,
     emergency_contact_phone: Option<Value>,
     emergency_contact_relation: Option<Value>,
+    passport_number: Option<Value>,
+    passport_expiry: Option<String>,
     legal_status: Option<Value>,
     clinical_warnings: Option<String>,
     notes: Option<Value>,
@@ -1200,6 +1202,7 @@ async fn get_patient(
                   address_street, address_city, address_zip, address_country,
                   insurance_provider, insurance_number, insurance_type,
                   emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
+                  passport_number, passport_expiry,
                   legal_status, clinical_warnings, notes, is_active, created_at, updated_at
            FROM patients WHERE id = $1"#,
     )
@@ -1368,6 +1371,8 @@ async fn get_patient(
                             )
                         },
                     )?,
+                    passport_number: r.try_get("passport_number").unwrap_or_default(),
+                    passport_expiry: r.try_get("passport_expiry").unwrap_or_default(),
                     legal_status: r.try_get("legal_status").map_err(|_| {
                         err(
                             StatusCode::INTERNAL_SERVER_ERROR,
@@ -1795,6 +1800,7 @@ async fn update_patient(
                   address_street, address_city, address_zip, address_country,
                   insurance_provider, insurance_number, insurance_type,
                   emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
+                  passport_number, passport_expiry,
                   notes
            FROM patients
            WHERE id = $1"#,
@@ -2131,6 +2137,33 @@ async fn update_patient(
         Ok(None) => current.try_get("functional_labels").unwrap_or_default(),
         Err(response) => return response,
     };
+    let passport_number = match normalize_patient_text_patch(
+        body.passport_number,
+        current.try_get("passport_number").unwrap_or_default(),
+        "passport_number",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let passport_expiry: Option<chrono::NaiveDate> = match body.passport_expiry.as_deref() {
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                match chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d") {
+                    Ok(parsed) => Some(parsed),
+                    Err(_) => {
+                        return err(
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                            "Invalid passport_expiry format (YYYY-MM-DD)",
+                        );
+                    }
+                }
+            }
+        }
+        None => current.try_get("passport_expiry").unwrap_or_default(),
+    };
     let legal_status = match body.legal_status {
         Some(value) => match normalize_legal_status(value) {
             Ok(value) => Some(SqlxJson(value)),
@@ -2204,6 +2237,8 @@ async fn update_patient(
             legal_status = COALESCE($24::jsonb, legal_status),
             notes = $25,
             clinical_warnings = CASE WHEN $26 THEN $27 ELSE clinical_warnings END,
+            passport_number = $28,
+            passport_expiry = $29,
             updated_at = now()
         WHERE id = $1"#,
     )
@@ -2234,6 +2269,8 @@ async fn update_patient(
     .bind(notes)
     .bind(clinical_warnings_supplied)
     .bind(clinical_warnings.flatten())
+    .bind(passport_number)
+    .bind(passport_expiry)
     .execute(&mut *tx)
     .await;
 
@@ -4189,6 +4226,7 @@ pub(crate) async fn load_patient_recheck_readiness(
                   languages,
                   phone_primary,
                   email,
+                  passport_expiry,
                   legal_status
            FROM patients
            WHERE id = $1"#,
@@ -4229,6 +4267,9 @@ pub(crate) async fn load_patient_recheck_readiness(
         .unwrap_or_default();
     let address_country = patient_row
         .try_get::<Option<String>, _>("address_country")
+        .unwrap_or_default();
+    let passport_expiry = patient_row
+        .try_get::<Option<chrono::NaiveDate>, _>("passport_expiry")
         .unwrap_or_default();
     let languages = patient_row
         .try_get::<Vec<String>, _>("languages")
@@ -4385,6 +4426,9 @@ pub(crate) async fn load_patient_recheck_readiness(
     })?;
 
     let today = chrono::Utc::now().date_naive();
+    // #6: flag an expired passport in compliance (a warning, never a hard gate
+    // on order creation). No passport date on file is treated as "not expired".
+    let passport_expired = passport_expiry.map(|value| value < today).unwrap_or(false);
     let latest_framework_contract = contract_rows.first().map(|row| {
         json!({
             "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
@@ -4464,6 +4508,12 @@ pub(crate) async fn load_patient_recheck_readiness(
             "passed": !debt_hold,
             "blocking_for": "create_order",
         }),
+        json!({
+            "key": "passport_valid",
+            "label": "Passport not expired",
+            "passed": !passport_expired,
+            "blocking_for": "none",
+        }),
     ];
 
     let mut blocking_reasons = Vec::new();
@@ -4521,6 +4571,7 @@ pub(crate) async fn load_patient_recheck_readiness(
             "document_pack_ready": document_pack_ready,
             "contract_ready": contract_ready,
             "debt_hold": debt_hold,
+            "passport_expired": passport_expired,
             "overdue_invoice_count": overdue_invoice_count,
             "debt_management": debt_management.payload,
             "outstanding_balance": debt_management.outstanding_balance.round_dp(2).normalize().to_string(),
@@ -6279,6 +6330,8 @@ struct PatientDetailInput {
     emergency_contact_name: Option<String>,
     emergency_contact_phone: Option<String>,
     emergency_contact_relation: Option<String>,
+    passport_number: Option<String>,
+    passport_expiry: Option<chrono::NaiveDate>,
     legal_status: serde_json::Value,
     clinical_warnings: Option<String>,
     notes: Option<String>,
@@ -6374,6 +6427,23 @@ fn build_patient_detail_json(
             insert_optional_string(map, "address_city", patient.address_city);
             insert_optional_string(map, "address_zip", patient.address_zip);
             insert_optional_string(map, "address_country", patient.address_country);
+            insert_optional_string(map, "passport_number", patient.passport_number);
+            match patient.passport_expiry {
+                Some(expiry) => {
+                    map.insert(
+                        "passport_expiry".to_string(),
+                        Value::String(expiry.to_string()),
+                    );
+                    map.insert(
+                        "passport_expired".to_string(),
+                        Value::Bool(expiry < chrono::Utc::now().date_naive()),
+                    );
+                }
+                None => {
+                    map.insert("passport_expiry".to_string(), Value::Null);
+                    map.insert("passport_expired".to_string(), Value::Bool(false));
+                }
+            }
             insert_optional_string(
                 map,
                 "emergency_contact_name",

@@ -155,6 +155,81 @@ async fn patient_notes_update_does_not_require_unrelated_minor_guardian_fix() {
 }
 
 #[tokio::test]
+async fn patient_passport_round_trips_and_flags_expiry() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("passport");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    // Record a passport that expired in the past.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/update"),
+        &pm_bearer,
+        Some(json!({ "passport_number": "X1234567", "passport_expiry": "2020-01-01" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["passport_number"], "X1234567");
+    assert_eq!(detail["passport_expiry"], "2020-01-01");
+    assert_eq!(detail["passport_expired"], true, "past expiry must flag expired");
+
+    // Renew to a future date -> no longer expired; number preserved when omitted.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/update"),
+        &pm_bearer,
+        Some(json!({ "passport_expiry": "2999-12-31" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        detail["passport_number"], "X1234567",
+        "number preserved when only expiry is patched"
+    );
+    assert_eq!(detail["passport_expiry"], "2999-12-31");
+    assert_eq!(detail["passport_expired"], false);
+
+    // A malformed date is rejected.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/update"),
+        &pm_bearer,
+        Some(json!({ "passport_expiry": "31.12.2030" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
 async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
