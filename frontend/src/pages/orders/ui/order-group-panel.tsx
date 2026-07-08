@@ -7,12 +7,14 @@ import { useLang } from "@/lib/i18n";
 
 import {
   fetchOrderGroup,
-  groupOrderUnderHead,
   mergeOrdersIntoHead,
+  orderGroupCandidates,
+  searchOrders,
   setOrderPayer,
   ungroupOrder,
   type OrderGroup,
 } from "../data/order-api";
+import type { OrderSummary } from "../model/types";
 
 type Bilingual = (ru: string, de: string) => string;
 
@@ -44,8 +46,10 @@ export function OrderGroupPanel({ orderId }: { orderId: string }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const [attachId, setAttachId] = useState("");
-  const [mergeIds, setMergeIds] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [candidates, setCandidates] = useState<OrderSummary[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [searching, setSearching] = useState(false);
   const [payerName, setPayerName] = useState("");
   const [payerEmail, setPayerEmail] = useState("");
   const [payerPhone, setPayerPhone] = useState("");
@@ -99,6 +103,27 @@ export function OrderGroupPanel({ orderId }: { orderId: string }) {
     }
   }
 
+  async function runSearch() {
+    if (!group) return;
+    setSearching(true);
+    setError("");
+    try {
+      const results = await searchOrders(searchQuery);
+      const subIds = group.subs.map((sub) => sub.id);
+      setCandidates(orderGroupCandidates(results, group.head.id, subIds));
+    } catch {
+      setCandidates([]);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds((current) =>
+      current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
+    );
+  }
+
   if (!group) {
     return (
       <div className="rounded-xl border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground">
@@ -108,10 +133,6 @@ export function OrderGroupPanel({ orderId }: { orderId: string }) {
   }
 
   const viewingHead = group.head.id === orderId;
-  const parsedMergeIds = mergeIds
-    .split(/[\s,]+/)
-    .map((value) => value.trim())
-    .filter(Boolean);
 
   return (
     <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
@@ -189,58 +210,82 @@ export function OrderGroupPanel({ orderId }: { orderId: string }) {
         <div className="mt-4 space-y-3 border-t border-border/60 pt-3">
           <div>
             <p className="text-xs font-medium text-muted-foreground">
-              {tx("Присоединить заказ под этот главный", "Auftrag unter diesen Hauptauftrag hängen")}
+              {tx("Добавить заказы в группу", "Aufträge zur Gruppe hinzufügen")}
             </p>
             <div className="mt-1.5 flex flex-wrap gap-2">
               <Input
-                value={attachId}
-                onChange={(event) => setAttachId(event.target.value)}
-                placeholder={tx("ID заказа", "Auftrags-ID")}
-                className="h-9 max-w-xs"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void runSearch();
+                  }
+                }}
+                placeholder={tx("Поиск по номеру или пациенту…", "Nach Nummer oder Patient suchen…")}
+                className="h-9 flex-1 min-w-[14rem]"
               />
               <Button
                 type="button"
                 size="sm"
-                disabled={busy || !attachId.trim()}
-                onClick={() =>
-                  void run(async () => {
-                    const next = await groupOrderUnderHead(attachId.trim(), group.head.id);
-                    setAttachId("");
-                    return next;
-                  })
-                }
+                variant="outline"
+                disabled={searching}
+                onClick={() => void runSearch()}
               >
-                {tx("Присоединить", "Anhängen")}
+                {searching ? tx("Поиск…", "Suche…") : tx("Найти", "Suchen")}
               </Button>
             </div>
-          </div>
 
-          <div>
-            <p className="text-xs font-medium text-muted-foreground">
-              {tx("Слить несколько заказов (ID через запятую)", "Mehrere Aufträge zusammenführen (IDs, kommagetrennt)")}
-            </p>
-            <div className="mt-1.5 flex flex-wrap gap-2">
-              <Input
-                value={mergeIds}
-                onChange={(event) => setMergeIds(event.target.value)}
-                placeholder={tx("ID, ID, ID", "ID, ID, ID")}
-                className="h-9 flex-1 min-w-[16rem]"
-              />
+            {candidates.length > 0 ? (
+              <ul className="mt-2 max-h-56 space-y-1 overflow-y-auto">
+                {candidates.map((candidate) => {
+                  const checked = selectedIds.includes(candidate.id);
+                  return (
+                    <li key={candidate.id}>
+                      <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleSelected(candidate.id)}
+                        />
+                        <span className="font-mono text-foreground">{candidate.order_number}</span>
+                        <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                          {candidate.patient_name}
+                        </span>
+                        <span className="text-muted-foreground">{candidate.status}</span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : searchQuery.trim() && !searching ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                {tx("Ничего не найдено.", "Nichts gefunden.")}
+              </p>
+            ) : null}
+
+            {selectedIds.length > 0 ? (
               <Button
                 type="button"
                 size="sm"
-                disabled={busy || parsedMergeIds.length === 0}
+                className="mt-2"
+                disabled={busy}
                 onClick={() =>
                   void run(async () => {
-                    const next = await mergeOrdersIntoHead(group.head.id, parsedMergeIds);
-                    setMergeIds("");
+                    const next = await mergeOrdersIntoHead(group.head.id, selectedIds);
+                    setSelectedIds([]);
+                    setCandidates([]);
+                    setSearchQuery("");
                     return next;
                   })
                 }
               >
-                {tx("Слить", "Zusammenführen")}
+                {tx(
+                  `Добавить выбранные (${selectedIds.length})`,
+                  `Ausgewählte hinzufügen (${selectedIds.length})`,
+                )}
               </Button>
-            </div>
+            ) : null}
           </div>
 
           <div className="rounded-lg border border-border/60 bg-background p-3">

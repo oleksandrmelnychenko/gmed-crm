@@ -439,3 +439,25 @@ export function decideOrderAmendment(
     note: note ?? null,
   });
 }
+
+/** Search orders by number / patient / service text — used to pick group members. */
+export async function searchOrders(query: string): Promise<OrderSummary[]> {
+  const trimmed = query.trim();
+  const path = `/orders${trimmed ? `?search=${encodeURIComponent(trimmed)}` : ""}`;
+  const rows = await apiFetch<OrderSummary[]>(path);
+  return Array.isArray(rows) ? rows : [];
+}
+
+/**
+ * Orders eligible to fold into a group: everything except the head itself and
+ * the orders already grouped under it (its current subs). Already-grouped
+ * orders elsewhere are still allowed — merge re-parents them.
+ */
+export function orderGroupCandidates(
+  orders: OrderSummary[],
+  headId: string,
+  subIds: string[],
+): OrderSummary[] {
+  const exclude = new Set<string>([headId, ...subIds]);
+  return orders.filter((order) => !exclude.has(order.id));
+}

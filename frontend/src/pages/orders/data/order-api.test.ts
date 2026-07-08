@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   normalizeOrderAmendment,
+  orderGroupCandidates,
   normalizeOrderGroup,
   normalizePatientOrderRecheck,
 } from "./order-api";
@@ -176,5 +177,32 @@ describe("normalizeOrderAmendment (#10)", () => {
     expect(amendment.currency).toBe("EUR");
     expect(amendment.status).toBe("pending");
     expect(amendment.decided_at).toBeNull();
+  });
+});
+
+describe("orderGroupCandidates", () => {
+  const order = (id: string) => ({
+    id,
+    order_number: id,
+    patient_id: "p",
+    patient_name: "P",
+    patient_pid: "PID",
+    phase: "discovery",
+    status: "active",
+    created_at: "2026-07-09",
+  });
+
+  it("excludes the head and its current subs, keeps the rest", () => {
+    const candidates = orderGroupCandidates(
+      [order("head"), order("sub-1"), order("free-1"), order("free-2")],
+      "head",
+      ["sub-1"],
+    );
+    expect(candidates.map((o) => o.id)).toEqual(["free-1", "free-2"]);
+  });
+
+  it("returns everything when nothing is excluded yet", () => {
+    const candidates = orderGroupCandidates([order("a"), order("b")], "head", []);
+    expect(candidates.map((o) => o.id)).toEqual(["a", "b"]);
   });
 });
