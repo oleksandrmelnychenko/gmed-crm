@@ -8,7 +8,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { selectClass, textareaClass } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { createOrder } from "@/pages/orders/data/order-api";
+import { createOrder, createOrderLeistung } from "@/pages/orders/data/order-api";
 
 import {
   fetchLeadDetail,
@@ -17,10 +17,14 @@ import {
 } from "../data/leads-api";
 import {
   PHASE_A_STEPS,
+  blankOrderLine,
   canConvert,
+  costEstimate,
   draftFromLead,
   isMinor,
   nextStep,
+  orderLineIsValid,
+  orderLinePayload,
   orderNeedsDescription,
   prevStep,
   resumeStep,
@@ -28,6 +32,7 @@ import {
   wizardUpdatePayload,
   type LegalSex,
   type WizardDraft,
+  type WizardOrderLine,
   type WizardStepId,
 } from "../model/lead-wizard.model";
 
@@ -165,6 +170,11 @@ export function LeadWizard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [loadError, setLoadError] = useState(false);
+  // Phase B — after conversion the wizard forms the actual order (#8).
+  const [phase, setPhase] = useState<"lead" | "order">("lead");
+  const [createdOrderId, setCreatedOrderId] = useState<string | null>(null);
+  const [createdPatientId, setCreatedPatientId] = useState<string | null>(null);
+  const [orderLines, setOrderLines] = useState<WizardOrderLine[]>([blankOrderLine()]);
 
   useEffect(() => {
     if (!open || !leadId) return;
@@ -172,6 +182,10 @@ export function LeadWizard({
     setLoadError(false);
     setError("");
     setDraft(null);
+    setPhase("lead");
+    setCreatedOrderId(null);
+    setCreatedPatientId(null);
+    setOrderLines([blankOrderLine()]);
     fetchLeadDetail(leadId)
       .then((lead) => {
         if (!active) return;
@@ -227,6 +241,7 @@ export function LeadWizard({
     setError("");
     try {
       const result = await wizardConvertLead(leadId);
+      setCreatedPatientId(result.patient_id);
       // Form the draft order — the goal of the wizard (#8) — carrying the
       // captured concern and requested specialists into needs_description.
       try {
@@ -234,9 +249,9 @@ export function LeadWizard({
           patient_id: result.patient_id,
           needs_description: orderNeedsDescription(draft),
         });
-        onOpenChange(false);
-        if (onOrderCreated) onOrderCreated(order.id);
-        else onConverted?.(result.patient_id);
+        // Stay open and move into Phase B to build the order's line items.
+        setCreatedOrderId(order.id);
+        setPhase("order");
       } catch {
         // The patient exists even if the order draft failed; finish on the patient.
         onOpenChange(false);
@@ -253,7 +268,38 @@ export function LeadWizard({
     }
   }
 
+  function patchLine(index: number, update: Partial<WizardOrderLine>) {
+    setOrderLines((current) =>
+      current.map((line, i) => (i === index ? { ...line, ...update } : line)),
+    );
+  }
+
+  async function handleFinishOrder() {
+    if (!createdOrderId) return;
+    setBusy(true);
+    setError("");
+    const billable = orderLines.filter(orderLineIsValid);
+    try {
+      for (const line of billable) {
+        await createOrderLeistung(createdOrderId, orderLinePayload(line));
+      }
+      const orderId = createdOrderId;
+      onOpenChange(false);
+      if (onOrderCreated) onOrderCreated(orderId);
+      else if (createdPatientId) onConverted?.(createdPatientId);
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : tx("Не удалось сохранить позиции", "Positionen konnten nicht gespeichert werden"),
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const minor = draft ? isMinor(draft.dateOfBirth, new Date()) : false;
+  const estimate = costEstimate(orderLines);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -299,6 +345,85 @@ export function LeadWizard({
             <p className="text-sm text-rose-600">
               {tx("Не удалось загрузить лид", "Lead konnte nicht geladen werden")}
             </p>
+          ) : phase === "order" ? (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                {tx(
+                  "Пациент создан. Сформируйте заказ: добавьте позиции и оцените стоимость.",
+                  "Patient angelegt. Bilden Sie den Auftrag: Positionen hinzufügen und Kosten schätzen.",
+                )}
+              </div>
+              <div className="space-y-3">
+                {orderLines.map((line, index) => (
+                  <div
+                    key={index}
+                    className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3"
+                  >
+                    <Input
+                      value={line.description}
+                      placeholder={tx("Описание позиции", "Positionsbeschreibung")}
+                      onChange={(event) => patchLine(index, { description: event.target.value })}
+                    />
+                    <div className="grid grid-cols-3 gap-2">
+                      <Field label={tx("Кол-во", "Menge")}>
+                        <Input
+                          value={line.quantity}
+                          inputMode="decimal"
+                          onChange={(event) => patchLine(index, { quantity: event.target.value })}
+                        />
+                      </Field>
+                      <Field label={tx("Цена", "Preis")}>
+                        <Input
+                          value={line.unitPrice}
+                          inputMode="decimal"
+                          onChange={(event) => patchLine(index, { unitPrice: event.target.value })}
+                        />
+                      </Field>
+                      <Field label={tx("НДС %", "MwSt %")}>
+                        <Input
+                          value={line.vatRate}
+                          inputMode="decimal"
+                          onChange={(event) => patchLine(index, { vatRate: event.target.value })}
+                        />
+                      </Field>
+                    </div>
+                    {orderLines.length > 1 ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setOrderLines((current) => current.filter((_, i) => i !== index))
+                        }
+                        className="text-xs text-muted-foreground hover:text-rose-600"
+                      >
+                        {tx("Удалить позицию", "Position entfernen")}
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setOrderLines((current) => [...current, blankOrderLine()])}
+                >
+                  {tx("Добавить позицию", "Position hinzufügen")}
+                </Button>
+              </div>
+              <div className="rounded-lg border border-border bg-card p-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">{tx("Нетто", "Netto")}</span>
+                  <span className="font-medium tabular-nums">{estimate.net.toFixed(2)} €</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">{tx("НДС", "MwSt")}</span>
+                  <span className="font-medium tabular-nums">{estimate.vat.toFixed(2)} €</span>
+                </div>
+                <div className="mt-1 flex justify-between border-t border-border pt-1 font-semibold">
+                  <span>{tx("Итого (брутто)", "Gesamt (Brutto)")}</span>
+                  <span className="tabular-nums">{estimate.gross.toFixed(2)} €</span>
+                </div>
+              </div>
+              {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+            </div>
           ) : !draft ? (
             <p className="text-sm text-muted-foreground">{tx("Загрузка…", "Wird geladen…")}</p>
           ) : (
@@ -475,32 +600,50 @@ export function LeadWizard({
         </div>
 
         <footer className="flex items-center justify-between border-t border-border/60 pt-4">
-          <Button type="button" variant="ghost" onClick={goBack} disabled={busy || !prevStep(step)}>
-            {tx("Назад", "Zurück")}
-          </Button>
-          <div className="flex items-center gap-2">
-            {nextStep(step) ? (
-              <Button type="button" onClick={goNext} disabled={busy || !draft}>
-                {tx("Дальше", "Weiter")}
+          {phase === "order" ? (
+            <>
+              <span className="text-xs text-muted-foreground">
+                {tx("Черновик заказа создан", "Auftragsentwurf erstellt")}
+              </span>
+              <Button type="button" variant="default" onClick={handleFinishOrder} disabled={busy}>
+                {tx("Завершить и открыть заказ", "Abschließen und Auftrag öffnen")}
               </Button>
-            ) : null}
-            <Button
-              type="button"
-              variant="default"
-              onClick={handleConvert}
-              disabled={busy || !draft || !canConvert(draft)}
-              title={
-                draft && !canConvert(draft)
-                  ? tx(
-                      "Нужны дата рождения, пол и контакт",
-                      "Geburtsdatum, Geschlecht und Kontakt erforderlich",
-                    )
-                  : undefined
-              }
-            >
-              {tx("Создать пациента", "Patient anlegen")}
-            </Button>
-          </div>
+            </>
+          ) : (
+            <>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={goBack}
+                disabled={busy || !prevStep(step)}
+              >
+                {tx("Назад", "Zurück")}
+              </Button>
+              <div className="flex items-center gap-2">
+                {nextStep(step) ? (
+                  <Button type="button" onClick={goNext} disabled={busy || !draft}>
+                    {tx("Дальше", "Weiter")}
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="default"
+                  onClick={handleConvert}
+                  disabled={busy || !draft || !canConvert(draft)}
+                  title={
+                    draft && !canConvert(draft)
+                      ? tx(
+                          "Нужны дата рождения, пол и контакт",
+                          "Geburtsdatum, Geschlecht und Kontakt erforderlich",
+                        )
+                      : undefined
+                  }
+                >
+                  {tx("Создать пациента", "Patient anlegen")}
+                </Button>
+              </div>
+            </>
+          )}
         </footer>
       </SheetContent>
     </Sheet>

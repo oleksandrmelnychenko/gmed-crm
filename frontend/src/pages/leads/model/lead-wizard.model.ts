@@ -177,3 +177,69 @@ export function resumeStep(lead: LeadDetail): WizardStepId {
   }
   return "identity";
 }
+
+/**
+ * Phase B — after the lead is converted, the wizard forms the actual order (#8):
+ * real Leistungen (line items) with a live Kostenschätzung. Kept as pure logic
+ * so the money maths and validation are unit-testable.
+ */
+export type WizardOrderLine = {
+  description: string;
+  quantity: string;
+  unitPrice: string;
+  vatRate: string;
+};
+
+export function blankOrderLine(): WizardOrderLine {
+  return { description: "", quantity: "1", unitPrice: "0", vatRate: "19" };
+}
+
+function numberOrNull(value: string): number | null {
+  const normalized = value.replace(",", ".").trim();
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** A line is billable once it has a description and numeric quantity + price. */
+export function orderLineIsValid(line: WizardOrderLine): boolean {
+  return (
+    line.description.trim().length > 0 &&
+    numberOrNull(line.quantity) !== null &&
+    numberOrNull(line.unitPrice) !== null
+  );
+}
+
+export type CostEstimate = { net: number; vat: number; gross: number };
+
+function roundMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+/** Kostenschätzung across the valid lines: net, VAT and gross totals. */
+export function costEstimate(lines: WizardOrderLine[]): CostEstimate {
+  let net = 0;
+  let vat = 0;
+  for (const line of lines) {
+    if (!orderLineIsValid(line)) continue;
+    const quantity = numberOrNull(line.quantity) ?? 0;
+    const unitPrice = numberOrNull(line.unitPrice) ?? 0;
+    const rate = numberOrNull(line.vatRate) ?? 0;
+    const lineNet = quantity * unitPrice;
+    net += lineNet;
+    vat += (lineNet * rate) / 100;
+  }
+  net = roundMoney(net);
+  vat = roundMoney(vat);
+  return { net, vat, gross: roundMoney(net + vat) };
+}
+
+/** The `POST /orders/{id}/leistungen` payload for one line. */
+export function orderLinePayload(line: WizardOrderLine): Record<string, unknown> {
+  return {
+    description: line.description.trim(),
+    quantity: numberOrNull(line.quantity) ?? 0,
+    unit_price: numberOrNull(line.unitPrice) ?? 0,
+    vat_rate: numberOrNull(line.vatRate) ?? 0,
+  };
+}

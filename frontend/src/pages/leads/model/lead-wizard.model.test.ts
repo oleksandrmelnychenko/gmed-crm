@@ -3,17 +3,22 @@ import { describe, expect, it } from "vitest";
 import type { LeadDetail } from "@/lib/api/types";
 
 import {
+  blankOrderLine,
   canConvert,
   completedSteps,
+  costEstimate,
   draftFromLead,
   isMinor,
   nextStep,
+  orderLineIsValid,
+  orderLinePayload,
   orderNeedsDescription,
   prevStep,
   resumeStep,
   stepIsComplete,
   wizardUpdatePayload,
   type WizardDraft,
+  type WizardOrderLine,
 } from "./lead-wizard.model";
 
 function lead(overrides: Partial<LeadDetail> = {}): LeadDetail {
@@ -173,5 +178,57 @@ describe("navigation + resume", () => {
     expect(resumeStep(lead())).toBe("eligibility");
     expect(resumeStep(lead({ wizard_state: null }))).toBe("identity");
     expect(resumeStep(lead({ wizard_state: { step: "bogus" } }))).toBe("identity");
+  });
+});
+
+describe("Phase B order lines (#8)", () => {
+  function line(overrides: Partial<WizardOrderLine> = {}): WizardOrderLine {
+    return { ...blankOrderLine(), ...overrides };
+  }
+
+  it("blank line defaults to quantity 1 / vat 19", () => {
+    expect(blankOrderLine()).toEqual({
+      description: "",
+      quantity: "1",
+      unitPrice: "0",
+      vatRate: "19",
+    });
+  });
+
+  it("a line is billable only with a description and numeric qty + price", () => {
+    expect(orderLineIsValid(line({ description: "MRT", unitPrice: "200" }))).toBe(true);
+    expect(orderLineIsValid(line({ description: "", unitPrice: "200" }))).toBe(false);
+    expect(orderLineIsValid(line({ description: "MRT", quantity: "abc" }))).toBe(false);
+  });
+
+  it("cost estimate sums net/vat/gross over valid lines only", () => {
+    const estimate = costEstimate([
+      line({ description: "MRT", quantity: "2", unitPrice: "100", vatRate: "19" }),
+      line({ description: "Beratung", quantity: "1", unitPrice: "50", vatRate: "7" }),
+      line({ description: "", quantity: "5", unitPrice: "999", vatRate: "19" }), // invalid -> ignored
+    ]);
+    // net = 2*100 + 1*50 = 250; vat = 38 + 3.5 = 41.5; gross = 291.5
+    expect(estimate.net).toBe(250);
+    expect(estimate.vat).toBe(41.5);
+    expect(estimate.gross).toBe(291.5);
+  });
+
+  it("accepts comma decimals and rounds money to cents", () => {
+    const estimate = costEstimate([
+      line({ description: "X", quantity: "3", unitPrice: "10,10", vatRate: "19" }),
+    ]);
+    // net = 30.3; vat = 5.757 -> 5.76; gross = 36.06
+    expect(estimate.net).toBe(30.3);
+    expect(estimate.vat).toBe(5.76);
+    expect(estimate.gross).toBe(36.06);
+  });
+
+  it("builds the leistung payload with numeric fields", () => {
+    expect(orderLinePayload(line({ description: " MRT ", quantity: "2", unitPrice: "100", vatRate: "19" }))).toEqual({
+      description: "MRT",
+      quantity: 2,
+      unit_price: 100,
+      vat_rate: 19,
+    });
   });
 });
