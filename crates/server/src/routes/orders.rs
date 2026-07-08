@@ -66,6 +66,12 @@ pub fn router() -> Router<AppState> {
             "/orders/{order_id}/amendments/{amendment_id}/decision",
             post(decide_order_amendment),
         )
+        .route(
+            "/orders/{order_id}/group",
+            get(get_order_group).post(group_order),
+        )
+        .route("/orders/{order_id}/ungroup", post(ungroup_order))
+        .route("/orders/{order_id}/payer", post(set_order_payer))
 }
 
 #[derive(Deserialize)]
@@ -4569,6 +4575,399 @@ async fn decide_order_amendment(
 
     Json(serde_json::json!({ "amendment": amendment, "order_total_estimated": new_total }))
         .into_response()
+}
+
+#[derive(Deserialize)]
+struct GroupOrderRequest {
+    head_order_id: Uuid,
+}
+
+#[derive(Deserialize)]
+struct SetOrderPayerRequest {
+    payer_patient_relation_id: Option<Uuid>,
+    payer_contact_name: Option<String>,
+    payer_contact_email: Option<String>,
+    payer_contact_phone: Option<String>,
+    payer_contact_relationship: Option<String>,
+    payer_notes: Option<String>,
+}
+
+/// Build the head read-model (#1/#3/#4): the head order, its sub-orders, the
+/// distinct patients covered across the group (orders + their appointments), and
+/// the rolled-up estimated total.
+async fn order_group_payload(
+    db: &sqlx::PgPool,
+    head_id: Uuid,
+) -> Result<serde_json::Value, axum::response::Response> {
+    let head = sqlx::query(
+        "SELECT id, order_number, patient_id, order_role, status, total_estimated, currency,
+                payer_patient_relation_id, payer_contact_name
+         FROM orders WHERE id = $1",
+    )
+    .bind(head_id)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "load order group head");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load order group",
+        )
+    })?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Order not found"))?;
+
+    let sub_rows = sqlx::query(
+        "SELECT id, order_number, patient_id, status, total_estimated
+         FROM orders WHERE head_order_id = $1 ORDER BY created_at",
+    )
+    .bind(head_id)
+    .fetch_all(db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "load order group subs");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load order group",
+        )
+    })?;
+
+    let covered = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT DISTINCT patient_id FROM (
+               SELECT patient_id FROM orders WHERE id = $1 OR head_order_id = $1
+               UNION
+               SELECT a.patient_id
+               FROM appointments a
+               JOIN orders o ON o.id = a.order_id
+               WHERE (o.id = $1 OR o.head_order_id = $1) AND a.patient_id IS NOT NULL
+           ) grp WHERE patient_id IS NOT NULL"#,
+    )
+    .bind(head_id)
+    .fetch_all(db)
+    .await
+    .unwrap_or_default();
+
+    let rollup = sqlx::query_scalar::<_, Option<rust_decimal::Decimal>>(
+        "SELECT SUM(total_estimated) FROM orders WHERE id = $1 OR head_order_id = $1",
+    )
+    .bind(head_id)
+    .fetch_one(db)
+    .await
+    .ok()
+    .flatten()
+    .map(|value| value.to_string());
+
+    let subs: Vec<serde_json::Value> = sub_rows
+        .iter()
+        .map(|row| {
+            serde_json::json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+                "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
+                "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_else(|_| Uuid::nil()),
+                "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                "total_estimated": row
+                    .try_get::<Option<rust_decimal::Decimal>, _>("total_estimated")
+                    .ok()
+                    .flatten()
+                    .map(|value| value.to_string()),
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({
+        "head": {
+            "id": head.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+            "order_number": head.try_get::<String, _>("order_number").unwrap_or_default(),
+            "patient_id": head.try_get::<Uuid, _>("patient_id").unwrap_or_else(|_| Uuid::nil()),
+            "order_role": head.try_get::<String, _>("order_role").unwrap_or_default(),
+            "status": head.try_get::<String, _>("status").unwrap_or_default(),
+            "total_estimated": head
+                .try_get::<Option<rust_decimal::Decimal>, _>("total_estimated")
+                .ok()
+                .flatten()
+                .map(|value| value.to_string()),
+            "currency": head.try_get::<String, _>("currency").unwrap_or_default(),
+            "payer_patient_relation_id": head
+                .try_get::<Option<Uuid>, _>("payer_patient_relation_id")
+                .unwrap_or_default(),
+            "payer_contact_name": head
+                .try_get::<Option<String>, _>("payer_contact_name")
+                .unwrap_or_default(),
+        },
+        "subs": subs,
+        "covered_patient_ids": covered,
+        "rollup_total_estimated": rollup,
+    }))
+}
+
+/// The head + its sub-orders + covered patients + rolled-up total. Works whether
+/// `order_id` is the head itself or one of its subs.
+async fn get_order_group(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
+        return e;
+    }
+    let row = match sqlx::query("SELECT order_role, head_order_id FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(e) => {
+            tracing::error!(error = %e, "load order for group");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let role: String = row.try_get("order_role").unwrap_or_default();
+    let head_id = if role == "sub" {
+        row.try_get::<Option<Uuid>, _>("head_order_id")
+            .ok()
+            .flatten()
+            .unwrap_or(order_id)
+    } else {
+        order_id
+    };
+    match order_group_payload(&state.db, head_id).await {
+        Ok(payload) => Json(payload).into_response(),
+        Err(resp) => resp,
+    }
+}
+
+/// Group a standalone order under a head (which becomes MAIN). One level only —
+/// a sub cannot itself be a head, and a head cannot be re-grouped (#4).
+async fn group_order(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+    Json(body): Json<GroupOrderRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
+        return e;
+    }
+    if order_id == body.head_order_id {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "An order cannot be grouped under itself",
+        );
+    }
+    let this_role: Option<String> =
+        sqlx::query_scalar("SELECT order_role FROM orders WHERE id = $1")
+            .bind(order_id)
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten();
+    let Some(this_role) = this_role else {
+        return err(StatusCode::NOT_FOUND, "Order not found");
+    };
+    let head_role: Option<String> =
+        sqlx::query_scalar("SELECT order_role FROM orders WHERE id = $1")
+            .bind(body.head_order_id)
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten();
+    let Some(head_role) = head_role else {
+        return err(StatusCode::NOT_FOUND, "Head order not found");
+    };
+    if this_role != "standalone" {
+        return err(
+            StatusCode::CONFLICT,
+            "Only a standalone order can be grouped under a head",
+        );
+    }
+    if head_role == "sub" {
+        return err(
+            StatusCode::CONFLICT,
+            "Cannot group under a sub-order (one level only)",
+        );
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin group tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(e) =
+        sqlx::query("UPDATE orders SET order_role = 'sub', head_order_id = $2, updated_at = now() WHERE id = $1")
+            .bind(order_id)
+            .bind(body.head_order_id)
+            .execute(&mut *tx)
+            .await
+    {
+        tracing::error!(error = %e, "group sub order");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(e) = sqlx::query(
+        "UPDATE orders SET order_role = 'main', updated_at = now() WHERE id = $1 AND order_role = 'standalone'",
+    )
+    .bind(body.head_order_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, "promote head order");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "commit group");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "group_order",
+        Some(auth.user_id),
+        "order",
+        Some(order_id),
+        serde_json::json!({ "head_order_id": body.head_order_id }),
+    ));
+
+    match order_group_payload(&state.db, body.head_order_id).await {
+        Ok(payload) => Json(payload).into_response(),
+        Err(resp) => resp,
+    }
+}
+
+/// Detach a sub-order from its head (reversible). If the head is left with no
+/// subs, it reverts to standalone (#4).
+async fn ungroup_order(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
+        return e;
+    }
+    let row = match sqlx::query("SELECT order_role, head_order_id FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(e) => {
+            tracing::error!(error = %e, "load order for ungroup");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let role: String = row.try_get("order_role").unwrap_or_default();
+    let head_id: Option<Uuid> = row.try_get("head_order_id").ok().flatten();
+    if role != "sub" || head_id.is_none() {
+        return err(StatusCode::CONFLICT, "Order is not grouped");
+    }
+    let head_id = head_id.unwrap();
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin ungroup tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(e) = sqlx::query(
+        "UPDATE orders SET order_role = 'standalone', head_order_id = NULL, updated_at = now() WHERE id = $1",
+    )
+    .bind(order_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, "ungroup order");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(e) = sqlx::query(
+        "UPDATE orders SET order_role = 'standalone', updated_at = now()
+         WHERE id = $1 AND order_role = 'main'
+           AND NOT EXISTS (SELECT 1 FROM orders WHERE head_order_id = $1)",
+    )
+    .bind(head_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, "revert empty head");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "commit ungroup");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "ungroup_order",
+        Some(auth.user_id),
+        "order",
+        Some(order_id),
+        serde_json::json!({ "head_order_id": head_id }),
+    ));
+
+    Json(serde_json::json!({ "ok": true, "head_order_id": head_id })).into_response()
+}
+
+/// Set (or clear) who pays for an order — e.g. the father via a patient relation,
+/// or a free-text contact — mirroring the payer already carried on invoices (#7).
+async fn set_order_payer(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+    Json(body): Json<SetOrderPayerRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
+        return e;
+    }
+
+    let result = sqlx::query(
+        "UPDATE orders SET
+            payer_patient_relation_id = $2,
+            payer_contact_name = $3,
+            payer_contact_email = $4,
+            payer_contact_phone = $5,
+            payer_contact_relationship = $6,
+            payer_notes = $7,
+            payer_updated_by = $8,
+            payer_updated_at = now(),
+            updated_at = now()
+         WHERE id = $1",
+    )
+    .bind(order_id)
+    .bind(body.payer_patient_relation_id)
+    .bind(body.payer_contact_name.as_deref())
+    .bind(body.payer_contact_email.as_deref())
+    .bind(body.payer_contact_phone.as_deref())
+    .bind(body.payer_contact_relationship.as_deref())
+    .bind(body.payer_notes.as_deref())
+    .bind(auth.user_id)
+    .execute(&state.db)
+    .await;
+
+    match result {
+        Ok(r) if r.rows_affected() > 0 => {
+            state.audit_sender.try_send(audit::domain_event(
+                "set_order_payer",
+                Some(auth.user_id),
+                "order",
+                Some(order_id),
+                serde_json::json!({
+                    "payer_patient_relation_id": body.payer_patient_relation_id,
+                    "payer_contact_name": body.payer_contact_name,
+                }),
+            ));
+            Json(serde_json::json!({
+                "ok": true,
+                "order_id": order_id,
+                "payer_patient_relation_id": body.payer_patient_relation_id,
+                "payer_contact_name": body.payer_contact_name,
+            }))
+            .into_response()
+        }
+        Ok(_) => err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(e) => {
+            tracing::error!(error = %e, "set order payer");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to set payer")
+        }
+    }
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {

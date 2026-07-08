@@ -1814,3 +1814,102 @@ async fn order_amendment_requires_separate_approval_and_updates_total() {
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
 }
+
+#[tokio::test]
+async fn head_order_groups_subs_rolls_up_and_ungroups() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = format!("head-{}", Uuid::new_v4().simple());
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm = auth_header_for(pm_id, "patient_manager");
+
+    let father = create_patient(&app, &pm, &format!("{tag}-f")).await;
+    let child = create_patient(&app, &pm, &format!("{tag}-c")).await;
+    let head = insert_existing_order(&pool, father, pm_id, &format!("{tag}-A")).await;
+    let sub = insert_existing_order(&pool, child, pm_id, &format!("{tag}-B")).await;
+    sqlx::query("UPDATE orders SET total_estimated = 1000 WHERE id = $1")
+        .bind(head)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE orders SET total_estimated = 300 WHERE id = $1")
+        .bind(sub)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // An order cannot be grouped under itself.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{head}/group"),
+        &pm,
+        Some(json!({ "head_order_id": head })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Group the child's order under the father's -> father becomes MAIN, rollup 1300.
+    let (status, group) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{sub}/group"),
+        &pm,
+        Some(json!({ "head_order_id": head })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{group}");
+    assert_eq!(group["head"]["order_role"], "main");
+    assert_eq!(group["rollup_total_estimated"], "1300");
+    assert_eq!(group["subs"].as_array().unwrap().len(), 1);
+    let covered = group["covered_patient_ids"].as_array().unwrap();
+    assert!(covered.iter().any(|v| v == &json!(father.to_string())));
+    assert!(covered.iter().any(|v| v == &json!(child.to_string())));
+
+    // Reading the group from the sub resolves to the head.
+    let (status, from_sub) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{sub}/group"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(from_sub["head"]["id"], json!(head.to_string()));
+
+    // Designate the payer (the father).
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{head}/payer"),
+        &pm,
+        Some(json!({ "payer_contact_name": "Father pays for the family" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Ungroup -> the head reverts to standalone and the rollup drops to 1000.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{sub}/ungroup"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, after) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{head}/group"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(after["head"]["order_role"], "standalone");
+    assert_eq!(after["subs"].as_array().unwrap().len(), 0);
+    assert_eq!(after["rollup_total_estimated"], "1000");
+}
