@@ -16,6 +16,7 @@ import {
   wizardConvertLead,
 } from "../data/leads-api";
 import { upsertPatientRelation } from "@/pages/patients/data/patient-detail-mutations";
+import { updatePatient } from "@/pages/patients/data/patient-mutations";
 
 import {
   PHASE_A_STEPS,
@@ -182,6 +183,7 @@ export function LeadWizard({
   const [createdPatientId, setCreatedPatientId] = useState<string | null>(null);
   const [orderLines, setOrderLines] = useState<WizardOrderLine[]>([blankOrderLine()]);
   const [guardian, setGuardian] = useState<GuardianDraft>(blankGuardian());
+  const [clinicalWarnings, setClinicalWarnings] = useState("");
 
   useEffect(() => {
     if (!open || !leadId) return;
@@ -194,6 +196,7 @@ export function LeadWizard({
     setCreatedPatientId(null);
     setOrderLines([blankOrderLine()]);
     setGuardian(blankGuardian());
+    setClinicalWarnings("");
     fetchLeadDetail(leadId)
       .then((lead) => {
         if (!active) return;
@@ -291,6 +294,12 @@ export function LeadWizard({
       // A minor's guardian is recorded before the order is opened (#2/#11).
       if (minor && createdPatientId) {
         await upsertPatientRelation(createdPatientId, guardianPayload(guardian));
+      }
+      // Safety-critical intake note (CAVE / allergies) onto the patient.
+      if (createdPatientId && clinicalWarnings.trim()) {
+        await updatePatient(createdPatientId, {
+          clinical_warnings: clinicalWarnings.trim(),
+        });
       }
       for (const line of billable) {
         await createOrderLeistung(createdOrderId, orderLinePayload(line));
@@ -393,6 +402,18 @@ export function LeadWizard({
                   </div>
                 </div>
               ) : null}
+              <Field label={tx("Клинические предупреждения (CAVE / аллергии)", "Klinische Warnungen (CAVE / Allergien)")}>
+                <textarea
+                  className={textareaClass}
+                  rows={2}
+                  value={clinicalWarnings}
+                  placeholder={tx(
+                    "Напр.: аллергия на пенициллин, антикоагулянты…",
+                    "z. B. Penicillin-Allergie, Antikoagulantien…",
+                  )}
+                  onChange={(event) => setClinicalWarnings(event.target.value)}
+                />
+              </Field>
               <div className="space-y-3">
                 {orderLines.map((line, index) => (
                   <div
