@@ -241,6 +241,37 @@ export function updateDocument(id: string, payload: JsonPayload) {
   return postJson<{ ok: boolean }>(`/documents/${id}/update`, payload);
 }
 
+export type DocumentComplianceKind =
+  | "dsgvo"
+  | "confidentiality_release"
+  | "identity"
+  | "framework_contract"
+  | "other";
+
+export type MarkDocumentSignedResponse = {
+  ok: boolean;
+  document_id: string;
+  signed_at: string;
+  compliance_kind: DocumentComplianceKind;
+  patient_id: string | null;
+  compliance_updated: boolean;
+};
+
+/**
+ * Record a document as the signed evidence for a compliance requirement and,
+ * atomically, flip the matching flag on the linked patient's legal_status (#13).
+ */
+export function markDocumentSigned(
+  id: string,
+  complianceKind: DocumentComplianceKind,
+  signedAt?: string,
+) {
+  return postJson<MarkDocumentSignedResponse>(`/documents/${id}/mark-signed`, {
+    compliance_kind: complianceKind,
+    ...(signedAt ? { signed_at: signedAt } : {}),
+  });
+}
+
 export function generateDocument(payload: JsonPayload) {
   return postJson<GenerateDocumentResponse>("/documents/generate", payload);
 }

@@ -179,6 +179,7 @@ import type {
   TranslationWorkspaceDraft,
   UploadFormState,
 } from "./model/types";
+import { MarkComplianceSignedControl } from "./ui/mark-compliance-signed-control";
 
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
@@ -4671,6 +4672,14 @@ function StaffDocumentsPage({
                   </Field>
                     </div>
                   </DocumentSheetSection>
+
+                  {detail && canManage ? (
+                    <MarkComplianceSignedControl
+                      documentId={detail.id}
+                      patientId={detail.patient_id}
+                      onDone={() => refresh()}
+                    />
+                  ) : null}
 
                   <DocumentSheetSection title={t.documents_section_document}>
                     <div className="grid gap-4 md:grid-cols-2">
