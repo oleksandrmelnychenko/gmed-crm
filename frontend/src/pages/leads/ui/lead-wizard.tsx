@@ -5,6 +5,7 @@ import {
   ChevronRight,
   LoaderCircle,
   Plus,
+  RefreshCw,
   UserPlus,
   X,
 } from "lucide-react";
@@ -28,6 +29,13 @@ import {
   savePatientMedications,
   savePatientNarrative,
 } from "@/pages/patients/data/patient-clinical";
+import { fetchSpecializations } from "@/pages/providers/data/provider-api";
+import {
+  normalizeSpecializationLabelKey,
+  specializationLabelForItem,
+  specializationLabelForValue,
+} from "@/pages/providers/model/specialization-labels";
+import type { SpecializationItem } from "@/pages/providers/model/types";
 
 import {
   fetchLeadDetail,
@@ -96,6 +104,8 @@ type LeadWizardProps = {
 };
 
 const LEGAL_SEX_OPTIONS: readonly LegalSex[] = ["female", "male", "diverse", "no_entry"];
+const WIZARD_PROGRESS_STEPS = [...PHASE_A_STEPS, "order"] as const;
+type WizardProgressStep = (typeof WIZARD_PROGRESS_STEPS)[number];
 
 function legalSexLabel(value: LegalSex, tx: Bilingual): string {
   switch (value) {
@@ -119,6 +129,10 @@ function stepLabel(step: WizardStepId, tx: Bilingual): string {
     case "specialties":
       return tx("Специалисты", "Fachärzte");
   }
+}
+
+function progressStepLabel(step: WizardProgressStep, tx: Bilingual): string {
+  return step === "order" ? tx("Заказ", "Auftrag") : stepLabel(step, tx);
 }
 
 function requirementLabel(requirement: WizardRequirement, tx: Bilingual): string {
@@ -230,6 +244,112 @@ function ChipEditor({
   );
 }
 
+function specializationCatalogValue(item: SpecializationItem): string {
+  return item.code.trim() || item.name_en.trim();
+}
+
+function specializationMatchesValue(item: SpecializationItem, value: string): boolean {
+  const key = normalizeSpecializationLabelKey(value);
+  return [item.code, item.name_en, item.name_de, item.name_ru].some(
+    (candidate) => candidate && normalizeSpecializationLabelKey(candidate) === key,
+  );
+}
+
+function SpecialtyCatalogSelect({
+  items,
+  selected,
+  loading,
+  loadError,
+  lang,
+  tx,
+  onSelect,
+  onRemove,
+  onRetry,
+}: {
+  items: SpecializationItem[];
+  selected: string[];
+  loading: boolean;
+  loadError: boolean;
+  lang: "de" | "ru";
+  tx: Bilingual;
+  onSelect: (value: string) => void;
+  onRemove: (index: number) => void;
+  onRetry: () => void;
+}) {
+  const seen = new Set<string>();
+  const availableItems = items.filter((item) => {
+    const value = specializationCatalogValue(item);
+    const key = normalizeSpecializationLabelKey(value);
+    if (!item.is_active || !value || seen.has(key)) return false;
+    seen.add(key);
+    return !selected.some((selectedValue) => specializationMatchesValue(item, selectedValue));
+  });
+
+  return (
+    <div className="space-y-2">
+      <NativeComboboxSelect
+        value=""
+        aria-label={tx("Специальность", "Fachrichtung")}
+        className={selectClass}
+        disabled={loading || availableItems.length === 0}
+        onChange={(event) => {
+          if (event.target.value) onSelect(event.target.value);
+        }}
+      >
+        <option value="">
+          {loading
+            ? tx("Загрузка справочника…", "Verzeichnis wird geladen…")
+            : availableItems.length > 0
+              ? tx("Выберите специальность…", "Fachrichtung auswählen…")
+              : tx("Нет доступных специальностей", "Keine Fachrichtungen verfügbar")}
+        </option>
+        {availableItems.map((item) => {
+          const value = specializationCatalogValue(item);
+          return (
+            <option key={item.id || value} value={value}>
+              {specializationLabelForItem(item, lang)}
+            </option>
+          );
+        })}
+      </NativeComboboxSelect>
+
+      {loadError ? (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <span>{tx("Справочник не загрузился", "Verzeichnis konnte nicht geladen werden")}</span>
+          <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+            <RefreshCw className="size-3.5" />
+            {tx("Повторить", "Erneut laden")}
+          </Button>
+        </div>
+      ) : null}
+
+      {selected.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {selected.map((value, index) => {
+            const label = specializationLabelForValue(value, items, lang);
+            return (
+              <span
+                key={`${value}-${index}`}
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-foreground"
+              >
+                {label}
+                <button
+                  type="button"
+                  onClick={() => onRemove(index)}
+                  className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label={tx(`Удалить ${label}`, `${label} entfernen`)}
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function LeadWizard({
   leadId,
   open,
@@ -260,6 +380,10 @@ export function LeadWizard({
   );
   const [startContract, setStartContract] = useState(true);
   const [contractId, setContractId] = useState<string | null>(null);
+  const [specializationOptions, setSpecializationOptions] = useState<SpecializationItem[]>([]);
+  const [specializationLoading, setSpecializationLoading] = useState(false);
+  const [specializationLoadError, setSpecializationLoadError] = useState(false);
+  const [specializationCatalogVersion, setSpecializationCatalogVersion] = useState(0);
 
   useEffect(() => {
     if (!open || !leadId) return;
@@ -308,6 +432,27 @@ export function LeadWizard({
       active = false;
     };
   }, [open, leadId]);
+
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setSpecializationLoading(true);
+    setSpecializationLoadError(false);
+    void fetchSpecializations()
+      .then((items) => {
+        if (!active) return;
+        setSpecializationOptions(items);
+      })
+      .catch(() => {
+        if (active) setSpecializationLoadError(true);
+      })
+      .finally(() => {
+        if (active) setSpecializationLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [open, specializationCatalogVersion]);
 
   function patch(update: Partial<WizardDraft>) {
     setDraft((current) => (current ? { ...current, ...update } : current));
@@ -727,6 +872,8 @@ export function LeadWizard({
     (line) => !orderLineIsBlank(line) && !orderLineIsValid(line),
   );
   const orderLinesReady = orderLinesAreReady(orderLines);
+  const currentProgressIndex =
+    phase === "order" ? WIZARD_PROGRESS_STEPS.length - 1 : PHASE_A_STEPS.indexOf(step);
   const patientOption: PatientOption | undefined =
     createdPatientId && draft
       ? {
@@ -755,50 +902,73 @@ export function LeadWizard({
               </Badge>
             ) : null}
           </div>
-          <ol className="mt-4 grid grid-cols-3 gap-2">
-            {PHASE_A_STEPS.map((phaseStep, index) => {
-              const done = draft ? stepIsComplete(phaseStep, draft) : false;
-              const active = phaseStep === step;
-              const unlocked =
-                phaseStep === step ||
-                (draft !== null &&
-                  PHASE_A_STEPS.slice(0, index).every((candidate) =>
-                    stepIsComplete(candidate, draft),
-                  ));
-              return (
-                <li key={phaseStep}>
-                  <button
-                    type="button"
-                    disabled={busy || phase === "order" || !unlocked}
-                    aria-current={active ? "step" : undefined}
-                    onClick={() => void moveToStep(phaseStep)}
-                    className={cn(
-                      "flex min-h-10 min-w-0 items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-                      active
-                        ? "border-primary/50 bg-primary/10 text-primary"
-                        : done
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                          : "border-border/70 bg-background text-muted-foreground hover:border-border hover:text-foreground",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px] tabular-nums",
-                        active
-                          ? "border-primary/40 bg-background"
-                          : done
-                            ? "border-emerald-300 bg-white"
-                            : "border-border bg-muted/40",
-                      )}
+          <nav
+            aria-label={tx("Прогресс обработки", "Bearbeitungsfortschritt")}
+            className="mt-4"
+          >
+            <p className="text-xs font-medium text-muted-foreground">
+              {tx("Шаг", "Schritt")} {currentProgressIndex + 1} {tx("из", "von")} {WIZARD_PROGRESS_STEPS.length}
+            </p>
+            <ol className="mt-3 grid grid-cols-4">
+              {WIZARD_PROGRESS_STEPS.map((progressStep, index) => {
+                const phaseStep = progressStep === "order" ? null : progressStep;
+                const done = index < currentProgressIndex;
+                const active = index === currentProgressIndex;
+                const unlocked =
+                  phaseStep !== null &&
+                  (phaseStep === step ||
+                    (draft !== null &&
+                      PHASE_A_STEPS.slice(0, index).every((candidate) =>
+                        stepIsComplete(candidate, draft),
+                      )));
+                const label = progressStepLabel(progressStep, tx);
+                return (
+                  <li key={progressStep} className="relative min-w-0">
+                    {index < WIZARD_PROGRESS_STEPS.length - 1 ? (
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          "absolute left-[calc(50%+18px)] right-[calc(-50%+18px)] top-3.5 h-px",
+                          index < currentProgressIndex ? "bg-foreground/25" : "bg-border",
+                        )}
+                      />
+                    ) : null}
+                    <button
+                      type="button"
+                      aria-label={`${index + 1}. ${label}`}
+                      aria-current={active ? "step" : undefined}
+                      disabled={busy || phase === "order" || !unlocked || active}
+                      onClick={() => {
+                        if (phaseStep) void moveToStep(phaseStep);
+                      }}
+                      className="relative z-10 flex w-full min-w-0 flex-col items-center gap-1.5 px-1 text-center text-xs font-medium disabled:cursor-default"
                     >
-                      {done ? <Check className="size-3" /> : index + 1}
-                    </span>
-                    <span className="min-w-0 leading-tight">{stepLabel(phaseStep, tx)}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
+                      <span
+                        className={cn(
+                          "flex size-7 shrink-0 items-center justify-center rounded-full border bg-background text-[11px] tabular-nums transition-colors",
+                          active
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : done
+                              ? "border-border bg-muted text-foreground"
+                              : "border-border text-muted-foreground",
+                        )}
+                      >
+                        {done ? <Check className="size-3.5" aria-hidden="true" /> : index + 1}
+                      </span>
+                      <span
+                        className={cn(
+                          "min-w-0 max-w-full leading-tight",
+                          active || done ? "text-foreground" : "text-muted-foreground",
+                        )}
+                      >
+                        {label}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          </nav>
         </header>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-muted/10 px-5 py-5">
@@ -1255,10 +1425,14 @@ export function LeadWizard({
                     )}
                   </p>
                   <Field label={tx("Специалисты", "Fachärzte")}>
-                    <ChipEditor
-                      items={draft.requestedSpecialties}
-                      placeholder={tx("Добавить специальность…", "Fachrichtung hinzufügen…")}
-                      onAdd={(value) =>
+                    <SpecialtyCatalogSelect
+                      items={specializationOptions}
+                      selected={draft.requestedSpecialties}
+                      loading={specializationLoading}
+                      loadError={specializationLoadError}
+                      lang={lang}
+                      tx={tx}
+                      onSelect={(value) =>
                         patch({ requestedSpecialties: [...draft.requestedSpecialties, value] })
                       }
                       onRemove={(index) =>
@@ -1267,6 +1441,9 @@ export function LeadWizard({
                             (_, i) => i !== index,
                           ),
                         })
+                      }
+                      onRetry={() =>
+                        setSpecializationCatalogVersion((current) => current + 1)
                       }
                     />
                   </Field>

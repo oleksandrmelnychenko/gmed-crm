@@ -161,10 +161,17 @@ export function fetchProviders(path: string) {
   });
 }
 
-export function fetchSpecializationsForAdmin() {
-  return apiFetch<SpecializationItem[]>("/providers/specializations?include_inactive=true").then((items) =>
+export function fetchSpecializations(includeInactive = false) {
+  const path = includeInactive
+    ? "/providers/specializations?include_inactive=true"
+    : "/providers/specializations";
+  return apiFetch<SpecializationItem[]>(path).then((items) =>
     items.map(normalizeSpecializationItem),
   );
+}
+
+export function fetchSpecializationsForAdmin() {
+  return fetchSpecializations(true);
 }
 
 export function fetchInsuranceProviders(includeInactive = false) {

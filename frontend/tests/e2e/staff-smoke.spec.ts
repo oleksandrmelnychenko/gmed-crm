@@ -694,6 +694,29 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
       return json(route, updatedRow ?? { message: "Not found" }, updatedRow ? 200 : 404);
     }
 
+    if (path === "/providers/specializations") {
+      return json(route, [
+        {
+          id: "00000000-0000-0000-0000-000000000211",
+          code: "orthopedics",
+          name_en: "Orthopedics",
+          name_de: "Orthopädie",
+          name_ru: "Ортопедия",
+          is_active: true,
+          sort_order: 10,
+        },
+        {
+          id: "00000000-0000-0000-0000-000000000212",
+          code: "cardiology",
+          name_en: "Cardiology",
+          name_de: "Kardiologie",
+          name_ru: "Кардиология",
+          is_active: true,
+          sort_order: 20,
+        },
+      ]);
+    }
+
     if (path === "/providers" || path.startsWith("/providers?")) {
       return json(route, [
         {
@@ -1792,6 +1815,39 @@ test.describe("lead conversion gating", () => {
     await expect(wizard.getByRole("button", { name: /3.*Fachärzte/i })).toBeDisabled();
   });
 
+  test("lead processing uses the specialization catalog and a linear stepper", async ({
+    page,
+  }) => {
+    await page.route("**/api/v1/leads/*/update", (route) => json(route, { ok: true }));
+
+    await page.goto("/leads?lead=00000000-0000-0000-0000-000000000902");
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+    const wizard = page.getByRole("dialog").filter({
+      has: page.getByRole("heading", { name: "Lead bearbeiten" }),
+    });
+    const progress = wizard.getByRole("navigation", {
+      name: "Bearbeitungsfortschritt",
+    });
+
+    await expect(progress.getByRole("listitem")).toHaveCount(4);
+    await expect(progress).toContainText("Schritt 1 von 4");
+    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
+    await wizard.locator("#lw-concern").fill("Knee pain");
+    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
+
+    const specialtySelect = wizard.getByRole("combobox", { name: "Fachrichtung" });
+    await chooseComboboxOption(page, specialtySelect, /Orthopädie/i);
+    await expect(wizard.getByText("Orthopädie", { exact: true })).toBeVisible();
+    await expect(wizard.getByRole("button", { name: "Patient anlegen" })).toBeEnabled();
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobileLayout = await wizard.evaluate((element) => ({
+      overflowX: element.scrollWidth > element.clientWidth,
+      width: Math.round(element.getBoundingClientRect().width),
+    }));
+    expect(mobileLayout).toEqual({ overflowX: false, width: 366 });
+  });
+
   test("lead processing exposes patient creation only on a completed final step", async ({
     page,
   }) => {
@@ -1816,9 +1872,11 @@ test.describe("lead conversion gating", () => {
     await expect(createPatient).toBeVisible();
     await expect(createPatient).toBeDisabled();
 
-    const specialtyInput = wizard.getByPlaceholder("Fachrichtung hinzufügen…");
-    await specialtyInput.fill("Orthopädie");
-    await wizard.getByRole("button", { name: "Fachrichtung hinzufügen…" }).click();
+    await chooseComboboxOption(
+      page,
+      wizard.getByRole("combobox", { name: "Fachrichtung" }),
+      /Orthopädie/i,
+    );
 
     await expect(createPatient).toBeEnabled();
     expect(updateRequests).toBe(2);
@@ -1883,8 +1941,11 @@ test.describe("lead conversion gating", () => {
     await leadWizard.getByRole("button", { name: "Weiter", exact: true }).click();
     await leadWizard.locator("#lw-concern").fill("Knee pain");
     await leadWizard.getByRole("button", { name: "Weiter", exact: true }).click();
-    await leadWizard.getByPlaceholder("Fachrichtung hinzufügen…").fill("Orthopädie");
-    await leadWizard.getByRole("button", { name: "Fachrichtung hinzufügen…" }).click();
+    await chooseComboboxOption(
+      page,
+      leadWizard.getByRole("combobox", { name: "Fachrichtung" }),
+      /Orthopädie/i,
+    );
     await leadWizard.getByRole("button", { name: "Patient anlegen" }).click();
 
     const orderWizard = page.getByRole("dialog", { name: "Auftrag erstellen" });
@@ -1911,6 +1972,9 @@ test.describe("lead conversion gating", () => {
       vat_rate: 19,
     });
     expect(commercialPayloads).toEqual([{ total_estimated: "238.00", contract_id: null }]);
+    expect(updates).toContainEqual(
+      expect.objectContaining({ requested_specialties: ["orthopedics"] }),
+    );
     expect(updates.at(-1)).toMatchObject({
       wizard_state: {
         phase: "completed",
