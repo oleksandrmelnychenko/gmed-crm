@@ -306,6 +306,111 @@ async fn framework_contract_can_be_completed_for_lead_without_creating_patient()
 }
 
 #[tokio::test]
+async fn lead_order_and_service_are_idempotent_without_creating_patient() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("lead-order");
+    let lead_id = seed_lead(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, contract) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &pm_bearer,
+        Some(json!({
+            "lead_id": lead_id,
+            "status": "signed",
+            "client_reference": format!("lead-onboarding:{lead_id}:framework")
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {contract}");
+    let contract_id = contract["id"].as_str().expect("contract id");
+
+    let order_payload = json!({
+        "source_lead_id": lead_id,
+        "contract_id": contract_id,
+        "needs_description": "Coordinate orthopedic assessment"
+    });
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm_bearer,
+        Some(order_payload.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {created}");
+    let order_id = created["id"].as_str().expect("order id");
+    assert_eq!(created["lead_id"], lead_id.to_string());
+    assert!(created["patient_id"].is_null());
+
+    let (status, replayed) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm_bearer,
+        Some(order_payload),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {replayed}");
+    assert_eq!(replayed["id"], order_id);
+    assert_eq!(replayed["idempotent_replay"], true);
+
+    let (status, service) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(json!({
+            "description": "Organisation der Behandlung",
+            "quantity": 1.0,
+            "unit_price": 250.0,
+            "client_reference": format!("lead-onboarding:{lead_id}:service:1")
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {service}");
+
+    let (status, orders) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders?lead_id={lead_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {orders}");
+    assert_eq!(orders.as_array().expect("orders").len(), 1);
+    assert_eq!(orders[0]["lead_id"], lead_id.to_string());
+    assert!(orders[0]["patient_id"].is_null());
+
+    let (order_patient_id, service_patient_id): (Option<Uuid>, Option<Uuid>) = sqlx::query_as(
+        r#"SELECT o.patient_id, ol.patient_id
+           FROM orders o
+           JOIN order_leistungen ol ON ol.order_id = o.id
+           WHERE o.id = $1"#,
+    )
+    .bind(Uuid::parse_str(order_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(order_patient_id.is_none());
+    assert!(service_patient_id.is_none());
+
+    let patient_count: i64 = sqlx::query_scalar("SELECT count(*) FROM patients WHERE email = $1")
+        .bind(format!("lead-{tag}@example.com"))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(patient_count, 0);
+}
+
+#[tokio::test]
 async fn framework_contract_create_returns_user_facing_patient_validation_errors() {
     let Some((app, _pool, _admin_id, admin_bearer)) = test_context().await else {
         return;

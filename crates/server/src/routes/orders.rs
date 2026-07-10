@@ -81,7 +81,7 @@ pub fn router() -> Router<AppState> {
 
 #[derive(Deserialize)]
 struct CreateOrderRequest {
-    patient_id: Uuid,
+    patient_id: Option<Uuid>,
     contract_id: Option<Uuid>,
     needs_description: Option<String>,
     source_lead_id: Option<Uuid>,
@@ -205,6 +205,7 @@ struct ListOrdersQuery {
     phase: Option<String>,
     status: Option<String>,
     patient_id: Option<Uuid>,
+    lead_id: Option<Uuid>,
     provider_id: Option<Uuid>,
     provider_taxonomy_node_id: Option<Uuid>,
     doctor_id: Option<Uuid>,
@@ -277,16 +278,20 @@ async fn list_orders(
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
 
     match sqlx::query(
-        r#"SELECT o.id, o.order_number, o.patient_id, o.phase, o.status,
+        r#"SELECT o.id, o.order_number, o.patient_id, o.source_lead_id, o.phase, o.status,
                   o.total_estimated, o.created_at,
-                  p.first_name, p.last_name, p.patient_id AS p_pid
+                  COALESCE(p.first_name, l.first_name) AS subject_first_name,
+                  COALESCE(p.last_name, l.last_name) AS subject_last_name,
+                  p.patient_id AS p_pid
            FROM orders o
-           JOIN patients p ON p.id = o.patient_id
+           LEFT JOIN patients p ON p.id = o.patient_id
+           LEFT JOIN leads l ON l.id = o.source_lead_id
            WHERE ($1::text = '%%'
                   OR de_normalize(concat_ws(' ',
                        o.order_number, o.needs_description,
                        p.first_name, p.last_name, p.patient_id,
-                       p.email, p.phone_primary, p.phone_secondary
+                       p.email, p.phone_primary, p.phone_secondary,
+                       l.first_name, l.last_name, l.email, l.phone
                      )) LIKE de_normalize($1)
                   OR EXISTS (
                         SELECT 1
@@ -302,31 +307,32 @@ async fn list_orders(
              AND ($2::text IS NULL OR o.phase = $2)
              AND ($3::text IS NULL OR o.status = $3)
              AND ($4::uuid IS NULL OR o.patient_id = $4)
-             AND (
-                $5::uuid IS NULL
-                OR EXISTS (
-                    SELECT 1
-                    FROM order_leistungen ol
-                    WHERE ol.order_id = o.id
-                      AND ol.provider_id = $5
-                )
-             )
+             AND ($5::uuid IS NULL OR o.source_lead_id = $5)
              AND (
                 $6::uuid IS NULL
                 OR EXISTS (
                     SELECT 1
                     FROM order_leistungen ol
                     WHERE ol.order_id = o.id
-                      AND ol.doctor_id = $6
+                      AND ol.provider_id = $6
                 )
              )
              AND (
                 $7::uuid IS NULL
                 OR EXISTS (
+                    SELECT 1
+                    FROM order_leistungen ol
+                    WHERE ol.order_id = o.id
+                      AND ol.doctor_id = $7
+                )
+             )
+             AND (
+                $8::uuid IS NULL
+                OR EXISTS (
                     WITH RECURSIVE selected_taxonomy AS (
                         SELECT n.id
                         FROM provider_taxonomy_nodes n
-                        WHERE n.id = $7
+                        WHERE n.id = $8
                         UNION ALL
                         SELECT child.id
                         FROM provider_taxonomy_nodes child
@@ -349,6 +355,7 @@ async fn list_orders(
     .bind(query.phase)
     .bind(query.status)
     .bind(query.patient_id)
+    .bind(query.lead_id)
     .bind(query.provider_id)
     .bind(query.doctor_id)
     .bind(query.provider_taxonomy_node_id)
@@ -359,9 +366,14 @@ async fn list_orders(
             let mut orders = Vec::with_capacity(rows.len());
             for r in rows {
                 let order_id = r.try_get::<Uuid, _>("id").unwrap_or_default();
-                let patient_id = r.try_get::<Uuid, _>("patient_id").unwrap_or_default();
+                let patient_id = r
+                    .try_get::<Option<Uuid>, _>("patient_id")
+                    .unwrap_or_default();
+                let lead_id = r
+                    .try_get::<Option<Uuid>, _>("source_lead_id")
+                    .unwrap_or_default();
 
-                match can_access_order(&state, &auth, order_id, Some(patient_id)).await {
+                match can_access_order(&state, &auth, order_id, patient_id).await {
                     Ok(true) => {}
                     Ok(false) => continue,
                     Err(resp) => return resp,
@@ -371,10 +383,11 @@ async fn list_orders(
                     "id": order_id,
                     "order_number": r.try_get::<String, _>("order_number").unwrap_or_default(),
                     "patient_id": patient_id,
+                    "lead_id": lead_id,
                     "patient_name": format!(
                         "{} {}",
-                        r.try_get::<String, _>("first_name").unwrap_or_default(),
-                        r.try_get::<String, _>("last_name").unwrap_or_default()
+                        r.try_get::<String, _>("subject_first_name").unwrap_or_default(),
+                        r.try_get::<String, _>("subject_last_name").unwrap_or_default()
                     ),
                     "patient_pid": r.try_get::<String, _>("p_pid").unwrap_or_default(),
                     "phase": r.try_get::<String, _>("phase").unwrap_or_default(),
@@ -1928,12 +1941,27 @@ async fn ensure_created_order_state(
     ensure_order_execution_flow_state(state, order_id).await?;
     ensure_order_followup_flow_state(state, order_id).await?;
     crate::routes::debt_management::ensure_order_debt_management_state(state, order_id).await?;
-    crate::routes::workflow_checklists::ensure_default_order_workflow(
-        state,
-        order_id,
-        Some(actor_id),
-    )
-    .await?;
+    let patient_id =
+        sqlx::query_scalar::<_, Option<Uuid>>("SELECT patient_id FROM orders WHERE id = $1")
+            .bind(order_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, order_id = %order_id, "load created order subject");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to initialize order",
+                )
+            })?
+            .flatten();
+    if patient_id.is_some() {
+        crate::routes::workflow_checklists::ensure_default_order_workflow(
+            state,
+            order_id,
+            Some(actor_id),
+        )
+        .await?;
+    }
     Ok(())
 }
 
@@ -1945,136 +1973,187 @@ async fn create_order(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
         return e;
     }
-    match ensure_patient_access(&state, &auth, body.patient_id).await {
-        Ok(()) => {}
-        Err(resp) => return resp,
+
+    let CreateOrderRequest {
+        patient_id,
+        contract_id,
+        needs_description,
+        source_lead_id,
+    } = body;
+    if patient_id.is_none() && source_lead_id.is_none() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Order requires patient_id or source_lead_id",
+        );
     }
 
-    if let Some(contract_id) = body.contract_id {
-        let contract_patient_id: Uuid = match sqlx::query_scalar::<_, Uuid>(
-            "SELECT patient_id FROM framework_contracts WHERE id = $1",
+    if let Some(source_lead_id) = source_lead_id {
+        let existing = match sqlx::query(
+            r#"SELECT id, order_number, patient_id, created_at
+               FROM orders
+               WHERE source_lead_id = $1"#,
+        )
+        .bind(source_lead_id)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(error = %error, source_lead_id = %source_lead_id, "find source lead order");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+        if let Some(row) = existing {
+            let order_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+            match can_access_order(&state, &auth, order_id, None).await {
+                Ok(true) => {}
+                Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+                Err(resp) => return resp,
+            }
+            if let Err(resp) = ensure_created_order_state(&state, order_id, auth.user_id).await {
+                return resp;
+            }
+            return (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "id": order_id,
+                    "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
+                    "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
+                    "lead_id": source_lead_id,
+                    "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                    "idempotent_replay": true,
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    if let Some(patient_id) = patient_id
+        && let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await
+    {
+        return resp;
+    }
+
+    let lead_wizard_draft_allowed = if let Some(source_lead_id) = source_lead_id {
+        let lead = match sqlx::query(
+            "SELECT converted_patient_id, qualification_status FROM leads WHERE id = $1",
+        )
+        .bind(source_lead_id)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(Some(row)) => row,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
+            Err(error) => {
+                tracing::error!(error = %error, source_lead_id = %source_lead_id, "validate source lead");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+        let converted_patient_id = lead
+            .try_get::<Option<Uuid>, _>("converted_patient_id")
+            .unwrap_or_default();
+        let qualification_status = lead
+            .try_get::<String, _>("qualification_status")
+            .unwrap_or_default();
+        match patient_id {
+            None if converted_patient_id.is_some() => {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Converted lead must use its patient context",
+                );
+            }
+            Some(patient_id)
+                if converted_patient_id != Some(patient_id)
+                    || qualification_status != "converted" =>
+            {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Source lead is not converted to this patient",
+                );
+            }
+            _ => {}
+        }
+        patient_id.is_some()
+    } else {
+        false
+    };
+
+    if let Some(contract_id) = contract_id {
+        let contract = match sqlx::query(
+            "SELECT patient_id, lead_id FROM framework_contracts WHERE id = $1",
         )
         .bind(contract_id)
         .fetch_optional(&state.db)
         .await
         {
-            Ok(Some(patient_id)) => patient_id,
+            Ok(Some(row)) => row,
             Ok(None) => {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
                     "Framework contract not found",
                 );
             }
-            Err(e) => {
-                tracing::error!(error = %e, contract_id = %contract_id, "validate contract");
+            Err(error) => {
+                tracing::error!(error = %error, contract_id = %contract_id, "validate contract");
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         };
-
-        if contract_patient_id != body.patient_id {
+        let contract_patient_id = contract
+            .try_get::<Option<Uuid>, _>("patient_id")
+            .unwrap_or_default();
+        let contract_lead_id = contract
+            .try_get::<Option<Uuid>, _>("lead_id")
+            .unwrap_or_default();
+        let belongs_to_subject = match patient_id {
+            Some(patient_id) => contract_patient_id == Some(patient_id),
+            None => contract_lead_id == source_lead_id,
+        };
+        if !belongs_to_subject {
             return err(
                 StatusCode::UNPROCESSABLE_ENTITY,
-                "Framework contract does not belong to patient",
+                if patient_id.is_some() {
+                    "Framework contract does not belong to patient"
+                } else {
+                    "Framework contract does not belong to lead"
+                },
             );
         }
     }
 
-    let lead_wizard_draft_allowed = match body.source_lead_id {
-        Some(source_lead_id) => {
-            let converted_to_patient = match sqlx::query_scalar::<_, bool>(
-                r#"SELECT EXISTS(
-                       SELECT 1
-                       FROM leads
-                       WHERE id = $1
-                         AND converted_patient_id = $2
-                         AND qualification_status = 'converted'
-                   )"#,
-            )
-            .bind(source_lead_id)
-            .bind(body.patient_id)
-            .fetch_one(&state.db)
-            .await
+    if let Some(patient_id) = patient_id {
+        let patient_recheck =
+            match crate::routes::patients::load_patient_recheck_readiness(&state, patient_id).await
             {
-                Ok(value) => value,
-                Err(e) => {
-                    tracing::error!(error = %e, source_lead_id = %source_lead_id, "validate source lead");
-                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-                }
+                Ok(Some(readiness)) => readiness,
+                Ok(None) => return err(StatusCode::NOT_FOUND, "Patient not found"),
+                Err(resp) => return resp,
             };
 
-            if !converted_to_patient {
-                return err(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "Source lead is not converted to this patient",
-                );
+        if !patient_recheck.can_create_order {
+            if lead_wizard_draft_allowed {
+                state.audit_sender.try_send(audit::domain_event(
+                    "create_order_draft_before_recheck",
+                    Some(auth.user_id),
+                    "patient",
+                    Some(patient_id),
+                    serde_json::json!({
+                        "source_lead_id": source_lead_id,
+                        "blocking_reasons": patient_recheck.blocking_reasons.clone(),
+                    }),
+                ));
+            } else {
+                state.audit_sender.try_send(audit::domain_event(
+                    "create_order_blocked_recheck",
+                    Some(auth.user_id),
+                    "patient",
+                    Some(patient_id),
+                    serde_json::json!({
+                        "blocking_reasons": patient_recheck.blocking_reasons.clone(),
+                        "recheck": patient_recheck.payload.clone(),
+                    }),
+                ));
+                return patient_recheck_err(&patient_recheck);
             }
-
-            match sqlx::query_as::<_, (Uuid, String, chrono::DateTime<chrono::Utc>)>(
-                "SELECT id, order_number, created_at FROM orders WHERE source_lead_id = $1",
-            )
-            .bind(source_lead_id)
-            .fetch_optional(&state.db)
-            .await
-            {
-                Ok(Some((id, order_number, created_at))) => {
-                    if let Err(resp) = ensure_created_order_state(&state, id, auth.user_id).await {
-                        return resp;
-                    }
-                    return (
-                        StatusCode::OK,
-                        Json(serde_json::json!({
-                            "id": id,
-                            "order_number": order_number,
-                            "created_at": created_at,
-                        })),
-                    )
-                        .into_response();
-                }
-                Ok(None) => true,
-                Err(e) => {
-                    tracing::error!(error = %e, source_lead_id = %source_lead_id, "find source lead order");
-                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-                }
-            }
-        }
-        None => false,
-    };
-
-    let patient_recheck = match crate::routes::patients::load_patient_recheck_readiness(
-        &state,
-        body.patient_id,
-    )
-    .await
-    {
-        Ok(Some(readiness)) => readiness,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Patient not found"),
-        Err(resp) => return resp,
-    };
-
-    if !patient_recheck.can_create_order {
-        if lead_wizard_draft_allowed {
-            state.audit_sender.try_send(audit::domain_event(
-                "create_order_draft_before_recheck",
-                Some(auth.user_id),
-                "patient",
-                Some(body.patient_id),
-                serde_json::json!({
-                    "source_lead_id": body.source_lead_id,
-                    "blocking_reasons": patient_recheck.blocking_reasons.clone(),
-                }),
-            ));
-        } else {
-            state.audit_sender.try_send(audit::domain_event(
-                "create_order_blocked_recheck",
-                Some(auth.user_id),
-                "patient",
-                Some(body.patient_id),
-                serde_json::json!({
-                    "blocking_reasons": patient_recheck.blocking_reasons.clone(),
-                    "recheck": patient_recheck.payload.clone(),
-                }),
-            ));
-            return patient_recheck_err(&patient_recheck);
         }
     }
 
@@ -2105,10 +2184,10 @@ async fn create_order(
            RETURNING id, order_number, created_at"#,
     )
     .bind(num)
-    .bind(body.patient_id)
-    .bind(body.contract_id)
-    .bind(body.needs_description)
-    .bind(body.source_lead_id)
+    .bind(patient_id)
+    .bind(contract_id)
+    .bind(needs_description)
+    .bind(source_lead_id)
     .bind(auth.user_id)
     .fetch_optional(&state.db)
     .await
@@ -2125,7 +2204,8 @@ async fn create_order(
                 Some(r.id),
                 serde_json::json!({
                     "order_number": order_number.clone(),
-                    "patient_id": body.patient_id,
+                    "patient_id": patient_id,
+                    "lead_id": source_lead_id,
                 }),
             ));
             if let Err(resp) = crate::routes::workflow_lifecycle::record_event(
@@ -2140,7 +2220,8 @@ async fn create_order(
                     note: None,
                     metadata: serde_json::json!({
                         "order_number": order_number.clone(),
-                        "patient_id": body.patient_id,
+                        "patient_id": patient_id,
+                        "lead_id": source_lead_id,
                     }),
                 },
             )
@@ -2155,16 +2236,27 @@ async fn create_order(
                 r.id,
                 serde_json::json!({
                     "order_number": order_number.clone(),
-                    "patient_id": body.patient_id,
+                    "patient_id": patient_id,
+                    "lead_id": source_lead_id,
                     "phase": "discovery",
                 }),
             )
             .await;
             tracing::info!(by = %auth.user_id, order = %order_number, "Order created");
-            (StatusCode::CREATED, Json(serde_json::json!({"id": r.id, "order_number": order_number, "created_at": r.created_at}))).into_response()
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({
+                    "id": r.id,
+                    "order_number": order_number,
+                    "patient_id": patient_id,
+                    "lead_id": source_lead_id,
+                    "created_at": r.created_at,
+                })),
+            )
+                .into_response()
         }
         Ok(None) => {
-            let Some(source_lead_id) = body.source_lead_id else {
+            let Some(source_lead_id) = source_lead_id else {
                 tracing::error!("order insert returned no row without a source lead");
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             };
@@ -2177,8 +2269,7 @@ async fn create_order(
             .await
             {
                 Ok(Some(r)) => {
-                    if let Err(resp) =
-                        ensure_created_order_state(&state, r.id, auth.user_id).await
+                    if let Err(resp) = ensure_created_order_state(&state, r.id, auth.user_id).await
                     {
                         return resp;
                     }
@@ -2187,7 +2278,10 @@ async fn create_order(
                         Json(serde_json::json!({
                             "id": r.id,
                             "order_number": r.order_number,
+                            "patient_id": patient_id,
+                            "lead_id": source_lead_id,
                             "created_at": r.created_at,
+                            "idempotent_replay": true,
                         })),
                     )
                         .into_response()
@@ -2430,11 +2524,7 @@ async fn update_order_commercial_basis(
             Ok(patient_id) => patient_id,
             Err(resp) => return resp,
         };
-    let total_estimated = match body
-        .total_estimated
-        .trim()
-        .parse::<rust_decimal::Decimal>()
-    {
+    let total_estimated = match body.total_estimated.trim().parse::<rust_decimal::Decimal>() {
         Ok(value) if value >= rust_decimal::Decimal::ZERO => value,
         _ => {
             return err(
@@ -5615,7 +5705,7 @@ async fn can_access_order(
     }
 
     let Some(patient_id) = patient_id else {
-        let row = sqlx::query("SELECT patient_id FROM orders WHERE id = $1")
+        let row = sqlx::query("SELECT patient_id, source_lead_id FROM orders WHERE id = $1")
             .bind(order_id)
             .fetch_optional(&state.db)
             .await
@@ -5628,19 +5718,28 @@ async fn can_access_order(
             return Ok(false);
         };
 
-        let patient_id: Uuid = row.try_get("patient_id").map_err(|_| {
+        let patient_id: Option<Uuid> = row.try_get("patient_id").map_err(|_| {
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to decode order access context",
             )
         })?;
+        if let Some(patient_id) = patient_id {
+            return access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e, order_id = %order_id, "Failed to validate order assignment");
+                    err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to validate order access",
+                    )
+                });
+        }
 
-        return access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, order_id = %order_id, "Failed to validate order assignment");
-                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate order access")
-            });
+        return Ok(row
+            .try_get::<Option<Uuid>, _>("source_lead_id")
+            .unwrap_or_default()
+            .is_some());
     };
 
     access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
@@ -5713,7 +5812,7 @@ async fn ensure_order_service_patient_allowed(
     auth: &AuthUser,
     order_id: Uuid,
     requested_patient_id: Option<Uuid>,
-) -> Result<Uuid, axum::response::Response> {
+) -> Result<Option<Uuid>, axum::response::Response> {
     let row = sqlx::query("SELECT patient_id, order_role FROM orders WHERE id = $1")
         .bind(order_id)
         .fetch_optional(&state.db)
@@ -5726,15 +5825,24 @@ async fn ensure_order_service_patient_allowed(
             )
         })?
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "Order not found"))?;
-    let order_patient_id: Uuid = row.try_get("patient_id").map_err(|_| {
+    let order_patient_id: Option<Uuid> = row.try_get("patient_id").map_err(|_| {
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to decode service patient context",
         )
     })?;
+    let Some(order_patient_id) = order_patient_id else {
+        if requested_patient_id.is_some() {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Lead order service cannot be assigned to a patient before conversion",
+            ));
+        }
+        return Ok(None);
+    };
     let service_patient_id = requested_patient_id.unwrap_or(order_patient_id);
     if service_patient_id == order_patient_id {
-        return Ok(service_patient_id);
+        return Ok(Some(service_patient_id));
     }
 
     let order_role: String = row.try_get("order_role").unwrap_or_default();
@@ -5783,7 +5891,7 @@ async fn ensure_order_service_patient_allowed(
     })?;
 
     if covered {
-        Ok(service_patient_id)
+        Ok(Some(service_patient_id))
     } else {
         Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
