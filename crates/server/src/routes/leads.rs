@@ -212,9 +212,14 @@ async fn list_leads(
                 // through and wait for a 422. The full readiness object
                 // stays on the detail endpoint — we only lift the single
                 // boolean here to keep the list payload light.
-                let readiness = build_lead_conversion_readiness(&r);
+                let lead_id = r.try_get::<Uuid, _>("id").unwrap_or_default();
+                let readiness = match load_lead_conversion_readiness(&state, lead_id).await {
+                    Ok(Some(readiness)) => readiness,
+                    Ok(None) => continue,
+                    Err(resp) => return resp,
+                };
                 leads.push(json!({
-                    "id": r.try_get::<Uuid, _>("id").unwrap_or_default(),
+                    "id": lead_id,
                     "first_name": r.try_get::<String, _>("first_name").unwrap_or_default(),
                     "last_name": r.try_get::<String, _>("last_name").unwrap_or_default(),
                     "email": r.try_get::<Option<String>, _>("email").unwrap_or_default(),
@@ -282,10 +287,7 @@ fn is_valid_lead_type(value: &str) -> bool {
 }
 
 fn normalize_lead_origin(value: &str) -> String {
-    value
-        .trim()
-        .to_ascii_lowercase()
-        .replace(['-', ' '], "_")
+    value.trim().to_ascii_lowercase().replace(['-', ' '], "_")
 }
 
 fn lead_type_from_origin(
@@ -388,8 +390,23 @@ struct LeadConversionReadinessInput {
     legal_sex: Option<String>,
     email: Option<String>,
     phone: Option<String>,
+    street_address: Option<String>,
+    city: Option<String>,
+    zip_code: Option<String>,
+    primary_concern_text: Option<String>,
+    requested_specialties: Value,
     consent_privacy_practices: bool,
     consent_healthcare: bool,
+    identity_document_verified: bool,
+    dsgvo_document_signed: bool,
+    intake_completed: bool,
+    contract_signed: bool,
+    order_exists: bool,
+    order_service_ready: bool,
+    order_signed_patient: bool,
+    order_signed_agency: bool,
+    quote_accepted: bool,
+    prepayment_ready: bool,
 }
 
 fn evaluate_lead_conversion_readiness(
@@ -407,6 +424,42 @@ fn evaluate_lead_conversion_readiness(
             .phone
             .as_deref()
             .is_some_and(|value| !value.trim().is_empty());
+    let address_present = [&input.street_address, &input.city, &input.zip_code]
+        .into_iter()
+        .all(|value| {
+            value
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+        });
+    let primary_concern_present = input
+        .primary_concern_text
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty());
+    let specialties_present = match &input.requested_specialties {
+        Value::Array(items) => items.iter().any(|value| match value {
+            Value::String(value) => !value.trim().is_empty(),
+            Value::Object(_) => true,
+            _ => false,
+        }),
+        Value::Object(items) => !items.is_empty(),
+        _ => false,
+    };
+    let master_data_ready =
+        birth_date_present && legal_sex_present && primary_contact_present && address_present;
+    let need_ready = primary_concern_present && specialties_present && lead_qualified;
+    let documents_ready = compliance_completed
+        && input.consent_privacy_practices
+        && input.consent_healthcare
+        && input.identity_document_verified
+        && input.dsgvo_document_signed
+        && input.intake_completed;
+    let commercial_ready = input.contract_signed
+        && input.order_exists
+        && input.order_service_ready
+        && input.order_signed_patient
+        && input.order_signed_agency
+        && input.quote_accepted
+        && input.prepayment_ready;
 
     let checks = vec![
         json!({
@@ -414,42 +467,140 @@ fn evaluate_lead_conversion_readiness(
             "label": "Lead qualified",
             "passed": lead_qualified,
             "blocking_for": "conversion",
+            "stage": "need",
         }),
         json!({
             "key": "compliance_completed",
             "label": "Compliance completed",
             "passed": compliance_completed,
             "blocking_for": "qualification",
+            "stage": "documents",
         }),
         json!({
             "key": "birth_date_present",
             "label": "Birth date captured",
             "passed": birth_date_present,
             "blocking_for": "qualification",
+            "stage": "master_data",
         }),
         json!({
             "key": "legal_sex_present",
             "label": "Legal sex captured",
             "passed": legal_sex_present,
             "blocking_for": "qualification",
+            "stage": "master_data",
         }),
         json!({
             "key": "primary_contact_present",
             "label": "Primary contact available",
             "passed": primary_contact_present,
             "blocking_for": "qualification",
+            "stage": "master_data",
         }),
         json!({
             "key": "privacy_consent",
             "label": "Privacy practices accepted",
             "passed": input.consent_privacy_practices,
             "blocking_for": "qualification",
+            "stage": "documents",
         }),
         json!({
             "key": "healthcare_consent",
             "label": "Healthcare consent captured",
             "passed": input.consent_healthcare,
             "blocking_for": "qualification",
+            "stage": "documents",
+        }),
+        json!({
+            "key": "address_present",
+            "label": "Address captured",
+            "passed": address_present,
+            "blocking_for": "conversion",
+            "stage": "master_data",
+        }),
+        json!({
+            "key": "primary_concern_present",
+            "label": "Primary concern captured",
+            "passed": primary_concern_present,
+            "blocking_for": "conversion",
+            "stage": "need",
+        }),
+        json!({
+            "key": "specialties_present",
+            "label": "Requested specialty selected",
+            "passed": specialties_present,
+            "blocking_for": "conversion",
+            "stage": "need",
+        }),
+        json!({
+            "key": "identity_document_verified",
+            "label": "Identity document verified",
+            "passed": input.identity_document_verified,
+            "blocking_for": "conversion",
+            "stage": "documents",
+        }),
+        json!({
+            "key": "dsgvo_document_signed",
+            "label": "DSGVO document signed",
+            "passed": input.dsgvo_document_signed,
+            "blocking_for": "conversion",
+            "stage": "documents",
+        }),
+        json!({
+            "key": "intake_completed",
+            "label": "Anamnesis intake completed",
+            "passed": input.intake_completed,
+            "blocking_for": "conversion",
+            "stage": "documents",
+        }),
+        json!({
+            "key": "contract_signed",
+            "label": "Framework contract signed",
+            "passed": input.contract_signed,
+            "blocking_for": "conversion",
+            "stage": "commercial",
+        }),
+        json!({
+            "key": "order_exists",
+            "label": "Order created",
+            "passed": input.order_exists,
+            "blocking_for": "conversion",
+            "stage": "commercial",
+        }),
+        json!({
+            "key": "order_service_ready",
+            "label": "Order service configured",
+            "passed": input.order_service_ready,
+            "blocking_for": "conversion",
+            "stage": "commercial",
+        }),
+        json!({
+            "key": "order_signed_patient",
+            "label": "Order signed by customer",
+            "passed": input.order_signed_patient,
+            "blocking_for": "conversion",
+            "stage": "commercial",
+        }),
+        json!({
+            "key": "order_signed_agency",
+            "label": "Order signed by agency",
+            "passed": input.order_signed_agency,
+            "blocking_for": "conversion",
+            "stage": "commercial",
+        }),
+        json!({
+            "key": "quote_accepted",
+            "label": "Quote accepted",
+            "passed": input.quote_accepted,
+            "blocking_for": "conversion",
+            "stage": "commercial",
+        }),
+        json!({
+            "key": "prepayment_ready",
+            "label": "Required prepayment received",
+            "passed": input.prepayment_ready,
+            "blocking_for": "conversion",
+            "stage": "commercial",
         }),
     ];
 
@@ -478,6 +629,45 @@ fn evaluate_lead_conversion_readiness(
     if !lead_qualified {
         conversion_reasons.insert(0, "Lead must be qualified before conversion".to_string());
     }
+    if !address_present {
+        conversion_reasons.push("Complete street, city and postal code".to_string());
+    }
+    if !primary_concern_present {
+        conversion_reasons.push("Primary concern is missing".to_string());
+    }
+    if !specialties_present {
+        conversion_reasons.push("Requested specialty is missing".to_string());
+    }
+    if !input.identity_document_verified {
+        conversion_reasons.push("Identity document is not verified".to_string());
+    }
+    if !input.dsgvo_document_signed {
+        conversion_reasons.push("Signed DSGVO document is missing".to_string());
+    }
+    if !input.intake_completed {
+        conversion_reasons.push("Anamnesis intake is incomplete".to_string());
+    }
+    if !input.contract_signed {
+        conversion_reasons.push("Framework contract is not signed".to_string());
+    }
+    if !input.order_exists {
+        conversion_reasons.push("Onboarding order is missing".to_string());
+    }
+    if !input.order_service_ready {
+        conversion_reasons.push("Order needs at least one valid service".to_string());
+    }
+    if !input.order_signed_patient {
+        conversion_reasons.push("Customer order signature is missing".to_string());
+    }
+    if !input.order_signed_agency {
+        conversion_reasons.push("Agency order signature is missing".to_string());
+    }
+    if !input.quote_accepted {
+        conversion_reasons.push("Quote is not accepted".to_string());
+    }
+    if !input.prepayment_ready {
+        conversion_reasons.push("Required prepayment is not complete".to_string());
+    }
     if input.converted_patient_id.is_some() {
         conversion_reasons.push("Lead is already converted".to_string());
     }
@@ -494,6 +684,13 @@ fn evaluate_lead_conversion_readiness(
             "qualification_reasons": qualification_reasons,
             "blocking_reasons": conversion_reasons,
             "checks": checks,
+            "steps": [
+                { "key": "master_data", "label": "Stammdaten", "ready": master_data_ready },
+                { "key": "need", "label": "Bedarf", "ready": need_ready },
+                { "key": "documents", "label": "Unterlagen", "ready": documents_ready },
+                { "key": "commercial", "label": "Vertrag & Auftrag", "ready": commercial_ready },
+                { "key": "release", "label": "Freigabe", "ready": conversion_ready }
+            ],
         }),
     }
 }
@@ -507,8 +704,25 @@ fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversio
         legal_sex: row.try_get("legal_sex").unwrap_or_default(),
         email: row.try_get("email").unwrap_or_default(),
         phone: row.try_get("phone").unwrap_or_default(),
+        street_address: row.try_get("street_address").unwrap_or_default(),
+        city: row.try_get("city").unwrap_or_default(),
+        zip_code: row.try_get("zip_code").unwrap_or_default(),
+        primary_concern_text: row.try_get("primary_concern_text").unwrap_or_default(),
+        requested_specialties: row
+            .try_get("requested_specialties")
+            .unwrap_or_else(|_| json!([])),
         consent_privacy_practices: row.try_get("consent_privacy_practices").unwrap_or(false),
         consent_healthcare: row.try_get("consent_healthcare").unwrap_or(false),
+        identity_document_verified: row.try_get("identity_document_verified").unwrap_or(false),
+        dsgvo_document_signed: row.try_get("dsgvo_document_signed").unwrap_or(false),
+        intake_completed: row.try_get("intake_completed").unwrap_or(false),
+        contract_signed: row.try_get("contract_signed").unwrap_or(false),
+        order_exists: row.try_get("order_exists").unwrap_or(false),
+        order_service_ready: row.try_get("order_service_ready").unwrap_or(false),
+        order_signed_patient: row.try_get("order_signed_patient").unwrap_or(false),
+        order_signed_agency: row.try_get("order_signed_agency").unwrap_or(false),
+        quote_accepted: row.try_get("quote_accepted").unwrap_or(false),
+        prepayment_ready: row.try_get("prepayment_ready").unwrap_or(false),
     })
 }
 
@@ -524,8 +738,84 @@ async fn load_lead_conversion_readiness(
                   legal_sex,
                   email,
                   phone,
+                  street_address,
+                  city,
+                  zip_code,
+                  primary_concern_text,
+                  requested_specialties,
                   consent_privacy_practices,
-                  consent_healthcare
+                  consent_healthcare,
+                  EXISTS (
+                      SELECT 1 FROM documents d
+                      WHERE d.lead_id = leads.id
+                        AND d.status = 'active'
+                        AND d.compliance_kind = 'identity'
+                        AND d.signed_at IS NOT NULL
+                  ) AS identity_document_verified,
+                  EXISTS (
+                      SELECT 1 FROM documents d
+                      WHERE d.lead_id = leads.id
+                        AND d.status = 'active'
+                        AND d.compliance_kind = 'dsgvo'
+                        AND d.signed_at IS NOT NULL
+                  ) AS dsgvo_document_signed,
+                  EXISTS (
+                      SELECT 1 FROM cases c
+                      WHERE c.lead_id = leads.id
+                        AND c.intake_completed_at IS NOT NULL
+                  ) AS intake_completed,
+                  EXISTS (
+                      SELECT 1 FROM framework_contracts fc
+                      WHERE fc.lead_id = leads.id
+                        AND fc.status = 'signed'
+                        AND fc.signed_at IS NOT NULL
+                  ) AS contract_signed,
+                  EXISTS (
+                      SELECT 1 FROM orders o
+                      WHERE o.source_lead_id = leads.id
+                  ) AS order_exists,
+                  EXISTS (
+                      SELECT 1
+                      FROM orders o
+                      JOIN order_leistungen ol ON ol.order_id = o.id
+                      WHERE o.source_lead_id = leads.id
+                        AND length(trim(ol.description)) > 0
+                        AND ol.quantity > 0
+                        AND ol.unit_price >= 0
+                  ) AS order_service_ready,
+                  COALESCE((
+                      SELECT o.signed_patient
+                      FROM orders o
+                      WHERE o.source_lead_id = leads.id
+                      LIMIT 1
+                  ), false) AS order_signed_patient,
+                  COALESCE((
+                      SELECT o.signed_agency
+                      FROM orders o
+                      WHERE o.source_lead_id = leads.id
+                      LIMIT 1
+                  ), false) AS order_signed_agency,
+                  EXISTS (
+                      SELECT 1
+                      FROM orders o
+                      JOIN quotes q ON q.order_id = o.id
+                      WHERE o.source_lead_id = leads.id
+                        AND q.status = 'accepted'
+                  ) AS quote_accepted,
+                  COALESCE((
+                      SELECT CASE
+                          WHEN NOT o.prepayment_required THEN true
+                          ELSE EXISTS (
+                              SELECT 1 FROM quotes q
+                              WHERE q.order_id = o.id
+                                AND q.status = 'accepted'
+                                AND q.paid_amount >= q.total_gross
+                          )
+                      END
+                      FROM orders o
+                      WHERE o.source_lead_id = leads.id
+                      LIMIT 1
+                  ), false) AS prepayment_ready
            FROM leads
            WHERE id = $1"#,
     )
@@ -983,7 +1273,11 @@ async fn get_lead(
             .try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")
             .ok()),
     );
-    let readiness = build_lead_conversion_readiness(&row);
+    let readiness = match load_lead_conversion_readiness(&state, lead_id).await {
+        Ok(Some(readiness)) => readiness,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
+        Err(resp) => return resp,
+    };
     let qualification_status = s_req(&row, "qualification_status");
     let failed_outcome_status = row
         .try_get::<String, _>("failed_outcome_status")
@@ -1064,14 +1358,20 @@ async fn update_lead(
 
     let first_name = match body.first_name.as_deref() {
         Some(value) if value.trim().is_empty() => {
-            return err(StatusCode::UNPROCESSABLE_ENTITY, "first_name cannot be empty");
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "first_name cannot be empty",
+            );
         }
         Some(value) => Some(value.trim().to_string()),
         None => None,
     };
     let last_name = match body.last_name.as_deref() {
         Some(value) if value.trim().is_empty() => {
-            return err(StatusCode::UNPROCESSABLE_ENTITY, "last_name cannot be empty");
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "last_name cannot be empty",
+            );
         }
         Some(value) => Some(value.trim().to_string()),
         None => None,
@@ -1166,7 +1466,11 @@ async fn update_lead(
     .bind(body.additional_concerns.as_deref())
     .bind(body.selected_program.as_deref())
     .bind(body.services.as_deref())
-    .bind(body.requested_specialties.as_ref().map(|value| value.to_string()))
+    .bind(
+        body.requested_specialties
+            .as_ref()
+            .map(|value| value.to_string()),
+    )
     .bind(body.wizard_state.as_ref().map(|value| value.to_string()))
     .execute(&state.db)
     .await
@@ -1498,14 +1802,23 @@ async fn convert_lead(
         return e;
     }
 
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, lead_id = %lead_id, "begin lead conversion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
     let lead = match sqlx::query(
         r#"SELECT id, first_name, last_name, email, phone, country, primary_language,
                   date_of_birth, legal_sex, qualification_status, converted_patient_id,
-                  failed_outcome_status
-           FROM leads WHERE id = $1"#,
+                  failed_outcome_status, street_address, city, zip_code
+           FROM leads WHERE id = $1
+           FOR UPDATE"#,
     )
     .bind(lead_id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *tx)
     .await
     {
         Ok(Some(l)) => l,
@@ -1564,10 +1877,16 @@ async fn convert_lead(
         }
     };
 
-    let seq: i64 = sqlx::query_scalar::<_, i64>(r#"SELECT nextval('patient_id_seq')"#)
-        .fetch_one(&state.db)
+    let seq: i64 = match sqlx::query_scalar::<_, i64>(r#"SELECT nextval('patient_id_seq')"#)
+        .fetch_one(&mut *tx)
         .await
-        .unwrap_or(0);
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, lead_id = %lead_id, "allocate patient id");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
     let pid = format!("P-{}-{:04}", chrono::Utc::now().format("%Y%m%d"), seq);
 
     let first_name: String = lead.try_get("first_name").unwrap_or_default();
@@ -1577,11 +1896,16 @@ async fn convert_lead(
     let country: Option<String> = lead.try_get("country").ok().flatten();
     let primary_language: Option<String> = lead.try_get("primary_language").ok().flatten();
     let languages: Vec<String> = primary_language.into_iter().collect();
+    let street_address: Option<String> = lead.try_get("street_address").ok().flatten();
+    let city: Option<String> = lead.try_get("city").ok().flatten();
+    let zip_code: Option<String> = lead.try_get("zip_code").ok().flatten();
 
     let patient_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender,
-                                 email, phone_primary, nationality, languages, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id"#,
+                                 email, phone_primary, nationality, languages,
+                                 address_street, address_city, address_zip, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+           RETURNING id"#,
     )
     .bind(&pid)
     .bind(&first_name)
@@ -1592,8 +1916,11 @@ async fn convert_lead(
     .bind(phone)
     .bind(country)
     .bind(&languages)
+    .bind(street_address)
+    .bind(city)
+    .bind(zip_code)
     .bind(auth.user_id)
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await
     {
         Ok(id) => id,
@@ -1603,21 +1930,70 @@ async fn convert_lead(
         }
     };
 
-    let _ = sqlx::query(
-        "UPDATE leads SET qualification_status = 'converted', converted_patient_id = $2 WHERE id = $1",
+    if let Err(error) = sqlx::query(
+        r#"WITH moved_cases AS (
+               UPDATE cases
+               SET patient_id = $2, lead_id = NULL
+               WHERE lead_id = $1
+               RETURNING id
+           ), moved_documents AS (
+               UPDATE documents
+               SET patient_id = $2, lead_id = NULL
+               WHERE lead_id = $1
+               RETURNING id
+           ), moved_contracts AS (
+               UPDATE framework_contracts
+               SET patient_id = $2, lead_id = NULL
+               WHERE lead_id = $1
+               RETURNING id
+           ), moved_orders AS (
+               UPDATE orders
+               SET patient_id = $2
+               WHERE source_lead_id = $1
+               RETURNING id
+           ), moved_services AS (
+               UPDATE order_leistungen service
+               SET patient_id = $2
+               FROM orders o
+               WHERE service.order_id = o.id
+                 AND o.source_lead_id = $1
+                 AND service.patient_id IS NULL
+               RETURNING service.id
+           )
+           UPDATE leads
+           SET qualification_status = 'converted', converted_patient_id = $2
+           WHERE id = $1 AND converted_patient_id IS NULL"#,
     )
     .bind(lead_id)
     .bind(patient_id)
-    .execute(&state.db)
-    .await;
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "transfer lead onboarding artifacts");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
 
-    let _ = sqlx::query(
-        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $2)",
+    if let Err(error) = sqlx::query(
+        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+           VALUES ($1, $2, $2)
+           ON CONFLICT (patient_id, user_id) DO UPDATE
+           SET assigned_by = EXCLUDED.assigned_by,
+               assigned_at = now(),
+               revoked_at = NULL"#,
     )
     .bind(patient_id)
     .bind(auth.user_id)
-    .execute(&state.db)
-    .await;
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "assign converted patient");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "commit lead conversion");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
 
     if let Err(resp) = crate::routes::workflow_checklists::ensure_default_patient_workflow(
         &state,
@@ -1627,6 +2003,30 @@ async fn convert_lead(
     .await
     {
         return resp;
+    }
+
+    let order_ids =
+        match sqlx::query_scalar::<_, Uuid>("SELECT id FROM orders WHERE source_lead_id = $1")
+            .bind(lead_id)
+            .fetch_all(&state.db)
+            .await
+        {
+            Ok(order_ids) => order_ids,
+            Err(error) => {
+                tracing::error!(error = %error, lead_id = %lead_id, "load converted lead orders");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+    for order_id in order_ids {
+        if let Err(resp) = crate::routes::workflow_checklists::ensure_default_order_workflow(
+            &state,
+            order_id,
+            Some(auth.user_id),
+        )
+        .await
+        {
+            return resp;
+        }
     }
 
     state.audit_sender.try_send(audit::domain_event(
@@ -1689,303 +2089,12 @@ async fn convert_lead(
     .into_response()
 }
 
-/// Shared tail for a lead→patient conversion: mark the lead converted (sticky),
-/// self-assign the operator, seed the patient workflow, and emit
-/// audit/lifecycle/realtime events. Returns an error response on a hard failure.
-async fn finalize_lead_conversion(
-    state: &AppState,
-    auth: &AuthUser,
-    lead_id: Uuid,
-    previous_status: &str,
-    patient_id: Uuid,
-    pid: &str,
-) -> Result<(), axum::response::Response> {
-    let _ = sqlx::query(
-        "UPDATE leads SET qualification_status = 'converted', converted_patient_id = $2 WHERE id = $1",
-    )
-    .bind(lead_id)
-    .bind(patient_id)
-    .execute(&state.db)
-    .await;
-
-    let _ = sqlx::query(
-        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $2)",
-    )
-    .bind(patient_id)
-    .bind(auth.user_id)
-    .execute(&state.db)
-    .await;
-
-    crate::routes::workflow_checklists::ensure_default_patient_workflow(
-        state,
-        patient_id,
-        Some(auth.user_id),
-    )
-    .await?;
-
-    state.audit_sender.try_send(audit::domain_event(
-        "convert_lead",
-        Some(auth.user_id),
-        "lead",
-        Some(lead_id),
-        json!({ "patient_id": patient_id, "patient_pid": pid }),
-    ));
-
-    crate::routes::workflow_lifecycle::record_event(
-        state,
-        crate::routes::workflow_lifecycle::RecordEvent {
-            entity_type: "lead",
-            entity_id: lead_id,
-            from_stage: Some(previous_status),
-            to_stage: "converted",
-            transition_kind: "converted",
-            changed_by: Some(auth.user_id),
-            note: Some("Lead converted to patient"),
-            metadata: json!({ "patient_id": patient_id, "patient_pid": pid }),
-        },
-    )
-    .await?;
-
-    crate::realtime::publish_lead_event(
-        state,
-        Some(auth.user_id),
-        "lead.converted",
-        lead_id,
-        json!({ "patient_id": patient_id, "patient_pid": pid }),
-    )
-    .await;
-    crate::realtime::publish_patient_event(
-        state,
-        Some(auth.user_id),
-        "patient.created",
-        patient_id,
-        json!({ "patient_pid": pid, "source_lead_id": lead_id }),
-    )
-    .await;
-
-    Ok(())
-}
-
-/// Wizard conversion path (convert-then-comply, design decision D2): converts a
-/// lead into a patient once identity basics are present — date of birth, a valid
-/// legal sex, and an email or phone — WITHOUT requiring compliance to be signed
-/// or the lead to be `qualified`. Those steps happen later against the patient
-/// inside the wizard. Carries over the lead's address on top of the standard copy.
 async fn wizard_convert_lead(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
-        return e;
-    }
-
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            tracing::error!(error = %e, lead_id = %lead_id, "begin wizard conversion");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-
-    // Serialize conversion attempts for one lead. This keeps the patient row,
-    // sticky lead link and initial assignment as one atomic unit.
-    let lead = match sqlx::query(
-        r#"SELECT id, first_name, last_name, email, phone, country, primary_language,
-                  date_of_birth, legal_sex, qualification_status, converted_patient_id,
-                  failed_outcome_status, street_address, city, zip_code
-           FROM leads WHERE id = $1
-           FOR UPDATE"#,
-    )
-    .bind(lead_id)
-    .fetch_optional(&mut *tx)
-    .await
-    {
-        Ok(Some(l)) => l,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
-        Err(e) => {
-            tracing::error!(error = %e, "wizard convert lead");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-
-    let converted_patient_id: Option<Uuid> = lead.try_get("converted_patient_id").ok().flatten();
-    if let Some(patient_id) = converted_patient_id {
-        let patient_pid = match sqlx::query_scalar::<_, String>(
-            "SELECT patient_id FROM patients WHERE id = $1",
-        )
-        .bind(patient_id)
-        .fetch_optional(&mut *tx)
-        .await
-        {
-            Ok(Some(value)) => value,
-            Ok(None) => {
-                tracing::error!(lead_id = %lead_id, patient_id = %patient_id, "converted lead points to missing patient");
-                return err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Converted lead patient is missing",
-                );
-            }
-            Err(e) => {
-                tracing::error!(error = %e, lead_id = %lead_id, patient_id = %patient_id, "load existing wizard patient");
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-            }
-        };
-
-        return Json(json!({
-            "patient_id": patient_id,
-            "patient_pid": patient_pid,
-            "already_converted": true,
-        }))
-        .into_response();
-    }
-    let failed_outcome_status: String = lead
-        .try_get("failed_outcome_status")
-        .unwrap_or_else(|_| "none".to_string());
-    if failed_outcome_status != "none" {
-        return err(
-            StatusCode::CONFLICT,
-            "Failed leads cannot be converted into patients",
-        );
-    }
-
-    let date_of_birth: Option<NaiveDate> = lead.try_get("date_of_birth").ok().flatten();
-    let Some(birth_date) = date_of_birth else {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Lead is missing date_of_birth; cannot convert to patient",
-        );
-    };
-    if birth_date > chrono::Utc::now().date_naive() {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Lead date_of_birth cannot be in the future",
-        );
-    }
-    let legal_sex: Option<String> = lead.try_get("legal_sex").ok().flatten();
-    let gender = match legal_sex.as_deref() {
-        Some("female") => "female",
-        Some("male") => "male",
-        Some("diverse") | Some("no_entry") => "diverse",
-        _ => {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "Lead is missing legal_sex; cannot convert to patient",
-            );
-        }
-    };
-    let email: Option<String> = lead.try_get("email").ok().flatten();
-    let phone: Option<String> = lead.try_get("phone").ok().flatten();
-    let has_contact = email.as_deref().is_some_and(|v| !v.trim().is_empty())
-        || phone.as_deref().is_some_and(|v| !v.trim().is_empty());
-    if !has_contact {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Lead needs an email or phone before conversion",
-        );
-    }
-
-    let seq: i64 = match sqlx::query_scalar::<_, i64>(r#"SELECT nextval('patient_id_seq')"#)
-        .fetch_one(&mut *tx)
-        .await
-    {
-        Ok(value) => value,
-        Err(e) => {
-            tracing::error!(error = %e, lead_id = %lead_id, "allocate wizard patient id");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-    let pid = format!("P-{}-{:04}", chrono::Utc::now().format("%Y%m%d"), seq);
-
-    let first_name: String = lead.try_get("first_name").unwrap_or_default();
-    let last_name: String = lead.try_get("last_name").unwrap_or_default();
-    let country: Option<String> = lead.try_get("country").ok().flatten();
-    let primary_language: Option<String> = lead.try_get("primary_language").ok().flatten();
-    let languages: Vec<String> = primary_language.into_iter().collect();
-    let street_address: Option<String> = lead.try_get("street_address").ok().flatten();
-    let city: Option<String> = lead.try_get("city").ok().flatten();
-    let zip_code: Option<String> = lead.try_get("zip_code").ok().flatten();
-
-    let patient_id = match sqlx::query_scalar::<_, Uuid>(
-        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender,
-                                 email, phone_primary, nationality, languages,
-                                 address_street, address_city, address_zip, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id"#,
-    )
-    .bind(&pid)
-    .bind(&first_name)
-    .bind(&last_name)
-    .bind(birth_date)
-    .bind(gender)
-    .bind(email)
-    .bind(phone)
-    .bind(country)
-    .bind(&languages)
-    .bind(street_address)
-    .bind(city)
-    .bind(zip_code)
-    .bind(auth.user_id)
-    .fetch_one(&mut *tx)
-    .await
-    {
-        Ok(id) => id,
-        Err(e) => {
-            tracing::error!(error = %e, "wizard create patient from lead");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-
-    let lead_update = sqlx::query(
-        "UPDATE leads
-         SET qualification_status = 'converted', converted_patient_id = $2
-         WHERE id = $1 AND converted_patient_id IS NULL",
-    )
-    .bind(lead_id)
-    .bind(patient_id)
-    .execute(&mut *tx)
-    .await;
-    match lead_update {
-        Ok(result) if result.rows_affected() == 1 => {}
-        Ok(_) => {
-            tracing::error!(lead_id = %lead_id, patient_id = %patient_id, "wizard lead conversion lost its row lock");
-            return err(StatusCode::CONFLICT, "Lead already converted");
-        }
-        Err(e) => {
-            tracing::error!(error = %e, lead_id = %lead_id, patient_id = %patient_id, "link wizard patient to lead");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    }
-
-    if let Err(e) = sqlx::query(
-        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
-         VALUES ($1, $2, $2)
-         ON CONFLICT (patient_id, user_id) DO UPDATE
-         SET assigned_by = EXCLUDED.assigned_by, assigned_at = now(), revoked_at = NULL",
-    )
-    .bind(patient_id)
-    .bind(auth.user_id)
-    .execute(&mut *tx)
-    .await
-    {
-        tracing::error!(error = %e, lead_id = %lead_id, patient_id = %patient_id, "assign wizard patient");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-
-    if let Err(e) = tx.commit().await {
-        tracing::error!(error = %e, lead_id = %lead_id, patient_id = %patient_id, "commit wizard conversion");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-
-    let previous_status: String = lead.try_get("qualification_status").unwrap_or_default();
-    if let Err(resp) =
-        finalize_lead_conversion(&state, &auth, lead_id, &previous_status, patient_id, &pid).await
-    {
-        return resp;
-    }
-
-    tracing::info!(by = %auth.user_id, lead = %lead_id, patient = %patient_id, "Lead wizard-converted to patient");
-
-    Json(json!({ "patient_id": patient_id, "patient_pid": pid })).into_response()
+    convert_lead(State(state), Extension(auth), Path(lead_id)).await
 }
 
 async fn resolve_failed_lead(
@@ -2995,8 +3104,23 @@ mod lead_conversion_readiness_tests {
             legal_sex: Some("female".to_string()),
             email: Some("lead@example.com".to_string()),
             phone: None,
+            street_address: Some("Hauptstrasse 1".to_string()),
+            city: Some("Berlin".to_string()),
+            zip_code: Some("10115".to_string()),
+            primary_concern_text: Some("Knee pain".to_string()),
+            requested_specialties: json!(["orthopedics"]),
             consent_privacy_practices: true,
             consent_healthcare: true,
+            identity_document_verified: true,
+            dsgvo_document_signed: true,
+            intake_completed: true,
+            contract_signed: true,
+            order_exists: true,
+            order_service_ready: true,
+            order_signed_patient: true,
+            order_signed_agency: true,
+            quote_accepted: true,
+            prepayment_ready: true,
         }
     }
 

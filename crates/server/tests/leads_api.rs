@@ -175,6 +175,149 @@ async fn make_lead_ready_for_qualification(
     body
 }
 
+struct SeededOnboardingArtifacts {
+    case_id: Uuid,
+    document_ids: Vec<Uuid>,
+    contract_id: Uuid,
+    order_id: Uuid,
+    service_id: Uuid,
+    quote_id: Uuid,
+}
+
+async fn seed_complete_lead_onboarding(app: &TestApp, lead_id: Uuid) -> SeededOnboardingArtifacts {
+    let pool = &app.suite.pool;
+    let tag = lead_id.simple().to_string();
+
+    sqlx::query(
+        r#"UPDATE leads
+           SET street_address = 'Hauptstr. 1',
+               city = 'Berlin',
+               zip_code = '10115',
+               primary_concern_text = 'Chronic knee pain',
+               requested_specialties = '["orthopedics"]'::jsonb,
+               compliance_status = 'signed',
+               consent_healthcare = true,
+               consent_privacy_practices = true
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let case_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO cases (
+                case_id, lead_id, manager_id, status, hauptanfragegrund,
+                aktuelle_anamnese, zuweiser, intake_completed_at, intake_completed_by
+           ) VALUES (
+                $1, $2, $3, 'open', 'Chronic knee pain',
+                'Pain for six months', 'Self referral', now(), $3
+           ) RETURNING id"#,
+    )
+    .bind(format!("C-ONBOARD-{tag}"))
+    .bind(lead_id)
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    let mut document_ids = Vec::new();
+    for compliance_kind in ["identity", "dsgvo"] {
+        let document_id = Uuid::new_v4();
+        sqlx::query(
+            r#"INSERT INTO documents (
+                    id, lead_id, auto_name, original_filename, art, category,
+                    status, visibility, is_medical, mime_type, file_size,
+                    version_root_document_id, version_number, uploaded_by,
+                    signed_at, signed_by, compliance_kind
+               ) VALUES (
+                    $1, $2, $3, $4, $5, 'administrative',
+                    'active', 'internal', false, 'application/pdf', 128,
+                    $1, 1, $6, now(), $6, $5
+               )"#,
+        )
+        .bind(document_id)
+        .bind(lead_id)
+        .bind(format!("{compliance_kind} {tag}"))
+        .bind(format!("{compliance_kind}-{tag}.pdf"))
+        .bind(compliance_kind)
+        .bind(app.patient_manager_id)
+        .execute(pool)
+        .await
+        .unwrap();
+        document_ids.push(document_id);
+    }
+
+    let contract_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO framework_contracts (
+                lead_id, contract_number, signed_at, status, created_by, client_reference
+           ) VALUES ($1, $2, now(), 'signed', $3, $4)
+           RETURNING id"#,
+    )
+    .bind(lead_id)
+    .bind(format!("FC-ONBOARD-{tag}"))
+    .bind(app.patient_manager_id)
+    .bind(format!("lead-onboarding:{lead_id}:framework"))
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (
+                order_number, contract_id, source_lead_id, needs_description,
+                signed_patient, signed_agency, signed_patient_at, signed_agency_at,
+                signed_at, prepayment_required, total_estimated, created_by
+           ) VALUES (
+                $1, $2, $3, 'Coordinate orthopedic treatment',
+                true, true, now(), now(), now(), true, 119, $4
+           ) RETURNING id"#,
+    )
+    .bind(format!("A-ONBOARD-{tag}"))
+    .bind(contract_id)
+    .bind(lead_id)
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    let service_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+                order_id, description, quantity, unit_price, vat_rate, client_reference
+           ) VALUES ($1, 'Initial orthopedic coordination', 1, 100, 19, $2)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(format!("lead-onboarding:{lead_id}:service:1"))
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    let quote_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO quotes (
+                order_id, quote_number, total_net, total_vat, total_gross,
+                status, paid_amount, paid_at, line_items, created_by
+           ) VALUES (
+                $1, $2, 100, 19, 119,
+                'accepted', 119, now(), '[]'::jsonb, $3
+           ) RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(format!("KV-ONBOARD-{tag}"))
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    SeededOnboardingArtifacts {
+        case_id,
+        document_ids,
+        contract_id,
+        order_id,
+        service_id,
+        quote_id,
+    }
+}
+
 #[tokio::test]
 async fn public_lead_intake_stores_contact_form_submissions_as_leads() {
     let Some(app) = test_app().await else { return };
@@ -243,8 +386,7 @@ async fn public_lead_intake_stores_contact_form_submissions_as_leads() {
         "I need a call about treatment coordination."
     );
 
-    let (status, list) =
-        json_request(&app, "GET", "/api/v1/leads?lead_type=form", &pm, None).await;
+    let (status, list) = json_request(&app, "GET", "/api/v1/leads?lead_type=form", &pm, None).await;
     assert_eq!(status, StatusCode::OK);
     let items = list.as_array().expect("leads list array");
     assert!(items.iter().any(|item| item["id"] == lead_id));
@@ -689,6 +831,8 @@ async fn full_lead_lifecycle() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
+    seed_complete_lead_onboarding(&app, Uuid::parse_str(&lead_id).unwrap()).await;
+
     // 4. Convert to patient
     let (status, body) = json_request(
         &app,
@@ -917,6 +1061,8 @@ async fn list_leads_conversion_ready_is_false_for_converted_lead() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
+    seed_complete_lead_onboarding(&app, Uuid::parse_str(&lead_id).unwrap()).await;
+
     let (status, convert_body) = json_request(
         &app,
         "POST",
@@ -948,20 +1094,21 @@ async fn list_leads_conversion_ready_is_false_for_converted_lead() {
 }
 
 #[tokio::test]
-async fn wizard_convert_creates_patient_without_compliance() {
+async fn wizard_convert_uses_the_full_readiness_gate() {
     let Some(app) = test_app().await else {
         return;
     };
     let pool = &app.suite.pool;
 
-    // A lead with identity basics + address, but no compliance and not qualified.
     let lead_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO leads
                (first_name, last_name, email, phone, country, primary_language,
                 date_of_birth, legal_sex, street_address, city, zip_code,
+                primary_concern_text, requested_specialties,
                 qualification_status, compliance_status, intake_source)
            VALUES ('Anna','Muster','anna@example.com','+49150','DE','de',
                    DATE '1990-05-01','female','Hauptstr. 1','Berlin','10115',
+                   'Knee pain','["orthopedics"]'::jsonb,
                    'new','pending','staff_wizard')
            RETURNING id"#,
     )
@@ -978,38 +1125,81 @@ async fn wizard_convert_creates_patient_without_compliance() {
         None,
     )
     .await;
-    assert_eq!(
-        status,
-        StatusCode::OK,
-        "convert-then-comply must succeed without compliance signed: {body}"
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["message"], "Lead is not conversion-ready");
+    assert!(
+        body["blocking_reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons
+                .iter()
+                .any(|reason| reason == "Signed DSGVO document is missing")),
+        "{body}"
     );
-    let patient_uuid = Uuid::parse_str(body["patient_id"].as_str().unwrap()).unwrap();
 
-    // Lead is now sticky-converted.
-    let (qstatus, cpid): (String, Option<Uuid>) =
-        sqlx::query_as("SELECT qualification_status, converted_patient_id FROM leads WHERE id = $1")
+    let converted_patient_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT converted_patient_id FROM leads WHERE id = $1")
             .bind(lead_id)
             .fetch_one(pool)
             .await
             .unwrap();
-    assert_eq!(qstatus, "converted");
-    assert_eq!(cpid, Some(patient_uuid));
+    assert!(converted_patient_id.is_none());
+    let patient_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM patients WHERE email = 'anna@example.com'")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(patient_count, 0);
+}
 
-    // Address carried over to the patient.
-    let (street, city, zip): (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
-        "SELECT address_street, address_city, address_zip FROM patients WHERE id = $1",
+#[tokio::test]
+async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pool = &app.suite.pool;
+    let email = format!("atomic-{}@example.com", Uuid::new_v4().simple());
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, phone, country, primary_language,
+                date_of_birth, legal_sex, street_address, city, zip_code,
+                primary_concern_text, requested_specialties,
+                qualification_status, compliance_status,
+                consent_healthcare, consent_privacy_practices, intake_source, created_by
+           ) VALUES (
+                'Atomic', 'Onboarding', $1, '+4915112345678', 'DE', 'de',
+                DATE '1990-05-01', 'female', 'Hauptstr. 1', 'Berlin', '10115',
+                'Chronic knee pain', '["orthopedics"]'::jsonb,
+                'qualified', 'signed', true, true, 'staff_wizard', $2
+           ) RETURNING id"#,
     )
-    .bind(patient_uuid)
+    .bind(&email)
+    .bind(app.patient_manager_id)
     .fetch_one(pool)
     .await
     .unwrap();
-    assert_eq!(street.as_deref(), Some("Hauptstr. 1"));
-    assert_eq!(city.as_deref(), Some("Berlin"));
-    assert_eq!(zip.as_deref(), Some("10115"));
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
 
-    // Re-conversion is idempotent: callers can recover after a later wizard
-    // step failed without creating another patient.
-    let (status, repeated) = json_request(
+    let pm = app.auth_header("patient_manager");
+    let (status, lead) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{lead}");
+    assert_eq!(lead["readiness"]["conversion_ready"], true, "{lead}");
+    assert_eq!(
+        lead["readiness"]["steps"]
+            .as_array()
+            .expect("readiness steps")
+            .len(),
+        5
+    );
+
+    let patient_before: i64 = sqlx::query_scalar("SELECT count(*) FROM patients WHERE email = $1")
+        .bind(&email)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(patient_before, 0);
+
+    let (status, converted) = json_request(
         &app,
         "POST",
         &format!("/api/v1/leads/{lead_id}/wizard-convert"),
@@ -1017,24 +1207,84 @@ async fn wizard_convert_creates_patient_without_compliance() {
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{repeated}");
-    assert_eq!(repeated["patient_id"], patient_uuid.to_string());
-    assert_eq!(repeated["patient_pid"], body["patient_pid"]);
-    assert_eq!(repeated["already_converted"], true);
+    assert_eq!(status, StatusCode::OK, "{converted}");
+    let patient_id = Uuid::parse_str(converted["patient_id"].as_str().unwrap()).unwrap();
 
-    let patient_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM patients WHERE id = $1 OR patient_id = $2",
+    let (case_patient_id, case_lead_id): (Option<Uuid>, Option<Uuid>) =
+        sqlx::query_as("SELECT patient_id, lead_id FROM cases WHERE id = $1")
+            .bind(artifacts.case_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(case_patient_id, Some(patient_id));
+    assert!(case_lead_id.is_none());
+
+    let moved_document_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM documents WHERE id = ANY($1) AND patient_id = $2 AND lead_id IS NULL",
     )
-    .bind(patient_uuid)
-    .bind(body["patient_pid"].as_str().unwrap())
+    .bind(&artifacts.document_ids)
+    .bind(patient_id)
     .fetch_one(pool)
     .await
     .unwrap();
-    assert_eq!(patient_count, 1);
+    assert_eq!(moved_document_count, 2);
+
+    let (contract_patient_id, contract_lead_id): (Option<Uuid>, Option<Uuid>) =
+        sqlx::query_as("SELECT patient_id, lead_id FROM framework_contracts WHERE id = $1")
+            .bind(artifacts.contract_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(contract_patient_id, Some(patient_id));
+    assert!(contract_lead_id.is_none());
+
+    let (order_patient_id, source_lead_id): (Option<Uuid>, Option<Uuid>) =
+        sqlx::query_as("SELECT patient_id, source_lead_id FROM orders WHERE id = $1")
+            .bind(artifacts.order_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(order_patient_id, Some(patient_id));
+    assert_eq!(source_lead_id, Some(lead_id));
+
+    let service_patient_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT patient_id FROM order_leistungen WHERE id = $1")
+            .bind(artifacts.service_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(service_patient_id, Some(patient_id));
+    let quote_order_id: Uuid = sqlx::query_scalar("SELECT order_id FROM quotes WHERE id = $1")
+        .bind(artifacts.quote_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(quote_order_id, artifacts.order_id);
+
+    let assignment_exists: bool = sqlx::query_scalar(
+        r#"SELECT EXISTS(
+               SELECT 1 FROM patient_assignments
+               WHERE patient_id = $1 AND user_id = $2 AND revoked_at IS NULL
+           )"#,
+    )
+    .bind(patient_id)
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(assignment_exists);
+
+    let converted_patient_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT converted_patient_id FROM leads WHERE id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(converted_patient_id, Some(patient_id));
 }
 
 #[tokio::test]
-async fn wizard_order_draft_is_idempotent_for_source_lead() {
+async fn lead_order_draft_is_idempotent_before_patient_conversion() {
     let Some(app) = test_app().await else {
         return;
     };
@@ -1052,18 +1302,7 @@ async fn wizard_order_draft_is_idempotent_for_source_lead() {
     .unwrap();
 
     let pm = app.auth_header("patient_manager");
-    let (status, converted) = json_request(
-        &app,
-        "POST",
-        &format!("/api/v1/leads/{lead_id}/wizard-convert"),
-        &pm,
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{converted}");
-    let patient_id = converted["patient_id"].as_str().unwrap();
     let payload = json!({
-        "patient_id": patient_id,
         "source_lead_id": lead_id,
         "needs_description": "Retry-safe draft"
     });
@@ -1101,7 +1340,6 @@ async fn wizard_order_draft_is_idempotent_for_source_lead() {
         &line_path,
         &pm,
         Some(json!({
-            "patient_id": patient_id,
             "description": "Initial consultation",
             "quantity": 1.0,
             "unit_price": 100.0,
@@ -1119,7 +1357,6 @@ async fn wizard_order_draft_is_idempotent_for_source_lead() {
         &line_path,
         &pm,
         Some(json!({
-            "patient_id": patient_id,
             "description": "Updated specialist consultation",
             "quantity": 2.0,
             "unit_price": 175.0,
@@ -1157,7 +1394,6 @@ async fn wizard_order_draft_is_idempotent_for_source_lead() {
         ("vat", json!({ "vat_rate": 101.0 })),
     ] {
         let mut invalid_payload = json!({
-            "patient_id": patient_id,
             "description": "Invalid service",
             "quantity": 1.0,
             "unit_price": 10.0,
@@ -1247,7 +1483,10 @@ async fn wizard_lead_fields_round_trip_through_update() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(lead["primary_concern_text"], "Chronic knee pain");
     assert_eq!(lead["street_address"], "Hauptstr. 1");
-    assert_eq!(lead["requested_specialties"], json!(["orthopedics", "surgery"]));
+    assert_eq!(
+        lead["requested_specialties"],
+        json!(["orthopedics", "surgery"])
+    );
     assert_eq!(lead["wizard_state"]["step"], 3);
 
     // A non-array requested_specialties is rejected.
