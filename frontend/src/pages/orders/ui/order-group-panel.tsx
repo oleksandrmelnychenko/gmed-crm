@@ -59,6 +59,10 @@ export function OrderGroupPanel({ orderId }: { orderId: string }) {
   function applyGroup(next: OrderGroup) {
     setGroup(next);
     setPayerName(next.head.payer_contact_name ?? "");
+    setPayerEmail(next.head.payer_contact_email ?? "");
+    setPayerPhone(next.head.payer_contact_phone ?? "");
+    setPayerRelationship(next.head.payer_contact_relationship ?? "");
+    setPayerNotes(next.head.payer_notes ?? "");
   }
 
   useEffect(() => {

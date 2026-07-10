@@ -576,17 +576,18 @@ async fn create_order(
 
     sqlx::query(
         r#"INSERT INTO order_leistungen (
-                id, order_id, description, quantity, unit_price, currency,
+                id, order_id, patient_id, description, quantity, unit_price, currency,
                 vat_rate, is_cost_passthrough, provider_id, status,
                 delivered_at, approved_by, approved_at, notes
            ) VALUES (
-                $1, $2, 'Treatment package', 1, 1000, 'EUR',
-                0, false, $3, 'approved',
-                now(), $4, now(), 'E2E seeded line item'
+                $1, $2, $3, 'Treatment package', 1, 1000, 'EUR',
+                0, false, $4, 'approved',
+                now(), $5, now(), 'E2E seeded line item'
            )"#,
     )
     .bind(Uuid::new_v4())
     .bind(id)
+    .bind(patient_id)
     .bind(parse_uuid(SEEDED_MEDICAL_PROVIDER_ID)?)
     .bind(created_by)
     .execute(&state.db)

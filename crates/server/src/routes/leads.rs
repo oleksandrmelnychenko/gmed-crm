@@ -1780,14 +1780,25 @@ async fn wizard_convert_lead(
         return e;
     }
 
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, lead_id = %lead_id, "begin wizard conversion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    // Serialize conversion attempts for one lead. This keeps the patient row,
+    // sticky lead link and initial assignment as one atomic unit.
     let lead = match sqlx::query(
         r#"SELECT id, first_name, last_name, email, phone, country, primary_language,
                   date_of_birth, legal_sex, qualification_status, converted_patient_id,
                   failed_outcome_status, street_address, city, zip_code
-           FROM leads WHERE id = $1"#,
+           FROM leads WHERE id = $1
+           FOR UPDATE"#,
     )
     .bind(lead_id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *tx)
     .await
     {
         Ok(Some(l)) => l,
@@ -1799,8 +1810,34 @@ async fn wizard_convert_lead(
     };
 
     let converted_patient_id: Option<Uuid> = lead.try_get("converted_patient_id").ok().flatten();
-    if converted_patient_id.is_some() {
-        return err(StatusCode::CONFLICT, "Lead already converted");
+    if let Some(patient_id) = converted_patient_id {
+        let patient_pid = match sqlx::query_scalar::<_, String>(
+            "SELECT patient_id FROM patients WHERE id = $1",
+        )
+        .bind(patient_id)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(Some(value)) => value,
+            Ok(None) => {
+                tracing::error!(lead_id = %lead_id, patient_id = %patient_id, "converted lead points to missing patient");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Converted lead patient is missing",
+                );
+            }
+            Err(e) => {
+                tracing::error!(error = %e, lead_id = %lead_id, patient_id = %patient_id, "load existing wizard patient");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+
+        return Json(json!({
+            "patient_id": patient_id,
+            "patient_pid": patient_pid,
+            "already_converted": true,
+        }))
+        .into_response();
     }
     let failed_outcome_status: String = lead
         .try_get("failed_outcome_status")
@@ -1819,6 +1856,12 @@ async fn wizard_convert_lead(
             "Lead is missing date_of_birth; cannot convert to patient",
         );
     };
+    if birth_date > chrono::Utc::now().date_naive() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Lead date_of_birth cannot be in the future",
+        );
+    }
     let legal_sex: Option<String> = lead.try_get("legal_sex").ok().flatten();
     let gender = match legal_sex.as_deref() {
         Some("female") => "female",
@@ -1842,10 +1885,16 @@ async fn wizard_convert_lead(
         );
     }
 
-    let seq: i64 = sqlx::query_scalar::<_, i64>(r#"SELECT nextval('patient_id_seq')"#)
-        .fetch_one(&state.db)
+    let seq: i64 = match sqlx::query_scalar::<_, i64>(r#"SELECT nextval('patient_id_seq')"#)
+        .fetch_one(&mut *tx)
         .await
-        .unwrap_or(0);
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, lead_id = %lead_id, "allocate wizard patient id");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
     let pid = format!("P-{}-{:04}", chrono::Utc::now().format("%Y%m%d"), seq);
 
     let first_name: String = lead.try_get("first_name").unwrap_or_default();
@@ -1876,7 +1925,7 @@ async fn wizard_convert_lead(
     .bind(city)
     .bind(zip_code)
     .bind(auth.user_id)
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await
     {
         Ok(id) => id,
@@ -1885,6 +1934,47 @@ async fn wizard_convert_lead(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+
+    let lead_update = sqlx::query(
+        "UPDATE leads
+         SET qualification_status = 'converted', converted_patient_id = $2
+         WHERE id = $1 AND converted_patient_id IS NULL",
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .execute(&mut *tx)
+    .await;
+    match lead_update {
+        Ok(result) if result.rows_affected() == 1 => {}
+        Ok(_) => {
+            tracing::error!(lead_id = %lead_id, patient_id = %patient_id, "wizard lead conversion lost its row lock");
+            return err(StatusCode::CONFLICT, "Lead already converted");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, lead_id = %lead_id, patient_id = %patient_id, "link wizard patient to lead");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
+
+    if let Err(e) = sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+         VALUES ($1, $2, $2)
+         ON CONFLICT (patient_id, user_id) DO UPDATE
+         SET assigned_by = EXCLUDED.assigned_by, assigned_at = now(), revoked_at = NULL",
+    )
+    .bind(patient_id)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, lead_id = %lead_id, patient_id = %patient_id, "assign wizard patient");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, lead_id = %lead_id, patient_id = %patient_id, "commit wizard conversion");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
 
     let previous_status: String = lead.try_get("qualification_status").unwrap_or_default();
     if let Err(resp) =

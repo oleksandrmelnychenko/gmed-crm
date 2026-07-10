@@ -677,19 +677,10 @@ async fn create_my_appointment_request(
     }
 
     if let Some(order_id) = body.order_id {
-        let belongs_to_patient = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM orders WHERE id = $1 AND patient_id = $2)",
-        )
-        .bind(order_id)
-        .bind(patient_id)
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(false);
-        if !belongs_to_patient {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "Order does not belong to patient",
-            );
+        if let Err(resp) =
+            ensure_appointment_order_link_allowed(&state, &auth, patient_id, order_id).await
+        {
+            return resp;
         }
     }
 
@@ -1216,19 +1207,10 @@ async fn convert_appointment_request(
 
     let order_id = body.order_id.or(request_order_id);
     if let Some(order_id) = order_id {
-        let belongs_to_patient = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM orders WHERE id = $1 AND patient_id = $2)",
-        )
-        .bind(order_id)
-        .bind(patient_id)
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(false);
-        if !belongs_to_patient {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "Order does not belong to patient",
-            );
+        if let Err(resp) =
+            ensure_appointment_order_link_allowed(&state, &auth, patient_id, order_id).await
+        {
+            return resp;
         }
     }
 
@@ -2260,6 +2242,12 @@ async fn create_appointment(
         recurrence_count: _,
         recurrence_until: _,
     } = body;
+    if let Some(order_id) = order_id
+        && let Err(resp) =
+            ensure_appointment_order_link_allowed(&state, &auth, patient_id, order_id).await
+    {
+        return resp;
+    }
     let owner_user_id = effective_owner_user_id;
     let mut tx = match state.db.begin().await {
         Ok(value) => value,
@@ -5563,19 +5551,20 @@ async fn sync_completed_medical_appointment_to_billing(
 
     let result = sqlx::query(
         r#"INSERT INTO order_leistungen (
-                order_id, description, quantity, unit_price, currency, vat_rate,
+                order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
                 is_cost_passthrough, provider_id, doctor_id, status, delivered_at, notes,
                 source_medical_appointment_id, agency_service_id
            ) VALUES (
-                $1, $2, 1, $3, $4, $5,
-                false, $6, $7, 'delivered', now(), $8,
-                $9, $10
+                $1, $2, $3, 1, $4, $5, $6,
+                false, $7, $8, 'delivered', now(), $9,
+                $10, $11
            )
            ON CONFLICT (source_medical_appointment_id)
                WHERE source_medical_appointment_id IS NOT NULL
            DO NOTHING"#,
     )
     .bind(order_id)
+    .bind(patient_id)
     .bind(catalog_item.service_name.clone())
     .bind(catalog_item.unit_price)
     .bind(catalog_item.currency.clone())
@@ -5718,19 +5707,20 @@ async fn sync_interpreter_report_billing_candidates(
 
         let result = sqlx::query(
             r#"INSERT INTO order_leistungen (
-                    order_id, description, quantity, unit_price, currency, vat_rate,
+                    order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
                     is_cost_passthrough, status, delivered_at, approved_by, approved_at,
                     notes, source_interpreter_report_id, agency_service_id
                ) VALUES (
-                    $1, $2, $3, $4, $5, $6,
-                    false, 'approved', $7, $8, $7,
-                    $9, $10, $11
+                    $1, $2, $3, $4, $5, $6, $7,
+                    false, 'approved', $8, $9, $8,
+                    $10, $11, $12
                )
                ON CONFLICT (source_interpreter_report_id)
                    WHERE source_interpreter_report_id IS NOT NULL
                DO NOTHING"#,
         )
         .bind(order_id)
+        .bind(candidate.patient_id)
         .bind(description)
         .bind(candidate.hours)
         .bind(catalog_item.unit_price)
@@ -7498,4 +7488,129 @@ async fn can_access_appointment(
     } else {
         Ok(true)
     }
+}
+
+async fn ensure_appointment_order_link_allowed(
+    state: &AppState,
+    auth: &AuthUser,
+    appointment_patient_id: Uuid,
+    order_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let row = sqlx::query("SELECT patient_id, order_role FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, order_id = %order_id, "Failed to load appointment order link");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate appointment order",
+            )
+        })?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "Order not found"))?;
+
+    let order_patient_id: Uuid = row.try_get("patient_id").map_err(|_| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to decode appointment order",
+        )
+    })?;
+    let order_role: String = row.try_get("order_role").unwrap_or_default();
+
+    if auth.role == Role::Patient {
+        if order_patient_id != appointment_patient_id && order_role != "main" {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Order does not belong to patient",
+            ));
+        }
+    } else if !matches!(auth.role, Role::Ceo | Role::ItAdmin)
+        && access::requires_patient_assignment(auth.role)
+    {
+        let assigned = access::has_active_patient_assignment(&state.db, order_patient_id, auth.user_id)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, order_id = %order_id, patient_id = %order_patient_id, "Failed to validate appointment order assignment");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate appointment order access",
+                )
+            })?;
+        if !assigned {
+            return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+        }
+    }
+
+    if order_patient_id == appointment_patient_id {
+        return Ok(());
+    }
+
+    if order_role != "main" {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Order does not belong to patient",
+        ));
+    }
+
+    let group_covers_patient = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM orders grouped
+               WHERE (grouped.id = $1 OR grouped.head_order_id = $1)
+                 AND grouped.patient_id = $2
+               UNION
+               SELECT 1
+               FROM appointments a
+               JOIN orders grouped_order ON grouped_order.id = a.order_id
+               WHERE (grouped_order.id = $1 OR grouped_order.head_order_id = $1)
+                 AND a.patient_id = $2
+           )"#,
+    )
+    .bind(order_id)
+    .bind(appointment_patient_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, order_id = %order_id, patient_id = %appointment_patient_id, "Failed to validate appointment order group coverage");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate appointment order",
+        )
+    })?;
+
+    if group_covers_patient {
+        return Ok(());
+    }
+
+    let family_relation_covers_patient = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM patient_relations pr
+               WHERE pr.relation_type IN ('parent', 'child', 'spouse', 'sibling', 'relative', 'guardian', 'caregiver')
+                 AND (
+                   (pr.patient_id = $1 AND pr.related_patient_id = $2)
+                   OR (pr.patient_id = $2 AND pr.related_patient_id = $1)
+                 )
+           )"#,
+    )
+    .bind(order_patient_id)
+    .bind(appointment_patient_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, order_id = %order_id, order_patient_id = %order_patient_id, patient_id = %appointment_patient_id, "Failed to validate appointment order family relation");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate appointment order",
+        )
+    })?;
+
+    if family_relation_covers_patient {
+        return Ok(());
+    }
+
+    Err(err(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "Order does not belong to patient",
+    ))
 }

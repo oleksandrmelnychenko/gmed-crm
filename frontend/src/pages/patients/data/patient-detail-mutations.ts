@@ -1,4 +1,9 @@
 import { apiFetch, downloadApiFile } from "@/lib/api";
+import type { RelationItem } from "../model/detail-tab-types";
+
+export function fetchPatientRelations(patientId: string) {
+  return apiFetch<RelationItem[]>(`/patients/${patientId}/relations`);
+}
 
 export async function upsertPatientRelation(
   patientId: string,
@@ -45,8 +50,15 @@ export async function deletePatientRelation(patientId: string, relationId: strin
   });
 }
 
+export type CreatedFrameworkContract = {
+  id: string;
+  contract_number?: string;
+  status?: string;
+  idempotent_replay?: boolean;
+};
+
 export async function createFrameworkContract(payload: Record<string, unknown>) {
-  return apiFetch("/framework-contracts", {
+  return apiFetch<CreatedFrameworkContract>("/framework-contracts", {
     method: "POST",
     body: JSON.stringify(payload),
   });

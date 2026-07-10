@@ -273,8 +273,25 @@ export function updateOrderFollowupFlow(orderId: string, payload: JsonPayload) {
   return postJson<void>(`/orders/${orderId}/followup-flow`, payload);
 }
 
+export type CreatedOrderLeistung = {
+  id: string;
+  idempotent_replay?: boolean;
+};
+
 export function createOrderLeistung(orderId: string, payload: JsonPayload) {
-  return postJson<void>(`/orders/${orderId}/leistungen`, payload);
+  return postJson<CreatedOrderLeistung>(`/orders/${orderId}/leistungen`, payload);
+}
+
+export function updateOrderCommercialBasis(
+  orderId: string,
+  payload: { total_estimated: string; contract_id?: string | null },
+) {
+  return postJson<{
+    ok: boolean;
+    order_id: string;
+    total_estimated: string;
+    contract_id: string | null;
+  }>(`/orders/${orderId}/commercial-basis`, payload);
 }
 
 export function approveOrderLeistung(orderId: string, leistungId: string) {
@@ -307,6 +324,10 @@ export type OrderGroupHead = {
   currency: string;
   payer_patient_relation_id: string | null;
   payer_contact_name: string | null;
+  payer_contact_email: string | null;
+  payer_contact_phone: string | null;
+  payer_contact_relationship: string | null;
+  payer_notes: string | null;
 };
 
 export type OrderGroupSub = {
@@ -339,6 +360,10 @@ export function normalizeOrderGroup(value: unknown): OrderGroup {
       currency: stringValue(head.currency, "EUR"),
       payer_patient_relation_id: nullableStringValue(head.payer_patient_relation_id),
       payer_contact_name: nullableStringValue(head.payer_contact_name),
+      payer_contact_email: nullableStringValue(head.payer_contact_email),
+      payer_contact_phone: nullableStringValue(head.payer_contact_phone),
+      payer_contact_relationship: nullableStringValue(head.payer_contact_relationship),
+      payer_notes: nullableStringValue(head.payer_notes),
     },
     subs: subs.map((entry) => {
       const sub = asRecord(entry);

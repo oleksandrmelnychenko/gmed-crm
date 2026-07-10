@@ -1011,6 +1011,9 @@ function useLeadsPageContent() {
     detailIsIntakeLead &&
     detail?.failed_outcome.status !== "delete_anonymized" &&
     !detail?.converted_patient_id;
+  const detailWizardIncomplete =
+    Boolean(detail) &&
+    (!detail?.converted_patient_id || detail.wizard_state?.["phase"] !== "completed");
 
   const paneTabs: Array<{
     key: LeadPaneTab;
@@ -1079,7 +1082,7 @@ function useLeadsPageContent() {
             {detail ? `${detail.first_name} ${detail.last_name}` : t.leads_title}
           </h2>
           <div className="flex shrink-0 items-center gap-2">
-            {detail && permissions.canConvert && !leadWorkflow?.leadConverted ? (
+            {detail && permissions.canConvert && detailWizardIncomplete ? (
               <Button
                 type="button"
                 variant="outline"

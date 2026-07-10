@@ -8,7 +8,17 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { selectClass, textareaClass } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { createOrder, createOrderLeistung } from "@/pages/orders/data/order-api";
+import {
+  createOrder,
+  createOrderLeistung,
+  updateOrderCommercialBasis,
+} from "@/pages/orders/data/order-api";
+import {
+  fetchPatientClinical,
+  savePatientClinicalWarnings,
+  savePatientMedications,
+  savePatientNarrative,
+} from "@/pages/patients/data/patient-clinical";
 
 import {
   fetchLeadDetail,
@@ -17,30 +27,44 @@ import {
 } from "../data/leads-api";
 import {
   createFrameworkContract,
+  fetchPatientRelations,
   upsertPatientRelation,
 } from "@/pages/patients/data/patient-detail-mutations";
-import { updatePatient } from "@/pages/patients/data/patient-mutations";
 import { PatientDocumentGenerateDialog } from "@/pages/patients/ui/sheets/patient-document-generate-dialog";
 import type { PatientOption } from "@/pages/documents/model/types";
 
 import {
   PHASE_A_STEPS,
+  blankClinicalIntake,
   blankGuardian,
   blankOrderLine,
   canConvert,
   canFinishOrder,
+  clinicalIntakeHasAllergy,
+  clinicalIntakeHasCave,
+  clinicalIntakeHasMedication,
+  clinicalIntakeHasNarrative,
+  clinicalMedicationFingerprint,
+  clinicalMedicationPayload,
+  clinicalNarrativePayload,
+  clinicalWarningFingerprint,
+  clinicalWarningPayload,
   costEstimate,
   draftFromLead,
   guardianPayload,
   isMinor,
   nextStep,
+  orderLineClientReference,
   orderLineIsValid,
   orderLinePayload,
   orderNeedsDescription,
+  orderResumeFromLead,
+  orderResumeWizardState,
   prevStep,
   resumeStep,
   stepIsComplete,
   wizardUpdatePayload,
+  type ClinicalIntakeDraft,
   type GuardianDraft,
   type LegalSex,
   type WizardDraft,
@@ -188,10 +212,14 @@ export function LeadWizard({
   const [createdPatientId, setCreatedPatientId] = useState<string | null>(null);
   const [createdPatientPid, setCreatedPatientPid] = useState("");
   const [genDocOpen, setGenDocOpen] = useState(false);
-  const [orderLines, setOrderLines] = useState<WizardOrderLine[]>([blankOrderLine()]);
+  const [orderLines, setOrderLines] = useState<WizardOrderLine[]>(() => [blankOrderLine()]);
+  const [savedOrderLineKeys, setSavedOrderLineKeys] = useState<string[]>([]);
   const [guardian, setGuardian] = useState<GuardianDraft>(blankGuardian());
-  const [clinicalWarnings, setClinicalWarnings] = useState("");
+  const [clinicalIntake, setClinicalIntake] = useState<ClinicalIntakeDraft>(
+    blankClinicalIntake(),
+  );
   const [startContract, setStartContract] = useState(true);
+  const [contractId, setContractId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || !leadId) return;
@@ -205,14 +233,32 @@ export function LeadWizard({
     setCreatedPatientPid("");
     setGenDocOpen(false);
     setOrderLines([blankOrderLine()]);
+    setSavedOrderLineKeys([]);
     setGuardian(blankGuardian());
-    setClinicalWarnings("");
+    setClinicalIntake(blankClinicalIntake());
     setStartContract(true);
+    setContractId(null);
     fetchLeadDetail(leadId)
       .then((lead) => {
         if (!active) return;
-        setDraft(draftFromLead(lead));
+        const nextDraft = draftFromLead(lead);
+        setDraft(nextDraft);
         setStep(resumeStep(lead));
+        const orderResume = orderResumeFromLead(lead);
+        if (orderResume) {
+          setCreatedPatientId(orderResume.patientId);
+          setCreatedPatientPid(orderResume.patientPid);
+          setCreatedOrderId(orderResume.orderId);
+          setSavedOrderLineKeys(orderResume.savedOrderLineKeys);
+          setOrderLines(
+            orderResume.orderLines.length > 0 ? orderResume.orderLines : [blankOrderLine()],
+          );
+          setGuardian(orderResume.guardian);
+          setClinicalIntake(orderResume.clinicalIntake);
+          setStartContract(orderResume.startContract);
+          setContractId(orderResume.contractId);
+          setPhase("order");
+        }
       })
       .catch(() => {
         if (active) setLoadError(true);
@@ -245,6 +291,61 @@ export function LeadWizard({
     }
   }
 
+  async function persistOrderResumeState(
+    patientId: string,
+    orderId: string,
+    lineKeys = savedOrderLineKeys,
+    nextContractId = contractId,
+  ) {
+    if (!leadId || !draft) return;
+    await updateLeadWizard(leadId, {
+      wizard_state: orderResumeWizardState(
+        draft,
+        step,
+        {
+          patientId,
+          patientPid: createdPatientPid,
+          orderId,
+          savedOrderLineKeys: lineKeys,
+          orderLines,
+          guardian,
+          clinicalIntake,
+          startContract,
+          contractId: nextContractId,
+        },
+      ),
+    });
+  }
+
+  async function persistOrderCompletedState(
+    patientId: string,
+    orderId: string,
+    lineKeys = savedOrderLineKeys,
+    nextContractId = contractId,
+  ) {
+    if (!leadId || !draft) return;
+    await updateLeadWizard(leadId, {
+      wizard_state: {
+        ...orderResumeWizardState(
+          draft,
+          step,
+          {
+            patientId,
+            patientPid: createdPatientPid,
+            orderId,
+            savedOrderLineKeys: lineKeys,
+            orderLines,
+            guardian,
+            clinicalIntake,
+            startContract,
+            contractId: nextContractId,
+          },
+        ),
+        phase: "completed",
+      },
+    });
+  }
+
   async function goNext() {
     const target = nextStep(step);
     if (!target) return;
@@ -265,20 +366,51 @@ export function LeadWizard({
       const result = await wizardConvertLead(leadId);
       setCreatedPatientId(result.patient_id);
       setCreatedPatientPid(result.patient_pid);
+      setClinicalIntake(blankClinicalIntake(draft));
       // Form the draft order — the goal of the wizard (#8) — carrying the
       // captured concern and requested specialists into needs_description.
       try {
         const order = await createOrder({
           patient_id: result.patient_id,
           needs_description: orderNeedsDescription(draft),
+          source_lead_id: leadId,
         });
         // Stay open and move into Phase B to build the order's line items.
         setCreatedOrderId(order.id);
         setPhase("order");
-      } catch {
-        // The patient exists even if the order draft failed; finish on the patient.
-        onOpenChange(false);
-        onConverted?.(result.patient_id);
+        try {
+          await updateLeadWizard(leadId, {
+            wizard_state: orderResumeWizardState(draft, step, {
+              patientId: result.patient_id,
+              patientPid: result.patient_pid,
+              orderId: order.id,
+              savedOrderLineKeys: [],
+              orderLines,
+              guardian,
+              clinicalIntake: blankClinicalIntake(draft),
+              startContract,
+              contractId: null,
+            }),
+          });
+        } catch (resumeError) {
+          setError(
+            resumeError instanceof Error
+              ? resumeError.message
+              : tx(
+                  "Черновик заказа создан, но состояние мастера не удалось сохранить.",
+                  "Auftragsentwurf erstellt, aber der Assistentenstatus konnte nicht gespeichert werden.",
+                ),
+          );
+        }
+      } catch (orderError) {
+        setError(
+          orderError instanceof Error
+            ? orderError.message
+            : tx(
+                "Пациент создан, но черновик заказа не удалось сформировать. Повторите шаг.",
+                "Patient angelegt, aber der Auftragsentwurf konnte nicht erstellt werden. Schritt erneut versuchen.",
+              ),
+        );
       }
     } catch (nextError) {
       setError(
@@ -297,47 +429,199 @@ export function LeadWizard({
     );
   }
 
+  function patchClinicalIntake(update: Partial<ClinicalIntakeDraft>) {
+    setClinicalIntake((current) => ({ ...current, ...update }));
+  }
+
+  async function saveClinicalIntake(patientId: string) {
+    const hasClinicalData =
+      clinicalIntakeHasNarrative(clinicalIntake) ||
+      clinicalIntakeHasMedication(clinicalIntake) ||
+      clinicalIntakeHasAllergy(clinicalIntake) ||
+      clinicalIntakeHasCave(clinicalIntake);
+    if (!hasClinicalData) return;
+
+    const clinical = await fetchPatientClinical(patientId);
+    if (clinicalIntakeHasNarrative(clinicalIntake)) {
+      await savePatientNarrative(
+        patientId,
+        clinicalNarrativePayload(clinicalIntake, clinical.narrative),
+      );
+    }
+
+    const medication = clinicalMedicationPayload(clinicalIntake);
+    if (medication) {
+      const existingKeys = new Set(
+        (clinical.medications ?? []).map((item) => clinicalMedicationFingerprint(item)),
+      );
+      const medicationKey = clinicalMedicationFingerprint(medication);
+      if (!existingKeys.has(medicationKey)) {
+        await savePatientMedications(patientId, [...(clinical.medications ?? []), medication]);
+      }
+    }
+
+    const allergy = clinicalWarningPayload(clinicalIntake, "allergie");
+    if (allergy) {
+      const existingKeys = new Set(
+        (clinical.allergien ?? []).map((item) => clinicalWarningFingerprint(item)),
+      );
+      if (!existingKeys.has(clinicalWarningFingerprint(allergy))) {
+        await savePatientClinicalWarnings(patientId, "allergie", [
+          ...(clinical.allergien ?? []),
+          allergy,
+        ]);
+      }
+    }
+
+    const cave = clinicalWarningPayload(clinicalIntake, "cave");
+    if (cave) {
+      const existingKeys = new Set(
+        (clinical.cave ?? []).map((item) => clinicalWarningFingerprint(item)),
+      );
+      if (!existingKeys.has(clinicalWarningFingerprint(cave))) {
+        await savePatientClinicalWarnings(patientId, "cave", [...(clinical.cave ?? []), cave]);
+      }
+    }
+  }
+
+  async function ensureGuardianRelation(patientId: string) {
+    const expected = guardianPayload(guardian);
+    const expectedName = String(expected.related_name).trim().toLowerCase();
+    const expectedPhone = String(expected.phone ?? "").trim().toLowerCase();
+    const relations = await fetchPatientRelations(patientId);
+    const exists = relations.some(
+      (relation) =>
+        relation.relation_type === "guardian" &&
+        relation.related_name.trim().toLowerCase() === expectedName &&
+        (relation.phone ?? "").trim().toLowerCase() === expectedPhone,
+    );
+    if (!exists) {
+      await upsertPatientRelation(patientId, expected);
+    }
+  }
+
   async function handleFinishOrder() {
-    if (!createdOrderId) return;
+    if (!createdOrderId || !createdPatientId || !leadId) return;
     setBusy(true);
     setError("");
-    const billable = orderLines.filter(orderLineIsValid);
+    const billable = orderLines
+      .map((line) => ({ line, key: line.clientKey }))
+      .filter(({ line }) => orderLineIsValid(line));
     try {
+      await persistOrderResumeState(createdPatientId, createdOrderId);
+      const completedLineKeys = new Set(savedOrderLineKeys);
+      for (const { line, key } of billable) {
+        if (completedLineKeys.has(key)) continue;
+        await createOrderLeistung(
+          createdOrderId,
+          orderLinePayload(
+            line,
+            createdPatientId,
+            orderLineClientReference(leadId, line),
+          ),
+        );
+        completedLineKeys.add(key);
+        const nextLineKeys = Array.from(completedLineKeys);
+        setSavedOrderLineKeys(nextLineKeys);
+        await persistOrderResumeState(
+          createdPatientId,
+          createdOrderId,
+          nextLineKeys,
+          contractId,
+        );
+      }
       // A minor's guardian is recorded before the order is opened (#2/#11).
-      if (minor && createdPatientId) {
-        await upsertPatientRelation(createdPatientId, guardianPayload(guardian));
+      if (minor) {
+        await ensureGuardianRelation(createdPatientId);
       }
-      // Safety-critical intake note (CAVE / allergies) onto the patient.
-      if (createdPatientId && clinicalWarnings.trim()) {
-        await updatePatient(createdPatientId, {
-          clinical_warnings: clinicalWarnings.trim(),
+      await saveClinicalIntake(createdPatientId);
+      // Create the framework contract only after line items and clinical intake
+      // are saved, so a retry after an earlier failure does not stack contracts.
+      let effectiveContractId = contractId;
+      if (startContract && !effectiveContractId) {
+        const contract = await createFrameworkContract({
+          patient_id: createdPatientId,
+          status: "draft",
+          client_reference: `lead-wizard:${leadId}:${createdOrderId}:framework-contract`,
+          conditions: {
+            source: "lead_wizard",
+            lead_id: leadId,
+            order_id: createdOrderId,
+          },
         });
+        effectiveContractId = contract.id;
+        setContractId(contract.id);
+        await persistOrderResumeState(
+          createdPatientId,
+          createdOrderId,
+          Array.from(completedLineKeys),
+          contract.id,
+        );
       }
-      // Start the framework contract (Rahmenvertrag) as a draft; staff generate
-      // and sign the PDF from the contracts workspace (#8).
-      if (createdPatientId && startContract) {
-        await createFrameworkContract({ patient_id: createdPatientId, status: "draft" });
-      }
-      for (const line of billable) {
-        await createOrderLeistung(createdOrderId, orderLinePayload(line));
-      }
+      await updateOrderCommercialBasis(createdOrderId, {
+        total_estimated: estimate.gross.toFixed(2),
+        contract_id: effectiveContractId,
+      });
+      await persistOrderCompletedState(
+        createdPatientId,
+        createdOrderId,
+        Array.from(completedLineKeys),
+        effectiveContractId,
+      );
       const orderId = createdOrderId;
       onOpenChange(false);
       if (onOrderCreated) onOrderCreated(orderId);
       else if (createdPatientId) onConverted?.(createdPatientId);
     } catch (nextError) {
+      const retryHint = tx(
+        "Мастер остаётся открытым — исправьте ошибку и повторите.",
+        "Der Assistent bleibt offen — Fehler beheben und erneut versuchen.",
+      );
       setError(
         nextError instanceof Error
-          ? nextError.message
-          : tx("Не удалось сохранить позиции", "Positionen konnten nicht gespeichert werden"),
+          ? `${nextError.message} ${retryHint}`
+          : tx(
+              "Не удалось завершить. Мастер остаётся открытым — исправьте ошибку и повторите.",
+              "Abschluss fehlgeschlagen. Der Assistent bleibt offen — Fehler beheben und erneut versuchen.",
+            ),
       );
     } finally {
       setBusy(false);
     }
   }
 
+  async function saveOrderDraft() {
+    if (!createdPatientId || !createdOrderId) return false;
+    setBusy(true);
+    setError("");
+    try {
+      await persistOrderResumeState(createdPatientId, createdOrderId);
+      return true;
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : tx("Не удалось сохранить черновик", "Entwurf konnte nicht gespeichert werden"),
+      );
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleWizardOpenChange(nextOpen: boolean) {
+    if (nextOpen || phase !== "order" || !createdPatientId || !createdOrderId) {
+      onOpenChange(nextOpen);
+      return;
+    }
+    void saveOrderDraft().then((saved) => {
+      if (saved) onOpenChange(false);
+    });
+  }
+
   const minor = draft ? isMinor(draft.dateOfBirth, new Date()) : false;
   const estimate = costEstimate(orderLines);
+  const hasBillableLines = orderLines.some(orderLineIsValid);
   const patientOption: PatientOption | undefined =
     createdPatientId && draft
       ? {
@@ -351,7 +635,7 @@ export function LeadWizard({
 
   return (
     <>
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={handleWizardOpenChange}>
       <SheetContent className="flex w-full flex-col gap-0 overflow-y-auto sm:max-w-xl">
         <header className="border-b border-border/60 pb-4">
           <div className="flex items-center gap-2">
@@ -430,18 +714,150 @@ export function LeadWizard({
                   </div>
                 </div>
               ) : null}
-              <Field label={tx("Клинические предупреждения (CAVE / аллергии)", "Klinische Warnungen (CAVE / Allergien)")}>
-                <textarea
-                  className={textareaClass}
-                  rows={2}
-                  value={clinicalWarnings}
-                  placeholder={tx(
-                    "Напр.: аллергия на пенициллин, антикоагулянты…",
-                    "z. B. Penicillin-Allergie, Antikoagulantien…",
-                  )}
-                  onChange={(event) => setClinicalWarnings(event.target.value)}
-                />
-              </Field>
+              <div className="space-y-3 rounded-lg border border-border/60 bg-background p-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    {tx("Клинический приём", "Klinische Aufnahme")}
+                  </p>
+                </div>
+                <div className="grid gap-2">
+                  <Field label={tx("Текущая жалоба / Anamnese", "Aktuelle Beschwerden / Anamnese")}>
+                    <textarea
+                      className={textareaClass}
+                      rows={2}
+                      value={clinicalIntake.currentComplaint}
+                      onChange={(event) =>
+                        patchClinicalIntake({ currentComplaint: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label={tx("Предыдущая история", "Vorgeschichte")}>
+                    <textarea
+                      className={textareaClass}
+                      rows={2}
+                      value={clinicalIntake.anamneseHistory}
+                      onChange={(event) =>
+                        patchClinicalIntake({ anamneseHistory: event.target.value })
+                      }
+                    />
+                  </Field>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Field label={tx("Медикамент", "Medikament")}>
+                    <Input
+                      value={clinicalIntake.medicationName}
+                      placeholder="Ibuprofen"
+                      onChange={(event) =>
+                        patchClinicalIntake({ medicationName: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label={tx("Дозировка", "Stärke")}>
+                    <Input
+                      value={clinicalIntake.medicationStrength}
+                      placeholder="400 mg"
+                      onChange={(event) =>
+                        patchClinicalIntake({ medicationStrength: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label={tx("Форма", "Darreichungsform")}>
+                    <Input
+                      value={clinicalIntake.medicationForm}
+                      placeholder="TABL"
+                      onChange={(event) =>
+                        patchClinicalIntake({ medicationForm: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label={tx("Приём", "Einnahmeform")}>
+                    <Input
+                      value={clinicalIntake.medicationRoute}
+                      placeholder="Oral"
+                      onChange={(event) =>
+                        patchClinicalIntake({ medicationRoute: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label={tx("Схема", "Schema")}>
+                    <Input
+                      value={clinicalIntake.medicationDose}
+                      placeholder="1-0-1"
+                      onChange={(event) =>
+                        patchClinicalIntake({ medicationDose: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label={tx("Причина", "Grund")}>
+                    <Input
+                      value={clinicalIntake.medicationReason}
+                      onChange={(event) =>
+                        patchClinicalIntake({ medicationReason: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label={tx("Указания", "Hinweise")}>
+                    <Input
+                      value={clinicalIntake.medicationNotes}
+                      onChange={(event) =>
+                        patchClinicalIntake({ medicationNotes: event.target.value })
+                      }
+                    />
+                  </Field>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Field label={tx("Аллергия", "Allergie")}>
+                    <Input
+                      value={clinicalIntake.allergyLabel}
+                      placeholder={tx("Пенициллин", "Penicillin")}
+                      onChange={(event) =>
+                        patchClinicalIntake({ allergyLabel: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label={tx("Реакция", "Reaktion")}>
+                    <Input
+                      value={clinicalIntake.allergyReaction}
+                      onChange={(event) =>
+                        patchClinicalIntake({ allergyReaction: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label={tx("Тяжесть", "Schweregrad")}>
+                    <Input
+                      value={clinicalIntake.allergySeverity}
+                      onChange={(event) =>
+                        patchClinicalIntake({ allergySeverity: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label={tx("Примечание аллергии", "Allergie-Notiz")}>
+                    <Input
+                      value={clinicalIntake.allergyNotes}
+                      onChange={(event) =>
+                        patchClinicalIntake({ allergyNotes: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label="CAVE">
+                    <Input
+                      value={clinicalIntake.caveLabel}
+                      placeholder={tx("Антикоагуляция", "Antikoagulation")}
+                      onChange={(event) =>
+                        patchClinicalIntake({ caveLabel: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label={tx("Примечание CAVE", "CAVE-Notiz")}>
+                    <Input
+                      value={clinicalIntake.caveNotes}
+                      onChange={(event) =>
+                        patchClinicalIntake({ caveNotes: event.target.value })
+                      }
+                    />
+                  </Field>
+                </div>
+              </div>
               <label className="flex items-center gap-2 text-sm text-foreground">
                 <input
                   type="checkbox"
@@ -720,22 +1136,32 @@ export function LeadWizard({
               <span className="text-xs text-muted-foreground">
                 {tx("Черновик заказа создан", "Auftragsentwurf erstellt")}
               </span>
-              <Button
-                type="button"
-                variant="default"
-                onClick={handleFinishOrder}
-                disabled={busy || !canFinishOrder(minor, guardian)}
-                title={
-                  !canFinishOrder(minor, guardian)
-                    ? tx(
-                        "Для несовершеннолетнего нужен представитель",
-                        "Für Minderjährige ist ein Vertreter erforderlich",
-                      )
-                    : undefined
-                }
-              >
-                {tx("Завершить и открыть заказ", "Abschließen und Auftrag öffnen")}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="outline" onClick={() => void saveOrderDraft()} disabled={busy}>
+                  {tx("Сохранить черновик", "Entwurf speichern")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="default"
+                  onClick={handleFinishOrder}
+                  disabled={busy || !canFinishOrder(minor, guardian) || !hasBillableLines}
+                  title={
+                    !canFinishOrder(minor, guardian)
+                      ? tx(
+                          "Для несовершеннолетнего нужен представитель",
+                          "Für Minderjährige ist ein Vertreter erforderlich",
+                        )
+                      : !hasBillableLines
+                        ? tx(
+                            "Добавьте минимум одну позицию заказа",
+                            "Mindestens eine Auftragsposition hinzufügen",
+                          )
+                        : undefined
+                  }
+                >
+                  {tx("Завершить и открыть заказ", "Abschließen und Auftrag öffnen")}
+                </Button>
+              </div>
             </>
           ) : (
             <>

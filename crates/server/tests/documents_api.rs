@@ -827,7 +827,10 @@ async fn large_document_upload_without_name_succeeds_and_is_auto_named() {
         StatusCode::OK,
         "upload above the 2 MB default must not 413"
     );
-    assert_eq!(upload_body["file_size"].as_i64(), Some(big_pdf.len() as i64));
+    assert_eq!(
+        upload_body["file_size"].as_i64(),
+        Some(big_pdf.len() as i64)
+    );
 
     let document_id = Uuid::parse_str(upload_body["id"].as_str().unwrap()).unwrap();
     let (status, detail_body) = json_request(
@@ -5458,12 +5461,13 @@ async fn mark_document_signed_records_evidence_and_satisfies_compliance() {
     assert_eq!(signed_by, Some(admin_id));
 
     // The compliance flag was flipped atomically on the patient.
-    let dsgvo_signed: Option<bool> =
-        sqlx::query_scalar("SELECT (legal_status->>'dsgvo_signed')::bool FROM patients WHERE id = $1")
-            .bind(patient_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let dsgvo_signed: Option<bool> = sqlx::query_scalar(
+        "SELECT (legal_status->>'dsgvo_signed')::bool FROM patients WHERE id = $1",
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(dsgvo_signed, Some(true));
 
     // An unknown compliance kind is rejected.
@@ -5476,4 +5480,62 @@ async fn mark_document_signed_records_evidence_and_satisfies_compliance() {
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn patient_manager_cannot_mark_unassigned_document_signed() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-sign-access");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, upload) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &admin_bearer,
+        &[
+            ("patient_id", patient_id.to_string()),
+            ("status", "active".to_string()),
+            ("visibility", "internal".to_string()),
+            ("auto_name", format!("DSGVO {tag}")),
+            ("art", "consent".to_string()),
+        ],
+        &format!("dsgvo-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-consent%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{upload}");
+    let document_id = upload["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/mark-signed"),
+        &pm_bearer,
+        Some(json!({ "compliance_kind": "dsgvo" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    let doc_uuid = Uuid::parse_str(&document_id).unwrap();
+    let signed_by: Option<Uuid> =
+        sqlx::query_scalar("SELECT signed_by FROM documents WHERE id = $1")
+            .bind(doc_uuid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(signed_by, None);
+
+    let dsgvo_signed: Option<bool> = sqlx::query_scalar(
+        "SELECT (legal_status->>'dsgvo_signed')::bool FROM patients WHERE id = $1",
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(dsgvo_signed, None);
 }

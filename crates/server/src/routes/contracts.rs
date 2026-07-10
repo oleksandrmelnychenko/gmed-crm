@@ -71,6 +71,7 @@ struct CreateFrameworkContractRequest {
     valid_to: Option<String>,
     conditions: Option<Value>,
     status: Option<String>,
+    client_reference: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -709,7 +710,8 @@ async fn load_contract_detail(
 ) -> Result<Option<Value>, axum::response::Response> {
     let row = sqlx::query(
         r#"SELECT fc.id, fc.patient_id, fc.contract_number, fc.status, fc.signed_at,
-                  fc.valid_from, fc.valid_to, fc.conditions, fc.created_at, fc.updated_at,
+                  fc.valid_from, fc.valid_to, fc.conditions, fc.client_reference,
+                  fc.created_at, fc.updated_at,
                   p.first_name, p.last_name, p.patient_id AS patient_pid
            FROM framework_contracts fc
            JOIN patients p ON p.id = fc.patient_id
@@ -752,6 +754,7 @@ async fn load_contract_detail(
         "valid_from": row.try_get::<Option<NaiveDate>, _>("valid_from").unwrap_or_default().map(|v| v.to_string()),
         "valid_to": row.try_get::<Option<NaiveDate>, _>("valid_to").unwrap_or_default().map(|v| v.to_string()),
         "conditions": row.try_get::<Option<Value>, _>("conditions").unwrap_or_default(),
+        "client_reference": row.try_get::<Option<String>, _>("client_reference").unwrap_or_default(),
         "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
         "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
     })))
@@ -776,7 +779,8 @@ async fn list_framework_contracts(
 
     match sqlx::query(
         r#"SELECT fc.id, fc.patient_id, fc.contract_number, fc.status, fc.signed_at,
-                  fc.valid_from, fc.valid_to, fc.conditions, fc.created_at, fc.updated_at,
+                  fc.valid_from, fc.valid_to, fc.conditions, fc.client_reference,
+                  fc.created_at, fc.updated_at,
                   p.first_name, p.last_name, p.patient_id AS patient_pid
            FROM framework_contracts fc
            JOIN patients p ON p.id = fc.patient_id
@@ -825,6 +829,7 @@ async fn list_framework_contracts(
                     "valid_from": row.try_get::<Option<NaiveDate>, _>("valid_from").unwrap_or_default().map(|v| v.to_string()),
                     "valid_to": row.try_get::<Option<NaiveDate>, _>("valid_to").unwrap_or_default().map(|v| v.to_string()),
                     "conditions": row.try_get::<Option<Value>, _>("conditions").unwrap_or_default(),
+                    "client_reference": row.try_get::<Option<String>, _>("client_reference").unwrap_or_default(),
                     "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                     "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                 }));
@@ -877,6 +882,13 @@ async fn create_framework_contract(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    let client_reference = body
+        .client_reference
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let conditions = body.conditions.unwrap_or(Value::Null);
 
     let seq: i64 = match sqlx::query_scalar("SELECT nextval('contract_number_seq')")
         .fetch_one(&state.db)
@@ -902,10 +914,11 @@ async fn create_framework_contract(
     match sqlx::query(
         r#"INSERT INTO framework_contracts (
                 patient_id, contract_number, signed_at, valid_from, valid_to,
-                conditions, status, created_by
+                conditions, status, created_by, client_reference
            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8
+                $1, $2, $3, $4, $5, $6, $7, $8, $9
            )
+           ON CONFLICT (patient_id, client_reference) DO NOTHING
            RETURNING id, created_at, updated_at"#,
     )
     .bind(patient_id)
@@ -913,13 +926,14 @@ async fn create_framework_contract(
     .bind(signed_at)
     .bind(valid_from)
     .bind(valid_to)
-    .bind(body.conditions.unwrap_or(Value::Null))
+    .bind(conditions)
     .bind(status.clone())
     .bind(auth.user_id)
-    .fetch_one(&state.db)
+    .bind(client_reference.as_deref())
+    .fetch_optional(&state.db)
     .await
     {
-        Ok(row) => {
+        Ok(Some(row)) => {
             let contract_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
             state.audit_sender.try_send(audit::domain_event(
                 "create_framework_contract",
@@ -957,6 +971,42 @@ async fn create_framework_contract(
                 })),
             )
                 .into_response()
+        }
+        Ok(None) => {
+            let Some(client_reference) = client_reference else {
+                tracing::error!(patient_id = %patient_id, "contract insert returned no row without a client reference");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create contract");
+            };
+            match sqlx::query(
+                r#"SELECT id, contract_number, status, signed_at, created_at, updated_at
+                   FROM framework_contracts
+                   WHERE patient_id = $1 AND client_reference = $2"#,
+            )
+            .bind(patient_id)
+            .bind(&client_reference)
+            .fetch_optional(&state.db)
+            .await
+            {
+                Ok(Some(row)) => Json(serde_json::json!({
+                    "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                    "contract_number": row.try_get::<String, _>("contract_number").unwrap_or_default(),
+                    "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                    "signed_at": row.try_get::<Option<DateTime<Utc>>, _>("signed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+                    "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                    "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                    "client_reference": client_reference,
+                    "idempotent_replay": true,
+                }))
+                .into_response(),
+                Ok(None) => {
+                    tracing::error!(patient_id = %patient_id, client_reference = %client_reference, "idempotent contract missing after conflict");
+                    err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create contract")
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, patient_id = %patient_id, client_reference = %client_reference, "load idempotent contract");
+                    err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create contract")
+                }
+            }
         }
         Err(e) => {
             tracing::error!(error = %e, "create framework contract");

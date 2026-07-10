@@ -73,6 +73,10 @@ pub fn router() -> Router<AppState> {
         .route("/orders/{order_id}/ungroup", post(ungroup_order))
         .route("/orders/{order_id}/merge", post(merge_orders))
         .route("/orders/{order_id}/payer", post(set_order_payer))
+        .route(
+            "/orders/{order_id}/commercial-basis",
+            post(update_order_commercial_basis),
+        )
 }
 
 #[derive(Deserialize)]
@@ -80,6 +84,13 @@ struct CreateOrderRequest {
     patient_id: Uuid,
     contract_id: Option<Uuid>,
     needs_description: Option<String>,
+    source_lead_id: Option<Uuid>,
+}
+
+#[derive(Deserialize)]
+struct UpdateOrderCommercialBasisRequest {
+    contract_id: Option<Uuid>,
+    total_estimated: String,
 }
 
 #[derive(Deserialize)]
@@ -141,6 +152,7 @@ struct UpdateOrderFollowupFlowRequest {
 
 #[derive(Deserialize)]
 struct AddLeistungRequest {
+    patient_id: Option<Uuid>,
     description: String,
     quantity: f64,
     unit_price: f64,
@@ -150,6 +162,7 @@ struct AddLeistungRequest {
     doctor_id: Option<Uuid>,
     external_document_id: Option<Uuid>,
     notes: Option<String>,
+    client_reference: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1953,17 +1966,48 @@ async fn create_order(
     };
 
     if !patient_recheck.can_create_order {
-        state.audit_sender.try_send(audit::domain_event(
-            "create_order_blocked_recheck",
-            Some(auth.user_id),
-            "patient",
-            Some(body.patient_id),
-            serde_json::json!({
-                "blocking_reasons": patient_recheck.blocking_reasons.clone(),
-                "recheck": patient_recheck.payload.clone(),
-            }),
-        ));
-        return patient_recheck_err(&patient_recheck);
+        let lead_wizard_draft_allowed = match body.source_lead_id {
+            Some(source_lead_id) => sqlx::query_scalar::<_, bool>(
+                r#"SELECT EXISTS(
+                       SELECT 1
+                       FROM leads
+                       WHERE id = $1
+                         AND converted_patient_id = $2
+                         AND qualification_status = 'converted'
+                   )"#,
+            )
+            .bind(source_lead_id)
+            .bind(body.patient_id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(false),
+            None => false,
+        };
+
+        if lead_wizard_draft_allowed {
+            state.audit_sender.try_send(audit::domain_event(
+                "create_order_draft_before_recheck",
+                Some(auth.user_id),
+                "patient",
+                Some(body.patient_id),
+                serde_json::json!({
+                    "source_lead_id": body.source_lead_id,
+                    "blocking_reasons": patient_recheck.blocking_reasons.clone(),
+                }),
+            ));
+        } else {
+            state.audit_sender.try_send(audit::domain_event(
+                "create_order_blocked_recheck",
+                Some(auth.user_id),
+                "patient",
+                Some(body.patient_id),
+                serde_json::json!({
+                    "blocking_reasons": patient_recheck.blocking_reasons.clone(),
+                    "recheck": patient_recheck.payload.clone(),
+                }),
+            ));
+            return patient_recheck_err(&patient_recheck);
+        }
     }
 
     let seq: i64 = match sqlx::query_scalar!("SELECT nextval('order_number_seq') AS \"v!\"")
@@ -2271,6 +2315,108 @@ async fn get_order(
         "created_at": order.created_at, "updated_at": order.updated_at,
     }))
     .into_response()
+}
+
+/// Persist the commercial basis assembled by the lead wizard: the live gross
+/// estimate and, when requested, the framework contract all orders refer to.
+async fn update_order_commercial_basis(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+    Json(body): Json<UpdateOrderCommercialBasisRequest>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::PatientManager]) {
+        return resp;
+    }
+
+    let order_patient_id =
+        match ensure_order_access(&state, &auth, order_id, "Order not found").await {
+            Ok(patient_id) => patient_id,
+            Err(resp) => return resp,
+        };
+    let total_estimated = match body
+        .total_estimated
+        .trim()
+        .parse::<rust_decimal::Decimal>()
+    {
+        Ok(value) if value >= rust_decimal::Decimal::ZERO => value,
+        _ => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "total_estimated must be a non-negative decimal",
+            );
+        }
+    };
+
+    if let Some(contract_id) = body.contract_id {
+        let contract_patient_id = match sqlx::query_scalar::<_, Uuid>(
+            "SELECT patient_id FROM framework_contracts WHERE id = $1",
+        )
+        .bind(contract_id)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(Some(patient_id)) => patient_id,
+            Ok(None) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Framework contract not found",
+                );
+            }
+            Err(e) => {
+                tracing::error!(error = %e, order_id = %order_id, contract_id = %contract_id, "validate order commercial contract");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+        if contract_patient_id != order_patient_id {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Framework contract does not belong to patient",
+            );
+        }
+    }
+
+    match sqlx::query(
+        "UPDATE orders
+         SET total_estimated = $2,
+             contract_id = COALESCE($3, contract_id),
+             updated_at = now()
+         WHERE id = $1",
+    )
+    .bind(order_id)
+    .bind(total_estimated)
+    .bind(body.contract_id)
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) if result.rows_affected() == 1 => {
+            state.audit_sender.try_send(audit::domain_event(
+                "update_order_commercial_basis",
+                Some(auth.user_id),
+                "order",
+                Some(order_id),
+                serde_json::json!({
+                    "contract_id": body.contract_id,
+                    "total_estimated": total_estimated.to_string(),
+                }),
+            ));
+            Json(serde_json::json!({
+                "ok": true,
+                "order_id": order_id,
+                "contract_id": body.contract_id,
+                "total_estimated": total_estimated.to_string(),
+            }))
+            .into_response()
+        }
+        Ok(_) => err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(e) => {
+            tracing::error!(error = %e, order_id = %order_id, "update order commercial basis");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update order commercial basis",
+            )
+        }
+    }
 }
 
 async fn update_phase(
@@ -3789,8 +3935,9 @@ async fn list_leistungen(
     }
 
     match sqlx::query(
-        r#"SELECT ol.id, ol.description, ol.quantity, ol.unit_price, ol.currency, ol.vat_rate,
-                  ol.is_cost_passthrough, ol.status, ol.notes, ol.provider_id, ol.doctor_id,
+        r#"SELECT ol.id, ol.patient_id, ol.description, ol.quantity, ol.unit_price, ol.currency, ol.vat_rate,
+                  ol.is_cost_passthrough, ol.status, ol.notes, ol.client_reference,
+                  ol.provider_id, ol.doctor_id,
                   ol.source_interpreter_report_id, ol.source_medical_appointment_id,
                   ol.agency_service_id, ol.external_document_id,
                   pr.name AS provider_name, d.name AS doctor_name,
@@ -3826,6 +3973,7 @@ async fn list_leistungen(
             for r in rows {
                 items.push(serde_json::json!({
                     "id": r.try_get::<Uuid, _>("id").unwrap_or_default(),
+                    "patient_id": r.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
                     "description": r.try_get::<String, _>("description").unwrap_or_default(),
                     "quantity": r.try_get::<rust_decimal::Decimal, _>("quantity").unwrap_or(rust_decimal::Decimal::ZERO),
                     "unit_price": r.try_get::<rust_decimal::Decimal, _>("unit_price").unwrap_or(rust_decimal::Decimal::ZERO),
@@ -3834,6 +3982,7 @@ async fn list_leistungen(
                     "is_cost_passthrough": r.try_get::<bool, _>("is_cost_passthrough").unwrap_or(false),
                     "status": r.try_get::<String, _>("status").unwrap_or_default(),
                     "notes": r.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+                    "client_reference": r.try_get::<Option<String>, _>("client_reference").unwrap_or_default(),
                     "provider_id": r.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
                     "provider_name": r.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
                     "provider_taxonomy_node_id": r.try_get::<Option<Uuid>, _>("provider_taxonomy_node_id").unwrap_or_default(),
@@ -3876,6 +4025,18 @@ async fn add_leistung(
         Err(resp) => return resp,
     }
 
+    let service_patient_id = match ensure_order_service_patient_allowed(
+        &state,
+        &auth,
+        order_id,
+        body.patient_id,
+    )
+    .await
+    {
+        Ok(patient_id) => patient_id,
+        Err(resp) => return resp,
+    };
+
     let vat = rust_decimal::Decimal::try_from(body.vat_rate.unwrap_or(19.0))
         .unwrap_or(rust_decimal::Decimal::new(19, 0));
     let qty = rust_decimal::Decimal::try_from(body.quantity).unwrap_or(rust_decimal::Decimal::ONE);
@@ -3883,6 +4044,7 @@ async fn add_leistung(
         rust_decimal::Decimal::try_from(body.unit_price).unwrap_or(rust_decimal::Decimal::ZERO);
     let passthrough = body.is_cost_passthrough.unwrap_or(false);
     let description = body.description.clone();
+    let client_reference = normalize_optional_text(body.client_reference);
     if let Err(resp) =
         validate_provider_doctor_context(&state, body.provider_id, body.doctor_id).await
     {
@@ -3901,11 +4063,17 @@ async fn add_leistung(
     };
 
     match sqlx::query(
-        "INSERT INTO order_leistungen (order_id, description, quantity, unit_price, vat_rate, is_cost_passthrough, provider_id, doctor_id, external_document_id, notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        "INSERT INTO order_leistungen (
+             order_id, patient_id, description, quantity, unit_price, vat_rate,
+             is_cost_passthrough, provider_id, doctor_id, external_document_id,
+             notes, client_reference
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         ON CONFLICT (order_id, client_reference) DO NOTHING
          RETURNING id",
     )
     .bind(order_id)
+    .bind(service_patient_id)
     .bind(body.description)
     .bind(qty)
     .bind(price)
@@ -3915,10 +4083,11 @@ async fn add_leistung(
     .bind(body.doctor_id)
     .bind(external_document_id)
     .bind(body.notes)
-    .fetch_one(&state.db)
+    .bind(client_reference.as_deref())
+    .fetch_optional(&state.db)
     .await
     {
-        Ok(r) => {
+        Ok(Some(r)) => {
             let id: Uuid = r.try_get("id").unwrap_or_default();
             crate::realtime::publish_order_event(
                 &state,
@@ -3933,6 +4102,34 @@ async fn add_leistung(
             )
             .await;
             (StatusCode::CREATED, Json(serde_json::json!({"id": id}))).into_response()
+        }
+        Ok(None) => {
+            let Some(client_reference) = client_reference else {
+                tracing::error!(order_id = %order_id, "leistung insert returned no row without a client reference");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            };
+            match sqlx::query_scalar::<_, Uuid>(
+                "SELECT id FROM order_leistungen WHERE order_id = $1 AND client_reference = $2",
+            )
+            .bind(order_id)
+            .bind(&client_reference)
+            .fetch_optional(&state.db)
+            .await
+            {
+                Ok(Some(id)) => Json(serde_json::json!({
+                    "id": id,
+                    "idempotent_replay": true,
+                }))
+                .into_response(),
+                Ok(None) => {
+                    tracing::error!(order_id = %order_id, client_reference = %client_reference, "idempotent leistung is missing after conflict");
+                    err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, order_id = %order_id, client_reference = %client_reference, "load idempotent leistung");
+                    err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+                }
+            }
         }
         Err(e) => { tracing::error!(error = %e, "add leistung"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
     }
@@ -4355,6 +4552,9 @@ async fn list_order_amendments(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
         return e;
     }
+    if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {
+        return resp;
+    }
     match sqlx::query(&format!(
         "SELECT {ORDER_AMENDMENT_COLUMNS} FROM order_amendments WHERE order_id = $1 ORDER BY created_at DESC"
     ))
@@ -4410,14 +4610,8 @@ async fn create_order_amendment(
         .unwrap_or("EUR")
         .to_string();
 
-    let order_exists =
-        sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM orders WHERE id = $1)")
-            .bind(order_id)
-            .fetch_one(&state.db)
-            .await
-            .unwrap_or(false);
-    if !order_exists {
-        return err(StatusCode::NOT_FOUND, "Order not found");
+    if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {
+        return resp;
     }
 
     match sqlx::query(&format!(
@@ -4477,34 +4671,9 @@ async fn decide_order_amendment(
         }
     };
 
-    let existing = match sqlx::query(
-        "SELECT status, delta_amount, requested_by FROM order_amendments WHERE id = $1 AND order_id = $2",
-    )
-    .bind(amendment_id)
-    .bind(order_id)
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(row)) => row,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Amendment not found"),
-        Err(e) => {
-            tracing::error!(error = %e, "load order amendment");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-
-    let status: String = existing.try_get("status").unwrap_or_default();
-    if status != "pending" {
-        return err(StatusCode::CONFLICT, "Amendment has already been decided");
+    if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {
+        return resp;
     }
-    let requested_by: Uuid = existing.try_get("requested_by").unwrap_or_else(|_| Uuid::nil());
-    if decision == "approved" && requested_by == auth.user_id {
-        return err(
-            StatusCode::FORBIDDEN,
-            "An amendment must be approved by someone other than its requester",
-        );
-    }
-    let delta: rust_decimal::Decimal = existing.try_get("delta_amount").unwrap_or_default();
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -4514,18 +4683,58 @@ async fn decide_order_amendment(
         }
     };
 
-    if let Err(e) = sqlx::query(
-        "UPDATE order_amendments SET status = $2, decided_by = $3, decided_at = now(), decision_note = $4 WHERE id = $1",
+    let existing = match sqlx::query(
+        "SELECT status, delta_amount, requested_by FROM order_amendments WHERE id = $1 AND order_id = $2 FOR UPDATE",
     )
     .bind(amendment_id)
+    .bind(order_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Amendment not found"),
+        Err(e) => {
+            tracing::error!(error = %e, "load order amendment for decision");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    let status: String = existing.try_get("status").unwrap_or_default();
+    if status != "pending" {
+        return err(StatusCode::CONFLICT, "Amendment has already been decided");
+    }
+    let requested_by: Uuid = existing
+        .try_get("requested_by")
+        .unwrap_or_else(|_| Uuid::nil());
+    if decision == "approved" && requested_by == auth.user_id {
+        return err(
+            StatusCode::FORBIDDEN,
+            "An amendment must be approved by someone other than its requester",
+        );
+    }
+    let delta: rust_decimal::Decimal = existing.try_get("delta_amount").unwrap_or_default();
+
+    let decision_result = match sqlx::query(
+        "UPDATE order_amendments
+         SET status = $3, decided_by = $4, decided_at = now(), decision_note = $5
+         WHERE id = $1 AND order_id = $2 AND status = 'pending'",
+    )
+    .bind(amendment_id)
+    .bind(order_id)
     .bind(decision)
     .bind(auth.user_id)
     .bind(body.note.as_deref())
     .execute(&mut *tx)
     .await
     {
-        tracing::error!(error = %e, "update order amendment");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        Ok(result) => result,
+        Err(e) => {
+            tracing::error!(error = %e, "update order amendment");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if decision_result.rows_affected() != 1 {
+        return err(StatusCode::CONFLICT, "Amendment has already been decided");
     }
 
     if decision == "approved"
@@ -4607,7 +4816,8 @@ async fn order_group_payload(
 ) -> Result<serde_json::Value, axum::response::Response> {
     let head = sqlx::query(
         "SELECT id, order_number, patient_id, order_role, status, total_estimated, currency,
-                payer_patient_relation_id, payer_contact_name
+                payer_patient_relation_id, payer_contact_name, payer_contact_email,
+                payer_contact_phone, payer_contact_relationship, payer_notes
          FROM orders WHERE id = $1",
     )
     .bind(head_id)
@@ -4645,6 +4855,11 @@ async fn order_group_payload(
                FROM appointments a
                JOIN orders o ON o.id = a.order_id
                WHERE (o.id = $1 OR o.head_order_id = $1) AND a.patient_id IS NOT NULL
+               UNION
+               SELECT service.patient_id
+               FROM order_leistungen service
+               JOIN orders o ON o.id = service.order_id
+               WHERE o.id = $1 OR o.head_order_id = $1
            ) grp WHERE patient_id IS NOT NULL"#,
     )
     .bind(head_id)
@@ -4698,6 +4913,18 @@ async fn order_group_payload(
             "payer_contact_name": head
                 .try_get::<Option<String>, _>("payer_contact_name")
                 .unwrap_or_default(),
+            "payer_contact_email": head
+                .try_get::<Option<String>, _>("payer_contact_email")
+                .unwrap_or_default(),
+            "payer_contact_phone": head
+                .try_get::<Option<String>, _>("payer_contact_phone")
+                .unwrap_or_default(),
+            "payer_contact_relationship": head
+                .try_get::<Option<String>, _>("payer_contact_relationship")
+                .unwrap_or_default(),
+            "payer_notes": head
+                .try_get::<Option<String>, _>("payer_notes")
+                .unwrap_or_default(),
         },
         "subs": subs,
         "covered_patient_ids": covered,
@@ -4714,6 +4941,9 @@ async fn get_order_group(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
         return e;
+    }
+    if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {
+        return resp;
     }
     let row = match sqlx::query("SELECT order_role, head_order_id FROM orders WHERE id = $1")
         .bind(order_id)
@@ -4736,6 +4966,11 @@ async fn get_order_group(
     } else {
         order_id
     };
+    if head_id != order_id
+        && let Err(resp) = ensure_order_access(&state, &auth, head_id, "Head order not found").await
+    {
+        return resp;
+    }
     match order_group_payload(&state.db, head_id).await {
         Ok(payload) => Json(payload).into_response(),
         Err(resp) => resp,
@@ -4758,6 +4993,14 @@ async fn group_order(
             StatusCode::UNPROCESSABLE_ENTITY,
             "An order cannot be grouped under itself",
         );
+    }
+    if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {
+        return resp;
+    }
+    if let Err(resp) =
+        ensure_order_access(&state, &auth, body.head_order_id, "Head order not found").await
+    {
+        return resp;
     }
     let this_role: Option<String> =
         sqlx::query_scalar("SELECT order_role FROM orders WHERE id = $1")
@@ -4864,6 +5107,34 @@ async fn merge_orders(
     if sources.is_empty() {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "No orders to merge");
     }
+    if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Target order not found").await
+    {
+        return resp;
+    }
+    if let Err(resp) = ensure_order_ids_access(
+        &state,
+        &auth,
+        &sources,
+        "One or more orders to merge not found",
+    )
+    .await
+    {
+        return resp;
+    }
+    let reparented_subs = match load_sub_order_ids(&state.db, &sources).await {
+        Ok(ids) => ids,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = ensure_order_ids_access(
+        &state,
+        &auth,
+        &reparented_subs,
+        "One or more orders to merge not found",
+    )
+    .await
+    {
+        return resp;
+    }
 
     let target_role: Option<String> =
         sqlx::query_scalar("SELECT order_role FROM orders WHERE id = $1")
@@ -4889,7 +5160,10 @@ async fn merge_orders(
         .await
         .unwrap_or(0);
     if found != sources.len() as i64 {
-        return err(StatusCode::NOT_FOUND, "One or more orders to merge not found");
+        return err(
+            StatusCode::NOT_FOUND,
+            "One or more orders to merge not found",
+        );
     }
 
     let mut tx = match state.db.begin().await {
@@ -4978,6 +5252,9 @@ async fn ungroup_order(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
         return e;
     }
+    if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {
+        return resp;
+    }
     let row = match sqlx::query("SELECT order_role, head_order_id FROM orders WHERE id = $1")
         .bind(order_id)
         .fetch_optional(&state.db)
@@ -4996,6 +5273,9 @@ async fn ungroup_order(
         return err(StatusCode::CONFLICT, "Order is not grouped");
     }
     let head_id = head_id.unwrap();
+    if let Err(resp) = ensure_order_access(&state, &auth, head_id, "Head order not found").await {
+        return resp;
+    }
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -5053,6 +5333,34 @@ async fn set_order_payer(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
         return e;
     }
+    let order_patient_id =
+        match ensure_order_access(&state, &auth, order_id, "Order not found").await {
+            Ok(patient_id) => patient_id,
+            Err(resp) => return resp,
+        };
+
+    if let Some(relation_id) = body.payer_patient_relation_id {
+        let relation_matches = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM patient_relations WHERE id = $1 AND patient_id = $2)",
+        )
+        .bind(relation_id)
+        .bind(order_patient_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(false);
+        if !relation_matches {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Payer relation does not belong to order patient",
+            );
+        }
+    }
+
+    let payer_contact_name = normalize_optional_text(body.payer_contact_name);
+    let payer_contact_email = normalize_optional_text(body.payer_contact_email);
+    let payer_contact_phone = normalize_optional_text(body.payer_contact_phone);
+    let payer_contact_relationship = normalize_optional_text(body.payer_contact_relationship);
+    let payer_notes = normalize_optional_text(body.payer_notes);
 
     let result = sqlx::query(
         "UPDATE orders SET
@@ -5069,11 +5377,11 @@ async fn set_order_payer(
     )
     .bind(order_id)
     .bind(body.payer_patient_relation_id)
-    .bind(body.payer_contact_name.as_deref())
-    .bind(body.payer_contact_email.as_deref())
-    .bind(body.payer_contact_phone.as_deref())
-    .bind(body.payer_contact_relationship.as_deref())
-    .bind(body.payer_notes.as_deref())
+    .bind(payer_contact_name.as_deref())
+    .bind(payer_contact_email.as_deref())
+    .bind(payer_contact_phone.as_deref())
+    .bind(payer_contact_relationship.as_deref())
+    .bind(payer_notes.as_deref())
     .bind(auth.user_id)
     .execute(&state.db)
     .await;
@@ -5087,14 +5395,18 @@ async fn set_order_payer(
                 Some(order_id),
                 serde_json::json!({
                     "payer_patient_relation_id": body.payer_patient_relation_id,
-                    "payer_contact_name": body.payer_contact_name,
+                    "payer_contact_name": payer_contact_name.clone(),
                 }),
             ));
             Json(serde_json::json!({
                 "ok": true,
                 "order_id": order_id,
                 "payer_patient_relation_id": body.payer_patient_relation_id,
-                "payer_contact_name": body.payer_contact_name,
+                "payer_contact_name": payer_contact_name,
+                "payer_contact_email": payer_contact_email,
+                "payer_contact_phone": payer_contact_phone,
+                "payer_contact_relationship": payer_contact_relationship,
+                "payer_notes": payer_notes,
             }))
             .into_response()
         }
@@ -5178,4 +5490,145 @@ async fn can_access_order(
             tracing::error!(error = %e, patient_id = %patient_id, "Failed to validate order assignment");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate order access")
         })
+}
+
+async fn ensure_order_access(
+    state: &AppState,
+    auth: &AuthUser,
+    order_id: Uuid,
+    not_found_message: &str,
+) -> Result<Uuid, axum::response::Response> {
+    let patient_id = sqlx::query_scalar::<_, Uuid>("SELECT patient_id FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, order_id = %order_id, "Failed to load order access context");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate order access")
+        })?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, not_found_message))?;
+
+    match can_access_order(state, auth, order_id, Some(patient_id)).await? {
+        true => Ok(patient_id),
+        false => Err(err(StatusCode::FORBIDDEN, "Insufficient permissions")),
+    }
+}
+
+async fn ensure_order_ids_access(
+    state: &AppState,
+    auth: &AuthUser,
+    order_ids: &[Uuid],
+    not_found_message: &str,
+) -> Result<(), axum::response::Response> {
+    for order_id in order_ids {
+        ensure_order_access(state, auth, *order_id, not_found_message).await?;
+    }
+    Ok(())
+}
+
+async fn load_sub_order_ids(
+    db: &sqlx::PgPool,
+    head_ids: &[Uuid],
+) -> Result<Vec<Uuid>, axum::response::Response> {
+    if head_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM orders WHERE head_order_id = ANY($1) AND id <> ALL($1)",
+    )
+    .bind(head_ids)
+    .fetch_all(db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "load source sub-orders for access validation");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate order access",
+        )
+    })
+}
+
+async fn ensure_order_service_patient_allowed(
+    state: &AppState,
+    auth: &AuthUser,
+    order_id: Uuid,
+    requested_patient_id: Option<Uuid>,
+) -> Result<Uuid, axum::response::Response> {
+    let row = sqlx::query("SELECT patient_id, order_role FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, order_id = %order_id, "load service order patient context");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate service patient",
+            )
+        })?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "Order not found"))?;
+    let order_patient_id: Uuid = row.try_get("patient_id").map_err(|_| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to decode service patient context",
+        )
+    })?;
+    let service_patient_id = requested_patient_id.unwrap_or(order_patient_id);
+    if service_patient_id == order_patient_id {
+        return Ok(service_patient_id);
+    }
+
+    let order_role: String = row.try_get("order_role").unwrap_or_default();
+    if order_role != "main" {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Cross-patient services require a MAIN order",
+        ));
+    }
+    ensure_patient_access(state, auth, service_patient_id).await?;
+
+    let covered = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM orders grouped
+               WHERE (grouped.id = $1 OR grouped.head_order_id = $1)
+                 AND grouped.patient_id = $2
+               UNION
+               SELECT 1
+               FROM appointments appointment
+               WHERE appointment.order_id = $1
+                 AND appointment.patient_id = $2
+               UNION
+               SELECT 1
+               FROM patient_relations relation
+               WHERE relation.relation_type IN (
+                   'parent', 'child', 'spouse', 'sibling', 'relative', 'guardian', 'caregiver'
+               )
+                 AND (
+                     (relation.patient_id = $3 AND relation.related_patient_id = $2)
+                     OR (relation.patient_id = $2 AND relation.related_patient_id = $3)
+                 )
+           )"#,
+    )
+    .bind(order_id)
+    .bind(service_patient_id)
+    .bind(order_patient_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, order_id = %order_id, patient_id = %service_patient_id, "validate MAIN order service patient");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate service patient",
+        )
+    })?;
+
+    if covered {
+        Ok(service_patient_id)
+    } else {
+        Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Patient is not covered by this MAIN order",
+        ))
+    }
 }

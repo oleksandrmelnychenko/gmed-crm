@@ -1209,6 +1209,29 @@ async fn mark_document_signed(
         }
     };
     let patient_id: Option<Uuid> = document.try_get("patient_id").ok().flatten();
+    if let Some(patient_id) = patient_id
+        && access::requires_patient_assignment(auth.role)
+    {
+        let assigned = access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, patient_id = %patient_id, document_id = %document_id, "validate document signature patient assignment");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate document access",
+                )
+            });
+        match assigned {
+            Ok(true) => {}
+            Ok(false) => {
+                return err(
+                    StatusCode::FORBIDDEN,
+                    "Patient manager is not assigned to this patient.",
+                );
+            }
+            Err(resp) => return resp,
+        }
+    }
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,

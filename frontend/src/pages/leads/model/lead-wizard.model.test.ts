@@ -3,10 +3,20 @@ import { describe, expect, it } from "vitest";
 import type { LeadDetail } from "@/lib/api/types";
 
 import {
+  blankClinicalIntake,
   blankGuardian,
   blankOrderLine,
   canConvert,
   canFinishOrder,
+  clinicalIntakeHasAllergy,
+  clinicalIntakeHasCave,
+  clinicalIntakeHasMedication,
+  clinicalIntakeHasNarrative,
+  clinicalMedicationFingerprint,
+  clinicalMedicationPayload,
+  clinicalNarrativePayload,
+  clinicalWarningFingerprint,
+  clinicalWarningPayload,
   completedSteps,
   costEstimate,
   guardianIsComplete,
@@ -14,6 +24,10 @@ import {
   draftFromLead,
   isMinor,
   nextStep,
+  orderLineClientReference,
+  orderResumeFromLead,
+  orderResumeWizardState,
+  orderLineFingerprint,
   orderLineIsValid,
   orderLinePayload,
   orderNeedsDescription,
@@ -184,6 +198,115 @@ describe("navigation + resume", () => {
     expect(resumeStep(lead({ wizard_state: null }))).toBe("identity");
     expect(resumeStep(lead({ wizard_state: { step: "bogus" } }))).toBe("identity");
   });
+
+  it("resumes Phase B order state from wizard_state", () => {
+    const detail = lead({
+      converted_patient_id: "patient-1",
+      wizard_state: {
+        step: "specialties",
+        phase: "order",
+        patient_id: "patient-1",
+        patient_pid: "P-1",
+        order_id: "order-1",
+        saved_order_line_keys: ["line-1"],
+        order_lines: [
+          {
+            clientKey: "line-1",
+            description: "MRT",
+            quantity: "1",
+            unitPrice: "100",
+            vatRate: "19",
+          },
+        ],
+        guardian: { name: "Parent", phone: "123" },
+        clinical_intake: { currentComplaint: "Knee pain" },
+        start_contract: true,
+        contract_id: "contract-1",
+        contract_started: true,
+      },
+    });
+
+    expect(orderResumeFromLead(detail)).toEqual({
+      orderId: "order-1",
+      patientId: "patient-1",
+      patientPid: "P-1",
+      savedOrderLineKeys: ["line-1"],
+      orderLines: [
+        {
+          clientKey: "line-1",
+          description: "MRT",
+          quantity: "1",
+          unitPrice: "100",
+          vatRate: "19",
+        },
+      ],
+      guardian: { name: "Parent", phone: "123" },
+      clinicalIntake: expect.objectContaining({ currentComplaint: "Knee pain" }),
+      startContract: true,
+      contractId: "contract-1",
+    });
+  });
+
+  it("rejects stale Phase B resume state for a different converted patient", () => {
+    expect(
+      orderResumeFromLead(
+        lead({
+          converted_patient_id: "patient-1",
+          wizard_state: {
+            phase: "order",
+            patient_id: "patient-2",
+            order_id: "order-1",
+          },
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("does not resume already completed Phase B state", () => {
+    expect(
+      orderResumeFromLead(
+        lead({
+          converted_patient_id: "patient-1",
+          wizard_state: {
+            phase: "completed",
+            patient_id: "patient-1",
+            order_id: "order-1",
+          },
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("builds the persisted Phase B resume marker", () => {
+    const draft = draftFromLead(lead());
+    const orderLines = [blankOrderLine("line-1")];
+    expect(
+      orderResumeWizardState(draft, "specialties", {
+        patientId: "patient-1",
+        patientPid: "P-1",
+        orderId: "order-1",
+        savedOrderLineKeys: ["line-1"],
+        orderLines,
+        guardian: { name: "Parent", phone: "123" },
+        clinicalIntake: blankClinicalIntake(draft),
+        startContract: true,
+        contractId: "contract-1",
+      }),
+    ).toMatchObject({
+      step: "specialties",
+      completed: completedSteps(draft),
+      phase: "order",
+      patient_id: "patient-1",
+      patient_pid: "P-1",
+      order_id: "order-1",
+      saved_order_line_keys: ["line-1"],
+      order_lines: orderLines,
+      guardian: { name: "Parent", phone: "123" },
+      start_contract: true,
+      contract_id: "contract-1",
+      contract_started: true,
+    });
+  });
 });
 
 describe("Phase B order lines (#8)", () => {
@@ -192,7 +315,8 @@ describe("Phase B order lines (#8)", () => {
   }
 
   it("blank line defaults to quantity 1 / vat 19", () => {
-    expect(blankOrderLine()).toEqual({
+    expect(blankOrderLine("line-1")).toEqual({
+      clientKey: "line-1",
       description: "",
       quantity: "1",
       unitPrice: "0",
@@ -229,12 +353,27 @@ describe("Phase B order lines (#8)", () => {
   });
 
   it("builds the leistung payload with numeric fields", () => {
-    expect(orderLinePayload(line({ description: " MRT ", quantity: "2", unitPrice: "100", vatRate: "19" }))).toEqual({
+    const value = line({
+      clientKey: "line-1",
+      description: " MRT ",
+      quantity: "2",
+      unitPrice: "100",
+      vatRate: "19",
+    });
+    expect(orderLinePayload(value, "patient-1", orderLineClientReference("lead-1", value))).toEqual({
+      patient_id: "patient-1",
       description: "MRT",
       quantity: 2,
       unit_price: 100,
       vat_rate: 19,
+      client_reference: "lead-wizard:lead-1:line-1",
     });
+  });
+
+  it("fingerprints a line by normalized billable values for retry skips", () => {
+    expect(
+      orderLineFingerprint(line({ description: " MRT ", quantity: "2", unitPrice: "100,00", vatRate: "19" })),
+    ).toBe(orderLineFingerprint(line({ description: "mrt", quantity: "2", unitPrice: "100", vatRate: "19" })));
   });
 });
 
@@ -263,5 +402,116 @@ describe("Phase B guardian branch (#2/#11)", () => {
       is_emergency_contact: true,
     });
     expect(guardianPayload(g({ name: "X" })).phone).toBeNull();
+  });
+});
+
+describe("Phase B clinical intake (#8)", () => {
+  it("starts narrative fields from the lead concern text", () => {
+    const intake = blankClinicalIntake(
+      draftFromLead(
+        lead({
+          primary_concern_text: "Knee pain",
+          additional_concerns: "Previous ACL repair",
+        }),
+      ),
+    );
+
+    expect(intake.currentComplaint).toBe("Knee pain");
+    expect(intake.anamneseHistory).toBe("Previous ACL repair");
+    expect(clinicalIntakeHasNarrative(intake)).toBe(true);
+  });
+
+  it("builds a narrative payload while preserving untouched existing fields", () => {
+    const payload = clinicalNarrativePayload(
+      {
+        ...blankClinicalIntake(),
+        currentComplaint: " Acute pain ",
+      },
+      {
+        id: "narrative-1",
+        anamnese_vorgeschichte: "Old history",
+        beurteilung: "Existing assessment",
+      },
+    );
+
+    expect(payload).toMatchObject({
+      id: "narrative-1",
+      anamnese_aktuelle: "Acute pain",
+      anamnese_vorgeschichte: "Old history",
+      beurteilung: "Existing assessment",
+      is_active: true,
+    });
+  });
+
+  it("builds a valid compact medication payload and retry fingerprint", () => {
+    const intake = {
+      ...blankClinicalIntake(),
+      medicationName: " Ibuprofen ",
+      medicationStrength: "400 mg",
+      medicationDose: "1-0-1",
+      medicationReason: "Pain",
+      medicationNotes: "After meals",
+    };
+    const payload = clinicalMedicationPayload(intake);
+
+    expect(clinicalIntakeHasMedication(intake)).toBe(true);
+    expect(payload).toMatchObject({
+      handelsname: "Ibuprofen",
+      staerke: "400 mg",
+      form: "TABL",
+      einnahmeform: "Oral",
+      dose_morgens: "1-0-1",
+      grund: "Pain",
+      hinweis: "After meals",
+      status: "aktiv",
+    });
+    expect(
+      clinicalMedicationFingerprint({
+        handelsname: " ibuprofen ",
+        staerke: "400 mg",
+        form: "TABL",
+        einnahmeform: "Oral",
+        dose_morgens: "1-0-1",
+        grund: "pain",
+        hinweis: "after meals",
+      }),
+    ).toBe(clinicalMedicationFingerprint(payload ?? {}));
+  });
+
+  it("builds allergy and CAVE warning payloads with duplicate fingerprints", () => {
+    const intake = {
+      ...blankClinicalIntake(),
+      allergyLabel: "Penicillin",
+      allergyReaction: "Rash",
+      allergySeverity: "mittel",
+      caveLabel: "Anticoagulation",
+      caveNotes: "Check before procedure",
+    };
+    const allergy = clinicalWarningPayload(intake, "allergie");
+    const cave = clinicalWarningPayload(intake, "cave");
+
+    expect(clinicalIntakeHasAllergy(intake)).toBe(true);
+    expect(clinicalIntakeHasCave(intake)).toBe(true);
+    expect(allergy).toMatchObject({
+      kind: "allergie",
+      label: "Penicillin",
+      reaction: "Rash",
+      severity: "mittel",
+    });
+    expect(cave).toMatchObject({
+      kind: "cave",
+      label: "Anticoagulation",
+      reaction: null,
+      note: "Check before procedure",
+    });
+    expect(clinicalWarningFingerprint(allergy ?? {})).toBe(
+      clinicalWarningFingerprint({
+        kind: "allergie",
+        label: " penicillin ",
+        reaction: "rash",
+        severity: "mittel",
+        note: null,
+      }),
+    );
   });
 });

@@ -1,4 +1,9 @@
 import type { LeadDetail } from "@/lib/api/types";
+import type {
+  ClinicalMedication,
+  ClinicalNarrative,
+  ClinicalWarning,
+} from "@/pages/patients/data/patient-clinical";
 
 /**
  * Pure logic for the staff lead-processing wizard, Phase A (before conversion
@@ -61,15 +66,25 @@ export function draftFromLead(lead: LeadDetail): WizardDraft {
 
 /** True when the person is younger than 18 on `today` — i.e. a child (#2). */
 export function isMinor(dateOfBirth: string, today: Date): boolean {
-  if (!dateOfBirth) return false;
-  const dob = new Date(dateOfBirth);
-  if (Number.isNaN(dob.getTime())) return false;
-  let age = today.getFullYear() - dob.getFullYear();
-  const monthDelta = today.getMonth() - dob.getMonth();
-  if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < dob.getDate())) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateOfBirth);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    return false;
+  }
+  let age = today.getFullYear() - year;
+  const monthDelta = today.getMonth() + 1 - month;
+  if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < day)) {
     age -= 1;
   }
-  return age >= 0 && age < 18;
+  return age < 18;
 }
 
 function hasContact(draft: WizardDraft): boolean {
@@ -178,20 +193,152 @@ export function resumeStep(lead: LeadDetail): WizardStepId {
   return "identity";
 }
 
+export type WizardOrderResume = {
+  orderId: string;
+  patientId: string;
+  patientPid: string;
+  savedOrderLineKeys: string[];
+  orderLines: WizardOrderLine[];
+  guardian: GuardianDraft;
+  clinicalIntake: ClinicalIntakeDraft;
+  startContract: boolean;
+  contractId: string | null;
+};
+
+function stringArrayFromUnknown(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function recordFromUnknown(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stringFromUnknown(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function orderLinesFromUnknown(value: unknown): WizardOrderLine[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item, index) => {
+    const record = recordFromUnknown(item);
+    const description = stringFromUnknown(record["description"]);
+    const quantity = stringFromUnknown(record["quantity"], "1");
+    const unitPrice = stringFromUnknown(record["unitPrice"], "0");
+    const vatRate = stringFromUnknown(record["vatRate"], "19");
+    const clientKey =
+      stringFromUnknown(record["clientKey"]).trim() ||
+      `restored-${index}-${description.trim().toLowerCase()}-${quantity}-${unitPrice}-${vatRate}`;
+    return [{ clientKey, description, quantity, unitPrice, vatRate }];
+  });
+}
+
+function guardianFromUnknown(value: unknown): GuardianDraft {
+  const record = recordFromUnknown(value);
+  return {
+    name: stringFromUnknown(record["name"]),
+    phone: stringFromUnknown(record["phone"]),
+  };
+}
+
+function clinicalIntakeFromUnknown(
+  value: unknown,
+  fallback: ClinicalIntakeDraft,
+): ClinicalIntakeDraft {
+  const record = recordFromUnknown(value);
+  return Object.fromEntries(
+    Object.entries(fallback).map(([key, fallbackValue]) => [
+      key,
+      stringFromUnknown(record[key], fallbackValue),
+    ]),
+  ) as ClinicalIntakeDraft;
+}
+
+export function orderResumeFromLead(lead: LeadDetail): WizardOrderResume | null {
+  const state = lead.wizard_state;
+  if (!state || state["phase"] !== "order") return null;
+  const orderId = state["order_id"];
+  const statePatientId = state["patient_id"];
+  const patientId = lead.converted_patient_id;
+  if (typeof orderId !== "string" || !orderId || !patientId) return null;
+  if (typeof statePatientId === "string" && statePatientId !== patientId) return null;
+  const leadDraft = draftFromLead(lead);
+  const contractId = state["contract_id"];
+  return {
+    orderId,
+    patientId,
+    patientPid: stringFromUnknown(state["patient_pid"]),
+    savedOrderLineKeys: stringArrayFromUnknown(state["saved_order_line_keys"]),
+    orderLines: orderLinesFromUnknown(state["order_lines"]),
+    guardian: guardianFromUnknown(state["guardian"]),
+    clinicalIntake: clinicalIntakeFromUnknown(
+      state["clinical_intake"],
+      blankClinicalIntake(leadDraft),
+    ),
+    startContract: state["start_contract"] !== false,
+    contractId: typeof contractId === "string" && contractId ? contractId : null,
+  };
+}
+
+export type OrderResumeStateInput = {
+  patientId: string;
+  patientPid?: string;
+  orderId: string;
+  savedOrderLineKeys?: string[];
+  orderLines: WizardOrderLine[];
+  guardian: GuardianDraft;
+  clinicalIntake: ClinicalIntakeDraft;
+  startContract: boolean;
+  contractId?: string | null;
+};
+
+export function orderResumeWizardState(
+  draft: WizardDraft,
+  currentStep: WizardStepId,
+  input: OrderResumeStateInput,
+): Record<string, unknown> {
+  return {
+    step: currentStep,
+    completed: completedSteps(draft),
+    phase: "order",
+    patient_id: input.patientId,
+    patient_pid: input.patientPid ?? "",
+    order_id: input.orderId,
+    saved_order_line_keys: input.savedOrderLineKeys ?? [],
+    order_lines: input.orderLines,
+    guardian: input.guardian,
+    clinical_intake: input.clinicalIntake,
+    start_contract: input.startContract,
+    contract_id: input.contractId ?? null,
+    contract_started: Boolean(input.contractId),
+  };
+}
+
 /**
  * Phase B — after the lead is converted, the wizard forms the actual order (#8):
  * real Leistungen (line items) with a live Kostenschätzung. Kept as pure logic
  * so the money maths and validation are unit-testable.
  */
 export type WizardOrderLine = {
+  clientKey: string;
   description: string;
   quantity: string;
   unitPrice: string;
   vatRate: string;
 };
 
-export function blankOrderLine(): WizardOrderLine {
-  return { description: "", quantity: "1", unitPrice: "0", vatRate: "19" };
+let orderLineSequence = 0;
+
+function nextOrderLineClientKey(): string {
+  orderLineSequence += 1;
+  return `wizard-line-${Date.now()}-${orderLineSequence}`;
+}
+
+export function blankOrderLine(clientKey = nextOrderLineClientKey()): WizardOrderLine {
+  return { clientKey, description: "", quantity: "1", unitPrice: "0", vatRate: "19" };
 }
 
 function numberOrNull(value: string): number | null {
@@ -235,13 +382,32 @@ export function costEstimate(lines: WizardOrderLine[]): CostEstimate {
 }
 
 /** The `POST /orders/{id}/leistungen` payload for one line. */
-export function orderLinePayload(line: WizardOrderLine): Record<string, unknown> {
+export function orderLineClientReference(leadId: string, line: WizardOrderLine): string {
+  return `lead-wizard:${leadId}:${line.clientKey}`;
+}
+
+export function orderLinePayload(
+  line: WizardOrderLine,
+  patientId?: string,
+  clientReference?: string,
+): Record<string, unknown> {
   return {
+    ...(patientId ? { patient_id: patientId } : {}),
     description: line.description.trim(),
     quantity: numberOrNull(line.quantity) ?? 0,
     unit_price: numberOrNull(line.unitPrice) ?? 0,
     vat_rate: numberOrNull(line.vatRate) ?? 0,
+    ...(clientReference ? { client_reference: clientReference } : {}),
   };
+}
+
+export function orderLineFingerprint(line: WizardOrderLine): string {
+  return [
+    line.description.trim().toLowerCase(),
+    numberOrNull(line.quantity) ?? 0,
+    numberOrNull(line.unitPrice) ?? 0,
+    numberOrNull(line.vatRate) ?? 0,
+  ].join("|");
 }
 
 /**
@@ -275,4 +441,177 @@ export function guardianPayload(guardian: GuardianDraft): Record<string, unknown
     phone: guardian.phone.trim() || null,
     is_emergency_contact: true,
   };
+}
+
+export type ClinicalIntakeDraft = {
+  currentComplaint: string;
+  anamneseHistory: string;
+  medicationName: string;
+  medicationStrength: string;
+  medicationForm: string;
+  medicationRoute: string;
+  medicationDose: string;
+  medicationReason: string;
+  medicationNotes: string;
+  allergyLabel: string;
+  allergyReaction: string;
+  allergySeverity: string;
+  allergyNotes: string;
+  caveLabel: string;
+  caveNotes: string;
+};
+
+export function blankClinicalIntake(
+  draft?: Pick<WizardDraft, "primaryConcernText" | "additionalConcerns">,
+): ClinicalIntakeDraft {
+  return {
+    currentComplaint: draft?.primaryConcernText ?? "",
+    anamneseHistory: draft?.additionalConcerns ?? "",
+    medicationName: "",
+    medicationStrength: "",
+    medicationForm: "TABL",
+    medicationRoute: "Oral",
+    medicationDose: "",
+    medicationReason: "",
+    medicationNotes: "",
+    allergyLabel: "",
+    allergyReaction: "",
+    allergySeverity: "",
+    allergyNotes: "",
+    caveLabel: "",
+    caveNotes: "",
+  };
+}
+
+function trimOrNull(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+export function clinicalIntakeHasNarrative(intake: ClinicalIntakeDraft): boolean {
+  return Boolean(
+    trimOrNull(intake.currentComplaint) || trimOrNull(intake.anamneseHistory),
+  );
+}
+
+export function clinicalIntakeHasMedication(intake: ClinicalIntakeDraft): boolean {
+  return Boolean(trimOrNull(intake.medicationName));
+}
+
+export function clinicalIntakeHasAllergy(intake: ClinicalIntakeDraft): boolean {
+  return Boolean(trimOrNull(intake.allergyLabel));
+}
+
+export function clinicalIntakeHasCave(intake: ClinicalIntakeDraft): boolean {
+  return Boolean(trimOrNull(intake.caveLabel));
+}
+
+export function clinicalNarrativePayload(
+  intake: ClinicalIntakeDraft,
+  existing: Partial<ClinicalNarrative> | null = null,
+): ClinicalNarrative {
+  return {
+    id: existing?.id ?? null,
+    anamnese_aktuelle:
+      trimOrNull(intake.currentComplaint) ?? existing?.anamnese_aktuelle ?? null,
+    anamnese_vorgeschichte:
+      trimOrNull(intake.anamneseHistory) ?? existing?.anamnese_vorgeschichte ?? null,
+    anamnese_vegetative: existing?.anamnese_vegetative ?? null,
+    anamnese_sozial: existing?.anamnese_sozial ?? null,
+    beurteilung: existing?.beurteilung ?? null,
+    is_active: true,
+  };
+}
+
+export function clinicalMedicationPayload(
+  intake: ClinicalIntakeDraft,
+): ClinicalMedication | null {
+  const handelsname = trimOrNull(intake.medicationName);
+  if (!handelsname) return null;
+  return {
+    provider_id: null,
+    provider_name: null,
+    doctor_id: null,
+    doctor_name: null,
+    doctor_title: null,
+    doctor_fachbereich: null,
+    category: "dauer",
+    wirkstoff: null,
+    handelsname,
+    staerke: trimOrNull(intake.medicationStrength),
+    form: trimOrNull(intake.medicationForm) ?? "TABL",
+    einnahmeform: trimOrNull(intake.medicationRoute) ?? "Oral",
+    dose_morgens: trimOrNull(intake.medicationDose),
+    dose_mittags: null,
+    dose_abends: null,
+    dose_nachts: null,
+    einheit: null,
+    hinweis: trimOrNull(intake.medicationNotes),
+    grund: trimOrNull(intake.medicationReason),
+    verordnet_am: null,
+    einnahme_von: null,
+    einnahme_bis: null,
+    status: "aktiv",
+    apothekenpflichtig: false,
+    rezeptpflichtig: false,
+    btm: false,
+    aut_idem_sperre: false,
+    abgabebeschraenkung: false,
+    sonstige_vermerke: null,
+    on_hold: false,
+    hold_until: null,
+    hold_note: null,
+  };
+}
+
+function normalizedFingerprint(parts: Array<string | null | undefined>): string {
+  return parts.map((part) => part?.trim().toLowerCase() ?? "").join("|");
+}
+
+export function clinicalMedicationFingerprint(item: ClinicalMedicationLike): string {
+  return normalizedFingerprint([
+    item.handelsname,
+    item.staerke,
+    item.form,
+    item.einnahmeform,
+    item.dose_morgens,
+    item.grund,
+    item.hinweis,
+  ]);
+}
+
+type ClinicalMedicationLike = Pick<
+  ClinicalMedication,
+  "handelsname" | "staerke" | "form" | "einnahmeform" | "dose_morgens" | "grund" | "hinweis"
+>;
+
+type ClinicalWarningLike = Pick<
+  ClinicalWarning,
+  "kind" | "label" | "reaction" | "severity" | "note"
+>;
+
+export function clinicalWarningPayload(
+  intake: ClinicalIntakeDraft,
+  kind: "allergie" | "cave",
+): ClinicalWarning | null {
+  const label =
+    kind === "allergie" ? trimOrNull(intake.allergyLabel) : trimOrNull(intake.caveLabel);
+  if (!label) return null;
+  return {
+    kind,
+    label,
+    reaction: kind === "allergie" ? trimOrNull(intake.allergyReaction) : null,
+    severity: kind === "allergie" ? trimOrNull(intake.allergySeverity) : null,
+    note: kind === "allergie" ? trimOrNull(intake.allergyNotes) : trimOrNull(intake.caveNotes),
+  };
+}
+
+export function clinicalWarningFingerprint(item: ClinicalWarningLike): string {
+  return normalizedFingerprint([
+    item.kind,
+    item.label,
+    item.reaction,
+    item.severity,
+    item.note,
+  ]);
 }

@@ -1007,8 +1007,9 @@ async fn wizard_convert_creates_patient_without_compliance() {
     assert_eq!(city.as_deref(), Some("Berlin"));
     assert_eq!(zip.as_deref(), Some("10115"));
 
-    // Re-conversion is blocked (sticky patient).
-    let (status, _) = json_request(
+    // Re-conversion is idempotent: callers can recover after a later wizard
+    // step failed without creating another patient.
+    let (status, repeated) = json_request(
         &app,
         "POST",
         &format!("/api/v1/leads/{lead_id}/wizard-convert"),
@@ -1016,7 +1017,20 @@ async fn wizard_convert_creates_patient_without_compliance() {
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(status, StatusCode::OK, "{repeated}");
+    assert_eq!(repeated["patient_id"], patient_uuid.to_string());
+    assert_eq!(repeated["patient_pid"], body["patient_pid"]);
+    assert_eq!(repeated["already_converted"], true);
+
+    let patient_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM patients WHERE id = $1 OR patient_id = $2",
+    )
+    .bind(patient_uuid)
+    .bind(body["patient_pid"].as_str().unwrap())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(patient_count, 1);
 }
 
 #[tokio::test]

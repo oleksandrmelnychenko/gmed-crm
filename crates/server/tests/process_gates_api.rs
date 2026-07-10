@@ -1816,6 +1816,53 @@ async fn order_amendment_requires_separate_approval_and_updates_total() {
 }
 
 #[tokio::test]
+async fn new_order_endpoints_require_access_to_target_and_sources() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = format!("order-access-{}", Uuid::new_v4().simple());
+    let pm_a_id = seed_user(&pool, &format!("{tag}-a"), "patient_manager").await;
+    let pm_b_id = seed_user(&pool, &format!("{tag}-b"), "patient_manager").await;
+    let pm_a = auth_header_for(pm_a_id, "patient_manager");
+    let pm_b = auth_header_for(pm_b_id, "patient_manager");
+
+    let patient_a = create_patient(&app, &pm_a, &format!("{tag}-pa")).await;
+    let patient_b = create_patient(&app, &pm_b, &format!("{tag}-pb")).await;
+    let order_a = insert_existing_order(&pool, patient_a, pm_a_id, &format!("{tag}-oa")).await;
+    let order_b = insert_existing_order(&pool, patient_b, pm_b_id, &format!("{tag}-ob")).await;
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_b}/amendments"),
+        &pm_a,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_b}/payer"),
+        &pm_a,
+        Some(json!({ "payer_contact_name": "Not my patient" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_a}/merge"),
+        &pm_a,
+        Some(json!({ "source_order_ids": [order_b] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn head_order_groups_subs_rolls_up_and_ungroups() {
     let Some((app, pool, _admin_id)) = test_context().await else {
         return;
@@ -1933,11 +1980,13 @@ async fn merge_orders_folds_groups_flattens_and_is_reversible() {
     let c_main = insert_existing_order(&pool, c2, pm_id, &format!("{tag}-CM")).await;
     let c_sub = insert_existing_order(&pool, c3, pm_id, &format!("{tag}-CS")).await;
     for (id, amount) in [(target, 1000), (b, 300), (c_main, 500), (c_sub, 200)] {
-        sqlx::query(&format!("UPDATE orders SET total_estimated = {amount} WHERE id = $1"))
-            .bind(id)
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(&format!(
+            "UPDATE orders SET total_estimated = {amount} WHERE id = $1"
+        ))
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
     }
 
     // Build a real group C: c_sub under c_main (c_main becomes MAIN).
@@ -1979,7 +2028,10 @@ async fn merge_orders_folds_groups_flattens_and_is_reversible() {
     assert_eq!(group["rollup_total_estimated"], "2000");
     let covered = group["covered_patient_ids"].as_array().unwrap();
     for p in [father, c1, c2, c3] {
-        assert!(covered.iter().any(|v| v == &json!(p.to_string())), "missing {p}");
+        assert!(
+            covered.iter().any(|v| v == &json!(p.to_string())),
+            "missing {p}"
+        );
     }
 
     // The flattened grandchild now resolves to the target as its head.
@@ -2037,4 +2089,89 @@ async fn merge_orders_folds_groups_flattens_and_is_reversible() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(cm_group["head"]["order_role"], "standalone");
+}
+
+#[tokio::test]
+async fn appointment_creation_rejects_arbitrary_cross_patient_order_id() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = format!("apt-order-{}", Uuid::new_v4().simple());
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm = auth_header_for(pm_id, "patient_manager");
+
+    let patient_a = create_patient(&app, &pm, &format!("{tag}-a")).await;
+    let patient_b = create_patient(&app, &pm, &format!("{tag}-b")).await;
+    let order_a = insert_existing_order(&pool, patient_a, pm_id, &format!("{tag}-oa")).await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm,
+        Some(json!({
+            "patient_id": patient_b,
+            "order_id": order_a,
+            "appointment_type": "internal",
+            "title": "Cross patient order should fail",
+            "date": "2030-03-10"
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["message"], "Order does not belong to patient");
+}
+
+#[tokio::test]
+async fn main_order_accepts_related_patient_appointment() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = format!("apt-family-order-{}", Uuid::new_v4().simple());
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm = auth_header_for(pm_id, "patient_manager");
+
+    let father = create_patient(&app, &pm, &format!("{tag}-father")).await;
+    let child = create_patient(&app, &pm, &format!("{tag}-child")).await;
+    let head_order = insert_existing_order(&pool, father, pm_id, &format!("{tag}-head")).await;
+    sqlx::query("UPDATE orders SET order_role = 'main' WHERE id = $1")
+        .bind(head_order)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, relation) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{father}/relations"),
+        &pm,
+        Some(json!({
+            "related_patient_id": child,
+            "related_name": "Child",
+            "relation_type": "child",
+            "is_emergency_contact": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{relation}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm,
+        Some(json!({
+            "patient_id": child,
+            "order_id": head_order,
+            "appointment_type": "internal",
+            "title": "Child appointment on family head order",
+            "date": "2030-03-11"
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["patient_id"], child.to_string());
+    assert_eq!(body["order_id"], head_order.to_string());
 }

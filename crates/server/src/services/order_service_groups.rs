@@ -213,12 +213,12 @@ pub async fn generate_order_service_group_lines(
 
         let leistung_id = sqlx::query_scalar::<_, Uuid>(
             r#"INSERT INTO order_leistungen (
-                    order_id, description, quantity, unit_price, currency, vat_rate,
+                    order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
                     is_cost_passthrough, provider_id, doctor_id, agency_service_id,
                     tax_profile_id, vat_source, source_service_group_id,
                     source_service_group_participant_id, notes
                ) VALUES (
-                    $1, $2, $3, $4, $5, $6,
+                    $1, (SELECT patient_id FROM orders WHERE id = $1), $2, $3, $4, $5, $6,
                     false, $7, $8, $9,
                     $10, $11, $12,
                     $13, $14
