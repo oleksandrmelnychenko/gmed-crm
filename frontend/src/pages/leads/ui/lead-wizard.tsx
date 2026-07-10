@@ -3,6 +3,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  CircleAlert,
   ClipboardCheck,
   FileCheck2,
   LoaderCircle,
@@ -103,6 +104,24 @@ type ServiceLine = {
   vat: string;
 };
 
+type AutosaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
+
+type AutosaveSnapshot = {
+  draft: Draft;
+  lines: ServiceLine[];
+  paidAmount: string;
+  prepayment: boolean;
+  step: StepId;
+};
+
+type StoredCommercialDraft = {
+  lines: ServiceLine[];
+  paidAmount: string;
+  prepayment: boolean;
+};
+
+const AUTOSAVE_DELAY_MS = 800;
+
 const STEPS: Array<{ id: StepId; ru: string; de: string }> = [
   { id: "master_data", ru: "Данные", de: "Stammdaten" },
   { id: "need", ru: "Запрос", de: "Bedarf" },
@@ -110,6 +129,95 @@ const STEPS: Array<{ id: StepId; ru: string; de: string }> = [
   { id: "commercial", ru: "Договор и заказ", de: "Vertrag & Auftrag" },
   { id: "release", ru: "Подтверждение", de: "Freigabe" },
 ];
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function inputString(value: unknown, fallback = "") {
+  return typeof value === "string" || typeof value === "number"
+    ? String(value)
+    : fallback;
+}
+
+function storedCommercialDraftFromLead(lead: LeadDetail): StoredCommercialDraft | null {
+  const stored = asRecord(lead.wizard_state?.["commercial_draft"]);
+  if (!stored) return null;
+
+  const lines = Array.isArray(stored.lines)
+    ? stored.lines.flatMap((value, index) => {
+        const line = asRecord(value);
+        if (!line) return [];
+        return [{
+          id: inputString(line.id, `stored-line-${index + 1}`),
+          clientReference:
+            typeof line.client_reference === "string" ? line.client_reference : null,
+          description: inputString(line.description),
+          quantity: inputString(line.quantity, "1"),
+          price: inputString(line.price),
+          vat: inputString(line.vat, "19"),
+        }];
+      })
+    : [];
+
+  return {
+    lines,
+    paidAmount: inputString(stored.paid_amount),
+    prepayment: stored.prepayment === true,
+  };
+}
+
+function autosaveSnapshotSignature(snapshot: AutosaveSnapshot) {
+  return JSON.stringify(snapshot);
+}
+
+function autosavePayload(
+  snapshot: AutosaveSnapshot,
+  previousWizardState: Record<string, unknown>,
+) {
+  const { draft, lines, paidAmount, prepayment, step } = snapshot;
+  const payload: Record<string, unknown> & { wizard_state: Record<string, unknown> } = {
+    date_of_birth: draft.birthDate || undefined,
+    legal_sex: draft.legalSex || undefined,
+    email: draft.email.trim(),
+    phone: draft.phone.trim(),
+    street_address: draft.street.trim(),
+    city: draft.city.trim(),
+    zip_code: draft.zip.trim(),
+    country: draft.country.trim(),
+    primary_language: draft.language.trim(),
+    primary_concern_text: draft.concern.trim(),
+    additional_concerns: draft.anamnese.trim(),
+    requested_specialties: draft.specialties,
+    consent_privacy_practices: draft.privacyConsent,
+    consent_healthcare: draft.healthcareConsent,
+    wizard_state: {
+      ...previousWizardState,
+      step,
+      onboarding_version: 2,
+      referrer: draft.referrer,
+      commercial_draft: {
+        lines: lines.map((line) => ({
+          id: line.id,
+          client_reference: line.clientReference,
+          description: line.description,
+          quantity: line.quantity,
+          price: line.price,
+          vat: line.vat,
+        })),
+        paid_amount: paidAmount,
+        prepayment,
+      },
+    },
+  };
+
+  if (draft.firstName.trim()) payload.first_name = draft.firstName.trim();
+  if (draft.lastName.trim()) payload.last_name = draft.lastName.trim();
+
+  return payload;
+}
 
 function draftFromLead(lead: LeadDetail): Draft {
   return {
@@ -126,7 +234,7 @@ function draftFromLead(lead: LeadDetail): Draft {
     language: lead.primary_language ?? "",
     concern: lead.primary_concern_text ?? "",
     anamnese: lead.additional_concerns ?? "",
-    referrer: "",
+    referrer: inputString(lead.wizard_state?.["referrer"]),
     specialties: lead.requested_specialties ?? [],
     privacyConsent: lead.consent_privacy_practices,
     healthcareConsent: lead.consent_healthcare,
@@ -223,8 +331,14 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("idle");
+  const [autosaveError, setAutosaveError] = useState("");
   const hydrated = useRef<string | null>(null);
   const stepNavRef = useRef<HTMLElement | null>(null);
+  const wizardStateBaseRef = useRef<Record<string, unknown>>({});
+  const currentAutosaveSignatureRef = useRef("");
+  const lastSavedAutosaveSignatureRef = useRef("");
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const reload = useCallback(async (hydrateDraft: boolean, hydrateCommercial = false) => {
     if (!leadId) return;
@@ -246,6 +360,26 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
         ? await fetchOrder(nextOrder.id).catch(() => null)
         : null;
       const paymentQuote = nextQuotes.find((item) => item.status === "accepted") ?? nextQuotes[0];
+      const storedCommercialDraft = storedCommercialDraftFromLead(nextLead);
+      const nextDraft = draftFromLead(nextLead);
+      const savedStep = nextLead.wizard_state?.["step"];
+      const nextStep =
+        typeof savedStep === "string" && STEPS.some((item) => item.id === savedStep)
+          ? savedStep as StepId
+          : "master_data";
+      const nextLines = storedCommercialDraft?.lines.length
+        ? storedCommercialDraft.lines
+        : nextOrderDetail?.leistungen.length
+          ? nextOrderDetail.leistungen.map(lineFromOrderLeistung)
+          : [newLine()];
+      const nextPrepayment = storedCommercialDraft
+        ? storedCommercialDraft.prepayment
+        : Boolean(nextOrder?.prepayment_required);
+      const nextPaidAmount = storedCommercialDraft
+        ? storedCommercialDraft.paidAmount
+        : paymentQuote?.paid_amount == null
+          ? ""
+          : String(paymentQuote.paid_amount);
 
       setLead(nextLead);
       setDocuments(nextDocuments);
@@ -254,16 +388,29 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
       setOrders(nextOrders);
       setQuotes(nextQuotes);
       setSpecialties(nextSpecialties);
+      wizardStateBaseRef.current = nextLead.wizard_state ?? {};
       if (hydrateDraft || hydrated.current !== leadId) {
         hydrated.current = leadId;
-        setDraft(draftFromLead(nextLead));
-        const savedStep = nextLead.wizard_state?.["step"];
-        setStep(typeof savedStep === "string" && STEPS.some((item) => item.id === savedStep) ? savedStep as StepId : "master_data");
+        setDraft(nextDraft);
+        setStep(nextStep);
       }
       if (hydrateDraft || hydrateCommercial) {
-        setLines(nextOrderDetail?.leistungen.length ? nextOrderDetail.leistungen.map(lineFromOrderLeistung) : [newLine()]);
-        setPrepayment(Boolean(nextOrder?.prepayment_required));
-        setPaidAmount(paymentQuote?.paid_amount == null ? "" : String(paymentQuote.paid_amount));
+        setLines(nextLines);
+        setPrepayment(nextPrepayment);
+        setPaidAmount(nextPaidAmount);
+      }
+      if (hydrateDraft) {
+        const signature = autosaveSnapshotSignature({
+          draft: nextDraft,
+          lines: nextLines,
+          paidAmount: nextPaidAmount,
+          prepayment: nextPrepayment,
+          step: nextStep,
+        });
+        currentAutosaveSignatureRef.current = signature;
+        lastSavedAutosaveSignatureRef.current = signature;
+        setAutosaveError("");
+        setAutosaveStatus("saved");
       }
     } catch (nextError) {
       setError(errorText(nextError));
@@ -282,6 +429,11 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
     setLead(null);
     setDraft(null);
     setError("");
+    setAutosaveError("");
+    setAutosaveStatus("idle");
+    currentAutosaveSignatureRef.current = "";
+    lastSavedAutosaveSignatureRef.current = "";
+    wizardStateBaseRef.current = {};
   }, [open]);
 
   useEffect(() => {
@@ -322,6 +474,85 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
     return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, gross: Math.round((net + vat) * 100) / 100 };
   }, [lines]);
 
+  const persistSnapshot = useCallback((snapshot: AutosaveSnapshot, force = false) => {
+    if (!leadId) return Promise.reject(new Error("Lead is not selected"));
+
+    const targetLeadId = leadId;
+    const signature = autosaveSnapshotSignature(snapshot);
+    const previousWizardState = wizardStateBaseRef.current;
+    const payload = autosavePayload(snapshot, previousWizardState);
+
+    const run = async () => {
+      if (!force && currentAutosaveSignatureRef.current !== signature) return;
+
+      if (
+        hydrated.current === targetLeadId &&
+        currentAutosaveSignatureRef.current === signature
+      ) {
+        setAutosaveError("");
+        setAutosaveStatus("saving");
+      }
+
+      try {
+        await updateLeadWizard(targetLeadId, payload);
+        if (hydrated.current !== targetLeadId) return;
+
+        wizardStateBaseRef.current = payload.wizard_state;
+        lastSavedAutosaveSignatureRef.current = signature;
+        if (currentAutosaveSignatureRef.current === signature) {
+          setAutosaveError("");
+          setAutosaveStatus("saved");
+        } else {
+          setAutosaveStatus("dirty");
+        }
+      } catch (nextError) {
+        if (
+          hydrated.current === targetLeadId &&
+          currentAutosaveSignatureRef.current === signature
+        ) {
+          setAutosaveError(errorText(nextError));
+          setAutosaveStatus("error");
+        }
+        throw nextError;
+      }
+    };
+
+    const queued = saveQueueRef.current.then(run, run);
+    saveQueueRef.current = queued.then(
+      () => undefined,
+      () => undefined,
+    );
+    return queued;
+  }, [leadId]);
+
+  useEffect(() => {
+    if (!open || !leadId || !draft || loading) return;
+
+    const snapshot: AutosaveSnapshot = {
+      draft,
+      lines,
+      paidAmount,
+      prepayment,
+      step,
+    };
+    const signature = autosaveSnapshotSignature(snapshot);
+    currentAutosaveSignatureRef.current = signature;
+
+    if (signature === lastSavedAutosaveSignatureRef.current) {
+      setAutosaveError("");
+      setAutosaveStatus("saved");
+      return;
+    }
+
+    setAutosaveError("");
+    setAutosaveStatus("dirty");
+    const timer = window.setTimeout(() => {
+      void persistSnapshot(snapshot).catch(() => undefined);
+    }, AUTOSAVE_DELAY_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [draft, leadId, lines, loading, open, paidAmount, persistSnapshot, prepayment, step]);
+
   const patch = <K extends keyof Draft>(key: K, value: Draft[K]) => {
     setDraft((current) => current ? { ...current, [key]: value } : current);
   };
@@ -331,25 +562,15 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
     if (trackBusy) setBusy("save");
     setError("");
     try {
-      await updateLeadWizard(leadId, {
-        first_name: draft.firstName.trim(),
-        last_name: draft.lastName.trim(),
-        date_of_birth: draft.birthDate || null,
-        legal_sex: draft.legalSex || null,
-        email: draft.email.trim() || null,
-        phone: draft.phone.trim() || null,
-        street_address: draft.street.trim(),
-        city: draft.city.trim(),
-        zip_code: draft.zip.trim(),
-        country: draft.country.trim() || null,
-        primary_language: draft.language.trim() || null,
-        primary_concern_text: draft.concern.trim(),
-        additional_concerns: draft.anamnese.trim(),
-        requested_specialties: draft.specialties,
-        consent_privacy_practices: draft.privacyConsent,
-        consent_healthcare: draft.healthcareConsent,
-        wizard_state: { step: target, onboarding_version: 2 },
-      });
+      const snapshot: AutosaveSnapshot = {
+        draft,
+        lines,
+        paidAmount,
+        prepayment,
+        step: target,
+      };
+      currentAutosaveSignatureRef.current = autosaveSnapshotSignature(snapshot);
+      await persistSnapshot(snapshot, true);
       await reload(false);
       return true;
     } catch (nextError) {
@@ -567,16 +788,49 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
 
   if (!leadId) return null;
   const isBusy = busy !== null;
+  const renderedAutosaveSignature = draft
+    ? autosaveSnapshotSignature({ draft, lines, paidAmount, prepayment, step })
+    : "";
+  const autosaveIsDirty = Boolean(
+    draft && renderedAutosaveSignature !== lastSavedAutosaveSignatureRef.current,
+  ) || autosaveStatus === "saving" || autosaveStatus === "error";
+  const autosaveLabel = autosaveStatus === "saving"
+    ? tx("Сохраняется…", "Wird gespeichert…")
+    : autosaveStatus === "saved"
+      ? tx("Сохранено автоматически", "Automatisch gespeichert")
+      : autosaveStatus === "error"
+        ? tx("Не удалось сохранить", "Speichern fehlgeschlagen")
+        : tx("Есть изменения", "Änderungen erkannt");
   const masterReady = Boolean(draft?.firstName.trim() && draft.lastName.trim() && draft.birthDate && draft.legalSex && (draft.email.trim() || draft.phone.trim()) && draft.street.trim() && draft.city.trim() && draft.zip.trim());
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} dirty={autosaveIsDirty} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 border-l border-border p-0 sm:max-w-4xl">
         <SheetTitle className="sr-only">{tx("Онбординг лида", "Lead-Onboarding")}</SheetTitle>
         <header className="flex min-h-16 items-center justify-between gap-4 border-b border-border px-4 py-3 pr-14 sm:px-5 sm:pr-14">
           <div className="min-w-0">
             <h2 className="truncate text-base font-semibold text-foreground">{lead ? [lead.first_name, lead.last_name].filter(Boolean).join(" ") : tx("Онбординг лида", "Lead-Onboarding")}</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">{tx("Пациент появится только после финального подтверждения.", "Ein Patient wird erst nach der finalen Freigabe angelegt.")}</p>
+            {autosaveStatus !== "idle" ? (
+              <div
+                role={autosaveStatus === "error" ? "alert" : "status"}
+                aria-live="polite"
+                title={autosaveError || undefined}
+                className={cn(
+                  "mt-1 inline-flex items-center gap-1 text-[11px]",
+                  autosaveStatus === "error"
+                    ? "text-destructive"
+                    : autosaveStatus === "saved"
+                      ? "text-emerald-700"
+                      : "text-muted-foreground",
+                )}
+              >
+                {autosaveStatus === "saving" ? <LoaderCircle aria-hidden="true" className="size-3 animate-spin" /> : null}
+                {autosaveStatus === "saved" ? <Check aria-hidden="true" className="size-3" /> : null}
+                {autosaveStatus === "error" ? <CircleAlert aria-hidden="true" className="size-3" /> : null}
+                {autosaveLabel}
+              </div>
+            ) : null}
           </div>
           <Button type="button" variant="outline" size="icon-sm" title={tx("Обновить", "Aktualisieren")} aria-label={tx("Обновить", "Aktualisieren")} disabled={loading || isBusy} onClick={() => void reload(false)}>
             <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
@@ -708,7 +962,7 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
 
         <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
           <Button type="button" variant="outline" size="sm" disabled={isBusy || index === 0} onClick={() => setStep(STEPS[index - 1].id)}><ChevronLeft className="size-3.5" />{tx("Назад", "Zurück")}</Button>
-          {step !== "release" ? <Button type="button" size="sm" disabled={isBusy || (step === "master_data" && !masterReady)} onClick={next}>{busy === "save" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}{tx("Сохранить и далее", "Speichern und weiter")}<ChevronRight className="size-3.5" /></Button> : null}
+          {step !== "release" ? <Button type="button" size="sm" disabled={isBusy || (step === "master_data" && !masterReady)} onClick={next}>{busy === "save" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}{tx("Далее", "Weiter")}<ChevronRight className="size-3.5" /></Button> : null}
         </footer>
       </SheetContent>
     </Sheet>

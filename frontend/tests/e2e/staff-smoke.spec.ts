@@ -1922,6 +1922,39 @@ test.describe("responsive staff workspace", () => {
       closeBox?.x ?? 0,
     );
 
+    const firstNameInput = wizard.getByRole("textbox", { name: "Vorname" });
+    const autosaveRequest = page.waitForRequest((request) => {
+      if (
+        request.method() !== "POST" ||
+        !request.url().endsWith(`/api/v1/leads/${leadId}/update`)
+      ) {
+        return false;
+      }
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      return payload.first_name === "Ready Autosaved";
+    });
+    await firstNameInput.fill("Ready Autosaved");
+    await expect(wizard.getByText("Änderungen erkannt", { exact: true })).toBeVisible();
+    const request = await autosaveRequest;
+    expect(request.postDataJSON()).toMatchObject({
+      first_name: "Ready Autosaved",
+      wizard_state: {
+        step: "master_data",
+        commercial_draft: {
+          lines: expect.any(Array),
+        },
+      },
+    });
+    await expect(wizard.getByText("Automatisch gespeichert", { exact: true })).toBeVisible();
+
+    await closeButton.click();
+    await expect(wizard).toBeHidden();
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+    await expect(wizard.getByRole("textbox", { name: "Vorname" })).toHaveValue(
+      "Ready Autosaved",
+    );
+
     await navigation.getByRole("button", { name: /Bedarf/i }).click();
     await wizard.getByRole("combobox").click();
     await page.getByText("Orthopädie", { exact: true }).click();
@@ -1943,5 +1976,46 @@ test.describe("responsive staff workspace", () => {
         stepBox.x + stepBox.width <= navigationBox.x + navigationBox.width
       );
     }).toBe(true);
+
+    const commercialAutosaveRequest = page.waitForRequest((candidate) => {
+      if (
+        candidate.method() !== "POST" ||
+        !candidate.url().endsWith(`/api/v1/leads/${leadId}/update`)
+      ) {
+        return false;
+      }
+      const payload = candidate.postDataJSON() as {
+        wizard_state?: { commercial_draft?: { lines?: Array<{ description?: string }> } };
+      };
+      return payload.wizard_state?.commercial_draft?.lines?.[0]?.description ===
+        "Transport coordination";
+    });
+    await wizard.getByRole("textbox", { name: "Leistungsbeschreibung" }).fill(
+      "Transport coordination",
+    );
+    await wizard.getByRole("textbox", { name: "Preis" }).fill("125");
+    const commercialRequest = await commercialAutosaveRequest;
+    expect(commercialRequest.postDataJSON()).toMatchObject({
+      wizard_state: {
+        step: "commercial",
+        commercial_draft: {
+          lines: [
+            expect.objectContaining({
+              description: "Transport coordination",
+              price: "125",
+            }),
+          ],
+        },
+      },
+    });
+    await expect(wizard.getByText("Automatisch gespeichert", { exact: true })).toBeVisible();
+
+    await closeButton.click();
+    await expect(wizard).toBeHidden();
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+    await expect(wizard.getByRole("textbox", { name: "Leistungsbeschreibung" })).toHaveValue(
+      "Transport coordination",
+    );
+    await expect(wizard.getByRole("textbox", { name: "Preis" })).toHaveValue("125");
   });
 });
