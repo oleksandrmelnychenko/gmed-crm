@@ -4,7 +4,8 @@ export type QuoteStatus = "draft" | "sent" | "accepted" | "rejected" | "expired"
 
 export type ContractItem = {
   id: string;
-  patient_id: string;
+  patient_id: string | null;
+  lead_id?: string | null;
   patient_name: string;
   patient_pid: string;
   contract_number: string;
@@ -36,7 +37,8 @@ export type QuoteItem = {
   order_id: string;
   order_number: string;
   contract_id: string | null;
-  patient_id: string;
+  patient_id: string | null;
+  lead_id?: string | null;
   patient_name: string;
   patient_pid: string;
   quote_number: string;

@@ -65,6 +65,13 @@ interface LeadReadinessCheck {
   label: string;
   passed: boolean;
   blocking_for: string;
+  stage?: string;
+}
+
+interface LeadReadinessStep {
+  key: string;
+  label: string;
+  ready: boolean;
 }
 
 interface LifecycleEvent {
@@ -100,6 +107,7 @@ interface LeadReadiness {
   qualification_reasons: string[];
   blocking_reasons: string[];
   checks: LeadReadinessCheck[];
+  steps: LeadReadinessStep[];
 }
 
 interface LeadPhoneEntry {

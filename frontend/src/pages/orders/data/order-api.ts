@@ -216,6 +216,10 @@ export function fetchOrders(path: string) {
   return apiFetch<OrderSummary[]>(path);
 }
 
+export function fetchOrder(orderId: string) {
+  return apiFetch<OrderDetail>(`/orders/${orderId}`);
+}
+
 export function fetchOrderDebtQueue(providerTaxonomyNodeId = "") {
   const params = new URLSearchParams();
   const trimmedTaxonomyNodeId = providerTaxonomyNodeId.trim();
@@ -284,13 +288,27 @@ export function createOrderLeistung(orderId: string, payload: JsonPayload) {
 
 export function updateOrderCommercialBasis(
   orderId: string,
-  payload: { total_estimated: string; contract_id?: string | null },
+  payload: {
+    total_estimated?: string;
+    contract_id?: string | null;
+    signed_patient?: boolean;
+    signed_agency?: boolean;
+    prepayment_required?: boolean;
+  },
 ) {
   return postJson<{
     ok: boolean;
     order_id: string;
-    total_estimated: string;
+    patient_id: string | null;
+    lead_id?: string | null;
+    total_estimated: string | null;
     contract_id: string | null;
+    signed_patient: boolean;
+    signed_agency: boolean;
+    signed_patient_at: string | null;
+    signed_agency_at: string | null;
+    signed_at: string | null;
+    prepayment_required: boolean;
   }>(`/orders/${orderId}/commercial-basis`, payload);
 }
 

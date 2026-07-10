@@ -61,6 +61,13 @@ export function saveCaseOverview(caseId: string, payload: JsonPayload) {
   return postJson(`/cases/${caseId}/anamnesis`, payload);
 }
 
+export function completeCaseIntake(caseId: string, completed = true) {
+  return postJson<{ ok: boolean; intake_completed_at: string | null }>(
+    `/cases/${caseId}/intake-completion`,
+    { completed },
+  );
+}
+
 export function saveCaseVorerkrankungen(caseId: string, payload: JsonPayload) {
   return postJson(`/cases/${caseId}/vorerkrankungen`, payload);
 }

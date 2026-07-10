@@ -254,6 +254,7 @@ export type MarkDocumentSignedResponse = {
   signed_at: string;
   compliance_kind: DocumentComplianceKind;
   patient_id: string | null;
+  lead_id?: string | null;
   compliance_updated: boolean;
 };
 

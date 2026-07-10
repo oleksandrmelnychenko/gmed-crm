@@ -38,6 +38,8 @@ type DocumentClassificationSuggestion = {
 export type DocumentItem = {
   id: string;
   patient_id: string | null;
+  lead_id?: string | null;
+  lead_name?: string | null;
   has_active_patient_portal_user: boolean;
   order_id: string | null;
   appointment_id: string | null;
@@ -73,6 +75,9 @@ export type DocumentItem = {
   payment_method: DocumentPaymentMethod | null;
   generated_template_id: string | null;
   notes: string | null;
+  signed_at?: string | null;
+  signed_by?: string | null;
+  compliance_kind?: string | null;
   uploaded_by_name: string | null;
   version_root_document_id: string;
   replaces_document_id: string | null;
@@ -389,6 +394,8 @@ export type GenerateDocumentResponse = {
 
 export type UploadDocumentResponse = {
   id: string;
+  patient_id?: string | null;
+  lead_id?: string | null;
   art: string;
   category: string | null;
   is_medical: boolean;

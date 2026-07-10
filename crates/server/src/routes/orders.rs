@@ -282,7 +282,8 @@ async fn list_orders(
 
     match sqlx::query(
         r#"SELECT o.id, o.order_number, o.patient_id, o.source_lead_id, o.phase, o.status,
-                  o.total_estimated, o.created_at,
+                  o.total_estimated, o.signed_patient, o.signed_agency,
+                  o.prepayment_required, o.created_at,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
                   COALESCE(p.last_name, l.last_name) AS subject_last_name,
                   p.patient_id AS p_pid
@@ -396,6 +397,9 @@ async fn list_orders(
                     "phase": r.try_get::<String, _>("phase").unwrap_or_default(),
                     "status": r.try_get::<String, _>("status").unwrap_or_default(),
                     "total_estimated": r.try_get::<Option<rust_decimal::Decimal>, _>("total_estimated").unwrap_or_default(),
+                    "signed_patient": r.try_get::<bool, _>("signed_patient").unwrap_or(false),
+                    "signed_agency": r.try_get::<bool, _>("signed_agency").unwrap_or(false),
+                    "prepayment_required": r.try_get::<bool, _>("prepayment_required").unwrap_or(false),
                     "created_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                 }));
             }

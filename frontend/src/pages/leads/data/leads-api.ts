@@ -71,7 +71,7 @@ export function updateLeadWizard(leadId: string, payload: JsonPayload) {
   return postJson<void>(`/leads/${leadId}/update`, payload);
 }
 
-/** Convert-then-comply: create the patient from the lead mid-wizard (D2). */
+/** Convert a fully ready lead; the backend returns the exact blocking checks otherwise. */
 export function wizardConvertLead(leadId: string) {
   return postJson<WizardConvertResponse>(`/leads/${leadId}/wizard-convert`, {});
 }

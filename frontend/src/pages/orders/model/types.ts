@@ -14,17 +14,22 @@ export type ExternalInvoiceStatus =
 export type OrderSummary = {
   id: string;
   order_number: string;
-  patient_id: string;
+  patient_id: string | null;
+  lead_id?: string | null;
   patient_name: string;
   patient_pid: string;
   phase: OrderPhase | string;
   status: OrderStatus | string;
   total_estimated?: unknown;
+  signed_patient?: boolean;
+  signed_agency?: boolean;
+  prepayment_required?: boolean;
   created_at: string;
 };
 
 export type Leistung = {
   id: string;
+  client_reference?: string | null;
   description: string;
   quantity: unknown;
   unit_price: unknown;
@@ -79,7 +84,8 @@ type ExternalInvoice = {
 export type OrderDetail = {
   id: string;
   order_number: string;
-  patient_id: string;
+  patient_id: string | null;
+  lead_id?: string | null;
   patient_name: string;
   patient_pid: string;
   phase: OrderPhase | string;

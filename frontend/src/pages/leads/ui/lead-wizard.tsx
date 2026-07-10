@@ -1,99 +1,70 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Check,
   ChevronLeft,
   ChevronRight,
+  ClipboardCheck,
+  FileCheck2,
   LoaderCircle,
   Plus,
   RefreshCw,
-  UserPlus,
+  ShieldCheck,
+  Upload,
+  UserRoundCheck,
   X,
 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { selectClass, textareaClass } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
+import type { LeadDetail } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
+import {
+  completeCaseIntake,
+  createCase,
+  fetchCases,
+  saveCaseOverview,
+} from "@/pages/cases/data/case-api";
+import {
+  createContract,
+  createQuote,
+  fetchContracts,
+  fetchQuotes,
+  updateContractStatus,
+  updateQuoteStatus,
+} from "@/pages/contracts/data/contracts-api";
+import type { ContractItem, QuoteItem } from "@/pages/contracts/model/types";
+import {
+  fetchDocuments,
+  markDocumentSigned,
+  uploadDocument,
+  type DocumentComplianceKind,
+} from "@/pages/documents/data/document-api";
+import type { DocumentItem } from "@/pages/documents/model/types";
 import {
   createOrder,
   createOrderLeistung,
+  fetchOrder,
+  fetchOrders,
   updateOrderCommercialBasis,
 } from "@/pages/orders/data/order-api";
-import {
-  fetchPatientClinical,
-  savePatientClinicalWarnings,
-  savePatientMedications,
-  savePatientNarrative,
-} from "@/pages/patients/data/patient-clinical";
+import type { Leistung, OrderSummary } from "@/pages/orders/model/types";
 import { fetchSpecializations } from "@/pages/providers/data/provider-api";
-import {
-  normalizeSpecializationLabelKey,
-  specializationLabelForItem,
-  specializationLabelForValue,
-} from "@/pages/providers/model/specialization-labels";
 import type { SpecializationItem } from "@/pages/providers/model/types";
 
 import {
   fetchLeadDetail,
+  updateLeadStatus,
   updateLeadWizard,
   wizardConvertLead,
 } from "../data/leads-api";
-import {
-  createFrameworkContract,
-  fetchPatientRelations,
-  upsertPatientRelation,
-} from "@/pages/patients/data/patient-detail-mutations";
-import { PatientDocumentGenerateDialog } from "@/pages/patients/ui/sheets/patient-document-generate-dialog";
-import type { PatientOption } from "@/pages/documents/model/types";
 
-import {
-  PHASE_A_STEPS,
-  blankClinicalIntake,
-  blankGuardian,
-  blankOrderLine,
-  canConvert,
-  canFinishOrder,
-  clinicalIntakeHasAllergy,
-  clinicalIntakeHasCave,
-  clinicalIntakeHasMedication,
-  clinicalIntakeHasNarrative,
-  clinicalMedicationFingerprint,
-  clinicalMedicationPayload,
-  clinicalNarrativePayload,
-  clinicalWarningFingerprint,
-  clinicalWarningPayload,
-  costEstimate,
-  draftFromLead,
-  guardianPayload,
-  isMinor,
-  missingStepRequirements,
-  nextStep,
-  orderLineClientReference,
-  orderLineIsBlank,
-  orderLineIsValid,
-  orderLinesAreReady,
-  orderLinePayload,
-  orderNeedsDescription,
-  orderResumeFromLead,
-  orderResumeWizardState,
-  prevStep,
-  resumeStep,
-  stepIsComplete,
-  wizardUpdatePayload,
-  type ClinicalIntakeDraft,
-  type GuardianDraft,
-  type LegalSex,
-  type WizardDraft,
-  type WizardOrderLine,
-  type WizardRequirement,
-  type WizardStepId,
-} from "../model/lead-wizard.model";
-
-type Bilingual = (ru: string, de: string) => string;
+type Tx = (ru: string, de: string) => string;
+type StepId = "master_data" | "need" | "documents" | "commercial" | "release";
+type CaseListItem = { id: string };
 
 type LeadWizardProps = {
   leadId: string | null;
@@ -103,1474 +74,598 @@ type LeadWizardProps = {
   onOrderCreated?: (orderId: string) => void;
 };
 
-const LEGAL_SEX_OPTIONS: readonly LegalSex[] = ["female", "male", "diverse", "no_entry"];
-const WIZARD_PROGRESS_STEPS = [...PHASE_A_STEPS, "order"] as const;
-type WizardProgressStep = (typeof WIZARD_PROGRESS_STEPS)[number];
+type Draft = {
+  firstName: string;
+  lastName: string;
+  birthDate: string;
+  legalSex: string;
+  email: string;
+  phone: string;
+  street: string;
+  city: string;
+  zip: string;
+  country: string;
+  language: string;
+  concern: string;
+  anamnese: string;
+  referrer: string;
+  specialties: string[];
+  privacyConsent: boolean;
+  healthcareConsent: boolean;
+};
 
-function legalSexLabel(value: LegalSex, tx: Bilingual): string {
-  switch (value) {
-    case "female":
-      return tx("Женский", "Weiblich");
-    case "male":
-      return tx("Мужской", "Männlich");
-    case "diverse":
-      return tx("Другое", "Divers");
-    case "no_entry":
-      return tx("Без указания", "Keine Angabe");
-  }
+type ServiceLine = {
+  id: string;
+  clientReference: string | null;
+  description: string;
+  quantity: string;
+  price: string;
+  vat: string;
+};
+
+const STEPS: Array<{ id: StepId; ru: string; de: string }> = [
+  { id: "master_data", ru: "Данные", de: "Stammdaten" },
+  { id: "need", ru: "Запрос", de: "Bedarf" },
+  { id: "documents", ru: "Документы", de: "Unterlagen" },
+  { id: "commercial", ru: "Договор и заказ", de: "Vertrag & Auftrag" },
+  { id: "release", ru: "Подтверждение", de: "Freigabe" },
+];
+
+function draftFromLead(lead: LeadDetail): Draft {
+  return {
+    firstName: lead.first_name ?? "",
+    lastName: lead.last_name ?? "",
+    birthDate: lead.date_of_birth ?? "",
+    legalSex: lead.legal_sex ?? "",
+    email: lead.email ?? "",
+    phone: lead.phone ?? "",
+    street: lead.street_address ?? "",
+    city: lead.city ?? "",
+    zip: lead.zip_code ?? "",
+    country: lead.country ?? "",
+    language: lead.primary_language ?? "",
+    concern: lead.primary_concern_text ?? "",
+    anamnese: lead.additional_concerns ?? "",
+    referrer: "",
+    specialties: lead.requested_specialties ?? [],
+    privacyConsent: lead.consent_privacy_practices,
+    healthcareConsent: lead.consent_healthcare,
+  };
 }
 
-function stepLabel(step: WizardStepId, tx: Bilingual): string {
-  switch (step) {
-    case "identity":
-      return tx("Личность", "Identität");
-    case "eligibility":
-      return tx("Причина", "Anliegen");
-    case "specialties":
-      return tx("Специалисты", "Fachärzte");
-  }
+function newLine(index = 1): ServiceLine {
+  return {
+    id: "line-" + Date.now().toString(36) + "-" + index,
+    clientReference: null,
+    description: "",
+    quantity: "1",
+    price: "",
+    vat: "19",
+  };
 }
 
-function progressStepLabel(step: WizardProgressStep, tx: Bilingual): string {
-  return step === "order" ? tx("Заказ", "Auftrag") : stepLabel(step, tx);
+function money(value: string): number {
+  const parsed = Number(value.replace(",", ".").trim());
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function requirementLabel(requirement: WizardRequirement, tx: Bilingual): string {
-  switch (requirement) {
-    case "first_name":
-      return tx("имя", "Vorname");
-    case "last_name":
-      return tx("фамилия", "Nachname");
-    case "date_of_birth":
-      return tx("дата рождения", "Geburtsdatum");
-    case "legal_sex":
-      return tx("пол (юр.)", "rechtliches Geschlecht");
-    case "contact":
-      return tx("e-mail или телефон", "E-Mail oder Telefon");
-    case "primary_concern":
-      return tx("основная жалоба", "Hauptanliegen");
-    case "specialty":
-      return tx("минимум один специалист", "mindestens eine Fachrichtung");
-  }
+function validLine(line: ServiceLine): boolean {
+  return line.description.trim().length > 0 && money(line.quantity) > 0 && money(line.price) >= 0 && money(line.vat) >= 0 && money(line.vat) <= 100;
 }
 
-function Field({
-  label,
-  htmlFor,
-  children,
-}: {
-  label: ReactNode;
-  htmlFor?: string;
-  children: ReactNode;
-}) {
+function lineFromOrderLeistung(item: Leistung): ServiceLine {
+  return {
+    id: item.id,
+    clientReference: item.client_reference ?? null,
+    description: item.description,
+    quantity: String(item.quantity ?? "1"),
+    price: String(item.unit_price ?? ""),
+    vat: String(item.vat_rate ?? "19"),
+  };
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error && error.message ? error.message : "Request failed";
+}
+
+function Field({ label, children, className }: { label: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <div className="min-w-0 space-y-1.5">
-      <label
-        htmlFor={htmlFor}
-        className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
-      >
-        {label}
-      </label>
+    <label className={cn("min-w-0 space-y-1.5", className)}>
+      <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
       {children}
-    </div>
+    </label>
   );
 }
 
-function ChipEditor({
-  items,
-  placeholder,
-  onAdd,
-  onRemove,
-}: {
-  items: string[];
-  placeholder: string;
-  onAdd: (value: string) => void;
-  onRemove: (index: number) => void;
-}) {
-  const [value, setValue] = useState("");
-  function commit() {
-    const trimmed = value.trim();
-    if (trimmed) {
-      onAdd(trimmed);
-      setValue("");
-    }
-  }
+function StateMark({ done, label }: { done: boolean; label: string }) {
   return (
-    <div className="space-y-2">
-      <div className="flex gap-2">
-        <Input
-          value={value}
-          placeholder={placeholder}
-          onChange={(event) => setValue(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              commit();
-            }
-          }}
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          onClick={commit}
-          disabled={!value.trim()}
-          aria-label={placeholder}
-        >
-          <Plus className="size-4" />
-        </Button>
-      </div>
-      {items.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
-          {items.map((item, index) => (
-            <span
-              key={`${item}-${index}`}
-              className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs text-foreground"
-            >
-              {item}
-              <button
-                type="button"
-                onClick={() => onRemove(index)}
-                className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label="remove"
-              >
-                <X className="size-3" />
-              </button>
-            </span>
-          ))}
-        </div>
-      ) : null}
-    </div>
+    <span className={cn("inline-flex items-center gap-1 text-xs", done ? "text-emerald-700" : "text-muted-foreground")}>
+      {done ? <Check className="size-3.5" /> : <span className="size-3.5 rounded-full border border-current" />}
+      {label}
+    </span>
   );
 }
 
-function specializationCatalogValue(item: SpecializationItem): string {
-  return item.code.trim() || item.name_en.trim();
-}
-
-function specializationMatchesValue(item: SpecializationItem, value: string): boolean {
-  const key = normalizeSpecializationLabelKey(value);
-  return [item.code, item.name_en, item.name_de, item.name_ru].some(
-    (candidate) => candidate && normalizeSpecializationLabelKey(candidate) === key,
-  );
-}
-
-function SpecialtyCatalogSelect({
-  items,
-  selected,
-  loading,
-  loadError,
-  lang,
-  tx,
-  onSelect,
-  onRemove,
-  onRetry,
+function ToggleRow({
+  checked,
+  label,
+  onChange,
+  disabled,
 }: {
-  items: SpecializationItem[];
-  selected: string[];
-  loading: boolean;
-  loadError: boolean;
-  lang: "de" | "ru";
-  tx: Bilingual;
-  onSelect: (value: string) => void;
-  onRemove: (index: number) => void;
-  onRetry: () => void;
+  checked: boolean;
+  label: string;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
 }) {
-  const seen = new Set<string>();
-  const availableItems = items.filter((item) => {
-    const value = specializationCatalogValue(item);
-    const key = normalizeSpecializationLabelKey(value);
-    if (!item.is_active || !value || seen.has(key)) return false;
-    seen.add(key);
-    return !selected.some((selectedValue) => specializationMatchesValue(item, selectedValue));
-  });
-
   return (
-    <div className="space-y-2">
-      <NativeComboboxSelect
-        value=""
-        aria-label={tx("Специальность", "Fachrichtung")}
-        className={selectClass}
-        disabled={loading || availableItems.length === 0}
-        onChange={(event) => {
-          if (event.target.value) onSelect(event.target.value);
-        }}
-      >
-        <option value="">
-          {loading
-            ? tx("Загрузка справочника…", "Verzeichnis wird geladen…")
-            : availableItems.length > 0
-              ? tx("Выберите специальность…", "Fachrichtung auswählen…")
-              : tx("Нет доступных специальностей", "Keine Fachrichtungen verfügbar")}
-        </option>
-        {availableItems.map((item) => {
-          const value = specializationCatalogValue(item);
-          return (
-            <option key={item.id || value} value={value}>
-              {specializationLabelForItem(item, lang)}
-            </option>
-          );
-        })}
-      </NativeComboboxSelect>
-
-      {loadError ? (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          <span>{tx("Справочник не загрузился", "Verzeichnis konnte nicht geladen werden")}</span>
-          <Button type="button" size="sm" variant="outline" onClick={onRetry}>
-            <RefreshCw className="size-3.5" />
-            {tx("Повторить", "Erneut laden")}
-          </Button>
-        </div>
-      ) : null}
-
-      {selected.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
-          {selected.map((value, index) => {
-            const label = specializationLabelForValue(value, items, lang);
-            return (
-              <span
-                key={`${value}-${index}`}
-                className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-foreground"
-              >
-                {label}
-                <button
-                  type="button"
-                  onClick={() => onRemove(index)}
-                  className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  aria-label={tx(`Удалить ${label}`, `${label} entfernen`)}
-                >
-                  <X className="size-3" />
-                </button>
-              </span>
-            );
-          })}
-        </div>
-      ) : null}
-    </div>
+    <label className="flex cursor-pointer items-center gap-3 border-b border-border/70 py-3 last:border-b-0">
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className="size-4 accent-[var(--brand)]" />
+      <span className="text-sm text-foreground">{label}</span>
+    </label>
   );
 }
 
-export function LeadWizard({
-  leadId,
-  open,
-  onOpenChange,
-  onConverted,
-  onOrderCreated,
-}: LeadWizardProps) {
+export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWizardProps) {
   const { lang } = useLang();
-  const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
-
-  const [draft, setDraft] = useState<WizardDraft | null>(null);
-  const [step, setStep] = useState<WizardStepId>("identity");
-  const [busy, setBusy] = useState(false);
+  const tx: Tx = useCallback((ru, de) => (lang === "de" ? de : ru), [lang]);
+  const [lead, setLead] = useState<LeadDetail | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [step, setStep] = useState<StepId>("master_data");
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [cases, setCases] = useState<CaseListItem[]>([]);
+  const [contracts, setContracts] = useState<ContractItem[]>([]);
+  const [orders, setOrders] = useState<OrderSummary[]>([]);
+  const [quotes, setQuotes] = useState<QuoteItem[]>([]);
+  const [specialties, setSpecialties] = useState<SpecializationItem[]>([]);
+  const [lines, setLines] = useState<ServiceLine[]>([newLine()]);
+  const [prepayment, setPrepayment] = useState(false);
+  const [paidAmount, setPaidAmount] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [loadError, setLoadError] = useState(false);
-  const [validationStep, setValidationStep] = useState<WizardStepId | null>(null);
-  // Phase B — after conversion the wizard forms the actual order (#8).
-  const [phase, setPhase] = useState<"lead" | "order">("lead");
-  const [createdOrderId, setCreatedOrderId] = useState<string | null>(null);
-  const [createdPatientId, setCreatedPatientId] = useState<string | null>(null);
-  const [createdPatientPid, setCreatedPatientPid] = useState("");
-  const [genDocOpen, setGenDocOpen] = useState(false);
-  const [orderLines, setOrderLines] = useState<WizardOrderLine[]>(() => [blankOrderLine()]);
-  const [savedOrderLineKeys, setSavedOrderLineKeys] = useState<string[]>([]);
-  const [guardian, setGuardian] = useState<GuardianDraft>(blankGuardian());
-  const [clinicalIntake, setClinicalIntake] = useState<ClinicalIntakeDraft>(
-    blankClinicalIntake(),
-  );
-  const [startContract, setStartContract] = useState(true);
-  const [contractId, setContractId] = useState<string | null>(null);
-  const [specializationOptions, setSpecializationOptions] = useState<SpecializationItem[]>([]);
-  const [specializationLoading, setSpecializationLoading] = useState(false);
-  const [specializationLoadError, setSpecializationLoadError] = useState(false);
-  const [specializationCatalogVersion, setSpecializationCatalogVersion] = useState(0);
+  const hydrated = useRef<string | null>(null);
+
+  const reload = useCallback(async (hydrateDraft: boolean, hydrateCommercial = false) => {
+    if (!leadId) return;
+    setLoading(true);
+    setError("");
+    try {
+      const leadPromise = fetchLeadDetail(leadId);
+      const [nextLead, nextDocuments, nextCases, nextContracts, nextOrders, nextQuotes, nextSpecialties] = await Promise.all([
+        leadPromise,
+        fetchDocuments("/documents?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
+        fetchCases("/cases?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
+        fetchContracts("/framework-contracts?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
+        fetchOrders("/orders?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
+        fetchQuotes("/quotes?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
+        fetchSpecializations().catch(() => []),
+      ]);
+      const nextOrder = nextOrders[0] ?? null;
+      const nextOrderDetail = nextOrder && (hydrateDraft || hydrateCommercial)
+        ? await fetchOrder(nextOrder.id).catch(() => null)
+        : null;
+      const paymentQuote = nextQuotes.find((item) => item.status === "accepted") ?? nextQuotes[0];
+
+      setLead(nextLead);
+      setDocuments(nextDocuments);
+      setCases(nextCases as CaseListItem[]);
+      setContracts(nextContracts);
+      setOrders(nextOrders);
+      setQuotes(nextQuotes);
+      setSpecialties(nextSpecialties);
+      if (hydrateDraft || hydrated.current !== leadId) {
+        hydrated.current = leadId;
+        setDraft(draftFromLead(nextLead));
+        const savedStep = nextLead.wizard_state?.["step"];
+        setStep(typeof savedStep === "string" && STEPS.some((item) => item.id === savedStep) ? savedStep as StepId : "master_data");
+      }
+      if (hydrateDraft || hydrateCommercial) {
+        setLines(nextOrderDetail?.leistungen.length ? nextOrderDetail.leistungen.map(lineFromOrderLeistung) : [newLine()]);
+        setPrepayment(Boolean(nextOrder?.prepayment_required));
+        setPaidAmount(paymentQuote?.paid_amount == null ? "" : String(paymentQuote.paid_amount));
+      }
+    } catch (nextError) {
+      setError(errorText(nextError));
+    } finally {
+      setLoading(false);
+    }
+  }, [leadId]);
 
   useEffect(() => {
-    if (!open || !leadId) return;
-    let active = true;
-    setLoadError(false);
-    setError("");
-    setValidationStep(null);
+    if (open && leadId) void reload(true);
+  }, [leadId, open, reload]);
+
+  useEffect(() => {
+    if (open) return;
+    hydrated.current = null;
+    setLead(null);
     setDraft(null);
-    setPhase("lead");
-    setCreatedOrderId(null);
-    setCreatedPatientId(null);
-    setCreatedPatientPid("");
-    setGenDocOpen(false);
-    setOrderLines([blankOrderLine()]);
-    setSavedOrderLineKeys([]);
-    setGuardian(blankGuardian());
-    setClinicalIntake(blankClinicalIntake());
-    setStartContract(true);
-    setContractId(null);
-    fetchLeadDetail(leadId)
-      .then((lead) => {
-        if (!active) return;
-        const nextDraft = draftFromLead(lead);
-        setDraft(nextDraft);
-        setStep(resumeStep(lead));
-        const orderResume = orderResumeFromLead(lead);
-        if (orderResume) {
-          setCreatedPatientId(orderResume.patientId);
-          setCreatedPatientPid(orderResume.patientPid);
-          setCreatedOrderId(orderResume.orderId);
-          setSavedOrderLineKeys(orderResume.savedOrderLineKeys);
-          setOrderLines(
-            orderResume.orderLines.length > 0 ? orderResume.orderLines : [blankOrderLine()],
-          );
-          setGuardian(orderResume.guardian);
-          setClinicalIntake(orderResume.clinicalIntake);
-          setStartContract(orderResume.startContract);
-          setContractId(orderResume.contractId);
-          setPhase("order");
-        }
-      })
-      .catch(() => {
-        if (active) setLoadError(true);
-      });
-    return () => {
-      active = false;
-    };
-  }, [open, leadId]);
-
-  useEffect(() => {
-    if (!open) return;
-    let active = true;
-    setSpecializationLoading(true);
-    setSpecializationLoadError(false);
-    void fetchSpecializations()
-      .then((items) => {
-        if (!active) return;
-        setSpecializationOptions(items);
-      })
-      .catch(() => {
-        if (active) setSpecializationLoadError(true);
-      })
-      .finally(() => {
-        if (active) setSpecializationLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [open, specializationCatalogVersion]);
-
-  function patch(update: Partial<WizardDraft>) {
-    setDraft((current) => (current ? { ...current, ...update } : current));
-  }
-
-  async function persist(targetStep: WizardStepId): Promise<boolean> {
-    if (!leadId || !draft) return false;
-    setBusy(true);
     setError("");
-    try {
-      await updateLeadWizard(leadId, wizardUpdatePayload(draft, targetStep));
-      return true;
-    } catch (nextError) {
-      setError(
-        nextError instanceof Error
-          ? nextError.message
-          : tx("Не удалось сохранить", "Speichern fehlgeschlagen"),
-      );
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }
+  }, [open]);
 
-  async function persistOrderResumeState(
-    patientId: string,
-    orderId: string,
-    lineKeys = savedOrderLineKeys,
-    nextContractId = contractId,
-  ) {
-    if (!leadId || !draft) return;
-    await updateLeadWizard(leadId, {
-      wizard_state: orderResumeWizardState(
-        draft,
-        step,
-        {
-          patientId,
-          patientPid: createdPatientPid,
-          orderId,
-          savedOrderLineKeys: lineKeys,
-          orderLines,
-          guardian,
-          clinicalIntake,
-          startContract,
-          contractId: nextContractId,
-        },
-      ),
-    });
-  }
-
-  async function persistOrderCompletedState(
-    patientId: string,
-    orderId: string,
-    lineKeys = savedOrderLineKeys,
-    nextContractId = contractId,
-  ) {
-    if (!leadId || !draft) return;
-    await updateLeadWizard(leadId, {
-      wizard_state: {
-        ...orderResumeWizardState(
-          draft,
-          step,
-          {
-            patientId,
-            patientPid: createdPatientPid,
-            orderId,
-            savedOrderLineKeys: lineKeys,
-            orderLines,
-            guardian,
-            clinicalIntake,
-            startContract,
-            contractId: nextContractId,
-          },
-        ),
-        phase: "completed",
-      },
-    });
-  }
-
-  async function moveToStep(target: WizardStepId) {
-    if (!draft) return;
-    if (target === step) {
-      setValidationStep(null);
-      return;
-    }
-
-    const currentIndex = PHASE_A_STEPS.indexOf(step);
-    const targetIndex = PHASE_A_STEPS.indexOf(target);
-    if (targetIndex > currentIndex) {
-      const incomplete = PHASE_A_STEPS.slice(currentIndex, targetIndex).find(
-        (candidate) => !stepIsComplete(candidate, draft),
-      );
-      if (incomplete) {
-        setStep(incomplete);
-        setValidationStep(incomplete);
-        setError("");
-        return;
-      }
-    }
-
-    if (await persist(target)) {
-      setValidationStep(null);
-      setStep(target);
-    }
-  }
-
-  async function goNext() {
-    const target = nextStep(step);
-    if (!target) return;
-    if (!draft || !stepIsComplete(step, draft)) {
-      setValidationStep(step);
-      setError("");
-      return;
-    }
-    await moveToStep(target);
-  }
-
-  async function goBack() {
-    const target = prevStep(step);
-    if (target) await moveToStep(target);
-  }
-
-  async function handleConvert() {
-    if (!leadId || !draft) return;
-    if (!canConvert(draft)) {
-      const incomplete = PHASE_A_STEPS.find((candidate) => !stepIsComplete(candidate, draft));
-      if (incomplete) {
-        setStep(incomplete);
-        setValidationStep(incomplete);
-      }
-      setError("");
-      return;
-    }
-    if (!(await persist(step))) return;
-    setBusy(true);
-    setError("");
-    try {
-      const result = await wizardConvertLead(leadId);
-      setCreatedPatientId(result.patient_id);
-      setCreatedPatientPid(result.patient_pid);
-      setClinicalIntake(blankClinicalIntake(draft));
-      // Form the draft order — the goal of the wizard (#8) — carrying the
-      // captured concern and requested specialists into needs_description.
-      try {
-        const order = await createOrder({
-          patient_id: result.patient_id,
-          needs_description: orderNeedsDescription(draft),
-          source_lead_id: leadId,
-        });
-        // Stay open and move into Phase B to build the order's line items.
-        setCreatedOrderId(order.id);
-        setPhase("order");
-        try {
-          await updateLeadWizard(leadId, {
-            wizard_state: orderResumeWizardState(draft, step, {
-              patientId: result.patient_id,
-              patientPid: result.patient_pid,
-              orderId: order.id,
-              savedOrderLineKeys: [],
-              orderLines,
-              guardian,
-              clinicalIntake: blankClinicalIntake(draft),
-              startContract,
-              contractId: null,
-            }),
-          });
-        } catch (resumeError) {
-          setError(
-            resumeError instanceof Error
-              ? resumeError.message
-              : tx(
-                  "Черновик заказа создан, но состояние обработки не удалось сохранить.",
-                  "Auftragsentwurf erstellt, aber der Bearbeitungsstatus konnte nicht gespeichert werden.",
-                ),
-          );
-        }
-      } catch (orderError) {
-        setError(
-          orderError instanceof Error
-            ? orderError.message
-            : tx(
-                "Пациент создан, но черновик заказа не удалось сформировать. Повторите шаг.",
-                "Patient angelegt, aber der Auftragsentwurf konnte nicht erstellt werden. Schritt erneut versuchen.",
-              ),
-        );
-      }
-    } catch (nextError) {
-      setError(
-        nextError instanceof Error
-          ? nextError.message
-          : tx("Не удалось конвертировать", "Konvertierung fehlgeschlagen"),
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function patchLine(index: number, update: Partial<WizardOrderLine>) {
-    setOrderLines((current) =>
-      current.map((line, i) => (i === index ? { ...line, ...update } : line)),
-    );
-  }
-
-  function patchClinicalIntake(update: Partial<ClinicalIntakeDraft>) {
-    setClinicalIntake((current) => ({ ...current, ...update }));
-  }
-
-  async function saveClinicalIntake(patientId: string) {
-    const hasClinicalData =
-      clinicalIntakeHasNarrative(clinicalIntake) ||
-      clinicalIntakeHasMedication(clinicalIntake) ||
-      clinicalIntakeHasAllergy(clinicalIntake) ||
-      clinicalIntakeHasCave(clinicalIntake);
-    if (!hasClinicalData) return;
-
-    const clinical = await fetchPatientClinical(patientId);
-    if (clinicalIntakeHasNarrative(clinicalIntake)) {
-      await savePatientNarrative(
-        patientId,
-        clinicalNarrativePayload(clinicalIntake, clinical.narrative),
-      );
-    }
-
-    const medication = clinicalMedicationPayload(clinicalIntake);
-    if (medication) {
-      const existingKeys = new Set(
-        (clinical.medications ?? []).map((item) => clinicalMedicationFingerprint(item)),
-      );
-      const medicationKey = clinicalMedicationFingerprint(medication);
-      if (!existingKeys.has(medicationKey)) {
-        await savePatientMedications(patientId, [...(clinical.medications ?? []), medication]);
-      }
-    }
-
-    const allergy = clinicalWarningPayload(clinicalIntake, "allergie");
-    if (allergy) {
-      const existingKeys = new Set(
-        (clinical.allergien ?? []).map((item) => clinicalWarningFingerprint(item)),
-      );
-      if (!existingKeys.has(clinicalWarningFingerprint(allergy))) {
-        await savePatientClinicalWarnings(patientId, "allergie", [
-          ...(clinical.allergien ?? []),
-          allergy,
-        ]);
-      }
-    }
-
-    const cave = clinicalWarningPayload(clinicalIntake, "cave");
-    if (cave) {
-      const existingKeys = new Set(
-        (clinical.cave ?? []).map((item) => clinicalWarningFingerprint(item)),
-      );
-      if (!existingKeys.has(clinicalWarningFingerprint(cave))) {
-        await savePatientClinicalWarnings(patientId, "cave", [...(clinical.cave ?? []), cave]);
-      }
-    }
-  }
-
-  async function ensureGuardianRelation(patientId: string) {
-    const expected = guardianPayload(guardian);
-    const expectedName = String(expected.related_name).trim().toLowerCase();
-    const expectedPhone = String(expected.phone ?? "").trim().toLowerCase();
-    const relations = await fetchPatientRelations(patientId);
-    const exists = relations.some(
-      (relation) =>
-        relation.relation_type === "guardian" &&
-        relation.related_name.trim().toLowerCase() === expectedName &&
-        (relation.phone ?? "").trim().toLowerCase() === expectedPhone,
-    );
-    if (!exists) {
-      await upsertPatientRelation(patientId, expected);
-    }
-  }
-
-  async function handleFinishOrder() {
-    if (!createdOrderId || !createdPatientId || !leadId) return;
-    if (!orderLinesAreReady(orderLines)) {
-      setError(
-        tx(
-          "Проверьте все заполненные позиции заказа.",
-          "Bitte alle begonnenen Auftragspositionen prüfen.",
-        ),
-      );
-      return;
-    }
-    setBusy(true);
-    setError("");
-    const billable = orderLines
-      .map((line) => ({ line, key: line.clientKey }))
-      .filter(({ line }) => orderLineIsValid(line));
-    try {
-      await persistOrderResumeState(createdPatientId, createdOrderId);
-      const completedLineKeys = new Set(savedOrderLineKeys);
-      for (const { line, key } of billable) {
-        await createOrderLeistung(
-          createdOrderId,
-          orderLinePayload(
-            line,
-            createdPatientId,
-            orderLineClientReference(leadId, line),
-          ),
-        );
-        completedLineKeys.add(key);
-        const nextLineKeys = Array.from(completedLineKeys);
-        setSavedOrderLineKeys(nextLineKeys);
-        await persistOrderResumeState(
-          createdPatientId,
-          createdOrderId,
-          nextLineKeys,
-          contractId,
-        );
-      }
-      // A minor's guardian is recorded before the order is opened (#2/#11).
-      if (minor) {
-        await ensureGuardianRelation(createdPatientId);
-      }
-      await saveClinicalIntake(createdPatientId);
-      // Create the framework contract only after line items and clinical intake
-      // are saved, so a retry after an earlier failure does not stack contracts.
-      let effectiveContractId = contractId;
-      if (startContract && !effectiveContractId) {
-        const contract = await createFrameworkContract({
-          patient_id: createdPatientId,
-          status: "draft",
-          client_reference: `lead-wizard:${leadId}:${createdOrderId}:framework-contract`,
-          conditions: {
-            source: "lead_wizard",
-            lead_id: leadId,
-            order_id: createdOrderId,
-          },
-        });
-        effectiveContractId = contract.id;
-        setContractId(contract.id);
-        await persistOrderResumeState(
-          createdPatientId,
-          createdOrderId,
-          Array.from(completedLineKeys),
-          contract.id,
-        );
-      }
-      await updateOrderCommercialBasis(createdOrderId, {
-        total_estimated: estimate.gross.toFixed(2),
-        contract_id: effectiveContractId,
-      });
-      await persistOrderCompletedState(
-        createdPatientId,
-        createdOrderId,
-        Array.from(completedLineKeys),
-        effectiveContractId,
-      );
-      const orderId = createdOrderId;
-      onOpenChange(false);
-      if (onOrderCreated) onOrderCreated(orderId);
-      else if (createdPatientId) onConverted?.(createdPatientId);
-    } catch (nextError) {
-      const retryHint = tx(
-        "Окно обработки остаётся открытым — исправьте ошибку и повторите.",
-        "Die Bearbeitung bleibt geöffnet — Fehler beheben und erneut versuchen.",
-      );
-      setError(
-        nextError instanceof Error
-          ? `${nextError.message} ${retryHint}`
-          : tx(
-              "Не удалось завершить. Окно обработки остаётся открытым — исправьте ошибку и повторите.",
-              "Abschluss fehlgeschlagen. Die Bearbeitung bleibt geöffnet — Fehler beheben und erneut versuchen.",
-            ),
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveOrderDraft() {
-    if (!createdPatientId || !createdOrderId) return false;
-    setBusy(true);
-    setError("");
-    try {
-      await persistOrderResumeState(createdPatientId, createdOrderId);
-      return true;
-    } catch (nextError) {
-      setError(
-        nextError instanceof Error
-          ? nextError.message
-          : tx("Не удалось сохранить черновик", "Entwurf konnte nicht gespeichert werden"),
-      );
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function handleWizardOpenChange(nextOpen: boolean) {
-    if (nextOpen) {
-      onOpenChange(true);
-      return;
-    }
-
-    if (busy) return;
-
-    const saveBeforeClose =
-      phase === "order" && createdPatientId && createdOrderId
-        ? saveOrderDraft()
-        : draft && leadId
-          ? persist(step)
-          : Promise.resolve(true);
-    void saveBeforeClose.then((saved) => {
-      if (saved) onOpenChange(false);
-    });
-  }
-
-  const minor = draft ? isMinor(draft.dateOfBirth, new Date()) : false;
-  const missingRequirements = draft ? missingStepRequirements(step, draft) : [];
-  const showStepValidation = validationStep === step && missingRequirements.length > 0;
-  const estimate = costEstimate(orderLines);
-  const hasBillableLines = orderLines.some(orderLineIsValid);
-  const hasInvalidOrderLines = orderLines.some(
-    (line) => !orderLineIsBlank(line) && !orderLineIsValid(line),
+  const order = orders[0] ?? null;
+  const contract = contracts.find((item) => item.status !== "terminated") ?? null;
+  const orderQuotes = useMemo(
+    () => quotes.filter((item) => !order || item.order_id === order.id),
+    [order, quotes],
   );
-  const orderLinesReady = orderLinesAreReady(orderLines);
-  const currentProgressIndex =
-    phase === "order" ? WIZARD_PROGRESS_STEPS.length - 1 : PHASE_A_STEPS.indexOf(step);
-  const patientOption: PatientOption | undefined =
-    createdPatientId && draft
-      ? {
-          id: createdPatientId,
-          patient_id: createdPatientPid,
-          first_name: draft.firstName,
-          last_name: draft.lastName,
-          languages: draft.primaryLanguage ? [draft.primaryLanguage] : [],
-        }
-      : undefined;
+  const quote = orderQuotes[0] ?? null;
+  const acceptedQuote = orderQuotes.find((item) => item.status === "accepted") ?? null;
+  const caseId = cases[0]?.id ?? null;
+  const identity = documents.find((item) => item.compliance_kind === "identity");
+  const dsgvo = documents.find((item) => item.compliance_kind === "dsgvo");
+  const readiness = useMemo(() => new Map((lead?.readiness.steps ?? []).map((item) => [item.key, item.ready])), [lead?.readiness.steps]);
+  const index = STEPS.findIndex((item) => item.id === step);
+  const estimate = useMemo(() => {
+    let net = 0;
+    let vat = 0;
+    lines.filter(validLine).forEach((line) => {
+      const lineNet = money(line.quantity) * money(line.price);
+      net += lineNet;
+      vat += lineNet * money(line.vat) / 100;
+    });
+    return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, gross: Math.round((net + vat) * 100) / 100 };
+  }, [lines]);
+
+  const patch = <K extends keyof Draft>(key: K, value: Draft[K]) => {
+    setDraft((current) => current ? { ...current, [key]: value } : current);
+  };
+
+  async function save(target = step, trackBusy = true): Promise<boolean> {
+    if (!leadId || !draft) return false;
+    if (trackBusy) setBusy("save");
+    setError("");
+    try {
+      await updateLeadWizard(leadId, {
+        first_name: draft.firstName.trim(),
+        last_name: draft.lastName.trim(),
+        date_of_birth: draft.birthDate || null,
+        legal_sex: draft.legalSex || null,
+        email: draft.email.trim() || null,
+        phone: draft.phone.trim() || null,
+        street_address: draft.street.trim(),
+        city: draft.city.trim(),
+        zip_code: draft.zip.trim(),
+        country: draft.country.trim() || null,
+        primary_language: draft.language.trim() || null,
+        primary_concern_text: draft.concern.trim(),
+        additional_concerns: draft.anamnese.trim(),
+        requested_specialties: draft.specialties,
+        consent_privacy_practices: draft.privacyConsent,
+        consent_healthcare: draft.healthcareConsent,
+        wizard_state: { step: target, onboarding_version: 2 },
+      });
+      await reload(false);
+      return true;
+    } catch (nextError) {
+      setError(errorText(nextError));
+      return false;
+    } finally {
+      if (trackBusy) setBusy(null);
+    }
+  }
+
+  async function qualify() {
+    if (!leadId || !(await save("need", false))) return;
+    setBusy("qualify");
+    try {
+      await updateLeadStatus(leadId, "qualified");
+      await reload(false);
+    } catch (nextError) {
+      setError(errorText(nextError));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function finishIntake() {
+    if (!leadId || !draft) return;
+    setBusy("intake");
+    try {
+      const id = caseId ?? (await createCase({
+        lead_id: leadId,
+        hauptanfragegrund: draft.concern.trim(),
+        aktuelle_anamnese: draft.anamnese.trim(),
+        zuweiser: draft.referrer.trim(),
+      })).id;
+      await saveCaseOverview(id, {
+        hauptanfragegrund: draft.concern.trim(),
+        aktuelle_anamnese: draft.anamnese.trim(),
+        zuweiser: draft.referrer.trim(),
+      });
+      await completeCaseIntake(id);
+      await save("documents", false);
+    } catch (nextError) {
+      setError(errorText(nextError));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function upload(kind: "identity" | "dsgvo", file: File) {
+    if (!leadId) return;
+    setBusy("upload-" + kind);
+    try {
+      const form = new FormData();
+      form.set("lead_id", leadId);
+      form.set("file", file);
+      form.set("auto_name", kind === "identity" ? "Identity document" : "DSGVO consent");
+      form.set("art", kind === "identity" ? "identity" : "consent");
+      form.set("category", kind === "identity" ? "identity" : "consent");
+      await uploadDocument(form);
+      await reload(false);
+    } catch (nextError) {
+      setError(errorText(nextError));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function signDocument(id: string, kind: DocumentComplianceKind) {
+    setBusy("sign-" + kind);
+    try {
+      await markDocumentSigned(id, kind);
+      await reload(false);
+    } catch (nextError) {
+      setError(errorText(nextError));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function ensureCommercial() {
+    if (!leadId || !draft) throw new Error("Lead is not selected");
+    if (!lines.some(validLine)) throw new Error(tx("Добавьте корректную услугу", "Mindestens eine gültige Leistung ist erforderlich"));
+    if (!(await save("commercial", false))) throw new Error("Lead could not be saved");
+    let contractId = contract?.id;
+    if (!contractId) {
+      contractId = (await createContract({
+        lead_id: leadId,
+        status: "sent",
+        client_reference: "lead-onboarding:" + leadId + ":framework",
+      })).id;
+    }
+    let orderId = order?.id;
+    if (!orderId) {
+      orderId = (await createOrder({
+        source_lead_id: leadId,
+        contract_id: contractId,
+        needs_description: draft.concern.trim(),
+      })).id;
+    }
+    for (const line of lines.filter(validLine)) {
+      await createOrderLeistung(orderId, {
+        description: line.description.trim(),
+        quantity: money(line.quantity),
+        unit_price: money(line.price),
+        vat_rate: money(line.vat),
+        client_reference: line.clientReference ?? "lead-wizard:" + leadId + ":" + line.id,
+      });
+    }
+    await updateOrderCommercialBasis(orderId, {
+      contract_id: contractId,
+      total_estimated: estimate.gross.toFixed(2),
+      prepayment_required: prepayment,
+      signed_patient: Boolean(order?.signed_patient),
+      signed_agency: Boolean(order?.signed_agency),
+    });
+    return { contractId, orderId };
+  }
+
+  async function prepareCommercial() {
+    setBusy("commercial");
+    try {
+      await ensureCommercial();
+      await reload(false, true);
+    } catch (nextError) {
+      setError(errorText(nextError));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function signContract() {
+    setBusy("contract");
+    try {
+      const result = await ensureCommercial();
+      await updateContractStatus(result.contractId, { status: "signed" });
+      await reload(false, true);
+    } catch (nextError) {
+      setError(errorText(nextError));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function saveFlags(patchValue: { signed_patient?: boolean; signed_agency?: boolean; prepayment_required?: boolean }) {
+    setBusy("flags");
+    try {
+      const result = await ensureCommercial();
+      await updateOrderCommercialBasis(result.orderId, patchValue);
+      await reload(false, true);
+    } catch (nextError) {
+      setError(errorText(nextError));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function createOrAcceptQuote(accept: boolean) {
+    setBusy(accept ? "accept" : "quote");
+    try {
+      let quoteId = quote?.id;
+      if (!accept || !quoteId) {
+        const result = await ensureCommercial();
+        quoteId = (await createQuote(result.orderId, {})).id;
+      }
+      if (accept) {
+        await updateQuoteStatus(quoteId, {
+          status: "accepted",
+          paid_amount: prepayment ? money(paidAmount) : undefined,
+        });
+      }
+      await reload(false, true);
+    } catch (nextError) {
+      setError(errorText(nextError));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function convert() {
+    if (!leadId) return;
+    setBusy("convert");
+    try {
+      if (!(await save("release", false))) return;
+      const result = await wizardConvertLead(leadId);
+      onConverted?.(result.patient_id);
+      onOpenChange(false);
+    } catch (nextError) {
+      setError(errorText(nextError));
+      await reload(false);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function next() {
+    const target = STEPS[index + 1];
+    if (!target) return;
+    void save(target.id).then((saved) => {
+      if (saved) setStep(target.id);
+    });
+  }
+
+  function updateLine(id: string, patchValue: Partial<ServiceLine>) {
+    setLines((current) => current.map((line) => line.id === id ? { ...line, ...patchValue } : line));
+  }
+
+  if (!leadId) return null;
+  const isBusy = busy !== null;
+  const masterReady = Boolean(draft?.firstName.trim() && draft.lastName.trim() && draft.birthDate && draft.legalSex && (draft.email.trim() || draft.phone.trim()) && draft.street.trim() && draft.city.trim() && draft.zip.trim());
 
   return (
-    <>
-      <Sheet open={open} dirty={false} onOpenChange={handleWizardOpenChange}>
-        <SheetContent className="w-[calc(100%-1.5rem)]! gap-0 overflow-hidden p-0 sm:max-w-2xl!">
-        <header className="shrink-0 border-b border-border/70 bg-popover px-5 pb-4 pt-4 pr-14">
-          <div className="flex items-center gap-2">
-            <SheetTitle className="text-lg font-semibold text-foreground">
-              {phase === "order"
-                ? tx("Формирование заказа", "Auftrag erstellen")
-                : tx("Обработка лида", "Lead bearbeiten")}
-            </SheetTitle>
-            {minor ? (
-              <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-700">
-                {tx("Ребёнок", "Minderjährig")}
-              </Badge>
-            ) : null}
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="flex w-full flex-col gap-0 border-l border-border p-0 sm:max-w-4xl">
+        <SheetTitle className="sr-only">{tx("Онбординг лида", "Lead-Onboarding")}</SheetTitle>
+        <header className="flex min-h-16 items-center justify-between gap-4 border-b border-border px-5 py-3">
+          <div className="min-w-0">
+            <h2 className="truncate text-base font-semibold text-foreground">{lead ? [lead.first_name, lead.last_name].filter(Boolean).join(" ") : tx("Онбординг лида", "Lead-Onboarding")}</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">{tx("Пациент появится только после финального подтверждения.", "Ein Patient wird erst nach der finalen Freigabe angelegt.")}</p>
           </div>
-          <nav
-            aria-label={tx("Прогресс обработки", "Bearbeitungsfortschritt")}
-            className="mt-4"
-          >
-            <p className="text-xs font-medium text-muted-foreground">
-              {tx("Шаг", "Schritt")} {currentProgressIndex + 1} {tx("из", "von")} {WIZARD_PROGRESS_STEPS.length}
-            </p>
-            <ol className="mt-3 grid grid-cols-4">
-              {WIZARD_PROGRESS_STEPS.map((progressStep, index) => {
-                const phaseStep = progressStep === "order" ? null : progressStep;
-                const done = index < currentProgressIndex;
-                const active = index === currentProgressIndex;
-                const unlocked =
-                  phaseStep !== null &&
-                  (phaseStep === step ||
-                    (draft !== null &&
-                      PHASE_A_STEPS.slice(0, index).every((candidate) =>
-                        stepIsComplete(candidate, draft),
-                      )));
-                const label = progressStepLabel(progressStep, tx);
-                return (
-                  <li key={progressStep} className="relative min-w-0">
-                    {index < WIZARD_PROGRESS_STEPS.length - 1 ? (
-                      <span
-                        aria-hidden="true"
-                        className={cn(
-                          "absolute left-[calc(50%+18px)] right-[calc(-50%+18px)] top-3.5 h-px",
-                          index < currentProgressIndex ? "bg-foreground/25" : "bg-border",
-                        )}
-                      />
-                    ) : null}
-                    <button
-                      type="button"
-                      aria-label={`${index + 1}. ${label}`}
-                      aria-current={active ? "step" : undefined}
-                      disabled={busy || phase === "order" || !unlocked || active}
-                      onClick={() => {
-                        if (phaseStep) void moveToStep(phaseStep);
-                      }}
-                      className="relative z-10 flex w-full min-w-0 flex-col items-center gap-1.5 px-1 text-center text-xs font-medium disabled:cursor-default"
-                    >
-                      <span
-                        className={cn(
-                          "flex size-7 shrink-0 items-center justify-center rounded-full border bg-background text-[11px] tabular-nums transition-colors",
-                          active
-                            ? "border-primary bg-primary text-primary-foreground"
-                            : done
-                              ? "border-border bg-muted text-foreground"
-                              : "border-border text-muted-foreground",
-                        )}
-                      >
-                        {done ? <Check className="size-3.5" aria-hidden="true" /> : index + 1}
-                      </span>
-                      <span
-                        className={cn(
-                          "min-w-0 max-w-full leading-tight",
-                          active || done ? "text-foreground" : "text-muted-foreground",
-                        )}
-                      >
-                        {label}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          </nav>
+          <Button type="button" variant="outline" size="icon-sm" title={tx("Обновить", "Aktualisieren")} aria-label={tx("Обновить", "Aktualisieren")} disabled={loading || isBusy} onClick={() => void reload(false)}>
+            <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+          </Button>
         </header>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-muted/10 px-5 py-5">
-          {loadError ? (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-              {tx("Не удалось загрузить лид", "Lead konnte nicht geladen werden")}
-            </div>
-          ) : phase === "order" ? (
-            <div className="space-y-4">
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-                {tx(
-                  "Пациент создан. Сформируйте заказ: добавьте позиции и оцените стоимость.",
-                  "Patient angelegt. Bilden Sie den Auftrag: Positionen hinzufügen und Kosten schätzen.",
-                )}
-              </div>
-              {minor ? (
-                <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
-                  <p className="text-sm font-medium text-amber-800">
-                    {tx(
-                      "Пациент — несовершеннолетний. Укажите законного представителя.",
-                      "Minderjährig — bitte gesetzlichen Vertreter angeben.",
-                    )}
-                  </p>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <Field label={tx("ФИО представителя", "Name des Vertreters")}>
-                      <Input
-                        value={guardian.name}
-                        onChange={(event) =>
-                          setGuardian((current) => ({ ...current, name: event.target.value }))
-                        }
-                      />
-                    </Field>
-                    <Field label={tx("Телефон", "Telefon")}>
-                      <Input
-                        value={guardian.phone}
-                        onChange={(event) =>
-                          setGuardian((current) => ({ ...current, phone: event.target.value }))
-                        }
-                      />
-                    </Field>
-                  </div>
-                </div>
-              ) : null}
-              <div className="space-y-3 rounded-lg border border-border/60 bg-background p-3">
-                <div>
-                  <p className="text-sm font-medium text-foreground">
-                    {tx("Клинический приём", "Klinische Aufnahme")}
-                  </p>
-                </div>
-                <div className="grid gap-2">
-                  <Field label={tx("Текущая жалоба / Anamnese", "Aktuelle Beschwerden / Anamnese")}>
-                    <textarea
-                      className={textareaClass}
-                      rows={2}
-                      value={clinicalIntake.currentComplaint}
-                      onChange={(event) =>
-                        patchClinicalIntake({ currentComplaint: event.target.value })
-                      }
-                    />
-                  </Field>
-                  <Field label={tx("Предыдущая история", "Vorgeschichte")}>
-                    <textarea
-                      className={textareaClass}
-                      rows={2}
-                      value={clinicalIntake.anamneseHistory}
-                      onChange={(event) =>
-                        patchClinicalIntake({ anamneseHistory: event.target.value })
-                      }
-                    />
-                  </Field>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Field label={tx("Медикамент", "Medikament")}>
-                    <Input
-                      value={clinicalIntake.medicationName}
-                      placeholder="Ibuprofen"
-                      onChange={(event) =>
-                        patchClinicalIntake({ medicationName: event.target.value })
-                      }
-                    />
-                  </Field>
-                  <Field label={tx("Дозировка", "Stärke")}>
-                    <Input
-                      value={clinicalIntake.medicationStrength}
-                      placeholder="400 mg"
-                      onChange={(event) =>
-                        patchClinicalIntake({ medicationStrength: event.target.value })
-                      }
-                    />
-                  </Field>
-                  <Field label={tx("Форма", "Darreichungsform")}>
-                    <Input
-                      value={clinicalIntake.medicationForm}
-                      placeholder="TABL"
-                      onChange={(event) =>
-                        patchClinicalIntake({ medicationForm: event.target.value })
-                      }
-                    />
-                  </Field>
-                  <Field label={tx("Приём", "Einnahmeform")}>
-                    <Input
-                      value={clinicalIntake.medicationRoute}
-                      placeholder="Oral"
-                      onChange={(event) =>
-                        patchClinicalIntake({ medicationRoute: event.target.value })
-                      }
-                    />
-                  </Field>
-                  <Field label={tx("Схема", "Schema")}>
-                    <Input
-                      value={clinicalIntake.medicationDose}
-                      placeholder="1-0-1"
-                      onChange={(event) =>
-                        patchClinicalIntake({ medicationDose: event.target.value })
-                      }
-                    />
-                  </Field>
-                  <Field label={tx("Причина", "Grund")}>
-                    <Input
-                      value={clinicalIntake.medicationReason}
-                      onChange={(event) =>
-                        patchClinicalIntake({ medicationReason: event.target.value })
-                      }
-                    />
-                  </Field>
-                  <Field label={tx("Указания", "Hinweise")}>
-                    <Input
-                      value={clinicalIntake.medicationNotes}
-                      onChange={(event) =>
-                        patchClinicalIntake({ medicationNotes: event.target.value })
-                      }
-                    />
-                  </Field>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Field label={tx("Аллергия", "Allergie")}>
-                    <Input
-                      value={clinicalIntake.allergyLabel}
-                      placeholder={tx("Пенициллин", "Penicillin")}
-                      onChange={(event) =>
-                        patchClinicalIntake({ allergyLabel: event.target.value })
-                      }
-                    />
-                  </Field>
-                  <Field label={tx("Реакция", "Reaktion")}>
-                    <Input
-                      value={clinicalIntake.allergyReaction}
-                      onChange={(event) =>
-                        patchClinicalIntake({ allergyReaction: event.target.value })
-                      }
-                    />
-                  </Field>
-                  <Field label={tx("Тяжесть", "Schweregrad")}>
-                    <Input
-                      value={clinicalIntake.allergySeverity}
-                      onChange={(event) =>
-                        patchClinicalIntake({ allergySeverity: event.target.value })
-                      }
-                    />
-                  </Field>
-                  <Field label={tx("Примечание аллергии", "Allergie-Notiz")}>
-                    <Input
-                      value={clinicalIntake.allergyNotes}
-                      onChange={(event) =>
-                        patchClinicalIntake({ allergyNotes: event.target.value })
-                      }
-                    />
-                  </Field>
-                  <Field label="CAVE">
-                    <Input
-                      value={clinicalIntake.caveLabel}
-                      placeholder={tx("Антикоагуляция", "Antikoagulation")}
-                      onChange={(event) =>
-                        patchClinicalIntake({ caveLabel: event.target.value })
-                      }
-                    />
-                  </Field>
-                  <Field label={tx("Примечание CAVE", "CAVE-Notiz")}>
-                    <Input
-                      value={clinicalIntake.caveNotes}
-                      onChange={(event) =>
-                        patchClinicalIntake({ caveNotes: event.target.value })
-                      }
-                    />
-                  </Field>
-                </div>
-              </div>
-              <label className="flex items-center gap-2 text-sm text-foreground">
-                <input
-                  type="checkbox"
-                  className="size-4 shrink-0 accent-[var(--brand)]"
-                  checked={startContract}
-                  onChange={(event) => setStartContract(event.target.checked)}
-                />
-                {tx(
-                  "Начать рамочный договор (Rahmenvertrag)",
-                  "Rahmenvertrag anlegen",
-                )}
-              </label>
-              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-background p-3">
-                <span className="text-sm text-foreground">
-                  {tx("Комплаенс-документы", "Compliance-Dokumente")}
+        <nav className="grid grid-cols-5 border-b border-border" aria-label={tx("Этапы онбординга", "Onboarding-Schritte")}>
+          {STEPS.map((item, itemIndex) => {
+            const selected = item.id === step;
+            const done = readiness.get(item.id) ?? false;
+            return (
+              <button key={item.id} type="button" onClick={() => setStep(item.id)} aria-current={selected ? "step" : undefined} className={cn("min-w-0 border-r border-border px-2 py-3 text-left last:border-r-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring", selected ? "bg-muted/50" : "hover:bg-muted/30")}>
+                <span className="flex items-center gap-1.5">
+                  <span className={cn("inline-flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px]", done ? "border-emerald-600 text-emerald-700" : "border-muted-foreground/50 text-muted-foreground")}>{done ? <Check className="size-3" /> : itemIndex + 1}</span>
+                  <span className="hidden text-[11px] font-medium leading-tight text-foreground lg:inline">{lang === "de" ? item.de : item.ru}</span>
                 </span>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="ml-auto"
-                  disabled={!createdPatientId}
-                  onClick={() => setGenDocOpen(true)}
-                >
-                  {tx("Сгенерировать документ", "Dokument generieren")}
-                </Button>
-              </div>
-              <div className="space-y-3">
-                {orderLines.map((line, index) => (
-                  <div
-                    key={index}
-                    className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3"
-                  >
-                    <Input
-                      value={line.description}
-                      placeholder={tx("Описание позиции", "Positionsbeschreibung")}
-                      onChange={(event) => patchLine(index, { description: event.target.value })}
-                    />
-                    <div className="grid gap-2 sm:grid-cols-3">
-                      <Field label={tx("Кол-во", "Menge")}>
-                        <Input
-                          value={line.quantity}
-                          inputMode="decimal"
-                          onChange={(event) => patchLine(index, { quantity: event.target.value })}
-                        />
-                      </Field>
-                      <Field label={tx("Цена", "Preis")}>
-                        <Input
-                          value={line.unitPrice}
-                          inputMode="decimal"
-                          onChange={(event) => patchLine(index, { unitPrice: event.target.value })}
-                        />
-                      </Field>
-                      <Field label={tx("НДС %", "MwSt %")}>
-                        <Input
-                          value={line.vatRate}
-                          inputMode="decimal"
-                          onChange={(event) => patchLine(index, { vatRate: event.target.value })}
-                        />
-                      </Field>
-                    </div>
-                    {orderLines.length > 1 ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setOrderLines((current) => current.filter((_, i) => i !== index))
-                        }
-                        className="text-xs text-muted-foreground hover:text-rose-600"
-                      >
-                        {tx("Удалить позицию", "Position entfernen")}
-                      </button>
-                    ) : null}
-                  </div>
-                ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setOrderLines((current) => [...current, blankOrderLine()])}
-                >
-                  {tx("Добавить позицию", "Position hinzufügen")}
-                </Button>
-              </div>
-              {hasInvalidOrderLines ? (
-                <div
-                  role="alert"
-                  className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
-                >
-                  {tx(
-                    "Заполните описание, количество больше нуля, неотрицательную цену и НДС от 0 до 100.",
-                    "Beschreibung, Menge über 0, einen nicht negativen Preis und MwSt. von 0 bis 100 ausfüllen.",
-                  )}
-                </div>
-              ) : null}
-              <div className="rounded-lg border border-border bg-card p-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">{tx("Нетто", "Netto")}</span>
-                  <span className="font-medium tabular-nums">{estimate.net.toFixed(2)} €</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">{tx("НДС", "MwSt")}</span>
-                  <span className="font-medium tabular-nums">{estimate.vat.toFixed(2)} €</span>
-                </div>
-                <div className="mt-1 flex justify-between border-t border-border pt-1 font-semibold">
-                  <span>{tx("Итого (брутто)", "Gesamt (Brutto)")}</span>
-                  <span className="tabular-nums">{estimate.gross.toFixed(2)} €</span>
-                </div>
-              </div>
-              {error ? (
-                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                  {error}
-                </div>
-              ) : null}
-            </div>
-          ) : !draft ? (
-            <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
-              <LoaderCircle className="size-4 animate-spin" />
-              {tx("Загрузка…", "Wird geladen…")}
-            </div>
-          ) : (
-            <>
-              {step === "identity" ? (
-                <div className="space-y-4 rounded-lg border border-border/70 bg-card p-4">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label={tx("Имя", "Vorname")} htmlFor="lw-first">
-                      <Input
-                        id="lw-first"
-                        value={draft.firstName}
-                        onChange={(event) => patch({ firstName: event.target.value })}
-                      />
-                    </Field>
-                    <Field label={tx("Фамилия", "Nachname")} htmlFor="lw-last">
-                      <Input
-                        id="lw-last"
-                        value={draft.lastName}
-                        onChange={(event) => patch({ lastName: event.target.value })}
-                      />
-                    </Field>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label={tx("Дата рождения", "Geburtsdatum")} htmlFor="lw-dob">
-                      <Input
-                        id="lw-dob"
-                        type="date"
-                        value={draft.dateOfBirth}
-                        onChange={(event) => patch({ dateOfBirth: event.target.value })}
-                      />
-                    </Field>
-                    <Field label={tx("Пол (юр.)", "Rechtl. Geschlecht")} htmlFor="lw-sex">
-                      <NativeComboboxSelect
-                        value={draft.legalSex || "__unset__"}
-                        className={selectClass}
-                        onChange={(event) =>
-                          patch({
-                            legalSex:
-                              event.target.value && event.target.value !== "__unset__"
-                                ? (event.target.value as LegalSex)
-                                : "",
-                          })
-                        }
-                      >
-                        <option value="__unset__">{tx("Не указано", "Nicht gesetzt")}</option>
-                        {LEGAL_SEX_OPTIONS.map((option) => (
-                          <option key={option} value={option}>
-                            {legalSexLabel(option, tx)}
-                          </option>
-                        ))}
-                      </NativeComboboxSelect>
-                    </Field>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label={tx("E-mail", "E-Mail")} htmlFor="lw-email">
-                      <Input
-                        id="lw-email"
-                        value={draft.email}
-                        onChange={(event) => patch({ email: event.target.value })}
-                      />
-                    </Field>
-                    <Field label={tx("Телефон", "Telefon")} htmlFor="lw-phone">
-                      <Input
-                        id="lw-phone"
-                        value={draft.phone}
-                        onChange={(event) => patch({ phone: event.target.value })}
-                      />
-                    </Field>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    <Field label={tx("Улица", "Straße")} htmlFor="lw-street">
-                      <Input
-                        id="lw-street"
-                        value={draft.streetAddress}
-                        onChange={(event) => patch({ streetAddress: event.target.value })}
-                      />
-                    </Field>
-                    <Field label={tx("Город", "Stadt")} htmlFor="lw-city">
-                      <Input
-                        id="lw-city"
-                        value={draft.city}
-                        onChange={(event) => patch({ city: event.target.value })}
-                      />
-                    </Field>
-                    <Field label={tx("Индекс", "PLZ")} htmlFor="lw-zip">
-                      <Input
-                        id="lw-zip"
-                        value={draft.zipCode}
-                        onChange={(event) => patch({ zipCode: event.target.value })}
-                      />
-                    </Field>
-                  </div>
-                  <label className="flex items-center gap-2 text-sm text-foreground">
-                    <input
-                      type="checkbox"
-                      className="size-4 shrink-0 accent-[var(--brand)]"
-                      checked={draft.needsInterpreter}
-                      onChange={(event) => patch({ needsInterpreter: event.target.checked })}
-                    />
-                    {tx("Нужен переводчик", "Dolmetscher benötigt")}
-                  </label>
-                </div>
-              ) : null}
+              </button>
+            );
+          })}
+        </nav>
 
-              {step === "eligibility" ? (
-                <div className="space-y-4 rounded-lg border border-border/70 bg-card p-4">
-                  <Field label={tx("Основная жалоба", "Hauptanliegen")} htmlFor="lw-concern">
-                    <textarea
-                      id="lw-concern"
-                      className={textareaClass}
-                      rows={4}
-                      value={draft.primaryConcernText}
-                      onChange={(event) => patch({ primaryConcernText: event.target.value })}
-                    />
-                  </Field>
-                  <Field label={tx("Дополнительно", "Weitere Anliegen")} htmlFor="lw-additional">
-                    <textarea
-                      id="lw-additional"
-                      className={textareaClass}
-                      rows={3}
-                      value={draft.additionalConcerns}
-                      onChange={(event) => patch({ additionalConcerns: event.target.value })}
-                    />
-                  </Field>
-                  <Field label={tx("Программа", "Programm")} htmlFor="lw-program">
-                    <Input
-                      id="lw-program"
-                      value={draft.selectedProgram}
-                      onChange={(event) => patch({ selectedProgram: event.target.value })}
-                    />
-                  </Field>
-                  <Field label={tx("Услуги", "Leistungen")}>
-                    <ChipEditor
-                      items={draft.services}
-                      placeholder={tx("Добавить услугу…", "Leistung hinzufügen…")}
-                      onAdd={(value) => patch({ services: [...draft.services, value] })}
-                      onRemove={(index) =>
-                        patch({ services: draft.services.filter((_, i) => i !== index) })
-                      }
-                    />
-                  </Field>
-                </div>
-              ) : null}
+        <main className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          {error ? <div className="mb-5 border-l-2 border-destructive bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div> : null}
+          {loading && !lead ? <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{tx("Загрузка", "Wird geladen")}</div> : null}
 
-              {step === "specialties" ? (
-                <div className="space-y-4 rounded-lg border border-border/70 bg-card p-4">
-                  <p className="text-sm text-muted-foreground">
-                    {tx(
-                      "Каких специалистов нужно привлечь (травматолог, ортопед…).",
-                      "Welche Fachärzte werden benötigt (Traumatologe, Orthopäde…).",
-                    )}
-                  </p>
-                  <Field label={tx("Специалисты", "Fachärzte")}>
-                    <SpecialtyCatalogSelect
-                      items={specializationOptions}
-                      selected={draft.requestedSpecialties}
-                      loading={specializationLoading}
-                      loadError={specializationLoadError}
-                      lang={lang}
-                      tx={tx}
-                      onSelect={(value) =>
-                        patch({ requestedSpecialties: [...draft.requestedSpecialties, value] })
-                      }
-                      onRemove={(index) =>
-                        patch({
-                          requestedSpecialties: draft.requestedSpecialties.filter(
-                            (_, i) => i !== index,
-                          ),
-                        })
-                      }
-                      onRetry={() =>
-                        setSpecializationCatalogVersion((current) => current + 1)
-                      }
-                    />
-                  </Field>
-                </div>
-              ) : null}
-
-              {showStepValidation ? (
-                <div
-                  role="alert"
-                  className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
-                >
-                  {tx("Для перехода заполните: ", "Für diesen Schritt fehlen: ")}
-                  {missingRequirements
-                    .map((requirement) => requirementLabel(requirement, tx))
-                    .join(", ")}
-                  .
-                </div>
-              ) : null}
-
-              {error ? (
-                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                  {error}
-                </div>
-              ) : null}
-            </>
-          )}
-        </div>
-
-        <footer className="shrink-0 border-t border-border/70 bg-popover px-5 py-3">
-          {phase === "order" ? (
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span className="text-xs text-muted-foreground">
-                {tx("Черновик заказа создан", "Auftragsentwurf erstellt")}
-              </span>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full sm:w-auto"
-                  onClick={() => void saveOrderDraft()}
-                  disabled={busy}
-                >
-                  {tx("Сохранить черновик", "Entwurf speichern")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="default"
-                  className="h-auto min-h-8 w-full whitespace-normal text-center sm:w-auto"
-                  onClick={handleFinishOrder}
-                  disabled={busy || !canFinishOrder(minor, guardian) || !orderLinesReady}
-                  aria-busy={busy}
-                  title={
-                    !canFinishOrder(minor, guardian)
-                      ? tx(
-                          "Для несовершеннолетнего нужен представитель",
-                          "Für Minderjährige ist ein Vertreter erforderlich",
-                        )
-                      : hasInvalidOrderLines
-                        ? tx(
-                            "Проверьте все заполненные позиции",
-                            "Alle begonnenen Positionen prüfen",
-                          )
-                      : !hasBillableLines
-                        ? tx(
-                            "Добавьте минимум одну позицию заказа",
-                            "Mindestens eine Auftragsposition hinzufügen",
-                          )
-                        : undefined
-                  }
-                >
-                  {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                  {tx("Завершить и открыть заказ", "Abschließen und Auftrag öffnen")}
-                </Button>
+          {draft && step === "master_data" ? (
+            <section className="space-y-5">
+              <div><h3 className="text-sm font-semibold text-foreground">{tx("Сведения о клиенте", "Personendaten")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Проверьте данные, которые станут основой карточки пациента.", "Diese Angaben werden zur Grundlage der Patientenakte.")}</p></div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label={tx("Имя", "Vorname")}><Input value={draft.firstName} onChange={(event) => patch("firstName", event.target.value)} /></Field>
+                <Field label={tx("Фамилия", "Nachname")}><Input value={draft.lastName} onChange={(event) => patch("lastName", event.target.value)} /></Field>
+                <Field label={tx("Дата рождения", "Geburtsdatum")}><Input type="date" value={draft.birthDate} onChange={(event) => patch("birthDate", event.target.value)} /></Field>
+                <Field label={tx("Юридический пол", "Rechtliches Geschlecht")}><NativeComboboxSelect value={draft.legalSex} onChange={(event) => patch("legalSex", event.target.value)} className={selectClass}><option value="">{tx("Выберите", "Auswählen")}</option><option value="female">{tx("Женский", "Weiblich")}</option><option value="male">{tx("Мужской", "Männlich")}</option><option value="diverse">{tx("Разное", "Divers")}</option><option value="no_entry">{tx("Без указания", "Keine Angabe")}</option></NativeComboboxSelect></Field>
+                <Field label="E-mail"><Input type="email" value={draft.email} onChange={(event) => patch("email", event.target.value)} /></Field>
+                <Field label={tx("Телефон", "Telefon")}><Input value={draft.phone} onChange={(event) => patch("phone", event.target.value)} /></Field>
+                <Field label={tx("Улица и дом", "Straße und Hausnummer")}><Input value={draft.street} onChange={(event) => patch("street", event.target.value)} /></Field>
+                <Field label={tx("Город", "Ort")}><Input value={draft.city} onChange={(event) => patch("city", event.target.value)} /></Field>
+                <Field label={tx("Индекс", "Postleitzahl")}><Input value={draft.zip} onChange={(event) => patch("zip", event.target.value)} /></Field>
+                <Field label={tx("Страна", "Land")}><Input value={draft.country} onChange={(event) => patch("country", event.target.value)} /></Field>
+                <Field label={tx("Основной язык", "Primärsprache")}><Input value={draft.language} onChange={(event) => patch("language", event.target.value)} /></Field>
               </div>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <Button
-                type="button"
-                variant="ghost"
-                className="w-full justify-center sm:w-auto"
-                onClick={goBack}
-                disabled={busy || !prevStep(step)}
-              >
-                <ChevronLeft className="size-4" />
-                {tx("Назад", "Zurück")}
-              </Button>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                {nextStep(step) ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full sm:w-auto"
-                    onClick={goNext}
-                    disabled={busy || !draft}
-                  >
-                    {tx("Дальше", "Weiter")}
-                    <ChevronRight className="size-4" />
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="default"
-                    className="w-full sm:w-auto"
-                    onClick={handleConvert}
-                    disabled={busy || !draft || !canConvert(draft)}
-                  >
-                    {busy ? (
-                      <LoaderCircle className="size-4 animate-spin" />
-                    ) : (
-                      <UserPlus className="size-4" />
-                    )}
-                    {tx("Создать пациента", "Patient anlegen")}
-                  </Button>
-                )}
+              <StateMark done={masterReady && Boolean(readiness.get("master_data"))} label={readiness.get("master_data") ? tx("Этап подтвержден", "Schritt erfüllt") : tx("Заполните обязательные поля", "Pflichtfelder ausfüllen")} />
+            </section>
+          ) : null}
+
+          {draft && step === "need" ? (
+            <section className="space-y-5">
+              <div><h3 className="text-sm font-semibold text-foreground">{tx("Запрос и специалисты", "Bedarf und Fachrichtungen")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Специальность выбирается из актуального справочника.", "Fachrichtungen werden aus dem aktuellen Verzeichnis gewählt.")}</p></div>
+              <Field label={tx("Основная причина обращения", "Hauptanliegen")}><textarea className={cn(textareaClass, "min-h-28")} value={draft.concern} onChange={(event) => patch("concern", event.target.value)} /></Field>
+              <Field label={tx("Дополнительный контекст", "Zusätzlicher Kontext")}><textarea className={cn(textareaClass, "min-h-24")} value={draft.anamnese} onChange={(event) => patch("anamnese", event.target.value)} /></Field>
+              <div className="space-y-2">
+                <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{tx("Специалисты", "Fachrichtungen")}</span>
+                <div className="flex flex-wrap gap-2">{draft.specialties.map((value) => <span key={value} className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-foreground">{value}<button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => patch("specialties", draft.specialties.filter((item) => item !== value))} aria-label={tx("Удалить", "Entfernen")}><X className="size-3" /></button></span>)}</div>
+                <NativeComboboxSelect value="" onChange={(event) => { const selected = specialties.find((item) => item.id === event.target.value); if (selected) { const value = selected.code || selected.name_en; if (!draft.specialties.includes(value)) patch("specialties", [...draft.specialties, value]); } }} className={selectClass}>
+                  <option value="">{tx("Добавить специальность", "Fachrichtung hinzufügen")}</option>
+                  {specialties.map((item) => <option key={item.id} value={item.id}>{lang === "de" ? item.name_de || item.name_en : item.name_ru || item.name_de || item.name_en}</option>)}
+                </NativeComboboxSelect>
               </div>
-            </div>
-          )}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+                <StateMark done={lead?.qualification_status === "qualified"} label={lead?.qualification_status === "qualified" ? tx("Лид квалифицирован", "Lead qualifiziert") : tx("Квалификация ожидается", "Qualifizierung ausstehend")} />
+                <Button type="button" variant="outline" disabled={isBusy || !draft.concern.trim() || draft.specialties.length === 0} onClick={() => void qualify()}>{busy === "qualify" ? <LoaderCircle className="size-3.5 animate-spin" /> : <UserRoundCheck className="size-3.5" />}{tx("Квалифицировать", "Qualifizieren")}</Button>
+              </div>
+            </section>
+          ) : null}
+
+          {draft && step === "documents" ? (
+            <section className="space-y-5">
+              <div><h3 className="text-sm font-semibold text-foreground">{tx("Документы и анамнез", "Unterlagen und Anamnese")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Документы остаются у лида до финальной конвертации.", "Die Dokumente bleiben bis zur finalen Konvertierung am Lead.")}</p></div>
+              {(["identity", "dsgvo"] as const).map((kind) => {
+                const document = kind === "identity" ? identity : dsgvo;
+                const signed = Boolean(document?.signed_at && document?.compliance_kind === kind);
+                const label = kind === "identity" ? tx("Документ личности", "Identitätsnachweis") : tx("Согласие DSGVO", "DSGVO-Einwilligung");
+                const fileId = "lead-file-" + kind;
+                return <div key={kind} className="flex flex-wrap items-center justify-between gap-3 border-y border-border py-3">
+                  <div><div className="text-sm font-medium text-foreground">{label}</div><div className="mt-1 text-xs text-muted-foreground">{document ? document.original_filename || document.auto_name : tx("Файл еще не загружен", "Noch keine Datei hochgeladen")}</div></div>
+                  <div className="flex flex-wrap items-center gap-2"><input id={fileId} type="file" className="sr-only" accept=".pdf,.jpg,.jpeg,.png" disabled={isBusy} onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) { void upload(kind, file); event.currentTarget.value = ""; } }} /><label htmlFor={fileId} className={cn("inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-3 text-xs font-medium text-foreground shadow-xs hover:bg-accent", isBusy && "pointer-events-none opacity-50")}><Upload className="size-3.5" />{tx("Загрузить", "Hochladen")}</label><Button type="button" variant="outline" size="icon-sm" title={tx("Подтвердить", "Bestätigen")} aria-label={tx("Подтвердить", "Bestätigen")} disabled={!document || signed || isBusy} onClick={() => document && void signDocument(document.id, kind)}><FileCheck2 className={cn("size-3.5", signed && "text-emerald-700")} /></Button><StateMark done={signed} label={signed ? tx("Подтвержден", "Bestätigt") : tx("Ожидается", "Ausstehend")} /></div>
+                </div>;
+              })}
+              <div className="border-y border-border"><ToggleRow checked={draft.privacyConsent} disabled={isBusy} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Приняты правила конфиденциальности", "Datenschutzhinweise akzeptiert")} /><ToggleRow checked={draft.healthcareConsent} disabled={isBusy} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung medizinischer Daten")} /></div>
+              <Field label={tx("Текущий анамнез", "Aktuelle Anamnese")}><textarea className={cn(textareaClass, "min-h-28")} value={draft.anamnese} onChange={(event) => patch("anamnese", event.target.value)} /></Field>
+              <Field label={tx("Направивший врач / источник", "Zuweiser / Quelle")}><Input value={draft.referrer} onChange={(event) => patch("referrer", event.target.value)} /></Field>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4"><StateMark done={Boolean(readiness.get("documents"))} label={readiness.get("documents") ? tx("Этап подтвержден", "Schritt erfüllt") : tx("Нужны документы и завершенный анамнез", "Dokumente und Anamnese erforderlich")} /><Button type="button" variant="outline" disabled={isBusy || !draft.concern.trim() || !draft.anamnese.trim()} onClick={() => void finishIntake()}>{busy === "intake" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ClipboardCheck className="size-3.5" />}{tx("Завершить анамнез", "Anamnese abschließen")}</Button></div>
+            </section>
+          ) : null}
+
+          {draft && step === "commercial" ? (
+            <section className="space-y-5">
+              <div><h3 className="text-sm font-semibold text-foreground">{tx("Договор, заказ и кошторис", "Vertrag, Auftrag und Kostenvoranschlag")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Эти артефакты принадлежат лиду до финальной конвертации.", "Diese Unterlagen gehören bis zur Freigabe dem Lead.")}</p></div>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-y border-border py-3"><div><div className="text-sm font-medium text-foreground">{tx("Рамочный договор", "Rahmenvertrag")}</div><div className="mt-1 text-xs text-muted-foreground">{contract?.contract_number ?? tx("Еще не подготовлен", "Noch nicht vorbereitet")}</div></div><div className="flex items-center gap-2"><StateMark done={contract?.status === "signed"} label={contract?.status === "signed" ? tx("Подписан", "Unterzeichnet") : tx("Не подписан", "Nicht unterzeichnet")} /><Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void signContract()}>{busy === "contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileCheck2 className="size-3.5" />}{tx("Подписать", "Unterzeichnen")}</Button></div></div>
+              <div className="space-y-3"><div className="flex items-center justify-between"><span className="text-sm font-medium text-foreground">{tx("Услуги заказа", "Auftragsleistungen")}</span><Button type="button" variant="outline" size="icon-sm" title={tx("Добавить услугу", "Leistung hinzufügen")} aria-label={tx("Добавить услугу", "Leistung hinzufügen")} onClick={() => setLines((current) => [...current, newLine(current.length + 1)])}><Plus className="size-3.5" /></Button></div>
+                {lines.map((line) => <div key={line.id} className="grid gap-2 border-b border-border/70 pb-3 md:grid-cols-[minmax(0,1fr)_72px_100px_72px_auto]"><Input placeholder={tx("Описание услуги", "Leistungsbeschreibung")} value={line.description} onChange={(event) => updateLine(line.id, { description: event.target.value })} /><Input inputMode="decimal" aria-label={tx("Количество", "Menge")} value={line.quantity} onChange={(event) => updateLine(line.id, { quantity: event.target.value })} /><Input inputMode="decimal" aria-label={tx("Цена", "Preis")} value={line.price} onChange={(event) => updateLine(line.id, { price: event.target.value })} /><Input inputMode="decimal" aria-label={tx("НДС", "MwSt.")} value={line.vat} onChange={(event) => updateLine(line.id, { vat: event.target.value })} /><Button type="button" variant="ghost" size="icon-sm" title={tx("Удалить услугу", "Leistung entfernen")} aria-label={tx("Удалить услугу", "Leistung entfernen")} disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((item) => item.id !== line.id))}><X className="size-3.5" /></Button></div>)}
+                <div className="flex flex-wrap justify-end gap-4 text-sm tabular-nums text-muted-foreground"><span>{tx("Нетто", "Netto")}: {estimate.net.toFixed(2)} EUR</span><span>{tx("НДС", "MwSt.")}: {estimate.vat.toFixed(2)} EUR</span><span className="font-semibold text-foreground">{tx("Итого", "Gesamt")}: {estimate.gross.toFixed(2)} EUR</span></div>
+              </div>
+              <div className="border-y border-border"><ToggleRow checked={Boolean(order?.signed_patient)} disabled={isBusy} onChange={(checked) => void saveFlags({ signed_patient: checked })} label={tx("Подпись клиента на заказе", "Unterschrift der Kundin / des Kunden")} /><ToggleRow checked={Boolean(order?.signed_agency)} disabled={isBusy} onChange={(checked) => void saveFlags({ signed_agency: checked })} label={tx("Подпись агентства на заказе", "Unterschrift der Agentur")} /><ToggleRow checked={prepayment} disabled={isBusy} onChange={(checked) => { setPrepayment(checked); void saveFlags({ prepayment_required: checked }); }} label={tx("Требуется предоплата", "Vorauszahlung erforderlich")} /></div>
+              <div className="grid gap-3 border-b border-border pb-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end"><Field label={tx("Получено предоплаты", "Erhaltene Vorauszahlung")}><Input inputMode="decimal" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} disabled={!prepayment} placeholder="0.00" /></Field><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" disabled={isBusy || !lines.some(validLine)} onClick={() => void createOrAcceptQuote(false)}>{busy === "quote" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}{quote ? tx("Новый кошторис", "Neuer Kostenvoranschlag") : tx("Создать кошторис", "Kostenvoranschlag erstellen")}</Button><Button type="button" variant="outline" disabled={isBusy || !quote} onClick={() => void createOrAcceptQuote(true)}>{busy === "accept" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}{tx("Принять", "Annehmen")}</Button></div></div>
+              <div className="flex flex-wrap items-center justify-between gap-3"><StateMark done={Boolean(readiness.get("commercial"))} label={acceptedQuote ? tx("Кошторис принят", "Kostenvoranschlag angenommen") : tx("Кошторис ожидает подтверждения", "Kostenvoranschlag ausstehend")} /><Button type="button" disabled={isBusy || !lines.some(validLine)} onClick={() => void prepareCommercial()}>{busy === "commercial" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}{tx("Сохранить коммерческие данные", "Kommerzielle Daten speichern")}</Button></div>
+            </section>
+          ) : null}
+
+          {lead && step === "release" ? (
+            <section className="space-y-5">
+              <div><h3 className="text-sm font-semibold text-foreground">{tx("Финальное подтверждение", "Finale Freigabe")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("После подтверждения будет создан пациент и перенесены все onboarding-артефакты.", "Nach der Freigabe werden Patient und alle Onboarding-Artefakte atomar angelegt bzw. übertragen.")}</p></div>
+              <div className="border-y border-border">{lead.readiness.steps.map((item) => <div key={item.key} className="flex items-center justify-between gap-4 border-b border-border/70 py-3 last:border-b-0"><span className="text-sm text-foreground">{item.label}</span><StateMark done={item.ready} label={item.ready ? tx("Готово", "Bereit") : tx("Не готово", "Nicht bereit")} /></div>)}</div>
+              {lead.readiness.blocking_reasons.length > 0 ? <div className="border-l-2 border-amber-500 bg-amber-50/50 px-3 py-3 text-sm text-amber-900"><div className="font-medium">{tx("Что еще нужно завершить", "Noch zu erledigen")}</div><ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5">{lead.readiness.blocking_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></div> : null}
+              <div className="flex justify-end"><Button type="button" disabled={isBusy || !lead.readiness.conversion_ready} onClick={() => void convert()}>{busy === "convert" ? <LoaderCircle className="size-4 animate-spin" /> : <UserRoundCheck className="size-4" />}{tx("Создать пациента", "Patient anlegen")}</Button></div>
+            </section>
+          ) : null}
+        </main>
+
+        <footer className="flex items-center justify-between gap-3 border-t border-border px-5 py-3">
+          <Button type="button" variant="outline" size="sm" disabled={isBusy || index === 0} onClick={() => setStep(STEPS[index - 1].id)}><ChevronLeft className="size-3.5" />{tx("Назад", "Zurück")}</Button>
+          {step !== "release" ? <Button type="button" size="sm" disabled={isBusy || (step === "master_data" && !masterReady)} onClick={next}>{busy === "save" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}{tx("Сохранить и далее", "Speichern und weiter")}<ChevronRight className="size-3.5" /></Button> : null}
         </footer>
-        </SheetContent>
-      </Sheet>
-      <PatientDocumentGenerateDialog
-        open={genDocOpen}
-        patientId={createdPatientId ?? undefined}
-        patient={patientOption}
-        onOpenChange={setGenDocOpen}
-      />
-    </>
+      </SheetContent>
+    </Sheet>
   );
 }

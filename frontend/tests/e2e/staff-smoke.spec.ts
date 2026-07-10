@@ -1743,7 +1743,7 @@ test.describe("patient-profile RBAC shell", () => {
   });
 });
 
-test.describe("lead conversion gating", () => {
+test.describe("lead onboarding wizard", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {
       window.localStorage.setItem("gmed_lang", "de");
@@ -1757,7 +1757,7 @@ test.describe("lead conversion gating", () => {
     await loginAsStaff(page, "pm@gmed.de");
   });
 
-  test("patient manager sees blocked and ready convert states directly on lead cards", async ({
+  test("patient manager sees blocked and ready conversion states on lead cards", async ({
     page,
   }) => {
     await page.goto("/leads");
@@ -1769,368 +1769,93 @@ test.describe("lead conversion gating", () => {
     });
     await expect(convertButtons).toHaveCount(2);
     await expect(convertButtons.nth(0)).toBeDisabled();
-    await expect(convertButtons.nth(0)).toHaveAttribute(
-      "title",
-      /Missing required data|Qualifikation und Konvertierung/i,
-    );
     await expect(convertButtons.nth(1)).toBeEnabled();
-
-    await page.getByText("Ready Lead").click();
-    const readyLeadDetail = page.getByRole("dialog").filter({
-      has: page.getByRole("heading", { name: "Ready Lead" }),
-    });
-    await expect(
-      readyLeadDetail.getByRole("button", { name: /Konvertieren|Convert/i }),
-    ).toBeEnabled();
   });
 
-  test("lead processing does not leave an incomplete required step", async ({ page }) => {
-    let updateRequests = 0;
-    await page.route("**/api/v1/leads/*/update", async (route) => {
-      updateRequests += 1;
-      return json(route, { ok: true });
-    });
-
-    await page.goto("/leads?lead=00000000-0000-0000-0000-000000000901");
+  test("wizard renders the five onboarding stages and catalog-backed specialties", async ({
+    page,
+  }) => {
+    await page.goto("/leads?lead=00000000-0000-0000-0000-000000000902");
     await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
-    const wizard = page.getByRole("dialog").filter({
-      has: page.getByRole("heading", { name: "Lead bearbeiten" }),
-    });
+
+    const wizard = page.getByRole("dialog", { name: "Lead-Onboarding" });
     await expect(wizard).toBeVisible();
-
-    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
-
-    await expect(wizard.locator("#lw-first")).toBeVisible();
-    await expect(wizard.getByText(/Geburtsdatum.*rechtliches Geschlecht/i)).toBeVisible();
-    expect(updateRequests).toBe(0);
-  });
-
-  test("lead processing cannot skip required steps from the step header", async ({ page }) => {
-    await page.goto("/leads?lead=00000000-0000-0000-0000-000000000901");
-    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
-    const wizard = page.getByRole("dialog").filter({
-      has: page.getByRole("heading", { name: "Lead bearbeiten" }),
-    });
-
-    await expect(wizard.getByRole("button", { name: /3.*Fachärzte/i })).toBeDisabled();
-  });
-
-  test("lead processing uses the specialization catalog and a linear stepper", async ({
-    page,
-  }) => {
-    await page.route("**/api/v1/leads/*/update", (route) => json(route, { ok: true }));
-
-    await page.goto("/leads?lead=00000000-0000-0000-0000-000000000902");
-    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
-    const wizard = page.getByRole("dialog").filter({
-      has: page.getByRole("heading", { name: "Lead bearbeiten" }),
-    });
-    const progress = wizard.getByRole("navigation", {
-      name: "Bearbeitungsfortschritt",
-    });
-
-    await expect(progress.getByRole("listitem")).toHaveCount(4);
-    await expect(progress).toContainText("Schritt 1 von 4");
-    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
-    await wizard.locator("#lw-concern").fill("Knee pain");
-    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
-
-    const specialtySelect = wizard.getByRole("combobox", { name: "Fachrichtung" });
-    await chooseComboboxOption(page, specialtySelect, /Orthopädie/i);
-    await expect(wizard.getByText("Orthopädie", { exact: true })).toBeVisible();
-    await expect(wizard.getByRole("button", { name: "Patient anlegen" })).toBeEnabled();
-
-    await page.setViewportSize({ width: 390, height: 844 });
-    const mobileLayout = await wizard.evaluate((element) => ({
-      overflowX: element.scrollWidth > element.clientWidth,
-      width: Math.round(element.getBoundingClientRect().width),
-    }));
-    expect(mobileLayout).toEqual({ overflowX: false, width: 366 });
-  });
-
-  test("lead processing exposes patient creation only on a completed final step", async ({
-    page,
-  }) => {
-    let updateRequests = 0;
-    await page.route("**/api/v1/leads/*/update", async (route) => {
-      updateRequests += 1;
-      return json(route, { ok: true });
-    });
-
-    await page.goto("/leads?lead=00000000-0000-0000-0000-000000000902");
-    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
-    const wizard = page.getByRole("dialog").filter({
-      has: page.getByRole("heading", { name: "Lead bearbeiten" }),
-    });
-
+    const navigation = wizard.getByRole("navigation", { name: "Onboarding-Schritte" });
+    await expect(navigation.getByRole("button")).toHaveCount(5);
+    await expect(wizard.getByText("Personendaten")).toBeVisible();
     await expect(wizard.getByRole("button", { name: "Patient anlegen" })).toHaveCount(0);
-    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
-    await wizard.locator("#lw-concern").fill("Knee pain");
-    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
 
-    const createPatient = wizard.getByRole("button", { name: "Patient anlegen" });
-    await expect(createPatient).toBeVisible();
-    await expect(createPatient).toBeDisabled();
+    await navigation.getByRole("button", { name: /Bedarf/i }).click();
+    await expect(wizard.getByText("Bedarf und Fachrichtungen")).toBeVisible();
+    await wizard.getByRole("combobox").click();
+    await expect(page.getByText("Orthopädie", { exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
 
-    await chooseComboboxOption(
-      page,
-      wizard.getByRole("combobox", { name: "Fachrichtung" }),
-      /Orthopädie/i,
-    );
+    await navigation.getByRole("button", { name: /Unterlagen/i }).click();
+    await expect(wizard.getByText("Identitätsnachweis")).toBeVisible();
+    await expect(wizard.getByText("DSGVO-Einwilligung")).toBeVisible();
 
-    await expect(createPatient).toBeEnabled();
-    expect(updateRequests).toBe(2);
+    await navigation.getByRole("button", { name: /Vertrag & Auftrag/i }).click();
+    await expect(wizard.getByText("Vertrag, Auftrag und Kostenvoranschlag")).toBeVisible();
+    await expect(wizard.getByRole("button", { name: "Leistung hinzufügen" })).toBeVisible();
   });
 
-  test("lead processing completes the observable lead-to-order workflow", async ({ page }) => {
+  test("final release reflects server readiness and does not expose an early conversion", async ({
+    page,
+  }) => {
     const leadId = "00000000-0000-0000-0000-000000000902";
-    const patientId = "00000000-0000-0000-0000-000000000301";
-    const orderId = "00000000-0000-0000-0000-000000000701";
-    const updates: Array<Record<string, unknown>> = [];
-    const linePayloads: Array<Record<string, unknown>> = [];
-    const commercialPayloads: Array<Record<string, unknown>> = [];
-    let conversionRequests = 0;
-    let orderRequests = 0;
-
-    await page.route(`**/api/v1/leads/${leadId}/update`, (route) => {
-      updates.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
-      return json(route, { ok: true });
-    });
-    await page.route(`**/api/v1/leads/${leadId}/wizard-convert`, (route) => {
-      conversionRequests += 1;
-      return json(route, { patient_id: patientId, patient_pid: "PT-001" });
-    });
-    await page.route("**/api/v1/orders", (route) => {
-      if (route.request().method() !== "POST") return route.fallback();
-      orderRequests += 1;
-      return json(
-        route,
-        {
-          id: orderId,
-          order_number: "A-20260710-0001",
-          created_at: "2026-07-10T15:00:00Z",
-        },
-        201,
-      );
-    });
-    await page.route(`**/api/v1/orders/${orderId}/leistungen`, (route) => {
-      linePayloads.push(
-        JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>,
-      );
-      return json(route, { id: "00000000-0000-0000-0000-000000000711" }, 201);
-    });
-    await page.route(`**/api/v1/orders/${orderId}/commercial-basis`, (route) => {
-      const payload = JSON.parse(route.request().postData() ?? "{}") as Record<
-        string,
-        unknown
-      >;
-      commercialPayloads.push(payload);
-      return json(route, {
-        ok: true,
-        order_id: orderId,
-        total_estimated: payload.total_estimated,
-        contract_id: null,
-      });
-    });
-
-    await page.goto(`/leads?lead=${leadId}`);
-    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
-    const leadWizard = page.getByRole("dialog").filter({
-      has: page.getByRole("heading", { name: "Lead bearbeiten" }),
-    });
-    await leadWizard.getByRole("button", { name: "Weiter", exact: true }).click();
-    await leadWizard.locator("#lw-concern").fill("Knee pain");
-    await leadWizard.getByRole("button", { name: "Weiter", exact: true }).click();
-    await chooseComboboxOption(
-      page,
-      leadWizard.getByRole("combobox", { name: "Fachrichtung" }),
-      /Orthopädie/i,
-    );
-    await leadWizard.getByRole("button", { name: "Patient anlegen" }).click();
-
-    const orderWizard = page.getByRole("dialog", { name: "Auftrag erstellen" });
-    await expect(orderWizard.getByText("Auftragsentwurf erstellt")).toBeVisible();
-    await orderWizard.getByRole("checkbox", { name: "Rahmenvertrag anlegen" }).uncheck();
-    await orderWizard.locator("textarea").first().fill("");
-    const description = orderWizard.getByPlaceholder("Positionsbeschreibung");
-    await description.fill("Specialist consultation");
-    const lineCard = description.locator("..");
-    await lineCard.locator("input").nth(2).fill("200");
-    await orderWizard
-      .getByRole("button", { name: "Abschließen und Auftrag öffnen" })
-      .click();
-
-    await page.waitForURL(`**/orders/${orderId}`);
-    expect(conversionRequests).toBe(1);
-    expect(orderRequests).toBe(1);
-    expect(linePayloads).toHaveLength(1);
-    expect(linePayloads[0]).toMatchObject({
-      patient_id: patientId,
-      description: "Specialist consultation",
-      quantity: 1,
-      unit_price: 200,
-      vat_rate: 19,
-    });
-    expect(commercialPayloads).toEqual([{ total_estimated: "238.00", contract_id: null }]);
-    expect(updates).toContainEqual(
-      expect.objectContaining({ requested_specialties: ["orthopedics"] }),
-    );
-    expect(updates.at(-1)).toMatchObject({
-      wizard_state: {
-        phase: "completed",
-        patient_id: patientId,
-        order_id: orderId,
-      },
-    });
-  });
-
-  test("lead processing persists edits before step-header navigation", async ({ page }) => {
-    const updates: Array<Record<string, unknown>> = [];
-    await page.route("**/api/v1/leads/*/update", async (route) => {
-      updates.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
-      return json(route, { ok: true });
-    });
-
-    await page.goto("/leads?lead=00000000-0000-0000-0000-000000000902");
-    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
-    const wizard = page.getByRole("dialog").filter({
-      has: page.getByRole("heading", { name: "Lead bearbeiten" }),
-    });
-
-    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
-    await wizard.locator("#lw-concern").fill("Updated concern");
-    await wizard.getByRole("button", { name: /Identität/i }).click();
-
-    await expect(wizard.locator("#lw-first")).toBeVisible();
-    expect(updates).toHaveLength(2);
-    expect(updates[1]).toMatchObject({
-      primary_concern_text: "Updated concern",
-      wizard_state: { step: "identity" },
-    });
-  });
-
-  test("lead processing persists Phase-A edits before closing", async ({ page }) => {
-    const updates: Array<Record<string, unknown>> = [];
-    await page.route("**/api/v1/leads/*/update", async (route) => {
-      updates.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
-      return route.fallback();
-    });
-
-    await page.goto("/leads?lead=00000000-0000-0000-0000-000000000902");
-    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
-    const wizard = page.getByRole("dialog").filter({
-      has: page.getByRole("heading", { name: "Lead bearbeiten" }),
-    });
-
-    await wizard.locator("#lw-first").fill("Updated");
-    await wizard.getByRole("button", { name: "Schließen", exact: true }).click();
-
-    await expect(wizard).toBeHidden();
-    expect(updates).toHaveLength(1);
-    expect(updates[0]).toMatchObject({
-      first_name: "Updated",
-      wizard_state: { step: "identity" },
-    });
-
-    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
-    await expect(wizard.locator("#lw-first")).toHaveValue("Updated");
-  });
-
-  test("lead processing resubmits restored order lines after edits", async ({ page }) => {
-    const leadId = "00000000-0000-0000-0000-000000000902";
-    const patientId = "00000000-0000-0000-0000-000000000301";
-    const orderId = "00000000-0000-0000-0000-000000000701";
-    const lineKey = "restored-line-1";
-    const linePayloads: Array<Record<string, unknown>> = [];
-
-    await page.route(`**/api/v1/leads/${leadId}`, (route) =>
+    await page.route("**/api/v1/leads/" + leadId, (route) =>
       json(route, {
         id: leadId,
         first_name: "Ready",
         last_name: "Lead",
         email: "ready.lead@example.com",
         phone: "+49 30 100002",
-        source: "referral",
         country: "DE",
-        intake_source: "referral",
-        flow: "standard",
-        qualification_status: "converted",
+        qualification_status: "qualified",
         compliance_status: "signed",
-        conversion_ready: true,
-        submitted_at: "2026-04-02T09:00:00Z",
-        created_at: "2026-04-02T09:00:00Z",
-        updated_at: "2026-04-03T09:00:00Z",
         date_of_birth: "1990-01-01",
         legal_sex: "female",
-        primary_language: "de",
-        primary_concern_text: "Knee pain",
+        requested_specialties: ["orthopedics"],
         services: [],
-        requested_specialties: ["Orthopädie"],
-        converted_patient_id: patientId,
+        consent_healthcare: true,
+        consent_privacy_practices: true,
         attachments: [],
         failed_outcome: { status: "none", reason: null, processed_at: null },
         readiness: {
           qualification_ready: true,
-          conversion_ready: true,
+          conversion_ready: false,
           qualification_reasons: [],
-          blocking_reasons: [],
+          blocking_reasons: ["Signed DSGVO document is missing"],
           checks: [],
+          steps: [
+            { key: "master_data", label: "Stammdaten", ready: true },
+            { key: "need", label: "Bedarf", ready: true },
+            { key: "documents", label: "Unterlagen", ready: false },
+            { key: "commercial", label: "Vertrag & Auftrag", ready: false },
+            { key: "release", label: "Freigabe", ready: false },
+          ],
         },
         lifecycle: {
-          current_stage: "converted",
-          stage_entered_at: "2026-04-03T09:00:00Z",
+          current_stage: "qualified",
+          stage_entered_at: null,
           can_convert: false,
-          can_resolve_failed: false,
+          can_resolve_failed: true,
           history: [],
         },
-        wizard_state: {
-          step: "specialties",
-          phase: "order",
-          patient_id: patientId,
-          patient_pid: "PT-001",
-          order_id: orderId,
-          saved_order_line_keys: [lineKey],
-          order_lines: [
-            {
-              clientKey: lineKey,
-              description: "Initial consultation",
-              quantity: "1",
-              unitPrice: "100",
-              vatRate: "19",
-            },
-          ],
-          guardian: {},
-          clinical_intake: {},
-          start_contract: false,
-          contract_id: null,
-        },
+        wizard_state: { step: "master_data" },
       }),
     );
-    await page.route(`**/api/v1/orders/${orderId}/leistungen`, (route) => {
-      if (route.request().method() === "POST") {
-        linePayloads.push(
-          JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>,
-        );
-        return json(route, { id: "00000000-0000-0000-0000-000000000711" }, 200);
-      }
-      return json(route, []);
-    });
 
-    await page.goto(`/leads?lead=${leadId}`);
+    await page.goto("/leads?lead=" + leadId);
     await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
-    const wizard = page.getByRole("dialog", { name: "Auftrag erstellen" });
-    await expect(wizard.getByText("Auftragsentwurf erstellt")).toBeVisible();
-    await wizard
-      .getByPlaceholder("Positionsbeschreibung")
-      .fill("Updated specialist consultation");
-    await wizard
-      .getByRole("button", { name: "Abschließen und Auftrag öffnen" })
+    const wizard = page.getByRole("dialog", { name: "Lead-Onboarding" });
+    await wizard.getByRole("navigation", { name: "Onboarding-Schritte" })
+      .getByRole("button", { name: /Freigabe/i })
       .click();
 
-    await expect.poll(() => linePayloads.length).toBe(1);
-    expect(linePayloads[0]).toMatchObject({
-      description: "Updated specialist consultation",
-      client_reference: `lead-wizard:${leadId}:${lineKey}`,
-    });
+    await expect(wizard.getByText("Noch zu erledigen")).toBeVisible();
+    await expect(wizard.getByText("Signed DSGVO document is missing")).toBeVisible();
+    await expect(wizard.getByRole("button", { name: "Patient anlegen" })).toBeDisabled();
   });
 });
