@@ -87,6 +87,24 @@ async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     .unwrap()
 }
 
+async fn seed_lead(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, phone, qualification_status,
+                compliance_status, intake_source, created_by
+           ) VALUES (
+                $1, $2, $3, '+4915112345678', 'qualified', 'signed', 'console', $4
+           ) RETURNING id"#,
+    )
+    .bind(format!("Lead {tag}"))
+    .bind("Onboarding")
+    .bind(format!("lead-{tag}@example.com"))
+    .bind(created_by)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 async fn seed_patient_assignment(
     pool: &PgPool,
     patient_id: Uuid,
@@ -210,6 +228,84 @@ async fn framework_contract_create_list_and_sign_flow_work() {
 }
 
 #[tokio::test]
+async fn framework_contract_can_be_completed_for_lead_without_creating_patient() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("lead-framework-contract");
+    let lead_id = seed_lead(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let client_reference = format!("lead-onboarding:{lead_id}:framework");
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &pm_bearer,
+        Some(json!({
+            "lead_id": lead_id,
+            "status": "sent",
+            "client_reference": client_reference,
+            "valid_from": "2026-07-10"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {created}");
+    let contract_id = created["id"].as_str().expect("contract id");
+    assert_eq!(created["lead_id"], lead_id.to_string());
+    assert!(created["patient_id"].is_null());
+
+    let (status, replayed) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &pm_bearer,
+        Some(json!({
+            "lead_id": lead_id,
+            "status": "sent",
+            "client_reference": client_reference
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {replayed}");
+    assert_eq!(replayed["id"], contract_id);
+    assert_eq!(replayed["idempotent_replay"], true);
+
+    let (status, listed) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/framework-contracts?lead_id={lead_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {listed}");
+    assert_eq!(listed.as_array().expect("contracts").len(), 1);
+    assert_eq!(listed[0]["lead_id"], lead_id.to_string());
+
+    let (status, signed) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{contract_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "signed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {signed}");
+    assert_eq!(signed["status"], "signed");
+    assert_eq!(signed["lead_id"], lead_id.to_string());
+
+    let patient_count: i64 = sqlx::query_scalar("SELECT count(*) FROM patients WHERE email = $1")
+        .bind(format!("lead-{tag}@example.com"))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(patient_count, 0);
+}
+
+#[tokio::test]
 async fn framework_contract_create_returns_user_facing_patient_validation_errors() {
     let Some((app, _pool, _admin_id, admin_bearer)) = test_context().await else {
         return;
@@ -227,7 +323,7 @@ async fn framework_contract_create_returns_user_facing_patient_validation_errors
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(body["message"], "Patient is required");
+    assert_eq!(body["message"], "Patient or lead is required");
 
     let (status, body) = json_request(
         &app,
@@ -242,7 +338,7 @@ async fn framework_contract_create_returns_user_facing_patient_validation_errors
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(body["message"], "Patient is required");
+    assert_eq!(body["message"], "Patient or lead is required");
 
     let (status, body) = json_request(
         &app,

@@ -54,6 +54,7 @@ pub fn router() -> Router<AppState> {
 struct ListFrameworkContractsQuery {
     search: Option<String>,
     patient_id: Option<Uuid>,
+    lead_id: Option<Uuid>,
     status: Option<String>,
 }
 
@@ -66,6 +67,7 @@ struct ListAgencyServicesQuery {
 #[derive(Deserialize)]
 struct CreateFrameworkContractRequest {
     patient_id: Option<String>,
+    lead_id: Option<String>,
     signed_at: Option<String>,
     valid_from: Option<String>,
     valid_to: Option<String>,
@@ -232,11 +234,14 @@ fn parse_optional_datetime(value: Option<&str>) -> Result<Option<DateTime<Utc>>,
     }
 }
 
-fn parse_required_uuid(value: Option<&str>) -> Result<Uuid, &'static str> {
-    let Some(raw) = value.map(str::trim).filter(|value| !value.is_empty()) else {
-        return Err("Patient is required");
-    };
-    Uuid::parse_str(raw).map_err(|_| "Invalid patient")
+fn parse_optional_subject_uuid(
+    value: Option<&str>,
+    invalid_message: &'static str,
+) -> Result<Option<Uuid>, &'static str> {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(raw) => Uuid::parse_str(raw).map(Some).map_err(|_| invalid_message),
+        None => Ok(None),
+    }
 }
 
 fn decimal_to_string(value: Decimal) -> String {
@@ -686,11 +691,52 @@ async fn ensure_patient_access(
     }
 }
 
-async fn load_contract_patient_id(
+async fn ensure_lead_access(
+    state: &AppState,
+    lead_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let converted_patient_id = sqlx::query_scalar::<_, Option<Uuid>>(
+        "SELECT converted_patient_id FROM leads WHERE id = $1",
+    )
+    .bind(lead_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, lead_id = %lead_id, "validate lead access");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate lead access",
+        )
+    })?;
+
+    match converted_patient_id {
+        None => Err(err(StatusCode::NOT_FOUND, "Lead not found")),
+        Some(Some(_)) => Err(err(
+            StatusCode::CONFLICT,
+            "Converted lead must use its patient context",
+        )),
+        Some(None) => Ok(()),
+    }
+}
+
+async fn ensure_subject_access(
+    state: &AppState,
+    auth: &AuthUser,
+    subject: access::RecordSubject,
+) -> Result<(), axum::response::Response> {
+    match subject {
+        access::RecordSubject::Patient(patient_id) => {
+            ensure_patient_access(state, auth, patient_id).await
+        }
+        access::RecordSubject::Lead(lead_id) => ensure_lead_access(state, lead_id).await,
+    }
+}
+
+async fn load_contract_subject(
     state: &AppState,
     contract_id: Uuid,
-) -> Result<Option<Uuid>, axum::response::Response> {
-    sqlx::query_scalar("SELECT patient_id FROM framework_contracts WHERE id = $1")
+) -> Result<Option<access::RecordSubject>, axum::response::Response> {
+    let row = sqlx::query("SELECT patient_id, lead_id FROM framework_contracts WHERE id = $1")
         .bind(contract_id)
         .fetch_optional(&state.db)
         .await
@@ -699,6 +745,25 @@ async fn load_contract_patient_id(
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to validate framework contract",
+            )
+        })?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let patient_id = row
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default();
+    let lead_id = row
+        .try_get::<Option<Uuid>, _>("lead_id")
+        .unwrap_or_default();
+    access::RecordSubject::from_ids(patient_id, lead_id)
+        .map(Some)
+        .map_err(|error| {
+            tracing::error!(?error, contract_id = %contract_id, "invalid framework contract subject");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Framework contract has invalid subject",
             )
         })
 }
@@ -709,12 +774,15 @@ async fn load_contract_detail(
     auth: &AuthUser,
 ) -> Result<Option<Value>, axum::response::Response> {
     let row = sqlx::query(
-        r#"SELECT fc.id, fc.patient_id, fc.contract_number, fc.status, fc.signed_at,
+        r#"SELECT fc.id, fc.patient_id, fc.lead_id, fc.contract_number, fc.status, fc.signed_at,
                   fc.valid_from, fc.valid_to, fc.conditions, fc.client_reference,
                   fc.created_at, fc.updated_at,
-                  p.first_name, p.last_name, p.patient_id AS patient_pid
+                  COALESCE(p.first_name, l.first_name) AS subject_first_name,
+                  COALESCE(p.last_name, l.last_name) AS subject_last_name,
+                  p.patient_id AS patient_pid
            FROM framework_contracts fc
-           JOIN patients p ON p.id = fc.patient_id
+           LEFT JOIN patients p ON p.id = fc.patient_id
+           LEFT JOIN leads l ON l.id = fc.lead_id
            WHERE fc.id = $1"#,
     )
     .bind(contract_id)
@@ -732,20 +800,29 @@ async fn load_contract_detail(
         return Ok(None);
     };
 
-    let patient_id = row.try_get::<Uuid, _>("patient_id").unwrap_or_default();
-    match can_access_patient(state, auth, patient_id).await {
-        Ok(true) => {}
-        Ok(false) => return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions")),
-        Err(resp) => return Err(resp),
-    }
+    let subject = access::RecordSubject::from_ids(
+        row.try_get::<Option<Uuid>, _>("patient_id")
+            .unwrap_or_default(),
+        row.try_get::<Option<Uuid>, _>("lead_id")
+            .unwrap_or_default(),
+    )
+    .map_err(|error| {
+        tracing::error!(?error, contract_id = %contract_id, "invalid framework contract subject");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Framework contract has invalid subject",
+        )
+    })?;
+    ensure_subject_access(state, auth, subject).await?;
 
     Ok(Some(serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
-        "patient_id": patient_id,
+        "patient_id": subject.patient_id(),
+        "lead_id": subject.lead_id(),
         "patient_name": format!(
             "{} {}",
-            row.try_get::<String, _>("first_name").unwrap_or_default(),
-            row.try_get::<String, _>("last_name").unwrap_or_default()
+            row.try_get::<String, _>("subject_first_name").unwrap_or_default(),
+            row.try_get::<String, _>("subject_last_name").unwrap_or_default()
         ).trim().to_string(),
         "patient_pid": row.try_get::<String, _>("patient_pid").unwrap_or_default(),
         "contract_number": row.try_get::<String, _>("contract_number").unwrap_or_default(),
@@ -778,28 +855,34 @@ async fn list_framework_contracts(
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
 
     match sqlx::query(
-        r#"SELECT fc.id, fc.patient_id, fc.contract_number, fc.status, fc.signed_at,
+        r#"SELECT fc.id, fc.patient_id, fc.lead_id, fc.contract_number, fc.status, fc.signed_at,
                   fc.valid_from, fc.valid_to, fc.conditions, fc.client_reference,
                   fc.created_at, fc.updated_at,
-                  p.first_name, p.last_name, p.patient_id AS patient_pid
+                  COALESCE(p.first_name, l.first_name) AS subject_first_name,
+                  COALESCE(p.last_name, l.last_name) AS subject_last_name,
+                  p.patient_id AS patient_pid
            FROM framework_contracts fc
-           JOIN patients p ON p.id = fc.patient_id
+           LEFT JOIN patients p ON p.id = fc.patient_id
+           LEFT JOIN leads l ON l.id = fc.lead_id
            WHERE ($1::text = '%%'
                     OR de_normalize(concat_ws(' ',
                          fc.contract_number,
                          p.first_name, p.last_name, p.patient_id,
                          p.email, p.phone_primary, p.phone_secondary,
-                         p.insurance_number, p.insurance_provider
+                         p.insurance_number, p.insurance_provider,
+                         l.first_name, l.last_name, l.email, l.phone
                        )) LIKE de_normalize($1)
                     OR (length(regexp_replace($1, '\D', '', 'g')) >= 3
-                        AND phone_digits(concat_ws(' ', p.phone_primary, p.phone_secondary)) LIKE '%' || regexp_replace($1, '\D', '', 'g') || '%'))
+                        AND phone_digits(concat_ws(' ', p.phone_primary, p.phone_secondary, l.phone)) LIKE '%' || regexp_replace($1, '\D', '', 'g') || '%'))
              AND ($2::uuid IS NULL OR fc.patient_id = $2)
-             AND ($3::text IS NULL OR fc.status = $3)
+             AND ($3::uuid IS NULL OR fc.lead_id = $3)
+             AND ($4::text IS NULL OR fc.status = $4)
            ORDER BY fc.created_at DESC
            LIMIT 200"#,
     )
     .bind(search_pattern)
     .bind(query.patient_id)
+    .bind(query.lead_id)
     .bind(query.status)
     .fetch_all(&state.db)
     .await
@@ -807,20 +890,37 @@ async fn list_framework_contracts(
         Ok(rows) => {
             let mut items = Vec::with_capacity(rows.len());
             for row in rows {
-                let patient_id = row.try_get::<Uuid, _>("patient_id").unwrap_or_default();
-                match can_access_patient(&state, &auth, patient_id).await {
-                    Ok(true) => {}
-                    Ok(false) => continue,
-                    Err(resp) => return resp,
+                let subject = match access::RecordSubject::from_ids(
+                    row.try_get::<Option<Uuid>, _>("patient_id")
+                        .unwrap_or_default(),
+                    row.try_get::<Option<Uuid>, _>("lead_id")
+                        .unwrap_or_default(),
+                ) {
+                    Ok(subject) => subject,
+                    Err(error) => {
+                        tracing::error!(?error, "invalid framework contract subject in list");
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Framework contract has invalid subject",
+                        );
+                    }
+                };
+                if let access::RecordSubject::Patient(patient_id) = subject {
+                    match can_access_patient(&state, &auth, patient_id).await {
+                        Ok(true) => {}
+                        Ok(false) => continue,
+                        Err(resp) => return resp,
+                    }
                 }
 
                 items.push(serde_json::json!({
                     "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
-                    "patient_id": patient_id,
+                    "patient_id": subject.patient_id(),
+                    "lead_id": subject.lead_id(),
                     "patient_name": format!(
                         "{} {}",
-                        row.try_get::<String, _>("first_name").unwrap_or_default(),
-                        row.try_get::<String, _>("last_name").unwrap_or_default()
+                        row.try_get::<String, _>("subject_first_name").unwrap_or_default(),
+                        row.try_get::<String, _>("subject_last_name").unwrap_or_default()
                     ).trim().to_string(),
                     "patient_pid": row.try_get::<String, _>("patient_pid").unwrap_or_default(),
                     "contract_number": row.try_get::<String, _>("contract_number").unwrap_or_default(),
@@ -855,14 +955,33 @@ async fn create_framework_contract(
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let patient_id = match parse_required_uuid(body.patient_id.as_deref()) {
+    let patient_id =
+        match parse_optional_subject_uuid(body.patient_id.as_deref(), "Invalid patient") {
+            Ok(value) => value,
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        };
+    let lead_id = match parse_optional_subject_uuid(body.lead_id.as_deref(), "Invalid lead") {
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    let subject = match access::RecordSubject::from_ids(patient_id, lead_id) {
+        Ok(subject) => subject,
+        Err(access::RecordSubjectError::Missing) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Patient or lead is required",
+            );
+        }
+        Err(access::RecordSubjectError::Ambiguous) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Contract cannot belong to patient and lead at the same time",
+            );
+        }
+    };
 
-    match ensure_patient_access(&state, &auth, patient_id).await {
-        Ok(()) => {}
-        Err(resp) => return resp,
+    if let Err(resp) = ensure_subject_access(&state, &auth, subject).await {
+        return resp;
     }
 
     let status = body.status.unwrap_or_else(|| "draft".to_string());
@@ -913,15 +1032,16 @@ async fn create_framework_contract(
 
     match sqlx::query(
         r#"INSERT INTO framework_contracts (
-                patient_id, contract_number, signed_at, valid_from, valid_to,
+                patient_id, lead_id, contract_number, signed_at, valid_from, valid_to,
                 conditions, status, created_by, client_reference
            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
            )
-           ON CONFLICT (patient_id, client_reference) DO NOTHING
+           ON CONFLICT DO NOTHING
            RETURNING id, created_at, updated_at"#,
     )
-    .bind(patient_id)
+    .bind(subject.patient_id())
+    .bind(subject.lead_id())
     .bind(contract_number.clone())
     .bind(signed_at)
     .bind(valid_from)
@@ -942,7 +1062,8 @@ async fn create_framework_contract(
                 Some(contract_id),
                 serde_json::json!({
                     "contract_number": contract_number,
-                    "patient_id": patient_id,
+                    "patient_id": subject.patient_id(),
+                    "lead_id": subject.lead_id(),
                     "status": status,
                 }),
             ));
@@ -953,7 +1074,8 @@ async fn create_framework_contract(
                 contract_id,
                 serde_json::json!({
                     "contract_number": contract_number.clone(),
-                    "patient_id": patient_id,
+                    "patient_id": subject.patient_id(),
+                    "lead_id": subject.lead_id(),
                     "status": status.clone(),
                 }),
             )
@@ -963,6 +1085,8 @@ async fn create_framework_contract(
                 StatusCode::CREATED,
                 Json(serde_json::json!({
                     "id": contract_id,
+                    "patient_id": subject.patient_id(),
+                    "lead_id": subject.lead_id(),
                     "contract_number": contract_number,
                     "status": status,
                     "signed_at": signed_at.map(|v| v.to_rfc3339()),
@@ -974,21 +1098,29 @@ async fn create_framework_contract(
         }
         Ok(None) => {
             let Some(client_reference) = client_reference else {
-                tracing::error!(patient_id = %patient_id, "contract insert returned no row without a client reference");
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create contract");
+                tracing::error!(patient_id = ?subject.patient_id(), lead_id = ?subject.lead_id(), "contract insert returned no row without a client reference");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create contract",
+                );
             };
             match sqlx::query(
                 r#"SELECT id, contract_number, status, signed_at, created_at, updated_at
                    FROM framework_contracts
-                   WHERE patient_id = $1 AND client_reference = $2"#,
+                   WHERE patient_id IS NOT DISTINCT FROM $1
+                     AND lead_id IS NOT DISTINCT FROM $2
+                     AND client_reference = $3"#,
             )
-            .bind(patient_id)
+            .bind(subject.patient_id())
+            .bind(subject.lead_id())
             .bind(&client_reference)
             .fetch_optional(&state.db)
             .await
             {
                 Ok(Some(row)) => Json(serde_json::json!({
                     "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                    "patient_id": subject.patient_id(),
+                    "lead_id": subject.lead_id(),
                     "contract_number": row.try_get::<String, _>("contract_number").unwrap_or_default(),
                     "status": row.try_get::<String, _>("status").unwrap_or_default(),
                     "signed_at": row.try_get::<Option<DateTime<Utc>>, _>("signed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
@@ -999,11 +1131,11 @@ async fn create_framework_contract(
                 }))
                 .into_response(),
                 Ok(None) => {
-                    tracing::error!(patient_id = %patient_id, client_reference = %client_reference, "idempotent contract missing after conflict");
+                    tracing::error!(patient_id = ?subject.patient_id(), lead_id = ?subject.lead_id(), client_reference = %client_reference, "idempotent contract missing after conflict");
                     err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create contract")
                 }
                 Err(e) => {
-                    tracing::error!(error = %e, patient_id = %patient_id, client_reference = %client_reference, "load idempotent contract");
+                    tracing::error!(error = %e, patient_id = ?subject.patient_id(), lead_id = ?subject.lead_id(), client_reference = %client_reference, "load idempotent contract");
                     err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create contract")
                 }
             }
@@ -1048,15 +1180,14 @@ async fn update_framework_contract_status(
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status");
     }
 
-    let patient_id = match load_contract_patient_id(&state, contract_id).await {
-        Ok(Some(patient_id)) => patient_id,
+    let subject = match load_contract_subject(&state, contract_id).await {
+        Ok(Some(subject)) => subject,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Framework contract not found"),
         Err(resp) => return resp,
     };
 
-    match ensure_patient_access(&state, &auth, patient_id).await {
-        Ok(()) => {}
-        Err(resp) => return resp,
+    if let Err(resp) = ensure_subject_access(&state, &auth, subject).await {
+        return resp;
     }
 
     let signed_at = match parse_optional_datetime(body.signed_at.as_deref()) {
