@@ -1,10 +1,19 @@
 import { useEffect, useState, type ReactNode } from "react";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  LoaderCircle,
+  Plus,
+  UserPlus,
+  X,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { selectClass, textareaClass } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -118,7 +127,7 @@ function Field({
   children: ReactNode;
 }) {
   return (
-    <div className="space-y-1.5">
+    <div className="min-w-0 space-y-1.5">
       <label
         htmlFor={htmlFor}
         className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
@@ -163,8 +172,15 @@ function ChipEditor({
             }
           }}
         />
-        <Button type="button" variant="outline" onClick={commit} disabled={!value.trim()}>
-          +
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          onClick={commit}
+          disabled={!value.trim()}
+          aria-label={placeholder}
+        >
+          <Plus className="size-4" />
         </Button>
       </div>
       {items.length > 0 ? (
@@ -178,10 +194,10 @@ function ChipEditor({
               <button
                 type="button"
                 onClick={() => onRemove(index)}
-                className="text-muted-foreground hover:text-foreground"
+                className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 aria-label="remove"
               >
-                ×
+                <X className="size-3" />
               </button>
             </span>
           ))}
@@ -397,8 +413,8 @@ export function LeadWizard({
             resumeError instanceof Error
               ? resumeError.message
               : tx(
-                  "Черновик заказа создан, но состояние мастера не удалось сохранить.",
-                  "Auftragsentwurf erstellt, aber der Assistentenstatus konnte nicht gespeichert werden.",
+                  "Черновик заказа создан, но состояние обработки не удалось сохранить.",
+                  "Auftragsentwurf erstellt, aber der Bearbeitungsstatus konnte nicht gespeichert werden.",
                 ),
           );
         }
@@ -574,15 +590,15 @@ export function LeadWizard({
       else if (createdPatientId) onConverted?.(createdPatientId);
     } catch (nextError) {
       const retryHint = tx(
-        "Мастер остаётся открытым — исправьте ошибку и повторите.",
-        "Der Assistent bleibt offen — Fehler beheben und erneut versuchen.",
+        "Окно обработки остаётся открытым — исправьте ошибку и повторите.",
+        "Die Bearbeitung bleibt geöffnet — Fehler beheben und erneut versuchen.",
       );
       setError(
         nextError instanceof Error
           ? `${nextError.message} ${retryHint}`
           : tx(
-              "Не удалось завершить. Мастер остаётся открытым — исправьте ошибку и повторите.",
-              "Abschluss fehlgeschlagen. Der Assistent bleibt offen — Fehler beheben und erneut versuchen.",
+              "Не удалось завершить. Окно обработки остаётся открытым — исправьте ошибку и повторите.",
+              "Abschluss fehlgeschlagen. Die Bearbeitung bleibt geöffnet — Fehler beheben und erneut versuchen.",
             ),
       );
     } finally {
@@ -635,20 +651,22 @@ export function LeadWizard({
 
   return (
     <>
-    <Sheet open={open} onOpenChange={handleWizardOpenChange}>
-      <SheetContent className="flex w-full flex-col gap-0 overflow-y-auto sm:max-w-xl">
-        <header className="border-b border-border/60 pb-4">
+      <Sheet open={open} onOpenChange={handleWizardOpenChange}>
+        <SheetContent className="w-[calc(100%-1.5rem)]! gap-0 overflow-hidden p-0 sm:max-w-2xl!">
+        <header className="shrink-0 border-b border-border/70 bg-popover px-5 pb-4 pt-4 pr-14">
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold text-foreground">
-              {tx("Мастер обработки лида", "Lead-Assistent")}
-            </h2>
+            <SheetTitle className="text-lg font-semibold text-foreground">
+              {phase === "order"
+                ? tx("Формирование заказа", "Auftrag erstellen")
+                : tx("Обработка лида", "Lead bearbeiten")}
+            </SheetTitle>
             {minor ? (
               <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-700">
                 {tx("Ребёнок", "Minderjährig")}
               </Badge>
             ) : null}
           </div>
-          <ol className="mt-3 flex flex-wrap gap-1.5">
+          <ol className="mt-4 grid grid-cols-3 gap-2">
             {PHASE_A_STEPS.map((phaseStep, index) => {
               const done = draft ? stepIsComplete(phaseStep, draft) : false;
               const active = phaseStep === step;
@@ -658,14 +676,27 @@ export function LeadWizard({
                     type="button"
                     onClick={() => setStep(phaseStep)}
                     className={cn(
-                      "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                      "flex min-h-10 min-w-0 items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs font-medium transition-colors",
                       active
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-border/60 bg-muted/30 text-muted-foreground hover:text-foreground",
+                        ? "border-primary/50 bg-primary/10 text-primary"
+                        : done
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          : "border-border/70 bg-background text-muted-foreground hover:border-border hover:text-foreground",
                     )}
                   >
-                    <span className="tabular-nums">{index + 1}.</span> {stepLabel(phaseStep, tx)}
-                    {done ? " ✓" : ""}
+                    <span
+                      className={cn(
+                        "flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px] tabular-nums",
+                        active
+                          ? "border-primary/40 bg-background"
+                          : done
+                            ? "border-emerald-300 bg-white"
+                            : "border-border bg-muted/40",
+                      )}
+                    >
+                      {done ? <Check className="size-3" /> : index + 1}
+                    </span>
+                    <span className="min-w-0 leading-tight">{stepLabel(phaseStep, tx)}</span>
                   </button>
                 </li>
               );
@@ -673,11 +704,11 @@ export function LeadWizard({
           </ol>
         </header>
 
-        <div className="flex-1 space-y-4 py-4">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-muted/10 px-5 py-5">
           {loadError ? (
-            <p className="text-sm text-rose-600">
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
               {tx("Не удалось загрузить лид", "Lead konnte nicht geladen werden")}
-            </p>
+            </div>
           ) : phase === "order" ? (
             <div className="space-y-4">
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
@@ -694,7 +725,7 @@ export function LeadWizard({
                       "Minderjährig — bitte gesetzlichen Vertreter angeben.",
                     )}
                   </p>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid gap-2 sm:grid-cols-2">
                     <Field label={tx("ФИО представителя", "Name des Vertreters")}>
                       <Input
                         value={guardian.name}
@@ -861,6 +892,7 @@ export function LeadWizard({
               <label className="flex items-center gap-2 text-sm text-foreground">
                 <input
                   type="checkbox"
+                  className="size-4 shrink-0 accent-[var(--brand)]"
                   checked={startContract}
                   onChange={(event) => setStartContract(event.target.checked)}
                 />
@@ -895,7 +927,7 @@ export function LeadWizard({
                       placeholder={tx("Описание позиции", "Positionsbeschreibung")}
                       onChange={(event) => patchLine(index, { description: event.target.value })}
                     />
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid gap-2 sm:grid-cols-3">
                       <Field label={tx("Кол-во", "Menge")}>
                         <Input
                           value={line.quantity}
@@ -953,15 +985,22 @@ export function LeadWizard({
                   <span className="tabular-nums">{estimate.gross.toFixed(2)} €</span>
                 </div>
               </div>
-              {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+              {error ? (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {error}
+                </div>
+              ) : null}
             </div>
           ) : !draft ? (
-            <p className="text-sm text-muted-foreground">{tx("Загрузка…", "Wird geladen…")}</p>
+            <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
+              <LoaderCircle className="size-4 animate-spin" />
+              {tx("Загрузка…", "Wird geladen…")}
+            </div>
           ) : (
             <>
               {step === "identity" ? (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-4 rounded-lg border border-border/70 bg-card p-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
                     <Field label={tx("Имя", "Vorname")} htmlFor="lw-first">
                       <Input
                         id="lw-first"
@@ -977,7 +1016,7 @@ export function LeadWizard({
                       />
                     </Field>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
                     <Field label={tx("Дата рождения", "Geburtsdatum")} htmlFor="lw-dob">
                       <Input
                         id="lw-dob"
@@ -1008,7 +1047,7 @@ export function LeadWizard({
                       </NativeComboboxSelect>
                     </Field>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
                     <Field label={tx("E-mail", "E-Mail")} htmlFor="lw-email">
                       <Input
                         id="lw-email"
@@ -1024,7 +1063,7 @@ export function LeadWizard({
                       />
                     </Field>
                   </div>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <Field label={tx("Улица", "Straße")} htmlFor="lw-street">
                       <Input
                         id="lw-street"
@@ -1050,6 +1089,7 @@ export function LeadWizard({
                   <label className="flex items-center gap-2 text-sm text-foreground">
                     <input
                       type="checkbox"
+                      className="size-4 shrink-0 accent-[var(--brand)]"
                       checked={draft.needsInterpreter}
                       onChange={(event) => patch({ needsInterpreter: event.target.checked })}
                     />
@@ -1059,7 +1099,7 @@ export function LeadWizard({
               ) : null}
 
               {step === "eligibility" ? (
-                <div className="space-y-4">
+                <div className="space-y-4 rounded-lg border border-border/70 bg-card p-4">
                   <Field label={tx("Основная жалоба", "Hauptanliegen")} htmlFor="lw-concern">
                     <textarea
                       id="lw-concern"
@@ -1099,7 +1139,7 @@ export function LeadWizard({
               ) : null}
 
               {step === "specialties" ? (
-                <div className="space-y-4">
+                <div className="space-y-4 rounded-lg border border-border/70 bg-card p-4">
                   <p className="text-sm text-muted-foreground">
                     {tx(
                       "Каких специалистов нужно привлечь (травматолог, ортопед…).",
@@ -1125,24 +1165,35 @@ export function LeadWizard({
                 </div>
               ) : null}
 
-              {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+              {error ? (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {error}
+                </div>
+              ) : null}
             </>
           )}
         </div>
 
-        <footer className="flex items-center justify-between border-t border-border/60 pt-4">
+        <footer className="shrink-0 border-t border-border/70 bg-popover px-5 py-3">
           {phase === "order" ? (
-            <>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-xs text-muted-foreground">
                 {tx("Черновик заказа создан", "Auftragsentwurf erstellt")}
               </span>
-              <div className="flex items-center gap-2">
-                <Button type="button" variant="outline" onClick={() => void saveOrderDraft()} disabled={busy}>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full sm:w-auto"
+                  onClick={() => void saveOrderDraft()}
+                  disabled={busy}
+                >
                   {tx("Сохранить черновик", "Entwurf speichern")}
                 </Button>
                 <Button
                   type="button"
                   variant="default"
+                  className="h-auto min-h-8 w-full whitespace-normal text-center sm:w-auto"
                   onClick={handleFinishOrder}
                   disabled={busy || !canFinishOrder(minor, guardian) || !hasBillableLines}
                   title={
@@ -1162,26 +1213,36 @@ export function LeadWizard({
                   {tx("Завершить и открыть заказ", "Abschließen und Auftrag öffnen")}
                 </Button>
               </div>
-            </>
+            </div>
           ) : (
-            <>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <Button
                 type="button"
                 variant="ghost"
+                className="w-full justify-center sm:w-auto"
                 onClick={goBack}
                 disabled={busy || !prevStep(step)}
               >
+                <ChevronLeft className="size-4" />
                 {tx("Назад", "Zurück")}
               </Button>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 {nextStep(step) ? (
-                  <Button type="button" onClick={goNext} disabled={busy || !draft}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full sm:w-auto"
+                    onClick={goNext}
+                    disabled={busy || !draft}
+                  >
                     {tx("Дальше", "Weiter")}
+                    <ChevronRight className="size-4" />
                   </Button>
                 ) : null}
                 <Button
                   type="button"
                   variant="default"
+                  className="w-full sm:w-auto"
                   onClick={handleConvert}
                   disabled={busy || !draft || !canConvert(draft)}
                   title={
@@ -1193,20 +1254,25 @@ export function LeadWizard({
                       : undefined
                   }
                 >
+                  {busy ? (
+                    <LoaderCircle className="size-4 animate-spin" />
+                  ) : (
+                    <UserPlus className="size-4" />
+                  )}
                   {tx("Создать пациента", "Patient anlegen")}
                 </Button>
               </div>
-            </>
+            </div>
           )}
         </footer>
-      </SheetContent>
-    </Sheet>
-    <PatientDocumentGenerateDialog
-      open={genDocOpen}
-      patientId={createdPatientId ?? undefined}
-      patient={patientOption}
-      onOpenChange={setGenDocOpen}
-    />
+        </SheetContent>
+      </Sheet>
+      <PatientDocumentGenerateDialog
+        open={genDocOpen}
+        patientId={createdPatientId ?? undefined}
+        patient={patientOption}
+        onOpenChange={setGenDocOpen}
+      />
     </>
   );
 }

@@ -1089,7 +1089,8 @@ function useLeadsPageContent() {
                 size="sm"
                 onClick={() => setWizardOpen(true)}
               >
-                {lang === "de" ? "Assistent" : "Мастер"}
+                <ClipboardCheck className="size-3.5" />
+                {lang === "de" ? "Bearbeiten" : "Обработать"}
               </Button>
             ) : null}
             {detail && detailCanPromoteToConsole ? (
