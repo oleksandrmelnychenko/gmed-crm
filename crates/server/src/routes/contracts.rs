@@ -90,6 +90,7 @@ struct ListQuotesQuery {
     search: Option<String>,
     order_id: Option<Uuid>,
     patient_id: Option<Uuid>,
+    lead_id: Option<Uuid>,
     status: Option<String>,
 }
 
@@ -166,9 +167,20 @@ struct QuoteLineItem {
 }
 
 struct OrderAccessContext {
-    patient_id: Uuid,
+    patient_id: Option<Uuid>,
+    lead_id: Option<Uuid>,
     contract_id: Option<Uuid>,
     order_number: String,
+}
+
+impl OrderAccessContext {
+    fn subject(&self) -> Result<access::RecordSubject, access::RecordSubjectError> {
+        if let Some(patient_id) = self.patient_id {
+            Ok(access::RecordSubject::Patient(patient_id))
+        } else {
+            access::RecordSubject::from_ids(None, self.lead_id)
+        }
+    }
 }
 
 struct QuoteTotals {
@@ -1269,24 +1281,31 @@ async fn load_order_access_context(
     state: &AppState,
     order_id: Uuid,
 ) -> Result<Option<OrderAccessContext>, axum::response::Response> {
-    let row = sqlx::query("SELECT patient_id, contract_id, order_number FROM orders WHERE id = $1")
-        .bind(order_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, order_id = %order_id, "load order access context");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to validate order access",
-            )
-        })?;
+    let row = sqlx::query(
+        "SELECT patient_id, source_lead_id, contract_id, order_number FROM orders WHERE id = $1",
+    )
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, order_id = %order_id, "load order access context");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate order access",
+        )
+    })?;
 
     let Some(row) = row else {
         return Ok(None);
     };
 
     Ok(Some(OrderAccessContext {
-        patient_id: row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
+        patient_id: row
+            .try_get::<Option<Uuid>, _>("patient_id")
+            .unwrap_or_default(),
+        lead_id: row
+            .try_get::<Option<Uuid>, _>("source_lead_id")
+            .unwrap_or_default(),
         contract_id: row
             .try_get::<Option<Uuid>, _>("contract_id")
             .unwrap_or_default(),
@@ -1413,12 +1432,12 @@ async fn load_quote_line_items_from_order(
     Ok(items)
 }
 
-async fn load_quote_patient_id(
+async fn load_quote_subject(
     state: &AppState,
     quote_id: Uuid,
-) -> Result<Option<Uuid>, axum::response::Response> {
-    sqlx::query_scalar(
-        r#"SELECT o.patient_id
+) -> Result<Option<access::RecordSubject>, axum::response::Response> {
+    let row = sqlx::query(
+        r#"SELECT o.patient_id, o.source_lead_id
            FROM quotes q
            JOIN orders o ON o.id = q.order_id
            WHERE q.id = $1"#,
@@ -1432,7 +1451,30 @@ async fn load_quote_patient_id(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to validate quote access",
         )
-    })
+    })?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let patient_id = row
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default();
+    let lead_id = row
+        .try_get::<Option<Uuid>, _>("source_lead_id")
+        .unwrap_or_default();
+    if let Some(patient_id) = patient_id {
+        Ok(Some(access::RecordSubject::Patient(patient_id)))
+    } else {
+        access::RecordSubject::from_ids(None, lead_id)
+            .map(Some)
+            .map_err(|error| {
+                tracing::error!(?error, quote_id = %quote_id, "invalid quote subject");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Quote has invalid subject",
+                )
+            })
+    }
 }
 
 async fn load_quote_detail(
@@ -1446,11 +1488,14 @@ async fn load_quote_detail(
                   q.created_at, q.updated_at,
                   COALESCE((SELECT count(*)::bigint FROM quote_versions qv WHERE qv.quote_id = q.id), 0) AS version_count,
                   COALESCE((SELECT max(version_number) FROM quote_versions qv WHERE qv.quote_id = q.id), 0) AS current_version_number,
-                  o.patient_id, o.order_number, o.contract_id,
-                  p.first_name, p.last_name, p.patient_id AS patient_pid
+                  o.patient_id, o.source_lead_id, o.order_number, o.contract_id,
+                  COALESCE(p.first_name, l.first_name) AS subject_first_name,
+                  COALESCE(p.last_name, l.last_name) AS subject_last_name,
+                  p.patient_id AS patient_pid
            FROM quotes q
            JOIN orders o ON o.id = q.order_id
-           JOIN patients p ON p.id = o.patient_id
+           LEFT JOIN patients p ON p.id = o.patient_id
+           LEFT JOIN leads l ON l.id = o.source_lead_id
            WHERE q.id = $1"#,
     )
     .bind(quote_id)
@@ -1465,23 +1510,36 @@ async fn load_quote_detail(
         return Ok(None);
     };
 
-    let patient_id = row.try_get::<Uuid, _>("patient_id").unwrap_or_default();
-    match can_access_patient(state, auth, patient_id).await {
-        Ok(true) => {}
-        Ok(false) => return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions")),
-        Err(resp) => return Err(resp),
-    }
+    let patient_id = row
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default();
+    let lead_id = row
+        .try_get::<Option<Uuid>, _>("source_lead_id")
+        .unwrap_or_default();
+    let subject = if let Some(patient_id) = patient_id {
+        access::RecordSubject::Patient(patient_id)
+    } else {
+        access::RecordSubject::from_ids(None, lead_id).map_err(|error| {
+            tracing::error!(?error, quote_id = %quote_id, "invalid quote subject");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Quote has invalid subject",
+            )
+        })?
+    };
+    ensure_subject_access(state, auth, subject).await?;
 
     Ok(Some(serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
         "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
         "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
         "contract_id": row.try_get::<Option<Uuid>, _>("contract_id").unwrap_or_default(),
-        "patient_id": patient_id,
+        "patient_id": subject.patient_id(),
+        "lead_id": subject.lead_id(),
         "patient_name": format!(
             "{} {}",
-            row.try_get::<String, _>("first_name").unwrap_or_default(),
-            row.try_get::<String, _>("last_name").unwrap_or_default()
+            row.try_get::<String, _>("subject_first_name").unwrap_or_default(),
+            row.try_get::<String, _>("subject_last_name").unwrap_or_default()
         ).trim().to_string(),
         "patient_pid": row.try_get::<String, _>("patient_pid").unwrap_or_default(),
         "quote_number": row.try_get::<String, _>("quote_number").unwrap_or_default(),
@@ -1521,25 +1579,31 @@ async fn list_quotes(
     match sqlx::query(
         r#"SELECT q.id, q.order_id, q.quote_number, q.total_net, q.total_vat, q.total_gross,
                   q.status, q.valid_until, q.paid_amount, q.paid_at, q.notes, q.created_at, q.updated_at,
-                  o.patient_id, o.order_number, o.contract_id,
-                  p.first_name, p.last_name, p.patient_id AS patient_pid
+                  o.patient_id, o.source_lead_id, o.order_number, o.contract_id,
+                  COALESCE(p.first_name, l.first_name) AS subject_first_name,
+                  COALESCE(p.last_name, l.last_name) AS subject_last_name,
+                  p.patient_id AS patient_pid
            FROM quotes q
            JOIN orders o ON o.id = q.order_id
-           JOIN patients p ON p.id = o.patient_id
+           LEFT JOIN patients p ON p.id = o.patient_id
+           LEFT JOIN leads l ON l.id = o.source_lead_id
            WHERE ($1::text = '%%'
                     OR de_normalize(concat_ws(' ',
                          q.quote_number, o.order_number, q.notes,
-                         p.first_name, p.last_name, p.patient_id
+                         p.first_name, p.last_name, p.patient_id,
+                         l.first_name, l.last_name, l.email, l.phone
                        )) LIKE de_normalize($1))
              AND ($2::uuid IS NULL OR q.order_id = $2)
              AND ($3::uuid IS NULL OR o.patient_id = $3)
-             AND ($4::text IS NULL OR q.status = $4)
+             AND ($4::uuid IS NULL OR o.source_lead_id = $4)
+             AND ($5::text IS NULL OR q.status = $5)
            ORDER BY q.created_at DESC
            LIMIT 200"#,
     )
     .bind(search_pattern)
     .bind(query.order_id)
     .bind(query.patient_id)
+    .bind(query.lead_id)
     .bind(query.status)
     .fetch_all(&state.db)
     .await
@@ -1547,23 +1611,42 @@ async fn list_quotes(
         Ok(rows) => {
             let mut items = Vec::with_capacity(rows.len());
             for row in rows {
-                let patient_id = row.try_get::<Uuid, _>("patient_id").unwrap_or_default();
-                match can_access_patient(&state, &auth, patient_id).await {
-                    Ok(true) => {}
-                    Ok(false) => continue,
-                    Err(resp) => return resp,
-                }
+                let patient_id = row
+                    .try_get::<Option<Uuid>, _>("patient_id")
+                    .unwrap_or_default();
+                let lead_id = row
+                    .try_get::<Option<Uuid>, _>("source_lead_id")
+                    .unwrap_or_default();
+                let subject = if let Some(patient_id) = patient_id {
+                    match can_access_patient(&state, &auth, patient_id).await {
+                        Ok(true) => access::RecordSubject::Patient(patient_id),
+                        Ok(false) => continue,
+                        Err(resp) => return resp,
+                    }
+                } else {
+                    match access::RecordSubject::from_ids(None, lead_id) {
+                        Ok(subject) => subject,
+                        Err(error) => {
+                            tracing::error!(?error, "invalid quote subject in list");
+                            return err(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Quote has invalid subject",
+                            );
+                        }
+                    }
+                };
 
                 items.push(serde_json::json!({
                     "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
                     "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
                     "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
                     "contract_id": row.try_get::<Option<Uuid>, _>("contract_id").unwrap_or_default(),
-                    "patient_id": patient_id,
+                    "patient_id": subject.patient_id(),
+                    "lead_id": subject.lead_id(),
                     "patient_name": format!(
                         "{} {}",
-                        row.try_get::<String, _>("first_name").unwrap_or_default(),
-                        row.try_get::<String, _>("last_name").unwrap_or_default()
+                        row.try_get::<String, _>("subject_first_name").unwrap_or_default(),
+                        row.try_get::<String, _>("subject_last_name").unwrap_or_default()
                     ).trim().to_string(),
                     "patient_pid": row.try_get::<String, _>("patient_pid").unwrap_or_default(),
                     "quote_number": row.try_get::<String, _>("quote_number").unwrap_or_default(),
@@ -1600,6 +1683,7 @@ async fn list_order_quotes(
             search: None,
             order_id: Some(order_id),
             patient_id: None,
+            lead_id: None,
             status: None,
         }),
     )
@@ -1622,9 +1706,18 @@ async fn create_quote(
         Err(resp) => return resp,
     };
 
-    match ensure_patient_access(&state, &auth, order_ctx.patient_id).await {
-        Ok(()) => {}
-        Err(resp) => return resp,
+    let order_subject = match order_ctx.subject() {
+        Ok(subject) => subject,
+        Err(error) => {
+            tracing::error!(?error, order_id = %order_id, "invalid quote order subject");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Order has invalid subject",
+            );
+        }
+    };
+    if let Err(resp) = ensure_subject_access(&state, &auth, order_subject).await {
+        return resp;
     }
 
     let valid_until = match parse_optional_date(body.valid_until.as_deref()) {
@@ -1778,6 +1871,7 @@ async fn create_quote(
             "order_id": order_id,
             "order_number": order_ctx.order_number.clone(),
             "patient_id": order_ctx.patient_id,
+            "lead_id": order_ctx.lead_id,
             "status": "draft",
             "total_gross": decimal_to_string(totals.total_gross),
         }),
@@ -1792,6 +1886,7 @@ async fn create_quote(
             "order_id": order_id,
             "contract_id": order_ctx.contract_id,
             "patient_id": order_ctx.patient_id,
+            "lead_id": order_ctx.lead_id,
             "status": "draft",
             "total_net": decimal_to_string(totals.total_net),
             "total_vat": decimal_to_string(totals.total_vat),
@@ -1833,15 +1928,14 @@ async fn list_quote_versions(
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let patient_id = match load_quote_patient_id(&state, quote_id).await {
+    let subject = match load_quote_subject(&state, quote_id).await {
         Ok(Some(value)) => value,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Quote not found"),
         Err(resp) => return resp,
     };
 
-    match ensure_patient_access(&state, &auth, patient_id).await {
-        Ok(()) => {}
-        Err(resp) => return resp,
+    if let Err(resp) = ensure_subject_access(&state, &auth, subject).await {
+        return resp;
     }
 
     match sqlx::query(
@@ -1920,15 +2014,14 @@ async fn update_quote_status(
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid paid_amount");
     }
 
-    let patient_id = match load_quote_patient_id(&state, quote_id).await {
+    let subject = match load_quote_subject(&state, quote_id).await {
         Ok(Some(value)) => value,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Quote not found"),
         Err(resp) => return resp,
     };
 
-    match ensure_patient_access(&state, &auth, patient_id).await {
-        Ok(()) => {}
-        Err(resp) => return resp,
+    if let Err(resp) = ensure_subject_access(&state, &auth, subject).await {
+        return resp;
     }
 
     let paid_amount = body

@@ -376,6 +376,58 @@ async fn lead_order_and_service_are_idempotent_without_creating_patient() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "response: {service}");
 
+    let (status, quote) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &pm_bearer,
+        Some(json!({ "valid_until": "2026-12-31" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {quote}");
+    let quote_id = quote["id"].as_str().expect("quote id");
+    assert_eq!(quote["lead_id"], lead_id.to_string());
+    assert!(quote["patient_id"].is_null());
+    assert_eq!(quote["total_gross"], "297.5");
+
+    let (status, accepted) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/status"),
+        &pm_bearer,
+        Some(json!({
+            "status": "accepted",
+            "paid_amount": 297.5
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {accepted}");
+    assert_eq!(accepted["status"], "accepted");
+
+    let (status, quote_detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes/{quote_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {quote_detail}");
+    assert_eq!(quote_detail["lead_id"], lead_id.to_string());
+    assert!(quote_detail["patient_id"].is_null());
+
+    let (status, quotes) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes?lead_id={lead_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {quotes}");
+    assert_eq!(quotes.as_array().expect("quotes").len(), 1);
+    assert_eq!(quotes[0]["lead_id"], lead_id.to_string());
+
     let (status, orders) = json_request(
         &app,
         "GET",
