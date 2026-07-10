@@ -428,6 +428,28 @@ async fn lead_order_and_service_are_idempotent_without_creating_patient() {
     assert_eq!(quotes.as_array().expect("quotes").len(), 1);
     assert_eq!(quotes[0]["lead_id"], lead_id.to_string());
 
+    let (status, commercial) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/commercial-basis"),
+        &pm_bearer,
+        Some(json!({
+            "contract_id": contract_id,
+            "signed_patient": true,
+            "signed_agency": true,
+            "prepayment_required": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {commercial}");
+    assert_eq!(commercial["lead_id"], lead_id.to_string());
+    assert_eq!(commercial["signed_patient"], true);
+    assert_eq!(commercial["signed_agency"], true);
+    assert_eq!(commercial["prepayment_required"], true);
+    assert!(commercial["signed_patient_at"].as_str().is_some());
+    assert!(commercial["signed_agency_at"].as_str().is_some());
+    assert!(commercial["signed_at"].as_str().is_some());
+
     let (status, orders) = json_request(
         &app,
         "GET",

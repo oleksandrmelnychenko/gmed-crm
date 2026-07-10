@@ -97,7 +97,10 @@ struct CreatedOrderRow {
 #[derive(Deserialize)]
 struct UpdateOrderCommercialBasisRequest {
     contract_id: Option<Uuid>,
-    total_estimated: String,
+    total_estimated: Option<String>,
+    signed_patient: Option<bool>,
+    signed_agency: Option<bool>,
+    prepayment_required: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -2519,30 +2522,52 @@ async fn update_order_commercial_basis(
         return resp;
     }
 
-    let order_patient_id =
-        match ensure_order_access(&state, &auth, order_id, "Order not found").await {
-            Ok(patient_id) => patient_id,
-            Err(resp) => return resp,
-        };
-    let total_estimated = match body.total_estimated.trim().parse::<rust_decimal::Decimal>() {
-        Ok(value) if value >= rust_decimal::Decimal::ZERO => value,
-        _ => {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "total_estimated must be a non-negative decimal",
-            );
+    let order = match sqlx::query("SELECT patient_id, source_lead_id FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "load order commercial subject");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
+    };
+    let order_patient_id = order
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default();
+    let order_lead_id = order
+        .try_get::<Option<Uuid>, _>("source_lead_id")
+        .unwrap_or_default();
+    match can_access_order(&state, &auth, order_id, order_patient_id).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let total_estimated = match body.total_estimated.as_deref() {
+        Some(raw) => match raw.trim().parse::<rust_decimal::Decimal>() {
+            Ok(value) if value >= rust_decimal::Decimal::ZERO => Some(value),
+            _ => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "total_estimated must be a non-negative decimal",
+                );
+            }
+        },
+        None => None,
     };
 
     if let Some(contract_id) = body.contract_id {
-        let contract_patient_id = match sqlx::query_scalar::<_, Uuid>(
-            "SELECT patient_id FROM framework_contracts WHERE id = $1",
+        let contract = match sqlx::query(
+            "SELECT patient_id, lead_id FROM framework_contracts WHERE id = $1",
         )
         .bind(contract_id)
         .fetch_optional(&state.db)
         .await
         {
-            Ok(Some(patient_id)) => patient_id,
+            Ok(Some(row)) => row,
             Ok(None) => {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
@@ -2554,47 +2579,115 @@ async fn update_order_commercial_basis(
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         };
-        if contract_patient_id != order_patient_id {
+        let contract_patient_id = contract
+            .try_get::<Option<Uuid>, _>("patient_id")
+            .unwrap_or_default();
+        let contract_lead_id = contract
+            .try_get::<Option<Uuid>, _>("lead_id")
+            .unwrap_or_default();
+        let belongs_to_subject = match order_patient_id {
+            Some(patient_id) => contract_patient_id == Some(patient_id),
+            None => contract_lead_id == order_lead_id,
+        };
+        if !belongs_to_subject {
             return err(
                 StatusCode::UNPROCESSABLE_ENTITY,
-                "Framework contract does not belong to patient",
+                if order_patient_id.is_some() {
+                    "Framework contract does not belong to patient"
+                } else {
+                    "Framework contract does not belong to lead"
+                },
             );
         }
     }
 
     match sqlx::query(
-        "UPDATE orders
-         SET total_estimated = $2,
+        r#"UPDATE orders
+         SET total_estimated = COALESCE($2, total_estimated),
              contract_id = COALESCE($3, contract_id),
+             signed_patient = COALESCE($4, signed_patient),
+             signed_agency = COALESCE($5, signed_agency),
+             prepayment_required = COALESCE($6, prepayment_required),
+             signed_patient_at = CASE
+                 WHEN $4 IS TRUE THEN COALESCE(signed_patient_at, now())
+                 WHEN $4 IS FALSE THEN NULL
+                 ELSE signed_patient_at
+             END,
+             signed_agency_at = CASE
+                 WHEN $5 IS TRUE THEN COALESCE(signed_agency_at, now())
+                 WHEN $5 IS FALSE THEN NULL
+                 ELSE signed_agency_at
+             END,
+             signed_at = CASE
+                 WHEN COALESCE($4, signed_patient) AND COALESCE($5, signed_agency)
+                     THEN COALESCE(signed_at, now())
+                 ELSE NULL
+             END,
              updated_at = now()
-         WHERE id = $1",
+         WHERE id = $1
+         RETURNING contract_id, total_estimated, signed_patient, signed_agency,
+                   signed_patient_at, signed_agency_at, prepayment_required, signed_at"#,
     )
     .bind(order_id)
     .bind(total_estimated)
     .bind(body.contract_id)
-    .execute(&state.db)
+    .bind(body.signed_patient)
+    .bind(body.signed_agency)
+    .bind(body.prepayment_required)
+    .fetch_optional(&state.db)
     .await
     {
-        Ok(result) if result.rows_affected() == 1 => {
+        Ok(Some(row)) => {
+            let contract_id = row
+                .try_get::<Option<Uuid>, _>("contract_id")
+                .unwrap_or_default();
+            let total_estimated = row
+                .try_get::<Option<rust_decimal::Decimal>, _>("total_estimated")
+                .unwrap_or_default();
+            let signed_patient = row.try_get::<bool, _>("signed_patient").unwrap_or(false);
+            let signed_agency = row.try_get::<bool, _>("signed_agency").unwrap_or(false);
+            let signed_patient_at = row
+                .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_patient_at")
+                .unwrap_or_default();
+            let signed_agency_at = row
+                .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_agency_at")
+                .unwrap_or_default();
+            let prepayment_required = row
+                .try_get::<bool, _>("prepayment_required")
+                .unwrap_or(false);
+            let signed_at = row
+                .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_at")
+                .unwrap_or_default();
             state.audit_sender.try_send(audit::domain_event(
                 "update_order_commercial_basis",
                 Some(auth.user_id),
                 "order",
                 Some(order_id),
                 serde_json::json!({
-                    "contract_id": body.contract_id,
-                    "total_estimated": total_estimated.to_string(),
+                    "contract_id": contract_id,
+                    "total_estimated": total_estimated.map(|value| value.to_string()),
+                    "signed_patient": signed_patient,
+                    "signed_agency": signed_agency,
+                    "prepayment_required": prepayment_required,
                 }),
             ));
             Json(serde_json::json!({
                 "ok": true,
                 "order_id": order_id,
-                "contract_id": body.contract_id,
-                "total_estimated": total_estimated.to_string(),
+                "patient_id": order_patient_id,
+                "lead_id": order_lead_id,
+                "contract_id": contract_id,
+                "total_estimated": total_estimated.map(|value| value.to_string()),
+                "signed_patient": signed_patient,
+                "signed_agency": signed_agency,
+                "signed_patient_at": signed_patient_at.map(|value| value.to_rfc3339()),
+                "signed_agency_at": signed_agency_at.map(|value| value.to_rfc3339()),
+                "signed_at": signed_at.map(|value| value.to_rfc3339()),
+                "prepayment_required": prepayment_required,
             }))
             .into_response()
         }
-        Ok(_) => err(StatusCode::NOT_FOUND, "Order not found"),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Order not found"),
         Err(e) => {
             tracing::error!(error = %e, order_id = %order_id, "update order commercial basis");
             err(
