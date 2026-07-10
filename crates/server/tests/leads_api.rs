@@ -1034,6 +1034,151 @@ async fn wizard_convert_creates_patient_without_compliance() {
 }
 
 #[tokio::test]
+async fn wizard_order_draft_is_idempotent_for_source_lead() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pool = &app.suite.pool;
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads
+               (first_name, last_name, email, phone, country, primary_language,
+                date_of_birth, legal_sex, qualification_status, compliance_status, intake_source)
+           VALUES ('Retry','Wizard','retry@example.com','+49151','DE','de',
+                   DATE '1990-05-01','female','new','pending','staff_wizard')
+           RETURNING id"#,
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    let pm = app.auth_header("patient_manager");
+    let (status, converted) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/wizard-convert"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{converted}");
+    let patient_id = converted["patient_id"].as_str().unwrap();
+    let payload = json!({
+        "patient_id": patient_id,
+        "source_lead_id": lead_id,
+        "needs_description": "Retry-safe draft"
+    });
+
+    let (first_status, first) =
+        json_request(&app, "POST", "/api/v1/orders", &pm, Some(payload.clone())).await;
+    assert_eq!(first_status, StatusCode::CREATED, "{first}");
+    let order_id = first["id"].as_str().unwrap();
+    let order_uuid = Uuid::parse_str(order_id).unwrap();
+
+    sqlx::query("DELETE FROM order_execution_flows WHERE order_id = $1")
+        .bind(order_uuid)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let (retry_status, retry) =
+        json_request(&app, "POST", "/api/v1/orders", &pm, Some(payload)).await;
+    assert_eq!(retry_status, StatusCode::OK, "{retry}");
+    assert_eq!(retry["id"], first["id"]);
+    assert_eq!(retry["order_number"], first["order_number"]);
+    let execution_state_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM order_execution_flows WHERE order_id = $1")
+            .bind(order_uuid)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(execution_state_count, 1);
+
+    let line_path = format!("/api/v1/orders/{order_id}/leistungen");
+    let client_reference = format!("lead-wizard:{lead_id}:line-1");
+    let (line_status, line) = json_request(
+        &app,
+        "POST",
+        &line_path,
+        &pm,
+        Some(json!({
+            "patient_id": patient_id,
+            "description": "Initial consultation",
+            "quantity": 1.0,
+            "unit_price": 100.0,
+            "vat_rate": 19.0,
+            "notes": "Initial values",
+            "client_reference": client_reference,
+        })),
+    )
+    .await;
+    assert_eq!(line_status, StatusCode::CREATED, "{line}");
+
+    let (line_retry_status, line_retry) = json_request(
+        &app,
+        "POST",
+        &line_path,
+        &pm,
+        Some(json!({
+            "patient_id": patient_id,
+            "description": "Updated specialist consultation",
+            "quantity": 2.0,
+            "unit_price": 175.0,
+            "vat_rate": 7.0,
+            "notes": "Latest wizard values",
+            "client_reference": client_reference,
+        })),
+    )
+    .await;
+    assert_eq!(line_retry_status, StatusCode::OK, "{line_retry}");
+    assert_eq!(line_retry["id"], line["id"]);
+
+    let (lines_status, lines) = json_request(&app, "GET", &line_path, &pm, None).await;
+    assert_eq!(lines_status, StatusCode::OK, "{lines}");
+    let matching_lines = lines
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["client_reference"] == client_reference)
+        .collect::<Vec<_>>();
+    assert_eq!(matching_lines.len(), 1, "{lines}");
+    assert_eq!(
+        matching_lines[0]["description"],
+        "Updated specialist consultation"
+    );
+    assert_eq!(matching_lines[0]["quantity"], "2");
+    assert_eq!(matching_lines[0]["unit_price"], "175");
+    assert_eq!(matching_lines[0]["vat_rate"], "7");
+    assert_eq!(matching_lines[0]["notes"], "Latest wizard values");
+
+    for (suffix, invalid_fields) in [
+        ("description", json!({ "description": " " })),
+        ("quantity", json!({ "quantity": 0.0 })),
+        ("price", json!({ "unit_price": -1.0 })),
+        ("vat", json!({ "vat_rate": 101.0 })),
+    ] {
+        let mut invalid_payload = json!({
+            "patient_id": patient_id,
+            "description": "Invalid service",
+            "quantity": 1.0,
+            "unit_price": 10.0,
+            "vat_rate": 19.0,
+            "client_reference": format!("lead-wizard:{lead_id}:invalid-{suffix}"),
+        });
+        invalid_payload
+            .as_object_mut()
+            .unwrap()
+            .extend(invalid_fields.as_object().unwrap().clone());
+        let (invalid_status, invalid_body) =
+            json_request(&app, "POST", &line_path, &pm, Some(invalid_payload)).await;
+        assert_eq!(
+            invalid_status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{suffix}: {invalid_body}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn wizard_convert_requires_identity_basics() {
     let Some(app) = test_app().await else {
         return;

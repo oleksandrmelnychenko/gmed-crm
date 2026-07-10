@@ -87,6 +87,13 @@ struct CreateOrderRequest {
     source_lead_id: Option<Uuid>,
 }
 
+#[derive(sqlx::FromRow)]
+struct CreatedOrderRow {
+    id: Uuid,
+    order_number: String,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
 #[derive(Deserialize)]
 struct UpdateOrderCommercialBasisRequest {
     contract_id: Option<Uuid>,
@@ -1912,6 +1919,24 @@ fn patient_recheck_err(
         .into_response()
 }
 
+async fn ensure_created_order_state(
+    state: &AppState,
+    order_id: Uuid,
+    actor_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    ensure_order_planning_preparation_state(state, order_id).await?;
+    ensure_order_execution_flow_state(state, order_id).await?;
+    ensure_order_followup_flow_state(state, order_id).await?;
+    crate::routes::debt_management::ensure_order_debt_management_state(state, order_id).await?;
+    crate::routes::workflow_checklists::ensure_default_order_workflow(
+        state,
+        order_id,
+        Some(actor_id),
+    )
+    .await?;
+    Ok(())
+}
+
 async fn create_order(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -1954,20 +1979,9 @@ async fn create_order(
         }
     }
 
-    let patient_recheck = match crate::routes::patients::load_patient_recheck_readiness(
-        &state,
-        body.patient_id,
-    )
-    .await
-    {
-        Ok(Some(readiness)) => readiness,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Patient not found"),
-        Err(resp) => return resp,
-    };
-
-    if !patient_recheck.can_create_order {
-        let lead_wizard_draft_allowed = match body.source_lead_id {
-            Some(source_lead_id) => sqlx::query_scalar::<_, bool>(
+    let lead_wizard_draft_allowed = match body.source_lead_id {
+        Some(source_lead_id) => {
+            let converted_to_patient = match sqlx::query_scalar::<_, bool>(
                 r#"SELECT EXISTS(
                        SELECT 1
                        FROM leads
@@ -1980,10 +1994,64 @@ async fn create_order(
             .bind(body.patient_id)
             .fetch_one(&state.db)
             .await
-            .unwrap_or(false),
-            None => false,
-        };
+            {
+                Ok(value) => value,
+                Err(e) => {
+                    tracing::error!(error = %e, source_lead_id = %source_lead_id, "validate source lead");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            };
 
+            if !converted_to_patient {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Source lead is not converted to this patient",
+                );
+            }
+
+            match sqlx::query_as::<_, (Uuid, String, chrono::DateTime<chrono::Utc>)>(
+                "SELECT id, order_number, created_at FROM orders WHERE source_lead_id = $1",
+            )
+            .bind(source_lead_id)
+            .fetch_optional(&state.db)
+            .await
+            {
+                Ok(Some((id, order_number, created_at))) => {
+                    if let Err(resp) = ensure_created_order_state(&state, id, auth.user_id).await {
+                        return resp;
+                    }
+                    return (
+                        StatusCode::OK,
+                        Json(serde_json::json!({
+                            "id": id,
+                            "order_number": order_number,
+                            "created_at": created_at,
+                        })),
+                    )
+                        .into_response();
+                }
+                Ok(None) => true,
+                Err(e) => {
+                    tracing::error!(error = %e, source_lead_id = %source_lead_id, "find source lead order");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            }
+        }
+        None => false,
+    };
+
+    let patient_recheck = match crate::routes::patients::load_patient_recheck_readiness(
+        &state,
+        body.patient_id,
+    )
+    .await
+    {
+        Ok(Some(readiness)) => readiness,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Patient not found"),
+        Err(resp) => return resp,
+    };
+
+    if !patient_recheck.can_create_order {
         if lead_wizard_draft_allowed {
             state.audit_sender.try_send(audit::domain_event(
                 "create_order_draft_before_recheck",
@@ -2023,42 +2091,31 @@ async fn create_order(
 
     let num = gen_order_number(seq);
 
-    match sqlx::query!(
-        "INSERT INTO orders (order_number, patient_id, contract_id, needs_description, created_by)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id, order_number, created_at",
-        num,
-        body.patient_id,
-        body.contract_id,
-        body.needs_description,
-        auth.user_id
+    match sqlx::query_as::<_, CreatedOrderRow>(
+        r#"INSERT INTO orders (
+               order_number,
+               patient_id,
+               contract_id,
+               needs_description,
+               source_lead_id,
+               created_by
+           )
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (source_lead_id) WHERE source_lead_id IS NOT NULL DO NOTHING
+           RETURNING id, order_number, created_at"#,
     )
-    .fetch_one(&state.db)
+    .bind(num)
+    .bind(body.patient_id)
+    .bind(body.contract_id)
+    .bind(body.needs_description)
+    .bind(body.source_lead_id)
+    .bind(auth.user_id)
+    .fetch_optional(&state.db)
     .await
     {
-        Ok(r) => {
+        Ok(Some(r)) => {
             let order_number = r.order_number.clone();
-            if let Err(resp) = ensure_order_planning_preparation_state(&state, r.id).await {
-                return resp;
-            }
-            if let Err(resp) = ensure_order_execution_flow_state(&state, r.id).await {
-                return resp;
-            }
-            if let Err(resp) = ensure_order_followup_flow_state(&state, r.id).await {
-                return resp;
-            }
-            if let Err(resp) =
-                crate::routes::debt_management::ensure_order_debt_management_state(&state, r.id)
-                    .await
-            {
-                return resp;
-            }
-            if let Err(resp) = crate::routes::workflow_checklists::ensure_default_order_workflow(
-                &state,
-                r.id,
-                Some(auth.user_id),
-            )
-            .await
-            {
+            if let Err(resp) = ensure_created_order_state(&state, r.id, auth.user_id).await {
                 return resp;
             }
             state.audit_sender.try_send(audit::domain_event(
@@ -2105,6 +2162,45 @@ async fn create_order(
             .await;
             tracing::info!(by = %auth.user_id, order = %order_number, "Order created");
             (StatusCode::CREATED, Json(serde_json::json!({"id": r.id, "order_number": order_number, "created_at": r.created_at}))).into_response()
+        }
+        Ok(None) => {
+            let Some(source_lead_id) = body.source_lead_id else {
+                tracing::error!("order insert returned no row without a source lead");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            };
+
+            match sqlx::query_as::<_, CreatedOrderRow>(
+                "SELECT id, order_number, created_at FROM orders WHERE source_lead_id = $1",
+            )
+            .bind(source_lead_id)
+            .fetch_optional(&state.db)
+            .await
+            {
+                Ok(Some(r)) => {
+                    if let Err(resp) =
+                        ensure_created_order_state(&state, r.id, auth.user_id).await
+                    {
+                        return resp;
+                    }
+                    (
+                        StatusCode::OK,
+                        Json(serde_json::json!({
+                            "id": r.id,
+                            "order_number": r.order_number,
+                            "created_at": r.created_at,
+                        })),
+                    )
+                        .into_response()
+                }
+                Ok(None) => {
+                    tracing::error!(source_lead_id = %source_lead_id, "conflicting source lead order not found");
+                    err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, source_lead_id = %source_lead_id, "load conflicting source lead order");
+                    err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+                }
+            }
         }
         Err(e) => {
             tracing::error!(error = %e, "create order");
@@ -4037,13 +4133,51 @@ async fn add_leistung(
         Err(resp) => return resp,
     };
 
-    let vat = rust_decimal::Decimal::try_from(body.vat_rate.unwrap_or(19.0))
-        .unwrap_or(rust_decimal::Decimal::new(19, 0));
-    let qty = rust_decimal::Decimal::try_from(body.quantity).unwrap_or(rust_decimal::Decimal::ONE);
-    let price =
-        rust_decimal::Decimal::try_from(body.unit_price).unwrap_or(rust_decimal::Decimal::ZERO);
+    let description = body.description.trim().to_string();
+    if description.is_empty() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Service description is required",
+        );
+    }
+    if !body.quantity.is_finite() || body.quantity <= 0.0 {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Service quantity must be greater than zero",
+        );
+    }
+    if !body.unit_price.is_finite() || body.unit_price < 0.0 {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Service unit price cannot be negative",
+        );
+    }
+    let raw_vat = body.vat_rate.unwrap_or(19.0);
+    if !raw_vat.is_finite() || !(0.0..=100.0).contains(&raw_vat) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Service VAT rate must be between 0 and 100",
+        );
+    }
+
+    let vat = match rust_decimal::Decimal::try_from(raw_vat) {
+        Ok(value) => value,
+        Err(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid service VAT rate"),
+    };
+    let qty = match rust_decimal::Decimal::try_from(body.quantity) {
+        Ok(value) => value,
+        Err(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid service quantity"),
+    };
+    let price = match rust_decimal::Decimal::try_from(body.unit_price) {
+        Ok(value) => value,
+        Err(_) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid service unit price",
+            );
+        }
+    };
     let passthrough = body.is_cost_passthrough.unwrap_or(false);
-    let description = body.description.clone();
     let client_reference = normalize_optional_text(body.client_reference);
     if let Err(resp) =
         validate_provider_doctor_context(&state, body.provider_id, body.doctor_id).await
@@ -4069,12 +4203,22 @@ async fn add_leistung(
              notes, client_reference
          )
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-         ON CONFLICT (order_id, client_reference) DO NOTHING
-         RETURNING id",
+         ON CONFLICT (order_id, client_reference) DO UPDATE SET
+             patient_id = EXCLUDED.patient_id,
+             description = EXCLUDED.description,
+             quantity = EXCLUDED.quantity,
+             unit_price = EXCLUDED.unit_price,
+             vat_rate = EXCLUDED.vat_rate,
+             is_cost_passthrough = EXCLUDED.is_cost_passthrough,
+             provider_id = EXCLUDED.provider_id,
+             doctor_id = EXCLUDED.doctor_id,
+             external_document_id = EXCLUDED.external_document_id,
+             notes = EXCLUDED.notes
+         RETURNING id, (xmax = 0) AS inserted",
     )
     .bind(order_id)
     .bind(service_patient_id)
-    .bind(body.description)
+    .bind(&description)
     .bind(qty)
     .bind(price)
     .bind(vat)
@@ -4089,19 +4233,31 @@ async fn add_leistung(
     {
         Ok(Some(r)) => {
             let id: Uuid = r.try_get("id").unwrap_or_default();
-            crate::realtime::publish_order_event(
-                &state,
-                Some(auth.user_id),
-                "order.leistung_added",
-                order_id,
-                serde_json::json!({
-                    "leistung_id": id,
-                    "description": description,
-                    "is_cost_passthrough": passthrough,
-                }),
-            )
-            .await;
-            (StatusCode::CREATED, Json(serde_json::json!({"id": id}))).into_response()
+            let inserted: bool = r.try_get("inserted").unwrap_or(false);
+            if inserted {
+                crate::realtime::publish_order_event(
+                    &state,
+                    Some(auth.user_id),
+                    "order.leistung_added",
+                    order_id,
+                    serde_json::json!({
+                        "leistung_id": id,
+                        "description": description,
+                        "is_cost_passthrough": passthrough,
+                    }),
+                )
+                .await;
+                (StatusCode::CREATED, Json(serde_json::json!({"id": id}))).into_response()
+            } else {
+                (
+                    StatusCode::OK,
+                    Json(serde_json::json!({
+                        "id": id,
+                        "idempotent_replay": true,
+                    })),
+                )
+                    .into_response()
+            }
         }
         Ok(None) => {
             let Some(client_reference) = client_reference else {
@@ -4131,7 +4287,10 @@ async fn add_leistung(
                 }
             }
         }
-        Err(e) => { tracing::error!(error = %e, "add leistung"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
+        Err(e) => {
+            tracing::error!(error = %e, "add leistung");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
     }
 }
 

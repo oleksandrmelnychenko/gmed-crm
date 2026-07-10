@@ -29,6 +29,7 @@ import {
   orderResumeWizardState,
   orderLineFingerprint,
   orderLineIsValid,
+  orderLinesAreReady,
   orderLinePayload,
   orderNeedsDescription,
   prevStep,
@@ -142,11 +143,15 @@ describe("stepIsComplete", () => {
 });
 
 describe("canConvert", () => {
-  it("requires dob + valid legal sex + a contact, but not compliance", () => {
-    expect(canConvert(draftFromLead(lead()))).toBe(true);
-    expect(canConvert({ ...draftFromLead(lead()), dateOfBirth: "" })).toBe(false);
-    expect(canConvert({ ...draftFromLead(lead()), email: "", phone: "" })).toBe(false);
-    expect(canConvert({ ...draftFromLead(lead()), legalSex: "" })).toBe(false);
+  it("requires every Phase-A step, but not patient compliance", () => {
+    const complete = draftFromLead(lead());
+    expect(canConvert(complete)).toBe(true);
+    expect(canConvert({ ...complete, firstName: "" })).toBe(false);
+    expect(canConvert({ ...complete, dateOfBirth: "" })).toBe(false);
+    expect(canConvert({ ...complete, email: "", phone: "" })).toBe(false);
+    expect(canConvert({ ...complete, legalSex: "" })).toBe(false);
+    expect(canConvert({ ...complete, primaryConcernText: "" })).toBe(false);
+    expect(canConvert({ ...complete, requestedSpecialties: [] })).toBe(false);
   });
 });
 
@@ -328,6 +333,20 @@ describe("Phase B order lines (#8)", () => {
     expect(orderLineIsValid(line({ description: "MRT", unitPrice: "200" }))).toBe(true);
     expect(orderLineIsValid(line({ description: "", unitPrice: "200" }))).toBe(false);
     expect(orderLineIsValid(line({ description: "MRT", quantity: "abc" }))).toBe(false);
+    expect(orderLineIsValid(line({ description: "MRT", quantity: "0" }))).toBe(false);
+    expect(orderLineIsValid(line({ description: "MRT", quantity: "-1" }))).toBe(false);
+    expect(orderLineIsValid(line({ description: "MRT", unitPrice: "-10" }))).toBe(false);
+    expect(orderLineIsValid(line({ description: "MRT", vatRate: "-1" }))).toBe(false);
+    expect(orderLineIsValid(line({ description: "MRT", vatRate: "101" }))).toBe(false);
+  });
+
+  it("allows untouched extra rows but blocks partially invalid rows", () => {
+    const valid = line({ description: "MRT", unitPrice: "200" });
+    expect(orderLinesAreReady([valid, blankOrderLine("unused")])).toBe(true);
+    expect(orderLinesAreReady([valid, line({ description: "Consultation", quantity: "" })])).toBe(
+      false,
+    );
+    expect(orderLinesAreReady([blankOrderLine("unused")])).toBe(false);
   });
 
   it("cost estimate sums net/vat/gross over valid lines only", () => {

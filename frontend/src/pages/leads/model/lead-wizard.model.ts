@@ -91,38 +91,48 @@ function hasContact(draft: WizardDraft): boolean {
   return draft.email.trim().length > 0 || draft.phone.trim().length > 0;
 }
 
-export function stepIsComplete(step: WizardStepId, draft: WizardDraft): boolean {
+export type WizardRequirement =
+  | "first_name"
+  | "last_name"
+  | "date_of_birth"
+  | "legal_sex"
+  | "contact"
+  | "primary_concern"
+  | "specialty";
+
+export function missingStepRequirements(
+  step: WizardStepId,
+  draft: WizardDraft,
+): WizardRequirement[] {
   switch (step) {
     case "identity":
-      return (
-        draft.firstName.trim().length > 0 &&
-        draft.lastName.trim().length > 0 &&
-        draft.dateOfBirth.length > 0 &&
-        (VALID_LEGAL_SEX as readonly string[]).includes(draft.legalSex) &&
-        hasContact(draft)
-      );
+      return [
+        ...(draft.firstName.trim() ? [] : (["first_name"] as const)),
+        ...(draft.lastName.trim() ? [] : (["last_name"] as const)),
+        ...(draft.dateOfBirth ? [] : (["date_of_birth"] as const)),
+        ...((VALID_LEGAL_SEX as readonly string[]).includes(draft.legalSex)
+          ? []
+          : (["legal_sex"] as const)),
+        ...(hasContact(draft) ? [] : (["contact"] as const)),
+      ];
     case "eligibility":
-      return draft.primaryConcernText.trim().length > 0;
+      return draft.primaryConcernText.trim() ? [] : ["primary_concern"];
     case "specialties":
-      return draft.requestedSpecialties.length > 0;
+      return draft.requestedSpecialties.length > 0 ? [] : ["specialty"];
   }
+}
+
+export function stepIsComplete(step: WizardStepId, draft: WizardDraft): boolean {
+  return missingStepRequirements(step, draft).length === 0;
 }
 
 export function completedSteps(draft: WizardDraft): WizardStepId[] {
   return PHASE_A_STEPS.filter((step) => stepIsComplete(step, draft));
 }
 
-/**
- * Identity basics required to create the patient mid-wizard (D2 /
- * convert-then-comply): a date of birth, a valid legal sex, and at least one
- * contact channel. Compliance and qualification are handled later.
- */
+/** All lead-capture steps must be complete before convert-then-comply begins. */
 export function canConvert(draft: WizardDraft): boolean {
-  return (
-    draft.dateOfBirth.length > 0 &&
-    (VALID_LEGAL_SEX as readonly string[]).includes(draft.legalSex) &&
-    hasContact(draft)
-  );
+  return PHASE_A_STEPS.every((step) => stepIsComplete(step, draft));
 }
 
 export function nextStep(step: WizardStepId): WizardStepId | null {
@@ -348,13 +358,36 @@ function numberOrNull(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-/** A line is billable once it has a description and numeric quantity + price. */
+/** A line is billable once its description and monetary fields are valid. */
 export function orderLineIsValid(line: WizardOrderLine): boolean {
+  const quantity = numberOrNull(line.quantity);
+  const unitPrice = numberOrNull(line.unitPrice);
+  const vatRate = numberOrNull(line.vatRate);
   return (
     line.description.trim().length > 0 &&
-    numberOrNull(line.quantity) !== null &&
-    numberOrNull(line.unitPrice) !== null
+    quantity !== null &&
+    quantity > 0 &&
+    unitPrice !== null &&
+    unitPrice >= 0 &&
+    vatRate !== null &&
+    vatRate >= 0 &&
+    vatRate <= 100
   );
+}
+
+export function orderLineIsBlank(line: WizardOrderLine): boolean {
+  return (
+    line.description.trim().length === 0 &&
+    numberOrNull(line.quantity) === 1 &&
+    numberOrNull(line.unitPrice) === 0 &&
+    numberOrNull(line.vatRate) === 19
+  );
+}
+
+/** At least one valid line is required; untouched extra rows are ignored. */
+export function orderLinesAreReady(lines: WizardOrderLine[]): boolean {
+  const enteredLines = lines.filter((line) => !orderLineIsBlank(line));
+  return enteredLines.length > 0 && enteredLines.every(orderLineIsValid);
 }
 
 export type CostEstimate = { net: number; vat: number; gross: number };

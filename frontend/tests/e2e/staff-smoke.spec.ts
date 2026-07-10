@@ -754,6 +754,18 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
 
     if (path.startsWith("/leads/")) {
       const leadSuffix = path.replace("/leads/", "");
+      if (leadSuffix.endsWith("/update") && route.request().method() === "POST") {
+        const requestedId = leadSuffix.replace("/update", "");
+        const detail = leadDetails.get(requestedId);
+        if (detail) {
+          const payload = JSON.parse(route.request().postData() ?? "{}") as Record<
+            string,
+            unknown
+          >;
+          leadDetails.set(requestedId, { ...detail, ...payload });
+        }
+        return json(route, { ok: true });
+      }
       if (!leadSuffix.includes("/")) {
         const detail = leadDetails.get(leadSuffix);
         if (detail) {
@@ -1747,5 +1759,314 @@ test.describe("lead conversion gating", () => {
     await expect(
       readyLeadDetail.getByRole("button", { name: /Konvertieren|Convert/i }),
     ).toBeEnabled();
+  });
+
+  test("lead processing does not leave an incomplete required step", async ({ page }) => {
+    let updateRequests = 0;
+    await page.route("**/api/v1/leads/*/update", async (route) => {
+      updateRequests += 1;
+      return json(route, { ok: true });
+    });
+
+    await page.goto("/leads?lead=00000000-0000-0000-0000-000000000901");
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+    const wizard = page.getByRole("dialog").filter({
+      has: page.getByRole("heading", { name: "Lead bearbeiten" }),
+    });
+    await expect(wizard).toBeVisible();
+
+    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
+
+    await expect(wizard.locator("#lw-first")).toBeVisible();
+    await expect(wizard.getByText(/Geburtsdatum.*rechtliches Geschlecht/i)).toBeVisible();
+    expect(updateRequests).toBe(0);
+  });
+
+  test("lead processing cannot skip required steps from the step header", async ({ page }) => {
+    await page.goto("/leads?lead=00000000-0000-0000-0000-000000000901");
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+    const wizard = page.getByRole("dialog").filter({
+      has: page.getByRole("heading", { name: "Lead bearbeiten" }),
+    });
+
+    await expect(wizard.getByRole("button", { name: /3.*Fachärzte/i })).toBeDisabled();
+  });
+
+  test("lead processing exposes patient creation only on a completed final step", async ({
+    page,
+  }) => {
+    let updateRequests = 0;
+    await page.route("**/api/v1/leads/*/update", async (route) => {
+      updateRequests += 1;
+      return json(route, { ok: true });
+    });
+
+    await page.goto("/leads?lead=00000000-0000-0000-0000-000000000902");
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+    const wizard = page.getByRole("dialog").filter({
+      has: page.getByRole("heading", { name: "Lead bearbeiten" }),
+    });
+
+    await expect(wizard.getByRole("button", { name: "Patient anlegen" })).toHaveCount(0);
+    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
+    await wizard.locator("#lw-concern").fill("Knee pain");
+    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
+
+    const createPatient = wizard.getByRole("button", { name: "Patient anlegen" });
+    await expect(createPatient).toBeVisible();
+    await expect(createPatient).toBeDisabled();
+
+    const specialtyInput = wizard.getByPlaceholder("Fachrichtung hinzufügen…");
+    await specialtyInput.fill("Orthopädie");
+    await wizard.getByRole("button", { name: "Fachrichtung hinzufügen…" }).click();
+
+    await expect(createPatient).toBeEnabled();
+    expect(updateRequests).toBe(2);
+  });
+
+  test("lead processing completes the observable lead-to-order workflow", async ({ page }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    const patientId = "00000000-0000-0000-0000-000000000301";
+    const orderId = "00000000-0000-0000-0000-000000000701";
+    const updates: Array<Record<string, unknown>> = [];
+    const linePayloads: Array<Record<string, unknown>> = [];
+    const commercialPayloads: Array<Record<string, unknown>> = [];
+    let conversionRequests = 0;
+    let orderRequests = 0;
+
+    await page.route(`**/api/v1/leads/${leadId}/update`, (route) => {
+      updates.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+      return json(route, { ok: true });
+    });
+    await page.route(`**/api/v1/leads/${leadId}/wizard-convert`, (route) => {
+      conversionRequests += 1;
+      return json(route, { patient_id: patientId, patient_pid: "PT-001" });
+    });
+    await page.route("**/api/v1/orders", (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      orderRequests += 1;
+      return json(
+        route,
+        {
+          id: orderId,
+          order_number: "A-20260710-0001",
+          created_at: "2026-07-10T15:00:00Z",
+        },
+        201,
+      );
+    });
+    await page.route(`**/api/v1/orders/${orderId}/leistungen`, (route) => {
+      linePayloads.push(
+        JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>,
+      );
+      return json(route, { id: "00000000-0000-0000-0000-000000000711" }, 201);
+    });
+    await page.route(`**/api/v1/orders/${orderId}/commercial-basis`, (route) => {
+      const payload = JSON.parse(route.request().postData() ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      commercialPayloads.push(payload);
+      return json(route, {
+        ok: true,
+        order_id: orderId,
+        total_estimated: payload.total_estimated,
+        contract_id: null,
+      });
+    });
+
+    await page.goto(`/leads?lead=${leadId}`);
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+    const leadWizard = page.getByRole("dialog").filter({
+      has: page.getByRole("heading", { name: "Lead bearbeiten" }),
+    });
+    await leadWizard.getByRole("button", { name: "Weiter", exact: true }).click();
+    await leadWizard.locator("#lw-concern").fill("Knee pain");
+    await leadWizard.getByRole("button", { name: "Weiter", exact: true }).click();
+    await leadWizard.getByPlaceholder("Fachrichtung hinzufügen…").fill("Orthopädie");
+    await leadWizard.getByRole("button", { name: "Fachrichtung hinzufügen…" }).click();
+    await leadWizard.getByRole("button", { name: "Patient anlegen" }).click();
+
+    const orderWizard = page.getByRole("dialog", { name: "Auftrag erstellen" });
+    await expect(orderWizard.getByText("Auftragsentwurf erstellt")).toBeVisible();
+    await orderWizard.getByRole("checkbox", { name: "Rahmenvertrag anlegen" }).uncheck();
+    await orderWizard.locator("textarea").first().fill("");
+    const description = orderWizard.getByPlaceholder("Positionsbeschreibung");
+    await description.fill("Specialist consultation");
+    const lineCard = description.locator("..");
+    await lineCard.locator("input").nth(2).fill("200");
+    await orderWizard
+      .getByRole("button", { name: "Abschließen und Auftrag öffnen" })
+      .click();
+
+    await page.waitForURL(`**/orders/${orderId}`);
+    expect(conversionRequests).toBe(1);
+    expect(orderRequests).toBe(1);
+    expect(linePayloads).toHaveLength(1);
+    expect(linePayloads[0]).toMatchObject({
+      patient_id: patientId,
+      description: "Specialist consultation",
+      quantity: 1,
+      unit_price: 200,
+      vat_rate: 19,
+    });
+    expect(commercialPayloads).toEqual([{ total_estimated: "238.00", contract_id: null }]);
+    expect(updates.at(-1)).toMatchObject({
+      wizard_state: {
+        phase: "completed",
+        patient_id: patientId,
+        order_id: orderId,
+      },
+    });
+  });
+
+  test("lead processing persists edits before step-header navigation", async ({ page }) => {
+    const updates: Array<Record<string, unknown>> = [];
+    await page.route("**/api/v1/leads/*/update", async (route) => {
+      updates.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+      return json(route, { ok: true });
+    });
+
+    await page.goto("/leads?lead=00000000-0000-0000-0000-000000000902");
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+    const wizard = page.getByRole("dialog").filter({
+      has: page.getByRole("heading", { name: "Lead bearbeiten" }),
+    });
+
+    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
+    await wizard.locator("#lw-concern").fill("Updated concern");
+    await wizard.getByRole("button", { name: /Identität/i }).click();
+
+    await expect(wizard.locator("#lw-first")).toBeVisible();
+    expect(updates).toHaveLength(2);
+    expect(updates[1]).toMatchObject({
+      primary_concern_text: "Updated concern",
+      wizard_state: { step: "identity" },
+    });
+  });
+
+  test("lead processing persists Phase-A edits before closing", async ({ page }) => {
+    const updates: Array<Record<string, unknown>> = [];
+    await page.route("**/api/v1/leads/*/update", async (route) => {
+      updates.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+      return route.fallback();
+    });
+
+    await page.goto("/leads?lead=00000000-0000-0000-0000-000000000902");
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+    const wizard = page.getByRole("dialog").filter({
+      has: page.getByRole("heading", { name: "Lead bearbeiten" }),
+    });
+
+    await wizard.locator("#lw-first").fill("Updated");
+    await wizard.getByRole("button", { name: "Schließen", exact: true }).click();
+
+    await expect(wizard).toBeHidden();
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toMatchObject({
+      first_name: "Updated",
+      wizard_state: { step: "identity" },
+    });
+
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+    await expect(wizard.locator("#lw-first")).toHaveValue("Updated");
+  });
+
+  test("lead processing resubmits restored order lines after edits", async ({ page }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    const patientId = "00000000-0000-0000-0000-000000000301";
+    const orderId = "00000000-0000-0000-0000-000000000701";
+    const lineKey = "restored-line-1";
+    const linePayloads: Array<Record<string, unknown>> = [];
+
+    await page.route(`**/api/v1/leads/${leadId}`, (route) =>
+      json(route, {
+        id: leadId,
+        first_name: "Ready",
+        last_name: "Lead",
+        email: "ready.lead@example.com",
+        phone: "+49 30 100002",
+        source: "referral",
+        country: "DE",
+        intake_source: "referral",
+        flow: "standard",
+        qualification_status: "converted",
+        compliance_status: "signed",
+        conversion_ready: true,
+        submitted_at: "2026-04-02T09:00:00Z",
+        created_at: "2026-04-02T09:00:00Z",
+        updated_at: "2026-04-03T09:00:00Z",
+        date_of_birth: "1990-01-01",
+        legal_sex: "female",
+        primary_language: "de",
+        primary_concern_text: "Knee pain",
+        services: [],
+        requested_specialties: ["Orthopädie"],
+        converted_patient_id: patientId,
+        attachments: [],
+        failed_outcome: { status: "none", reason: null, processed_at: null },
+        readiness: {
+          qualification_ready: true,
+          conversion_ready: true,
+          qualification_reasons: [],
+          blocking_reasons: [],
+          checks: [],
+        },
+        lifecycle: {
+          current_stage: "converted",
+          stage_entered_at: "2026-04-03T09:00:00Z",
+          can_convert: false,
+          can_resolve_failed: false,
+          history: [],
+        },
+        wizard_state: {
+          step: "specialties",
+          phase: "order",
+          patient_id: patientId,
+          patient_pid: "PT-001",
+          order_id: orderId,
+          saved_order_line_keys: [lineKey],
+          order_lines: [
+            {
+              clientKey: lineKey,
+              description: "Initial consultation",
+              quantity: "1",
+              unitPrice: "100",
+              vatRate: "19",
+            },
+          ],
+          guardian: {},
+          clinical_intake: {},
+          start_contract: false,
+          contract_id: null,
+        },
+      }),
+    );
+    await page.route(`**/api/v1/orders/${orderId}/leistungen`, (route) => {
+      if (route.request().method() === "POST") {
+        linePayloads.push(
+          JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>,
+        );
+        return json(route, { id: "00000000-0000-0000-0000-000000000711" }, 200);
+      }
+      return json(route, []);
+    });
+
+    await page.goto(`/leads?lead=${leadId}`);
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+    const wizard = page.getByRole("dialog", { name: "Auftrag erstellen" });
+    await expect(wizard.getByText("Auftragsentwurf erstellt")).toBeVisible();
+    await wizard
+      .getByPlaceholder("Positionsbeschreibung")
+      .fill("Updated specialist consultation");
+    await wizard
+      .getByRole("button", { name: "Abschließen und Auftrag öffnen" })
+      .click();
+
+    await expect.poll(() => linePayloads.length).toBe(1);
+    expect(linePayloads[0]).toMatchObject({
+      description: "Updated specialist consultation",
+      client_reference: `lead-wizard:${leadId}:${lineKey}`,
+    });
   });
 });

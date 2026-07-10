@@ -62,9 +62,12 @@ import {
   draftFromLead,
   guardianPayload,
   isMinor,
+  missingStepRequirements,
   nextStep,
   orderLineClientReference,
+  orderLineIsBlank,
   orderLineIsValid,
+  orderLinesAreReady,
   orderLinePayload,
   orderNeedsDescription,
   orderResumeFromLead,
@@ -78,6 +81,7 @@ import {
   type LegalSex,
   type WizardDraft,
   type WizardOrderLine,
+  type WizardRequirement,
   type WizardStepId,
 } from "../model/lead-wizard.model";
 
@@ -114,6 +118,25 @@ function stepLabel(step: WizardStepId, tx: Bilingual): string {
       return tx("Причина", "Anliegen");
     case "specialties":
       return tx("Специалисты", "Fachärzte");
+  }
+}
+
+function requirementLabel(requirement: WizardRequirement, tx: Bilingual): string {
+  switch (requirement) {
+    case "first_name":
+      return tx("имя", "Vorname");
+    case "last_name":
+      return tx("фамилия", "Nachname");
+    case "date_of_birth":
+      return tx("дата рождения", "Geburtsdatum");
+    case "legal_sex":
+      return tx("пол (юр.)", "rechtliches Geschlecht");
+    case "contact":
+      return tx("e-mail или телефон", "E-Mail oder Telefon");
+    case "primary_concern":
+      return tx("основная жалоба", "Hauptanliegen");
+    case "specialty":
+      return tx("минимум один специалист", "mindestens eine Fachrichtung");
   }
 }
 
@@ -222,6 +245,7 @@ export function LeadWizard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [loadError, setLoadError] = useState(false);
+  const [validationStep, setValidationStep] = useState<WizardStepId | null>(null);
   // Phase B — after conversion the wizard forms the actual order (#8).
   const [phase, setPhase] = useState<"lead" | "order">("lead");
   const [createdOrderId, setCreatedOrderId] = useState<string | null>(null);
@@ -242,6 +266,7 @@ export function LeadWizard({
     let active = true;
     setLoadError(false);
     setError("");
+    setValidationStep(null);
     setDraft(null);
     setPhase("lead");
     setCreatedOrderId(null);
@@ -362,19 +387,60 @@ export function LeadWizard({
     });
   }
 
+  async function moveToStep(target: WizardStepId) {
+    if (!draft) return;
+    if (target === step) {
+      setValidationStep(null);
+      return;
+    }
+
+    const currentIndex = PHASE_A_STEPS.indexOf(step);
+    const targetIndex = PHASE_A_STEPS.indexOf(target);
+    if (targetIndex > currentIndex) {
+      const incomplete = PHASE_A_STEPS.slice(currentIndex, targetIndex).find(
+        (candidate) => !stepIsComplete(candidate, draft),
+      );
+      if (incomplete) {
+        setStep(incomplete);
+        setValidationStep(incomplete);
+        setError("");
+        return;
+      }
+    }
+
+    if (await persist(target)) {
+      setValidationStep(null);
+      setStep(target);
+    }
+  }
+
   async function goNext() {
     const target = nextStep(step);
     if (!target) return;
-    if (await persist(target)) setStep(target);
+    if (!draft || !stepIsComplete(step, draft)) {
+      setValidationStep(step);
+      setError("");
+      return;
+    }
+    await moveToStep(target);
   }
 
-  function goBack() {
+  async function goBack() {
     const target = prevStep(step);
-    if (target) setStep(target);
+    if (target) await moveToStep(target);
   }
 
   async function handleConvert() {
-    if (!leadId || !draft || !canConvert(draft)) return;
+    if (!leadId || !draft) return;
+    if (!canConvert(draft)) {
+      const incomplete = PHASE_A_STEPS.find((candidate) => !stepIsComplete(candidate, draft));
+      if (incomplete) {
+        setStep(incomplete);
+        setValidationStep(incomplete);
+      }
+      setError("");
+      return;
+    }
     if (!(await persist(step))) return;
     setBusy(true);
     setError("");
@@ -518,6 +584,15 @@ export function LeadWizard({
 
   async function handleFinishOrder() {
     if (!createdOrderId || !createdPatientId || !leadId) return;
+    if (!orderLinesAreReady(orderLines)) {
+      setError(
+        tx(
+          "Проверьте все заполненные позиции заказа.",
+          "Bitte alle begonnenen Auftragspositionen prüfen.",
+        ),
+      );
+      return;
+    }
     setBusy(true);
     setError("");
     const billable = orderLines
@@ -527,7 +602,6 @@ export function LeadWizard({
       await persistOrderResumeState(createdPatientId, createdOrderId);
       const completedLineKeys = new Set(savedOrderLineKeys);
       for (const { line, key } of billable) {
-        if (completedLineKeys.has(key)) continue;
         await createOrderLeistung(
           createdOrderId,
           orderLinePayload(
@@ -626,18 +700,33 @@ export function LeadWizard({
   }
 
   function handleWizardOpenChange(nextOpen: boolean) {
-    if (nextOpen || phase !== "order" || !createdPatientId || !createdOrderId) {
-      onOpenChange(nextOpen);
+    if (nextOpen) {
+      onOpenChange(true);
       return;
     }
-    void saveOrderDraft().then((saved) => {
+
+    if (busy) return;
+
+    const saveBeforeClose =
+      phase === "order" && createdPatientId && createdOrderId
+        ? saveOrderDraft()
+        : draft && leadId
+          ? persist(step)
+          : Promise.resolve(true);
+    void saveBeforeClose.then((saved) => {
       if (saved) onOpenChange(false);
     });
   }
 
   const minor = draft ? isMinor(draft.dateOfBirth, new Date()) : false;
+  const missingRequirements = draft ? missingStepRequirements(step, draft) : [];
+  const showStepValidation = validationStep === step && missingRequirements.length > 0;
   const estimate = costEstimate(orderLines);
   const hasBillableLines = orderLines.some(orderLineIsValid);
+  const hasInvalidOrderLines = orderLines.some(
+    (line) => !orderLineIsBlank(line) && !orderLineIsValid(line),
+  );
+  const orderLinesReady = orderLinesAreReady(orderLines);
   const patientOption: PatientOption | undefined =
     createdPatientId && draft
       ? {
@@ -651,7 +740,7 @@ export function LeadWizard({
 
   return (
     <>
-      <Sheet open={open} onOpenChange={handleWizardOpenChange}>
+      <Sheet open={open} dirty={false} onOpenChange={handleWizardOpenChange}>
         <SheetContent className="w-[calc(100%-1.5rem)]! gap-0 overflow-hidden p-0 sm:max-w-2xl!">
         <header className="shrink-0 border-b border-border/70 bg-popover px-5 pb-4 pt-4 pr-14">
           <div className="flex items-center gap-2">
@@ -670,13 +759,21 @@ export function LeadWizard({
             {PHASE_A_STEPS.map((phaseStep, index) => {
               const done = draft ? stepIsComplete(phaseStep, draft) : false;
               const active = phaseStep === step;
+              const unlocked =
+                phaseStep === step ||
+                (draft !== null &&
+                  PHASE_A_STEPS.slice(0, index).every((candidate) =>
+                    stepIsComplete(candidate, draft),
+                  ));
               return (
                 <li key={phaseStep}>
                   <button
                     type="button"
-                    onClick={() => setStep(phaseStep)}
+                    disabled={busy || phase === "order" || !unlocked}
+                    aria-current={active ? "step" : undefined}
+                    onClick={() => void moveToStep(phaseStep)}
                     className={cn(
-                      "flex min-h-10 min-w-0 items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs font-medium transition-colors",
+                      "flex min-h-10 min-w-0 items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
                       active
                         ? "border-primary/50 bg-primary/10 text-primary"
                         : done
@@ -971,6 +1068,17 @@ export function LeadWizard({
                   {tx("Добавить позицию", "Position hinzufügen")}
                 </Button>
               </div>
+              {hasInvalidOrderLines ? (
+                <div
+                  role="alert"
+                  className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+                >
+                  {tx(
+                    "Заполните описание, количество больше нуля, неотрицательную цену и НДС от 0 до 100.",
+                    "Beschreibung, Menge über 0, einen nicht negativen Preis und MwSt. von 0 bis 100 ausfüllen.",
+                  )}
+                </div>
+              ) : null}
               <div className="rounded-lg border border-border bg-card p-3 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">{tx("Нетто", "Netto")}</span>
@@ -1165,6 +1273,19 @@ export function LeadWizard({
                 </div>
               ) : null}
 
+              {showStepValidation ? (
+                <div
+                  role="alert"
+                  className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+                >
+                  {tx("Для перехода заполните: ", "Für diesen Schritt fehlen: ")}
+                  {missingRequirements
+                    .map((requirement) => requirementLabel(requirement, tx))
+                    .join(", ")}
+                  .
+                </div>
+              ) : null}
+
               {error ? (
                 <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
                   {error}
@@ -1195,13 +1316,19 @@ export function LeadWizard({
                   variant="default"
                   className="h-auto min-h-8 w-full whitespace-normal text-center sm:w-auto"
                   onClick={handleFinishOrder}
-                  disabled={busy || !canFinishOrder(minor, guardian) || !hasBillableLines}
+                  disabled={busy || !canFinishOrder(minor, guardian) || !orderLinesReady}
+                  aria-busy={busy}
                   title={
                     !canFinishOrder(minor, guardian)
                       ? tx(
                           "Для несовершеннолетнего нужен представитель",
                           "Für Minderjährige ist ein Vertreter erforderlich",
                         )
+                      : hasInvalidOrderLines
+                        ? tx(
+                            "Проверьте все заполненные позиции",
+                            "Alle begonnenen Positionen prüfen",
+                          )
                       : !hasBillableLines
                         ? tx(
                             "Добавьте минимум одну позицию заказа",
@@ -1210,6 +1337,7 @@ export function LeadWizard({
                         : undefined
                   }
                 >
+                  {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
                   {tx("Завершить и открыть заказ", "Abschließen und Auftrag öffnen")}
                 </Button>
               </div>
@@ -1238,29 +1366,22 @@ export function LeadWizard({
                     {tx("Дальше", "Weiter")}
                     <ChevronRight className="size-4" />
                   </Button>
-                ) : null}
-                <Button
-                  type="button"
-                  variant="default"
-                  className="w-full sm:w-auto"
-                  onClick={handleConvert}
-                  disabled={busy || !draft || !canConvert(draft)}
-                  title={
-                    draft && !canConvert(draft)
-                      ? tx(
-                          "Нужны дата рождения, пол и контакт",
-                          "Geburtsdatum, Geschlecht und Kontakt erforderlich",
-                        )
-                      : undefined
-                  }
-                >
-                  {busy ? (
-                    <LoaderCircle className="size-4 animate-spin" />
-                  ) : (
-                    <UserPlus className="size-4" />
-                  )}
-                  {tx("Создать пациента", "Patient anlegen")}
-                </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="default"
+                    className="w-full sm:w-auto"
+                    onClick={handleConvert}
+                    disabled={busy || !draft || !canConvert(draft)}
+                  >
+                    {busy ? (
+                      <LoaderCircle className="size-4 animate-spin" />
+                    ) : (
+                      <UserPlus className="size-4" />
+                    )}
+                    {tx("Создать пациента", "Patient anlegen")}
+                  </Button>
+                )}
               </div>
             </div>
           )}
