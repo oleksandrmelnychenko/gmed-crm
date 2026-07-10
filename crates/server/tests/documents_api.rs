@@ -5483,6 +5483,109 @@ async fn mark_document_signed_records_evidence_and_satisfies_compliance() {
 }
 
 #[tokio::test]
+async fn lead_document_upload_and_signature_do_not_create_patient() {
+    let Some((app, pool, admin_id, _admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("lead-document");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, created_by)
+           VALUES ($1, $2, $3, $4)
+           RETURNING id"#,
+    )
+    .bind(format!("First {tag}"))
+    .bind(format!("Last {tag}"))
+    .bind(format!("{tag}@example.com"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let patient_count_before: i64 = sqlx::query_scalar("SELECT count(*) FROM patients")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let file_bytes = b"%PDF-lead-consent%";
+    let (upload_status, upload) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &pm_bearer,
+        &[
+            ("lead_id", lead_id.to_string()),
+            ("status", "active".to_string()),
+            ("visibility", "internal".to_string()),
+            ("auto_name", format!("DSGVO {tag}")),
+            ("art", "consent".to_string()),
+            ("category", "compliance".to_string()),
+        ],
+        &format!("dsgvo-{tag}.pdf"),
+        "application/pdf",
+        file_bytes,
+    )
+    .await;
+    assert_eq!(upload_status, StatusCode::OK, "upload body: {upload}");
+    assert_eq!(upload["lead_id"], lead_id.to_string());
+    assert!(upload["patient_id"].is_null());
+    let document_id = Uuid::parse_str(upload["id"].as_str().unwrap()).unwrap();
+
+    let (list_status, list) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents?lead_id={lead_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(list_status, StatusCode::OK, "list body: {list}");
+    let item = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == document_id.to_string())
+        .expect("lead document in filtered list");
+    assert_eq!(item["lead_id"], lead_id.to_string());
+    assert!(item["patient_id"].is_null());
+    assert!(item["lead_name"].as_str().unwrap().contains(&tag));
+
+    let (download_status, downloaded) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &pm_bearer,
+    )
+    .await;
+    assert_eq!(download_status, StatusCode::OK);
+    assert_eq!(downloaded, file_bytes);
+
+    let (signed_status, signed) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/mark-signed"),
+        &pm_bearer,
+        Some(json!({ "compliance_kind": "dsgvo" })),
+    )
+    .await;
+    assert_eq!(signed_status, StatusCode::OK, "signed body: {signed}");
+    assert_eq!(signed["lead_id"], lead_id.to_string());
+    assert_eq!(signed["compliance_updated"], true);
+
+    let compliance_status: String =
+        sqlx::query_scalar("SELECT compliance_status FROM leads WHERE id = $1")
+            .bind(lead_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(compliance_status, "signed");
+    let patient_count_after: i64 = sqlx::query_scalar("SELECT count(*) FROM patients")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(patient_count_after, patient_count_before);
+}
+
+#[tokio::test]
 async fn patient_manager_cannot_mark_unassigned_document_signed() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;

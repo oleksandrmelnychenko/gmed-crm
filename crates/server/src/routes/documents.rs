@@ -720,6 +720,7 @@ struct DocumentShareInsert<'a> {
 pub(crate) struct NewStoredDocument<'a> {
     pub(crate) document_id: Option<Uuid>,
     pub(crate) patient_id: Option<Uuid>,
+    pub(crate) lead_id: Option<Uuid>,
     pub(crate) order_id: Option<Uuid>,
     pub(crate) appointment_id: Option<Uuid>,
     pub(crate) auto_name: &'a str,
@@ -1196,7 +1197,7 @@ async fn mark_document_signed(
         _ => chrono::Utc::now(),
     };
 
-    let document = match sqlx::query("SELECT patient_id FROM documents WHERE id = $1")
+    let document = match sqlx::query("SELECT patient_id, lead_id FROM documents WHERE id = $1")
         .bind(document_id)
         .fetch_optional(&state.db)
         .await
@@ -1209,6 +1210,7 @@ async fn mark_document_signed(
         }
     };
     let patient_id: Option<Uuid> = document.try_get("patient_id").ok().flatten();
+    let lead_id: Option<Uuid> = document.try_get("lead_id").ok().flatten();
     if let Some(patient_id) = patient_id
         && access::requires_patient_assignment(auth.role)
     {
@@ -1274,6 +1276,33 @@ async fn mark_document_signed(
         }
         compliance_updated = true;
     }
+    if let Some(lead_id) = lead_id
+        && kind == "dsgvo"
+    {
+        let result = sqlx::query(
+            r#"UPDATE leads
+               SET compliance_status = 'signed', updated_at = now()
+               WHERE id = $1 AND converted_patient_id IS NULL"#,
+        )
+        .bind(lead_id)
+        .execute(&mut *tx)
+        .await;
+        match result {
+            Ok(result) if result.rows_affected() == 1 => {
+                compliance_updated = true;
+            }
+            Ok(_) => {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Converted lead must use its patient context",
+                );
+            }
+            Err(error) => {
+                tracing::error!(error = %error, lead_id = %lead_id, "update lead compliance from signed document");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    }
 
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, "commit mark-signed tx");
@@ -1285,7 +1314,11 @@ async fn mark_document_signed(
         Some(auth.user_id),
         "document",
         Some(document_id),
-        json!({ "compliance_kind": kind, "patient_id": patient_id }),
+        json!({
+            "compliance_kind": kind,
+            "patient_id": patient_id,
+            "lead_id": lead_id,
+        }),
     ));
 
     Json(json!({
@@ -1294,6 +1327,7 @@ async fn mark_document_signed(
         "signed_at": signed_at.to_rfc3339(),
         "compliance_kind": kind,
         "patient_id": patient_id,
+        "lead_id": lead_id,
         "compliance_updated": compliance_updated,
     }))
     .into_response()
@@ -1303,6 +1337,7 @@ async fn mark_document_signed(
 struct DocumentListQuery {
     search: Option<String>,
     patient_id: Option<String>,
+    lead_id: Option<String>,
     order_id: Option<String>,
     appointment_id: Option<String>,
     status: Option<String>,
@@ -1336,6 +1371,7 @@ fn parse_required_uuid_query_filter(
     Uuid::parse_str(&value).map(Some).map_err(|_| {
         let message = match field {
             "patient_id" => "Invalid patient_id filter",
+            "lead_id" => "Invalid lead_id filter",
             "order_id" => "Invalid order_id filter",
             "appointment_id" => "Invalid appointment_id filter",
             _ => "Invalid document filter",
@@ -8731,12 +8767,14 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
     json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
         "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
+        "lead_id": row.try_get::<Option<Uuid>, _>("lead_id").unwrap_or_default(),
         "has_active_patient_portal_user": row.try_get::<bool, _>("has_active_patient_portal_user").unwrap_or(false),
         "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
         "appointment_id": row.try_get::<Option<Uuid>, _>("appointment_id").unwrap_or_default(),
         "provider_context_ids": row.try_get::<Vec<Uuid>, _>("provider_context_ids").unwrap_or_default(),
         "patient_pid": row.try_get::<Option<String>, _>("patient_pid").unwrap_or_default(),
         "patient_name": row.try_get::<Option<String>, _>("patient_name").unwrap_or_default(),
+        "lead_name": row.try_get::<Option<String>, _>("lead_name").unwrap_or_default(),
         "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
         "appointment_title": row.try_get::<Option<String>, _>("appointment_title").unwrap_or_default(),
         "auto_name": row.try_get::<String, _>("auto_name").unwrap_or_default(),
@@ -8768,6 +8806,9 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "payment_due_date": row.try_get::<Option<NaiveDate>, _>("payment_due_date").unwrap_or_default(),
         "payment_date": row.try_get::<Option<NaiveDate>, _>("payment_date").unwrap_or_default(),
         "payment_method": row.try_get::<Option<String>, _>("payment_method").unwrap_or_default(),
+        "signed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "signed_by": row.try_get::<Option<Uuid>, _>("signed_by").unwrap_or_default(),
+        "compliance_kind": row.try_get::<Option<String>, _>("compliance_kind").unwrap_or_default(),
         "generated_template_id": generated_template_id,
         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
         "uploaded_by": row.try_get::<Uuid, _>("uploaded_by").unwrap_or_else(|_| Uuid::nil()),
@@ -8933,19 +8974,21 @@ async fn fetch_document_row(
     current_user_id: Uuid,
 ) -> Result<Option<sqlx::postgres::PgRow>, axum::response::Response> {
     sqlx::query(
-        r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
+        r#"SELECT d.id, d.patient_id, d.lead_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
                   d.document_direction, d.document_variant, d.document_language, d.access_category,
                   d.document_date, d.source_person, d.source_institution, d.addressee_person,
                   d.addressee_institution, d.financial_status, d.payment_due_date, d.payment_date,
                   d.payment_method, d.generated_template_id,
+                  d.signed_at, d.signed_by, d.compliance_kind,
                   d.notes, d.extracted_text, d.text_extraction_status, d.text_extraction_method,
                   d.text_extracted_at, d.text_extracted_by, d.version_root_document_id, d.replaces_document_id,
                   d.version_number, d.uploaded_by, d.created_at, d.updated_at,
                   d.file_deleted_at, d.file_deleted_by, d.file_delete_reason,
                   p.patient_id AS patient_pid,
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
+                  trim(concat_ws(' ', l.first_name, l.last_name)) AS lead_name,
                   o.order_number,
                   a.title AS appointment_title,
                   u.name AS uploaded_by_name,
@@ -8977,6 +9020,7 @@ async fn fetch_document_row(
                   provider_context.provider_context_ids
            FROM documents d
            LEFT JOIN patients p ON p.id = d.patient_id
+           LEFT JOIN leads l ON l.id = d.lead_id
            LEFT JOIN orders o ON o.id = d.order_id
            LEFT JOIN appointments a ON a.id = d.appointment_id
            LEFT JOIN users u ON u.id = d.uploaded_by
@@ -9280,7 +9324,9 @@ fn can_view_document_row(
 
     let explicit_share = row.try_get::<bool, _>("shared_to_current").unwrap_or(false);
     let patient_id: Option<Uuid> = row.try_get("patient_id").unwrap_or_default();
-    let is_assigned = if explicit_share {
+    let lead_id: Option<Uuid> = row.try_get("lead_id").unwrap_or_default();
+    let is_assigned = if explicit_share || (lead_id.is_some() && auth.role == Role::PatientManager)
+    {
         true
     } else if access::requires_patient_assignment(auth.role) {
         patient_id
@@ -9399,10 +9445,17 @@ fn validate_teamlead_document_review_update(
 async fn validate_document_context(
     state: &AppState,
     mut patient_id: Option<Uuid>,
+    mut lead_id: Option<Uuid>,
     mut order_id: Option<Uuid>,
     appointment_id: Option<Uuid>,
-) -> Result<(Option<Uuid>, Option<Uuid>, Option<Uuid>), axum::response::Response> {
+) -> Result<(Option<Uuid>, Option<Uuid>, Option<Uuid>, Option<Uuid>), axum::response::Response> {
     if let Some(appointment_id) = appointment_id {
+        if lead_id.is_some() {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Appointment documents cannot use lead context",
+            ));
+        }
         let row = sqlx::query("SELECT patient_id, order_id FROM appointments WHERE id = $1")
             .bind(appointment_id)
             .fetch_optional(&state.db)
@@ -9443,7 +9496,9 @@ async fn validate_document_context(
     }
 
     if let Some(order_id_value) = order_id {
-        let row = sqlx::query("SELECT patient_id FROM orders WHERE id = $1")
+        let row = sqlx::query(
+            "SELECT patient_id, source_lead_id FROM orders WHERE id = $1",
+        )
             .bind(order_id_value)
             .fetch_optional(&state.db)
             .await
@@ -9455,21 +9510,65 @@ async fn validate_document_context(
         let Some(row) = row else {
             return Err(err(StatusCode::NOT_FOUND, "Order not found"));
         };
-        let order_patient_id: Uuid = row.try_get("patient_id").unwrap_or_else(|_| Uuid::nil());
+        let order_patient_id: Option<Uuid> = row.try_get("patient_id").unwrap_or_default();
+        let order_lead_id: Option<Uuid> = row.try_get("source_lead_id").unwrap_or_default();
 
         if let Some(existing) = patient_id {
-            if existing != order_patient_id {
+            if Some(existing) != order_patient_id {
                 return Err(err(
                     StatusCode::UNPROCESSABLE_ENTITY,
                     "Order and patient context do not match",
                 ));
             }
+        } else if order_patient_id.is_some() {
+            patient_id = order_patient_id;
+            lead_id = None;
+        } else if let Some(existing) = lead_id {
+            if Some(existing) != order_lead_id {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Order and lead context do not match",
+                ));
+            }
         } else {
-            patient_id = Some(order_patient_id);
+            lead_id = order_lead_id;
         }
     }
 
-    Ok((patient_id, order_id, appointment_id))
+    if patient_id.is_some() && lead_id.is_some() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Document cannot use patient and lead context at the same time",
+        ));
+    }
+
+    if let Some(lead_id) = lead_id {
+        let converted_patient_id = sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT converted_patient_id FROM leads WHERE id = $1",
+        )
+        .bind(lead_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, lead_id = %lead_id, "validate document lead context");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate lead context",
+            )
+        })?;
+        match converted_patient_id {
+            Some(None) => {}
+            Some(Some(_)) => {
+                return Err(err(
+                    StatusCode::CONFLICT,
+                    "Converted lead must use its patient context",
+                ));
+            }
+            None => return Err(err(StatusCode::NOT_FOUND, "Lead not found")),
+        }
+    }
+
+    Ok((patient_id, lead_id, order_id, appointment_id))
 }
 
 async fn provider_in_order_or_appointment(
@@ -9640,7 +9739,7 @@ pub(crate) async fn persist_document_file(
 
     if let Err(e) = sqlx::query(
         r#"INSERT INTO documents (
-                id, patient_id, order_id, appointment_id, auto_name, original_filename,
+                id, patient_id, lead_id, order_id, appointment_id, auto_name, original_filename,
                 art, category, status, visibility, is_medical, mime_type, file_size,
                 storage_key, klinik, ursprung, notes, generated_template_id,
                 document_direction, document_variant, document_language, access_category,
@@ -9649,17 +9748,18 @@ pub(crate) async fn persist_document_file(
                 payment_method, version_root_document_id, replaces_document_id,
                 version_number, uploaded_by
            ) VALUES (
-                $1, $2, $3, $4, $5, $6,
-                $7, $8, $9, $10, $11, $12, $13,
-                $14, $15, $16, $17, $18,
-                $19, $20, $21, $22,
-                $23, $24, $25, $26,
-                $27, $28, $29, $30,
-                $31, $32, $33, $34, $35
+                $1, $2, $3, $4, $5, $6, $7,
+                $8, $9, $10, $11, $12, $13, $14,
+                $15, $16, $17, $18, $19,
+                $20, $21, $22, $23,
+                $24, $25, $26, $27,
+                $28, $29, $30, $31,
+                $32, $33, $34, $35, $36
            )"#,
     )
     .bind(document_id)
     .bind(input.patient_id)
+    .bind(input.lead_id)
     .bind(input.order_id)
     .bind(input.appointment_id)
     .bind(input.auto_name.trim())
@@ -9871,13 +9971,18 @@ async fn generate_provider_document_from_template_internal(
         ));
     }
 
-    let (patient_id, order_id, appointment_id) =
-        match validate_document_context(state, body.patient_id, body.order_id, body.appointment_id)
-            .await
-        {
-            Ok(value) => value,
-            Err(resp) => return Err(resp),
-        };
+    let (patient_id, _lead_id, order_id, appointment_id) = match validate_document_context(
+        state,
+        body.patient_id,
+        None,
+        body.order_id,
+        body.appointment_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(resp) => return Err(resp),
+    };
     let Some(patient_uuid) = patient_id else {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -10189,6 +10294,7 @@ async fn generate_provider_document_from_template_internal(
     let persist_input = NewStoredDocument {
         document_id: None,
         patient_id,
+        lead_id: None,
         order_id,
         appointment_id,
         auto_name: &auto_name,
@@ -10447,9 +10553,10 @@ async fn generate_document(
         );
     }
 
-    let (patient_id, order_id, appointment_id) = match validate_document_context(
+    let (patient_id, _lead_id, order_id, appointment_id) = match validate_document_context(
         &state,
         body.patient_id,
+        None,
         body.order_id,
         body.appointment_id,
     )
@@ -11710,6 +11817,7 @@ async fn generate_document(
     let persist_input = NewStoredDocument {
         document_id: Some(generated_document_id),
         patient_id,
+        lead_id: None,
         order_id,
         appointment_id,
         auto_name: &auto_name,
@@ -14099,6 +14207,10 @@ async fn list_documents(
             Ok(value) => value,
             Err(resp) => return resp,
         };
+    let lead_id = match parse_required_uuid_query_filter(query.lead_id.as_deref(), "lead_id") {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
     let (order_id, order_lookup) = parse_uuid_or_text_query_filter(query.order_id.as_deref());
     let (appointment_id, appointment_lookup) =
         parse_uuid_or_text_query_filter(query.appointment_id.as_deref());
@@ -14157,18 +14269,20 @@ async fn list_documents(
         };
 
     let rows = match sqlx::query(
-        r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
+        r#"SELECT d.id, d.patient_id, d.lead_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
                   d.document_direction, d.document_variant, d.document_language, d.access_category,
                   d.document_date, d.source_person, d.source_institution, d.addressee_person,
                   d.addressee_institution, d.financial_status, d.payment_due_date, d.payment_date,
                   d.payment_method, d.generated_template_id,
+                  d.signed_at, d.signed_by, d.compliance_kind,
                   d.notes, d.version_root_document_id, d.replaces_document_id,
                   d.version_number, d.uploaded_by, d.created_at, d.updated_at,
                   d.file_deleted_at, d.file_deleted_by, d.file_delete_reason,
                   p.patient_id AS patient_pid,
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
+                  trim(concat_ws(' ', l.first_name, l.last_name)) AS lead_name,
                   o.order_number,
                   a.title AS appointment_title,
                   u.name AS uploaded_by_name,
@@ -14197,6 +14311,7 @@ async fn list_documents(
                   provider_context.provider_context_ids
            FROM documents d
            LEFT JOIN patients p ON p.id = d.patient_id
+           LEFT JOIN leads l ON l.id = d.lead_id
            LEFT JOIN orders o ON o.id = d.order_id
            LEFT JOIN appointments a ON a.id = d.appointment_id
            LEFT JOIN users u ON u.id = d.uploaded_by
@@ -14235,6 +14350,7 @@ async fn list_documents(
                        d.access_category, d.source_person, d.source_institution,
                        d.addressee_person, d.addressee_institution, d.financial_status,
                        p.patient_id, p.first_name, p.last_name,
+                       l.first_name, l.last_name, l.email, l.phone,
                        o.order_number, a.title,
                        u.name, deleter.name
                      )) LIKE '%' || de_normalize($1) || '%')
@@ -14255,6 +14371,7 @@ async fn list_documents(
              AND ($17::text IS NULL OR d.document_variant = $17)
              AND ($18::text IS NULL OR d.access_category = $18)
              AND ($19::text IS NULL OR d.financial_status = $19)
+             AND ($20::uuid IS NULL OR d.lead_id = $20)
            ORDER BY d.created_at DESC
            LIMIT 300"#,
     )
@@ -14277,6 +14394,7 @@ async fn list_documents(
     .bind(document_variant.as_deref())
     .bind(access_category.as_deref())
     .bind(financial_status.as_deref())
+    .bind(lead_id)
     .fetch_all(&state.db)
     .await
     {
@@ -15377,6 +15495,7 @@ async fn create_translated_document_from_request(
     let persist_input = NewStoredDocument {
         document_id: None,
         patient_id,
+        lead_id: None,
         order_id,
         appointment_id,
         auto_name: auto_name.as_str(),
@@ -15803,8 +15922,10 @@ async fn upload_my_document(
         Ok(value) => value,
         Err(resp) => return resp,
     };
-    let (patient_id, order_id, appointment_id) =
-        match validate_document_context(&state, Some(patient_id), order_id, appointment_id).await {
+    let (patient_id, _lead_id, order_id, appointment_id) =
+        match validate_document_context(&state, Some(patient_id), None, order_id, appointment_id)
+            .await
+        {
             Ok(value) => value,
             Err(resp) => return resp,
         };
@@ -15826,6 +15947,7 @@ async fn upload_my_document(
     let persist_input = NewStoredDocument {
         document_id: None,
         patient_id,
+        lead_id: None,
         order_id,
         appointment_id,
         auto_name: auto_name.trim(),
@@ -16067,6 +16189,7 @@ async fn upload_document(
     let mut file_name: Option<String> = None;
     let mut mime_type = String::from("application/octet-stream");
     let mut patient_id: Option<Uuid> = None;
+    let mut lead_id: Option<Uuid> = None;
     let mut order_id: Option<Uuid> = None;
     let mut appointment_id: Option<Uuid> = None;
     let mut auto_name = String::new();
@@ -16116,6 +16239,12 @@ async fn upload_document(
             "patient_id" => {
                 patient_id = match parse_uuid_field(field).await {
                     Ok(v) => v,
+                    Err(resp) => return resp,
+                }
+            }
+            "lead_id" => {
+                lead_id = match parse_uuid_field(field).await {
+                    Ok(value) => value,
                     Err(resp) => return resp,
                 }
             }
@@ -16266,16 +16395,30 @@ async fn upload_document(
         );
     }
 
-    let (patient_id, order_id, appointment_id) =
-        match validate_document_context(&state, patient_id, order_id, appointment_id).await {
-            Ok(value) => value,
-            Err(resp) => return resp,
-        };
+    let (patient_id, lead_id, order_id, appointment_id) = match validate_document_context(
+        &state,
+        patient_id,
+        lead_id,
+        order_id,
+        appointment_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
 
-    if patient_id.is_none() && order_id.is_none() && appointment_id.is_none() {
+    if patient_id.is_none() && lead_id.is_none() && order_id.is_none() && appointment_id.is_none() {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "Document must be linked to patient, order or appointment",
+            "Document must be linked to lead, patient, order or appointment",
+        );
+    }
+
+    if lead_id.is_some() && !matches!(auth.role, Role::PatientManager | Role::Ceo | Role::ItAdmin) {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Insufficient permissions for lead documents",
         );
     }
 
@@ -16350,6 +16493,7 @@ async fn upload_document(
     let persist_input = NewStoredDocument {
         document_id: None,
         patient_id,
+        lead_id,
         order_id,
         appointment_id,
         auto_name: auto_name.trim(),
@@ -16414,6 +16558,7 @@ async fn upload_document(
         Some(document_id),
         json!({
             "patient_id": patient_id,
+            "lead_id": lead_id,
             "order_id": order_id,
             "appointment_id": appointment_id,
             "art": persist_input.art,
@@ -16504,6 +16649,7 @@ async fn upload_document(
         document_id,
         json!({
             "patient_id": patient_id,
+            "lead_id": lead_id,
             "order_id": order_id,
             "appointment_id": appointment_id,
             "art": persist_input.art,
@@ -16520,6 +16666,10 @@ async fn upload_document(
     Json(json!({
         "ok": true,
         "id": document_id,
+        "patient_id": patient_id,
+        "lead_id": lead_id,
+        "order_id": order_id,
+        "appointment_id": appointment_id,
         "original_filename": original_filename,
         "mime_type": mime_type,
         "file_size": file_size,
@@ -16570,13 +16720,15 @@ async fn update_document(
     }
 
     let current_patient_id: Option<Uuid> = current.try_get("patient_id").unwrap_or_default();
+    let current_lead_id: Option<Uuid> = current.try_get("lead_id").unwrap_or_default();
     let current_order_id: Option<Uuid> = current.try_get("order_id").unwrap_or_default();
     let current_appointment_id: Option<Uuid> =
         current.try_get("appointment_id").unwrap_or_default();
 
-    let (patient_id, order_id, appointment_id) = match validate_document_context(
+    let (patient_id, _lead_id, order_id, appointment_id) = match validate_document_context(
         &state,
         body.patient_id.or(current_patient_id),
+        current_lead_id,
         body.order_id.or(current_order_id),
         body.appointment_id.or(current_appointment_id),
     )

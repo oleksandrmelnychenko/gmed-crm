@@ -19,13 +19,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_cases_lead
 ALTER TABLE documents
     ADD COLUMN IF NOT EXISTS lead_id UUID REFERENCES leads(id) ON DELETE CASCADE;
 
-ALTER TABLE documents
-    DROP CONSTRAINT IF EXISTS documents_subject_context_chk;
-
-ALTER TABLE documents
-    ADD CONSTRAINT documents_subject_context_chk
-    CHECK (num_nonnulls(patient_id, lead_id, order_id, appointment_id) >= 1);
-
 CREATE INDEX IF NOT EXISTS idx_documents_lead
     ON documents (lead_id, created_at DESC)
     WHERE lead_id IS NOT NULL;

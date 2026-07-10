@@ -584,6 +584,7 @@ async fn upload_interpreter_profile_document(
     let persist_input = NewStoredDocument {
         document_id: None,
         patient_id: None,
+        lead_id: None,
         order_id: None,
         appointment_id: None,
         auto_name: resolved_auto_name.as_str(),
