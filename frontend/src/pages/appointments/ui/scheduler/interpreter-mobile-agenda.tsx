@@ -93,7 +93,7 @@ function StatsCard({
   tone: "sky" | "amber" | "slate";
 }) {
   return (
-    <div className="relative flex h-full min-w-0 flex-col rounded-[1.2rem] border border-white/90 bg-white/88 p-3 pr-10 backdrop-blur">
+    <div className="relative flex h-full min-w-0 flex-col rounded-lg border border-white/90 bg-white/88 p-3 pr-10 backdrop-blur">
       <span className="block w-full whitespace-normal break-words text-left text-[11px] font-semibold uppercase leading-tight tracking-[0.08em] text-zinc-600">
         {label}
       </span>
@@ -102,7 +102,7 @@ function StatsCard({
       </p>
       <span
         className={cn(
-          "absolute right-2 bottom-2 shrink-0 rounded-xl p-1.5",
+          "absolute right-2 bottom-2 shrink-0 rounded-md p-1.5",
           appointmentMobileAgendaStatToneClassName(tone),
         )}
       >
@@ -211,7 +211,7 @@ function MobileAgendaCard({
           type="button"
           size="sm"
           variant="outline"
-          className="rounded-2xl"
+          className="rounded-lg"
           onClick={onOpen}
         >
           {appointmentText("appointments_open")}

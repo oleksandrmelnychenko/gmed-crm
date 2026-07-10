@@ -100,19 +100,30 @@ export function NavPanel() {
   const { user, logout } = useAuth();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const { collapsed } = useNavState();
+  const { collapsed, toggle } = useNavState();
   const isPatientPortal = user?.role === "patient";
   const patientPortalNav = isPatientPortal ? listPatientPortalNavItems().map(toPatientNavItem) : [];
   const staffNavBySection =
     user && user.role !== "patient"
       ? groupStaffNavItems(listStaffNavItems(user.role))
       : new Map<StaffNavSection, NavItem[]>();
+  const closeOnCompactViewport = () => {
+    if (
+      !collapsed &&
+      typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 1023px)").matches
+    ) {
+      toggle();
+    }
+  };
 
   return (
     <nav
       className={cn(
-        "relative flex flex-col bg-sidebar overflow-y-auto overflow-x-hidden shrink-0 transition-[width] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
-        collapsed ? "w-14 items-center" : "w-60",
+        "relative z-40 flex shrink-0 flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain bg-sidebar transition-[width,transform] duration-200 ease-out motion-reduce:transition-none lg:relative lg:inset-auto lg:translate-x-0 max-lg:fixed max-lg:inset-y-12 max-lg:left-0 max-lg:w-72 max-lg:border-r max-lg:border-sidebar-border max-lg:shadow-xl",
+        collapsed
+          ? "w-14 items-center max-lg:pointer-events-none max-lg:-translate-x-full"
+          : "w-60 max-lg:translate-x-0",
       )}
     >
       {user && (
@@ -122,22 +133,36 @@ export function NavPanel() {
       )}
       <div className={cn("flex-1 py-4", collapsed ? "px-2" : "px-3")}>
         {isPatientPortal ? (
-          <NavGroup items={patientPortalNav} tr={tr} translations={t} collapsed={collapsed} />
+          <NavGroup
+            items={patientPortalNav}
+            tr={tr}
+            translations={t}
+            collapsed={collapsed}
+            onNavigate={closeOnCompactViewport}
+          />
         ) : (
-          <StaffNavGroups staffNavBySection={staffNavBySection} tr={tr} translations={t} collapsed={collapsed} />
+          <StaffNavGroups
+            staffNavBySection={staffNavBySection}
+            tr={tr}
+            translations={t}
+            collapsed={collapsed}
+            onNavigate={closeOnCompactViewport}
+          />
         )}
       </div>
 
       <div className={cn("shrink-0 border-t border-sidebar-border", collapsed ? "py-2 px-2" : "py-3 px-3")}>
         <button
+          type="button"
           onClick={logout}
           title={collapsed ? tr.nav_logout : undefined}
+          aria-label={collapsed ? tr.nav_logout : undefined}
           className={cn(
-            "flex items-center rounded-lg text-sidebar-foreground/85 hover:text-rose-600 hover:bg-rose-50 transition-colors",
+            "flex items-center rounded-lg text-sidebar-foreground/85 transition-colors hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring motion-reduce:transition-none",
             collapsed ? "justify-center size-11 mx-auto" : "gap-3 w-full px-3 py-2.5 text-sm",
           )}
         >
-          <LogOut className={cn("shrink-0", collapsed ? "size-5" : "size-[18px]")} />
+          <LogOut aria-hidden="true" className={cn("shrink-0", collapsed ? "size-5" : "size-[18px]")} />
           {!collapsed && <span className="whitespace-nowrap overflow-hidden">{tr.nav_logout}</span>}
         </button>
       </div>
@@ -150,11 +175,13 @@ function StaffNavGroups({
   tr,
   translations,
   collapsed,
+  onNavigate,
 }: {
   staffNavBySection: Map<StaffNavSection, NavItem[]>;
   tr: Record<string, string>;
   translations: UnknownTranslations;
   collapsed: boolean;
+  onNavigate: () => void;
 }) {
   const sections = STAFF_NAV_SECTIONS.filter((section) => (staffNavBySection.get(section)?.length ?? 0) > 0);
 
@@ -171,7 +198,13 @@ function StaffNavGroups({
             </div>
           )}
           {collapsed && <SectionDivider />}
-          <NavGroup items={staffNavBySection.get(section) ?? []} tr={tr} translations={translations} collapsed={collapsed} />
+          <NavGroup
+            items={staffNavBySection.get(section) ?? []}
+            tr={tr}
+            translations={translations}
+            collapsed={collapsed}
+            onNavigate={onNavigate}
+          />
         </div>
       ))}
     </div>
@@ -193,11 +226,13 @@ function NavGroup({
   tr,
   translations,
   collapsed,
+  onNavigate,
 }: {
   items: NavItem[];
   tr: Record<string, string>;
   translations: UnknownTranslations;
   collapsed: boolean;
+  onNavigate: () => void;
 }) {
   return (
     <div className="flex flex-col gap-0.5">
@@ -210,9 +245,11 @@ function NavGroup({
             to={item.to}
             end={item.to === "/"}
             title={collapsed ? label : undefined}
+            aria-label={collapsed ? label : undefined}
+            onClick={onNavigate}
             className={({ isActive }: { isActive: boolean }) =>
               cn(
-                "relative flex items-center rounded-lg text-sm transition-colors",
+                "relative flex items-center rounded-lg text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring motion-reduce:transition-none",
                 collapsed ? "justify-center size-11 mx-auto" : "gap-3 px-3 h-10",
                 isActive
                   ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-r-full before:bg-[var(--brand)]"
@@ -223,6 +260,7 @@ function NavGroup({
             {({ isActive }: { isActive: boolean }) => (
               <>
                 <Icon
+                  aria-hidden="true"
                   strokeWidth={isActive ? 1.85 : 1.6}
                   className={cn("shrink-0", collapsed ? "size-5" : "size-[18px]")}
                 />
@@ -239,7 +277,7 @@ function NavGroup({
 }
 
 function SectionDivider() {
-  return <div className="h-px w-6 bg-sidebar-border mx-auto my-1" />;
+  return <div aria-hidden="true" className="mx-auto my-1 h-px w-6 bg-sidebar-border" />;
 }
 
 function userInitials(name: string): string {
@@ -298,7 +336,7 @@ function UserCard({
     );
   }
   return (
-    <div className="flex items-center gap-2.5 rounded-xl border border-border bg-card px-2.5 py-2 shadow-sm">
+    <div className="flex items-center gap-2.5 rounded-lg border border-border bg-card px-2.5 py-2 shadow-sm">
       <div className="flex items-center justify-center size-9 shrink-0 rounded-full bg-[var(--brand)] text-[12px] font-semibold text-white">
         {userInitials(name)}
       </div>

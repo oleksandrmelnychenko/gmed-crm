@@ -106,7 +106,7 @@ function RealtimeConnectionIndicator({
       ? "bg-emerald-500"
       : status === "disconnected"
         ? "bg-rose-500"
-        : "bg-amber-500 animate-pulse";
+        : "bg-amber-500 animate-pulse motion-reduce:animate-none";
   const label = realtimeStatusLabel(status, attempt, translations);
 
   return (
@@ -215,18 +215,18 @@ export function Topbar() {
 
   return (
     <>
-      <header className="relative z-30 flex items-center justify-between h-12 px-3 bg-card border-b border-border shrink-0">
-        <div className="flex items-center gap-1">
+      <header className="relative z-30 flex h-12 shrink-0 items-center justify-between border-b border-border bg-card px-2 sm:px-3">
+        <div className="flex min-w-0 items-center gap-1">
           <TopbarIconButton onClick={toggleNav} title={t.ui_toggle_sidebar}>
             <PanelLeft className="size-[17px]" />
           </TopbarIconButton>
-          <div className="h-4 w-px bg-border mx-1" />
-          <span className="px-2 text-[13px] font-semibold tracking-tight text-foreground">
+          <div aria-hidden="true" className="mx-1 h-4 w-px bg-border" />
+          <span className="truncate px-2 text-[13px] font-semibold tracking-normal text-foreground">
             {t.app_name}
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
           <RealtimeConnectionIndicator
             status={realtimeConnection.status}
             attempt={realtimeConnection.attempt}
@@ -252,7 +252,7 @@ export function Topbar() {
             }}
             title={t.topbar_notifications}
           >
-            <Bell className="size-[17px]" />
+            <Bell aria-hidden="true" className="size-[17px]" />
             {unread > 0 && (
               <span className="absolute top-0.5 right-0.5 flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-[var(--brand)] text-[10px] font-semibold text-white px-1">
                 {unread}
@@ -266,9 +266,9 @@ export function Topbar() {
             onClick={toggleLang}
             title={t.topbar_language_toggle}
             aria-label={t.topbar_language_toggle}
-            className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[12px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className="flex h-8 items-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:px-2.5"
           >
-            <Globe className="size-3.5" />
+            <Globe aria-hidden="true" className="size-3.5" />
             {t.common_lang_native}
           </button>
         </div>
@@ -312,7 +312,7 @@ function TopbarIconButton({
       onClick={onClick}
       title={title}
       aria-label={title}
-      className="relative flex items-center justify-center size-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+      className="relative flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
     >
       {children}
     </button>
@@ -336,7 +336,7 @@ function OnlineAvatars({
   return (
     <button
       type="button"
-      className="flex items-center cursor-pointer [&>*+*]:-ml-1.5"
+      className="flex items-center cursor-pointer [&>*+*]:-ml-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onClick={onToggle}
       aria-label={t.topbar_online_users}
     >
@@ -432,7 +432,7 @@ function NotificationPanel({
         className="fixed inset-0 z-40 cursor-default border-0 bg-transparent p-0"
         onClick={onClose}
       />
-      <div className="fixed right-4 top-16 z-50 w-96 rounded-2xl border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200">
+      <div className="fixed inset-x-3 top-14 z-50 max-h-[calc(100dvh-4rem)] overflow-hidden rounded-lg border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200 motion-reduce:animate-none sm:inset-x-auto sm:right-4 sm:top-16 sm:w-96">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <h3 className="text-sm font-semibold">{t.topbar_notifications}</h3>
           <button
@@ -569,7 +569,7 @@ function UsersPanel({
           className="fixed inset-0 z-40 cursor-default"
           onClick={onClose}
         />
-        <div className="fixed right-4 top-16 z-50 w-96 rounded-2xl border border-border bg-background shadow-xl flex flex-col max-h-[480px] animate-in fade-in slide-in-from-top-2 duration-200">
+        <div className="fixed inset-x-3 top-14 z-50 flex max-h-[calc(100dvh-4rem)] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200 motion-reduce:animate-none sm:inset-x-auto sm:right-4 sm:top-16 sm:w-96 sm:max-h-[480px]">
           {/* Chat header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <div className="flex items-center gap-2">
@@ -657,7 +657,7 @@ function UsersPanel({
         className="fixed inset-0 z-40 cursor-default border-0 bg-transparent p-0"
         onClick={onClose}
       />
-      <div className="fixed right-4 top-16 z-50 w-80 rounded-2xl border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200">
+      <div className="fixed inset-x-3 top-14 z-50 max-h-[calc(100dvh-4rem)] overflow-hidden rounded-lg border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200 motion-reduce:animate-none sm:inset-x-auto sm:right-4 sm:top-16 sm:w-80">
         <div className="px-4 py-3 border-b border-border">
           <h3 className="text-sm font-semibold">
             {t.topbar_online} ({users.length})

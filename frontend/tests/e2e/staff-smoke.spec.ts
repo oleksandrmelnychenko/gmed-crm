@@ -1859,3 +1859,47 @@ test.describe("lead onboarding wizard", () => {
     await expect(wizard.getByRole("button", { name: "Patient anlegen" })).toBeDisabled();
   });
 });
+
+test.describe("responsive staff workspace", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.addInitScript(() => {
+      window.localStorage.setItem("gmed_lang", "de");
+    });
+    await installStaffApiMocks(page, {
+      role: "patient_manager",
+      email: "pm@gmed.de",
+      name: "PM GMED",
+      userId: "00000000-0000-0000-0000-000000000003",
+    });
+    await loginAsStaff(page, "pm@gmed.de");
+  });
+
+  test("keeps the workspace usable and switches appointments to the compact agenda", async ({
+    page,
+  }) => {
+    await page.goto("/leads");
+
+    await expect.poll(async () => (await page.locator("main").boundingBox())?.width ?? 0)
+      .toBeGreaterThan(340);
+    const viewport = await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth);
+
+    await page.getByRole("button", { name: "Benachrichtigungen" }).click();
+    const notificationPanel = page
+      .getByRole("heading", { name: "Benachrichtigungen", exact: true })
+      .locator("xpath=../..");
+    await expect(notificationPanel).toBeVisible();
+    const notificationPanelBox = await notificationPanel.boundingBox();
+    expect(notificationPanelBox?.x).toBeGreaterThanOrEqual(0);
+    expect((notificationPanelBox?.x ?? 0) + (notificationPanelBox?.width ?? 0))
+      .toBeLessThanOrEqual(viewport.clientWidth);
+
+    await page.goto("/appointments");
+    await expect(page.getByRole("button", { name: "Patienten heute", exact: true })).toBeVisible();
+    await expect(page.locator(".appointments-calendar-shell")).toHaveCount(0);
+  });
+});

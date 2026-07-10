@@ -29,7 +29,6 @@ import {
   buildAppointmentTimelineEvents,
   canResubmitInterpreterReport,
   normalizeAppointmentWorkspaceTab,
-  shouldUseInterpreterMobileAgenda,
 } from "@/pages/appointments/model/selectors";
 import {
   appointmentPermissions,
@@ -1208,20 +1207,17 @@ function useStaffAppointmentsPageContent() {
       mobileAgendaWeekCount: mobileWeekCount,
     };
   }, [activeOperationalScope, scopedAppointments, todayDate, weekEnd, weekStart]);
-  const useInterpreterMobileAgenda = shouldUseInterpreterMobileAgenda(
-    user?.role,
-    isMobile,
-  );
+  const useMobileAgenda = isMobile;
   const mobileAgendaSections = useMemo(
     () =>
-      useInterpreterMobileAgenda
+      useMobileAgenda
         ? buildInterpreterMobileAgendaSections(
             scopedAppointments,
             todayDate,
             t.appointments_today,
           ).slice(0, 8)
         : [],
-    [scopedAppointments, t.appointments_today, todayDate, useInterpreterMobileAgenda],
+    [scopedAppointments, t.appointments_today, todayDate, useMobileAgenda],
   );
   const calendarEvents = useMemo(
     () =>
@@ -1599,7 +1595,7 @@ function useStaffAppointmentsPageContent() {
         />
 
         <AppointmentsSchedulerSurface
-          useMobileAgenda={useInterpreterMobileAgenda}
+          useMobileAgenda={useMobileAgenda}
           mobileAgenda={{
             todayLabel: t.dash_patients_today,
             pendingLabel: t.mfa_pending,

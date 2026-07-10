@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { SortStack } from "@/components/data-table/types";
 
 import type { ProviderOrganizationLevel, ProviderSummary } from "../../model/types";
-import { buildProviderTreeRows } from "./use-providers-list-table-model";
+import {
+  buildProviderTreeRows,
+  summarizeProviderMetrics,
+} from "./use-providers-list-table-model";
 
 const providerSort: SortStack = [{ field: "provider", dir: "asc" }];
 const accessors = {
@@ -148,6 +151,30 @@ describe("buildProviderTreeRows", () => {
       childCount: 0,
       depth: 0,
       isMatched: true,
+    });
+  });
+});
+
+describe("summarizeProviderMetrics", () => {
+  it("treats incomplete numeric counters from the API as zero", () => {
+    const incompleteProvider = {
+      ...provider("clinic", "Clinic", "clinic"),
+      appointment_count: undefined,
+      concierge_service_count: undefined,
+      doctor_count: undefined,
+      open_concierge_service_count: undefined,
+      patient_count: undefined,
+      service_count: undefined,
+    } as unknown as ProviderSummary;
+
+    expect(summarizeProviderMetrics([incompleteProvider])).toMatchObject({
+      appointments: 0,
+      conciergeRequests: 0,
+      doctors: 0,
+      openConciergeRequests: 0,
+      patients: 0,
+      services: 0,
+      total: 1,
     });
   });
 });

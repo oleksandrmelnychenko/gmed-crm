@@ -13,7 +13,7 @@ export const appointmentSchedulerToolbarSearchButtonClassName =
 export const appointmentSchedulerToolbarQueueButtonClassName =
   "h-8 shrink-0 rounded-full bg-transparent px-3 hover:cursor-pointer hover:bg-transparent";
 export const appointmentMobileAgendaCardClassName =
-  "rounded-[1.5rem] border border-slate-200/80 bg-slate-50/85 p-4 shadow-sm";
+  "rounded-lg border border-slate-200/80 bg-slate-50/85 p-4 shadow-sm";
 export const appointmentMobileAgendaSearchInputClassName =
   "h-10 rounded-xl bg-slate-50";
 export const appointmentMobileAgendaInfoBadgeClassName =

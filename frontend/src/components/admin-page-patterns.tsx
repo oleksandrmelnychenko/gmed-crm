@@ -71,6 +71,10 @@ function SheetFooterError({ error }: { error?: ReactNode }) {
   ) : null;
 }
 
+function normalizeMetricValue(value: ReactNode) {
+  return typeof value === "number" && !Number.isFinite(value) ? "-" : value;
+}
+
 export function AdminToolbar({
   children,
   className,
@@ -110,6 +114,7 @@ export function AdminInlineMetric({
   const hasDescription = Boolean(description);
   const hasTwoLabels = hasLabel && hasDescription;
   const singleLabel = hasLabel ? label : description;
+  const displayValue = normalizeMetricValue(value);
 
   return (
     <article
@@ -126,7 +131,7 @@ export function AdminInlineMetric({
       <div className="flex items-baseline gap-2">
         <Icon className="size-4.5 shrink-0 text-muted-foreground/55" />
         <p className="text-2xl font-semibold leading-[0.75] text-foreground">
-          {value}
+          {displayValue}
         </p>
       </div>
       {hasTwoLabels ? (

@@ -34,6 +34,42 @@ type ProviderMetrics = {
   total: number;
 };
 
+function countOrZero(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+export function summarizeProviderMetrics(
+  providers: readonly ProviderSummary[],
+): ProviderMetrics {
+  return providers.reduce(
+    (acc, provider) => {
+      acc.total += 1;
+      if (provider.is_active) acc.active += 1;
+      if (provider.provider_type === "medical") acc.medical += 1;
+      if (provider.provider_type === "non_medical") acc.nonMedical += 1;
+      acc.doctors += countOrZero(provider.doctor_count);
+      acc.patients += countOrZero(provider.patient_count);
+      acc.appointments += countOrZero(provider.appointment_count);
+      acc.services += countOrZero(provider.service_count);
+      acc.conciergeRequests += countOrZero(provider.concierge_service_count);
+      acc.openConciergeRequests += countOrZero(provider.open_concierge_service_count);
+      return acc;
+    },
+    {
+      active: 0,
+      appointments: 0,
+      conciergeRequests: 0,
+      doctors: 0,
+      medical: 0,
+      nonMedical: 0,
+      openConciergeRequests: 0,
+      patients: 0,
+      services: 0,
+      total: 0,
+    },
+  );
+}
+
 type ProviderTreeRowsResult = {
   rows: ProviderSummary[];
   treeMetaById: Map<string, ProviderTreeMeta>;
@@ -169,35 +205,7 @@ export function useProvidersListTableModel({
   sortStack,
   tr,
 }: UseProvidersListTableModelArgs) {
-  const metrics = useMemo<ProviderMetrics>(() => {
-    return providers.reduce(
-      (acc, provider) => {
-        acc.total += 1;
-        if (provider.is_active) acc.active += 1;
-        if (provider.provider_type === "medical") acc.medical += 1;
-        if (provider.provider_type === "non_medical") acc.nonMedical += 1;
-        acc.doctors += provider.doctor_count;
-        acc.patients += provider.patient_count;
-        acc.appointments += provider.appointment_count;
-        acc.services += provider.service_count;
-        acc.conciergeRequests += provider.concierge_service_count;
-        acc.openConciergeRequests += provider.open_concierge_service_count;
-        return acc;
-      },
-      {
-        active: 0,
-        appointments: 0,
-        conciergeRequests: 0,
-        doctors: 0,
-        medical: 0,
-        nonMedical: 0,
-        openConciergeRequests: 0,
-        patients: 0,
-        services: 0,
-        total: 0,
-      },
-    );
-  }, [providers]);
+  const metrics = useMemo(() => summarizeProviderMetrics(providers), [providers]);
 
   const accessorColumns = useMemo(
     () => buildProviderColumns(tr, providers, { lang }),

@@ -196,7 +196,7 @@ function SheetOverlay({ className, ...props }: SheetPrimitive.Backdrop.Props) {
     <SheetPrimitive.Backdrop
       data-slot="sheet-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-black/10 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0 supports-backdrop-filter:backdrop-blur-xs",
+        "fixed inset-0 z-50 bg-black/10 transition-opacity duration-150 motion-reduce:transition-none data-ending-style:opacity-0 data-starting-style:opacity-0 supports-backdrop-filter:backdrop-blur-xs",
         className
       )}
       {...props}
@@ -273,7 +273,7 @@ function SheetContent({
         data-slot="sheet-content"
         data-side={side}
         className={cn(
-          "flex min-h-0 flex-col gap-4 bg-popover text-sm text-popover-foreground",
+          "flex min-h-0 flex-col gap-4 overscroll-contain bg-popover text-sm text-popover-foreground",
           className
         )}
         onChangeCapture={handleChangeCapture}
@@ -294,7 +294,7 @@ function SheetContent({
         data-slot="sheet-content"
         data-side={side}
         className={cn(
-          "fixed z-50 flex flex-col gap-4 bg-popover bg-clip-padding text-sm text-popover-foreground shadow-lg transition duration-200 ease-in-out data-ending-style:opacity-0 data-starting-style:opacity-0 data-[side=bottom]:inset-x-0 data-[side=bottom]:bottom-0 data-[side=bottom]:h-auto data-[side=bottom]:border-t data-[side=bottom]:data-ending-style:translate-y-[2.5rem] data-[side=bottom]:data-starting-style:translate-y-[2.5rem] data-[side=left]:top-3 data-[side=left]:bottom-3 data-[side=left]:left-3 data-[side=left]:w-3/4 data-[side=left]:rounded-[20px] data-[side=left]:border data-[side=left]:border-border data-[side=left]:data-ending-style:translate-x-[-2.5rem] data-[side=left]:data-starting-style:translate-x-[-2.5rem] data-[side=right]:top-3 data-[side=right]:bottom-3 data-[side=right]:right-3 data-[side=right]:w-3/4 data-[side=right]:rounded-[20px] data-[side=right]:border data-[side=right]:border-border data-[side=right]:data-ending-style:translate-x-[2.5rem] data-[side=right]:data-starting-style:translate-x-[2.5rem] data-[side=top]:inset-x-0 data-[side=top]:top-0 data-[side=top]:h-auto data-[side=top]:border-b data-[side=top]:data-ending-style:translate-y-[-2.5rem] data-[side=top]:data-starting-style:translate-y-[-2.5rem] data-[side=left]:sm:max-w-[50vw] data-[side=right]:sm:max-w-[50vw]",
+          "fixed z-50 flex flex-col gap-4 overscroll-contain bg-popover bg-clip-padding text-sm text-popover-foreground shadow-lg transition-[opacity,transform] duration-200 ease-in-out motion-reduce:transition-none data-ending-style:opacity-0 data-starting-style:opacity-0 data-[side=bottom]:inset-x-0 data-[side=bottom]:bottom-0 data-[side=bottom]:h-auto data-[side=bottom]:border-t data-[side=bottom]:data-ending-style:translate-y-[2.5rem] data-[side=bottom]:data-starting-style:translate-y-[2.5rem] data-[side=left]:inset-y-0 data-[side=left]:left-0 data-[side=left]:w-full data-[side=left]:border-r data-[side=left]:border-border data-[side=left]:data-ending-style:translate-x-[-2.5rem] data-[side=left]:data-starting-style:translate-x-[-2.5rem] data-[side=right]:inset-y-0 data-[side=right]:right-0 data-[side=right]:w-full data-[side=right]:border-l data-[side=right]:border-border data-[side=right]:data-ending-style:translate-x-[2.5rem] data-[side=right]:data-starting-style:translate-x-[2.5rem] data-[side=top]:inset-x-0 data-[side=top]:top-0 data-[side=top]:h-auto data-[side=top]:border-b data-[side=top]:data-ending-style:translate-y-[-2.5rem] data-[side=top]:data-starting-style:translate-y-[-2.5rem] data-[side=left]:sm:top-3 data-[side=left]:sm:bottom-3 data-[side=left]:sm:left-3 data-[side=left]:sm:w-3/4 data-[side=left]:sm:rounded-lg data-[side=left]:sm:border data-[side=right]:sm:top-3 data-[side=right]:sm:bottom-3 data-[side=right]:sm:right-3 data-[side=right]:sm:w-3/4 data-[side=right]:sm:rounded-lg data-[side=right]:sm:border data-[side=left]:sm:max-w-[50vw] data-[side=right]:sm:max-w-[50vw]",
           className
         )}
         onChangeCapture={handleChangeCapture}

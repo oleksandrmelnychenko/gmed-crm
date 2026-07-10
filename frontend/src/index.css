@@ -137,10 +137,14 @@
     }
   html {
     @apply font-sans;
+    color-scheme: light;
     }
   button,
-  [data-slot="button"] {
+  [data-slot="button"],
+  a {
     cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
     }
   button:disabled,
   [data-slot="button"]:disabled,
@@ -175,6 +179,21 @@
   *::-webkit-scrollbar-corner {
     background: transparent;
     }
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 @layer components {
