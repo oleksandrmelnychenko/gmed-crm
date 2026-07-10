@@ -202,6 +202,113 @@ async fn create_case_assigns_format_c_yyyymmdd_nnnn_and_is_unique() {
     );
 }
 
+#[tokio::test]
+async fn lead_case_completes_anamnesis_without_creating_patient() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let bearer = auth_header_for(admin_id, "ceo");
+    let tag = unique_tag("lead-case");
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, created_by)
+           VALUES ($1, $2, $3, $4)
+           RETURNING id"#,
+    )
+    .bind(format!("First {tag}"))
+    .bind(format!("Last {tag}"))
+    .bind(format!("{tag}@example.com"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let patient_count_before: i64 = sqlx::query_scalar("SELECT count(*) FROM patients")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let (create_status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/cases",
+        &bearer,
+        Some(json!({
+            "lead_id": lead_id,
+            "hauptanfragegrund": "Knee pain",
+        })),
+    )
+    .await;
+    assert_eq!(create_status, StatusCode::CREATED, "create body: {created}");
+    assert_eq!(created["lead_id"], lead_id.to_string());
+    assert!(created["patient_id"].is_null());
+    let case_uuid = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+
+    let (repeat_status, repeated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/cases",
+        &bearer,
+        Some(json!({ "lead_id": lead_id })),
+    )
+    .await;
+    assert_eq!(repeat_status, StatusCode::OK, "repeat body: {repeated}");
+    assert_eq!(repeated["id"], created["id"]);
+    assert_eq!(repeated["already_exists"], true);
+
+    let (blocked_status, blocked) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_uuid}/intake-completion"),
+        &bearer,
+        Some(json!({ "completed": true })),
+    )
+    .await;
+    assert_eq!(blocked_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        blocked["blocking_fields"],
+        json!(["aktuelle_anamnese", "zuweiser"])
+    );
+
+    let (update_status, update_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_uuid}/anamnesis"),
+        &bearer,
+        Some(json!({
+            "aktuelle_anamnese": "Pain for six months after a sports injury.",
+            "zuweiser": "Selbstanfrage",
+        })),
+    )
+    .await;
+    assert_eq!(update_status, StatusCode::OK, "update body: {update_body}");
+
+    let (complete_status, completed) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_uuid}/intake-completion"),
+        &bearer,
+        Some(json!({ "completed": true })),
+    )
+    .await;
+    assert_eq!(
+        complete_status,
+        StatusCode::OK,
+        "complete body: {completed}"
+    );
+    assert_eq!(completed["completed"], true);
+    assert!(completed["intake_completed_at"].is_string());
+
+    let detail = fetch_case(&app, &bearer, case_uuid).await;
+    assert_eq!(detail["lead_id"], lead_id.to_string());
+    assert!(detail["patient_id"].is_null());
+    assert!(detail["intake_completed_at"].is_string());
+
+    let patient_count_after: i64 = sqlx::query_scalar("SELECT count(*) FROM patients")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(patient_count_after, patient_count_before);
+}
+
 // ============================================================================
 // EPIC 2 T-016 — update_anamnesis overview round-trip
 // ============================================================================

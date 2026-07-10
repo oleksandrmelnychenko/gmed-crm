@@ -5,6 +5,46 @@ use gmed_domain::role::Role;
 use sqlx::Row;
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordSubject {
+    Patient(Uuid),
+    Lead(Uuid),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordSubjectError {
+    Missing,
+    Ambiguous,
+}
+
+impl RecordSubject {
+    pub fn from_ids(
+        patient_id: Option<Uuid>,
+        lead_id: Option<Uuid>,
+    ) -> Result<Self, RecordSubjectError> {
+        match (patient_id, lead_id) {
+            (Some(patient_id), None) => Ok(Self::Patient(patient_id)),
+            (None, Some(lead_id)) => Ok(Self::Lead(lead_id)),
+            (None, None) => Err(RecordSubjectError::Missing),
+            (Some(_), Some(_)) => Err(RecordSubjectError::Ambiguous),
+        }
+    }
+
+    pub fn patient_id(self) -> Option<Uuid> {
+        match self {
+            Self::Patient(id) => Some(id),
+            Self::Lead(_) => None,
+        }
+    }
+
+    pub fn lead_id(self) -> Option<Uuid> {
+        match self {
+            Self::Patient(_) => None,
+            Self::Lead(id) => Some(id),
+        }
+    }
+}
+
 pub fn requires_patient_assignment(role: Role) -> bool {
     matches!(
         role,
@@ -91,4 +131,47 @@ pub fn mask_phone(value: &str) -> String {
 
     let suffix = &digits[digits.len() - 4..];
     format!("***{suffix}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RecordSubject, RecordSubjectError};
+    use uuid::Uuid;
+
+    #[test]
+    fn record_subject_requires_exactly_one_id() {
+        let patient_id = Uuid::new_v4();
+        let lead_id = Uuid::new_v4();
+
+        assert_eq!(
+            RecordSubject::from_ids(Some(patient_id), None),
+            Ok(RecordSubject::Patient(patient_id))
+        );
+        assert_eq!(
+            RecordSubject::from_ids(None, Some(lead_id)),
+            Ok(RecordSubject::Lead(lead_id))
+        );
+        assert_eq!(
+            RecordSubject::from_ids(None, None),
+            Err(RecordSubjectError::Missing)
+        );
+        assert_eq!(
+            RecordSubject::from_ids(Some(patient_id), Some(lead_id)),
+            Err(RecordSubjectError::Ambiguous)
+        );
+    }
+
+    #[test]
+    fn record_subject_exposes_only_its_active_id() {
+        let patient_id = Uuid::new_v4();
+        let lead_id = Uuid::new_v4();
+
+        let patient = RecordSubject::Patient(patient_id);
+        assert_eq!(patient.patient_id(), Some(patient_id));
+        assert_eq!(patient.lead_id(), None);
+
+        let lead = RecordSubject::Lead(lead_id);
+        assert_eq!(lead.patient_id(), None);
+        assert_eq!(lead.lead_id(), Some(lead_id));
+    }
 }

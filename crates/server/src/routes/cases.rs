@@ -31,6 +31,10 @@ pub fn router() -> Router<AppState> {
         .route("/cases/{case_id}/history", get(get_case_history))
         .route("/cases/{case_id}/anamnesis", post(update_anamnesis))
         .route(
+            "/cases/{case_id}/intake-completion",
+            post(update_intake_completion),
+        )
+        .route(
             "/cases/{case_id}/vorerkrankungen",
             post(save_vorerkrankungen),
         )
@@ -58,7 +62,8 @@ pub fn router() -> Router<AppState> {
 
 #[derive(Deserialize)]
 struct CreateCaseRequest {
-    patient_id: Uuid,
+    patient_id: Option<Uuid>,
+    lead_id: Option<Uuid>,
     hauptanfragegrund: Option<String>,
     aktuelle_anamnese: Option<String>,
     zuweiser_doctor_id: Option<Uuid>,
@@ -71,6 +76,11 @@ struct UpdateAnamnesisRequest {
     aktuelle_anamnese: Option<String>,
     zuweiser_doctor_id: Option<Uuid>,
     zuweiser: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateIntakeCompletionRequest {
+    completed: bool,
 }
 
 #[derive(Deserialize)]
@@ -283,6 +293,7 @@ struct ListCasesQuery {
     search: Option<String>,
     status: Option<String>,
     patient_id: Option<Uuid>,
+    lead_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -343,28 +354,35 @@ async fn list_cases(
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
 
     match sqlx::query(
-        r#"SELECT c.id, c.case_id, c.patient_id, c.status, c.hauptanfragegrund,
-                  c.created_at, p.first_name, p.last_name, p.patient_id AS p_pid
+        r#"SELECT c.id, c.case_id, c.patient_id, c.lead_id, c.manager_id,
+                  c.status, c.hauptanfragegrund, c.created_at,
+                  COALESCE(p.first_name, l.first_name) AS first_name,
+                  COALESCE(p.last_name, l.last_name) AS last_name,
+                  p.patient_id AS p_pid
            FROM cases c
-           JOIN patients p ON p.id = c.patient_id
+           LEFT JOIN patients p ON p.id = c.patient_id
+           LEFT JOIN leads l ON l.id = c.lead_id
            WHERE ($1::text = '%%'
                   OR de_normalize(concat_ws(' ',
                        c.case_id, c.hauptanfragegrund, c.zuweiser,
-                       p.first_name, p.last_name, p.patient_id,
-                       p.email, p.phone_primary, p.phone_secondary,
+                       p.first_name, p.last_name, p.patient_id, l.first_name, l.last_name,
+                       p.email, p.phone_primary, p.phone_secondary, l.email, l.phone,
                        p.insurance_number
                      )) LIKE de_normalize($1)
-                  OR (length(regexp_replace($1, '\D', '', 'g')) >= 3
-                      AND phone_digits(concat_ws(' ', p.phone_primary, p.phone_secondary)) LIKE '%' || regexp_replace($1, '\D', '', 'g') || '%')
+                  OR (length(regexp_replace($1, '\D', '', 'g')) >= 3 AND
+                      phone_digits(concat_ws(' ', p.phone_primary, p.phone_secondary, l.phone))
+                      LIKE '%' || regexp_replace($1, '\D', '', 'g') || '%')
            )
              AND ($2::text IS NULL OR c.status = $2)
              AND ($3::uuid IS NULL OR c.patient_id = $3)
+             AND ($4::uuid IS NULL OR c.lead_id = $4)
            ORDER BY c.created_at DESC
            LIMIT 200"#,
     )
     .bind(search_pattern)
     .bind(query.status)
     .bind(query.patient_id)
+    .bind(query.lead_id)
     .fetch_all(&state.db)
     .await
     {
@@ -372,9 +390,12 @@ async fn list_cases(
             let mut cases = Vec::with_capacity(rows.len());
             for r in rows {
                 let case_id = r.try_get::<Uuid, _>("id").unwrap_or_default();
-                let patient_id = r.try_get::<Uuid, _>("patient_id").unwrap_or_default();
+                let patient_id = r
+                    .try_get::<Option<Uuid>, _>("patient_id")
+                    .unwrap_or_default();
+                let lead_id = r.try_get::<Option<Uuid>, _>("lead_id").unwrap_or_default();
 
-                match can_access_case(&state, &auth, case_id, Some(patient_id)).await {
+                match can_access_case_subject(&state, &auth, case_id, patient_id, lead_id).await {
                     Ok(true) => {}
                     Ok(false) => continue,
                     Err(resp) => return resp,
@@ -385,6 +406,7 @@ async fn list_cases(
                     "case_uuid": case_id,
                     "case_id": r.try_get::<String, _>("case_id").unwrap_or_default(),
                     "patient_id": patient_id,
+                    "lead_id": lead_id,
                     "patient_name": format!(
                         "{} {}",
                         r.try_get::<String, _>("first_name").unwrap_or_default(),
@@ -615,9 +637,87 @@ async fn create_case(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
         return e;
     }
-    match ensure_patient_access(&state, &auth, body.patient_id).await {
-        Ok(()) => {}
-        Err(resp) => return resp,
+
+    let subject = match access::RecordSubject::from_ids(body.patient_id, body.lead_id) {
+        Ok(subject) => subject,
+        Err(access::RecordSubjectError::Missing) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Case requires patient_id or lead_id",
+            );
+        }
+        Err(access::RecordSubjectError::Ambiguous) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Case cannot belong to patient and lead at the same time",
+            );
+        }
+    };
+
+    match subject {
+        access::RecordSubject::Patient(patient_id) => {
+            if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+                return resp;
+            }
+        }
+        access::RecordSubject::Lead(lead_id) => {
+            let lead = match sqlx::query("SELECT converted_patient_id FROM leads WHERE id = $1")
+                .bind(lead_id)
+                .fetch_optional(&state.db)
+                .await
+            {
+                Ok(Some(row)) => row,
+                Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
+                Err(error) => {
+                    tracing::error!(error = %error, lead_id = %lead_id, "load lead case subject");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            };
+            if lead
+                .try_get::<Option<Uuid>, _>("converted_patient_id")
+                .unwrap_or_default()
+                .is_some()
+            {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Converted lead must use its patient context",
+                );
+            }
+
+            let existing = match sqlx::query(
+                r#"SELECT id, case_id, manager_id, created_at, retention_until
+                   FROM cases
+                   WHERE lead_id = $1"#,
+            )
+            .bind(lead_id)
+            .fetch_optional(&state.db)
+            .await
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    tracing::error!(error = %error, lead_id = %lead_id, "load existing lead case");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            };
+            if let Some(row) = existing {
+                let manager_id = row.try_get::<Uuid, _>("manager_id").unwrap_or_default();
+                if !auth.role.has_full_access() && manager_id != auth.user_id {
+                    return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+                }
+                return (
+                    StatusCode::OK,
+                    Json(serde_json::json!({
+                        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                        "case_uuid": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                        "case_id": row.try_get::<String, _>("case_id").unwrap_or_default(),
+                        "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                        "retention_until": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("retention_until").unwrap_or_default().map(|value| value.to_rfc3339()),
+                        "already_exists": true,
+                    })),
+                )
+                    .into_response();
+            }
+        }
     }
 
     let seq: i64 = match sqlx::query_scalar!("SELECT nextval('case_id_seq') AS \"v!\"")
@@ -645,14 +745,15 @@ async fn create_case(
 
     let row = match sqlx::query(
         "INSERT INTO cases (
-            case_id, patient_id, manager_id, hauptanfragegrund, aktuelle_anamnese,
+            case_id, patient_id, lead_id, manager_id, hauptanfragegrund, aktuelle_anamnese,
             zuweiser_doctor_id, zuweiser, retention_until, last_clinical_update_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, now() + ($8 * interval '1 year'), now())
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now() + ($9 * interval '1 year'), now())
          RETURNING id, case_id, created_at, retention_until",
     )
     .bind(&cid)
-    .bind(body.patient_id)
+    .bind(subject.patient_id())
+    .bind(subject.lead_id())
     .bind(auth.user_id)
     .bind(body.hauptanfragegrund.clone())
     .bind(body.aktuelle_anamnese.clone())
@@ -702,7 +803,8 @@ async fn create_case(
         Some(created_case_id),
         serde_json::json!({
             "case_id": created_case_code.clone(),
-            "patient_id": body.patient_id,
+            "patient_id": subject.patient_id(),
+            "lead_id": subject.lead_id(),
         }),
     ));
     crate::realtime::publish_case_event(
@@ -712,7 +814,8 @@ async fn create_case(
         created_case_id,
         serde_json::json!({
             "case_id": created_case_code.clone(),
-            "patient_id": body.patient_id,
+            "patient_id": subject.patient_id(),
+            "lead_id": subject.lead_id(),
         }),
     )
     .await;
@@ -725,6 +828,8 @@ async fn create_case(
             "id": created_case_id,
             "case_uuid": created_case_id,
             "case_id": created_case_code,
+            "patient_id": subject.patient_id(),
+            "lead_id": subject.lead_id(),
             "created_at": created_at,
             "retention_until": retention_until.map(|value| value.to_rfc3339()),
         })),
@@ -742,10 +847,11 @@ async fn get_case_full(
     }
 
     let case = match sqlx::query(
-        r#"SELECT c.id, c.case_id, c.patient_id, c.manager_id, c.status,
+        r#"SELECT c.id, c.case_id, c.patient_id, c.lead_id, c.manager_id, c.status,
                   c.hauptanfragegrund, c.aktuelle_anamnese, c.zuweiser_doctor_id, c.zuweiser,
                   c.notes, c.created_at, c.updated_at, c.retention_until,
                   c.last_clinical_update_at, c.version_count,
+                  c.intake_completed_at, c.intake_completed_by,
                   d.name AS zuweiser_doctor_name,
                   p.name AS zuweiser_provider_name
            FROM cases c
@@ -766,8 +872,13 @@ async fn get_case_full(
     };
 
     let case_id = case.try_get::<Uuid, _>("id").unwrap_or(case_uuid);
-    let patient_id = case.try_get::<Uuid, _>("patient_id").unwrap_or_default();
-    match can_access_case(&state, &auth, case_id, Some(patient_id)).await {
+    let patient_id = case
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default();
+    let lead_id = case
+        .try_get::<Option<Uuid>, _>("lead_id")
+        .unwrap_or_default();
+    match can_access_case_subject(&state, &auth, case_id, patient_id, lead_id).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -1003,6 +1114,7 @@ async fn get_case_full(
         "case_uuid": case_id,
         "case_id": case.try_get::<String, _>("case_id").unwrap_or_default(),
         "patient_id": patient_id,
+        "lead_id": lead_id,
         "manager_id": case.try_get::<Uuid, _>("manager_id").unwrap_or_default(),
         "status": case.try_get::<String, _>("status").unwrap_or_default(),
         "hauptanfragegrund": case.try_get::<Option<String>, _>("hauptanfragegrund").unwrap_or_default(),
@@ -1017,6 +1129,8 @@ async fn get_case_full(
         "retention_until": case.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("retention_until").unwrap_or_default().map(|value| value.to_rfc3339()),
         "last_clinical_update_at": case.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_clinical_update_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "version_count": case.try_get::<i32, _>("version_count").unwrap_or_default(),
+        "intake_completed_at": case.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("intake_completed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "intake_completed_by": case.try_get::<Option<Uuid>, _>("intake_completed_by").unwrap_or_default(),
         "vorerkrankungen": vorerkr_json,
         "allergien": allergien_json,
         "operationen": ops_json,
@@ -1265,6 +1379,129 @@ async fn update_anamnesis(
     .await;
 
     Json(serde_json::json!({"ok": true})).into_response()
+}
+
+async fn update_intake_completion(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(case_uuid): Path<Uuid>,
+    Json(body): Json<UpdateIntakeCompletionRequest>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin])
+    {
+        return response;
+    }
+    match can_access_case(&state, &auth, case_uuid, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
+    }
+
+    let row = match sqlx::query(
+        r#"SELECT hauptanfragegrund, aktuelle_anamnese, zuweiser
+           FROM cases
+           WHERE id = $1"#,
+    )
+    .bind(case_uuid)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Case not found"),
+        Err(error) => {
+            tracing::error!(error = %error, case_id = %case_uuid, "load case intake completion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    if body.completed {
+        let fields = [
+            (
+                "hauptanfragegrund",
+                row.try_get::<Option<String>, _>("hauptanfragegrund")
+                    .unwrap_or_default(),
+            ),
+            (
+                "aktuelle_anamnese",
+                row.try_get::<Option<String>, _>("aktuelle_anamnese")
+                    .unwrap_or_default(),
+            ),
+            (
+                "zuweiser",
+                row.try_get::<Option<String>, _>("zuweiser")
+                    .unwrap_or_default(),
+            ),
+        ];
+        let blocking_fields = fields
+            .into_iter()
+            .filter_map(|(key, value)| {
+                value
+                    .as_deref()
+                    .is_none_or(|text| text.trim().is_empty())
+                    .then_some(key)
+            })
+            .collect::<Vec<_>>();
+        if !blocking_fields.is_empty() {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(serde_json::json!({
+                    "error": "Unprocessable Entity",
+                    "message": "Case intake is incomplete",
+                    "blocking_fields": blocking_fields,
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    let row = match sqlx::query(
+        r#"UPDATE cases
+           SET intake_completed_at = CASE WHEN $2 THEN now() ELSE NULL END,
+               intake_completed_by = CASE WHEN $2 THEN $3 ELSE NULL END
+           WHERE id = $1
+           RETURNING intake_completed_at, intake_completed_by"#,
+    )
+    .bind(case_uuid)
+    .bind(body.completed)
+    .bind(auth.user_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Case not found"),
+        Err(error) => {
+            tracing::error!(error = %error, case_id = %case_uuid, "update case intake completion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    state.audit_sender.try_send(audit::domain_event(
+        if body.completed {
+            "complete_case_intake"
+        } else {
+            "reopen_case_intake"
+        },
+        Some(auth.user_id),
+        "case",
+        Some(case_uuid),
+        serde_json::json!({ "completed": body.completed }),
+    ));
+    crate::realtime::publish_case_event(
+        &state,
+        Some(auth.user_id),
+        "case.intake_completion_changed",
+        case_uuid,
+        serde_json::json!({ "completed": body.completed }),
+    )
+    .await;
+
+    Json(serde_json::json!({
+        "ok": true,
+        "completed": body.completed,
+        "intake_completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("intake_completed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "intake_completed_by": row.try_get::<Option<Uuid>, _>("intake_completed_by").unwrap_or_default(),
+    }))
+    .into_response()
 }
 
 async fn save_vorerkrankungen(
@@ -2480,6 +2717,8 @@ async fn version_log(
         "UPDATE cases
          SET version_count = version_count + 1,
              last_clinical_update_at = now(),
+             intake_completed_at = NULL,
+             intake_completed_by = NULL,
              retention_until = GREATEST(
                  COALESCE(retention_until, now()),
                  now() + ($2 * interval '1 year')
@@ -3249,12 +3488,24 @@ async fn can_access_case(
     case_id: Uuid,
     patient_id: Option<Uuid>,
 ) -> Result<bool, axum::response::Response> {
+    can_access_case_subject(state, auth, case_id, patient_id, None).await
+}
+
+async fn can_access_case_subject(
+    state: &AppState,
+    auth: &AuthUser,
+    case_id: Uuid,
+    patient_id: Option<Uuid>,
+    lead_id: Option<Uuid>,
+) -> Result<bool, axum::response::Response> {
     if auth.role.has_full_access() {
         return Ok(true);
     }
 
-    let Some(patient_id) = patient_id else {
-        let row = sqlx::query("SELECT patient_id, manager_id FROM cases WHERE id = $1")
+    let (patient_id, lead_id, manager_id) = if patient_id.is_none() && lead_id.is_none() {
+        let row = sqlx::query(
+            "SELECT patient_id, lead_id, manager_id FROM cases WHERE id = $1",
+        )
             .bind(case_id)
             .fetch_optional(&state.db)
             .await
@@ -3266,36 +3517,59 @@ async fn can_access_case(
         let Some(row) = row else {
             return Ok(false);
         };
-        let owner_id: Uuid = row.try_get("manager_id").map_err(|_| {
+        let manager_id: Uuid = row.try_get("manager_id").map_err(|_| {
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to decode case access context",
             )
         })?;
-        if owner_id == auth.user_id {
-            return Ok(true);
-        }
+        (
+            row.try_get::<Option<Uuid>, _>("patient_id")
+                .unwrap_or_default(),
+            row.try_get::<Option<Uuid>, _>("lead_id")
+                .unwrap_or_default(),
+            Some(manager_id),
+        )
+    } else {
+        (patient_id, lead_id, None)
+    };
 
-        let patient_id: Uuid = row.try_get("patient_id").map_err(|_| {
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to decode case access context",
-            )
-        })?;
+    if manager_id == Some(auth.user_id) {
+        return Ok(true);
+    }
+
+    if let Some(patient_id) = patient_id {
         return access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
             .await
             .map_err(|e| {
-                tracing::error!(error = %e, case_id = %case_id, "Failed to validate case assignment");
-                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate case access")
+                tracing::error!(error = %e, patient_id = %patient_id, "Failed to validate case assignment");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate case access",
+                )
             });
-    };
+    }
 
-    access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, patient_id = %patient_id, "Failed to validate case assignment");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate case access")
-        })
+    if lead_id.is_some() {
+        let manager_id = match manager_id {
+            Some(value) => value,
+            None => sqlx::query_scalar::<_, Uuid>("SELECT manager_id FROM cases WHERE id = $1")
+                .bind(case_id)
+                .fetch_optional(&state.db)
+                .await
+                .map_err(|error| {
+                    tracing::error!(error = %error, case_id = %case_id, "load lead case manager");
+                    err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to validate case access",
+                    )
+                })?
+                .unwrap_or_else(Uuid::nil),
+        };
+        return Ok(manager_id == auth.user_id);
+    }
+
+    Ok(false)
 }
 
 async fn resolve_case_doctor_label(
