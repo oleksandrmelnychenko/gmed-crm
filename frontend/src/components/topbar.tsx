@@ -169,6 +169,19 @@ export function Topbar() {
   const [usersOpen, setUsersOpen] = useState(false);
 
   useEffect(() => {
+    if (!notifOpen && !usersOpen) return;
+
+    const closePanelsOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setNotifOpen(false);
+      setUsersOpen(false);
+    };
+
+    document.addEventListener("keydown", closePanelsOnEscape);
+    return () => document.removeEventListener("keydown", closePanelsOnEscape);
+  }, [notifOpen, usersOpen]);
+
+  useEffect(() => {
     if (isPatientPortal) {
       return;
     }
@@ -432,13 +445,13 @@ function NotificationPanel({
         className="fixed inset-0 z-40 cursor-default border-0 bg-transparent p-0"
         onClick={onClose}
       />
-      <div className="fixed inset-x-3 top-14 z-50 max-h-[calc(100dvh-4rem)] overflow-hidden rounded-lg border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200 motion-reduce:animate-none sm:inset-x-auto sm:right-4 sm:top-16 sm:w-96">
+      <div role="dialog" aria-label={t.topbar_notifications} className="fixed inset-x-3 top-14 z-50 max-h-[calc(100dvh-4rem)] overflow-hidden rounded-lg border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200 motion-reduce:animate-none sm:inset-x-auto sm:right-4 sm:top-16 sm:w-96">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <h3 className="text-sm font-semibold">{t.topbar_notifications}</h3>
           <button
             type="button"
             onClick={markAll}
-            className="text-xs text-primary hover:underline"
+            className="rounded-sm text-xs text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {t.topbar_mark_all_read}
           </button>
@@ -476,13 +489,13 @@ function NotificationPanel({
                 key={n.id}
                 type="button"
                 onClick={() => handleOpen(n)}
-                className={`flex w-full gap-3 px-4 py-3 text-left border-b border-border last:border-0 cursor-pointer transition-colors ${
+                className={`flex w-full cursor-pointer gap-3 border-b border-border px-4 py-3 text-left transition-colors last:border-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
                   n.is_read
                     ? "opacity-60"
                     : "bg-primary/5 hover:bg-primary/10"
                 }`}
               >
-                <Bell className="size-4 shrink-0 mt-0.5 text-muted-foreground" />
+                <Bell aria-hidden="true" className="size-4 shrink-0 mt-0.5 text-muted-foreground" />
                 <div className="min-w-0">
                   <p className="text-sm font-medium truncate">{n.title}</p>
                   {n.body && (
@@ -569,7 +582,7 @@ function UsersPanel({
           className="fixed inset-0 z-40 cursor-default"
           onClick={onClose}
         />
-        <div className="fixed inset-x-3 top-14 z-50 flex max-h-[calc(100dvh-4rem)] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200 motion-reduce:animate-none sm:inset-x-auto sm:right-4 sm:top-16 sm:w-96 sm:max-h-[480px]">
+        <div role="dialog" aria-label={chatUser.user_name} className="fixed inset-x-3 top-14 z-50 flex max-h-[calc(100dvh-4rem)] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200 motion-reduce:animate-none sm:inset-x-auto sm:right-4 sm:top-16 sm:w-96 sm:max-h-[480px]">
           {/* Chat header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <div className="flex items-center gap-2">
@@ -588,9 +601,9 @@ function UsersPanel({
               onClick={() => setChatUser(null)}
               title={t.common_close}
               aria-label={t.common_close}
-              className="size-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              className="flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <X className="size-4" />
+              <X aria-hidden="true" className="size-4" />
             </button>
           </div>
 
@@ -630,18 +643,21 @@ function UsersPanel({
           >
             <input
               type="text"
+              name="chat_message"
+              autoComplete="off"
+              aria-label={t.topbar_message_placeholder}
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               placeholder={t.topbar_message_placeholder}
-              className="flex-1 h-9 rounded-full bg-muted px-4 text-sm outline-none placeholder:text-muted-foreground"
+              className="h-9 min-w-0 flex-1 rounded-full bg-muted px-4 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
             />
             <button
               type="submit"
               title={t.chat_send}
               aria-label={t.chat_send}
-              className="flex items-center justify-center size-9 rounded-full bg-foreground text-background hover:opacity-80 transition-opacity"
+              className="flex size-9 items-center justify-center rounded-full bg-foreground text-background transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
-              <Send className="size-4" />
+              <Send aria-hidden="true" className="size-4" />
             </button>
           </form>
         </div>
@@ -657,7 +673,7 @@ function UsersPanel({
         className="fixed inset-0 z-40 cursor-default border-0 bg-transparent p-0"
         onClick={onClose}
       />
-      <div className="fixed inset-x-3 top-14 z-50 max-h-[calc(100dvh-4rem)] overflow-hidden rounded-lg border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200 motion-reduce:animate-none sm:inset-x-auto sm:right-4 sm:top-16 sm:w-80">
+      <div role="dialog" aria-label={t.topbar_online_users} className="fixed inset-x-3 top-14 z-50 max-h-[calc(100dvh-4rem)] overflow-hidden rounded-lg border border-border bg-background shadow-xl animate-in fade-in slide-in-from-top-2 duration-200 motion-reduce:animate-none sm:inset-x-auto sm:right-4 sm:top-16 sm:w-80">
         <div className="px-4 py-3 border-b border-border">
           <h3 className="text-sm font-semibold">
             {t.topbar_online} ({users.length})
@@ -669,7 +685,7 @@ function UsersPanel({
               key={u.user_id}
               type="button"
               onClick={() => openChat(u)}
-              className="flex w-full items-center gap-3 px-4 py-2.5 text-left cursor-pointer hover:bg-muted transition-colors"
+              className="flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             >
               <div className="flex items-center justify-center size-8 rounded-full bg-muted text-xs font-medium shrink-0">
                 {initials(u.user_name)}
@@ -680,7 +696,7 @@ function UsersPanel({
                   {roleDisplay(u.role, t)}
                 </p>
               </div>
-              <MessageSquare className="size-4 text-primary shrink-0" />
+              <MessageSquare aria-hidden="true" className="size-4 text-primary shrink-0" />
             </button>
           ))}
         </div>

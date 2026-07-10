@@ -224,6 +224,7 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const hydrated = useRef<string | null>(null);
+  const stepNavRef = useRef<HTMLElement | null>(null);
 
   const reload = useCallback(async (hydrateDraft: boolean, hydrateCommercial = false) => {
     if (!leadId) return;
@@ -282,6 +283,20 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
     setDraft(null);
     setError("");
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const activeStep = stepNavRef.current?.querySelector<HTMLElement>(
+      `[data-step="${step}"]`,
+    );
+    if (!activeStep) return;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    activeStep.scrollIntoView({
+      behavior: reduceMotion ? "auto" : "smooth",
+      block: "nearest",
+      inline: "center",
+    });
+  }, [open, step]);
 
   const order = orders[0] ?? null;
   const contract = contracts.find((item) => item.status !== "terminated") ?? null;
@@ -540,6 +555,16 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
     setLines((current) => current.map((line) => line.id === id ? { ...line, ...patchValue } : line));
   }
 
+  function specialtyLabel(value: string) {
+    const specialty = specialties.find(
+      (item) => (item.code || item.name_en) === value,
+    );
+    if (!specialty) return value;
+    return lang === "de"
+      ? specialty.name_de || specialty.name_en
+      : specialty.name_ru || specialty.name_de || specialty.name_en;
+  }
+
   if (!leadId) return null;
   const isBusy = busy !== null;
   const masterReady = Boolean(draft?.firstName.trim() && draft.lastName.trim() && draft.birthDate && draft.legalSex && (draft.email.trim() || draft.phone.trim()) && draft.street.trim() && draft.city.trim() && draft.zip.trim());
@@ -548,7 +573,7 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 border-l border-border p-0 sm:max-w-4xl">
         <SheetTitle className="sr-only">{tx("Онбординг лида", "Lead-Onboarding")}</SheetTitle>
-        <header className="flex min-h-16 items-center justify-between gap-4 border-b border-border px-5 py-3">
+        <header className="flex min-h-16 items-center justify-between gap-4 border-b border-border px-4 py-3 pr-14 sm:px-5 sm:pr-14">
           <div className="min-w-0">
             <h2 className="truncate text-base font-semibold text-foreground">{lead ? [lead.first_name, lead.last_name].filter(Boolean).join(" ") : tx("Онбординг лида", "Lead-Onboarding")}</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">{tx("Пациент появится только после финального подтверждения.", "Ein Patient wird erst nach der finalen Freigabe angelegt.")}</p>
@@ -558,40 +583,60 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
           </Button>
         </header>
 
-        <nav className="grid grid-cols-5 border-b border-border" aria-label={tx("Этапы онбординга", "Onboarding-Schritte")}>
-          {STEPS.map((item, itemIndex) => {
-            const selected = item.id === step;
-            const done = readiness.get(item.id) ?? false;
-            return (
-              <button key={item.id} type="button" onClick={() => setStep(item.id)} aria-current={selected ? "step" : undefined} className={cn("min-w-0 border-r border-border px-2 py-3 text-left last:border-r-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring", selected ? "bg-muted/50" : "hover:bg-muted/30")}>
-                <span className="flex items-center gap-1.5">
-                  <span className={cn("inline-flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px]", done ? "border-emerald-600 text-emerald-700" : "border-muted-foreground/50 text-muted-foreground")}>{done ? <Check className="size-3" /> : itemIndex + 1}</span>
-                  <span className="hidden text-[11px] font-medium leading-tight text-foreground lg:inline">{lang === "de" ? item.de : item.ru}</span>
-                </span>
-              </button>
-            );
-          })}
+        <nav
+          ref={stepNavRef}
+          className="overflow-x-auto overscroll-x-contain border-b border-border"
+          aria-label={tx("Этапы онбординга", "Onboarding-Schritte")}
+        >
+          <div className="grid min-w-[42rem] grid-cols-5 sm:min-w-0">
+            {STEPS.map((item, itemIndex) => {
+              const selected = item.id === step;
+              const done = readiness.get(item.id) ?? false;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  data-step={item.id}
+                  onClick={() => setStep(item.id)}
+                  aria-current={selected ? "step" : undefined}
+                  className={cn(
+                    "relative min-w-0 border-r border-border px-3 py-3 text-left last:border-r-0 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                    selected && "bg-muted/50 after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:bg-[var(--brand)]",
+                  )}
+                >
+                  <span className="flex items-center gap-2">
+                    <span className={cn("inline-flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px]", done ? "border-emerald-600 text-emerald-700" : "border-muted-foreground/50 text-muted-foreground")}>
+                      {done ? <Check aria-hidden="true" className="size-3" /> : itemIndex + 1}
+                    </span>
+                    <span className="min-w-0 break-words text-[11px] font-medium leading-tight text-foreground">
+                      {lang === "de" ? item.de : item.ru}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </nav>
 
-        <main className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-          {error ? <div className="mb-5 border-l-2 border-destructive bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div> : null}
-          {loading && !lead ? <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{tx("Загрузка", "Wird geladen")}</div> : null}
+        <main aria-busy={loading || isBusy} className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-5">
+          {error ? <div role="alert" className="mb-5 border-l-2 border-destructive bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div> : null}
+          {loading && !lead ? <div role="status" aria-live="polite" className="flex items-center gap-2 py-12 text-sm text-muted-foreground"><LoaderCircle aria-hidden="true" className="size-4 animate-spin" />{tx("Загрузка", "Wird geladen")}</div> : null}
 
           {draft && step === "master_data" ? (
             <section className="space-y-5">
               <div><h3 className="text-sm font-semibold text-foreground">{tx("Сведения о клиенте", "Personendaten")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Проверьте данные, которые станут основой карточки пациента.", "Diese Angaben werden zur Grundlage der Patientenakte.")}</p></div>
               <div className="grid gap-4 md:grid-cols-2">
-                <Field label={tx("Имя", "Vorname")}><Input value={draft.firstName} onChange={(event) => patch("firstName", event.target.value)} /></Field>
-                <Field label={tx("Фамилия", "Nachname")}><Input value={draft.lastName} onChange={(event) => patch("lastName", event.target.value)} /></Field>
-                <Field label={tx("Дата рождения", "Geburtsdatum")}><Input type="date" value={draft.birthDate} onChange={(event) => patch("birthDate", event.target.value)} /></Field>
-                <Field label={tx("Юридический пол", "Rechtliches Geschlecht")}><NativeComboboxSelect value={draft.legalSex} onChange={(event) => patch("legalSex", event.target.value)} className={selectClass}><option value="">{tx("Выберите", "Auswählen")}</option><option value="female">{tx("Женский", "Weiblich")}</option><option value="male">{tx("Мужской", "Männlich")}</option><option value="diverse">{tx("Разное", "Divers")}</option><option value="no_entry">{tx("Без указания", "Keine Angabe")}</option></NativeComboboxSelect></Field>
-                <Field label="E-mail"><Input type="email" value={draft.email} onChange={(event) => patch("email", event.target.value)} /></Field>
-                <Field label={tx("Телефон", "Telefon")}><Input value={draft.phone} onChange={(event) => patch("phone", event.target.value)} /></Field>
-                <Field label={tx("Улица и дом", "Straße und Hausnummer")}><Input value={draft.street} onChange={(event) => patch("street", event.target.value)} /></Field>
-                <Field label={tx("Город", "Ort")}><Input value={draft.city} onChange={(event) => patch("city", event.target.value)} /></Field>
-                <Field label={tx("Индекс", "Postleitzahl")}><Input value={draft.zip} onChange={(event) => patch("zip", event.target.value)} /></Field>
-                <Field label={tx("Страна", "Land")}><Input value={draft.country} onChange={(event) => patch("country", event.target.value)} /></Field>
-                <Field label={tx("Основной язык", "Primärsprache")}><Input value={draft.language} onChange={(event) => patch("language", event.target.value)} /></Field>
+                <Field label={tx("Имя", "Vorname")}><Input name="first_name" autoComplete="given-name" value={draft.firstName} onChange={(event) => patch("firstName", event.target.value)} /></Field>
+                <Field label={tx("Фамилия", "Nachname")}><Input name="last_name" autoComplete="family-name" value={draft.lastName} onChange={(event) => patch("lastName", event.target.value)} /></Field>
+                <Field label={tx("Дата рождения", "Geburtsdatum")}><Input name="birth_date" autoComplete="bday" type="date" value={draft.birthDate} onChange={(event) => patch("birthDate", event.target.value)} /></Field>
+                <Field label={tx("Юридический пол", "Rechtliches Geschlecht")}><NativeComboboxSelect name="legal_sex" value={draft.legalSex} onChange={(event) => patch("legalSex", event.target.value)} className={selectClass}><option value="">{tx("Выберите", "Auswählen")}</option><option value="female">{tx("Женский", "Weiblich")}</option><option value="male">{tx("Мужской", "Männlich")}</option><option value="diverse">{tx("Разное", "Divers")}</option><option value="no_entry">{tx("Без указания", "Keine Angabe")}</option></NativeComboboxSelect></Field>
+                <Field label="E-mail"><Input name="email" autoComplete="email" spellCheck={false} type="email" value={draft.email} onChange={(event) => patch("email", event.target.value)} /></Field>
+                <Field label={tx("Телефон", "Telefon")}><Input name="phone" autoComplete="tel" type="tel" value={draft.phone} onChange={(event) => patch("phone", event.target.value)} /></Field>
+                <Field label={tx("Улица и дом", "Straße und Hausnummer")}><Input name="street_address" autoComplete="street-address" value={draft.street} onChange={(event) => patch("street", event.target.value)} /></Field>
+                <Field label={tx("Город", "Ort")}><Input name="city" autoComplete="address-level2" value={draft.city} onChange={(event) => patch("city", event.target.value)} /></Field>
+                <Field label={tx("Индекс", "Postleitzahl")}><Input name="postal_code" autoComplete="postal-code" value={draft.zip} onChange={(event) => patch("zip", event.target.value)} /></Field>
+                <Field label={tx("Страна", "Land")}><Input name="country" autoComplete="country-name" value={draft.country} onChange={(event) => patch("country", event.target.value)} /></Field>
+                <Field label={tx("Основной язык", "Primärsprache")}><Input name="primary_language" autoComplete="off" value={draft.language} onChange={(event) => patch("language", event.target.value)} /></Field>
               </div>
               <StateMark done={masterReady && Boolean(readiness.get("master_data"))} label={readiness.get("master_data") ? tx("Этап подтвержден", "Schritt erfüllt") : tx("Заполните обязательные поля", "Pflichtfelder ausfüllen")} />
             </section>
@@ -604,8 +649,8 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
               <Field label={tx("Дополнительный контекст", "Zusätzlicher Kontext")}><textarea className={cn(textareaClass, "min-h-24")} value={draft.anamnese} onChange={(event) => patch("anamnese", event.target.value)} /></Field>
               <div className="space-y-2">
                 <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{tx("Специалисты", "Fachrichtungen")}</span>
-                <div className="flex flex-wrap gap-2">{draft.specialties.map((value) => <span key={value} className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-foreground">{value}<button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => patch("specialties", draft.specialties.filter((item) => item !== value))} aria-label={tx("Удалить", "Entfernen")}><X className="size-3" /></button></span>)}</div>
-                <NativeComboboxSelect value="" onChange={(event) => { const selected = specialties.find((item) => item.id === event.target.value); if (selected) { const value = selected.code || selected.name_en; if (!draft.specialties.includes(value)) patch("specialties", [...draft.specialties, value]); } }} className={selectClass}>
+                <div className="flex flex-wrap gap-2">{draft.specialties.map((value) => <span key={value} className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-foreground">{specialtyLabel(value)}<button type="button" className="rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => patch("specialties", draft.specialties.filter((item) => item !== value))} aria-label={tx("Удалить", "Entfernen")}><X aria-hidden="true" className="size-3" /></button></span>)}</div>
+                <NativeComboboxSelect aria-label={tx("Добавить специальность", "Fachrichtung hinzufügen")} name="specialty" value="" onChange={(event) => { const selected = specialties.find((item) => item.id === event.target.value); if (selected) { const value = selected.code || selected.name_en; if (!draft.specialties.includes(value)) patch("specialties", [...draft.specialties, value]); } }} className={selectClass}>
                   <option value="">{tx("Добавить специальность", "Fachrichtung hinzufügen")}</option>
                   {specialties.map((item) => <option key={item.id} value={item.id}>{lang === "de" ? item.name_de || item.name_en : item.name_ru || item.name_de || item.name_en}</option>)}
                 </NativeComboboxSelect>
@@ -627,7 +672,7 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
                 const fileId = "lead-file-" + kind;
                 return <div key={kind} className="flex flex-wrap items-center justify-between gap-3 border-y border-border py-3">
                   <div><div className="text-sm font-medium text-foreground">{label}</div><div className="mt-1 text-xs text-muted-foreground">{document ? document.original_filename || document.auto_name : tx("Файл еще не загружен", "Noch keine Datei hochgeladen")}</div></div>
-                  <div className="flex flex-wrap items-center gap-2"><input id={fileId} type="file" className="sr-only" accept=".pdf,.jpg,.jpeg,.png" disabled={isBusy} onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) { void upload(kind, file); event.currentTarget.value = ""; } }} /><label htmlFor={fileId} className={cn("inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-3 text-xs font-medium text-foreground shadow-xs hover:bg-accent", isBusy && "pointer-events-none opacity-50")}><Upload className="size-3.5" />{tx("Загрузить", "Hochladen")}</label><Button type="button" variant="outline" size="icon-sm" title={tx("Подтвердить", "Bestätigen")} aria-label={tx("Подтвердить", "Bestätigen")} disabled={!document || signed || isBusy} onClick={() => document && void signDocument(document.id, kind)}><FileCheck2 className={cn("size-3.5", signed && "text-emerald-700")} /></Button><StateMark done={signed} label={signed ? tx("Подтвержден", "Bestätigt") : tx("Ожидается", "Ausstehend")} /></div>
+                  <div className="flex flex-wrap items-center gap-2"><input id={fileId} type="file" className="peer sr-only" accept=".pdf,.jpg,.jpeg,.png" disabled={isBusy} onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) { void upload(kind, file); event.currentTarget.value = ""; } }} /><label htmlFor={fileId} className={cn("inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-3 text-xs font-medium text-foreground shadow-xs hover:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring", isBusy && "pointer-events-none opacity-50")}><Upload aria-hidden="true" className="size-3.5" />{tx("Загрузить", "Hochladen")}</label><Button type="button" variant="outline" size="icon-sm" title={tx("Подтвердить", "Bestätigen")} aria-label={tx("Подтвердить", "Bestätigen")} disabled={!document || signed || isBusy} onClick={() => document && void signDocument(document.id, kind)}><FileCheck2 className={cn("size-3.5", signed && "text-emerald-700")} /></Button><StateMark done={signed} label={signed ? tx("Подтвержден", "Bestätigt") : tx("Ожидается", "Ausstehend")} /></div>
                 </div>;
               })}
               <div className="border-y border-border"><ToggleRow checked={draft.privacyConsent} disabled={isBusy} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Приняты правила конфиденциальности", "Datenschutzhinweise akzeptiert")} /><ToggleRow checked={draft.healthcareConsent} disabled={isBusy} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung medizinischer Daten")} /></div>
@@ -642,7 +687,7 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
               <div><h3 className="text-sm font-semibold text-foreground">{tx("Договор, заказ и кошторис", "Vertrag, Auftrag und Kostenvoranschlag")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Эти артефакты принадлежат лиду до финальной конвертации.", "Diese Unterlagen gehören bis zur Freigabe dem Lead.")}</p></div>
               <div className="flex flex-wrap items-center justify-between gap-3 border-y border-border py-3"><div><div className="text-sm font-medium text-foreground">{tx("Рамочный договор", "Rahmenvertrag")}</div><div className="mt-1 text-xs text-muted-foreground">{contract?.contract_number ?? tx("Еще не подготовлен", "Noch nicht vorbereitet")}</div></div><div className="flex items-center gap-2"><StateMark done={contract?.status === "signed"} label={contract?.status === "signed" ? tx("Подписан", "Unterzeichnet") : tx("Не подписан", "Nicht unterzeichnet")} /><Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void signContract()}>{busy === "contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileCheck2 className="size-3.5" />}{tx("Подписать", "Unterzeichnen")}</Button></div></div>
               <div className="space-y-3"><div className="flex items-center justify-between"><span className="text-sm font-medium text-foreground">{tx("Услуги заказа", "Auftragsleistungen")}</span><Button type="button" variant="outline" size="icon-sm" title={tx("Добавить услугу", "Leistung hinzufügen")} aria-label={tx("Добавить услугу", "Leistung hinzufügen")} onClick={() => setLines((current) => [...current, newLine(current.length + 1)])}><Plus className="size-3.5" /></Button></div>
-                {lines.map((line) => <div key={line.id} className="grid gap-2 border-b border-border/70 pb-3 md:grid-cols-[minmax(0,1fr)_72px_100px_72px_auto]"><Input placeholder={tx("Описание услуги", "Leistungsbeschreibung")} value={line.description} onChange={(event) => updateLine(line.id, { description: event.target.value })} /><Input inputMode="decimal" aria-label={tx("Количество", "Menge")} value={line.quantity} onChange={(event) => updateLine(line.id, { quantity: event.target.value })} /><Input inputMode="decimal" aria-label={tx("Цена", "Preis")} value={line.price} onChange={(event) => updateLine(line.id, { price: event.target.value })} /><Input inputMode="decimal" aria-label={tx("НДС", "MwSt.")} value={line.vat} onChange={(event) => updateLine(line.id, { vat: event.target.value })} /><Button type="button" variant="ghost" size="icon-sm" title={tx("Удалить услугу", "Leistung entfernen")} aria-label={tx("Удалить услугу", "Leistung entfernen")} disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((item) => item.id !== line.id))}><X className="size-3.5" /></Button></div>)}
+                {lines.map((line) => <div key={line.id} className="grid gap-2 border-b border-border/70 pb-3 md:grid-cols-[minmax(0,1fr)_72px_100px_72px_auto]"><Input aria-label={tx("Описание услуги", "Leistungsbeschreibung")} name={`service_description_${line.id}`} autoComplete="off" placeholder={tx("Описание услуги", "Leistungsbeschreibung")} value={line.description} onChange={(event) => updateLine(line.id, { description: event.target.value })} /><Input name={`service_quantity_${line.id}`} autoComplete="off" inputMode="decimal" aria-label={tx("Количество", "Menge")} value={line.quantity} onChange={(event) => updateLine(line.id, { quantity: event.target.value })} /><Input name={`service_price_${line.id}`} autoComplete="off" inputMode="decimal" aria-label={tx("Цена", "Preis")} value={line.price} onChange={(event) => updateLine(line.id, { price: event.target.value })} /><Input name={`service_vat_${line.id}`} autoComplete="off" inputMode="decimal" aria-label={tx("НДС", "MwSt.")} value={line.vat} onChange={(event) => updateLine(line.id, { vat: event.target.value })} /><Button type="button" variant="ghost" size="icon-sm" title={tx("Удалить услугу", "Leistung entfernen")} aria-label={tx("Удалить услугу", "Leistung entfernen")} disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((item) => item.id !== line.id))}><X className="size-3.5" /></Button></div>)}
                 <div className="flex flex-wrap justify-end gap-4 text-sm tabular-nums text-muted-foreground"><span>{tx("Нетто", "Netto")}: {estimate.net.toFixed(2)} EUR</span><span>{tx("НДС", "MwSt.")}: {estimate.vat.toFixed(2)} EUR</span><span className="font-semibold text-foreground">{tx("Итого", "Gesamt")}: {estimate.gross.toFixed(2)} EUR</span></div>
               </div>
               <div className="border-y border-border"><ToggleRow checked={Boolean(order?.signed_patient)} disabled={isBusy} onChange={(checked) => void saveFlags({ signed_patient: checked })} label={tx("Подпись клиента на заказе", "Unterschrift der Kundin / des Kunden")} /><ToggleRow checked={Boolean(order?.signed_agency)} disabled={isBusy} onChange={(checked) => void saveFlags({ signed_agency: checked })} label={tx("Подпись агентства на заказе", "Unterschrift der Agentur")} /><ToggleRow checked={prepayment} disabled={isBusy} onChange={(checked) => { setPrepayment(checked); void saveFlags({ prepayment_required: checked }); }} label={tx("Требуется предоплата", "Vorauszahlung erforderlich")} /></div>
@@ -661,7 +706,7 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
           ) : null}
         </main>
 
-        <footer className="flex items-center justify-between gap-3 border-t border-border px-5 py-3">
+        <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
           <Button type="button" variant="outline" size="sm" disabled={isBusy || index === 0} onClick={() => setStep(STEPS[index - 1].id)}><ChevronLeft className="size-3.5" />{tx("Назад", "Zurück")}</Button>
           {step !== "release" ? <Button type="button" size="sm" disabled={isBusy || (step === "master_data" && !masterReady)} onClick={next}>{busy === "save" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}{tx("Сохранить и далее", "Speichern und weiter")}<ChevronRight className="size-3.5" /></Button> : null}
         </footer>

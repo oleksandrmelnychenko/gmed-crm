@@ -75,7 +75,7 @@ export function Toaster() {
   if (list.length === 0) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
+    <div className="pointer-events-none fixed inset-x-3 top-3 z-[100] flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:top-4">
       {list.map((item) => (
         <ToastCard key={item.id} item={item} />
       ))}
@@ -113,22 +113,22 @@ function ToastCard({ item }: { item: ToastItem }) {
   return (
     <div
       className={cn(
-        "pointer-events-auto min-w-[260px] max-w-[360px] flex items-start gap-3 rounded-xl border px-3.5 py-2.5 shadow-[0_10px_32px_rgba(15,23,42,0.08)] animate-in slide-in-from-right-4 fade-in duration-200",
+        "pointer-events-auto flex w-full min-w-0 max-w-[360px] items-start gap-3 rounded-lg border px-3.5 py-2.5 shadow-[0_10px_32px_rgba(15,23,42,0.08)] animate-in slide-in-from-right-4 fade-in duration-200 motion-reduce:animate-none sm:min-w-[260px]",
         palette.ring
       )}
-      role="status"
+      role={kind === "error" ? "alert" : "status"}
     >
       <div className={cn("flex items-center justify-center size-7 rounded-full shrink-0", palette.iconBg)}>
-        <Icon className="size-4" strokeWidth={2} />
+        <Icon aria-hidden="true" className="size-4" strokeWidth={2} />
       </div>
       <p className="flex-1 text-[13px] text-foreground leading-[1.35] pt-0.5">{message}</p>
       <button
         type="button"
         aria-label={t.common_dismiss}
         onClick={() => remove(item.id)}
-        className="shrink-0 size-6 rounded-md inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <X className="size-3.5" />
+        <X aria-hidden="true" className="size-3.5" />
       </button>
     </div>
   );

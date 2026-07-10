@@ -1902,4 +1902,46 @@ test.describe("responsive staff workspace", () => {
     await expect(page.getByRole("button", { name: "Patienten heute", exact: true })).toBeVisible();
     await expect(page.locator(".appointments-calendar-shell")).toHaveCount(0);
   });
+
+  test("keeps onboarding steps labeled, localized, and reachable on mobile", async ({ page }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    await page.goto(`/leads?lead=${leadId}`);
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+
+    const wizard = page.getByRole("dialog", { name: "Lead-Onboarding" });
+    const navigation = wizard.getByRole("navigation", { name: "Onboarding-Schritte" });
+    await expect(navigation.getByRole("button", { name: /Stammdaten/i })).toBeVisible();
+
+    const refreshButton = wizard.getByRole("button", { name: "Aktualisieren" });
+    const closeButton = wizard.getByRole("button", { name: "Schließen" });
+    const refreshBox = await refreshButton.boundingBox();
+    const closeBox = await closeButton.boundingBox();
+    expect(refreshBox).not.toBeNull();
+    expect(closeBox).not.toBeNull();
+    expect((refreshBox?.x ?? 0) + (refreshBox?.width ?? 0)).toBeLessThanOrEqual(
+      closeBox?.x ?? 0,
+    );
+
+    await navigation.getByRole("button", { name: /Bedarf/i }).click();
+    await wizard.getByRole("combobox").click();
+    await page.getByText("Orthopädie", { exact: true }).click();
+    await expect(wizard.getByText("Orthopädie", { exact: true })).toBeVisible();
+
+    const commercialStep = navigation.getByRole("button", { name: /Vertrag & Auftrag/i });
+    await commercialStep.click();
+    await expect(
+      wizard.getByRole("heading", { name: "Vertrag, Auftrag und Kostenvoranschlag" }),
+    ).toBeVisible();
+    await expect.poll(async () => {
+      const [navigationBox, stepBox] = await Promise.all([
+        navigation.boundingBox(),
+        commercialStep.boundingBox(),
+      ]);
+      if (!navigationBox || !stepBox) return false;
+      return (
+        stepBox.x >= navigationBox.x &&
+        stepBox.x + stepBox.width <= navigationBox.x + navigationBox.width
+      );
+    }).toBe(true);
+  });
 });

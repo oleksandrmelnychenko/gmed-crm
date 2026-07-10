@@ -23,11 +23,15 @@ export function DirtyDismissConfirmDialog({
   title,
 }: DirtyDismissConfirmDialogProps) {
   const cancelButtonRef = React.useRef<HTMLButtonElement | null>(null)
+  const confirmButtonRef = React.useRef<HTMLButtonElement | null>(null)
+  const previouslyFocusedRef = React.useRef<HTMLElement | null>(null)
 
   React.useEffect(() => {
     if (!open) {
       return
     }
+
+    previouslyFocusedRef.current = document.activeElement as HTMLElement | null
 
     const frame = window.requestAnimationFrame(() => {
       cancelButtonRef.current?.focus()
@@ -35,6 +39,8 @@ export function DirtyDismissConfirmDialog({
 
     return () => {
       window.cancelAnimationFrame(frame)
+      previouslyFocusedRef.current?.focus()
+      previouslyFocusedRef.current = null
     }
   }, [open])
 
@@ -44,6 +50,20 @@ export function DirtyDismissConfirmDialog({
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Tab") {
+        const first = cancelButtonRef.current
+        const last = confirmButtonRef.current
+        if (!first || !last) return
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault()
+          last.focus()
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault()
+          first.focus()
+        }
+        return
+      }
+
       if (event.key !== "Escape") {
         return
       }
@@ -77,7 +97,7 @@ export function DirtyDismissConfirmDialog({
         aria-modal="true"
         aria-labelledby="dirty-dismiss-confirm-title"
         aria-describedby="dirty-dismiss-confirm-message"
-        className="w-full max-w-[420px] rounded-xl border border-border bg-popover p-4 text-popover-foreground shadow-2xl"
+        className="w-full max-w-[420px] overscroll-contain rounded-lg border border-border bg-popover p-4 text-popover-foreground shadow-2xl"
         onPointerDown={(event) => {
           event.stopPropagation()
         }}
@@ -107,6 +127,7 @@ export function DirtyDismissConfirmDialog({
             {cancelLabel}
           </Button>
           <Button
+            ref={confirmButtonRef}
             type="button"
             className="h-9 rounded-lg"
             onClick={onConfirm}
