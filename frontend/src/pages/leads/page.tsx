@@ -15,7 +15,6 @@ import {
   ArrowRight,
   CheckCircle2,
   ClipboardCheck,
-  Eye,
   FileCheck2,
   LoaderCircle,
   Plus,
@@ -836,14 +835,6 @@ function useLeadsPageContent() {
     if (leadId !== selectedLeadId) {
       setPaneTab("overview");
     }
-    setSelectedLeadId(leadId);
-    setDetailOpen(true);
-    syncLeadQuery(leadId, { replace: false });
-  }
-
-  function openLeadDetailTab(leadId: string, tab: LeadPaneTab) {
-    setWizardLeadId(null);
-    setPaneTab(tab);
     setSelectedLeadId(leadId);
     setDetailOpen(true);
     syncLeadQuery(leadId, { replace: false });
@@ -2539,140 +2530,6 @@ function useLeadsPageContent() {
             activeRowId={wizardLeadId || selectedLeadId || null}
             onRowClick={openLeadFromRow}
             rowAccent={(row) => leadRowAccent(row.qualification_status)}
-            rowActionsLabel={t.users_actions || t.common_actions}
-            rowActionsWidth={224}
-            rowActions={(row) => {
-              const detailsAction = (
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  variant="ghost"
-                  className="size-7 rounded-md"
-                  title={t.lead_tab_details}
-                  aria-label={t.lead_tab_details}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    openLeadDetail(row.id);
-                  }}
-                >
-                  <Eye aria-hidden="true" className="size-3.5" />
-                </Button>
-              );
-              const rowLeadType = leadTypeFromLead(row);
-              const canPromoteRowToConsole =
-                rowLeadType !== "console" &&
-                row.failed_outcome?.status !== "delete_anonymized" &&
-                row.qualification_status !== "converted";
-              if (canPromoteRowToConsole) {
-                return (
-                  <>
-                    {detailsAction}
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-7 rounded-md px-2 text-[11px]"
-                      disabled={Boolean(actionBusy)}
-                      title={t.lead_promote_to_console_description}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void promoteToConsole(row.id);
-                      }}
-                    >
-                      {actionBusy === `promote-console:${row.id}` ? (
-                        <LoaderCircle className="size-3 animate-spin" />
-                      ) : (
-                        <ArrowRight className="size-3" />
-                      )}
-                      {t.lead_promote_to_console}
-                    </Button>
-                  </>
-                );
-              }
-
-              const canQualify =
-                row.qualification_status === "new" || row.qualification_status === "in_progress";
-              const {
-                canConvertRole,
-                canConvert,
-                disabledReason: convertDisabledReason,
-              } = computeLeadConversionGate(row, {
-                canConvert: permissions.canConvert,
-              });
-              const canResolveFailed =
-                row.qualification_status !== "converted" &&
-                row.failed_outcome?.status !== "delete_anonymized";
-
-              return (
-                <>
-                  {detailsAction}
-                  {canQualify ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-7 rounded-md px-2 text-[11px]"
-                      disabled={Boolean(actionBusy)}
-                      title={
-                        row.qualification_ready === false
-                          ? t.lead_workflow_complete_required_fields
-                          : undefined
-                      }
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        if (row.qualification_ready) {
-                          void updateStatus(row.id, "qualified");
-                        } else {
-                          openLeadDetailTab(row.id, "qualification");
-                        }
-                      }}
-                    >
-                      {actionBusy === `status:${row.id}:qualified` ? (
-                        <LoaderCircle className="size-3 animate-spin" />
-                      ) : null}
-                      {t.lead_qualify}
-                    </Button>
-                  ) : null}
-                  {canConvertRole ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-7 rounded-md px-2 text-[11px]"
-                      disabled={Boolean(actionBusy) || !canConvert}
-                      title={convertDisabledReason ?? undefined}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setPendingConvertLead(row);
-                      }}
-                    >
-                      {actionBusy === `convert:${row.id}` ? (
-                        <LoaderCircle className="size-3 animate-spin" />
-                      ) : null}
-                      {t.lead_convert_action}
-                    </Button>
-                  ) : null}
-                  {canResolveFailed ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 rounded-md px-2 text-[11px]"
-                      disabled={
-                        Boolean(actionBusy) ||
-                        row.failed_outcome?.status === "delete_anonymized"
-                      }
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openLeadDetail(row.id);
-                      }}
-                    >
-                      {t.lead_resolve}
-                    </Button>
-                  ) : null}
-                </>
-              );
-            }}
             emptyState={
               <div className={cn("rounded-xl px-6 py-10 text-center", tokens.surface.dashed)}>
                 <div className="text-sm font-medium text-foreground">{t.lead_empty_title}</div>
@@ -2816,6 +2673,13 @@ function useLeadsPageContent() {
           setWizardLeadId(null);
           syncLeadQuery(undefined, { replace: false });
         }}
+        onArchived={() => {
+          setWizardLeadId(null);
+          syncLeadQuery(undefined, { replace: false });
+          setSuccessMessage(lang === "de" ? "Lead archiviert." : "Лид архивирован.");
+          reload();
+        }}
+        onShowDetails={(leadId) => openLeadDetail(leadId)}
         onConverted={(patientId) => {
           setWizardLeadId(null);
           staffGo(`/patients/${patientId}`);

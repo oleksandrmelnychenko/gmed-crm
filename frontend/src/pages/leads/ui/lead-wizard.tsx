@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  Archive,
   Check,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
   ClipboardCheck,
+  Eye,
   FileCheck2,
   LoaderCircle,
   Plus,
@@ -17,6 +19,14 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { selectClass, textareaClass } from "@/components/ui-shell";
@@ -58,6 +68,7 @@ import type { SpecializationItem } from "@/pages/providers/model/types";
 
 import {
   fetchLeadDetail,
+  resolveFailedLead,
   updateLeadStatus,
   updateLeadWizard,
   wizardConvertLead,
@@ -72,6 +83,8 @@ type LeadWizardProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConverted?: (patientId: string) => void;
+  onArchived?: () => void;
+  onShowDetails?: (leadId: string) => void;
   onOrderCreated?: (orderId: string) => void;
 };
 
@@ -422,7 +435,14 @@ function ToggleRow({
   );
 }
 
-export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWizardProps) {
+export function LeadWizard({
+  leadId,
+  open,
+  onOpenChange,
+  onConverted,
+  onArchived,
+  onShowDetails,
+}: LeadWizardProps) {
   const { lang } = useLang();
   const tx: Tx = useCallback((ru, de) => (lang === "de" ? de : ru), [lang]);
   const [lead, setLead] = useState<LeadDetail | null>(null);
@@ -442,6 +462,7 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
   const [error, setError] = useState("");
   const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("idle");
   const [autosaveError, setAutosaveError] = useState("");
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
   const [touchedMasterFields, setTouchedMasterFields] = useState<Set<MasterFieldKey>>(
     () => new Set(),
   );
@@ -546,6 +567,7 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
     setError("");
     setAutosaveError("");
     setAutosaveStatus("idle");
+    setArchiveConfirmOpen(false);
     setTouchedMasterFields(new Set());
     setMasterValidationAttempted(false);
     currentAutosaveSignatureRef.current = "";
@@ -896,6 +918,25 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
     }
   }
 
+  async function archiveLead() {
+    if (!leadId) return;
+    setBusy("archive");
+    setError("");
+    try {
+      await resolveFailedLead(leadId, {
+        resolution: "archive",
+        reason: "not_our_lead",
+      });
+      setArchiveConfirmOpen(false);
+      if (onArchived) onArchived();
+      else onOpenChange(false);
+    } catch (nextError) {
+      setError(errorText(nextError));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   function next() {
     if (step === "master_data" && Object.keys(masterErrors).length > 0) {
       setMasterValidationAttempted(true);
@@ -946,13 +987,13 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
         : tx("Есть изменения", "Änderungen erkannt");
 
   return (
-    <Sheet open={open} dirty={autosaveIsDirty} onOpenChange={onOpenChange}>
+    <>
+      <Sheet open={open} dirty={autosaveIsDirty} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 border-l border-border p-0 sm:max-w-4xl">
         <SheetTitle className="sr-only">{tx("Онбординг лида", "Lead-Onboarding")}</SheetTitle>
         <header className="flex min-h-16 items-center justify-between gap-4 border-b border-border px-4 py-3 pr-14 sm:px-5 sm:pr-14">
           <div className="min-w-0">
             <h2 className="truncate text-base font-semibold text-foreground">{lead ? [lead.first_name, lead.last_name].filter(Boolean).join(" ") : tx("Онбординг лида", "Lead-Onboarding")}</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">{tx("Пациент появится только после финального подтверждения.", "Ein Patient wird erst nach der finalen Freigabe angelegt.")}</p>
             {autosaveStatus !== "idle" ? (
               <div
                 role={autosaveStatus === "error" ? "alert" : "status"}
@@ -974,9 +1015,36 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
               </div>
             ) : null}
           </div>
-          <Button type="button" variant="outline" size="icon-sm" title={tx("Обновить", "Aktualisieren")} aria-label={tx("Обновить", "Aktualisieren")} disabled={loading || isBusy} onClick={() => void reload(false)}>
-            <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
-          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="text-destructive hover:text-destructive"
+              title={tx("Архивировать лид", "Lead archivieren")}
+              aria-label={tx("Архивировать лид", "Lead archivieren")}
+              disabled={loading || isBusy}
+              onClick={() => setArchiveConfirmOpen(true)}
+            >
+              <Archive aria-hidden="true" className="size-3.5" />
+            </Button>
+            {onShowDetails && leadId ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                title={tx("Детали лида", "Lead-Details")}
+                aria-label={tx("Детали лида", "Lead-Details")}
+                disabled={loading || isBusy}
+                onClick={() => onShowDetails(leadId)}
+              >
+                <Eye aria-hidden="true" className="size-3.5" />
+              </Button>
+            ) : null}
+            <Button type="button" variant="outline" size="icon-sm" title={tx("Обновить", "Aktualisieren")} aria-label={tx("Обновить", "Aktualisieren")} disabled={loading || isBusy} onClick={() => void reload(false)}>
+              <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+            </Button>
+          </div>
         </header>
 
         <nav
@@ -1289,6 +1357,39 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
           {step !== "release" ? <Button type="button" size="sm" disabled={isBusy} onClick={next}>{busy === "save" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}{tx("Далее", "Weiter")}<ChevronRight className="size-3.5" /></Button> : null}
         </footer>
       </SheetContent>
-    </Sheet>
+      </Sheet>
+      <Dialog open={archiveConfirmOpen} onOpenChange={setArchiveConfirmOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{tx("Архивировать лид?", "Lead archivieren?")}</DialogTitle>
+            <DialogDescription>
+              {tx(
+                "Лид будет отмечен как не относящийся к нашим обращениям и убран из активного списка.",
+                "Der Lead wird als nicht zu uns gehörend markiert und aus der aktiven Liste entfernt.",
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy === "archive"}
+              onClick={() => setArchiveConfirmOpen(false)}
+            >
+              {tx("Отмена", "Abbrechen")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={busy === "archive"}
+              onClick={() => void archiveLead()}
+            >
+              {busy === "archive" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Archive className="size-3.5" />}
+              {tx("Архивировать", "Archivieren")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

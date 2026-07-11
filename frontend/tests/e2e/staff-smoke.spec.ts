@@ -799,6 +799,33 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
         }
         return json(route, { ok: true });
       }
+      if (leadSuffix.endsWith("/failed-flow") && route.request().method() === "POST") {
+        const requestedId = leadSuffix.replace("/failed-flow", "");
+        const payload = JSON.parse(route.request().postData() ?? "{}") as {
+          reason?: string;
+          resolution?: string;
+        };
+        const failedOutcome = {
+          status: "archived",
+          reason: payload.reason ?? null,
+          note: null,
+          processed_at: "2026-04-04T11:00:00Z",
+        };
+        const listLead = leads.find((item) => item.id === requestedId);
+        if (listLead) {
+          listLead.qualification_status = "archived";
+          listLead.failed_outcome = failedOutcome;
+        }
+        const detail = leadDetails.get(requestedId);
+        if (detail) {
+          leadDetails.set(requestedId, {
+            ...detail,
+            qualification_status: "archived",
+            failed_outcome: failedOutcome,
+          });
+        }
+        return json(route, { ok: true });
+      }
       if (leadSuffix.endsWith("/update") && route.request().method() === "POST") {
         const requestedId = leadSuffix.replace("/update", "");
         const detail = leadDetails.get(requestedId);
@@ -1779,19 +1806,15 @@ test.describe("lead onboarding wizard", () => {
     await loginAsStaff(page, "pm@gmed.de");
   });
 
-  test("patient manager sees blocked and ready conversion states on lead cards", async ({
+  test("lead table omits the inline actions column", async ({
     page,
   }) => {
     await page.goto("/leads");
     await expect(page.getByText("Blocked Lead")).toBeVisible();
     await expect(page.getByText("Ready Lead")).toBeVisible();
-
-    const convertButtons = page.getByRole("button", {
-      name: /Konvertieren|Convert/i,
-    });
-    await expect(convertButtons).toHaveCount(1);
-    await expect(convertButtons.first()).toBeEnabled();
-    await expect(page.getByRole("button", { name: "In Konsole übernehmen" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Aktionen" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "In Konsole übernehmen" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Konvertieren|Convert/i })).toHaveCount(0);
   });
 
   test("active console lead rows open the wizard while Details opens the audit sheet", async ({
@@ -1808,13 +1831,34 @@ test.describe("lead onboarding wizard", () => {
     await expect(page).toHaveURL(new RegExp(`lead=${leadId}.*view=wizard`));
     await expect(page.getByRole("button", { name: "Bearbeiten", exact: true })).toHaveCount(0);
 
-    await wizard.getByRole("button", { name: "Schließen" }).click();
-    await expect(wizard).toBeHidden();
-
-    await readyRow.getByRole("button", { name: "Details" }).click();
+    await wizard.getByRole("button", { name: "Lead-Details" }).click();
     await expect(page.getByRole("button", { name: "Bearbeiten", exact: true })).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`lead=${leadId}(?!.*view=wizard)`));
     await expect(wizard).toBeHidden();
+  });
+
+  test("wizard header archives a lead that does not belong to the service", async ({ page }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    await page.goto("/leads");
+    await page.getByRole("row").filter({ hasText: "Ready Lead" }).click();
+
+    const wizard = page.getByRole("dialog", { name: "Lead-Onboarding" });
+    await wizard.getByRole("button", { name: "Lead archivieren" }).click();
+    const confirmation = page.getByRole("dialog", { name: "Lead archivieren?" });
+    await expect(confirmation).toBeVisible();
+
+    const archiveRequest = page.waitForRequest((request) =>
+      request.method() === "POST" &&
+      request.url().endsWith(`/api/v1/leads/${leadId}/failed-flow`),
+    );
+    await confirmation.getByRole("button", { name: "Archivieren", exact: true }).click();
+    const request = await archiveRequest;
+    expect(request.postDataJSON()).toEqual({
+      resolution: "archive",
+      reason: "not_our_lead",
+    });
+    await expect(wizard).toBeHidden();
+    await expect(page.getByText("Lead archiviert.")).toBeVisible();
   });
 
   test("intake lead rows open details and promotion continues directly in the wizard", async ({
@@ -1846,6 +1890,9 @@ test.describe("lead onboarding wizard", () => {
     const navigation = wizard.getByRole("navigation", { name: "Onboarding-Schritte" });
     await expect(navigation.getByRole("button")).toHaveCount(5);
     await expect(wizard.getByText("Personendaten")).toBeVisible();
+    await expect(
+      wizard.getByText("Ein Patient wird erst nach der finalen Freigabe angelegt."),
+    ).toHaveCount(0);
     await expect(wizard.getByRole("button", { name: "Patient anlegen" })).toHaveCount(0);
 
     await navigation.getByRole("button", { name: /Bedarf/i }).click();
