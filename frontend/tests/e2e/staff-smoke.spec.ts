@@ -280,6 +280,9 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
         attachments: [],
         converted_patient_id: null,
         converted_patient_pid: null,
+        wizard_state: lead.id === "00000000-0000-0000-0000-000000000902"
+          ? { step: "documents" }
+          : {},
         readiness: {
           qualification_ready: true,
           conversion_ready: lead.conversion_ready,
@@ -2386,6 +2389,8 @@ test.describe("responsive staff workspace", () => {
     await closeButton.click();
     await expect(wizard).toBeHidden();
     await readyLeadCell.click();
+    await expect(wizard.getByRole("heading", { name: "Personendaten" })).toBeVisible();
+    await navigation.getByRole("button", { name: /Vertrag & Angebot/i }).click();
     await expect(wizard.getByText("Transport coordination", { exact: true })).toBeVisible();
     await expect(wizard.getByText("12.500,00 EUR", { exact: false }).first()).toBeVisible();
 

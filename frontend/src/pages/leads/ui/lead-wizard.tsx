@@ -623,11 +623,7 @@ export function LeadWizard({
       const paymentQuote = nextQuotes.find((item) => item.status === "accepted") ?? nextQuotes[0];
       const storedCommercialDraft = storedCommercialDraftFromLead(nextLead);
       const nextDraft = draftFromLead(nextLead);
-      const savedStep = nextLead.wizard_state?.["step"];
-      const nextStep =
-        typeof savedStep === "string" && STEPS.some((item) => item.id === savedStep)
-          ? savedStep as StepId
-          : "master_data";
+      const nextStep: StepId = "master_data";
       const nextLines = storedCommercialDraft?.lines.length
         ? storedCommercialDraft.lines
         : nextOrderDetail?.leistungen.length
