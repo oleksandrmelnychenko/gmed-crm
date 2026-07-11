@@ -1398,7 +1398,7 @@ async fn update_intake_completion(
     }
 
     let row = match sqlx::query(
-        r#"SELECT hauptanfragegrund, aktuelle_anamnese, zuweiser
+        r#"SELECT hauptanfragegrund, aktuelle_anamnese
            FROM cases
            WHERE id = $1"#,
     )
@@ -1424,11 +1424,6 @@ async fn update_intake_completion(
             (
                 "aktuelle_anamnese",
                 row.try_get::<Option<String>, _>("aktuelle_anamnese")
-                    .unwrap_or_default(),
-            ),
-            (
-                "zuweiser",
-                row.try_get::<Option<String>, _>("zuweiser")
                     .unwrap_or_default(),
             ),
         ];

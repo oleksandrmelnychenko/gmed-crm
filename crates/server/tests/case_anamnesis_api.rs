@@ -263,10 +263,7 @@ async fn lead_case_completes_anamnesis_without_creating_patient() {
     )
     .await;
     assert_eq!(blocked_status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(
-        blocked["blocking_fields"],
-        json!(["aktuelle_anamnese", "zuweiser"])
-    );
+    assert_eq!(blocked["blocking_fields"], json!(["aktuelle_anamnese"]));
 
     let (update_status, update_body) = json_request(
         &app,
@@ -275,7 +272,6 @@ async fn lead_case_completes_anamnesis_without_creating_patient() {
         &bearer,
         Some(json!({
             "aktuelle_anamnese": "Pain for six months after a sports injury.",
-            "zuweiser": "Selbstanfrage",
         })),
     )
     .await;

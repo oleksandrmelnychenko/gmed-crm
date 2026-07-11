@@ -148,6 +148,7 @@ type MasterFieldKey =
 type MasterValidationErrors = Partial<Record<MasterFieldKey, string>>;
 
 const AUTOSAVE_DELAY_MS = 800;
+const MAX_DOCUMENT_FILE_SIZE = 25 * 1024 * 1024;
 const NEED_CONCERN_ID = "lead-wizard-concern";
 const NEED_SPECIALTIES_ID = "lead-wizard-specialties";
 const DOCUMENT_ANAMNESE_ID = "lead-wizard-anamnese";
@@ -358,6 +359,7 @@ function errorText(error: unknown, tx: Tx): string {
     "Lead could not be saved": tx("Не удалось сохранить обращение", "Lead konnte nicht gespeichert werden"),
     "No order services available for quote": tx("Добавьте хотя бы одну услугу", "Mindestens eine Leistung hinzufügen"),
     "Failed to create quote": tx("Не удалось создать смету", "Kostenvoranschlag konnte nicht erstellt werden"),
+    "Case intake is incomplete": tx("Заполните причину обращения и анамнез", "Anliegen und Anamnese vollständig ausfüllen"),
   };
   return labels[message] ?? message;
 }
@@ -875,6 +877,10 @@ export function LeadWizard({
 
   async function upload(kind: "identity" | "dsgvo", file: File) {
     if (!leadId) return;
+    if (file.size > MAX_DOCUMENT_FILE_SIZE) {
+      setError(tx("Размер файла не должен превышать 25 МБ", "Die Datei darf höchstens 25 MB groß sein"));
+      return;
+    }
     setBusy("upload-" + kind);
     try {
       const form = new FormData();

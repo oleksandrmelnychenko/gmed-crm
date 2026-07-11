@@ -11,6 +11,9 @@ server {
   index index.html;
 
   location /api/ {
+    # Document uploads are validated by the backend at 25 MiB. Keep enough
+    # proxy headroom for multipart boundaries and accompanying form fields.
+    client_max_body_size 30m;
     proxy_pass ${GMED_BACKEND_UPSTREAM};
     proxy_http_version 1.1;
     proxy_set_header Host $host;
