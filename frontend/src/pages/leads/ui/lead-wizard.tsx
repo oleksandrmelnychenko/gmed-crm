@@ -5,12 +5,15 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleAlert,
+  Download,
   Eye,
   FileCheck2,
+  FileText,
   LoaderCircle,
   Plus,
   RefreshCw,
   ShieldCheck,
+  Trash2,
   Upload,
   UserRoundCheck,
   X,
@@ -48,6 +51,8 @@ import {
 } from "@/pages/contracts/data/contracts-api";
 import type { AgencyServiceItem, ContractItem, QuoteItem } from "@/pages/contracts/model/types";
 import {
+  deleteStoredDocumentFile,
+  downloadDocumentFile,
   fetchDocuments,
   markDocumentSigned,
   uploadDocument,
@@ -119,6 +124,7 @@ type ServiceLine = {
 };
 
 type AutosaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
+type WizardDocumentKind = "identity" | "dsgvo";
 
 type AutosaveSnapshot = {
   draft: Draft;
@@ -132,6 +138,12 @@ type StoredCommercialDraft = {
   lines: ServiceLine[];
   paidAmount: string;
   prepayment: boolean;
+};
+
+type CommercialFlagsPatch = {
+  signed_patient?: boolean;
+  signed_agency?: boolean;
+  prepayment_required?: boolean;
 };
 
 type MasterFieldKey =
@@ -351,6 +363,32 @@ function lineFromOrderLeistung(item: Leistung): ServiceLine {
   };
 }
 
+function wizardDocumentKind(item: DocumentItem): WizardDocumentKind | null {
+  const complianceKind = item.compliance_kind?.trim().toLowerCase();
+  if (complianceKind === "identity" || complianceKind === "dsgvo") return complianceKind;
+
+  const classification = [item.art, item.category, item.auto_name]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (classification.includes("identity") || classification.includes("passport") || classification.includes("ausweis")) {
+    return "identity";
+  }
+  if (classification.includes("dsgvo") || classification.includes("datenschutz")) {
+    return "dsgvo";
+  }
+  return null;
+}
+
+function formatFileSize(size: number | null, lang: string) {
+  if (!size || size <= 0) return "";
+  const formatter = new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
+    maximumFractionDigits: size >= 1024 * 1024 ? 1 : 0,
+  });
+  if (size >= 1024 * 1024) return `${formatter.format(size / (1024 * 1024))} MB`;
+  return `${formatter.format(size / 1024)} KB`;
+}
+
 function errorText(error: unknown, tx: Tx): string {
   const message = error instanceof Error && error.message ? error.message : "Request failed";
   const labels: Record<string, string> = {
@@ -530,6 +568,8 @@ export function LeadWizard({
   const [agencyServices, setAgencyServices] = useState<AgencyServiceItem[]>([]);
   const [lines, setLines] = useState<ServiceLine[]>([]);
   const [prepayment, setPrepayment] = useState(false);
+  const [signedPatient, setSignedPatient] = useState(false);
+  const [signedAgency, setSignedAgency] = useState(false);
   const [paidAmount, setPaidAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -537,6 +577,9 @@ export function LeadWizard({
   const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("idle");
   const [autosaveError, setAutosaveError] = useState("");
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
+  const [deleteDocument, setDeleteDocument] = useState<DocumentItem | null>(null);
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deleteError, setDeleteError] = useState("");
   const [touchedMasterFields, setTouchedMasterFields] = useState<Set<MasterFieldKey>>(
     () => new Set(),
   );
@@ -613,6 +656,8 @@ export function LeadWizard({
       if (hydrateDraft || hydrateCommercial) {
         setLines(nextLines);
         setPrepayment(nextPrepayment);
+        setSignedPatient(Boolean(nextOrder?.signed_patient));
+        setSignedAgency(Boolean(nextOrder?.signed_agency));
         setPaidAmount(nextPaidAmount);
       }
       if (hydrateDraft) {
@@ -648,6 +693,9 @@ export function LeadWizard({
     setAutosaveError("");
     setAutosaveStatus("idle");
     setArchiveConfirmOpen(false);
+    setDeleteDocument(null);
+    setDeleteReason("");
+    setDeleteError("");
     setTouchedMasterFields(new Set());
     setMasterValidationAttempted(false);
     setNeedValidationAttempted(false);
@@ -680,8 +728,18 @@ export function LeadWizard({
   const quote = orderQuotes[0] ?? null;
   const acceptedQuote = orderQuotes.find((item) => item.status === "accepted") ?? null;
   const caseId = cases[0]?.id ?? null;
-  const identity = documents.find((item) => item.compliance_kind === "identity");
-  const dsgvo = documents.find((item) => item.compliance_kind === "dsgvo");
+  const wizardDocuments = useMemo(() => {
+    const grouped: Record<WizardDocumentKind, DocumentItem[]> = {
+      identity: [],
+      dsgvo: [],
+    };
+    documents.forEach((item) => {
+      if (item.file_deleted_at || item.has_stored_file === false) return;
+      const kind = wizardDocumentKind(item);
+      if (kind) grouped[kind].push(item);
+    });
+    return grouped;
+  }, [documents]);
   const readiness = useMemo(() => new Map((lead?.readiness.steps ?? []).map((item) => [item.key, item.ready])), [lead?.readiness.steps]);
   const index = STEPS.findIndex((item) => item.id === step);
   const estimate = useMemo(() => {
@@ -898,6 +956,43 @@ export function LeadWizard({
     }
   }
 
+  async function downloadDocument(document: DocumentItem) {
+    setBusy(`download-${document.id}`);
+    setError("");
+    try {
+      await downloadDocumentFile(
+        document.id,
+        document.original_filename || document.auto_name || "document",
+      );
+    } catch (nextError) {
+      setError(errorText(nextError, tx));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function deleteWizardDocument() {
+    if (!deleteDocument) return;
+    const reason = deleteReason.trim();
+    if (!reason) {
+      setDeleteError(tx("Укажите причину удаления", "Löschgrund angeben"));
+      return;
+    }
+
+    setBusy(`delete-${deleteDocument.id}`);
+    setDeleteError("");
+    try {
+      await deleteStoredDocumentFile(deleteDocument.id, reason);
+      setDeleteDocument(null);
+      setDeleteReason("");
+      await reload(false);
+    } catch (nextError) {
+      setDeleteError(errorText(nextError, tx));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function signDocument(id: string, kind: DocumentComplianceKind) {
     setBusy("sign-" + kind);
     try {
@@ -910,7 +1005,7 @@ export function LeadWizard({
     }
   }
 
-  async function ensureCommercial() {
+  async function ensureCommercial(flags: CommercialFlagsPatch = {}) {
     if (!leadId || !draft) throw new Error(tx("Обращение не выбрано", "Kein Lead ausgewählt"));
     if (!lines.some(validLine)) throw new Error(tx("Добавьте корректную услугу", "Mindestens eine gültige Leistung ist erforderlich"));
     if (!(await save("commercial", false))) throw new Error(tx("Не удалось сохранить обращение", "Lead konnte nicht gespeichert werden"));
@@ -943,9 +1038,9 @@ export function LeadWizard({
     await updateOrderCommercialBasis(orderId, {
       contract_id: contractId,
       total_estimated: estimate.gross.toFixed(2),
-      prepayment_required: prepayment,
-      signed_patient: Boolean(order?.signed_patient),
-      signed_agency: Boolean(order?.signed_agency),
+      prepayment_required: flags.prepayment_required ?? prepayment,
+      signed_patient: flags.signed_patient ?? signedPatient,
+      signed_agency: flags.signed_agency ?? signedAgency,
     });
     return { contractId, orderId };
   }
@@ -975,14 +1070,14 @@ export function LeadWizard({
     }
   }
 
-  async function saveFlags(patchValue: { signed_patient?: boolean; signed_agency?: boolean; prepayment_required?: boolean }) {
+  async function saveFlags(patchValue: CommercialFlagsPatch) {
     setBusy("flags");
     try {
-      const result = await ensureCommercial();
-      await updateOrderCommercialBasis(result.orderId, patchValue);
+      await ensureCommercial(patchValue);
       await reload(false, true);
     } catch (nextError) {
       setError(errorText(nextError, tx));
+      await reload(false, true);
     } finally {
       setBusy(null);
     }
@@ -1517,14 +1612,76 @@ export function LeadWizard({
           {draft && step === "documents" ? (
             <section className="space-y-5">
               {(["identity", "dsgvo"] as const).map((kind) => {
-                const document = kind === "identity" ? identity : dsgvo;
-                const signed = Boolean(document?.signed_at && document?.compliance_kind === kind);
+                const kindDocuments = wizardDocuments[kind];
                 const label = kind === "identity" ? tx("Документ, удостоверяющий личность", "Ausweisdokument") : tx("Согласие на обработку персональных данных", "Datenschutzeinwilligung (DSGVO)");
                 const fileId = "lead-file-" + kind;
-                return <div key={kind} className="flex flex-wrap items-center justify-between gap-3 border-y border-border py-3">
-                  <div><div className="text-sm font-medium text-foreground">{label}</div><div className="mt-1 text-xs text-muted-foreground">{document ? document.original_filename || document.auto_name : tx("Файл не загружен", "Keine Datei hochgeladen")}</div></div>
-                  <div className="flex flex-wrap items-center gap-2"><input id={fileId} type="file" className="peer sr-only" accept=".pdf,.jpg,.jpeg,.png" disabled={isBusy} onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) { void upload(kind, file); event.currentTarget.value = ""; } }} /><label htmlFor={fileId} className={cn("inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-3 text-xs font-medium text-foreground shadow-xs hover:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring", isBusy && "pointer-events-none opacity-50")}><Upload aria-hidden="true" className="size-3.5" />{tx("Загрузить файл", "Datei hochladen")}</label><Button type="button" variant="outline" size="icon-sm" title={tx("Подтвердить документ", "Dokument bestätigen")} aria-label={tx("Подтвердить документ", "Dokument bestätigen")} disabled={!document || signed || isBusy} onClick={() => document && void signDocument(document.id, kind)}><FileCheck2 className={cn("size-3.5", signed && "text-emerald-700")} /></Button><StateMark done={signed} label={signed ? tx("Документ подтверждён", "Dokument bestätigt") : tx("Требует подтверждения", "Bestätigung erforderlich")} /></div>
-                </div>;
+                return (
+                  <div key={kind} className="space-y-3 border-y border-border py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="text-sm font-medium text-foreground">{label}</div>
+                      <input
+                        id={fileId}
+                        type="file"
+                        className="peer sr-only"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        disabled={isBusy}
+                        onChange={(event) => {
+                          const file = event.currentTarget.files?.[0];
+                          if (file) {
+                            void upload(kind, file);
+                            event.currentTarget.value = "";
+                          }
+                        }}
+                      />
+                      <label
+                        htmlFor={fileId}
+                        className={cn(
+                          "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-3 text-xs font-medium text-foreground shadow-xs hover:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
+                          isBusy && "pointer-events-none opacity-50",
+                        )}
+                      >
+                        <Upload aria-hidden="true" className="size-3.5" />
+                        {kindDocuments.length > 0 ? tx("Добавить файл", "Datei hinzufügen") : tx("Загрузить файл", "Datei hochladen")}
+                      </label>
+                    </div>
+
+                    {kindDocuments.length > 0 ? (
+                      <div className="divide-y divide-border rounded-md border border-border">
+                        {kindDocuments.map((document) => {
+                          const signed = Boolean(document.signed_at && document.compliance_kind === kind);
+                          const sizeLabel = formatFileSize(document.file_size, lang);
+                          return (
+                            <div key={document.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
+                              <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate text-sm font-medium text-foreground">
+                                  {document.original_filename || document.auto_name}
+                                </div>
+                                <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                  {sizeLabel ? <span className="font-mono tabular-nums">{sizeLabel}</span> : null}
+                                  <StateMark done={signed} label={signed ? tx("Подтверждён", "Bestätigt") : tx("Не подтверждён", "Nicht bestätigt")} />
+                                </div>
+                              </div>
+                              <div className="flex shrink-0 items-center gap-1">
+                                <Button type="button" variant="ghost" size="icon-sm" title={tx("Скачать файл", "Datei herunterladen")} aria-label={tx("Скачать файл", "Datei herunterladen")} disabled={isBusy} onClick={() => void downloadDocument(document)}>
+                                  {busy === `download-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+                                </Button>
+                                <Button type="button" variant="ghost" size="icon-sm" title={tx("Подтвердить документ", "Dokument bestätigen")} aria-label={tx("Подтвердить документ", "Dokument bestätigen")} disabled={signed || isBusy} onClick={() => void signDocument(document.id, kind)}>
+                                  <FileCheck2 className={cn("size-3.5", signed && "text-emerald-700")} />
+                                </Button>
+                                <Button type="button" variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" title={tx("Удалить файл", "Datei löschen")} aria-label={tx("Удалить файл", "Datei löschen")} disabled={isBusy} onClick={() => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}>
+                                  <Trash2 className="size-3.5" />
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted-foreground">{tx("Файлы не добавлены", "Keine Dateien hinzugefügt")}</div>
+                    )}
+                  </div>
+                );
               })}
               <div className="border-y border-border"><ToggleRow checked={draft.privacyConsent} disabled={isBusy} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} /><ToggleRow checked={draft.healthcareConsent} disabled={isBusy} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} /></div>
               <Field
@@ -1602,8 +1759,36 @@ export function LeadWizard({
                   <span className="font-semibold text-foreground">{tx("Итого", "Gesamt")}: <span className="font-mono tabular-nums">{formatMoneyValue(estimate.gross, lang)} EUR</span></span>
                 </div>
               </div>
-              <div className="border-y border-border"><ToggleRow checked={Boolean(order?.signed_patient)} disabled={isBusy} onChange={(checked) => void saveFlags({ signed_patient: checked })} label={tx("Клиент подписал заказ", "Auftrag vom Kunden unterzeichnet")} /><ToggleRow checked={Boolean(order?.signed_agency)} disabled={isBusy} onChange={(checked) => void saveFlags({ signed_agency: checked })} label={tx("Агентство подтвердило заказ", "Auftrag von der Agentur bestätigt")} /><ToggleRow checked={prepayment} disabled={isBusy} onChange={(checked) => { setPrepayment(checked); void saveFlags({ prepayment_required: checked }); }} label={tx("Требуется предоплата", "Vorauszahlung erforderlich")} /></div>
-              <div className="grid gap-3 border-b border-border pb-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end"><Field label={tx("Полученная предоплата", "Erhaltene Vorauszahlung")}><Input inputMode="decimal" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} disabled={!prepayment} placeholder="0.00" /></Field><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" disabled={isBusy || !lines.some(validLine)} onClick={() => void createOrAcceptQuote(false)}>{busy === "quote" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}{quote ? tx("Создать новую смету", "Neuen Kostenvoranschlag erstellen") : tx("Создать смету", "Kostenvoranschlag erstellen")}</Button><Button type="button" variant="outline" disabled={isBusy || !quote} onClick={() => void createOrAcceptQuote(true)}>{busy === "accept" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}{tx("Подтвердить смету", "Kostenvoranschlag annehmen")}</Button></div></div>
+              <div className="border-y border-border">
+                <ToggleRow
+                  checked={signedPatient}
+                  disabled={isBusy}
+                  onChange={(checked) => {
+                    setSignedPatient(checked);
+                    void saveFlags({ signed_patient: checked });
+                  }}
+                  label={tx("Клиент подписал заказ", "Auftrag vom Kunden unterzeichnet")}
+                />
+                <ToggleRow
+                  checked={signedAgency}
+                  disabled={isBusy}
+                  onChange={(checked) => {
+                    setSignedAgency(checked);
+                    void saveFlags({ signed_agency: checked });
+                  }}
+                  label={tx("Агентство подтвердило заказ", "Auftrag von der Agentur bestätigt")}
+                />
+                <ToggleRow
+                  checked={prepayment}
+                  disabled={isBusy}
+                  onChange={(checked) => {
+                    setPrepayment(checked);
+                    void saveFlags({ prepayment_required: checked });
+                  }}
+                  label={tx("Требуется предоплата", "Vorauszahlung erforderlich")}
+                />
+              </div>
+              <div className="grid gap-3 border-b border-border pb-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end"><Field label={tx("Полученная предоплата", "Erhaltene Vorauszahlung")}><Input className="font-mono tabular-nums" inputMode="decimal" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} disabled={!prepayment} placeholder="0.00" /></Field><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" disabled={isBusy || !lines.some(validLine)} onClick={() => void createOrAcceptQuote(false)}>{busy === "quote" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}{quote ? tx("Создать новую смету", "Neuen Kostenvoranschlag erstellen") : tx("Создать смету", "Kostenvoranschlag erstellen")}</Button><Button type="button" variant="outline" disabled={isBusy || !quote} onClick={() => void createOrAcceptQuote(true)}>{busy === "accept" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}{tx("Подтвердить смету", "Kostenvoranschlag annehmen")}</Button></div></div>
               <div className="flex flex-wrap items-center justify-between gap-3"><StateMark done={Boolean(readiness.get("commercial"))} label={acceptedQuote ? tx("Смета подтверждена", "Kostenvoranschlag angenommen") : quote ? tx("Смета создана и ожидает подтверждения", "Kostenvoranschlag erstellt, Annahme ausstehend") : tx("Смета ещё не создана", "Kostenvoranschlag noch nicht erstellt")} /><Button type="button" disabled={isBusy || !lines.some(validLine)} onClick={() => void prepareCommercial()}>{busy === "commercial" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}{tx("Сохранить договор и заказ", "Vertrag und Auftrag speichern")}</Button></div>
             </section>
           ) : null}
@@ -1623,6 +1808,59 @@ export function LeadWizard({
           {step !== "release" ? <Button type="button" size="sm" disabled={isBusy} onClick={next}>{busy === "save" || busy === "intake" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}{tx("Далее", "Weiter")}<ChevronRight className="size-3.5" /></Button> : null}
         </footer>
       </DialogContent>
+      </Dialog>
+      <Dialog
+        open={Boolean(deleteDocument)}
+        allowImplicitDismissal
+        onOpenChange={(nextOpen) => {
+          if (nextOpen) return;
+          setDeleteDocument(null);
+          setDeleteReason("");
+          setDeleteError("");
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{tx("Удалить файл?", "Datei löschen?")}</DialogTitle>
+            <DialogDescription>
+              {deleteDocument?.original_filename || deleteDocument?.auto_name}
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void deleteWizardDocument();
+            }}
+          >
+            <Field
+              required
+              label={tx("Причина удаления", "Löschgrund")}
+              error={deleteError || undefined}
+              errorId="lead-wizard-delete-reason-error"
+            >
+              <textarea
+                className={cn(textareaClass, "min-h-20", deleteError && "border-destructive")}
+                value={deleteReason}
+                aria-invalid={Boolean(deleteError)}
+                aria-describedby={deleteError ? "lead-wizard-delete-reason-error" : undefined}
+                onChange={(event) => {
+                  setDeleteReason(event.target.value);
+                  if (deleteError) setDeleteError("");
+                }}
+              />
+            </Field>
+            <DialogFooter>
+              <Button type="button" variant="outline" disabled={busy?.startsWith("delete-")} onClick={() => setDeleteDocument(null)}>
+                {tx("Отмена", "Abbrechen")}
+              </Button>
+              <Button type="submit" variant="destructive" disabled={busy?.startsWith("delete-")}>
+                {busy?.startsWith("delete-") ? <LoaderCircle className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                {tx("Удалить файл", "Datei löschen")}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
       </Dialog>
       <Dialog open={archiveConfirmOpen} onOpenChange={setArchiveConfirmOpen}>
         <DialogContent className="max-w-md">

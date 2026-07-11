@@ -2006,6 +2006,74 @@ test.describe("lead onboarding wizard", () => {
     await expect(navigation.getByRole("button", { name: /Создание пациента/i })).toBeVisible();
   });
 
+  test("wizard lists uploaded lead files and deletes them with an audit reason", async ({
+    page,
+  }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    const leadDocumentId = "00000000-0000-0000-0000-000000000972";
+    let fileActive = true;
+
+    await page.route(`**/api/v1/documents?lead_id=${leadId}`, (route) =>
+      json(route, fileActive ? [{
+        id: leadDocumentId,
+        lead_id: leadId,
+        patient_id: null,
+        auto_name: "Identity document",
+        original_filename: "passport-alfred.pdf",
+        art: "identity",
+        category: "identity",
+        status: "active",
+        visibility: "internal",
+        mime_type: "application/pdf",
+        file_size: 2 * 1024 * 1024,
+        has_stored_file: true,
+        compliance_kind: null,
+        signed_at: null,
+        file_deleted_at: null,
+      }] : []),
+    );
+    await page.route(`**/api/v1/documents/${leadDocumentId}/delete`, (route) => {
+      const payload = route.request().postDataJSON() as { reason?: string };
+      fileActive = false;
+      return json(route, {
+        ok: true,
+        document: {
+          id: leadDocumentId,
+          has_stored_file: false,
+          status: "archived",
+          file_deleted_at: "2026-07-11T11:30:00Z",
+          file_delete_reason: payload.reason ?? null,
+        },
+      });
+    });
+
+    await page.goto(`/leads?lead=${leadId}`);
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    await wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" })
+      .getByRole("button", { name: /Unterlagen/i })
+      .click();
+
+    await expect(wizard.getByText("passport-alfred.pdf", { exact: true })).toBeVisible();
+    await expect(wizard.getByText("2 MB", { exact: true })).toBeVisible();
+    await expect(wizard.getByText("Nicht bestätigt", { exact: true })).toBeVisible();
+
+    await wizard.getByRole("button", { name: "Datei löschen" }).click();
+    const deleteDialog = page.getByRole("dialog", { name: "Datei löschen?" });
+    await expect(deleteDialog.getByText("passport-alfred.pdf", { exact: true })).toBeVisible();
+    await deleteDialog.getByRole("textbox", { name: "Löschgrund" }).fill("Falsches Dokument");
+    const deleteRequest = page.waitForRequest((request) =>
+      request.method() === "POST" &&
+      request.url().endsWith(`/api/v1/documents/${leadDocumentId}/delete`),
+    );
+    await deleteDialog.getByRole("button", { name: "Datei löschen", exact: true }).click();
+    expect((await deleteRequest).postDataJSON()).toEqual({ reason: "Falsches Dokument" });
+
+    await expect(deleteDialog).toBeHidden();
+    await expect(wizard.getByText("passport-alfred.pdf", { exact: true })).toHaveCount(0);
+    await expect(wizard.getByText("Keine Dateien hinzugefügt").first()).toBeVisible();
+  });
+
   test("final release reflects server readiness and does not expose an early conversion", async ({
     page,
   }) => {
@@ -2288,6 +2356,15 @@ test.describe("responsive staff workspace", () => {
     const orderId = "00000000-0000-0000-0000-000000000962";
     const quoteId = "00000000-0000-0000-0000-000000000963";
     let quoteCreated = false;
+    let orderCreated = false;
+    let signedPatient = false;
+    let signedAgency = false;
+    let prepaymentRequired = false;
+    let commercialBasisRequests = 0;
+    let releaseCommercialBasis = () => undefined;
+    const commercialBasisGate = new Promise<void>((resolve) => {
+      releaseCommercialBasis = resolve;
+    });
     let releaseQuoteReload = () => undefined;
     const quoteReloadGate = new Promise<void>((resolve) => {
       releaseQuoteReload = resolve;
@@ -2301,16 +2378,46 @@ test.describe("responsive staff workspace", () => {
     });
     await page.route("**/api/v1/orders", (route) => {
       if (route.request().method() === "POST") {
+        orderCreated = true;
         return json(route, { id: orderId }, 201);
       }
       return json(route, []);
     });
+    await page.route("**/api/v1/orders?*", (route) =>
+      json(route, orderCreated ? [{
+        id: orderId,
+        order_number: "A-20260711-0099",
+        source_lead_id: leadId,
+        signed_patient: signedPatient,
+        signed_agency: signedAgency,
+        prepayment_required: prepaymentRequired,
+      }] : []),
+    );
+    await page.route(`**/api/v1/orders/${orderId}`, (route) =>
+      json(route, {
+        id: orderId,
+        signed_patient: signedPatient,
+        signed_agency: signedAgency,
+        prepayment_required: prepaymentRequired,
+        leistungen: [],
+      }),
+    );
     await page.route(`**/api/v1/orders/${orderId}/leistungen`, (route) =>
       json(route, { id: "00000000-0000-0000-0000-000000000964" }, 201),
     );
-    await page.route(`**/api/v1/orders/${orderId}/commercial-basis`, (route) =>
-      json(route, { ok: true, order_id: orderId }),
-    );
+    await page.route(`**/api/v1/orders/${orderId}/commercial-basis`, async (route) => {
+      const payload = route.request().postDataJSON() as {
+        signed_patient?: boolean;
+        signed_agency?: boolean;
+        prepayment_required?: boolean;
+      };
+      commercialBasisRequests += 1;
+      signedPatient = payload.signed_patient ?? signedPatient;
+      signedAgency = payload.signed_agency ?? signedAgency;
+      prepaymentRequired = payload.prepayment_required ?? prepaymentRequired;
+      await commercialBasisGate;
+      return json(route, { ok: true, order_id: orderId });
+    });
     await page.route(`**/api/v1/orders/${orderId}/quotes`, (route) => {
       quoteCreated = true;
       return json(route, {
@@ -2337,6 +2444,17 @@ test.describe("responsive staff workspace", () => {
       if (quoteCreated) await quoteReloadGate;
       return json(route, []);
     });
+
+    const patientSignatureToggle = wizard.getByRole("checkbox", {
+      name: "Auftrag vom Kunden unterzeichnet",
+    });
+    await patientSignatureToggle.check();
+    await expect(patientSignatureToggle).toBeChecked();
+    await expect.poll(() => commercialBasisRequests).toBe(1);
+    releaseCommercialBasis();
+    await expect(patientSignatureToggle).toBeEnabled();
+    await expect(patientSignatureToggle).toBeChecked();
+    expect(commercialBasisRequests).toBe(1);
 
     await wizard.getByRole("button", { name: "Kostenvoranschlag erstellen" }).click();
     await expect(
