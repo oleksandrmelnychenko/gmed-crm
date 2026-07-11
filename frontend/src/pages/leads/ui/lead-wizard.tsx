@@ -27,7 +27,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { selectClass, textareaClass } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import type { LeadDetail } from "@/lib/api/types";
@@ -361,18 +360,6 @@ function errorText(error: unknown, tx: Tx): string {
     "Failed to create quote": tx("Не удалось создать смету", "Kostenvoranschlag konnte nicht erstellt werden"),
   };
   return labels[message] ?? message;
-}
-
-function qualificationReasonLabel(reason: string, tx: Tx) {
-  const labels: Record<string, string> = {
-    "Compliance is not signed yet": tx("Подтвердите необходимые согласия", "Erforderliche Einwilligungen bestätigen"),
-    "Birth date is missing": tx("Указать дату рождения", "Geburtsdatum angeben"),
-    "Legal sex is missing": tx("Укажите пол по документам", "Geschlecht laut Ausweisdokument angeben"),
-    "Email or phone is required": tx("Укажите электронную почту или телефон", "E-Mail-Adresse oder Telefonnummer angeben"),
-    "Privacy practices consent is missing": tx("Подтвердите ознакомление с политикой конфиденциальности", "Datenschutzhinweise bestätigen"),
-    "Healthcare consent is missing": tx("Получите согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten einholen"),
-  };
-  return labels[reason] ?? tx("Проверьте обязательные данные", "Pflichtangaben prüfen");
 }
 
 function readinessStepLabel(key: string, tx: Tx) {
@@ -1148,9 +1135,9 @@ export function LeadWizard({
   ) || autosaveStatus === "saving" || autosaveStatus === "error";
   return (
     <>
-      <Sheet open={open} dirty={autosaveIsDirty} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="flex w-full flex-col gap-0 border-l border-border p-0 sm:max-w-4xl">
-        <SheetTitle className="sr-only">{tx("Оформление обращения", "Lead-Aufnahme")}</SheetTitle>
+      <Dialog open={open} dirty={autosaveIsDirty} onOpenChange={onOpenChange}>
+      <DialogContent className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(88vh,52rem)] sm:w-[min(92vw,64rem)] sm:max-w-5xl">
+        <DialogTitle className="sr-only">{tx("Оформление обращения", "Lead-Aufnahme")}</DialogTitle>
         <header className="flex min-h-16 items-center justify-between gap-4 border-b border-border px-4 py-3 pr-14 sm:px-5 sm:pr-14">
           <div className="min-w-0">
             <h2 className="truncate text-base font-semibold text-foreground">{lead ? [lead.first_name, lead.last_name].filter(Boolean).join(" ") : tx("Оформление обращения", "Lead-Aufnahme")}</h2>
@@ -1438,7 +1425,6 @@ export function LeadWizard({
 
           {draft && step === "need" ? (
             <section className="space-y-5">
-              <div><h3 className="text-sm font-semibold text-foreground">{tx("Причина обращения и специализации", "Anliegen und Fachrichtungen")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Выберите подходящие специализации из справочника.", "Wählen Sie die passenden Fachrichtungen aus dem Verzeichnis aus.")}</p></div>
               <Field
                 required
                 label={tx("Причина обращения", "Anliegen")}
@@ -1516,15 +1502,7 @@ export function LeadWizard({
                   </div>
                 ) : null}
               </div>
-              <div className="flex flex-wrap items-start justify-between gap-3 border-t border-border pt-4">
-                <div className="min-w-0 space-y-2">
-                  <StateMark done={lead?.qualification_status === "qualified"} label={lead?.qualification_status === "qualified" ? tx("Данные обращения подтверждены", "Angaben zum Anliegen bestätigt") : tx("Данные обращения ещё не подтверждены", "Angaben zum Anliegen noch nicht bestätigt")} />
-                  {lead?.qualification_status !== "qualified" && lead?.readiness.qualification_reasons.length ? (
-                    <ul className="space-y-1 text-xs text-muted-foreground">
-                      {lead.readiness.qualification_reasons.map((reason) => <li key={reason}>{qualificationReasonLabel(reason, tx)}</li>)}
-                    </ul>
-                  ) : null}
-                </div>
+              <div className="flex justify-end border-t border-border pt-4">
                 <Button type="button" variant="outline" disabled={isBusy || lead?.qualification_status === "qualified"} onClick={() => void qualify()}>{busy === "qualify" ? <LoaderCircle className="size-3.5 animate-spin" /> : <UserRoundCheck className="size-3.5" />}{tx("Подтвердить данные", "Angaben bestätigen")}</Button>
               </div>
             </section>
@@ -1638,8 +1616,8 @@ export function LeadWizard({
           <Button type="button" variant="outline" size="sm" disabled={isBusy || index === 0} onClick={() => setStep(STEPS[index - 1].id)}><ChevronLeft className="size-3.5" />{tx("Назад", "Zurück")}</Button>
           {step !== "release" ? <Button type="button" size="sm" disabled={isBusy} onClick={next}>{busy === "save" || busy === "intake" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}{tx("Далее", "Weiter")}<ChevronRight className="size-3.5" /></Button> : null}
         </footer>
-      </SheetContent>
-      </Sheet>
+      </DialogContent>
+      </Dialog>
       <Dialog open={archiveConfirmOpen} onOpenChange={setArchiveConfirmOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>

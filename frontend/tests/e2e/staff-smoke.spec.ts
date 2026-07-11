@@ -1923,6 +1923,13 @@ test.describe("lead onboarding wizard", () => {
 
     const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
     await expect(wizard).toBeVisible();
+    const [wizardBox, viewport] = await Promise.all([
+      wizard.boundingBox(),
+      page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
+    ]);
+    expect(wizardBox).not.toBeNull();
+    expect(Math.abs((wizardBox?.x ?? 0) + (wizardBox?.width ?? 0) / 2 - viewport.width / 2)).toBeLessThanOrEqual(2);
+    expect(Math.abs((wizardBox?.y ?? 0) + (wizardBox?.height ?? 0) / 2 - viewport.height / 2)).toBeLessThanOrEqual(2);
     const navigation = wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" });
     await expect(navigation.getByRole("button")).toHaveCount(5);
     await expect(wizard.getByRole("heading", { name: "Personendaten" })).toBeVisible();
@@ -1932,7 +1939,10 @@ test.describe("lead onboarding wizard", () => {
     await expect(wizard.getByRole("button", { name: "Patient anlegen" })).toHaveCount(0);
 
     await navigation.getByRole("button", { name: /Anliegen/i }).click();
-    await expect(wizard.getByText("Anliegen und Fachrichtungen")).toBeVisible();
+    await expect(wizard.getByText("Anliegen und Fachrichtungen")).toHaveCount(0);
+    await expect(
+      wizard.getByText("Wählen Sie die passenden Fachrichtungen aus dem Verzeichnis aus."),
+    ).toHaveCount(0);
     await wizard.getByRole("textbox", { name: "Anliegen", exact: true }).fill("Orthopädische Beratung");
     await expect(
       wizard.getByRole("textbox", { name: "Wie sind Sie auf uns aufmerksam geworden?" }),
@@ -1978,8 +1988,9 @@ test.describe("lead onboarding wizard", () => {
     await expect(navigation.getByRole("button", { name: /Данные клиента/i })).toBeVisible();
 
     await navigation.getByRole("button", { name: /Обращение/i }).click();
-    await expect(wizard.getByText("Причина обращения и специализации")).toBeVisible();
-    await expect(wizard.getByText("Данные обращения подтверждены")).toBeVisible();
+    await expect(wizard.getByText("Причина обращения и специализации")).toHaveCount(0);
+    await expect(wizard.getByText("Выберите подходящие специализации из справочника.")).toHaveCount(0);
+    await expect(wizard.getByText("Данные обращения подтверждены")).toHaveCount(0);
     await wizard.getByRole("textbox", { name: "Причина обращения" }).fill("Консультация ортопеда");
 
     await navigation.getByRole("button", { name: /Документы/i }).click();
@@ -2108,6 +2119,12 @@ test.describe("responsive staff workspace", () => {
     const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
     const navigation = wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" });
     await expect(navigation.getByRole("button", { name: /Personendaten/i })).toBeVisible();
+    const wizardBox = await wizard.boundingBox();
+    expect(wizardBox).not.toBeNull();
+    expect(wizardBox?.x ?? -1).toBeGreaterThanOrEqual(0);
+    expect((wizardBox?.x ?? 0) + (wizardBox?.width ?? 0)).toBeLessThanOrEqual(390);
+    expect(wizardBox?.y ?? -1).toBeGreaterThanOrEqual(0);
+    expect((wizardBox?.y ?? 0) + (wizardBox?.height ?? 0)).toBeLessThanOrEqual(844);
     let leadListRefreshes = 0;
     page.on("request", (request) => {
       if (
