@@ -146,6 +146,8 @@ type CommercialFlagsPatch = {
   prepayment_required?: boolean;
 };
 
+type CommercialFlagKey = keyof CommercialFlagsPatch;
+
 type MasterFieldKey =
   | "firstName"
   | "lastName"
@@ -592,6 +594,11 @@ export function LeadWizard({
   const currentAutosaveSignatureRef = useRef("");
   const lastSavedAutosaveSignatureRef = useRef("");
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const commercialFlagRequestVersionRef = useRef<Record<CommercialFlagKey, number>>({
+    signed_patient: 0,
+    signed_agency: 0,
+    prepayment_required: 0,
+  });
 
   const reload = useCallback(async (hydrateDraft: boolean, hydrateCommercial = false) => {
     if (!leadId) return;
@@ -1070,16 +1077,52 @@ export function LeadWizard({
     }
   }
 
-  async function saveFlags(patchValue: CommercialFlagsPatch) {
-    setBusy("flags");
+  async function saveFlags(
+    patchValue: CommercialFlagsPatch,
+    rollbackValue: CommercialFlagsPatch,
+  ) {
+    const flagKeys = Object.keys(patchValue) as CommercialFlagKey[];
+    const requestVersions = new Map(
+      flagKeys.map((key) => {
+        const version = commercialFlagRequestVersionRef.current[key] + 1;
+        commercialFlagRequestVersionRef.current[key] = version;
+        return [key, version] as const;
+      }),
+    );
+    const targetLeadId = leadId;
+    const existingOrderId = order?.id;
+    if (!existingOrderId) setBusy("flags");
+    setError("");
     try {
-      await ensureCommercial(patchValue);
-      await reload(false, true);
+      if (existingOrderId) {
+        await updateOrderCommercialBasis(existingOrderId, patchValue);
+        setOrders((current) => current.map((item) => (
+          item.id === existingOrderId ? { ...item, ...patchValue } : item
+        )));
+
+        if (targetLeadId) {
+          void fetchLeadDetail(targetLeadId).then((nextLead) => {
+            if (hydrated.current === targetLeadId) setLead(nextLead);
+          }).catch(() => undefined);
+        }
+      } else {
+        await ensureCommercial(patchValue);
+        await reload(false, true);
+      }
     } catch (nextError) {
-      setError(errorText(nextError, tx));
-      await reload(false, true);
+      if (hydrated.current === targetLeadId) {
+        setError(errorText(nextError, tx));
+        flagKeys.forEach((key) => {
+          if (commercialFlagRequestVersionRef.current[key] !== requestVersions.get(key)) return;
+          const rollback = rollbackValue[key];
+          if (rollback === undefined) return;
+          if (key === "signed_patient") setSignedPatient(rollback);
+          if (key === "signed_agency") setSignedAgency(rollback);
+          if (key === "prepayment_required") setPrepayment(rollback);
+        });
+      }
     } finally {
-      setBusy(null);
+      if (!existingOrderId) setBusy(null);
     }
   }
 
@@ -1765,7 +1808,10 @@ export function LeadWizard({
                   disabled={isBusy}
                   onChange={(checked) => {
                     setSignedPatient(checked);
-                    void saveFlags({ signed_patient: checked });
+                    void saveFlags(
+                      { signed_patient: checked },
+                      { signed_patient: signedPatient },
+                    );
                   }}
                   label={tx("Клиент подписал заказ", "Auftrag vom Kunden unterzeichnet")}
                 />
@@ -1774,7 +1820,10 @@ export function LeadWizard({
                   disabled={isBusy}
                   onChange={(checked) => {
                     setSignedAgency(checked);
-                    void saveFlags({ signed_agency: checked });
+                    void saveFlags(
+                      { signed_agency: checked },
+                      { signed_agency: signedAgency },
+                    );
                   }}
                   label={tx("Агентство подтвердило заказ", "Auftrag von der Agentur bestätigt")}
                 />
@@ -1783,7 +1832,10 @@ export function LeadWizard({
                   disabled={isBusy}
                   onChange={(checked) => {
                     setPrepayment(checked);
-                    void saveFlags({ prepayment_required: checked });
+                    void saveFlags(
+                      { prepayment_required: checked },
+                      { prepayment_required: prepayment },
+                    );
                   }}
                   label={tx("Требуется предоплата", "Vorauszahlung erforderlich")}
                 />

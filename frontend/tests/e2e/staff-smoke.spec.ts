@@ -2361,9 +2361,18 @@ test.describe("responsive staff workspace", () => {
     let signedAgency = false;
     let prepaymentRequired = false;
     let commercialBasisRequests = 0;
+    const commercialBasisPayloads: Array<{
+      signed_patient?: boolean;
+      signed_agency?: boolean;
+      prepayment_required?: boolean;
+    }> = [];
     let releaseCommercialBasis = () => undefined;
     const commercialBasisGate = new Promise<void>((resolve) => {
       releaseCommercialBasis = resolve;
+    });
+    let releaseAgencyConfirmation = () => undefined;
+    const agencyConfirmationGate = new Promise<void>((resolve) => {
+      releaseAgencyConfirmation = resolve;
     });
     let releaseQuoteReload = () => undefined;
     const quoteReloadGate = new Promise<void>((resolve) => {
@@ -2412,10 +2421,12 @@ test.describe("responsive staff workspace", () => {
         prepayment_required?: boolean;
       };
       commercialBasisRequests += 1;
+      commercialBasisPayloads.push(payload);
       signedPatient = payload.signed_patient ?? signedPatient;
       signedAgency = payload.signed_agency ?? signedAgency;
       prepaymentRequired = payload.prepayment_required ?? prepaymentRequired;
-      await commercialBasisGate;
+      if (commercialBasisRequests === 1) await commercialBasisGate;
+      if (payload.signed_agency === true) await agencyConfirmationGate;
       return json(route, { ok: true, order_id: orderId });
     });
     await page.route(`**/api/v1/orders/${orderId}/quotes`, (route) => {
@@ -2455,6 +2466,19 @@ test.describe("responsive staff workspace", () => {
     await expect(patientSignatureToggle).toBeEnabled();
     await expect(patientSignatureToggle).toBeChecked();
     expect(commercialBasisRequests).toBe(1);
+
+    const agencyConfirmationToggle = wizard.getByRole("checkbox", {
+      name: "Auftrag von der Agentur bestätigt",
+    });
+    await agencyConfirmationToggle.check();
+    await expect(agencyConfirmationToggle).toBeChecked();
+    await expect(agencyConfirmationToggle).toBeEnabled();
+    await expect(
+      wizard.getByRole("button", { name: "Kostenvoranschlag erstellen" }),
+    ).toBeEnabled();
+    await expect.poll(() => commercialBasisRequests).toBe(2);
+    expect(commercialBasisPayloads[1]).toEqual({ signed_agency: true });
+    releaseAgencyConfirmation();
 
     await wizard.getByRole("button", { name: "Kostenvoranschlag erstellen" }).click();
     await expect(
