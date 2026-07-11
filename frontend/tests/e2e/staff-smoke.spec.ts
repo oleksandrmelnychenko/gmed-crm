@@ -235,7 +235,7 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
       flow: "standard",
       lead_type: "form",
       console_promoted_at: null,
-      qualification_status: "qualified",
+      qualification_status: "in_progress",
       compliance_status: "pending",
       conversion_ready: false,
       failed_outcome: { status: "none", reason: null, note: null, processed_at: null },
@@ -255,7 +255,7 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
       flow: "standard",
       lead_type: "console",
       console_promoted_at: null,
-      qualification_status: "qualified",
+      qualification_status: "in_progress",
       compliance_status: "signed",
       conversion_ready: true,
       failed_outcome: { status: "none", reason: null, note: null, processed_at: null },
@@ -858,6 +858,23 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
             ...detail,
             qualification_status: "archived",
             failed_outcome: failedOutcome,
+          });
+        }
+        return json(route, { ok: true });
+      }
+      if (leadSuffix.endsWith("/qualify") && route.request().method() === "POST") {
+        const requestedId = leadSuffix.replace("/qualify", "");
+        const payload = JSON.parse(route.request().postData() ?? "{}") as {
+          status?: string;
+        };
+        const qualificationStatus = payload.status ?? "in_progress";
+        const listLead = leads.find((item) => item.id === requestedId);
+        if (listLead) listLead.qualification_status = qualificationStatus;
+        const detail = leadDetails.get(requestedId);
+        if (detail) {
+          leadDetails.set(requestedId, {
+            ...detail,
+            qualification_status: qualificationStatus,
           });
         }
         return json(route, { ok: true });
@@ -1918,7 +1935,8 @@ test.describe("lead onboarding wizard", () => {
   test("wizard renders the five onboarding stages and catalog-backed specialties", async ({
     page,
   }) => {
-    await page.goto("/leads?lead=00000000-0000-0000-0000-000000000902");
+    const readyLeadId = "00000000-0000-0000-0000-000000000902";
+    await page.goto(`/leads?lead=${readyLeadId}`);
     await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
 
     const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
@@ -1961,7 +1979,8 @@ test.describe("lead onboarding wizard", () => {
       (specialtySelectBox?.y ?? 0) + (specialtySelectBox?.height ?? 0),
     );
 
-    await navigation.getByRole("button", { name: /Unterlagen/i }).click();
+    await expect(wizard.getByRole("button", { name: "Angaben bestätigen" })).toHaveCount(0);
+    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
     await expect(wizard.getByText("Ausweisdokument")).toBeVisible();
     await expect(wizard.getByText("Datenschutzeinwilligung (DSGVO)")).toBeVisible();
     await expect(wizard.getByText("Unterlagen und Anamnese vervollständigen")).toHaveCount(0);
@@ -1971,6 +1990,9 @@ test.describe("lead onboarding wizard", () => {
     const intakeCompletionRequest = page.waitForRequest((request) =>
       request.method() === "POST" && request.url().endsWith("/intake-completion"),
     );
+    const qualificationRequest = page.waitForRequest((request) =>
+      request.method() === "POST" && request.url().endsWith(`/leads/${readyLeadId}/qualify`),
+    );
     await navigation.getByRole("button", { name: /Vertrag & Angebot/i }).click();
     const intakeRequest = await intakeCompletionRequest;
     expect(intakeRequest.postDataJSON()).toEqual({
@@ -1978,6 +2000,7 @@ test.describe("lead onboarding wizard", () => {
       hauptanfragegrund: "Orthopädische Beratung",
       aktuelle_anamnese: "Beschwerden seit drei Wochen",
     });
+    expect((await qualificationRequest).postDataJSON()).toEqual({ status: "qualified" });
     await expect(wizard.getByText("Vertrag, Auftrag und Kostenvoranschlag")).toBeVisible();
     await expect(
       wizard.getByText("Diese Unterlagen gehören bis zur Freigabe dem Lead."),
@@ -2001,6 +2024,8 @@ test.describe("lead onboarding wizard", () => {
     await expect(wizard.getByText("Выберите подходящие специализации из справочника.")).toHaveCount(0);
     await expect(wizard.getByText("Данные обращения подтверждены")).toHaveCount(0);
     await wizard.getByRole("textbox", { name: "Причина обращения" }).fill("Консультация ортопеда");
+    await wizard.getByRole("combobox").click();
+    await page.getByText("Ортопедия", { exact: true }).click();
 
     await navigation.getByRole("button", { name: /Документы/i }).click();
     await expect(wizard.getByText("Документ, удостоверяющий личность")).toBeVisible();
@@ -2275,6 +2300,9 @@ test.describe("responsive staff workspace", () => {
     );
 
     await navigation.getByRole("button", { name: /Anliegen/i }).click();
+    await wizard
+      .getByRole("textbox", { name: "Anliegen", exact: true })
+      .fill("Orthopädische Beratung");
     await wizard.getByRole("combobox").click();
     await page.getByText("Orthopädie", { exact: true }).click();
     await expect(wizard.getByText("Orthopädie", { exact: true })).toBeVisible();

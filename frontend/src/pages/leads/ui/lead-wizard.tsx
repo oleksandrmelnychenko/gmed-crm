@@ -883,24 +883,17 @@ export function LeadWizard({
     }
   }
 
-  async function qualify() {
-    if (!leadId || !draft) return;
+  async function finishNeed(targetStep: StepId): Promise<boolean> {
+    if (!leadId || !draft) return false;
     if (!draft.concern.trim() || draft.specialties.length === 0) {
       setNeedValidationAttempted(true);
       const targetId = !draft.concern.trim() ? NEED_CONCERN_ID : NEED_SPECIALTIES_ID;
       window.requestAnimationFrame(() => document.getElementById(targetId)?.focus());
-      return;
+      return false;
     }
-    if (!(await save("need", false))) return;
-    setBusy("qualify");
-    try {
-      await updateLeadStatus(leadId, "qualified");
-      await reload(false);
-    } catch (nextError) {
-      setError(errorText(nextError, tx));
-    } finally {
-      setBusy(null);
-    }
+    const saved = await save(targetStep);
+    if (saved) setNeedValidationAttempted(false);
+    return saved;
   }
 
   async function finishIntake(targetStep: StepId): Promise<boolean> {
@@ -935,6 +928,10 @@ export function LeadWizard({
         aktuelle_anamnese: draft.anamnese.trim(),
       });
       const saved = await save(targetStep, false);
+      if (saved && lead?.qualification_status !== "qualified") {
+        await updateLeadStatus(leadId, "qualified");
+        await reload(false);
+      }
       if (saved) setDocumentsValidationAttempted(false);
       return saved;
     } catch (nextError) {
@@ -1237,6 +1234,12 @@ export function LeadWizard({
       });
       return;
     }
+    if (step === "need") {
+      void finishNeed(target.id).then((saved) => {
+        if (saved) setStep(target.id);
+      });
+      return;
+    }
     void save(target.id).then((saved) => {
       if (saved) setStep(target.id);
     });
@@ -1349,6 +1352,12 @@ export function LeadWizard({
                   type="button"
                   data-step={item.id}
                   onClick={() => {
+                    if (step === "need" && itemIndex > index) {
+                      void finishNeed(item.id).then((saved) => {
+                        if (saved) setStep(item.id);
+                      });
+                      return;
+                    }
                     if (step === "documents" && itemIndex > index) {
                       void finishIntake(item.id).then((saved) => {
                         if (saved) setStep(item.id);
@@ -1650,9 +1659,6 @@ export function LeadWizard({
                     ))}
                   </div>
                 ) : null}
-              </div>
-              <div className="flex justify-end border-t border-border pt-4">
-                <Button type="button" variant="outline" disabled={isBusy || lead?.qualification_status === "qualified"} onClick={() => void qualify()}>{busy === "qualify" ? <LoaderCircle className="size-3.5 animate-spin" /> : <UserRoundCheck className="size-3.5" />}{tx("Подтвердить данные", "Angaben bestätigen")}</Button>
               </div>
             </section>
           ) : null}
