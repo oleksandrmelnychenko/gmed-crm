@@ -49,6 +49,7 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
   let nextGeneratedDocumentIndex = 1;
   let nextProviderShareIndex = 1;
   let nextTranslationRequestIndex = 1;
+  let intakeCaseCreated = false;
   let feedbackRows = [
     {
       id: "00000000-0000-0000-0000-000000001301",
@@ -725,14 +726,41 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
     }
 
     if (path === "/cases" && route.request().method() === "POST") {
+      intakeCaseCreated = true;
       return json(route, { id: "00000000-0000-0000-0000-000000000971" }, 201);
     }
 
     if (path.startsWith("/cases?") && route.request().method() === "GET") {
-      return json(route, []);
+      return json(route, intakeCaseCreated ? [{ id: "00000000-0000-0000-0000-000000000971" }] : []);
+    }
+
+    if (path === "/cases/00000000-0000-0000-0000-000000000971" && route.request().method() === "GET") {
+      return json(route, {
+        id: "00000000-0000-0000-0000-000000000971",
+        case_id: "CASE-971",
+        patient_id: "",
+        manager_id: userId,
+        status: "new",
+        hauptanfragegrund: "Orthopädische Beratung",
+        aktuelle_anamnese: "Beschwerden seit drei Wochen",
+        zuweiser: null,
+        notes: null,
+        created_at: "2026-07-11T10:00:00Z",
+        updated_at: "2026-07-11T10:00:00Z",
+        vorerkrankungen: [],
+        allergien: [],
+        operationen: [],
+        medikamente: [],
+        pain_records: [],
+        symptome: [],
+      });
     }
 
     if (path === "/cases/00000000-0000-0000-0000-000000000971/anamnesis") {
+      return json(route, { ok: true });
+    }
+
+    if (["vorerkrankungen", "allergien", "medikamente"].some((section) => path === `/cases/00000000-0000-0000-0000-000000000971/${section}`)) {
       return json(route, { ok: true });
     }
 
@@ -1935,7 +1963,7 @@ test.describe("lead onboarding wizard", () => {
     await expect(page.getByRole("button", { name: "Bearbeiten", exact: true })).toHaveCount(0);
   });
 
-  test("wizard renders the five onboarding stages and catalog-backed specialties", async ({
+  test("wizard renders six onboarding stages and catalog-backed specialties", async ({
     page,
   }) => {
     const readyLeadId = "00000000-0000-0000-0000-000000000902";
@@ -1952,14 +1980,30 @@ test.describe("lead onboarding wizard", () => {
     expect(Math.abs((wizardBox?.x ?? 0) + (wizardBox?.width ?? 0) / 2 - viewport.width / 2)).toBeLessThanOrEqual(2);
     expect(Math.abs((wizardBox?.y ?? 0) + (wizardBox?.height ?? 0) / 2 - viewport.height / 2)).toBeLessThanOrEqual(2);
     const navigation = wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" });
-    await expect(navigation.getByRole("button")).toHaveCount(5);
-    await expect(wizard.getByRole("heading", { name: "Personendaten" })).toBeVisible();
+    await expect(navigation.getByRole("button")).toHaveCount(6);
+    await expect(wizard.getByText("Interne Anfrage", { exact: true })).toBeVisible();
     await expect(
       wizard.getByText("Ein Patient wird erst nach der finalen Freigabe angelegt."),
     ).toHaveCount(0);
     await expect(wizard.getByRole("button", { name: "Patient anlegen" })).toHaveCount(0);
 
-    await navigation.getByRole("button", { name: /Anliegen/i }).click();
+    await navigation.getByRole("button", { name: /Medizinische Merkmale/i }).click();
+    await wizard.getByRole("textbox", { name: "Aktuelle Anamnese" }).fill("Beschwerden seit drei Wochen");
+    await wizard.getByRole("button", { name: "Hinzufügen" }).nth(0).click();
+    await wizard.getByRole("textbox", { name: "Diagnose", exact: true }).fill("Gonarthrose");
+    await wizard.getByRole("button", { name: "Hinzufügen" }).nth(1).click();
+    await wizard.getByRole("textbox", { name: "Handelsname" }).fill("Ibuprofen");
+    await wizard.getByRole("button", { name: "Allergie hinzufügen" }).click();
+    await wizard.getByRole("textbox", { name: "Allergie", exact: true }).fill("Penicillin");
+    const diagnosisRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/vorerkrankungen"));
+    const allergyRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/allergien"));
+    const medicationRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/medikamente"));
+    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
+    expect((await diagnosisRequest).postDataJSON()).toMatchObject({ items: [{ erkrankung: "Gonarthrose" }] });
+    expect((await allergyRequest).postDataJSON()).toMatchObject({ items: [{ allergie: "Penicillin" }] });
+    expect((await medicationRequest).postDataJSON()).toMatchObject({ items: [{ handelsname: "Ibuprofen", med_typ: "permanent" }] });
+
+    await expect(navigation.getByRole("button", { name: /Servicehistorie/i })).toHaveAttribute("aria-current", "step");
     await expect(wizard.getByText("Anliegen und Fachrichtungen")).toHaveCount(0);
     await expect(
       wizard.getByText("Wählen Sie die passenden Fachrichtungen aus dem Verzeichnis aus."),
@@ -1988,8 +2032,6 @@ test.describe("lead onboarding wizard", () => {
     await expect(wizard.getByText("Datenschutzeinwilligung (DSGVO)")).toBeVisible();
     await expect(wizard.getByText("Unterlagen und Anamnese vervollständigen")).toHaveCount(0);
     await expect(wizard.getByRole("button", { name: "Anamnese abschließen" })).toHaveCount(0);
-    await wizard.getByRole("textbox", { name: "Aktuelle Anamnese" }).fill("Beschwerden seit drei Wochen");
-
     const intakeCompletionRequest = page.waitForRequest((request) =>
       request.method() === "POST" && request.url().endsWith("/intake-completion"),
     );
@@ -2022,7 +2064,11 @@ test.describe("lead onboarding wizard", () => {
     const navigation = wizard.getByRole("navigation", { name: "Этапы оформления" });
     await expect(navigation.getByRole("button", { name: /Данные клиента/i })).toBeVisible();
 
-    await navigation.getByRole("button", { name: /Обращение/i }).click();
+    await navigation.getByRole("button", { name: /Медицинская характеристика/i }).click();
+    await wizard.getByRole("textbox", { name: "Анамнез" }).fill("Жалобы в течение трёх недель");
+    await wizard.getByRole("button", { name: "Далее", exact: true }).click();
+
+    await expect(navigation.getByRole("button", { name: /Сервисная история/i })).toHaveAttribute("aria-current", "step");
     await expect(wizard.getByText("Причина обращения и специализации")).toHaveCount(0);
     await expect(wizard.getByText("Выберите подходящие специализации из справочника.")).toHaveCount(0);
     await expect(wizard.getByText("Данные обращения подтверждены")).toHaveCount(0);
@@ -2035,8 +2081,6 @@ test.describe("lead onboarding wizard", () => {
     await expect(wizard.getByText("Согласие на обработку персональных данных")).toBeVisible();
     await expect(wizard.getByText("Заполните документы и анамнез")).toHaveCount(0);
     await expect(wizard.getByRole("button", { name: "Сохранить анамнез" })).toHaveCount(0);
-    await wizard.getByRole("textbox", { name: "Анамнез" }).fill("Жалобы в течение трёх недель");
-
     await navigation.getByRole("button", { name: /Договор и смета/i }).click();
     await expect(wizard.getByRole("heading", { name: "Договор, заказ и смета" })).toBeVisible();
     await expect(wizard.getByText(/кошторис/i)).toHaveCount(0);
@@ -2141,7 +2185,8 @@ test.describe("lead onboarding wizard", () => {
           checks: [],
           steps: [
             { key: "master_data", label: "Stammdaten", ready: true },
-            { key: "need", label: "Bedarf", ready: true },
+            { key: "medical", label: "Medizinische Merkmale", ready: true },
+            { key: "service", label: "Servicehistorie", ready: true },
             { key: "documents", label: "Unterlagen", ready: false },
             { key: "commercial", label: "Vertrag & Auftrag", ready: false },
             { key: "release", label: "Freigabe", ready: false },
@@ -2302,7 +2347,9 @@ test.describe("responsive staff workspace", () => {
       "Ready Autosaved",
     );
 
-    await navigation.getByRole("button", { name: /Anliegen/i }).click();
+    await navigation.getByRole("button", { name: /Medizinische Merkmale/i }).click();
+    await wizard.getByRole("textbox", { name: "Aktuelle Anamnese" }).fill("Beschwerden seit drei Wochen");
+    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
     await wizard
       .getByRole("textbox", { name: "Anliegen", exact: true })
       .fill("Orthopädische Beratung");

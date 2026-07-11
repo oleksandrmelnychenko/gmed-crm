@@ -25,11 +25,15 @@ export async function fetchCaseLookups() {
     apiFetch<PatientOption[]>("/patients", {
       cacheTtlMs: CASE_LOOKUPS_CACHE_TTL_MS,
     }).catch(() => []),
-    apiFetch<DoctorOption[]>("/cases/meta/doctors", {
-      cacheTtlMs: CASE_STATIC_META_CACHE_TTL_MS,
-    }).catch(() => []),
+    fetchCaseDoctors().catch(() => []),
   ]);
   return { patients, doctors };
+}
+
+export function fetchCaseDoctors() {
+  return apiFetch<DoctorOption[]>("/cases/meta/doctors", {
+    cacheTtlMs: CASE_STATIC_META_CACHE_TTL_MS,
+  });
 }
 
 export function fetchCaseTextSnippets() {

@@ -1164,12 +1164,14 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
                 date_of_birth, legal_sex, street_address, city, zip_code,
                 primary_concern_text, requested_specialties,
                 qualification_status, compliance_status,
-                consent_healthcare, consent_privacy_practices, intake_source, created_by
+                consent_healthcare, consent_privacy_practices, intake_source, created_by,
+                wizard_state
            ) VALUES (
                 'Atomic', 'Onboarding', $1, '+4915112345678', 'DE', 'de',
                 DATE '1990-05-01', 'female', 'Hauptstr. 1', 'Berlin', '10115',
                 'Chronic knee pain', '["orthopedics"]'::jsonb,
-                'qualified', 'signed', true, true, 'staff_wizard', $2
+                'qualified', 'signed', true, true, 'staff_wizard', $2,
+                '{"clinical_draft":{"caves":[{"label":"Antikoagulation","note":"Vor Eingriff prüfen"}]}}'::jsonb
            ) RETURNING id"#,
     )
     .bind(&email)
@@ -1189,7 +1191,7 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
             .as_array()
             .expect("readiness steps")
             .len(),
-        5
+        6
     );
 
     let patient_before: i64 = sqlx::query_scalar("SELECT count(*) FROM patients WHERE email = $1")
@@ -1281,6 +1283,16 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
             .await
             .unwrap();
     assert_eq!(converted_patient_id, Some(patient_id));
+
+    let cave: (String, Option<String>) = sqlx::query_as(
+        "SELECT label, note FROM patient_clinical_warnings WHERE patient_id = $1 AND kind = 'cave'",
+    )
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(cave.0, "Antikoagulation");
+    assert_eq!(cave.1.as_deref(), Some("Vor Eingriff prüfen"));
 }
 
 #[tokio::test]

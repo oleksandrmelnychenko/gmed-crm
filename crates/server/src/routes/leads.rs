@@ -390,7 +390,6 @@ struct LeadConversionReadinessInput {
     legal_sex: Option<String>,
     email: Option<String>,
     phone: Option<String>,
-    street_address: Option<String>,
     city: Option<String>,
     zip_code: Option<String>,
     primary_concern_text: Option<String>,
@@ -424,13 +423,11 @@ fn evaluate_lead_conversion_readiness(
             .phone
             .as_deref()
             .is_some_and(|value| !value.trim().is_empty());
-    let address_present = [&input.street_address, &input.city, &input.zip_code]
-        .into_iter()
-        .all(|value| {
-            value
-                .as_deref()
-                .is_some_and(|value| !value.trim().is_empty())
-        });
+    let address_present = [&input.city, &input.zip_code].into_iter().all(|value| {
+        value
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+    });
     let primary_concern_present = input
         .primary_concern_text
         .as_deref()
@@ -446,13 +443,13 @@ fn evaluate_lead_conversion_readiness(
     };
     let master_data_ready =
         birth_date_present && legal_sex_present && primary_contact_present && address_present;
-    let need_ready = primary_concern_present && specialties_present && lead_qualified;
+    let medical_ready = input.intake_completed;
+    let service_ready = primary_concern_present && specialties_present;
     let documents_ready = compliance_completed
         && input.consent_privacy_practices
         && input.consent_healthcare
         && input.identity_document_verified
-        && input.dsgvo_document_signed
-        && input.intake_completed;
+        && input.dsgvo_document_signed;
     let commercial_ready = input.contract_signed
         && input.order_exists
         && input.order_service_ready
@@ -467,7 +464,7 @@ fn evaluate_lead_conversion_readiness(
             "label": "Lead qualified",
             "passed": lead_qualified,
             "blocking_for": "conversion",
-            "stage": "need",
+            "stage": "service",
         }),
         json!({
             "key": "compliance_completed",
@@ -523,14 +520,14 @@ fn evaluate_lead_conversion_readiness(
             "label": "Primary concern captured",
             "passed": primary_concern_present,
             "blocking_for": "conversion",
-            "stage": "need",
+            "stage": "service",
         }),
         json!({
             "key": "specialties_present",
             "label": "Requested specialty selected",
             "passed": specialties_present,
             "blocking_for": "conversion",
-            "stage": "need",
+            "stage": "service",
         }),
         json!({
             "key": "identity_document_verified",
@@ -551,7 +548,7 @@ fn evaluate_lead_conversion_readiness(
             "label": "Anamnesis intake completed",
             "passed": input.intake_completed,
             "blocking_for": "conversion",
-            "stage": "documents",
+            "stage": "medical",
         }),
         json!({
             "key": "contract_signed",
@@ -630,7 +627,7 @@ fn evaluate_lead_conversion_readiness(
         conversion_reasons.insert(0, "Lead must be qualified before conversion".to_string());
     }
     if !address_present {
-        conversion_reasons.push("Complete street, city and postal code".to_string());
+        conversion_reasons.push("Complete city and postal code".to_string());
     }
     if !primary_concern_present {
         conversion_reasons.push("Primary concern is missing".to_string());
@@ -686,7 +683,8 @@ fn evaluate_lead_conversion_readiness(
             "checks": checks,
             "steps": [
                 { "key": "master_data", "label": "Stammdaten", "ready": master_data_ready },
-                { "key": "need", "label": "Bedarf", "ready": need_ready },
+                { "key": "medical", "label": "Medizinische Merkmale", "ready": medical_ready },
+                { "key": "service", "label": "Servicehistorie", "ready": service_ready },
                 { "key": "documents", "label": "Unterlagen", "ready": documents_ready },
                 { "key": "commercial", "label": "Vertrag & Auftrag", "ready": commercial_ready },
                 { "key": "release", "label": "Freigabe", "ready": conversion_ready }
@@ -704,7 +702,6 @@ fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversio
         legal_sex: row.try_get("legal_sex").unwrap_or_default(),
         email: row.try_get("email").unwrap_or_default(),
         phone: row.try_get("phone").unwrap_or_default(),
-        street_address: row.try_get("street_address").unwrap_or_default(),
         city: row.try_get("city").unwrap_or_default(),
         zip_code: row.try_get("zip_code").unwrap_or_default(),
         primary_concern_text: row.try_get("primary_concern_text").unwrap_or_default(),
@@ -1813,7 +1810,7 @@ async fn convert_lead(
     let lead = match sqlx::query(
         r#"SELECT id, first_name, last_name, email, phone, country, primary_language,
                   date_of_birth, legal_sex, qualification_status, converted_patient_id,
-                  failed_outcome_status, street_address, city, zip_code
+                  failed_outcome_status, street_address, city, zip_code, wizard_state
            FROM leads WHERE id = $1
            FOR UPDATE"#,
     )
@@ -1899,6 +1896,7 @@ async fn convert_lead(
     let street_address: Option<String> = lead.try_get("street_address").ok().flatten();
     let city: Option<String> = lead.try_get("city").ok().flatten();
     let zip_code: Option<String> = lead.try_get("zip_code").ok().flatten();
+    let wizard_state: Value = lead.try_get("wizard_state").unwrap_or_else(|_| json!({}));
 
     let patient_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender,
@@ -1929,6 +1927,25 @@ async fn convert_lead(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+
+    if let Err(error) = sqlx::query(
+        r#"INSERT INTO patient_clinical_warnings (patient_id, kind, label, note, sort_order)
+           SELECT $1, 'cave', btrim(entry.value->>'label'),
+                  NULLIF(btrim(entry.value->>'note'), ''),
+                  (entry.ordinality - 1)::int
+           FROM jsonb_array_elements(
+               COALESCE($2::jsonb #> '{clinical_draft,caves}', '[]'::jsonb)
+           ) WITH ORDINALITY AS entry(value, ordinality)
+           WHERE btrim(COALESCE(entry.value->>'label', '')) <> ''"#,
+    )
+    .bind(patient_id)
+    .bind(wizard_state.to_string())
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "transfer lead CAVE warnings");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
 
     if let Err(error) = sqlx::query(
         r#"WITH moved_cases AS (
@@ -3104,7 +3121,6 @@ mod lead_conversion_readiness_tests {
             legal_sex: Some("female".to_string()),
             email: Some("lead@example.com".to_string()),
             phone: None,
-            street_address: Some("Hauptstrasse 1".to_string()),
             city: Some("Berlin".to_string()),
             zip_code: Some("10115".to_string()),
             primary_concern_text: Some("Knee pain".to_string()),
@@ -3131,6 +3147,18 @@ mod lead_conversion_readiness_tests {
         assert!(readiness.qualification_ready);
         assert!(readiness.conversion_ready);
         assert!(readiness.qualification_reasons.is_empty());
+        assert!(readiness.conversion_reasons.is_empty());
+    }
+
+    #[test]
+    fn city_and_postal_code_are_sufficient_address_data() {
+        let mut input = ready_input();
+        input.city = Some("Berlin".to_string());
+        input.zip_code = Some("10115".to_string());
+
+        let readiness = evaluate_lead_conversion_readiness(&input);
+
+        assert!(readiness.conversion_ready);
         assert!(readiness.conversion_reasons.is_empty());
     }
 

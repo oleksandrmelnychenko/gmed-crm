@@ -66,10 +66,15 @@ export function CountrySelect({
 }) {
   const options = useMemo(() => {
     const collator = new Intl.Collator(lang === "de" ? "de" : "ru");
-    return COUNTRY_CODES.map((code) => ({ code, label: countryLabel(code, lang) })).sort(
+    const knownOptions = COUNTRY_CODES.map((code) => ({ code, label: countryLabel(code, lang) })).sort(
       (a, b) => collator.compare(a.label, b.label),
     );
-  }, [lang]);
+    const currentValue = value?.trim();
+    if (currentValue && !COUNTRY_CODES.includes(currentValue.toUpperCase())) {
+      return [{ code: currentValue, label: currentValue }, ...knownOptions];
+    }
+    return knownOptions;
+  }, [lang, value]);
 
   return (
     <NativeComboboxSelect
