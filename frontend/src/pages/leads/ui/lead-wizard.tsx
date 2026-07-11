@@ -1216,7 +1216,7 @@ export function LeadWizard({
 
           {draft && step === "master_data" ? (
             <section className="space-y-5">
-              <div><h3 className="text-sm font-semibold text-foreground">{tx("Данные клиента", "Personendaten")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Проверьте данные. Они будут перенесены в карточку пациента.", "Bitte prüfen Sie die Angaben. Sie werden in die Patientenakte übernommen.")}</p></div>
+              <h3 className="text-sm font-semibold text-foreground">{tx("Данные клиента", "Personendaten")}</h3>
               <div className="grid gap-4 md:grid-cols-2">
                 <Field
                   label={tx("Имя", "Vorname")}
