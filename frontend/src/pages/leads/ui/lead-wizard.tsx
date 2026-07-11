@@ -1123,14 +1123,6 @@ export function LeadWizard({
   const autosaveIsDirty = Boolean(
     draft && renderedAutosaveSignature !== lastSavedAutosaveSignatureRef.current,
   ) || autosaveStatus === "saving" || autosaveStatus === "error";
-  const autosaveLabel = autosaveStatus === "saving"
-    ? tx("Сохраняем…", "Wird gespeichert…")
-    : autosaveStatus === "saved"
-      ? tx("Изменения сохранены", "Änderungen gespeichert")
-      : autosaveStatus === "error"
-        ? tx("Не удалось сохранить изменения", "Änderungen konnten nicht gespeichert werden")
-        : tx("Есть несохранённые изменения", "Nicht gespeicherte Änderungen");
-
   return (
     <>
       <Sheet open={open} dirty={autosaveIsDirty} onOpenChange={onOpenChange}>
@@ -1139,24 +1131,15 @@ export function LeadWizard({
         <header className="flex min-h-16 items-center justify-between gap-4 border-b border-border px-4 py-3 pr-14 sm:px-5 sm:pr-14">
           <div className="min-w-0">
             <h2 className="truncate text-base font-semibold text-foreground">{lead ? [lead.first_name, lead.last_name].filter(Boolean).join(" ") : tx("Оформление обращения", "Lead-Aufnahme")}</h2>
-            {autosaveStatus !== "idle" ? (
+            {autosaveStatus === "error" ? (
               <div
-                role={autosaveStatus === "error" ? "alert" : "status"}
+                role="alert"
                 aria-live="polite"
                 title={autosaveError || undefined}
-                className={cn(
-                  "mt-1 inline-flex items-center gap-1 text-[11px]",
-                  autosaveStatus === "error"
-                    ? "text-destructive"
-                    : autosaveStatus === "saved"
-                      ? "text-emerald-700"
-                      : "text-muted-foreground",
-                )}
+                className="mt-1 inline-flex items-center gap-1 text-[11px] text-destructive"
               >
-                {autosaveStatus === "saving" ? <LoaderCircle aria-hidden="true" className="size-3 animate-spin" /> : null}
-                {autosaveStatus === "saved" ? <Check aria-hidden="true" className="size-3" /> : null}
-                {autosaveStatus === "error" ? <CircleAlert aria-hidden="true" className="size-3" /> : null}
-                {autosaveLabel}
+                <CircleAlert aria-hidden="true" className="size-3" />
+                {tx("Не удалось сохранить изменения", "Änderungen konnten nicht gespeichert werden")}
               </div>
             ) : null}
           </div>
@@ -1453,7 +1436,7 @@ export function LeadWizard({
                   onChange={(event) => patch("discoverySource", event.target.value)}
                 />
               </Field>
-              <div className="space-y-3">
+              <div className="space-y-3 pt-2">
                 <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   {tx("Специализации", "Fachrichtungen")}
                   <span aria-hidden="true" className="ml-0.5 text-destructive">*</span>

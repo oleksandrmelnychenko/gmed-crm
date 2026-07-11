@@ -2123,7 +2123,6 @@ test.describe("responsive staff workspace", () => {
       return payload.first_name === "Ready Autosaved";
     });
     await firstNameInput.fill("Ready Autosaved");
-    await expect(wizard.getByText("Nicht gespeicherte Änderungen", { exact: true })).toBeVisible();
     const request = await autosaveRequest;
     expect(request.postDataJSON()).toMatchObject({
       first_name: "Ready Autosaved",
@@ -2134,7 +2133,8 @@ test.describe("responsive staff workspace", () => {
         },
       },
     });
-    await expect(wizard.getByText("Änderungen gespeichert", { exact: true })).toBeVisible();
+    expect((await request.response())?.ok()).toBe(true);
+    await expect(wizard.getByText("Änderungen gespeichert", { exact: true })).toHaveCount(0);
     await page.evaluate((entityId) => {
       window.dispatchEvent(new CustomEvent("gmed:realtime-event", {
         detail: {
@@ -2234,7 +2234,8 @@ test.describe("responsive staff workspace", () => {
         },
       },
     });
-    await expect(wizard.getByText("Änderungen gespeichert", { exact: true })).toBeVisible();
+    expect((await commercialRequest.response())?.ok()).toBe(true);
+    await expect(wizard.getByText("Änderungen gespeichert", { exact: true })).toHaveCount(0);
 
     await closeButton.click();
     await expect(wizard).toBeHidden();
