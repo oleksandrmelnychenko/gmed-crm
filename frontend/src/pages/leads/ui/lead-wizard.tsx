@@ -178,11 +178,11 @@ const MASTER_FIELD_IDS: Record<MasterFieldKey, string> = {
 };
 
 const STEPS: Array<{ id: StepId; ru: string; de: string }> = [
-  { id: "master_data", ru: "Данные", de: "Stammdaten" },
-  { id: "need", ru: "Запрос", de: "Bedarf" },
+  { id: "master_data", ru: "Данные клиента", de: "Personendaten" },
+  { id: "need", ru: "Обращение", de: "Anliegen" },
   { id: "documents", ru: "Документы", de: "Unterlagen" },
-  { id: "commercial", ru: "Договор и заказ", de: "Vertrag & Auftrag" },
-  { id: "release", ru: "Подтверждение", de: "Freigabe" },
+  { id: "commercial", ru: "Договор и смета", de: "Vertrag & Angebot" },
+  { id: "release", ru: "Создание пациента", de: "Freigabe" },
 ];
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -351,20 +351,66 @@ function lineFromOrderLeistung(item: Leistung): ServiceLine {
   };
 }
 
-function errorText(error: unknown): string {
-  return error instanceof Error && error.message ? error.message : "Request failed";
+function errorText(error: unknown, tx: Tx): string {
+  const message = error instanceof Error && error.message ? error.message : "Request failed";
+  const labels: Record<string, string> = {
+    "Request failed": tx("Не удалось выполнить действие", "Aktion konnte nicht abgeschlossen werden"),
+    "Lead is not selected": tx("Обращение не выбрано", "Kein Lead ausgewählt"),
+    "Lead could not be saved": tx("Не удалось сохранить обращение", "Lead konnte nicht gespeichert werden"),
+    "No order services available for quote": tx("Добавьте хотя бы одну услугу", "Mindestens eine Leistung hinzufügen"),
+    "Failed to create quote": tx("Не удалось создать смету", "Kostenvoranschlag konnte nicht erstellt werden"),
+  };
+  return labels[message] ?? message;
 }
 
 function qualificationReasonLabel(reason: string, tx: Tx) {
   const labels: Record<string, string> = {
-    "Compliance is not signed yet": tx("Нужно подтвердить согласия", "Einwilligungen bestätigen"),
+    "Compliance is not signed yet": tx("Подтвердите необходимые согласия", "Erforderliche Einwilligungen bestätigen"),
     "Birth date is missing": tx("Указать дату рождения", "Geburtsdatum angeben"),
-    "Legal sex is missing": tx("Указать юридический пол", "Rechtliches Geschlecht angeben"),
-    "Email or phone is required": tx("Указать E-mail или телефон", "E-Mail oder Telefon angeben"),
-    "Privacy practices consent is missing": tx("Принять правила конфиденциальности", "Datenschutzhinweise akzeptieren"),
-    "Healthcare consent is missing": tx("Дать согласие на обработку медицинских данных", "Einwilligung für Gesundheitsdaten erteilen"),
+    "Legal sex is missing": tx("Укажите пол по документам", "Geschlecht laut Ausweisdokument angeben"),
+    "Email or phone is required": tx("Укажите электронную почту или телефон", "E-Mail-Adresse oder Telefonnummer angeben"),
+    "Privacy practices consent is missing": tx("Подтвердите ознакомление с политикой конфиденциальности", "Datenschutzhinweise bestätigen"),
+    "Healthcare consent is missing": tx("Получите согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten einholen"),
   };
-  return labels[reason] ?? reason;
+  return labels[reason] ?? tx("Проверьте обязательные данные", "Pflichtangaben prüfen");
+}
+
+function readinessStepLabel(key: string, tx: Tx) {
+  const labels: Record<string, string> = {
+    master_data: tx("Данные клиента", "Personendaten"),
+    need: tx("Причина обращения", "Anliegen"),
+    documents: tx("Документы и анамнез", "Unterlagen und Anamnese"),
+    commercial: tx("Договор, заказ и смета", "Vertrag, Auftrag und Kostenvoranschlag"),
+    release: tx("Готовность к созданию пациента", "Bereit zur Patientenanlage"),
+  };
+  return labels[key] ?? tx("Проверка данных", "Datenprüfung");
+}
+
+function readinessReasonLabel(reason: string, tx: Tx) {
+  const labels: Record<string, string> = {
+    "Lead must be qualified before conversion": tx("Подтвердите данные обращения", "Angaben zum Anliegen bestätigen"),
+    "Compliance is not signed yet": tx("Подтвердите необходимые согласия", "Erforderliche Einwilligungen bestätigen"),
+    "Birth date is missing": tx("Укажите дату рождения", "Geburtsdatum angeben"),
+    "Legal sex is missing": tx("Укажите пол по документам", "Geschlecht laut Ausweisdokument angeben"),
+    "Email or phone is required": tx("Укажите электронную почту или телефон", "E-Mail-Adresse oder Telefonnummer angeben"),
+    "Privacy practices consent is missing": tx("Подтвердите ознакомление с политикой конфиденциальности", "Datenschutzhinweise bestätigen"),
+    "Healthcare consent is missing": tx("Получите согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten einholen"),
+    "Complete street, city and postal code": tx("Заполните улицу, город и почтовый индекс", "Straße, Ort und Postleitzahl vollständig angeben"),
+    "Primary concern is missing": tx("Укажите причину обращения", "Anliegen angeben"),
+    "Requested specialty is missing": tx("Выберите хотя бы одну специализацию", "Mindestens eine Fachrichtung auswählen"),
+    "Identity document is not verified": tx("Подтвердите документ, удостоверяющий личность", "Ausweisdokument bestätigen"),
+    "Signed DSGVO document is missing": tx("Загрузите и подтвердите согласие на обработку персональных данных", "Datenschutzeinwilligung hochladen und bestätigen"),
+    "Anamnesis intake is incomplete": tx("Заполните и сохраните анамнез", "Anamnese ausfüllen und abschließen"),
+    "Framework contract is not signed": tx("Подпишите рамочный договор", "Rahmenvertrag unterzeichnen"),
+    "Onboarding order is missing": tx("Создайте заказ", "Auftrag erstellen"),
+    "Order needs at least one valid service": tx("Добавьте в заказ хотя бы одну услугу", "Mindestens eine Leistung zum Auftrag hinzufügen"),
+    "Customer order signature is missing": tx("Получите подпись клиента на заказе", "Unterschrift des Kunden für den Auftrag einholen"),
+    "Agency order signature is missing": tx("Подтвердите заказ со стороны агентства", "Auftrag durch die Agentur bestätigen"),
+    "Quote is not accepted": tx("Подтвердите смету", "Kostenvoranschlag annehmen"),
+    "Required prepayment is not complete": tx("Укажите полученную предоплату", "Erforderliche Vorauszahlung erfassen"),
+    "Lead is already converted": tx("Пациент уже создан", "Patient wurde bereits angelegt"),
+  };
+  return labels[reason] ?? tx("Проверьте незавершённые данные", "Unvollständige Angaben prüfen");
 }
 
 function validateMasterDraft(draft: Draft | null, tx: Tx): MasterValidationErrors {
@@ -388,7 +434,7 @@ function validateMasterDraft(draft: Draft | null, tx: Tx): MasterValidationError
   const phone = draft.phone.trim();
   if (!email && !phone) {
     const contactRequired = tx(
-      "Укажите E-mail или телефон",
+      "Укажите электронную почту или телефон",
       "E-Mail oder Telefonnummer angeben",
     );
     errors.email = contactRequired;
@@ -396,7 +442,7 @@ function validateMasterDraft(draft: Draft | null, tx: Tx): MasterValidationError
   } else {
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       errors.email = tx(
-        "Введите корректный E-mail",
+        "Введите корректный адрес электронной почты",
         "Gültige E-Mail-Adresse eingeben",
       );
     }
@@ -592,11 +638,11 @@ export function LeadWizard({
         setAutosaveStatus("saved");
       }
     } catch (nextError) {
-      setError(errorText(nextError));
+      setError(errorText(nextError, tx));
     } finally {
       setLoading(false);
     }
-  }, [leadId]);
+  }, [leadId, tx]);
 
   useEffect(() => {
     if (open && leadId) void reload(true);
@@ -659,7 +705,7 @@ export function LeadWizard({
   const masterErrors = useMemo(() => validateMasterDraft(draft, tx), [draft, tx]);
 
   const persistSnapshot = useCallback((snapshot: AutosaveSnapshot, force = false) => {
-    if (!leadId) return Promise.reject(new Error("Lead is not selected"));
+    if (!leadId) return Promise.reject(new Error(tx("Обращение не выбрано", "Kein Lead ausgewählt")));
 
     const targetLeadId = leadId;
     const signature = autosaveSnapshotSignature(snapshot);
@@ -694,7 +740,7 @@ export function LeadWizard({
           hydrated.current === targetLeadId &&
           currentAutosaveSignatureRef.current === signature
         ) {
-          setAutosaveError(errorText(nextError));
+          setAutosaveError(errorText(nextError, tx));
           setAutosaveStatus("error");
         }
         throw nextError;
@@ -707,7 +753,7 @@ export function LeadWizard({
       () => undefined,
     );
     return queued;
-  }, [leadId]);
+  }, [leadId, tx]);
 
   useEffect(() => {
     if (!open || !leadId || !draft || loading) return;
@@ -772,7 +818,7 @@ export function LeadWizard({
       await reload(false);
       return true;
     } catch (nextError) {
-      setError(errorText(nextError));
+      setError(errorText(nextError, tx));
       return false;
     } finally {
       if (trackBusy) setBusy(null);
@@ -793,7 +839,7 @@ export function LeadWizard({
       await updateLeadStatus(leadId, "qualified");
       await reload(false);
     } catch (nextError) {
-      setError(errorText(nextError));
+      setError(errorText(nextError, tx));
     } finally {
       setBusy(null);
     }
@@ -817,7 +863,7 @@ export function LeadWizard({
       await completeCaseIntake(id);
       await save("documents", false);
     } catch (nextError) {
-      setError(errorText(nextError));
+      setError(errorText(nextError, tx));
     } finally {
       setBusy(null);
     }
@@ -836,7 +882,7 @@ export function LeadWizard({
       await uploadDocument(form);
       await reload(false);
     } catch (nextError) {
-      setError(errorText(nextError));
+      setError(errorText(nextError, tx));
     } finally {
       setBusy(null);
     }
@@ -848,16 +894,16 @@ export function LeadWizard({
       await markDocumentSigned(id, kind);
       await reload(false);
     } catch (nextError) {
-      setError(errorText(nextError));
+      setError(errorText(nextError, tx));
     } finally {
       setBusy(null);
     }
   }
 
   async function ensureCommercial() {
-    if (!leadId || !draft) throw new Error("Lead is not selected");
+    if (!leadId || !draft) throw new Error(tx("Обращение не выбрано", "Kein Lead ausgewählt"));
     if (!lines.some(validLine)) throw new Error(tx("Добавьте корректную услугу", "Mindestens eine gültige Leistung ist erforderlich"));
-    if (!(await save("commercial", false))) throw new Error("Lead could not be saved");
+    if (!(await save("commercial", false))) throw new Error(tx("Не удалось сохранить обращение", "Lead konnte nicht gespeichert werden"));
     let contractId = contract?.id;
     if (!contractId) {
       contractId = (await createContract({
@@ -900,7 +946,7 @@ export function LeadWizard({
       await ensureCommercial();
       await reload(false, true);
     } catch (nextError) {
-      setError(errorText(nextError));
+      setError(errorText(nextError, tx));
     } finally {
       setBusy(null);
     }
@@ -913,7 +959,7 @@ export function LeadWizard({
       await updateContractStatus(result.contractId, { status: "signed" });
       await reload(false, true);
     } catch (nextError) {
-      setError(errorText(nextError));
+      setError(errorText(nextError, tx));
     } finally {
       setBusy(null);
     }
@@ -926,7 +972,7 @@ export function LeadWizard({
       await updateOrderCommercialBasis(result.orderId, patchValue);
       await reload(false, true);
     } catch (nextError) {
-      setError(errorText(nextError));
+      setError(errorText(nextError, tx));
     } finally {
       setBusy(null);
     }
@@ -936,19 +982,48 @@ export function LeadWizard({
     setBusy(accept ? "accept" : "quote");
     try {
       let quoteId = quote?.id;
+      let createdQuote: QuoteItem | null = null;
       if (!accept || !quoteId) {
         const result = await ensureCommercial();
-        quoteId = (await createQuote(result.orderId, {})).id;
+        const created = await createQuote(result.orderId, {});
+        quoteId = created.id;
+        createdQuote = {
+          id: created.id,
+          order_id: created.order_id,
+          order_number: order?.order_number ?? "",
+          contract_id: created.contract_id ?? result.contractId,
+          patient_id: created.patient_id ?? null,
+          lead_id: created.lead_id ?? leadId,
+          patient_name: lead ? [lead.first_name, lead.last_name].filter(Boolean).join(" ") : "",
+          patient_pid: "",
+          quote_number: created.quote_number,
+          status: created.status,
+          total_net: created.total_net,
+          total_vat: created.total_vat,
+          total_gross: created.total_gross,
+          valid_until: created.valid_until ?? null,
+          paid_amount: created.paid_amount ?? "0",
+          paid_at: created.paid_at ?? null,
+          notes: created.notes ?? null,
+          version_count: created.version_count,
+          current_version_number: created.current_version_number,
+          created_at: created.created_at,
+          updated_at: created.updated_at,
+          line_items: created.line_items,
+        };
       }
       if (accept) {
-        await updateQuoteStatus(quoteId, {
+        const accepted = await updateQuoteStatus(quoteId, {
           status: "accepted",
           paid_amount: prepayment ? money(paidAmount) : undefined,
         });
+        setQuotes((current) => [accepted, ...current.filter((item) => item.id !== accepted.id)]);
+      } else if (createdQuote) {
+        setQuotes((current) => [createdQuote, ...current.filter((item) => item.id !== createdQuote.id)]);
       }
-      await reload(false, true);
+      void reload(false, true);
     } catch (nextError) {
-      setError(errorText(nextError));
+      setError(errorText(nextError, tx));
     } finally {
       setBusy(null);
     }
@@ -963,7 +1038,7 @@ export function LeadWizard({
       onConverted?.(result.patient_id);
       onOpenChange(false);
     } catch (nextError) {
-      setError(errorText(nextError));
+      setError(errorText(nextError, tx));
       await reload(false);
     } finally {
       setBusy(null);
@@ -983,7 +1058,7 @@ export function LeadWizard({
       if (onArchived) onArchived();
       else onOpenChange(false);
     } catch (nextError) {
-      setError(errorText(nextError));
+      setError(errorText(nextError, tx));
     } finally {
       setBusy(null);
     }
@@ -1049,21 +1124,21 @@ export function LeadWizard({
     draft && renderedAutosaveSignature !== lastSavedAutosaveSignatureRef.current,
   ) || autosaveStatus === "saving" || autosaveStatus === "error";
   const autosaveLabel = autosaveStatus === "saving"
-    ? tx("Сохраняется…", "Wird gespeichert…")
+    ? tx("Сохраняем…", "Wird gespeichert…")
     : autosaveStatus === "saved"
-      ? tx("Сохранено автоматически", "Automatisch gespeichert")
+      ? tx("Изменения сохранены", "Änderungen gespeichert")
       : autosaveStatus === "error"
-        ? tx("Не удалось сохранить", "Speichern fehlgeschlagen")
-        : tx("Есть изменения", "Änderungen erkannt");
+        ? tx("Не удалось сохранить изменения", "Änderungen konnten nicht gespeichert werden")
+        : tx("Есть несохранённые изменения", "Nicht gespeicherte Änderungen");
 
   return (
     <>
       <Sheet open={open} dirty={autosaveIsDirty} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 border-l border-border p-0 sm:max-w-4xl">
-        <SheetTitle className="sr-only">{tx("Онбординг лида", "Lead-Onboarding")}</SheetTitle>
+        <SheetTitle className="sr-only">{tx("Оформление обращения", "Lead-Aufnahme")}</SheetTitle>
         <header className="flex min-h-16 items-center justify-between gap-4 border-b border-border px-4 py-3 pr-14 sm:px-5 sm:pr-14">
           <div className="min-w-0">
-            <h2 className="truncate text-base font-semibold text-foreground">{lead ? [lead.first_name, lead.last_name].filter(Boolean).join(" ") : tx("Онбординг лида", "Lead-Onboarding")}</h2>
+            <h2 className="truncate text-base font-semibold text-foreground">{lead ? [lead.first_name, lead.last_name].filter(Boolean).join(" ") : tx("Оформление обращения", "Lead-Aufnahme")}</h2>
             {autosaveStatus !== "idle" ? (
               <div
                 role={autosaveStatus === "error" ? "alert" : "status"}
@@ -1091,8 +1166,8 @@ export function LeadWizard({
               variant="ghost"
               size="icon-sm"
               className="text-destructive hover:text-destructive"
-              title={tx("Архивировать лид", "Lead archivieren")}
-              aria-label={tx("Архивировать лид", "Lead archivieren")}
+              title={tx("Архивировать обращение", "Lead archivieren")}
+              aria-label={tx("Архивировать обращение", "Lead archivieren")}
               disabled={loading || isBusy}
               onClick={() => setArchiveConfirmOpen(true)}
             >
@@ -1103,8 +1178,8 @@ export function LeadWizard({
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                title={tx("Детали лида", "Lead-Details")}
-                aria-label={tx("Детали лида", "Lead-Details")}
+                title={tx("Подробности обращения", "Lead-Details")}
+                aria-label={tx("Подробности обращения", "Lead-Details")}
                 disabled={loading || isBusy}
                 onClick={() => onShowDetails(leadId)}
               >
@@ -1120,7 +1195,7 @@ export function LeadWizard({
         <nav
           ref={stepNavRef}
           className="overflow-x-auto overscroll-x-contain border-b border-border"
-          aria-label={tx("Этапы онбординга", "Onboarding-Schritte")}
+          aria-label={tx("Этапы оформления", "Schritte der Lead-Aufnahme")}
         >
           <div className="grid min-w-[42rem] grid-cols-5 sm:min-w-0">
             {STEPS.map((item, itemIndex) => {
@@ -1154,11 +1229,11 @@ export function LeadWizard({
 
         <main aria-busy={loading || isBusy} className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-5">
           {error ? <div role="alert" className="mb-5 border-l-2 border-destructive bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div> : null}
-          {loading && !lead ? <div role="status" aria-live="polite" className="flex items-center gap-2 py-12 text-sm text-muted-foreground"><LoaderCircle aria-hidden="true" className="size-4 animate-spin" />{tx("Загрузка", "Wird geladen")}</div> : null}
+          {loading && !lead ? <div role="status" aria-live="polite" className="flex items-center gap-2 py-12 text-sm text-muted-foreground"><LoaderCircle aria-hidden="true" className="size-4 animate-spin" />{tx("Загрузка…", "Wird geladen…")}</div> : null}
 
           {draft && step === "master_data" ? (
             <section className="space-y-5">
-              <div><h3 className="text-sm font-semibold text-foreground">{tx("Сведения о клиенте", "Personendaten")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Проверьте данные, которые станут основой карточки пациента.", "Diese Angaben werden zur Grundlage der Patientenakte.")}</p></div>
+              <div><h3 className="text-sm font-semibold text-foreground">{tx("Данные клиента", "Personendaten")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Проверьте данные. Они будут перенесены в карточку пациента.", "Bitte prüfen Sie die Angaben. Sie werden in die Patientenakte übernommen.")}</p></div>
               <div className="grid gap-4 md:grid-cols-2">
                 <Field
                   label={tx("Имя", "Vorname")}
@@ -1220,7 +1295,7 @@ export function LeadWizard({
                   />
                 </Field>
                 <Field
-                  label={tx("Юридический пол", "Rechtliches Geschlecht")}
+                  label={tx("Пол по документам", "Geschlecht laut Ausweisdokument")}
                   required
                   error={visibleMasterError("legalSex")}
                   errorId={`${MASTER_FIELD_IDS.legalSex}-error`}
@@ -1239,12 +1314,12 @@ export function LeadWizard({
                     <option value="">{tx("Выберите", "Auswählen")}</option>
                     <option value="female">{tx("Женский", "Weiblich")}</option>
                     <option value="male">{tx("Мужской", "Männlich")}</option>
-                    <option value="diverse">{tx("Разное", "Divers")}</option>
+                    <option value="diverse">{tx("Другой", "Divers")}</option>
                     <option value="no_entry">{tx("Без указания", "Keine Angabe")}</option>
                   </NativeComboboxSelect>
                 </Field>
                 <Field
-                  label="E-mail"
+                  label="E-Mail"
                   required={!draft.phone.trim()}
                   error={visibleMasterError("email")}
                   errorId={`${MASTER_FIELD_IDS.email}-error`}
@@ -1323,7 +1398,7 @@ export function LeadWizard({
                   />
                 </Field>
                 <Field
-                  label={tx("Индекс", "Postleitzahl")}
+                  label={tx("Почтовый индекс", "Postleitzahl")}
                   required
                   error={visibleMasterError("zip")}
                   errorId={`${MASTER_FIELD_IDS.zip}-error`}
@@ -1342,17 +1417,17 @@ export function LeadWizard({
                   />
                 </Field>
                 <Field label={tx("Страна", "Land")}><Input name="country" autoComplete="country-name" value={draft.country} onChange={(event) => patch("country", event.target.value)} /></Field>
-                <Field label={tx("Основной язык", "Primärsprache")}><Input name="primary_language" autoComplete="off" value={draft.language} onChange={(event) => patch("language", event.target.value)} /></Field>
+                <Field label={tx("Предпочитаемый язык", "Bevorzugte Sprache")}><Input name="primary_language" autoComplete="off" value={draft.language} onChange={(event) => patch("language", event.target.value)} /></Field>
               </div>
             </section>
           ) : null}
 
           {draft && step === "need" ? (
             <section className="space-y-5">
-              <div><h3 className="text-sm font-semibold text-foreground">{tx("Запрос и специалисты", "Bedarf und Fachrichtungen")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Специальность выбирается из актуального справочника.", "Fachrichtungen werden aus dem aktuellen Verzeichnis gewählt.")}</p></div>
+              <div><h3 className="text-sm font-semibold text-foreground">{tx("Причина обращения и специализации", "Anliegen und Fachrichtungen")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Выберите подходящие специализации из справочника.", "Wählen Sie die passenden Fachrichtungen aus dem Verzeichnis aus.")}</p></div>
               <Field
                 required
-                label={tx("Основная причина обращения", "Hauptanliegen")}
+                label={tx("Причина обращения", "Anliegen")}
                 error={needValidationAttempted && !draft.concern.trim() ? tx("Обязательное поле", "Pflichtfeld") : undefined}
                 errorId={`${NEED_CONCERN_ID}-error`}
               >
@@ -1369,7 +1444,7 @@ export function LeadWizard({
                   onChange={(event) => patch("concern", event.target.value)}
                 />
               </Field>
-              <Field label={tx("Дополнительный контекст", "Zusätzlicher Kontext")}><textarea className={cn(textareaClass, "min-h-24")} value={draft.anamnese} onChange={(event) => patch("anamnese", event.target.value)} /></Field>
+              <Field label={tx("Дополнительная информация", "Weitere Informationen")}><textarea className={cn(textareaClass, "min-h-24")} value={draft.anamnese} onChange={(event) => patch("anamnese", event.target.value)} /></Field>
               <Field label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")}>
                 <Input
                   name="discovery_source"
@@ -1380,12 +1455,12 @@ export function LeadWizard({
               </Field>
               <div className="space-y-3">
                 <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  {tx("Специалисты", "Fachrichtungen")}
+                  {tx("Специализации", "Fachrichtungen")}
                   <span aria-hidden="true" className="ml-0.5 text-destructive">*</span>
                 </span>
                 <NativeComboboxSelect
                   id={NEED_SPECIALTIES_ID}
-                  aria-label={tx("Добавить специальность", "Fachrichtung hinzufügen")}
+                  aria-label={tx("Добавить специализацию", "Fachrichtung hinzufügen")}
                   aria-invalid={needValidationAttempted && draft.specialties.length === 0}
                   aria-describedby={needValidationAttempted && draft.specialties.length === 0 ? `${NEED_SPECIALTIES_ID}-error` : undefined}
                   name="specialty"
@@ -1398,12 +1473,12 @@ export function LeadWizard({
                   }}
                   className={cn(selectClass, needValidationAttempted && draft.specialties.length === 0 && "border-destructive")}
                 >
-                  <option value="">{tx("Добавить специальность", "Fachrichtung hinzufügen")}</option>
+                  <option value="">{tx("Добавить специализацию", "Fachrichtung hinzufügen")}</option>
                   {specialties.map((item) => <option key={item.id} value={item.id}>{lang === "de" ? item.name_de || item.name_en : item.name_ru || item.name_de || item.name_en}</option>)}
                 </NativeComboboxSelect>
                 {needValidationAttempted && draft.specialties.length === 0 ? (
                   <span id={`${NEED_SPECIALTIES_ID}-error`} role="alert" className="block text-xs leading-4 text-destructive">
-                    {tx("Выберите хотя бы одну специальность", "Mindestens eine Fachrichtung auswählen")}
+                    {tx("Выберите хотя бы одну специализацию", "Mindestens eine Fachrichtung auswählen")}
                   </span>
                 ) : null}
                 {draft.specialties.length > 0 ? (
@@ -1416,8 +1491,8 @@ export function LeadWizard({
                           variant="ghost"
                           size="icon-sm"
                           className="shrink-0"
-                          title={tx("Удалить специальность", "Fachrichtung entfernen")}
-                          aria-label={tx("Удалить специальность", "Fachrichtung entfernen")}
+                          title={tx("Удалить специализацию", "Fachrichtung entfernen")}
+                          aria-label={tx("Удалить специализацию", "Fachrichtung entfernen")}
                           onClick={() => patch("specialties", draft.specialties.filter((item) => item !== value))}
                         >
                           <X aria-hidden="true" className="size-3.5" />
@@ -1429,44 +1504,44 @@ export function LeadWizard({
               </div>
               <div className="flex flex-wrap items-start justify-between gap-3 border-t border-border pt-4">
                 <div className="min-w-0 space-y-2">
-                  <StateMark done={lead?.qualification_status === "qualified"} label={lead?.qualification_status === "qualified" ? tx("Лид квалифицирован", "Lead qualifiziert") : tx("Квалификация ожидается", "Qualifizierung ausstehend")} />
+                  <StateMark done={lead?.qualification_status === "qualified"} label={lead?.qualification_status === "qualified" ? tx("Данные обращения подтверждены", "Angaben zum Anliegen bestätigt") : tx("Данные обращения ещё не подтверждены", "Angaben zum Anliegen noch nicht bestätigt")} />
                   {lead?.qualification_status !== "qualified" && lead?.readiness.qualification_reasons.length ? (
                     <ul className="space-y-1 text-xs text-muted-foreground">
                       {lead.readiness.qualification_reasons.map((reason) => <li key={reason}>{qualificationReasonLabel(reason, tx)}</li>)}
                     </ul>
                   ) : null}
                 </div>
-                <Button type="button" variant="outline" disabled={isBusy || lead?.qualification_status === "qualified"} onClick={() => void qualify()}>{busy === "qualify" ? <LoaderCircle className="size-3.5 animate-spin" /> : <UserRoundCheck className="size-3.5" />}{tx("Квалифицировать", "Qualifizieren")}</Button>
+                <Button type="button" variant="outline" disabled={isBusy || lead?.qualification_status === "qualified"} onClick={() => void qualify()}>{busy === "qualify" ? <LoaderCircle className="size-3.5 animate-spin" /> : <UserRoundCheck className="size-3.5" />}{tx("Подтвердить данные", "Angaben bestätigen")}</Button>
               </div>
             </section>
           ) : null}
 
           {draft && step === "documents" ? (
             <section className="space-y-5">
-              <div><h3 className="text-sm font-semibold text-foreground">{tx("Документы и анамнез", "Unterlagen und Anamnese")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Документы остаются у лида до финальной конвертации.", "Die Dokumente bleiben bis zur finalen Konvertierung am Lead.")}</p></div>
+              <div><h3 className="text-sm font-semibold text-foreground">{tx("Документы и анамнез", "Unterlagen und Anamnese")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Загрузите документы, подтвердите согласия и заполните анамнез.", "Laden Sie die Unterlagen hoch, bestätigen Sie die Einwilligungen und erfassen Sie die Anamnese.")}</p></div>
               {(["identity", "dsgvo"] as const).map((kind) => {
                 const document = kind === "identity" ? identity : dsgvo;
                 const signed = Boolean(document?.signed_at && document?.compliance_kind === kind);
-                const label = kind === "identity" ? tx("Удостоверение личности", "Ausweisdokument") : tx("Согласие DSGVO", "DSGVO-Einwilligung");
+                const label = kind === "identity" ? tx("Документ, удостоверяющий личность", "Ausweisdokument") : tx("Согласие на обработку персональных данных", "Datenschutzeinwilligung (DSGVO)");
                 const fileId = "lead-file-" + kind;
                 return <div key={kind} className="flex flex-wrap items-center justify-between gap-3 border-y border-border py-3">
-                  <div><div className="text-sm font-medium text-foreground">{label}</div><div className="mt-1 text-xs text-muted-foreground">{document ? document.original_filename || document.auto_name : tx("Файл еще не загружен", "Noch keine Datei hochgeladen")}</div></div>
-                  <div className="flex flex-wrap items-center gap-2"><input id={fileId} type="file" className="peer sr-only" accept=".pdf,.jpg,.jpeg,.png" disabled={isBusy} onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) { void upload(kind, file); event.currentTarget.value = ""; } }} /><label htmlFor={fileId} className={cn("inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-3 text-xs font-medium text-foreground shadow-xs hover:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring", isBusy && "pointer-events-none opacity-50")}><Upload aria-hidden="true" className="size-3.5" />{tx("Загрузить", "Hochladen")}</label><Button type="button" variant="outline" size="icon-sm" title={tx("Подтвердить", "Bestätigen")} aria-label={tx("Подтвердить", "Bestätigen")} disabled={!document || signed || isBusy} onClick={() => document && void signDocument(document.id, kind)}><FileCheck2 className={cn("size-3.5", signed && "text-emerald-700")} /></Button><StateMark done={signed} label={signed ? tx("Подтвержден", "Bestätigt") : tx("Ожидается", "Ausstehend")} /></div>
+                  <div><div className="text-sm font-medium text-foreground">{label}</div><div className="mt-1 text-xs text-muted-foreground">{document ? document.original_filename || document.auto_name : tx("Файл не загружен", "Keine Datei hochgeladen")}</div></div>
+                  <div className="flex flex-wrap items-center gap-2"><input id={fileId} type="file" className="peer sr-only" accept=".pdf,.jpg,.jpeg,.png" disabled={isBusy} onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) { void upload(kind, file); event.currentTarget.value = ""; } }} /><label htmlFor={fileId} className={cn("inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-3 text-xs font-medium text-foreground shadow-xs hover:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring", isBusy && "pointer-events-none opacity-50")}><Upload aria-hidden="true" className="size-3.5" />{tx("Загрузить файл", "Datei hochladen")}</label><Button type="button" variant="outline" size="icon-sm" title={tx("Подтвердить документ", "Dokument bestätigen")} aria-label={tx("Подтвердить документ", "Dokument bestätigen")} disabled={!document || signed || isBusy} onClick={() => document && void signDocument(document.id, kind)}><FileCheck2 className={cn("size-3.5", signed && "text-emerald-700")} /></Button><StateMark done={signed} label={signed ? tx("Документ подтверждён", "Dokument bestätigt") : tx("Требует подтверждения", "Bestätigung erforderlich")} /></div>
                 </div>;
               })}
-              <div className="border-y border-border"><ToggleRow checked={draft.privacyConsent} disabled={isBusy} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Приняты правила конфиденциальности", "Datenschutzhinweise akzeptiert")} /><ToggleRow checked={draft.healthcareConsent} disabled={isBusy} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung medizinischer Daten")} /></div>
-              <Field required label={tx("Текущий анамнез", "Aktuelle Anamnese")}><textarea className={cn(textareaClass, "min-h-28")} value={draft.anamnese} onChange={(event) => patch("anamnese", event.target.value)} /></Field>
+              <div className="border-y border-border"><ToggleRow checked={draft.privacyConsent} disabled={isBusy} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} /><ToggleRow checked={draft.healthcareConsent} disabled={isBusy} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} /></div>
+              <Field required label={tx("Анамнез", "Aktuelle Anamnese")}><textarea className={cn(textareaClass, "min-h-28")} value={draft.anamnese} onChange={(event) => patch("anamnese", event.target.value)} /></Field>
               <Field label={tx("Направивший врач", "Zuweisender Arzt")}><Input value={draft.referrer} onChange={(event) => patch("referrer", event.target.value)} /></Field>
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4"><StateMark done={Boolean(readiness.get("documents"))} label={readiness.get("documents") ? tx("Этап подтвержден", "Schritt erfüllt") : tx("Нужны документы и завершенный анамнез", "Dokumente und Anamnese erforderlich")} /><Button type="button" variant="outline" disabled={isBusy || !draft.concern.trim() || !draft.anamnese.trim()} onClick={() => void finishIntake()}>{busy === "intake" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ClipboardCheck className="size-3.5" />}{tx("Завершить анамнез", "Anamnese abschließen")}</Button></div>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4"><StateMark done={Boolean(readiness.get("documents"))} label={readiness.get("documents") ? tx("Документы и анамнез заполнены", "Unterlagen und Anamnese vollständig") : tx("Заполните документы и анамнез", "Unterlagen und Anamnese vervollständigen")} /><Button type="button" variant="outline" disabled={isBusy || !draft.concern.trim() || !draft.anamnese.trim()} onClick={() => void finishIntake()}>{busy === "intake" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ClipboardCheck className="size-3.5" />}{tx("Сохранить анамнез", "Anamnese abschließen")}</Button></div>
             </section>
           ) : null}
 
           {draft && step === "commercial" ? (
             <section className="space-y-5">
-              <h3 className="text-sm font-semibold text-foreground">{tx("Договор, заказ и кошторис", "Vertrag, Auftrag und Kostenvoranschlag")}</h3>
-              <div className="flex flex-wrap items-center justify-between gap-3 border-y border-border py-3"><div><div className="text-sm font-medium text-foreground">{tx("Рамочный договор", "Rahmenvertrag")}</div><div className="mt-1 text-xs text-muted-foreground">{contract?.contract_number ?? tx("Еще не подготовлен", "Noch nicht vorbereitet")}</div></div><div className="flex items-center gap-2"><StateMark done={contract?.status === "signed"} label={contract?.status === "signed" ? tx("Подписан", "Unterzeichnet") : tx("Не подписан", "Nicht unterzeichnet")} /><Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void signContract()}>{busy === "contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileCheck2 className="size-3.5" />}{tx("Подписать", "Unterzeichnen")}</Button></div></div>
+              <h3 className="text-sm font-semibold text-foreground">{tx("Договор, заказ и смета", "Vertrag, Auftrag und Kostenvoranschlag")}</h3>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-y border-border py-3"><div><div className="text-sm font-medium text-foreground">{tx("Рамочный договор", "Rahmenvertrag")}</div><div className="mt-1 text-xs text-muted-foreground">{contract?.contract_number ?? tx("Договор ещё не создан", "Vertrag noch nicht erstellt")}</div></div><div className="flex items-center gap-2"><StateMark done={contract?.status === "signed"} label={contract?.status === "signed" ? tx("Договор подписан", "Vertrag unterzeichnet") : tx("Договор не подписан", "Vertrag nicht unterzeichnet")} /><Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void signContract()}>{busy === "contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileCheck2 className="size-3.5" />}{tx("Подписать договор", "Vertrag unterzeichnen")}</Button></div></div>
               <div className="space-y-3">
-                <span className="text-sm font-medium text-foreground">{tx("Услуги заказа", "Auftragsleistungen")}</span>
+                <span className="text-sm font-medium text-foreground">{tx("Услуги", "Leistungen")}</span>
                 <NativeComboboxSelect
                   aria-label={tx("Выбрать услугу из каталога", "Leistung aus dem Katalog auswählen")}
                   name="agency_service"
@@ -1486,7 +1561,7 @@ export function LeadWizard({
                   ))}
                 </NativeComboboxSelect>
                 {lines.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">{tx("Услуги еще не выбраны", "Noch keine Leistungen ausgewählt")}</p>
+                  <p className="text-xs text-muted-foreground">{tx("Услуги не выбраны", "Keine Leistungen ausgewählt")}</p>
                 ) : null}
                 {lines.map((line) => {
                   const catalogService = agencyServices.find((service) => service.id === line.agencyServiceId);
@@ -1500,7 +1575,7 @@ export function LeadWizard({
                         <Input name={`service_quantity_${line.id}`} autoComplete="off" inputMode="decimal" aria-label={tx("Количество", "Menge")} value={line.quantity} onChange={(event) => updateLine(line.id, { quantity: event.target.value })} />
                       </Field>
                       <div className="font-mono text-sm tabular-nums text-foreground sm:text-right">
-                        <div className="font-sans text-[11px] uppercase text-muted-foreground">{tx("Цена", "Preis")}</div>
+                        <div className="font-sans text-[11px] uppercase text-muted-foreground">{tx("Цена за единицу", "Einzelpreis")}</div>
                         {formatMoneyValue(money(line.price), lang)} {catalogService?.currency || "EUR"}
                       </div>
                       <div className="font-mono text-sm tabular-nums text-foreground sm:text-right">
@@ -1517,17 +1592,17 @@ export function LeadWizard({
                   <span className="font-semibold text-foreground">{tx("Итого", "Gesamt")}: <span className="font-mono tabular-nums">{formatMoneyValue(estimate.gross, lang)} EUR</span></span>
                 </div>
               </div>
-              <div className="border-y border-border"><ToggleRow checked={Boolean(order?.signed_patient)} disabled={isBusy} onChange={(checked) => void saveFlags({ signed_patient: checked })} label={tx("Подпись клиента на заказе", "Unterschrift der Kundin / des Kunden")} /><ToggleRow checked={Boolean(order?.signed_agency)} disabled={isBusy} onChange={(checked) => void saveFlags({ signed_agency: checked })} label={tx("Подпись агентства на заказе", "Unterschrift der Agentur")} /><ToggleRow checked={prepayment} disabled={isBusy} onChange={(checked) => { setPrepayment(checked); void saveFlags({ prepayment_required: checked }); }} label={tx("Требуется предоплата", "Vorauszahlung erforderlich")} /></div>
-              <div className="grid gap-3 border-b border-border pb-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end"><Field label={tx("Получено предоплаты", "Erhaltene Vorauszahlung")}><Input inputMode="decimal" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} disabled={!prepayment} placeholder="0.00" /></Field><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" disabled={isBusy || !lines.some(validLine)} onClick={() => void createOrAcceptQuote(false)}>{busy === "quote" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}{quote ? tx("Новый кошторис", "Neuer Kostenvoranschlag") : tx("Создать кошторис", "Kostenvoranschlag erstellen")}</Button><Button type="button" variant="outline" disabled={isBusy || !quote} onClick={() => void createOrAcceptQuote(true)}>{busy === "accept" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}{tx("Принять", "Annehmen")}</Button></div></div>
-              <div className="flex flex-wrap items-center justify-between gap-3"><StateMark done={Boolean(readiness.get("commercial"))} label={acceptedQuote ? tx("Кошторис принят", "Kostenvoranschlag angenommen") : tx("Кошторис ожидает подтверждения", "Kostenvoranschlag ausstehend")} /><Button type="button" disabled={isBusy || !lines.some(validLine)} onClick={() => void prepareCommercial()}>{busy === "commercial" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}{tx("Сохранить коммерческие данные", "Kommerzielle Daten speichern")}</Button></div>
+              <div className="border-y border-border"><ToggleRow checked={Boolean(order?.signed_patient)} disabled={isBusy} onChange={(checked) => void saveFlags({ signed_patient: checked })} label={tx("Клиент подписал заказ", "Auftrag vom Kunden unterzeichnet")} /><ToggleRow checked={Boolean(order?.signed_agency)} disabled={isBusy} onChange={(checked) => void saveFlags({ signed_agency: checked })} label={tx("Агентство подтвердило заказ", "Auftrag von der Agentur bestätigt")} /><ToggleRow checked={prepayment} disabled={isBusy} onChange={(checked) => { setPrepayment(checked); void saveFlags({ prepayment_required: checked }); }} label={tx("Требуется предоплата", "Vorauszahlung erforderlich")} /></div>
+              <div className="grid gap-3 border-b border-border pb-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end"><Field label={tx("Полученная предоплата", "Erhaltene Vorauszahlung")}><Input inputMode="decimal" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} disabled={!prepayment} placeholder="0.00" /></Field><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" disabled={isBusy || !lines.some(validLine)} onClick={() => void createOrAcceptQuote(false)}>{busy === "quote" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}{quote ? tx("Создать новую смету", "Neuen Kostenvoranschlag erstellen") : tx("Создать смету", "Kostenvoranschlag erstellen")}</Button><Button type="button" variant="outline" disabled={isBusy || !quote} onClick={() => void createOrAcceptQuote(true)}>{busy === "accept" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}{tx("Подтвердить смету", "Kostenvoranschlag annehmen")}</Button></div></div>
+              <div className="flex flex-wrap items-center justify-between gap-3"><StateMark done={Boolean(readiness.get("commercial"))} label={acceptedQuote ? tx("Смета подтверждена", "Kostenvoranschlag angenommen") : quote ? tx("Смета создана и ожидает подтверждения", "Kostenvoranschlag erstellt, Annahme ausstehend") : tx("Смета ещё не создана", "Kostenvoranschlag noch nicht erstellt")} /><Button type="button" disabled={isBusy || !lines.some(validLine)} onClick={() => void prepareCommercial()}>{busy === "commercial" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}{tx("Сохранить договор и заказ", "Vertrag und Auftrag speichern")}</Button></div>
             </section>
           ) : null}
 
           {lead && step === "release" ? (
             <section className="space-y-5">
-              <div><h3 className="text-sm font-semibold text-foreground">{tx("Финальное подтверждение", "Finale Freigabe")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("После подтверждения будет создан пациент и перенесены все onboarding-артефакты.", "Nach der Freigabe werden Patient und alle Onboarding-Artefakte atomar angelegt bzw. übertragen.")}</p></div>
-              <div className="border-y border-border">{lead.readiness.steps.map((item) => <div key={item.key} className="flex items-center justify-between gap-4 border-b border-border/70 py-3 last:border-b-0"><span className="text-sm text-foreground">{item.label}</span><StateMark done={item.ready} label={item.ready ? tx("Готово", "Bereit") : tx("Не готово", "Nicht bereit")} /></div>)}</div>
-              {lead.readiness.blocking_reasons.length > 0 ? <div className="border-l-2 border-amber-500 bg-amber-50/50 px-3 py-3 text-sm text-amber-900"><div className="font-medium">{tx("Что еще нужно завершить", "Noch zu erledigen")}</div><ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5">{lead.readiness.blocking_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></div> : null}
+              <div><h3 className="text-sm font-semibold text-foreground">{tx("Создание пациента", "Patient anlegen")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Проверьте все этапы. После подтверждения система создаст карточку пациента и перенесёт в неё данные обращения.", "Prüfen Sie alle Schritte. Nach der Bestätigung wird die Patientenakte angelegt und die Angaben aus dem Lead werden übernommen.")}</p></div>
+              <div className="border-y border-border">{lead.readiness.steps.map((item) => <div key={item.key} className="flex items-center justify-between gap-4 border-b border-border/70 py-3 last:border-b-0"><span className="text-sm text-foreground">{readinessStepLabel(item.key, tx)}</span><StateMark done={item.ready} label={item.ready ? tx("Выполнено", "Erledigt") : tx("Не завершено", "Noch offen")} /></div>)}</div>
+              {lead.readiness.blocking_reasons.length > 0 ? <div className="border-l-2 border-amber-500 bg-amber-50/50 px-3 py-3 text-sm text-amber-900"><div className="font-medium">{tx("Что осталось заполнить", "Was noch fehlt")}</div><ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5">{lead.readiness.blocking_reasons.map((reason) => <li key={reason}>{readinessReasonLabel(reason, tx)}</li>)}</ul></div> : null}
               <div className="flex justify-end"><Button type="button" disabled={isBusy || !lead.readiness.conversion_ready} onClick={() => void convert()}>{busy === "convert" ? <LoaderCircle className="size-4 animate-spin" /> : <UserRoundCheck className="size-4" />}{tx("Создать пациента", "Patient anlegen")}</Button></div>
             </section>
           ) : null}
@@ -1542,11 +1617,11 @@ export function LeadWizard({
       <Dialog open={archiveConfirmOpen} onOpenChange={setArchiveConfirmOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{tx("Архивировать лид?", "Lead archivieren?")}</DialogTitle>
+            <DialogTitle>{tx("Переместить обращение в архив?", "Lead archivieren?")}</DialogTitle>
             <DialogDescription>
               {tx(
-                "Лид будет отмечен как не относящийся к нашим обращениям и убран из активного списка.",
-                "Der Lead wird als nicht zu uns gehörend markiert und aus der aktiven Liste entfernt.",
+                "Обращение исчезнет из активного списка, но останется доступным в архиве.",
+                "Der Lead wird aus der aktiven Liste entfernt und bleibt im Archiv verfügbar.",
               )}
             </DialogDescription>
           </DialogHeader>

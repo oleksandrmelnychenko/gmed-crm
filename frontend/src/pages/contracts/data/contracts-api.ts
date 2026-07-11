@@ -64,7 +64,21 @@ export function createContract(payload: JsonPayload) {
 }
 
 export function createQuote(orderId: string, payload: JsonPayload) {
-  return postJson<{ id: string }>(`/orders/${orderId}/quotes`, payload);
+  return postJson<
+    Partial<QuoteItem> &
+      Pick<
+        QuoteItem,
+        | "id"
+        | "order_id"
+        | "quote_number"
+        | "status"
+        | "total_net"
+        | "total_vat"
+        | "total_gross"
+        | "created_at"
+        | "updated_at"
+      >
+  >(`/orders/${orderId}/quotes`, payload);
 }
 
 export function saveAgencyService(serviceId: string, payload: JsonPayload) {

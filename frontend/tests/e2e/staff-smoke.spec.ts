@@ -1846,7 +1846,7 @@ test.describe("lead onboarding wizard", () => {
     const readyRow = page.getByRole("row").filter({ hasText: "Ready Lead" });
     await readyRow.click();
 
-    const wizard = page.getByRole("dialog", { name: "Lead-Onboarding" });
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
     await expect(wizard).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`lead=${leadId}.*view=wizard`));
     await expect(page.getByRole("button", { name: "Bearbeiten", exact: true })).toHaveCount(0);
@@ -1862,7 +1862,7 @@ test.describe("lead onboarding wizard", () => {
     await page.goto("/leads");
     await page.getByRole("row").filter({ hasText: "Ready Lead" }).click();
 
-    const wizard = page.getByRole("dialog", { name: "Lead-Onboarding" });
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
     await wizard.getByRole("button", { name: "Lead archivieren" }).click();
     const confirmation = page.getByRole("dialog", { name: "Lead archivieren?" });
     await expect(confirmation).toBeVisible();
@@ -1891,10 +1891,10 @@ test.describe("lead onboarding wizard", () => {
     await intakeRow.click();
     await expect(page.getByRole("button", { name: "Bearbeiten", exact: true })).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`lead=${leadId}(?!.*view=wizard)`));
-    await expect(page.getByRole("dialog", { name: "Lead-Onboarding" })).toBeHidden();
+    await expect(page.getByRole("dialog", { name: "Lead-Aufnahme" })).toBeHidden();
 
     await page.getByRole("button", { name: "In Konsole übernehmen" }).last().click();
-    await expect(page.getByRole("dialog", { name: "Lead-Onboarding" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Lead-Aufnahme" })).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`lead=${leadId}.*view=wizard`));
     await expect(page.getByRole("button", { name: "Bearbeiten", exact: true })).toHaveCount(0);
   });
@@ -1905,18 +1905,18 @@ test.describe("lead onboarding wizard", () => {
     await page.goto("/leads?lead=00000000-0000-0000-0000-000000000902");
     await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
 
-    const wizard = page.getByRole("dialog", { name: "Lead-Onboarding" });
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
     await expect(wizard).toBeVisible();
-    const navigation = wizard.getByRole("navigation", { name: "Onboarding-Schritte" });
+    const navigation = wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" });
     await expect(navigation.getByRole("button")).toHaveCount(5);
-    await expect(wizard.getByText("Personendaten")).toBeVisible();
+    await expect(wizard.getByRole("heading", { name: "Personendaten" })).toBeVisible();
     await expect(
       wizard.getByText("Ein Patient wird erst nach der finalen Freigabe angelegt."),
     ).toHaveCount(0);
     await expect(wizard.getByRole("button", { name: "Patient anlegen" })).toHaveCount(0);
 
-    await navigation.getByRole("button", { name: /Bedarf/i }).click();
-    await expect(wizard.getByText("Bedarf und Fachrichtungen")).toBeVisible();
+    await navigation.getByRole("button", { name: /Anliegen/i }).click();
+    await expect(wizard.getByText("Anliegen und Fachrichtungen")).toBeVisible();
     await expect(
       wizard.getByRole("textbox", { name: "Wie sind Sie auf uns aufmerksam geworden?" }),
     ).toBeVisible();
@@ -1936,9 +1936,9 @@ test.describe("lead onboarding wizard", () => {
 
     await navigation.getByRole("button", { name: /Unterlagen/i }).click();
     await expect(wizard.getByText("Ausweisdokument")).toBeVisible();
-    await expect(wizard.getByText("DSGVO-Einwilligung")).toBeVisible();
+    await expect(wizard.getByText("Datenschutzeinwilligung (DSGVO)")).toBeVisible();
 
-    await navigation.getByRole("button", { name: /Vertrag & Auftrag/i }).click();
+    await navigation.getByRole("button", { name: /Vertrag & Angebot/i }).click();
     await expect(wizard.getByText("Vertrag, Auftrag und Kostenvoranschlag")).toBeVisible();
     await expect(
       wizard.getByText("Diese Unterlagen gehören bis zur Freigabe dem Lead."),
@@ -1946,6 +1946,29 @@ test.describe("lead onboarding wizard", () => {
     await expect(
       wizard.getByRole("combobox", { name: "Leistung aus dem Katalog auswählen" }),
     ).toBeVisible();
+  });
+
+  test("wizard uses clear Russian copy across all stages", async ({ page }) => {
+    await page.goto("/leads");
+    await page.getByRole("button", { name: "Sprache wechseln" }).click();
+    await page.getByRole("row").filter({ hasText: "Ready Lead" }).click();
+
+    const wizard = page.getByRole("dialog", { name: "Оформление обращения" });
+    const navigation = wizard.getByRole("navigation", { name: "Этапы оформления" });
+    await expect(navigation.getByRole("button", { name: /Данные клиента/i })).toBeVisible();
+
+    await navigation.getByRole("button", { name: /Обращение/i }).click();
+    await expect(wizard.getByText("Причина обращения и специализации")).toBeVisible();
+    await expect(wizard.getByText("Данные обращения подтверждены")).toBeVisible();
+
+    await navigation.getByRole("button", { name: /Документы/i }).click();
+    await expect(wizard.getByText("Документ, удостоверяющий личность")).toBeVisible();
+    await expect(wizard.getByText("Согласие на обработку персональных данных")).toBeVisible();
+
+    await navigation.getByRole("button", { name: /Договор и смета/i }).click();
+    await expect(wizard.getByRole("heading", { name: "Договор, заказ и смета" })).toBeVisible();
+    await expect(wizard.getByText(/кошторис/i)).toHaveCount(0);
+    await expect(navigation.getByRole("button", { name: /Создание пациента/i })).toBeVisible();
   });
 
   test("final release reflects server readiness and does not expose an early conversion", async ({
@@ -1997,13 +2020,13 @@ test.describe("lead onboarding wizard", () => {
 
     await page.goto("/leads?lead=" + leadId);
     await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
-    const wizard = page.getByRole("dialog", { name: "Lead-Onboarding" });
-    await wizard.getByRole("navigation", { name: "Onboarding-Schritte" })
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    await wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" })
       .getByRole("button", { name: /Freigabe/i })
       .click();
 
-    await expect(wizard.getByText("Noch zu erledigen")).toBeVisible();
-    await expect(wizard.getByText("Signed DSGVO document is missing")).toBeVisible();
+    await expect(wizard.getByText("Was noch fehlt")).toBeVisible();
+    await expect(wizard.getByText("Datenschutzeinwilligung hochladen und bestätigen")).toBeVisible();
     await expect(wizard.getByRole("button", { name: "Patient anlegen" })).toBeDisabled();
   });
 });
@@ -2058,9 +2081,9 @@ test.describe("responsive staff workspace", () => {
     const readyLeadCell = readyRow.getByText("Ready Lead", { exact: true });
     await readyLeadCell.click();
 
-    const wizard = page.getByRole("dialog", { name: "Lead-Onboarding" });
-    const navigation = wizard.getByRole("navigation", { name: "Onboarding-Schritte" });
-    await expect(navigation.getByRole("button", { name: /Stammdaten/i })).toBeVisible();
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    const navigation = wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" });
+    await expect(navigation.getByRole("button", { name: /Personendaten/i })).toBeVisible();
     let leadListRefreshes = 0;
     page.on("request", (request) => {
       if (
@@ -2100,7 +2123,7 @@ test.describe("responsive staff workspace", () => {
       return payload.first_name === "Ready Autosaved";
     });
     await firstNameInput.fill("Ready Autosaved");
-    await expect(wizard.getByText("Änderungen erkannt", { exact: true })).toBeVisible();
+    await expect(wizard.getByText("Nicht gespeicherte Änderungen", { exact: true })).toBeVisible();
     const request = await autosaveRequest;
     expect(request.postDataJSON()).toMatchObject({
       first_name: "Ready Autosaved",
@@ -2111,7 +2134,7 @@ test.describe("responsive staff workspace", () => {
         },
       },
     });
-    await expect(wizard.getByText("Automatisch gespeichert", { exact: true })).toBeVisible();
+    await expect(wizard.getByText("Änderungen gespeichert", { exact: true })).toBeVisible();
     await page.evaluate((entityId) => {
       window.dispatchEvent(new CustomEvent("gmed:realtime-event", {
         detail: {
@@ -2133,7 +2156,7 @@ test.describe("responsive staff workspace", () => {
       "Ready Autosaved",
     );
 
-    await navigation.getByRole("button", { name: /Bedarf/i }).click();
+    await navigation.getByRole("button", { name: /Anliegen/i }).click();
     await wizard.getByRole("combobox").click();
     await page.getByText("Orthopädie", { exact: true }).click();
     await expect(wizard.getByText("Orthopädie", { exact: true })).toBeVisible();
@@ -2158,7 +2181,7 @@ test.describe("responsive staff workspace", () => {
       wizard_state: { discovery_source: "Empfehlung einer Freundin" },
     });
 
-    const commercialStep = navigation.getByRole("button", { name: /Vertrag & Auftrag/i });
+    const commercialStep = navigation.getByRole("button", { name: /Vertrag & Angebot/i });
     await commercialStep.click();
     await expect(
       wizard.getByRole("heading", { name: "Vertrag, Auftrag und Kostenvoranschlag" }),
@@ -2211,12 +2234,75 @@ test.describe("responsive staff workspace", () => {
         },
       },
     });
-    await expect(wizard.getByText("Automatisch gespeichert", { exact: true })).toBeVisible();
+    await expect(wizard.getByText("Änderungen gespeichert", { exact: true })).toBeVisible();
 
     await closeButton.click();
     await expect(wizard).toBeHidden();
     await readyLeadCell.click();
     await expect(wizard.getByText("Transport coordination", { exact: true })).toBeVisible();
     await expect(wizard.getByText("12.500,00 EUR", { exact: false }).first()).toBeVisible();
+
+    const contractId = "00000000-0000-0000-0000-000000000961";
+    const orderId = "00000000-0000-0000-0000-000000000962";
+    const quoteId = "00000000-0000-0000-0000-000000000963";
+    let quoteCreated = false;
+    let releaseQuoteReload = () => undefined;
+    const quoteReloadGate = new Promise<void>((resolve) => {
+      releaseQuoteReload = resolve;
+    });
+
+    await page.route("**/api/v1/framework-contracts", (route) => {
+      if (route.request().method() === "POST") {
+        return json(route, { id: contractId, status: "sent" }, 201);
+      }
+      return json(route, []);
+    });
+    await page.route("**/api/v1/orders", (route) => {
+      if (route.request().method() === "POST") {
+        return json(route, { id: orderId }, 201);
+      }
+      return json(route, []);
+    });
+    await page.route(`**/api/v1/orders/${orderId}/leistungen`, (route) =>
+      json(route, { id: "00000000-0000-0000-0000-000000000964" }, 201),
+    );
+    await page.route(`**/api/v1/orders/${orderId}/commercial-basis`, (route) =>
+      json(route, { ok: true, order_id: orderId }),
+    );
+    await page.route(`**/api/v1/orders/${orderId}/quotes`, (route) => {
+      quoteCreated = true;
+      return json(route, {
+        id: quoteId,
+        order_id: orderId,
+        contract_id: contractId,
+        patient_id: null,
+        lead_id: leadId,
+        quote_number: "KV-20260711-0099",
+        status: "draft",
+        total_net: "12500.00",
+        total_vat: "2375.00",
+        total_gross: "14875.00",
+        valid_until: null,
+        line_items: [],
+        notes: null,
+        version_count: 1,
+        current_version_number: 1,
+        created_at: "2026-07-11T09:35:31Z",
+        updated_at: "2026-07-11T09:35:31Z",
+      }, 201);
+    });
+    await page.route("**/api/v1/quotes?*", async (route) => {
+      if (quoteCreated) await quoteReloadGate;
+      return json(route, []);
+    });
+
+    await wizard.getByRole("button", { name: "Kostenvoranschlag erstellen" }).click();
+    await expect(
+      wizard.getByText("Kostenvoranschlag erstellt, Annahme ausstehend", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      wizard.getByRole("button", { name: "Neuen Kostenvoranschlag erstellen" }),
+    ).toBeEnabled();
+    releaseQuoteReload();
   });
 });
