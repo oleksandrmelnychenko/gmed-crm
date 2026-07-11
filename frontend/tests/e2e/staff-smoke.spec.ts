@@ -1787,12 +1787,15 @@ test.describe("lead onboarding wizard", () => {
 
     await navigation.getByRole("button", { name: /Bedarf/i }).click();
     await expect(wizard.getByText("Bedarf und Fachrichtungen")).toBeVisible();
+    await expect(
+      wizard.getByRole("textbox", { name: "Wie sind Sie auf uns aufmerksam geworden?" }),
+    ).toBeVisible();
     await wizard.getByRole("combobox").click();
     await expect(page.getByText("Orthopädie", { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
 
     await navigation.getByRole("button", { name: /Unterlagen/i }).click();
-    await expect(wizard.getByText("Identitätsnachweis")).toBeVisible();
+    await expect(wizard.getByText("Ausweisdokument")).toBeVisible();
     await expect(wizard.getByText("DSGVO-Einwilligung")).toBeVisible();
 
     await navigation.getByRole("button", { name: /Vertrag & Auftrag/i }).click();
@@ -1923,6 +1926,13 @@ test.describe("responsive staff workspace", () => {
     );
 
     const firstNameInput = wizard.getByRole("textbox", { name: "Vorname" });
+    await firstNameInput.fill("");
+    await firstNameInput.blur();
+    await expect(wizard.getByText("Pflichtfeld", { exact: true }).first()).toBeVisible();
+    await expect(wizard.getByText("Pflichtfelder ausfüllen", { exact: true })).toHaveCount(0);
+    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
+    await expect(firstNameInput).toBeFocused();
+
     const autosaveRequest = page.waitForRequest((request) => {
       if (
         request.method() !== "POST" ||
@@ -1959,6 +1969,26 @@ test.describe("responsive staff workspace", () => {
     await wizard.getByRole("combobox").click();
     await page.getByText("Orthopädie", { exact: true }).click();
     await expect(wizard.getByText("Orthopädie", { exact: true })).toBeVisible();
+
+    const discoverySourceRequest = page.waitForRequest((candidate) => {
+      if (
+        candidate.method() !== "POST" ||
+        !candidate.url().endsWith(`/api/v1/leads/${leadId}/update`)
+      ) {
+        return false;
+      }
+      const payload = candidate.postDataJSON() as {
+        wizard_state?: { discovery_source?: string };
+      };
+      return payload.wizard_state?.discovery_source === "Empfehlung einer Freundin";
+    });
+    await wizard
+      .getByRole("textbox", { name: "Wie sind Sie auf uns aufmerksam geworden?" })
+      .fill("Empfehlung einer Freundin");
+    const discoveryRequest = await discoverySourceRequest;
+    expect(discoveryRequest.postDataJSON()).toMatchObject({
+      wizard_state: { discovery_source: "Empfehlung einer Freundin" },
+    });
 
     const commercialStep = navigation.getByRole("button", { name: /Vertrag & Auftrag/i });
     await commercialStep.click();

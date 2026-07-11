@@ -89,6 +89,7 @@ type Draft = {
   language: string;
   concern: string;
   anamnese: string;
+  discoverySource: string;
   referrer: string;
   specialties: string[];
   privacyConsent: boolean;
@@ -120,7 +121,44 @@ type StoredCommercialDraft = {
   prepayment: boolean;
 };
 
+type MasterFieldKey =
+  | "firstName"
+  | "lastName"
+  | "birthDate"
+  | "legalSex"
+  | "email"
+  | "phone"
+  | "street"
+  | "city"
+  | "zip";
+
+type MasterValidationErrors = Partial<Record<MasterFieldKey, string>>;
+
 const AUTOSAVE_DELAY_MS = 800;
+
+const MASTER_FIELD_ORDER: MasterFieldKey[] = [
+  "firstName",
+  "lastName",
+  "birthDate",
+  "legalSex",
+  "email",
+  "phone",
+  "street",
+  "city",
+  "zip",
+];
+
+const MASTER_FIELD_IDS: Record<MasterFieldKey, string> = {
+  firstName: "lead-wizard-first-name",
+  lastName: "lead-wizard-last-name",
+  birthDate: "lead-wizard-birth-date",
+  legalSex: "lead-wizard-legal-sex",
+  email: "lead-wizard-email",
+  phone: "lead-wizard-phone",
+  street: "lead-wizard-street",
+  city: "lead-wizard-city",
+  zip: "lead-wizard-zip",
+};
 
 const STEPS: Array<{ id: StepId; ru: string; de: string }> = [
   { id: "master_data", ru: "Данные", de: "Stammdaten" },
@@ -197,6 +235,7 @@ function autosavePayload(
       ...previousWizardState,
       step,
       onboarding_version: 2,
+      discovery_source: draft.discoverySource,
       referrer: draft.referrer,
       commercial_draft: {
         lines: lines.map((line) => ({
@@ -234,6 +273,7 @@ function draftFromLead(lead: LeadDetail): Draft {
     language: lead.primary_language ?? "",
     concern: lead.primary_concern_text ?? "",
     anamnese: lead.additional_concerns ?? "",
+    discoverySource: inputString(lead.wizard_state?.["discovery_source"]),
     referrer: inputString(lead.wizard_state?.["referrer"]),
     specialties: lead.requested_specialties ?? [],
     privacyConsent: lead.consent_privacy_practices,
@@ -276,11 +316,80 @@ function errorText(error: unknown): string {
   return error instanceof Error && error.message ? error.message : "Request failed";
 }
 
-function Field({ label, children, className }: { label: ReactNode; children: ReactNode; className?: string }) {
+function validateMasterDraft(draft: Draft | null, tx: Tx): MasterValidationErrors {
+  if (!draft) return {};
+
+  const errors: MasterValidationErrors = {};
+  const required = tx("Обязательное поле", "Pflichtfeld");
+  if (!draft.firstName.trim()) errors.firstName = required;
+  if (!draft.lastName.trim()) errors.lastName = required;
+  if (!draft.birthDate) {
+    errors.birthDate = required;
+  } else if (draft.birthDate > new Date().toISOString().slice(0, 10)) {
+    errors.birthDate = tx(
+      "Дата рождения не может быть в будущем",
+      "Das Geburtsdatum darf nicht in der Zukunft liegen",
+    );
+  }
+  if (!draft.legalSex) errors.legalSex = required;
+
+  const email = draft.email.trim();
+  const phone = draft.phone.trim();
+  if (!email && !phone) {
+    const contactRequired = tx(
+      "Укажите E-mail или телефон",
+      "E-Mail oder Telefonnummer angeben",
+    );
+    errors.email = contactRequired;
+    errors.phone = contactRequired;
+  } else {
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      errors.email = tx(
+        "Введите корректный E-mail",
+        "Gültige E-Mail-Adresse eingeben",
+      );
+    }
+    if (phone && phone.replace(/\D/g, "").length < 6) {
+      errors.phone = tx(
+        "Введите корректный номер телефона",
+        "Gültige Telefonnummer eingeben",
+      );
+    }
+  }
+
+  if (!draft.street.trim()) errors.street = required;
+  if (!draft.city.trim()) errors.city = required;
+  if (!draft.zip.trim()) errors.zip = required;
+  return errors;
+}
+
+function Field({
+  label,
+  children,
+  className,
+  error,
+  errorId,
+  required = false,
+}: {
+  label: ReactNode;
+  children: ReactNode;
+  className?: string;
+  error?: string;
+  errorId?: string;
+  required?: boolean;
+}) {
   return (
     <label className={cn("min-w-0 space-y-1.5", className)}>
-      <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
+      <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+        {required ? <span aria-hidden="true" className="ml-0.5 text-destructive">*</span> : null}
+      </span>
       {children}
+      {error ? (
+        <span id={errorId} role="alert" className="block text-xs leading-4 text-destructive">
+          {error}
+        </span>
+      ) : null}
     </label>
   );
 }
@@ -333,6 +442,10 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
   const [error, setError] = useState("");
   const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("idle");
   const [autosaveError, setAutosaveError] = useState("");
+  const [touchedMasterFields, setTouchedMasterFields] = useState<Set<MasterFieldKey>>(
+    () => new Set(),
+  );
+  const [masterValidationAttempted, setMasterValidationAttempted] = useState(false);
   const hydrated = useRef<string | null>(null);
   const stepNavRef = useRef<HTMLElement | null>(null);
   const wizardStateBaseRef = useRef<Record<string, unknown>>({});
@@ -393,6 +506,8 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
         hydrated.current = leadId;
         setDraft(nextDraft);
         setStep(nextStep);
+        setTouchedMasterFields(new Set());
+        setMasterValidationAttempted(false);
       }
       if (hydrateDraft || hydrateCommercial) {
         setLines(nextLines);
@@ -431,6 +546,8 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
     setError("");
     setAutosaveError("");
     setAutosaveStatus("idle");
+    setTouchedMasterFields(new Set());
+    setMasterValidationAttempted(false);
     currentAutosaveSignatureRef.current = "";
     lastSavedAutosaveSignatureRef.current = "";
     wizardStateBaseRef.current = {};
@@ -473,6 +590,7 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
     });
     return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, gross: Math.round((net + vat) * 100) / 100 };
   }, [lines]);
+  const masterErrors = useMemo(() => validateMasterDraft(draft, tx), [draft, tx]);
 
   const persistSnapshot = useCallback((snapshot: AutosaveSnapshot, force = false) => {
     if (!leadId) return Promise.reject(new Error("Lead is not selected"));
@@ -556,6 +674,20 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
   const patch = <K extends keyof Draft>(key: K, value: Draft[K]) => {
     setDraft((current) => current ? { ...current, [key]: value } : current);
   };
+
+  const touchMasterField = (field: MasterFieldKey) => {
+    setTouchedMasterFields((current) => {
+      if (current.has(field)) return current;
+      const nextFields = new Set(current);
+      nextFields.add(field);
+      return nextFields;
+    });
+  };
+
+  const visibleMasterError = (field: MasterFieldKey) =>
+    masterValidationAttempted || touchedMasterFields.has(field)
+      ? masterErrors[field]
+      : undefined;
 
   async function save(target = step, trackBusy = true): Promise<boolean> {
     if (!leadId || !draft) return false;
@@ -765,6 +897,17 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
   }
 
   function next() {
+    if (step === "master_data" && Object.keys(masterErrors).length > 0) {
+      setMasterValidationAttempted(true);
+      const firstInvalid = MASTER_FIELD_ORDER.find((field) => masterErrors[field]);
+      if (firstInvalid) {
+        window.requestAnimationFrame(() => {
+          document.getElementById(MASTER_FIELD_IDS[firstInvalid])?.focus();
+        });
+      }
+      return;
+    }
+
     const target = STEPS[index + 1];
     if (!target) return;
     void save(target.id).then((saved) => {
@@ -801,7 +944,6 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
       : autosaveStatus === "error"
         ? tx("Не удалось сохранить", "Speichern fehlgeschlagen")
         : tx("Есть изменения", "Änderungen erkannt");
-  const masterReady = Boolean(draft?.firstName.trim() && draft.lastName.trim() && draft.birthDate && draft.legalSex && (draft.email.trim() || draft.phone.trim()) && draft.street.trim() && draft.city.trim() && draft.zip.trim());
 
   return (
     <Sheet open={open} dirty={autosaveIsDirty} onOpenChange={onOpenChange}>
@@ -880,29 +1022,211 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
             <section className="space-y-5">
               <div><h3 className="text-sm font-semibold text-foreground">{tx("Сведения о клиенте", "Personendaten")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Проверьте данные, которые станут основой карточки пациента.", "Diese Angaben werden zur Grundlage der Patientenakte.")}</p></div>
               <div className="grid gap-4 md:grid-cols-2">
-                <Field label={tx("Имя", "Vorname")}><Input name="first_name" autoComplete="given-name" value={draft.firstName} onChange={(event) => patch("firstName", event.target.value)} /></Field>
-                <Field label={tx("Фамилия", "Nachname")}><Input name="last_name" autoComplete="family-name" value={draft.lastName} onChange={(event) => patch("lastName", event.target.value)} /></Field>
-                <Field label={tx("Дата рождения", "Geburtsdatum")}><Input name="birth_date" autoComplete="bday" type="date" value={draft.birthDate} onChange={(event) => patch("birthDate", event.target.value)} /></Field>
-                <Field label={tx("Юридический пол", "Rechtliches Geschlecht")}><NativeComboboxSelect name="legal_sex" value={draft.legalSex} onChange={(event) => patch("legalSex", event.target.value)} className={selectClass}><option value="">{tx("Выберите", "Auswählen")}</option><option value="female">{tx("Женский", "Weiblich")}</option><option value="male">{tx("Мужской", "Männlich")}</option><option value="diverse">{tx("Разное", "Divers")}</option><option value="no_entry">{tx("Без указания", "Keine Angabe")}</option></NativeComboboxSelect></Field>
-                <Field label="E-mail"><Input name="email" autoComplete="email" spellCheck={false} type="email" value={draft.email} onChange={(event) => patch("email", event.target.value)} /></Field>
-                <Field label={tx("Телефон", "Telefon")}><Input name="phone" autoComplete="tel" type="tel" value={draft.phone} onChange={(event) => patch("phone", event.target.value)} /></Field>
-                <Field label={tx("Улица и дом", "Straße und Hausnummer")}><Input name="street_address" autoComplete="street-address" value={draft.street} onChange={(event) => patch("street", event.target.value)} /></Field>
-                <Field label={tx("Город", "Ort")}><Input name="city" autoComplete="address-level2" value={draft.city} onChange={(event) => patch("city", event.target.value)} /></Field>
-                <Field label={tx("Индекс", "Postleitzahl")}><Input name="postal_code" autoComplete="postal-code" value={draft.zip} onChange={(event) => patch("zip", event.target.value)} /></Field>
+                <Field
+                  label={tx("Имя", "Vorname")}
+                  required
+                  error={visibleMasterError("firstName")}
+                  errorId={`${MASTER_FIELD_IDS.firstName}-error`}
+                >
+                  <Input
+                    id={MASTER_FIELD_IDS.firstName}
+                    name="first_name"
+                    autoComplete="given-name"
+                    required
+                    aria-invalid={Boolean(visibleMasterError("firstName"))}
+                    aria-describedby={visibleMasterError("firstName") ? `${MASTER_FIELD_IDS.firstName}-error` : undefined}
+                    className={cn(visibleMasterError("firstName") && "border-destructive")}
+                    value={draft.firstName}
+                    onBlur={() => touchMasterField("firstName")}
+                    onChange={(event) => patch("firstName", event.target.value)}
+                  />
+                </Field>
+                <Field
+                  label={tx("Фамилия", "Nachname")}
+                  required
+                  error={visibleMasterError("lastName")}
+                  errorId={`${MASTER_FIELD_IDS.lastName}-error`}
+                >
+                  <Input
+                    id={MASTER_FIELD_IDS.lastName}
+                    name="last_name"
+                    autoComplete="family-name"
+                    required
+                    aria-invalid={Boolean(visibleMasterError("lastName"))}
+                    aria-describedby={visibleMasterError("lastName") ? `${MASTER_FIELD_IDS.lastName}-error` : undefined}
+                    className={cn(visibleMasterError("lastName") && "border-destructive")}
+                    value={draft.lastName}
+                    onBlur={() => touchMasterField("lastName")}
+                    onChange={(event) => patch("lastName", event.target.value)}
+                  />
+                </Field>
+                <Field
+                  label={tx("Дата рождения", "Geburtsdatum")}
+                  required
+                  error={visibleMasterError("birthDate")}
+                  errorId={`${MASTER_FIELD_IDS.birthDate}-error`}
+                >
+                  <Input
+                    id={MASTER_FIELD_IDS.birthDate}
+                    name="birth_date"
+                    autoComplete="bday"
+                    type="date"
+                    max={new Date().toISOString().slice(0, 10)}
+                    required
+                    aria-invalid={Boolean(visibleMasterError("birthDate"))}
+                    aria-describedby={visibleMasterError("birthDate") ? `${MASTER_FIELD_IDS.birthDate}-error` : undefined}
+                    className={cn(visibleMasterError("birthDate") && "border-destructive")}
+                    value={draft.birthDate}
+                    onBlur={() => touchMasterField("birthDate")}
+                    onChange={(event) => patch("birthDate", event.target.value)}
+                  />
+                </Field>
+                <Field
+                  label={tx("Юридический пол", "Rechtliches Geschlecht")}
+                  required
+                  error={visibleMasterError("legalSex")}
+                  errorId={`${MASTER_FIELD_IDS.legalSex}-error`}
+                >
+                  <NativeComboboxSelect
+                    id={MASTER_FIELD_IDS.legalSex}
+                    name="legal_sex"
+                    value={draft.legalSex}
+                    required
+                    aria-invalid={Boolean(visibleMasterError("legalSex"))}
+                    aria-describedby={visibleMasterError("legalSex") ? `${MASTER_FIELD_IDS.legalSex}-error` : undefined}
+                    onBlur={() => touchMasterField("legalSex")}
+                    onChange={(event) => patch("legalSex", event.target.value)}
+                    className={cn(selectClass, visibleMasterError("legalSex") && "border-destructive")}
+                  >
+                    <option value="">{tx("Выберите", "Auswählen")}</option>
+                    <option value="female">{tx("Женский", "Weiblich")}</option>
+                    <option value="male">{tx("Мужской", "Männlich")}</option>
+                    <option value="diverse">{tx("Разное", "Divers")}</option>
+                    <option value="no_entry">{tx("Без указания", "Keine Angabe")}</option>
+                  </NativeComboboxSelect>
+                </Field>
+                <Field
+                  label="E-mail"
+                  required={!draft.phone.trim()}
+                  error={visibleMasterError("email")}
+                  errorId={`${MASTER_FIELD_IDS.email}-error`}
+                >
+                  <Input
+                    id={MASTER_FIELD_IDS.email}
+                    name="email"
+                    autoComplete="email"
+                    spellCheck={false}
+                    type="email"
+                    aria-required={!draft.phone.trim()}
+                    aria-invalid={Boolean(visibleMasterError("email"))}
+                    aria-describedby={visibleMasterError("email") ? `${MASTER_FIELD_IDS.email}-error` : undefined}
+                    className={cn(visibleMasterError("email") && "border-destructive")}
+                    value={draft.email}
+                    onBlur={() => touchMasterField("email")}
+                    onChange={(event) => patch("email", event.target.value)}
+                  />
+                </Field>
+                <Field
+                  label={tx("Телефон", "Telefon")}
+                  required={!draft.email.trim()}
+                  error={visibleMasterError("phone")}
+                  errorId={`${MASTER_FIELD_IDS.phone}-error`}
+                >
+                  <Input
+                    id={MASTER_FIELD_IDS.phone}
+                    name="phone"
+                    autoComplete="tel"
+                    type="tel"
+                    aria-required={!draft.email.trim()}
+                    aria-invalid={Boolean(visibleMasterError("phone"))}
+                    aria-describedby={visibleMasterError("phone") ? `${MASTER_FIELD_IDS.phone}-error` : undefined}
+                    className={cn(visibleMasterError("phone") && "border-destructive")}
+                    value={draft.phone}
+                    onBlur={() => touchMasterField("phone")}
+                    onChange={(event) => patch("phone", event.target.value)}
+                  />
+                </Field>
+                <Field
+                  label={tx("Улица и дом", "Straße und Hausnummer")}
+                  required
+                  error={visibleMasterError("street")}
+                  errorId={`${MASTER_FIELD_IDS.street}-error`}
+                >
+                  <Input
+                    id={MASTER_FIELD_IDS.street}
+                    name="street_address"
+                    autoComplete="street-address"
+                    required
+                    aria-invalid={Boolean(visibleMasterError("street"))}
+                    aria-describedby={visibleMasterError("street") ? `${MASTER_FIELD_IDS.street}-error` : undefined}
+                    className={cn(visibleMasterError("street") && "border-destructive")}
+                    value={draft.street}
+                    onBlur={() => touchMasterField("street")}
+                    onChange={(event) => patch("street", event.target.value)}
+                  />
+                </Field>
+                <Field
+                  label={tx("Город", "Ort")}
+                  required
+                  error={visibleMasterError("city")}
+                  errorId={`${MASTER_FIELD_IDS.city}-error`}
+                >
+                  <Input
+                    id={MASTER_FIELD_IDS.city}
+                    name="city"
+                    autoComplete="address-level2"
+                    required
+                    aria-invalid={Boolean(visibleMasterError("city"))}
+                    aria-describedby={visibleMasterError("city") ? `${MASTER_FIELD_IDS.city}-error` : undefined}
+                    className={cn(visibleMasterError("city") && "border-destructive")}
+                    value={draft.city}
+                    onBlur={() => touchMasterField("city")}
+                    onChange={(event) => patch("city", event.target.value)}
+                  />
+                </Field>
+                <Field
+                  label={tx("Индекс", "Postleitzahl")}
+                  required
+                  error={visibleMasterError("zip")}
+                  errorId={`${MASTER_FIELD_IDS.zip}-error`}
+                >
+                  <Input
+                    id={MASTER_FIELD_IDS.zip}
+                    name="postal_code"
+                    autoComplete="postal-code"
+                    required
+                    aria-invalid={Boolean(visibleMasterError("zip"))}
+                    aria-describedby={visibleMasterError("zip") ? `${MASTER_FIELD_IDS.zip}-error` : undefined}
+                    className={cn(visibleMasterError("zip") && "border-destructive")}
+                    value={draft.zip}
+                    onBlur={() => touchMasterField("zip")}
+                    onChange={(event) => patch("zip", event.target.value)}
+                  />
+                </Field>
                 <Field label={tx("Страна", "Land")}><Input name="country" autoComplete="country-name" value={draft.country} onChange={(event) => patch("country", event.target.value)} /></Field>
                 <Field label={tx("Основной язык", "Primärsprache")}><Input name="primary_language" autoComplete="off" value={draft.language} onChange={(event) => patch("language", event.target.value)} /></Field>
               </div>
-              <StateMark done={masterReady && Boolean(readiness.get("master_data"))} label={readiness.get("master_data") ? tx("Этап подтвержден", "Schritt erfüllt") : tx("Заполните обязательные поля", "Pflichtfelder ausfüllen")} />
             </section>
           ) : null}
 
           {draft && step === "need" ? (
             <section className="space-y-5">
               <div><h3 className="text-sm font-semibold text-foreground">{tx("Запрос и специалисты", "Bedarf und Fachrichtungen")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Специальность выбирается из актуального справочника.", "Fachrichtungen werden aus dem aktuellen Verzeichnis gewählt.")}</p></div>
-              <Field label={tx("Основная причина обращения", "Hauptanliegen")}><textarea className={cn(textareaClass, "min-h-28")} value={draft.concern} onChange={(event) => patch("concern", event.target.value)} /></Field>
+              <Field required label={tx("Основная причина обращения", "Hauptanliegen")}><textarea className={cn(textareaClass, "min-h-28")} value={draft.concern} onChange={(event) => patch("concern", event.target.value)} /></Field>
               <Field label={tx("Дополнительный контекст", "Zusätzlicher Kontext")}><textarea className={cn(textareaClass, "min-h-24")} value={draft.anamnese} onChange={(event) => patch("anamnese", event.target.value)} /></Field>
+              <Field label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")}>
+                <Input
+                  name="discovery_source"
+                  autoComplete="off"
+                  value={draft.discoverySource}
+                  onChange={(event) => patch("discoverySource", event.target.value)}
+                />
+              </Field>
               <div className="space-y-2">
-                <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{tx("Специалисты", "Fachrichtungen")}</span>
+                <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {tx("Специалисты", "Fachrichtungen")}
+                  <span aria-hidden="true" className="ml-0.5 text-destructive">*</span>
+                </span>
                 <div className="flex flex-wrap gap-2">{draft.specialties.map((value) => <span key={value} className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-foreground">{specialtyLabel(value)}<button type="button" className="rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => patch("specialties", draft.specialties.filter((item) => item !== value))} aria-label={tx("Удалить", "Entfernen")}><X aria-hidden="true" className="size-3" /></button></span>)}</div>
                 <NativeComboboxSelect aria-label={tx("Добавить специальность", "Fachrichtung hinzufügen")} name="specialty" value="" onChange={(event) => { const selected = specialties.find((item) => item.id === event.target.value); if (selected) { const value = selected.code || selected.name_en; if (!draft.specialties.includes(value)) patch("specialties", [...draft.specialties, value]); } }} className={selectClass}>
                   <option value="">{tx("Добавить специальность", "Fachrichtung hinzufügen")}</option>
@@ -922,7 +1246,7 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
               {(["identity", "dsgvo"] as const).map((kind) => {
                 const document = kind === "identity" ? identity : dsgvo;
                 const signed = Boolean(document?.signed_at && document?.compliance_kind === kind);
-                const label = kind === "identity" ? tx("Документ личности", "Identitätsnachweis") : tx("Согласие DSGVO", "DSGVO-Einwilligung");
+                const label = kind === "identity" ? tx("Удостоверение личности", "Ausweisdokument") : tx("Согласие DSGVO", "DSGVO-Einwilligung");
                 const fileId = "lead-file-" + kind;
                 return <div key={kind} className="flex flex-wrap items-center justify-between gap-3 border-y border-border py-3">
                   <div><div className="text-sm font-medium text-foreground">{label}</div><div className="mt-1 text-xs text-muted-foreground">{document ? document.original_filename || document.auto_name : tx("Файл еще не загружен", "Noch keine Datei hochgeladen")}</div></div>
@@ -930,8 +1254,8 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
                 </div>;
               })}
               <div className="border-y border-border"><ToggleRow checked={draft.privacyConsent} disabled={isBusy} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Приняты правила конфиденциальности", "Datenschutzhinweise akzeptiert")} /><ToggleRow checked={draft.healthcareConsent} disabled={isBusy} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung medizinischer Daten")} /></div>
-              <Field label={tx("Текущий анамнез", "Aktuelle Anamnese")}><textarea className={cn(textareaClass, "min-h-28")} value={draft.anamnese} onChange={(event) => patch("anamnese", event.target.value)} /></Field>
-              <Field label={tx("Направивший врач / источник", "Zuweiser / Quelle")}><Input value={draft.referrer} onChange={(event) => patch("referrer", event.target.value)} /></Field>
+              <Field required label={tx("Текущий анамнез", "Aktuelle Anamnese")}><textarea className={cn(textareaClass, "min-h-28")} value={draft.anamnese} onChange={(event) => patch("anamnese", event.target.value)} /></Field>
+              <Field label={tx("Направивший врач", "Zuweisender Arzt")}><Input value={draft.referrer} onChange={(event) => patch("referrer", event.target.value)} /></Field>
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4"><StateMark done={Boolean(readiness.get("documents"))} label={readiness.get("documents") ? tx("Этап подтвержден", "Schritt erfüllt") : tx("Нужны документы и завершенный анамнез", "Dokumente und Anamnese erforderlich")} /><Button type="button" variant="outline" disabled={isBusy || !draft.concern.trim() || !draft.anamnese.trim()} onClick={() => void finishIntake()}>{busy === "intake" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ClipboardCheck className="size-3.5" />}{tx("Завершить анамнез", "Anamnese abschließen")}</Button></div>
             </section>
           ) : null}
@@ -962,7 +1286,7 @@ export function LeadWizard({ leadId, open, onOpenChange, onConverted }: LeadWiza
 
         <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
           <Button type="button" variant="outline" size="sm" disabled={isBusy || index === 0} onClick={() => setStep(STEPS[index - 1].id)}><ChevronLeft className="size-3.5" />{tx("Назад", "Zurück")}</Button>
-          {step !== "release" ? <Button type="button" size="sm" disabled={isBusy || (step === "master_data" && !masterReady)} onClick={next}>{busy === "save" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}{tx("Далее", "Weiter")}<ChevronRight className="size-3.5" /></Button> : null}
+          {step !== "release" ? <Button type="button" size="sm" disabled={isBusy} onClick={next}>{busy === "save" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}{tx("Далее", "Weiter")}<ChevronRight className="size-3.5" /></Button> : null}
         </footer>
       </SheetContent>
     </Sheet>
