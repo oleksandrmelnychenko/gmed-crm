@@ -709,10 +709,10 @@ function useLeadsPageContent() {
     if (!permissions.canViewPage) return;
 
     let cancelled = false;
-    dispatchListState({
-      loading: true,
+    dispatchListState((current) => ({
+      loading: current.leads.length === 0,
       error: "",
-    });
+    }));
 
     void fetchLeads(leadsPath)
       .then((items) => {
@@ -872,6 +872,7 @@ function useLeadsPageContent() {
     }
     if (wizardLeadId) {
       clearApiCache(`/leads/${wizardLeadId}`);
+      return;
     }
     startTransition(() => {
       setVersion((current) => current + 1);
@@ -2672,6 +2673,7 @@ function useLeadsPageContent() {
           if (open) return;
           setWizardLeadId(null);
           syncLeadQuery(undefined, { replace: false });
+          reload();
         }}
         onArchived={() => {
           setWizardLeadId(null);

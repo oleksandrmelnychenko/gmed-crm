@@ -1332,6 +1332,25 @@ async fn lead_order_draft_is_idempotent_before_patient_conversion() {
             .unwrap();
     assert_eq!(execution_state_count, 1);
 
+    let patient_manager_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM users WHERE role = 'patient_manager' ORDER BY created_at LIMIT 1",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let agency_service_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO agency_service_catalog (
+               service_key, service_name, unit_label, unit_price, currency,
+               vat_rate, is_active, valid_from, created_by
+           ) VALUES ($1, 'Initial consultation', 'case', 100, 'EUR', 19, true, CURRENT_DATE, $2)
+           RETURNING id"#,
+    )
+    .bind(format!("lead-wizard-test-{lead_id}"))
+    .bind(patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
     let line_path = format!("/api/v1/orders/{order_id}/leistungen");
     let client_reference = format!("lead-wizard:{lead_id}:line-1");
     let (line_status, line) = json_request(
@@ -1340,6 +1359,7 @@ async fn lead_order_draft_is_idempotent_before_patient_conversion() {
         &line_path,
         &pm,
         Some(json!({
+            "agency_service_id": agency_service_id,
             "description": "Initial consultation",
             "quantity": 1.0,
             "unit_price": 100.0,
@@ -1357,6 +1377,7 @@ async fn lead_order_draft_is_idempotent_before_patient_conversion() {
         &line_path,
         &pm,
         Some(json!({
+            "agency_service_id": agency_service_id,
             "description": "Updated specialist consultation",
             "quantity": 2.0,
             "unit_price": 175.0,
@@ -1386,6 +1407,10 @@ async fn lead_order_draft_is_idempotent_before_patient_conversion() {
     assert_eq!(matching_lines[0]["unit_price"], "175");
     assert_eq!(matching_lines[0]["vat_rate"], "7");
     assert_eq!(matching_lines[0]["notes"], "Latest wizard values");
+    assert_eq!(
+        matching_lines[0]["agency_service_id"],
+        agency_service_id.to_string()
+    );
 
     for (suffix, invalid_fields) in [
         ("description", json!({ "description": " " })),

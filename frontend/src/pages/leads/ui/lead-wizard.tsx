@@ -42,12 +42,13 @@ import {
 import {
   createContract,
   createQuote,
+  fetchAgencyServices,
   fetchContracts,
   fetchQuotes,
   updateContractStatus,
   updateQuoteStatus,
 } from "@/pages/contracts/data/contracts-api";
-import type { ContractItem, QuoteItem } from "@/pages/contracts/model/types";
+import type { AgencyServiceItem, ContractItem, QuoteItem } from "@/pages/contracts/model/types";
 import {
   fetchDocuments,
   markDocumentSigned,
@@ -111,6 +112,7 @@ type Draft = {
 
 type ServiceLine = {
   id: string;
+  agencyServiceId: string | null;
   clientReference: string | null;
   description: string;
   quantity: string;
@@ -148,6 +150,8 @@ type MasterFieldKey =
 type MasterValidationErrors = Partial<Record<MasterFieldKey, string>>;
 
 const AUTOSAVE_DELAY_MS = 800;
+const NEED_CONCERN_ID = "lead-wizard-concern";
+const NEED_SPECIALTIES_ID = "lead-wizard-specialties";
 
 const MASTER_FIELD_ORDER: MasterFieldKey[] = [
   "firstName",
@@ -203,6 +207,8 @@ function storedCommercialDraftFromLead(lead: LeadDetail): StoredCommercialDraft 
         if (!line) return [];
         return [{
           id: inputString(line.id, `stored-line-${index + 1}`),
+          agencyServiceId:
+            typeof line.agency_service_id === "string" ? line.agency_service_id : null,
           clientReference:
             typeof line.client_reference === "string" ? line.client_reference : null,
           description: inputString(line.description),
@@ -253,6 +259,7 @@ function autosavePayload(
       commercial_draft: {
         lines: lines.map((line) => ({
           id: line.id,
+          agency_service_id: line.agencyServiceId,
           client_reference: line.clientReference,
           description: line.description,
           quantity: line.quantity,
@@ -297,6 +304,7 @@ function draftFromLead(lead: LeadDetail): Draft {
 function newLine(index = 1): ServiceLine {
   return {
     id: "line-" + Date.now().toString(36) + "-" + index,
+    agencyServiceId: null,
     clientReference: null,
     description: "",
     quantity: "1",
@@ -310,6 +318,23 @@ function money(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+const MONEY_FORMATTERS = {
+  de: new Intl.NumberFormat("de-DE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    useGrouping: true,
+  }),
+  ru: new Intl.NumberFormat("ru-RU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    useGrouping: true,
+  }),
+};
+
+function formatMoneyValue(value: number, lang: string) {
+  return (lang === "de" ? MONEY_FORMATTERS.de : MONEY_FORMATTERS.ru).format(value);
+}
+
 function validLine(line: ServiceLine): boolean {
   return line.description.trim().length > 0 && money(line.quantity) > 0 && money(line.price) >= 0 && money(line.vat) >= 0 && money(line.vat) <= 100;
 }
@@ -317,6 +342,7 @@ function validLine(line: ServiceLine): boolean {
 function lineFromOrderLeistung(item: Leistung): ServiceLine {
   return {
     id: item.id,
+    agencyServiceId: item.agency_service_id ?? null,
     clientReference: item.client_reference ?? null,
     description: item.description,
     quantity: String(item.quantity ?? "1"),
@@ -327,6 +353,18 @@ function lineFromOrderLeistung(item: Leistung): ServiceLine {
 
 function errorText(error: unknown): string {
   return error instanceof Error && error.message ? error.message : "Request failed";
+}
+
+function qualificationReasonLabel(reason: string, tx: Tx) {
+  const labels: Record<string, string> = {
+    "Compliance is not signed yet": tx("Нужно подтвердить согласия", "Einwilligungen bestätigen"),
+    "Birth date is missing": tx("Указать дату рождения", "Geburtsdatum angeben"),
+    "Legal sex is missing": tx("Указать юридический пол", "Rechtliches Geschlecht angeben"),
+    "Email or phone is required": tx("Указать E-mail или телефон", "E-Mail oder Telefon angeben"),
+    "Privacy practices consent is missing": tx("Принять правила конфиденциальности", "Datenschutzhinweise akzeptieren"),
+    "Healthcare consent is missing": tx("Дать согласие на обработку медицинских данных", "Einwilligung für Gesundheitsdaten erteilen"),
+  };
+  return labels[reason] ?? reason;
 }
 
 function validateMasterDraft(draft: Draft | null, tx: Tx): MasterValidationErrors {
@@ -454,7 +492,8 @@ export function LeadWizard({
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [quotes, setQuotes] = useState<QuoteItem[]>([]);
   const [specialties, setSpecialties] = useState<SpecializationItem[]>([]);
-  const [lines, setLines] = useState<ServiceLine[]>([newLine()]);
+  const [agencyServices, setAgencyServices] = useState<AgencyServiceItem[]>([]);
+  const [lines, setLines] = useState<ServiceLine[]>([]);
   const [prepayment, setPrepayment] = useState(false);
   const [paidAmount, setPaidAmount] = useState("");
   const [loading, setLoading] = useState(false);
@@ -467,6 +506,7 @@ export function LeadWizard({
     () => new Set(),
   );
   const [masterValidationAttempted, setMasterValidationAttempted] = useState(false);
+  const [needValidationAttempted, setNeedValidationAttempted] = useState(false);
   const hydrated = useRef<string | null>(null);
   const stepNavRef = useRef<HTMLElement | null>(null);
   const wizardStateBaseRef = useRef<Record<string, unknown>>({});
@@ -480,7 +520,7 @@ export function LeadWizard({
     setError("");
     try {
       const leadPromise = fetchLeadDetail(leadId);
-      const [nextLead, nextDocuments, nextCases, nextContracts, nextOrders, nextQuotes, nextSpecialties] = await Promise.all([
+      const [nextLead, nextDocuments, nextCases, nextContracts, nextOrders, nextQuotes, nextSpecialties, nextAgencyServices] = await Promise.all([
         leadPromise,
         fetchDocuments("/documents?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
         fetchCases("/cases?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
@@ -488,6 +528,7 @@ export function LeadWizard({
         fetchOrders("/orders?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
         fetchQuotes("/quotes?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
         fetchSpecializations().catch(() => []),
+        fetchAgencyServices("/agency-services?active_only=true").catch(() => []),
       ]);
       const nextOrder = nextOrders[0] ?? null;
       const nextOrderDetail = nextOrder && (hydrateDraft || hydrateCommercial)
@@ -505,7 +546,7 @@ export function LeadWizard({
         ? storedCommercialDraft.lines
         : nextOrderDetail?.leistungen.length
           ? nextOrderDetail.leistungen.map(lineFromOrderLeistung)
-          : [newLine()];
+          : [];
       const nextPrepayment = storedCommercialDraft
         ? storedCommercialDraft.prepayment
         : Boolean(nextOrder?.prepayment_required);
@@ -522,6 +563,7 @@ export function LeadWizard({
       setOrders(nextOrders);
       setQuotes(nextQuotes);
       setSpecialties(nextSpecialties);
+      setAgencyServices(nextAgencyServices.filter((item) => item.is_active));
       wizardStateBaseRef.current = nextLead.wizard_state ?? {};
       if (hydrateDraft || hydrated.current !== leadId) {
         hydrated.current = leadId;
@@ -529,6 +571,7 @@ export function LeadWizard({
         setStep(nextStep);
         setTouchedMasterFields(new Set());
         setMasterValidationAttempted(false);
+        setNeedValidationAttempted(false);
       }
       if (hydrateDraft || hydrateCommercial) {
         setLines(nextLines);
@@ -570,6 +613,7 @@ export function LeadWizard({
     setArchiveConfirmOpen(false);
     setTouchedMasterFields(new Set());
     setMasterValidationAttempted(false);
+    setNeedValidationAttempted(false);
     currentAutosaveSignatureRef.current = "";
     lastSavedAutosaveSignatureRef.current = "";
     wizardStateBaseRef.current = {};
@@ -736,7 +780,14 @@ export function LeadWizard({
   }
 
   async function qualify() {
-    if (!leadId || !(await save("need", false))) return;
+    if (!leadId || !draft) return;
+    if (!draft.concern.trim() || draft.specialties.length === 0) {
+      setNeedValidationAttempted(true);
+      const targetId = !draft.concern.trim() ? NEED_CONCERN_ID : NEED_SPECIALTIES_ID;
+      window.requestAnimationFrame(() => document.getElementById(targetId)?.focus());
+      return;
+    }
+    if (!(await save("need", false))) return;
     setBusy("qualify");
     try {
       await updateLeadStatus(leadId, "qualified");
@@ -825,6 +876,7 @@ export function LeadWizard({
     }
     for (const line of lines.filter(validLine)) {
       await createOrderLeistung(orderId, {
+        agency_service_id: line.agencyServiceId,
         description: line.description.trim(),
         quantity: money(line.quantity),
         unit_price: money(line.price),
@@ -958,6 +1010,24 @@ export function LeadWizard({
 
   function updateLine(id: string, patchValue: Partial<ServiceLine>) {
     setLines((current) => current.map((line) => line.id === id ? { ...line, ...patchValue } : line));
+  }
+
+  function addAgencyService(serviceId: string) {
+    const service = agencyServices.find((item) => item.id === serviceId);
+    if (!service) return;
+    setLines((current) => {
+      if (current.some((line) => line.agencyServiceId === service.id)) return current;
+      return [
+        ...current,
+        {
+          ...newLine(current.length + 1),
+          agencyServiceId: service.id,
+          description: service.service_name,
+          price: inputString(service.unit_price),
+          vat: inputString(service.vat_rate, "19"),
+        },
+      ];
+    });
   }
 
   function specialtyLabel(value: string) {
@@ -1280,7 +1350,25 @@ export function LeadWizard({
           {draft && step === "need" ? (
             <section className="space-y-5">
               <div><h3 className="text-sm font-semibold text-foreground">{tx("Запрос и специалисты", "Bedarf und Fachrichtungen")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Специальность выбирается из актуального справочника.", "Fachrichtungen werden aus dem aktuellen Verzeichnis gewählt.")}</p></div>
-              <Field required label={tx("Основная причина обращения", "Hauptanliegen")}><textarea className={cn(textareaClass, "min-h-28")} value={draft.concern} onChange={(event) => patch("concern", event.target.value)} /></Field>
+              <Field
+                required
+                label={tx("Основная причина обращения", "Hauptanliegen")}
+                error={needValidationAttempted && !draft.concern.trim() ? tx("Обязательное поле", "Pflichtfeld") : undefined}
+                errorId={`${NEED_CONCERN_ID}-error`}
+              >
+                <textarea
+                  id={NEED_CONCERN_ID}
+                  className={cn(
+                    textareaClass,
+                    "min-h-28",
+                    needValidationAttempted && !draft.concern.trim() && "border-destructive",
+                  )}
+                  aria-invalid={needValidationAttempted && !draft.concern.trim()}
+                  aria-describedby={needValidationAttempted && !draft.concern.trim() ? `${NEED_CONCERN_ID}-error` : undefined}
+                  value={draft.concern}
+                  onChange={(event) => patch("concern", event.target.value)}
+                />
+              </Field>
               <Field label={tx("Дополнительный контекст", "Zusätzlicher Kontext")}><textarea className={cn(textareaClass, "min-h-24")} value={draft.anamnese} onChange={(event) => patch("anamnese", event.target.value)} /></Field>
               <Field label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")}>
                 <Input
@@ -1290,20 +1378,65 @@ export function LeadWizard({
                   onChange={(event) => patch("discoverySource", event.target.value)}
                 />
               </Field>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   {tx("Специалисты", "Fachrichtungen")}
                   <span aria-hidden="true" className="ml-0.5 text-destructive">*</span>
                 </span>
-                <div className="flex flex-wrap gap-2">{draft.specialties.map((value) => <span key={value} className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-foreground">{specialtyLabel(value)}<button type="button" className="rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => patch("specialties", draft.specialties.filter((item) => item !== value))} aria-label={tx("Удалить", "Entfernen")}><X aria-hidden="true" className="size-3" /></button></span>)}</div>
-                <NativeComboboxSelect aria-label={tx("Добавить специальность", "Fachrichtung hinzufügen")} name="specialty" value="" onChange={(event) => { const selected = specialties.find((item) => item.id === event.target.value); if (selected) { const value = selected.code || selected.name_en; if (!draft.specialties.includes(value)) patch("specialties", [...draft.specialties, value]); } }} className={selectClass}>
+                <NativeComboboxSelect
+                  id={NEED_SPECIALTIES_ID}
+                  aria-label={tx("Добавить специальность", "Fachrichtung hinzufügen")}
+                  aria-invalid={needValidationAttempted && draft.specialties.length === 0}
+                  aria-describedby={needValidationAttempted && draft.specialties.length === 0 ? `${NEED_SPECIALTIES_ID}-error` : undefined}
+                  name="specialty"
+                  value=""
+                  onChange={(event) => {
+                    const selected = specialties.find((item) => item.id === event.target.value);
+                    if (!selected) return;
+                    const value = selected.code || selected.name_en;
+                    if (!draft.specialties.includes(value)) patch("specialties", [...draft.specialties, value]);
+                  }}
+                  className={cn(selectClass, needValidationAttempted && draft.specialties.length === 0 && "border-destructive")}
+                >
                   <option value="">{tx("Добавить специальность", "Fachrichtung hinzufügen")}</option>
                   {specialties.map((item) => <option key={item.id} value={item.id}>{lang === "de" ? item.name_de || item.name_en : item.name_ru || item.name_de || item.name_en}</option>)}
                 </NativeComboboxSelect>
+                {needValidationAttempted && draft.specialties.length === 0 ? (
+                  <span id={`${NEED_SPECIALTIES_ID}-error`} role="alert" className="block text-xs leading-4 text-destructive">
+                    {tx("Выберите хотя бы одну специальность", "Mindestens eine Fachrichtung auswählen")}
+                  </span>
+                ) : null}
+                {draft.specialties.length > 0 ? (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {draft.specialties.map((value) => (
+                      <div key={value} className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-border bg-muted/25 px-3 py-2">
+                        <span className="min-w-0 break-words text-sm text-foreground">{specialtyLabel(value)}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="shrink-0"
+                          title={tx("Удалить специальность", "Fachrichtung entfernen")}
+                          aria-label={tx("Удалить специальность", "Fachrichtung entfernen")}
+                          onClick={() => patch("specialties", draft.specialties.filter((item) => item !== value))}
+                        >
+                          <X aria-hidden="true" className="size-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-                <StateMark done={lead?.qualification_status === "qualified"} label={lead?.qualification_status === "qualified" ? tx("Лид квалифицирован", "Lead qualifiziert") : tx("Квалификация ожидается", "Qualifizierung ausstehend")} />
-                <Button type="button" variant="outline" disabled={isBusy || !draft.concern.trim() || draft.specialties.length === 0} onClick={() => void qualify()}>{busy === "qualify" ? <LoaderCircle className="size-3.5 animate-spin" /> : <UserRoundCheck className="size-3.5" />}{tx("Квалифицировать", "Qualifizieren")}</Button>
+              <div className="flex flex-wrap items-start justify-between gap-3 border-t border-border pt-4">
+                <div className="min-w-0 space-y-2">
+                  <StateMark done={lead?.qualification_status === "qualified"} label={lead?.qualification_status === "qualified" ? tx("Лид квалифицирован", "Lead qualifiziert") : tx("Квалификация ожидается", "Qualifizierung ausstehend")} />
+                  {lead?.qualification_status !== "qualified" && lead?.readiness.qualification_reasons.length ? (
+                    <ul className="space-y-1 text-xs text-muted-foreground">
+                      {lead.readiness.qualification_reasons.map((reason) => <li key={reason}>{qualificationReasonLabel(reason, tx)}</li>)}
+                    </ul>
+                  ) : null}
+                </div>
+                <Button type="button" variant="outline" disabled={isBusy || lead?.qualification_status === "qualified"} onClick={() => void qualify()}>{busy === "qualify" ? <LoaderCircle className="size-3.5 animate-spin" /> : <UserRoundCheck className="size-3.5" />}{tx("Квалифицировать", "Qualifizieren")}</Button>
               </div>
             </section>
           ) : null}
@@ -1330,11 +1463,59 @@ export function LeadWizard({
 
           {draft && step === "commercial" ? (
             <section className="space-y-5">
-              <div><h3 className="text-sm font-semibold text-foreground">{tx("Договор, заказ и кошторис", "Vertrag, Auftrag und Kostenvoranschlag")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Эти артефакты принадлежат лиду до финальной конвертации.", "Diese Unterlagen gehören bis zur Freigabe dem Lead.")}</p></div>
+              <h3 className="text-sm font-semibold text-foreground">{tx("Договор, заказ и кошторис", "Vertrag, Auftrag und Kostenvoranschlag")}</h3>
               <div className="flex flex-wrap items-center justify-between gap-3 border-y border-border py-3"><div><div className="text-sm font-medium text-foreground">{tx("Рамочный договор", "Rahmenvertrag")}</div><div className="mt-1 text-xs text-muted-foreground">{contract?.contract_number ?? tx("Еще не подготовлен", "Noch nicht vorbereitet")}</div></div><div className="flex items-center gap-2"><StateMark done={contract?.status === "signed"} label={contract?.status === "signed" ? tx("Подписан", "Unterzeichnet") : tx("Не подписан", "Nicht unterzeichnet")} /><Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void signContract()}>{busy === "contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileCheck2 className="size-3.5" />}{tx("Подписать", "Unterzeichnen")}</Button></div></div>
-              <div className="space-y-3"><div className="flex items-center justify-between"><span className="text-sm font-medium text-foreground">{tx("Услуги заказа", "Auftragsleistungen")}</span><Button type="button" variant="outline" size="icon-sm" title={tx("Добавить услугу", "Leistung hinzufügen")} aria-label={tx("Добавить услугу", "Leistung hinzufügen")} onClick={() => setLines((current) => [...current, newLine(current.length + 1)])}><Plus className="size-3.5" /></Button></div>
-                {lines.map((line) => <div key={line.id} className="grid gap-2 border-b border-border/70 pb-3 md:grid-cols-[minmax(0,1fr)_72px_100px_72px_auto]"><Input aria-label={tx("Описание услуги", "Leistungsbeschreibung")} name={`service_description_${line.id}`} autoComplete="off" placeholder={tx("Описание услуги", "Leistungsbeschreibung")} value={line.description} onChange={(event) => updateLine(line.id, { description: event.target.value })} /><Input name={`service_quantity_${line.id}`} autoComplete="off" inputMode="decimal" aria-label={tx("Количество", "Menge")} value={line.quantity} onChange={(event) => updateLine(line.id, { quantity: event.target.value })} /><Input name={`service_price_${line.id}`} autoComplete="off" inputMode="decimal" aria-label={tx("Цена", "Preis")} value={line.price} onChange={(event) => updateLine(line.id, { price: event.target.value })} /><Input name={`service_vat_${line.id}`} autoComplete="off" inputMode="decimal" aria-label={tx("НДС", "MwSt.")} value={line.vat} onChange={(event) => updateLine(line.id, { vat: event.target.value })} /><Button type="button" variant="ghost" size="icon-sm" title={tx("Удалить услугу", "Leistung entfernen")} aria-label={tx("Удалить услугу", "Leistung entfernen")} disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((item) => item.id !== line.id))}><X className="size-3.5" /></Button></div>)}
-                <div className="flex flex-wrap justify-end gap-4 text-sm tabular-nums text-muted-foreground"><span>{tx("Нетто", "Netto")}: {estimate.net.toFixed(2)} EUR</span><span>{tx("НДС", "MwSt.")}: {estimate.vat.toFixed(2)} EUR</span><span className="font-semibold text-foreground">{tx("Итого", "Gesamt")}: {estimate.gross.toFixed(2)} EUR</span></div>
+              <div className="space-y-3">
+                <span className="text-sm font-medium text-foreground">{tx("Услуги заказа", "Auftragsleistungen")}</span>
+                <NativeComboboxSelect
+                  aria-label={tx("Выбрать услугу из каталога", "Leistung aus dem Katalog auswählen")}
+                  name="agency_service"
+                  value=""
+                  onChange={(event) => addAgencyService(event.target.value)}
+                  className={selectClass}
+                >
+                  <option value="">{tx("Выберите услугу из каталога", "Leistung aus dem Katalog auswählen")}</option>
+                  {agencyServices.map((service) => (
+                    <option
+                      key={service.id}
+                      value={service.id}
+                      disabled={lines.some((line) => line.agencyServiceId === service.id)}
+                    >
+                      {service.service_name} · {formatMoneyValue(money(inputString(service.unit_price)), lang)} {service.currency}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+                {lines.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">{tx("Услуги еще не выбраны", "Noch keine Leistungen ausgewählt")}</p>
+                ) : null}
+                {lines.map((line) => {
+                  const catalogService = agencyServices.find((service) => service.id === line.agencyServiceId);
+                  return (
+                    <div key={line.id} className="grid gap-3 rounded-md border border-border px-3 py-3 sm:grid-cols-[minmax(0,1fr)_90px_110px_80px_auto] sm:items-center">
+                      <div className="min-w-0">
+                        <div className="break-words text-sm font-medium text-foreground">{line.description}</div>
+                        {catalogService?.unit_label ? <div className="mt-0.5 text-xs text-muted-foreground">{catalogService.unit_label}</div> : null}
+                      </div>
+                      <Field label={tx("Количество", "Menge")}>
+                        <Input name={`service_quantity_${line.id}`} autoComplete="off" inputMode="decimal" aria-label={tx("Количество", "Menge")} value={line.quantity} onChange={(event) => updateLine(line.id, { quantity: event.target.value })} />
+                      </Field>
+                      <div className="font-mono text-sm tabular-nums text-foreground sm:text-right">
+                        <div className="font-sans text-[11px] uppercase text-muted-foreground">{tx("Цена", "Preis")}</div>
+                        {formatMoneyValue(money(line.price), lang)} {catalogService?.currency || "EUR"}
+                      </div>
+                      <div className="font-mono text-sm tabular-nums text-foreground sm:text-right">
+                        <div className="font-sans text-[11px] uppercase text-muted-foreground">{tx("НДС", "MwSt.")}</div>
+                        {formatMoneyValue(money(line.vat), lang)}%
+                      </div>
+                      <Button type="button" variant="ghost" size="icon-sm" title={tx("Удалить услугу", "Leistung entfernen")} aria-label={tx("Удалить услугу", "Leistung entfernen")} onClick={() => setLines((current) => current.filter((item) => item.id !== line.id))}><X className="size-3.5" /></Button>
+                    </div>
+                  );
+                })}
+                <div className="flex flex-wrap justify-end gap-x-6 gap-y-2 text-sm text-muted-foreground">
+                  <span>{tx("Нетто", "Netto")}: <span className="font-mono tabular-nums">{formatMoneyValue(estimate.net, lang)} EUR</span></span>
+                  <span>{tx("НДС", "MwSt.")}: <span className="font-mono tabular-nums">{formatMoneyValue(estimate.vat, lang)} EUR</span></span>
+                  <span className="font-semibold text-foreground">{tx("Итого", "Gesamt")}: <span className="font-mono tabular-nums">{formatMoneyValue(estimate.gross, lang)} EUR</span></span>
+                </div>
               </div>
               <div className="border-y border-border"><ToggleRow checked={Boolean(order?.signed_patient)} disabled={isBusy} onChange={(checked) => void saveFlags({ signed_patient: checked })} label={tx("Подпись клиента на заказе", "Unterschrift der Kundin / des Kunden")} /><ToggleRow checked={Boolean(order?.signed_agency)} disabled={isBusy} onChange={(checked) => void saveFlags({ signed_agency: checked })} label={tx("Подпись агентства на заказе", "Unterschrift der Agentur")} /><ToggleRow checked={prepayment} disabled={isBusy} onChange={(checked) => { setPrepayment(checked); void saveFlags({ prepayment_required: checked }); }} label={tx("Требуется предоплата", "Vorauszahlung erforderlich")} /></div>
               <div className="grid gap-3 border-b border-border pb-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end"><Field label={tx("Получено предоплаты", "Erhaltene Vorauszahlung")}><Input inputMode="decimal" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} disabled={!prepayment} placeholder="0.00" /></Field><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" disabled={isBusy || !lines.some(validLine)} onClick={() => void createOrAcceptQuote(false)}>{busy === "quote" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}{quote ? tx("Новый кошторис", "Neuer Kostenvoranschlag") : tx("Создать кошторис", "Kostenvoranschlag erstellen")}</Button><Button type="button" variant="outline" disabled={isBusy || !quote} onClick={() => void createOrAcceptQuote(true)}>{busy === "accept" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}{tx("Принять", "Annehmen")}</Button></div></div>

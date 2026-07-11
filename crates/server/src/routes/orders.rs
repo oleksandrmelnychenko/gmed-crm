@@ -163,6 +163,7 @@ struct UpdateOrderFollowupFlowRequest {
 #[derive(Deserialize)]
 struct AddLeistungRequest {
     patient_id: Option<Uuid>,
+    agency_service_id: Option<Uuid>,
     description: String,
     quantity: f64,
     unit_price: f64,
@@ -4320,6 +4321,28 @@ async fn add_leistung(
         Err(resp) => return resp,
     };
 
+    if let Some(agency_service_id) = body.agency_service_id {
+        match sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM agency_service_catalog WHERE id = $1 AND is_active)",
+        )
+        .bind(agency_service_id)
+        .fetch_one(&state.db)
+        .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Agency service is missing or inactive",
+                );
+            }
+            Err(error) => {
+                tracing::error!(%error, %agency_service_id, "validate agency service");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    }
+
     let description = body.description.trim().to_string();
     if description.is_empty() {
         return err(
@@ -4385,13 +4408,14 @@ async fn add_leistung(
 
     match sqlx::query(
         "INSERT INTO order_leistungen (
-             order_id, patient_id, description, quantity, unit_price, vat_rate,
+             order_id, patient_id, agency_service_id, description, quantity, unit_price, vat_rate,
              is_cost_passthrough, provider_id, doctor_id, external_document_id,
              notes, client_reference
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          ON CONFLICT (order_id, client_reference) DO UPDATE SET
              patient_id = EXCLUDED.patient_id,
+             agency_service_id = EXCLUDED.agency_service_id,
              description = EXCLUDED.description,
              quantity = EXCLUDED.quantity,
              unit_price = EXCLUDED.unit_price,
@@ -4405,6 +4429,7 @@ async fn add_leistung(
     )
     .bind(order_id)
     .bind(service_patient_id)
+    .bind(body.agency_service_id)
     .bind(&description)
     .bind(qty)
     .bind(price)

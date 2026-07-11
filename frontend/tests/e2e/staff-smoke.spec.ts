@@ -779,6 +779,26 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
       return json(route, leads);
     }
 
+    if (path === "/agency-services" || path.startsWith("/agency-services?")) {
+      return json(route, [
+        {
+          id: "00000000-0000-0000-0000-000000000951",
+          service_key: "transport_coordination",
+          service_name: "Transport coordination",
+          description: "Transport and arrival coordination",
+          unit_label: "case",
+          unit_price: "12500.00",
+          currency: "EUR",
+          vat_rate: "19.00",
+          is_active: true,
+          valid_from: null,
+          valid_to: null,
+          created_at: "2026-04-01T09:00:00Z",
+          updated_at: "2026-04-01T09:00:00Z",
+        },
+      ]);
+    }
+
     if (path.startsWith("/leads/")) {
       const leadSuffix = path.replace("/leads/", "");
       if (leadSuffix.endsWith("/promote-console") && route.request().method() === "POST") {
@@ -1900,9 +1920,19 @@ test.describe("lead onboarding wizard", () => {
     await expect(
       wizard.getByRole("textbox", { name: "Wie sind Sie auf uns aufmerksam geworden?" }),
     ).toBeVisible();
-    await wizard.getByRole("combobox").click();
+    const specialtySelect = wizard.getByRole("combobox");
+    await specialtySelect.click();
     await expect(page.getByText("Orthopädie", { exact: true })).toBeVisible();
-    await page.keyboard.press("Escape");
+    await page.getByText("Orthopädie", { exact: true }).click();
+    const selectedSpecialty = wizard.getByText("Orthopädie", { exact: true });
+    await expect(selectedSpecialty).toBeVisible();
+    const [specialtySelectBox, selectedSpecialtyBox] = await Promise.all([
+      specialtySelect.boundingBox(),
+      selectedSpecialty.boundingBox(),
+    ]);
+    expect((selectedSpecialtyBox?.y ?? 0)).toBeGreaterThan(
+      (specialtySelectBox?.y ?? 0) + (specialtySelectBox?.height ?? 0),
+    );
 
     await navigation.getByRole("button", { name: /Unterlagen/i }).click();
     await expect(wizard.getByText("Ausweisdokument")).toBeVisible();
@@ -1910,7 +1940,12 @@ test.describe("lead onboarding wizard", () => {
 
     await navigation.getByRole("button", { name: /Vertrag & Auftrag/i }).click();
     await expect(wizard.getByText("Vertrag, Auftrag und Kostenvoranschlag")).toBeVisible();
-    await expect(wizard.getByRole("button", { name: "Leistung hinzufügen" })).toBeVisible();
+    await expect(
+      wizard.getByText("Diese Unterlagen gehören bis zur Freigabe dem Lead."),
+    ).toHaveCount(0);
+    await expect(
+      wizard.getByRole("combobox", { name: "Leistung aus dem Katalog auswählen" }),
+    ).toBeVisible();
   });
 
   test("final release reflects server readiness and does not expose an early conversion", async ({
@@ -2026,6 +2061,15 @@ test.describe("responsive staff workspace", () => {
     const wizard = page.getByRole("dialog", { name: "Lead-Onboarding" });
     const navigation = wizard.getByRole("navigation", { name: "Onboarding-Schritte" });
     await expect(navigation.getByRole("button", { name: /Stammdaten/i })).toBeVisible();
+    let leadListRefreshes = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "GET" &&
+        new URL(request.url()).pathname === "/api/v1/leads"
+      ) {
+        leadListRefreshes += 1;
+      }
+    });
 
     const refreshButton = wizard.getByRole("button", { name: "Aktualisieren" });
     const closeButton = wizard.getByRole("button", { name: "Schließen" });
@@ -2068,10 +2112,22 @@ test.describe("responsive staff workspace", () => {
       },
     });
     await expect(wizard.getByText("Automatisch gespeichert", { exact: true })).toBeVisible();
+    await page.evaluate((entityId) => {
+      window.dispatchEvent(new CustomEvent("gmed:realtime-event", {
+        detail: {
+          type: "lead.updated",
+          entity_type: "lead",
+          entity_id: entityId,
+        },
+      }));
+    }, leadId);
+    await page.waitForTimeout(400);
+    expect(leadListRefreshes).toBe(0);
 
     await closeButton.click();
     await expect(wizard).toBeHidden();
     await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    await expect.poll(() => leadListRefreshes).toBeGreaterThan(0);
     await readyLeadCell.click();
     await expect(wizard.getByRole("textbox", { name: "Vorname" })).toHaveValue(
       "Ready Autosaved",
@@ -2127,15 +2183,19 @@ test.describe("responsive staff workspace", () => {
         return false;
       }
       const payload = candidate.postDataJSON() as {
-        wizard_state?: { commercial_draft?: { lines?: Array<{ description?: string }> } };
+        wizard_state?: {
+          commercial_draft?: {
+            lines?: Array<{ agency_service_id?: string; description?: string }>;
+          };
+        };
       };
       return payload.wizard_state?.commercial_draft?.lines?.[0]?.description ===
         "Transport coordination";
     });
-    await wizard.getByRole("textbox", { name: "Leistungsbeschreibung" }).fill(
-      "Transport coordination",
-    );
-    await wizard.getByRole("textbox", { name: "Preis" }).fill("125");
+    await wizard
+      .getByRole("combobox", { name: "Leistung aus dem Katalog auswählen" })
+      .click();
+    await page.getByText("Transport coordination · 12.500,00 EUR", { exact: true }).click();
     const commercialRequest = await commercialAutosaveRequest;
     expect(commercialRequest.postDataJSON()).toMatchObject({
       wizard_state: {
@@ -2143,8 +2203,9 @@ test.describe("responsive staff workspace", () => {
         commercial_draft: {
           lines: [
             expect.objectContaining({
+              agency_service_id: "00000000-0000-0000-0000-000000000951",
               description: "Transport coordination",
-              price: "125",
+              price: "12500.00",
             }),
           ],
         },
@@ -2155,9 +2216,7 @@ test.describe("responsive staff workspace", () => {
     await closeButton.click();
     await expect(wizard).toBeHidden();
     await readyLeadCell.click();
-    await expect(wizard.getByRole("textbox", { name: "Leistungsbeschreibung" })).toHaveValue(
-      "Transport coordination",
-    );
-    await expect(wizard.getByRole("textbox", { name: "Preis" })).toHaveValue("125");
+    await expect(wizard.getByText("Transport coordination", { exact: true })).toBeVisible();
+    await expect(wizard.getByText("12.500,00 EUR", { exact: false }).first()).toBeVisible();
   });
 });
