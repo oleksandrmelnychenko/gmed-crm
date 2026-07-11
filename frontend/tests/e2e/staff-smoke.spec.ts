@@ -229,10 +229,12 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
       last_name: "Lead",
       email: "blocked.lead@example.com",
       phone: "+49 30 100001",
-      source: "website",
+      source: "website_contact_form",
       country: "DE",
-      intake_source: "website",
+      intake_source: "website_contact",
       flow: "standard",
+      lead_type: "form",
+      console_promoted_at: null,
       qualification_status: "qualified",
       compliance_status: "pending",
       conversion_ready: false,
@@ -251,6 +253,8 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
       country: "DE",
       intake_source: "referral",
       flow: "standard",
+      lead_type: "console",
+      console_promoted_at: null,
       qualification_status: "qualified",
       compliance_status: "signed",
       conversion_ready: true,
@@ -777,6 +781,24 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
 
     if (path.startsWith("/leads/")) {
       const leadSuffix = path.replace("/leads/", "");
+      if (leadSuffix.endsWith("/promote-console") && route.request().method() === "POST") {
+        const requestedId = leadSuffix.replace("/promote-console", "");
+        const promotedAt = "2026-04-04T10:00:00Z";
+        const listLead = leads.find((item) => item.id === requestedId);
+        if (listLead) {
+          listLead.lead_type = "console";
+          listLead.console_promoted_at = promotedAt;
+        }
+        const detail = leadDetails.get(requestedId);
+        if (detail) {
+          leadDetails.set(requestedId, {
+            ...detail,
+            lead_type: "console",
+            console_promoted_at: promotedAt,
+          });
+        }
+        return json(route, { ok: true });
+      }
       if (leadSuffix.endsWith("/update") && route.request().method() === "POST") {
         const requestedId = leadSuffix.replace("/update", "");
         const detail = leadDetails.get(requestedId);
@@ -1767,9 +1789,50 @@ test.describe("lead onboarding wizard", () => {
     const convertButtons = page.getByRole("button", {
       name: /Konvertieren|Convert/i,
     });
-    await expect(convertButtons).toHaveCount(2);
-    await expect(convertButtons.nth(0)).toBeDisabled();
-    await expect(convertButtons.nth(1)).toBeEnabled();
+    await expect(convertButtons).toHaveCount(1);
+    await expect(convertButtons.first()).toBeEnabled();
+    await expect(page.getByRole("button", { name: "In Konsole übernehmen" })).toBeVisible();
+  });
+
+  test("active console lead rows open the wizard while Details opens the audit sheet", async ({
+    page,
+  }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    await page.goto("/leads");
+
+    const readyRow = page.getByRole("row").filter({ hasText: "Ready Lead" });
+    await readyRow.click();
+
+    const wizard = page.getByRole("dialog", { name: "Lead-Onboarding" });
+    await expect(wizard).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`lead=${leadId}.*view=wizard`));
+    await expect(page.getByRole("button", { name: "Bearbeiten", exact: true })).toHaveCount(0);
+
+    await wizard.getByRole("button", { name: "Schließen" }).click();
+    await expect(wizard).toBeHidden();
+
+    await readyRow.getByRole("button", { name: "Details" }).click();
+    await expect(page.getByRole("button", { name: "Bearbeiten", exact: true })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`lead=${leadId}(?!.*view=wizard)`));
+    await expect(wizard).toBeHidden();
+  });
+
+  test("intake lead rows open details and promotion continues directly in the wizard", async ({
+    page,
+  }) => {
+    const leadId = "00000000-0000-0000-0000-000000000901";
+    await page.goto("/leads");
+
+    const intakeRow = page.getByRole("row").filter({ hasText: "Blocked Lead" });
+    await intakeRow.click();
+    await expect(page.getByRole("button", { name: "Bearbeiten", exact: true })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`lead=${leadId}(?!.*view=wizard)`));
+    await expect(page.getByRole("dialog", { name: "Lead-Onboarding" })).toBeHidden();
+
+    await page.getByRole("button", { name: "In Konsole übernehmen" }).last().click();
+    await expect(page.getByRole("dialog", { name: "Lead-Onboarding" })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`lead=${leadId}.*view=wizard`));
+    await expect(page.getByRole("button", { name: "Bearbeiten", exact: true })).toHaveCount(0);
   });
 
   test("wizard renders the five onboarding stages and catalog-backed specialties", async ({
@@ -1908,8 +1971,10 @@ test.describe("responsive staff workspace", () => {
 
   test("keeps onboarding steps labeled, localized, and reachable on mobile", async ({ page }) => {
     const leadId = "00000000-0000-0000-0000-000000000902";
-    await page.goto(`/leads?lead=${leadId}`);
-    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+    await page.goto("/leads");
+    const readyRow = page.getByRole("row").filter({ hasText: "Ready Lead" });
+    const readyLeadCell = readyRow.getByText("Ready Lead", { exact: true });
+    await readyLeadCell.click();
 
     const wizard = page.getByRole("dialog", { name: "Lead-Onboarding" });
     const navigation = wizard.getByRole("navigation", { name: "Onboarding-Schritte" });
@@ -1960,7 +2025,7 @@ test.describe("responsive staff workspace", () => {
     await closeButton.click();
     await expect(wizard).toBeHidden();
     await expect(page.getByRole("alertdialog")).toHaveCount(0);
-    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+    await readyLeadCell.click();
     await expect(wizard.getByRole("textbox", { name: "Vorname" })).toHaveValue(
       "Ready Autosaved",
     );
@@ -2042,7 +2107,7 @@ test.describe("responsive staff workspace", () => {
 
     await closeButton.click();
     await expect(wizard).toBeHidden();
-    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+    await readyLeadCell.click();
     await expect(wizard.getByRole("textbox", { name: "Leistungsbeschreibung" })).toHaveValue(
       "Transport coordination",
     );

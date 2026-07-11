@@ -15,6 +15,7 @@ import {
   ArrowRight,
   CheckCircle2,
   ClipboardCheck,
+  Eye,
   FileCheck2,
   LoaderCircle,
   Plus,
@@ -141,6 +142,7 @@ const textareaClassName = shellTextareaClass;
 const LEAD_DEFAULT_FROZEN_COLUMNS = ["lead"];
 const LEAD_MAX_FROZEN_COLUMNS = 2;
 const FAILED_OUTCOME_OPTIONS = ["archived", "delete_anonymized"] as const;
+const ACTIVE_WIZARD_LEAD_STATUSES = new Set(["new", "in_progress", "qualified"]);
 type LeadPaneTab = "overview" | "process" | "qualification" | "details";
 type LeadTypeTone = "warning" | "brand" | "info" | "neutral";
 const LEAD_REALTIME_EVENTS = [
@@ -159,6 +161,13 @@ function titleWithDot(title: ReactNode) {
       <span>{title}</span>
     </span>
   );
+}
+
+function shouldOpenWizardFromRow(lead: LeadListItem, canConvert: boolean) {
+  return canConvert &&
+    leadTypeFromLead(lead) === "console" &&
+    ACTIVE_WIZARD_LEAD_STATUSES.has(lead.qualification_status) &&
+    (!lead.failed_outcome || lead.failed_outcome.status === "none");
 }
 
 function leadTypeTone(type: string): LeadTypeTone {
@@ -318,7 +327,7 @@ function useLeadsPageContent() {
     [t],
   );
   const { staffGo } = useStaffNavigate();
-  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardLeadId, setWizardLeadId] = useState<string | null>(null);
   const failedLoadMessage = t.common_failed_load;
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => leadPermissions(user?.role), [user?.role]);
@@ -660,6 +669,21 @@ function useLeadsPageContent() {
 
   useEffect(() => {
     const leadParam = searchParams.get("lead") ?? "";
+    const leadView = searchParams.get("view") === "wizard" && permissions.canConvert
+      ? "wizard"
+      : "details";
+    if (leadParam && leadView === "wizard") {
+      setWizardLeadId(leadParam);
+      dispatchDetailState({
+        selectedLeadId: "",
+        detailOpen: false,
+        detail: null,
+        detailError: "",
+      });
+      return;
+    }
+
+    setWizardLeadId(null);
     dispatchDetailState((current) => {
       if (!leadParam) {
         if (!current.detailOpen && !current.selectedLeadId) {
@@ -680,7 +704,7 @@ function useLeadsPageContent() {
         detailOpen: true,
       };
     });
-  }, [searchParams]);
+  }, [permissions.canConvert, searchParams]);
 
   useEffect(() => {
     if (!permissions.canViewPage) return;
@@ -791,17 +815,24 @@ function useLeadsPageContent() {
     }));
   }, [detail, user?.role]);
 
-  function syncLeadQuery(leadId?: string, options: { replace?: boolean } = {}) {
+  function syncLeadQuery(
+    leadId?: string,
+    options: { replace?: boolean; view?: "details" | "wizard" } = {},
+  ) {
     const params = new URLSearchParams(searchParams);
     if (leadId) {
       params.set("lead", leadId);
+      if (options.view === "wizard") params.set("view", "wizard");
+      else params.delete("view");
     } else {
       params.delete("lead");
+      params.delete("view");
     }
     setSearchParams(params, { replace: options.replace ?? true });
   }
 
   function openLeadDetail(leadId: string) {
+    setWizardLeadId(null);
     if (leadId !== selectedLeadId) {
       setPaneTab("overview");
     }
@@ -811,10 +842,25 @@ function useLeadsPageContent() {
   }
 
   function openLeadDetailTab(leadId: string, tab: LeadPaneTab) {
+    setWizardLeadId(null);
     setPaneTab(tab);
     setSelectedLeadId(leadId);
     setDetailOpen(true);
     syncLeadQuery(leadId, { replace: false });
+  }
+
+  function openLeadWizard(leadId: string) {
+    setDetailOpen(false);
+    setWizardLeadId(leadId);
+    syncLeadQuery(leadId, { replace: false, view: "wizard" });
+  }
+
+  function openLeadFromRow(lead: LeadListItem) {
+    if (shouldOpenWizardFromRow(lead, permissions.canConvert)) {
+      openLeadWizard(lead.id);
+      return;
+    }
+    openLeadDetail(lead.id);
   }
 
   function reload() {
@@ -832,6 +878,9 @@ function useLeadsPageContent() {
     }
     if (selectedLeadId) {
       clearApiCache(`/leads/${selectedLeadId}`);
+    }
+    if (wizardLeadId) {
+      clearApiCache(`/leads/${wizardLeadId}`);
     }
     startTransition(() => {
       setVersion((current) => current + 1);
@@ -894,6 +943,9 @@ function useLeadsPageContent() {
       setPaneTab("overview");
       setSuccessMessage(t.lead_promote_to_console_success);
       reload();
+      if (permissions.canConvert) {
+        openLeadWizard(leadId);
+      }
     } catch (actionError) {
       const message =
         actionError instanceof Error ? actionError.message : t.common_failed_update;
@@ -1087,7 +1139,7 @@ function useLeadsPageContent() {
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setWizardOpen(true)}
+                onClick={() => openLeadWizard(detail.id)}
               >
                 <ClipboardCheck className="size-3.5" />
                 {lang === "de" ? "Bearbeiten" : "Обработать"}
@@ -2484,12 +2536,28 @@ function useLeadsPageContent() {
             loading={loading}
             maxFrozenColumns={LEAD_MAX_FROZEN_COLUMNS}
             toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
-            activeRowId={selectedLeadId || null}
-            onRowClick={(row) => openLeadDetail(row.id)}
+            activeRowId={wizardLeadId || selectedLeadId || null}
+            onRowClick={openLeadFromRow}
             rowAccent={(row) => leadRowAccent(row.qualification_status)}
             rowActionsLabel={t.users_actions || t.common_actions}
             rowActionsWidth={224}
             rowActions={(row) => {
+              const detailsAction = (
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  className="size-7 rounded-md"
+                  title={t.lead_tab_details}
+                  aria-label={t.lead_tab_details}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openLeadDetail(row.id);
+                  }}
+                >
+                  <Eye aria-hidden="true" className="size-3.5" />
+                </Button>
+              );
               const rowLeadType = leadTypeFromLead(row);
               const canPromoteRowToConsole =
                 rowLeadType !== "console" &&
@@ -2497,25 +2565,28 @@ function useLeadsPageContent() {
                 row.qualification_status !== "converted";
               if (canPromoteRowToConsole) {
                 return (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-7 rounded-md px-2 text-[11px]"
-                    disabled={Boolean(actionBusy)}
-                    title={t.lead_promote_to_console_description}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void promoteToConsole(row.id);
-                    }}
-                  >
-                    {actionBusy === `promote-console:${row.id}` ? (
-                      <LoaderCircle className="size-3 animate-spin" />
-                    ) : (
-                      <ArrowRight className="size-3" />
-                    )}
-                    {t.lead_promote_to_console}
-                  </Button>
+                  <>
+                    {detailsAction}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 rounded-md px-2 text-[11px]"
+                      disabled={Boolean(actionBusy)}
+                      title={t.lead_promote_to_console_description}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void promoteToConsole(row.id);
+                      }}
+                    >
+                      {actionBusy === `promote-console:${row.id}` ? (
+                        <LoaderCircle className="size-3 animate-spin" />
+                      ) : (
+                        <ArrowRight className="size-3" />
+                      )}
+                      {t.lead_promote_to_console}
+                    </Button>
+                  </>
                 );
               }
 
@@ -2534,6 +2605,7 @@ function useLeadsPageContent() {
 
               return (
                 <>
+                  {detailsAction}
                   {canQualify ? (
                     <Button
                       type="button"
@@ -2737,15 +2809,19 @@ function useLeadsPageContent() {
       </Sheet>
 
       <LeadWizard
-        leadId={selectedLeadId || null}
-        open={wizardOpen}
-        onOpenChange={setWizardOpen}
+        leadId={wizardLeadId}
+        open={wizardLeadId !== null}
+        onOpenChange={(open) => {
+          if (open) return;
+          setWizardLeadId(null);
+          syncLeadQuery(undefined, { replace: false });
+        }}
         onConverted={(patientId) => {
-          setWizardOpen(false);
+          setWizardLeadId(null);
           staffGo(`/patients/${patientId}`);
         }}
         onOrderCreated={(orderId) => {
-          setWizardOpen(false);
+          setWizardLeadId(null);
           staffGo(`/orders/${orderId}`);
         }}
       />
