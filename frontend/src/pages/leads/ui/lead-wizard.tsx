@@ -841,6 +841,7 @@ export function LeadWizard({
   }, [draft, leadId, lines, loading, open, paidAmount, persistSnapshot, prepayment, step]);
 
   const patch = <K extends keyof Draft>(key: K, value: Draft[K]) => {
+    setError("");
     setDraft((current) => current ? { ...current, [key]: value } : current);
   };
 
@@ -904,6 +905,7 @@ export function LeadWizard({
 
   async function finishIntake(targetStep: StepId): Promise<boolean> {
     if (!leadId || !draft) return false;
+    setError("");
     if (!draft.concern.trim()) {
       setNeedValidationAttempted(true);
       setStep("need");
@@ -928,7 +930,10 @@ export function LeadWizard({
         aktuelle_anamnese: draft.anamnese.trim(),
         zuweiser: draft.referrer.trim(),
       });
-      await completeCaseIntake(id);
+      await completeCaseIntake(id, true, {
+        hauptanfragegrund: draft.concern.trim(),
+        aktuelle_anamnese: draft.anamnese.trim(),
+      });
       const saved = await save(targetStep, false);
       if (saved) setDocumentsValidationAttempted(false);
       return saved;

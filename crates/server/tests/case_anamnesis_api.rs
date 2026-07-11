@@ -265,24 +265,15 @@ async fn lead_case_completes_anamnesis_without_creating_patient() {
     assert_eq!(blocked_status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(blocked["blocking_fields"], json!(["aktuelle_anamnese"]));
 
-    let (update_status, update_body) = json_request(
-        &app,
-        "POST",
-        &format!("/api/v1/cases/{case_uuid}/anamnesis"),
-        &bearer,
-        Some(json!({
-            "aktuelle_anamnese": "Pain for six months after a sports injury.",
-        })),
-    )
-    .await;
-    assert_eq!(update_status, StatusCode::OK, "update body: {update_body}");
-
     let (complete_status, completed) = json_request(
         &app,
         "POST",
         &format!("/api/v1/cases/{case_uuid}/intake-completion"),
         &bearer,
-        Some(json!({ "completed": true })),
+        Some(json!({
+            "completed": true,
+            "aktuelle_anamnese": "Pain for six months after a sports injury.",
+        })),
     )
     .await;
     assert_eq!(
@@ -296,6 +287,10 @@ async fn lead_case_completes_anamnesis_without_creating_patient() {
     let detail = fetch_case(&app, &bearer, case_uuid).await;
     assert_eq!(detail["lead_id"], lead_id.to_string());
     assert!(detail["patient_id"].is_null());
+    assert_eq!(
+        detail["aktuelle_anamnese"],
+        "Pain for six months after a sports injury."
+    );
     assert!(detail["intake_completed_at"].is_string());
 
     let patient_count_after: i64 = sqlx::query_scalar("SELECT count(*) FROM patients")

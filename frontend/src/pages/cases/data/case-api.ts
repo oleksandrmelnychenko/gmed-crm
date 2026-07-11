@@ -61,10 +61,14 @@ export function saveCaseOverview(caseId: string, payload: JsonPayload) {
   return postJson(`/cases/${caseId}/anamnesis`, payload);
 }
 
-export function completeCaseIntake(caseId: string, completed = true) {
+export function completeCaseIntake(
+  caseId: string,
+  completed = true,
+  fields: JsonPayload = {},
+) {
   return postJson<{ ok: boolean; intake_completed_at: string | null }>(
     `/cases/${caseId}/intake-completion`,
-    { completed },
+    { ...fields, completed },
   );
 }
 

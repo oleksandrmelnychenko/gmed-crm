@@ -81,6 +81,8 @@ struct UpdateAnamnesisRequest {
 #[derive(Deserialize)]
 struct UpdateIntakeCompletionRequest {
     completed: bool,
+    hauptanfragegrund: Option<String>,
+    aktuelle_anamnese: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1397,13 +1399,25 @@ async fn update_intake_completion(
         Err(response) => return response,
     }
 
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(error) => {
+            tracing::error!(error = %error, case_id = %case_uuid, "begin case intake completion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
     let row = match sqlx::query(
-        r#"SELECT hauptanfragegrund, aktuelle_anamnese
-           FROM cases
-           WHERE id = $1"#,
+        r#"UPDATE cases
+           SET hauptanfragegrund = COALESCE($2, hauptanfragegrund),
+               aktuelle_anamnese = COALESCE($3, aktuelle_anamnese)
+           WHERE id = $1
+           RETURNING hauptanfragegrund, aktuelle_anamnese"#,
     )
     .bind(case_uuid)
-    .fetch_optional(&state.db)
+    .bind(body.hauptanfragegrund.clone())
+    .bind(body.aktuelle_anamnese.clone())
+    .fetch_optional(&mut *transaction)
     .await
     {
         Ok(Some(row)) => row,
@@ -1459,7 +1473,7 @@ async fn update_intake_completion(
     .bind(case_uuid)
     .bind(body.completed)
     .bind(auth.user_id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *transaction)
     .await
     {
         Ok(Some(row)) => row,
@@ -1469,6 +1483,11 @@ async fn update_intake_completion(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+
+    if let Err(error) = transaction.commit().await {
+        tracing::error!(error = %error, case_id = %case_uuid, "commit case intake completion");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
 
     state.audit_sender.try_send(audit::domain_event(
         if body.completed {

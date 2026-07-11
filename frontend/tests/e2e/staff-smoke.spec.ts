@@ -1968,7 +1968,16 @@ test.describe("lead onboarding wizard", () => {
     await expect(wizard.getByRole("button", { name: "Anamnese abschließen" })).toHaveCount(0);
     await wizard.getByRole("textbox", { name: "Aktuelle Anamnese" }).fill("Beschwerden seit drei Wochen");
 
+    const intakeCompletionRequest = page.waitForRequest((request) =>
+      request.method() === "POST" && request.url().endsWith("/intake-completion"),
+    );
     await navigation.getByRole("button", { name: /Vertrag & Angebot/i }).click();
+    const intakeRequest = await intakeCompletionRequest;
+    expect(intakeRequest.postDataJSON()).toEqual({
+      completed: true,
+      hauptanfragegrund: "Orthopädische Beratung",
+      aktuelle_anamnese: "Beschwerden seit drei Wochen",
+    });
     await expect(wizard.getByText("Vertrag, Auftrag und Kostenvoranschlag")).toBeVisible();
     await expect(
       wizard.getByText("Diese Unterlagen gehören bis zur Freigabe dem Lead."),
