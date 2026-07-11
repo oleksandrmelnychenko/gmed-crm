@@ -721,6 +721,22 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
       ]);
     }
 
+    if (path === "/cases" && route.request().method() === "POST") {
+      return json(route, { id: "00000000-0000-0000-0000-000000000971" }, 201);
+    }
+
+    if (path.startsWith("/cases?") && route.request().method() === "GET") {
+      return json(route, []);
+    }
+
+    if (path === "/cases/00000000-0000-0000-0000-000000000971/anamnesis") {
+      return json(route, { ok: true });
+    }
+
+    if (path === "/cases/00000000-0000-0000-0000-000000000971/intake-completion") {
+      return json(route, { ok: true, intake_completed_at: "2026-07-11T10:00:00Z" });
+    }
+
     if (path === "/providers" || path.startsWith("/providers?")) {
       return json(route, [
         {
@@ -1917,6 +1933,7 @@ test.describe("lead onboarding wizard", () => {
 
     await navigation.getByRole("button", { name: /Anliegen/i }).click();
     await expect(wizard.getByText("Anliegen und Fachrichtungen")).toBeVisible();
+    await wizard.getByRole("textbox", { name: "Anliegen", exact: true }).fill("Orthopädische Beratung");
     await expect(
       wizard.getByRole("textbox", { name: "Wie sind Sie auf uns aufmerksam geworden?" }),
     ).toBeVisible();
@@ -1937,6 +1954,9 @@ test.describe("lead onboarding wizard", () => {
     await navigation.getByRole("button", { name: /Unterlagen/i }).click();
     await expect(wizard.getByText("Ausweisdokument")).toBeVisible();
     await expect(wizard.getByText("Datenschutzeinwilligung (DSGVO)")).toBeVisible();
+    await expect(wizard.getByText("Unterlagen und Anamnese vervollständigen")).toHaveCount(0);
+    await expect(wizard.getByRole("button", { name: "Anamnese abschließen" })).toHaveCount(0);
+    await wizard.getByRole("textbox", { name: "Aktuelle Anamnese" }).fill("Beschwerden seit drei Wochen");
 
     await navigation.getByRole("button", { name: /Vertrag & Angebot/i }).click();
     await expect(wizard.getByText("Vertrag, Auftrag und Kostenvoranschlag")).toBeVisible();
@@ -1960,10 +1980,14 @@ test.describe("lead onboarding wizard", () => {
     await navigation.getByRole("button", { name: /Обращение/i }).click();
     await expect(wizard.getByText("Причина обращения и специализации")).toBeVisible();
     await expect(wizard.getByText("Данные обращения подтверждены")).toBeVisible();
+    await wizard.getByRole("textbox", { name: "Причина обращения" }).fill("Консультация ортопеда");
 
     await navigation.getByRole("button", { name: /Документы/i }).click();
     await expect(wizard.getByText("Документ, удостоверяющий личность")).toBeVisible();
     await expect(wizard.getByText("Согласие на обработку персональных данных")).toBeVisible();
+    await expect(wizard.getByText("Заполните документы и анамнез")).toHaveCount(0);
+    await expect(wizard.getByRole("button", { name: "Сохранить анамнез" })).toHaveCount(0);
+    await wizard.getByRole("textbox", { name: "Анамнез" }).fill("Жалобы в течение трёх недель");
 
     await navigation.getByRole("button", { name: /Договор и смета/i }).click();
     await expect(wizard.getByRole("heading", { name: "Договор, заказ и смета" })).toBeVisible();

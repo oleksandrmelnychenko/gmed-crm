@@ -5,7 +5,6 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleAlert,
-  ClipboardCheck,
   Eye,
   FileCheck2,
   LoaderCircle,
@@ -152,6 +151,7 @@ type MasterValidationErrors = Partial<Record<MasterFieldKey, string>>;
 const AUTOSAVE_DELAY_MS = 800;
 const NEED_CONCERN_ID = "lead-wizard-concern";
 const NEED_SPECIALTIES_ID = "lead-wizard-specialties";
+const DOCUMENT_ANAMNESE_ID = "lead-wizard-anamnese";
 
 const MASTER_FIELD_ORDER: MasterFieldKey[] = [
   "firstName",
@@ -553,6 +553,7 @@ export function LeadWizard({
   );
   const [masterValidationAttempted, setMasterValidationAttempted] = useState(false);
   const [needValidationAttempted, setNeedValidationAttempted] = useState(false);
+  const [documentsValidationAttempted, setDocumentsValidationAttempted] = useState(false);
   const hydrated = useRef<string | null>(null);
   const stepNavRef = useRef<HTMLElement | null>(null);
   const wizardStateBaseRef = useRef<Record<string, unknown>>({});
@@ -618,6 +619,7 @@ export function LeadWizard({
         setTouchedMasterFields(new Set());
         setMasterValidationAttempted(false);
         setNeedValidationAttempted(false);
+        setDocumentsValidationAttempted(false);
       }
       if (hydrateDraft || hydrateCommercial) {
         setLines(nextLines);
@@ -660,6 +662,7 @@ export function LeadWizard({
     setTouchedMasterFields(new Set());
     setMasterValidationAttempted(false);
     setNeedValidationAttempted(false);
+    setDocumentsValidationAttempted(false);
     currentAutosaveSignatureRef.current = "";
     lastSavedAutosaveSignatureRef.current = "";
     wizardStateBaseRef.current = {};
@@ -845,8 +848,19 @@ export function LeadWizard({
     }
   }
 
-  async function finishIntake() {
-    if (!leadId || !draft) return;
+  async function finishIntake(targetStep: StepId): Promise<boolean> {
+    if (!leadId || !draft) return false;
+    if (!draft.concern.trim()) {
+      setNeedValidationAttempted(true);
+      setStep("need");
+      window.requestAnimationFrame(() => document.getElementById(NEED_CONCERN_ID)?.focus());
+      return false;
+    }
+    if (!draft.anamnese.trim()) {
+      setDocumentsValidationAttempted(true);
+      window.requestAnimationFrame(() => document.getElementById(DOCUMENT_ANAMNESE_ID)?.focus());
+      return false;
+    }
     setBusy("intake");
     try {
       const id = caseId ?? (await createCase({
@@ -861,9 +875,12 @@ export function LeadWizard({
         zuweiser: draft.referrer.trim(),
       });
       await completeCaseIntake(id);
-      await save("documents", false);
+      const saved = await save(targetStep, false);
+      if (saved) setDocumentsValidationAttempted(false);
+      return saved;
     } catch (nextError) {
       setError(errorText(nextError, tx));
+      return false;
     } finally {
       setBusy(null);
     }
@@ -1078,6 +1095,12 @@ export function LeadWizard({
 
     const target = STEPS[index + 1];
     if (!target) return;
+    if (step === "documents") {
+      void finishIntake(target.id).then((saved) => {
+        if (saved) setStep(target.id);
+      });
+      return;
+    }
     void save(target.id).then((saved) => {
       if (saved) setStep(target.id);
     });
@@ -1189,7 +1212,15 @@ export function LeadWizard({
                   key={item.id}
                   type="button"
                   data-step={item.id}
-                  onClick={() => setStep(item.id)}
+                  onClick={() => {
+                    if (step === "documents" && itemIndex > index) {
+                      void finishIntake(item.id).then((saved) => {
+                        if (saved) setStep(item.id);
+                      });
+                      return;
+                    }
+                    setStep(item.id);
+                  }}
                   aria-current={selected ? "step" : undefined}
                   className={cn(
                     "relative min-w-0 border-r border-border px-3 py-3 text-left last:border-r-0 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
@@ -1501,7 +1532,6 @@ export function LeadWizard({
 
           {draft && step === "documents" ? (
             <section className="space-y-5">
-              <div><h3 className="text-sm font-semibold text-foreground">{tx("Документы и анамнез", "Unterlagen und Anamnese")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Загрузите документы, подтвердите согласия и заполните анамнез.", "Laden Sie die Unterlagen hoch, bestätigen Sie die Einwilligungen und erfassen Sie die Anamnese.")}</p></div>
               {(["identity", "dsgvo"] as const).map((kind) => {
                 const document = kind === "identity" ? identity : dsgvo;
                 const signed = Boolean(document?.signed_at && document?.compliance_kind === kind);
@@ -1513,9 +1543,22 @@ export function LeadWizard({
                 </div>;
               })}
               <div className="border-y border-border"><ToggleRow checked={draft.privacyConsent} disabled={isBusy} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} /><ToggleRow checked={draft.healthcareConsent} disabled={isBusy} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} /></div>
-              <Field required label={tx("Анамнез", "Aktuelle Anamnese")}><textarea className={cn(textareaClass, "min-h-28")} value={draft.anamnese} onChange={(event) => patch("anamnese", event.target.value)} /></Field>
+              <Field
+                required
+                label={tx("Анамнез", "Aktuelle Anamnese")}
+                error={documentsValidationAttempted && !draft.anamnese.trim() ? tx("Обязательное поле", "Pflichtfeld") : undefined}
+                errorId={`${DOCUMENT_ANAMNESE_ID}-error`}
+              >
+                <textarea
+                  id={DOCUMENT_ANAMNESE_ID}
+                  className={cn(textareaClass, "min-h-28", documentsValidationAttempted && !draft.anamnese.trim() && "border-destructive")}
+                  aria-invalid={documentsValidationAttempted && !draft.anamnese.trim()}
+                  aria-describedby={documentsValidationAttempted && !draft.anamnese.trim() ? `${DOCUMENT_ANAMNESE_ID}-error` : undefined}
+                  value={draft.anamnese}
+                  onChange={(event) => patch("anamnese", event.target.value)}
+                />
+              </Field>
               <Field label={tx("Направивший врач", "Zuweisender Arzt")}><Input value={draft.referrer} onChange={(event) => patch("referrer", event.target.value)} /></Field>
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4"><StateMark done={Boolean(readiness.get("documents"))} label={readiness.get("documents") ? tx("Документы и анамнез заполнены", "Unterlagen und Anamnese vollständig") : tx("Заполните документы и анамнез", "Unterlagen und Anamnese vervollständigen")} /><Button type="button" variant="outline" disabled={isBusy || !draft.concern.trim() || !draft.anamnese.trim()} onClick={() => void finishIntake()}>{busy === "intake" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ClipboardCheck className="size-3.5" />}{tx("Сохранить анамнез", "Anamnese abschließen")}</Button></div>
             </section>
           ) : null}
 
@@ -1593,7 +1636,7 @@ export function LeadWizard({
 
         <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
           <Button type="button" variant="outline" size="sm" disabled={isBusy || index === 0} onClick={() => setStep(STEPS[index - 1].id)}><ChevronLeft className="size-3.5" />{tx("Назад", "Zurück")}</Button>
-          {step !== "release" ? <Button type="button" size="sm" disabled={isBusy} onClick={next}>{busy === "save" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}{tx("Далее", "Weiter")}<ChevronRight className="size-3.5" /></Button> : null}
+          {step !== "release" ? <Button type="button" size="sm" disabled={isBusy} onClick={next}>{busy === "save" || busy === "intake" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}{tx("Далее", "Weiter")}<ChevronRight className="size-3.5" /></Button> : null}
         </footer>
       </SheetContent>
       </Sheet>
