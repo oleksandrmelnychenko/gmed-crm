@@ -298,8 +298,29 @@ const LEAD_DATE_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
   }),
 };
 
+const LEAD_DATE_TIME_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
+  "de-DE": new Intl.DateTimeFormat("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }),
+  "ru-RU": new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }),
+};
+
 function leadDateFormatter(locale: string) {
   return LEAD_DATE_FORMATTERS[locale] ?? LEAD_DATE_FORMATTERS["ru-RU"];
+}
+
+function leadDateTimeFormatter(locale: string) {
+  return LEAD_DATE_TIME_FORMATTERS[locale] ?? LEAD_DATE_TIME_FORMATTERS["ru-RU"];
 }
 
 export function leadPermissions(role?: string): LeadPermissions {
@@ -677,6 +698,19 @@ export function formatDate(
   if (!value) return fallback;
   try {
     return leadDateFormatter(locale).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
+export function formatDateTime(
+  value?: string | null,
+  locale = runtimeLocale(),
+  fallback = runtimeTranslations().common_not_set,
+) {
+  if (!value) return fallback;
+  try {
+    return leadDateTimeFormatter(locale).format(new Date(value));
   } catch {
     return value;
   }

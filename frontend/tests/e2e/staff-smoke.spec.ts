@@ -1936,6 +1936,14 @@ test.describe("lead onboarding wizard", () => {
     await page.goto("/leads");
     await expect(page.getByText("Blocked Lead")).toBeVisible();
     await expect(page.getByText("Ready Lead")).toBeVisible();
+    await expect(page.getByRole("columnheader").nth(3)).toContainText("Eingegangen");
+    const receivedAtCell = page
+      .getByRole("row")
+      .filter({ hasText: "Ready Lead" })
+      .getByRole("cell")
+      .nth(3);
+    await expect(receivedAtCell).toContainText(/02\.04\.2026/);
+    await expect(receivedAtCell).toContainText(/\d{2}:\d{2}/);
     await expect(page.getByRole("columnheader", { name: "Aktionen" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "In Konsole übernehmen" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /Konvertieren|Convert/i })).toHaveCount(0);

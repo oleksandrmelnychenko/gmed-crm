@@ -397,6 +397,7 @@ export interface OperationsTranslations {
   lead_needs_interpreter: string;
   lead_flow: string;
   lead_locale: string;
+  lead_received_at: string;
   lead_submitted_at: string;
   lead_from_website_wizard: string;
   lead_from_website_contact_form: string;
@@ -961,6 +962,7 @@ export const operationsRu: OperationsTranslations = {
   lead_needs_interpreter: "Нужен переводчик",
   lead_flow: "Процесс",
   lead_locale: "Локаль",
+  lead_received_at: "Поступил",
   lead_submitted_at: "Отправлено",
   lead_from_website_wizard: "Из мастера на сайте",
   lead_from_website_contact_form: "Из контактной формы сайта",
@@ -1540,6 +1542,7 @@ export const operationsDe: OperationsTranslations = {
   lead_needs_interpreter: "Dolmetscher erforderlich",
   lead_flow: "Flow",
   lead_locale: "Locale",
+  lead_received_at: "Eingegangen",
   lead_submitted_at: "Eingereicht am",
   lead_from_website_wizard: "Aus dem Website-Assistenten",
   lead_from_website_contact_form: "Aus dem Website-Kontaktformular",

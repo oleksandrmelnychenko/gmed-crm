@@ -104,6 +104,7 @@ import {
   failedOutcomeLabel,
   filterLeadsByContact,
   formatDate,
+  formatDateTime,
   formatSize,
   leadLocationDetailedLabel,
   leadLocationLabel,
@@ -577,6 +578,23 @@ function useLeadsPageContent() {
         ),
       },
       {
+        id: "received_at",
+        label: t.lead_received_at,
+        accessor: (row) => row.created_at,
+        filterType: "date",
+        group: "lifecycle",
+        sortable: true,
+        width: 170,
+        render: (row) => (
+          <time
+            dateTime={row.created_at}
+            className="whitespace-nowrap text-xs tabular-nums text-foreground"
+          >
+            {formatDateTime(row.created_at, locale, t.common_not_set)}
+          </time>
+        ),
+      },
+      {
         id: "compliance",
         label: t.lead_compliance_status,
         accessor: (row) => row.compliance_status ?? "",
@@ -628,16 +646,6 @@ function useLeadsPageContent() {
         group: "origin",
         width: 150,
         render: (row) => <span className="text-xs text-foreground">{row.country || t.common_not_set}</span>,
-      },
-      {
-        id: "created",
-        label: t.patients_col_created_at,
-        accessor: (row) => row.created_at,
-        filterType: "date",
-        group: "lifecycle",
-        sortable: true,
-        width: 130,
-        render: (row) => <span className="text-xs text-foreground">{formatDate(row.created_at, locale, t.common_not_set)}</span>,
       },
       {
         id: "failed",
