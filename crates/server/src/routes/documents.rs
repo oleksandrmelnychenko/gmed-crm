@@ -17133,6 +17133,30 @@ async fn delete_document_file(
         }
     };
 
+    let questionnaire_source_bytes_removed = match sqlx::query(
+        r#"UPDATE lead_attachments
+           SET data = ''::bytea,
+               size_bytes = 0
+           WHERE imported_document_id = $1
+             AND octet_length(data) > 0"#,
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await
+    {
+        Ok(result) => result.rows_affected() > 0,
+        Err(error) => {
+            if let Some(staged) = staged_delete.as_ref() {
+                rollback_staged_document_delete(staged).await;
+            }
+            tracing::error!(error = %error, document_id = %id, "remove questionnaire source bytes");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete document file",
+            );
+        }
+    };
+
     match sqlx::query(
         r#"UPDATE documents
            SET status = 'archived',
@@ -17203,6 +17227,7 @@ async fn delete_document_file(
             "previous_visibility": previous_visibility,
             "had_stored_file": had_storage_key.is_some(),
             "file_removed_from_disk": staged_delete.is_some(),
+            "questionnaire_source_bytes_removed": questionnaire_source_bytes_removed,
             "revoked_share_ids": revoked_share_ids,
         }),
     ));
@@ -17218,6 +17243,7 @@ async fn delete_document_file(
             "previous_visibility": previous_visibility,
             "revoked_share_count": revoked_share_ids.len(),
             "file_removed_from_disk": staged_delete.is_some(),
+            "questionnaire_source_bytes_removed": questionnaire_source_bytes_removed,
         }),
     )
     .await;

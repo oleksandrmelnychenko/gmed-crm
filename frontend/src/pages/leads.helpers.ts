@@ -1,6 +1,7 @@
 export {
   computeLeadConversionGate,
   filterLeadsByContact,
+  leadIntakeTypeFromLead,
   leadLanguageLabel,
   leadSourceLabel,
   leadTypeFromLead,

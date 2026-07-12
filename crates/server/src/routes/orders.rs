@@ -1973,6 +1973,58 @@ async fn ensure_created_order_state(
     Ok(())
 }
 
+async fn initialize_order_planning_from_lead(
+    state: &AppState,
+    order_id: Uuid,
+    lead_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    sqlx::query(
+        r#"UPDATE order_planning_preparation AS planning
+           SET interpreter_required = source.requires_interpreter,
+               interpreter_briefing_status = CASE
+                   WHEN source.requires_interpreter THEN 'pending'
+                   ELSE planning.interpreter_briefing_status
+               END,
+               non_medical_required = source.requires_non_medical
+           FROM (
+               SELECT
+                   COALESCE(needs_interpreter, false)
+                       OR COALESCE(services, ARRAY[]::text[])
+                          && ARRAY['interpreter_support']::text[]
+                       AS requires_interpreter,
+                   COALESCE(services, ARRAY[]::text[])
+                       && ARRAY[
+                           'driver',
+                           'concierge',
+                           'concierge_support',
+                           'medical-transport',
+                           'medical_transport',
+                           'air-ambulance',
+                           'air_ambulance',
+                           'business-aviation',
+                           'business_aviation'
+                       ]::text[]
+                       AS requires_non_medical
+               FROM leads
+               WHERE id = $2
+           ) AS source
+           WHERE planning.order_id = $1
+             AND planning.updated_at = planning.created_at"#,
+    )
+    .bind(order_id)
+    .bind(lead_id)
+    .execute(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, order_id = %order_id, lead_id = %lead_id, "initialize order planning from lead");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to initialize order",
+        )
+    })?;
+    Ok(())
+}
+
 async fn create_order(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -2019,6 +2071,11 @@ async fn create_order(
                 Err(resp) => return resp,
             }
             if let Err(resp) = ensure_created_order_state(&state, order_id, auth.user_id).await {
+                return resp;
+            }
+            if let Err(resp) =
+                initialize_order_planning_from_lead(&state, order_id, source_lead_id).await
+            {
                 return resp;
             }
             return (
@@ -2203,6 +2260,12 @@ async fn create_order(
         Ok(Some(r)) => {
             let order_number = r.order_number.clone();
             if let Err(resp) = ensure_created_order_state(&state, r.id, auth.user_id).await {
+                return resp;
+            }
+            if let Some(source_lead_id) = source_lead_id
+                && let Err(resp) =
+                    initialize_order_planning_from_lead(&state, r.id, source_lead_id).await
+            {
                 return resp;
             }
             state.audit_sender.try_send(audit::domain_event(

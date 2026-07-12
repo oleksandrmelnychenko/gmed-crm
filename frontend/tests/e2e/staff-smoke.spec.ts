@@ -250,12 +250,12 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
       last_name: "Lead",
       email: "ready.lead@example.com",
       phone: "+49 30 100002",
-      source: "referral",
+      source: "Website Wizard",
       country: "DE",
-      intake_source: "referral",
-      flow: "standard",
+      intake_source: "visitor_facade",
+      flow: "medical",
       lead_type: "console",
-      console_promoted_at: null,
+      console_promoted_at: "2026-04-02T10:00:00Z",
       qualification_status: "in_progress",
       compliance_status: "signed",
       conversion_ready: true,
@@ -270,11 +270,48 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
       lead.id,
       {
         ...lead,
-        middle_name: null,
-        suffix: null,
+        middle_name: lead.conversion_ready ? "Maria" : null,
+        suffix: lead.conversion_ready ? "Jr." : null,
         date_of_birth: lead.conversion_ready ? "1990-01-01" : null,
         legal_sex: lead.conversion_ready ? "female" : null,
         primary_language: lead.conversion_ready ? "de" : "",
+        locale: lead.conversion_ready ? "ru-RU" : "de",
+        state: lead.conversion_ready ? "Berlin" : null,
+        primary_phone_type: lead.conversion_ready ? "mobile" : null,
+        phones: lead.conversion_ready
+          ? [
+              { number: "+49 30 100002", type: "mobile" },
+              { number: "+49 30 100099", type: "work" },
+            ]
+          : [],
+        whatsapp_number: lead.conversion_ready ? "+49 30 100002" : null,
+        whatsapp_consent: lead.conversion_ready ? true : null,
+        email_consent: lead.conversion_ready ? true : null,
+        location: lead.conversion_ready ? "eu" : null,
+        location_detailed: lead.conversion_ready ? "germany" : null,
+        preferred_location: lead.conversion_ready ? "berlin" : null,
+        visit_timing: lead.conversion_ready ? "within_4_weeks" : null,
+        wants_membership: lead.conversion_ready ? false : null,
+        selected_program: lead.conversion_ready ? "medical_treatment" : null,
+        can_travel: lead.conversion_ready ? true : null,
+        has_travel_documents: lead.conversion_ready ? true : null,
+        currently_in_treatment: lead.conversion_ready ? true : null,
+        has_health_risk_for_travel: lead.conversion_ready ? false : null,
+        has_medical_records: lead.conversion_ready ? "yes" : null,
+        records_in_accepted_language: lead.conversion_ready ? true : null,
+        has_insurance: lead.conversion_ready ? true : null,
+        insurance_covers_germany: lead.conversion_ready ? "not_sure" : null,
+        needs_interpreter: lead.conversion_ready ? true : null,
+        message: lead.conversion_ready
+          ? "Please coordinate an orthopedic consultation and airport transfer."
+          : null,
+        services: lead.conversion_ready
+          ? ["medical_treatment", "concierge_support"]
+          : [],
+        consent_automated_contact: lead.conversion_ready,
+        consent_opt_out: lead.conversion_ready,
+        consent_healthcare: lead.conversion_ready,
+        consent_privacy_practices: lead.conversion_ready,
         notes: lead.conversion_ready
           ? "Ready for conversion."
           : "Needs compliance and identity completion.",
@@ -1981,13 +2018,17 @@ test.describe("lead onboarding wizard", () => {
     expect(Math.abs((wizardBox?.y ?? 0) + (wizardBox?.height ?? 0) / 2 - viewport.height / 2)).toBeLessThanOrEqual(2);
     const navigation = wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" });
     await expect(navigation.getByRole("button")).toHaveCount(6);
-    await expect(wizard.getByText("Interne Anfrage", { exact: true })).toBeVisible();
+    await expect(wizard.getByText("Fragebogen", { exact: true })).toBeVisible();
+    await expect(wizard.getByText("Website-Assistent", { exact: true })).toBeVisible();
+    await expect(wizard.getByText("Russisch (ru)", { exact: true })).toBeVisible();
+    await expect(wizard.getByRole("textbox", { name: "WhatsApp" })).toHaveValue("+49 30 100002");
     await expect(
       wizard.getByText("Ein Patient wird erst nach der finalen Freigabe angelegt."),
     ).toHaveCount(0);
     await expect(wizard.getByRole("button", { name: "Patient anlegen" })).toHaveCount(0);
 
     await navigation.getByRole("button", { name: /Medizinische Merkmale/i }).click();
+    await expect(wizard.getByText("Krankenversicherung vorhanden", { exact: true })).toBeVisible();
     await wizard.getByRole("textbox", { name: "Aktuelle Anamnese" }).fill("Beschwerden seit drei Wochen");
     await wizard.getByRole("button", { name: "Hinzufügen" }).nth(0).click();
     await wizard.getByRole("textbox", { name: "Diagnose", exact: true }).fill("Gonarthrose");
@@ -2024,6 +2065,12 @@ test.describe("lead onboarding wizard", () => {
     await expect(
       wizard.getByText("Wählen Sie die passenden Fachrichtungen aus dem Verzeichnis aus."),
     ).toHaveCount(0);
+    await expect(wizard.getByText("Kundennachricht", { exact: true })).toBeVisible();
+    await expect(
+      wizard.getByText("Please coordinate an orthopedic consultation and airport transfer.", { exact: true }),
+    ).toBeVisible();
+    await expect(wizard.getByText("Unbekannter Wert", { exact: true })).toHaveCount(0);
+    await expect(wizard.getByText("Medizinische Betreuung", { exact: true })).toBeVisible();
     await wizard.getByRole("textbox", { name: "Anliegen", exact: true }).fill("Orthopädische Beratung");
     await expect(
       wizard.getByRole("textbox", { name: "Wie sind Sie auf uns aufmerksam geworden?" }),
@@ -2046,6 +2093,9 @@ test.describe("lead onboarding wizard", () => {
     await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
     await expect(wizard.getByText("Ausweisdokument")).toBeVisible();
     await expect(wizard.getByText("Datenschutzeinwilligung (DSGVO)")).toBeVisible();
+    await expect(
+      wizard.getByText("Einwilligung zur Kontaktaufnahme per WhatsApp", { exact: true }),
+    ).toBeVisible();
     await expect(wizard.getByText("Unterlagen und Anamnese vervollständigen")).toHaveCount(0);
     await expect(wizard.getByRole("button", { name: "Anamnese abschließen" })).toHaveCount(0);
     const intakeCompletionRequest = page.waitForRequest((request) =>
@@ -2069,6 +2119,7 @@ test.describe("lead onboarding wizard", () => {
     await expect(
       wizard.getByRole("combobox", { name: "Leistung aus dem Katalog auswählen" }),
     ).toBeVisible();
+    await expect(wizard.getByText("Kundenbedarf", { exact: true })).toBeVisible();
   });
 
   test("wizard uses clear Russian copy across all stages", async ({ page }) => {
@@ -2311,7 +2362,7 @@ test.describe("responsive staff workspace", () => {
       closeBox?.x ?? 0,
     );
 
-    const firstNameInput = wizard.getByRole("textbox", { name: "Vorname" });
+    const firstNameInput = wizard.locator('input[name="first_name"]');
     await firstNameInput.fill("");
     await firstNameInput.blur();
     await expect(wizard.getByText("Pflichtfeld", { exact: true }).first()).toBeVisible();
@@ -2359,7 +2410,7 @@ test.describe("responsive staff workspace", () => {
     await expect(page.getByRole("alertdialog")).toHaveCount(0);
     await expect.poll(() => leadListRefreshes).toBeGreaterThan(0);
     await readyLeadCell.click();
-    await expect(wizard.getByRole("textbox", { name: "Vorname" })).toHaveValue(
+    await expect(wizard.locator('input[name="first_name"]')).toHaveValue(
       "Ready Autosaved",
     );
 
@@ -2462,6 +2513,7 @@ test.describe("responsive staff workspace", () => {
     const quoteId = "00000000-0000-0000-0000-000000000963";
     let quoteCreated = false;
     let orderCreated = false;
+    let orderCreatePayload: { needs_description?: string } | null = null;
     let signedPatient = false;
     let signedAgency = false;
     let prepaymentRequired = false;
@@ -2492,6 +2544,9 @@ test.describe("responsive staff workspace", () => {
     });
     await page.route("**/api/v1/orders", (route) => {
       if (route.request().method() === "POST") {
+        orderCreatePayload = route.request().postDataJSON() as {
+          needs_description?: string;
+        };
         orderCreated = true;
         return json(route, { id: orderId }, 201);
       }
@@ -2567,6 +2622,10 @@ test.describe("responsive staff workspace", () => {
     await patientSignatureToggle.check();
     await expect(patientSignatureToggle).toBeChecked();
     await expect.poll(() => commercialBasisRequests).toBe(1);
+    expect(orderCreatePayload?.needs_description).toContain("Kundennachricht");
+    expect(orderCreatePayload?.needs_description).toContain("Kann anreisen: Ja");
+    expect(orderCreatePayload?.needs_description).toContain("Reisedokumente: Ja");
+    expect(orderCreatePayload?.needs_description).toContain("Dolmetscher benötigt");
     releaseCommercialBasis();
     await expect(patientSignatureToggle).toBeEnabled();
     await expect(patientSignatureToggle).toBeChecked();

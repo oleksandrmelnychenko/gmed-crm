@@ -18,6 +18,7 @@ export const LANGUAGE_OPTIONS: LanguageOption[] = [
   { value: "ru", labelDe: "Russisch", labelRu: "Русский" },
   { value: "en", labelDe: "Englisch", labelRu: "Английский" },
   { value: "ar", labelDe: "Arabisch", labelRu: "Арабский" },
+  { value: "fa", labelDe: "Persisch", labelRu: "Персидский" },
   { value: "pt", labelDe: "Portugiesisch", labelRu: "Португальский" },
   { value: "fr", labelDe: "Französisch", labelRu: "Французский" },
   { value: "es", labelDe: "Spanisch", labelRu: "Испанский" },

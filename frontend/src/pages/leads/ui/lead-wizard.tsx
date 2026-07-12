@@ -77,6 +77,16 @@ import type { Leistung, OrderSummary } from "@/pages/orders/model/types";
 import type { DoctorOption } from "@/pages/cases/model/types";
 import { fetchSpecializations } from "@/pages/providers/data/provider-api";
 import type { SpecializationItem } from "@/pages/providers/model/types";
+import {
+  leadIntakeTypeFromLead,
+  knownLeadProgramServiceLabel,
+  leadLocationDetailedLabel,
+  leadLocationLabel,
+  leadPreferredLocationLabel,
+  leadProgramServiceLabel,
+  leadSourceLabel,
+  leadVisitTimingLabel,
+} from "@/pages/leads/model/leads-model";
 
 import {
   LeadMedicalIntakeForm,
@@ -85,9 +95,11 @@ import {
   type LeadDiagnosisDraft,
   type LeadMedicationDraft,
 } from "./lead-medical-intake-form";
+import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 
 import {
   fetchLeadDetail,
+  importLeadAttachments,
   resolveFailedLead,
   updateLeadStatus,
   updateLeadWizard,
@@ -110,16 +122,20 @@ type LeadWizardProps = {
 
 type Draft = {
   firstName: string;
+  middleName: string;
   lastName: string;
+  suffix: string;
   birthDate: string;
   legalSex: string;
   email: string;
   phone: string;
   street: string;
   city: string;
+  state: string;
   zip: string;
   country: string;
   language: string;
+  whatsappNumber: string;
   concern: string;
   anamnese: string;
   diagnoses: LeadDiagnosisDraft[];
@@ -291,8 +307,12 @@ function autosavePayload(
     legal_sex: draft.legalSex || undefined,
     email: draft.email.trim(),
     phone: draft.phone.trim(),
+    middle_name: draft.middleName.trim(),
+    suffix: draft.suffix.trim(),
+    whatsapp_number: draft.whatsappNumber.trim(),
     street_address: draft.street.trim(),
     city: draft.city.trim(),
+    state: draft.state.trim(),
     zip_code: draft.zip.trim(),
     country: draft.country.trim(),
     primary_language: draft.language.trim(),
@@ -349,6 +369,53 @@ function stringFromUnknown(value: unknown) {
 
 function booleanFromUnknown(value: unknown) {
   return value === true;
+}
+
+function normalizedLanguageCode(value: string | null | undefined) {
+  const key = value?.trim().toLowerCase().replaceAll("_", "-");
+  if (!key) return "";
+  const aliases: Record<string, string> = {
+    deutsch: "de",
+    german: "de",
+    englisch: "en",
+    english: "en",
+    russisch: "ru",
+    russian: "ru",
+    "русский": "ru",
+    ukrainisch: "uk",
+    ukrainian: "uk",
+    "українська": "uk",
+    arabisch: "ar",
+    arabic: "ar",
+    portugiesisch: "pt",
+    portuguese: "pt",
+    "französisch": "fr",
+    french: "fr",
+    spanisch: "es",
+    spanish: "es",
+    italienisch: "it",
+    italian: "it",
+    "türkisch": "tr",
+    turkish: "tr",
+    polnisch: "pl",
+    polish: "pl",
+    tschechisch: "cs",
+    czech: "cs",
+    "dänisch": "da",
+    danish: "da",
+    griechisch: "el",
+    greek: "el",
+    lettisch: "lv",
+    latvian: "lv",
+    chinesisch: "zh",
+    chinese: "zh",
+    persisch: "fa",
+    persian: "fa",
+    farsi: "fa",
+    urdu: "ur",
+  };
+  const normalized = aliases[key] ?? key.split("-")[0] ?? "";
+  return LANGUAGE_OPTIONS.some((option) => option.value === normalized) ? normalized : "";
 }
 
 function clinicalRowsFromLead(lead: LeadDetail) {
@@ -429,16 +496,20 @@ function draftFromLead(lead: LeadDetail): Draft {
   const clinical = clinicalRowsFromLead(lead);
   return {
     firstName: lead.first_name ?? "",
+    middleName: lead.middle_name ?? "",
     lastName: lead.last_name ?? "",
+    suffix: lead.suffix ?? "",
     birthDate: lead.date_of_birth ?? "",
     legalSex: lead.legal_sex ?? "",
     email: lead.email ?? "",
     phone: lead.phone ?? "",
     street: lead.street_address ?? "",
     city: lead.city ?? "",
+    state: lead.state ?? "",
     zip: lead.zip_code ?? "",
     country: lead.country ?? "",
-    language: lead.primary_language ?? "",
+    language: normalizedLanguageCode(lead.primary_language) || normalizedLanguageCode(lead.locale),
+    whatsappNumber: lead.whatsapp_number ?? "",
     concern: lead.primary_concern_text ?? "",
     anamnese: lead.additional_concerns ?? "",
     diagnoses: clinical.diagnoses,
@@ -448,10 +519,11 @@ function draftFromLead(lead: LeadDetail): Draft {
     serviceNeeds: Array.from(new Set([
       ...(lead.services ?? []),
       ...(lead.selected_program ? [lead.selected_program] : []),
+      ...(lead.needs_interpreter ? ["interpreter_support"] : []),
     ])),
     discoverySource: inputString(lead.wizard_state?.["discovery_source"]) || questionnaireText(lead, "discoverySource", "howDidYouHearAboutUs", "referralSource"),
     referrer: inputString(lead.wizard_state?.["referrer"]),
-    serviceNotes: lead.notes || lead.message || "",
+    serviceNotes: lead.notes ?? "",
     specialties: lead.requested_specialties ?? [],
     privacyConsent: lead.consent_privacy_practices,
     healthcareConsent: lead.consent_healthcare,
@@ -459,14 +531,43 @@ function draftFromLead(lead: LeadDetail): Draft {
 }
 
 function intakeTypeLabel(lead: LeadDetail, tx: Tx) {
-  if (lead.intake_source === "visitor_facade") return tx("Опросник", "Fragebogen");
-  if (lead.intake_source === "website_contact") return tx("Форма", "Formular");
-  return tx("Внутреннее обращение", "Interne Anfrage");
+  switch (leadIntakeTypeFromLead(lead)) {
+    case "questionnaire":
+      return tx("Опросник", "Fragebogen");
+    case "form":
+      return tx("Форма", "Formular");
+    default:
+      return tx("Внутреннее обращение", "Interne Anfrage");
+  }
+}
+
+function intakeFlowLabel(value: string | null | undefined, tx: Tx) {
+  const normalized = value?.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const labels: Record<string, [string, string]> = {
+    medical: ["Медицинский", "Medizinisch"],
+    contact: ["Контактная форма", "Kontaktformular"],
+    standard: ["Стандартный", "Standard"],
+  };
+  const label = normalized ? labels[normalized] : null;
+  return label ? tx(label[0], label[1]) : value || tx("Не указано", "Nicht angegeben");
 }
 
 function yesNoValue(value: boolean | null, tx: Tx) {
-  if (value === null) return tx("Не указано", "Nicht angegeben");
+  if (value == null) return tx("Не указано", "Nicht angegeben");
   return value ? tx("Да", "Ja") : tx("Нет", "Nein");
+}
+
+function phoneTypeLabel(value: string | null | undefined, tx: Tx) {
+  const labels: Record<string, [string, string]> = {
+    mobile: ["Мобильный", "Mobil"],
+    home: ["Домашний", "Privat"],
+    private: ["Личный", "Privat"],
+    work: ["Рабочий", "Geschäftlich"],
+    other: ["Другой", "Sonstige"],
+  };
+  const normalized = value?.trim().toLowerCase();
+  const label = normalized ? labels[normalized] : null;
+  return label ? tx(label[0], label[1]) : value || tx("Не указано", "Nicht angegeben");
 }
 
 function serviceNeedLabel(value: string, tx: Tx) {
@@ -541,7 +642,7 @@ function wizardDocumentKind(item: DocumentItem): WizardDocumentKind | null {
   const complianceKind = item.compliance_kind?.trim().toLowerCase();
   if (complianceKind === "identity" || complianceKind === "dsgvo") return complianceKind;
 
-  const classification = [item.art, item.category, item.auto_name]
+  const classification = [item.art, item.category, item.auto_name, item.original_filename]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
@@ -730,7 +831,7 @@ export function LeadWizard({
   onArchived,
   onShowDetails,
 }: LeadWizardProps) {
-  const { lang } = useLang();
+  const { lang, t } = useLang();
   const tx: Tx = useCallback((ru, de) => (lang === "de" ? de : ru), [lang]);
   const [lead, setLead] = useState<LeadDetail | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -782,10 +883,21 @@ export function LeadWizard({
     setLoading(true);
     setError("");
     try {
+      let attachmentImportError: unknown = null;
       const leadPromise = fetchLeadDetail(leadId);
+      const documentsPromise = leadPromise.then(async (nextLead) => {
+        if (nextLead.attachments?.some((attachment) => !attachment.imported_at)) {
+          try {
+            await importLeadAttachments(leadId);
+          } catch (nextError) {
+            attachmentImportError = nextError;
+          }
+        }
+        return fetchDocuments("/documents?lead_id=" + encodeURIComponent(leadId)).catch(() => []);
+      });
       const [nextLead, nextDocuments, nextCases, nextContracts, nextOrders, nextQuotes, nextSpecialties, nextAgencyServices, nextDoctors] = await Promise.all([
         leadPromise,
-        fetchDocuments("/documents?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
+        documentsPromise,
         fetchCases("/cases?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
         fetchContracts("/framework-contracts?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
         fetchOrders("/orders?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
@@ -920,6 +1032,11 @@ export function LeadWizard({
         setAutosaveError("");
         setAutosaveStatus("saved");
       }
+      if (attachmentImportError) {
+        setError(
+          `${tx("Не удалось импортировать файлы опросника", "Fragebogendateien konnten nicht importiert werden")}: ${errorText(attachmentImportError, tx)}`,
+        );
+      }
     } catch (nextError) {
       setError(errorText(nextError, tx));
     } finally {
@@ -987,6 +1104,17 @@ export function LeadWizard({
     });
     return grouped;
   }, [documents]);
+  const supplementaryDocuments = useMemo(
+    () => documents.filter((item) => (
+      !item.file_deleted_at
+      && item.has_stored_file !== false
+      && !wizardDocumentKind(item)
+    )),
+    [documents],
+  );
+  const intakeType = lead ? leadIntakeTypeFromLead(lead) : null;
+  const isQuestionnaireLead = intakeType === "questionnaire";
+  const isExternalIntakeLead = intakeType === "questionnaire" || intakeType === "form";
   const readiness = useMemo(() => new Map((lead?.readiness.steps ?? []).map((item) => [item.key, item.ready])), [lead?.readiness.steps]);
   const index = STEPS.findIndex((item) => item.id === step);
   const estimate = useMemo(() => {
@@ -1345,10 +1473,37 @@ export function LeadWizard({
     }
     let orderId = order?.id;
     if (!orderId) {
+      const needsDescription = [
+        draft.concern.trim(),
+        lead?.message ? `${tx("Комментарий клиента", "Kundennachricht")}: ${lead.message.trim()}` : "",
+        draft.serviceNeeds.length > 0
+          ? `${tx("Запрошенные услуги", "Gewünschte Leistungen")}: ${draft.serviceNeeds.map((value) => knownLeadProgramServiceLabel(value, t) ?? serviceNeedLabel(value, tx)).join(", ")}`
+          : "",
+        lead?.location_detailed
+          ? `${tx("Текущее местонахождение", "Aktueller Aufenthaltsort")}: ${leadLocationDetailedLabel(lead.location_detailed, t)}`
+          : lead?.location
+            ? `${tx("Текущее местонахождение", "Aktueller Aufenthaltsort")}: ${leadLocationLabel(lead.location, t)}`
+            : "",
+        lead?.preferred_location
+          ? `${tx("Предпочитаемое место лечения", "Bevorzugter Behandlungsort")}: ${leadPreferredLocationLabel(lead.preferred_location, t)}`
+          : "",
+        lead?.visit_timing
+          ? `${tx("Желаемый срок", "Gewünschter Zeitraum")}: ${leadVisitTimingLabel(lead.visit_timing, t)}`
+          : "",
+        lead?.needs_interpreter
+          ? tx("Нужен переводчик", "Dolmetscher benötigt")
+          : "",
+        lead?.can_travel != null
+          ? `${tx("Может приехать", "Kann anreisen")}: ${yesNoValue(lead.can_travel, tx)}`
+          : "",
+        lead?.has_travel_documents != null
+          ? `${tx("Проездные документы", "Reisedokumente")}: ${yesNoValue(lead.has_travel_documents, tx)}`
+          : "",
+      ].filter(Boolean).join("\n");
       orderId = (await createOrder({
         source_lead_id: leadId,
         contract_id: contractId,
-        needs_description: draft.concern.trim(),
+        needs_description: needsDescription,
       })).id;
     }
     for (const line of lines.filter(validLine)) {
@@ -1725,11 +1880,19 @@ export function LeadWizard({
             <section className="space-y-5">
               <h3 className="text-sm font-semibold text-foreground">{tx("Данные клиента", "Personendaten")}</h3>
               {lead ? (
-                <div className="grid gap-3 border-y border-border py-3 sm:grid-cols-3">
-                  <div><div className="text-xs text-muted-foreground">{tx("Тип", "Typ")}</div><div className="mt-1 text-sm font-medium text-foreground">{intakeTypeLabel(lead, tx)}</div></div>
-                  <div><div className="text-xs text-muted-foreground">{tx("Источник", "Quelle")}</div><div className="mt-1 text-sm font-medium text-foreground">{lead.source || tx("Не указано", "Nicht angegeben")}</div></div>
-                  <div><div className="text-xs text-muted-foreground">{tx("Сценарий", "Ablauf")}</div><div className="mt-1 text-sm font-medium text-foreground">{lead.flow || tx("Не указано", "Nicht angegeben")}</div></div>
-                </div>
+                <LeadQuestionnaireFacts
+                  items={[
+                    { label: tx("Тип", "Typ"), value: intakeTypeLabel(lead, tx) },
+                    { label: tx("Источник", "Quelle"), value: lead.source ? leadSourceLabel(lead.source, t) : tx("Не указано", "Nicht angegeben") },
+                    { label: tx("Сценарий", "Ablauf"), value: intakeFlowLabel(lead.flow, tx) },
+                    ...(isExternalIntakeLead ? [{
+                      label: tx("Язык заполнения", "Eingabesprache"),
+                      value: normalizedLanguageCode(lead.locale)
+                        ? languageLabel(normalizedLanguageCode(lead.locale), lang)
+                        : lead.locale || tx("Не указано", "Nicht angegeben"),
+                    }] : []),
+                  ]}
+                />
               ) : null}
               <div className="grid gap-4 md:grid-cols-2">
                 <Field
@@ -1751,6 +1914,14 @@ export function LeadWizard({
                     onChange={(event) => patch("firstName", event.target.value)}
                   />
                 </Field>
+                <Field label={tx("Отчество / второе имя", "Zweiter Vorname")}>
+                  <Input
+                    name="middle_name"
+                    autoComplete="additional-name"
+                    value={draft.middleName}
+                    onChange={(event) => patch("middleName", event.target.value)}
+                  />
+                </Field>
                 <Field
                   label={tx("Фамилия", "Nachname")}
                   required
@@ -1768,6 +1939,13 @@ export function LeadWizard({
                     value={draft.lastName}
                     onBlur={() => touchMasterField("lastName")}
                     onChange={(event) => patch("lastName", event.target.value)}
+                  />
+                </Field>
+                <Field label={tx("Суффикс имени", "Namenszusatz")}>
+                  <Input
+                    name="name_suffix"
+                    value={draft.suffix}
+                    onChange={(event) => patch("suffix", event.target.value)}
                   />
                 </Field>
                 <Field
@@ -1856,6 +2034,22 @@ export function LeadWizard({
                     onChange={(event) => patch("phone", event.target.value)}
                   />
                 </Field>
+                <Field label="WhatsApp">
+                  <Input
+                    name="whatsapp_number"
+                    autoComplete="tel"
+                    type="tel"
+                    value={draft.whatsappNumber}
+                    onChange={(event) => patch("whatsappNumber", event.target.value)}
+                  />
+                </Field>
+                <Field label={tx("Предпочитаемый язык", "Bevorzugte Sprache")}>
+                  <NativeComboboxSelect name="primary_language" value={draft.language} className={selectClass} onChange={(event) => patch("language", event.target.value)}>
+                    <option value="">{tx("Выберите", "Auswählen")}</option>
+                    {draft.language && !LANGUAGE_OPTIONS.some((item) => item.value === draft.language) ? <option value={draft.language}>{draft.language}</option> : null}
+                    {LANGUAGE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{languageLabel(item.value, lang)}</option>)}
+                  </NativeComboboxSelect>
+                </Field>
                 <Field
                   label={tx("Улица и дом", "Straße und Hausnummer")}
                 >
@@ -1886,6 +2080,14 @@ export function LeadWizard({
                     onChange={(event) => patch("city", event.target.value)}
                   />
                 </Field>
+                <Field label={tx("Регион / область", "Region / Bundesland")}>
+                  <Input
+                    name="address_region"
+                    autoComplete="address-level1"
+                    value={draft.state}
+                    onChange={(event) => patch("state", event.target.value)}
+                  />
+                </Field>
                 <Field
                   label={tx("Почтовый индекс", "Postleitzahl")}
                   required
@@ -1905,17 +2107,24 @@ export function LeadWizard({
                     onChange={(event) => patch("zip", event.target.value)}
                   />
                 </Field>
-                <Field label={tx("Страна", "Land")}>
+                <Field label={tx("Страна", "Land")} className="md:col-span-2">
                   <CountrySelect value={draft.country} lang={lang} className={selectClass} aria-label={tx("Страна", "Land")} onChange={(value) => patch("country", value ?? "")} />
                 </Field>
-                <Field label={tx("Предпочитаемый язык", "Bevorzugte Sprache")}>
-                  <NativeComboboxSelect name="primary_language" value={draft.language} className={selectClass} onChange={(event) => patch("language", event.target.value)}>
-                    <option value="">{tx("Выберите", "Auswählen")}</option>
-                    {draft.language && !LANGUAGE_OPTIONS.some((item) => item.value === draft.language) ? <option value={draft.language}>{draft.language}</option> : null}
-                    {LANGUAGE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{languageLabel(item.value, lang)}</option>)}
-                  </NativeComboboxSelect>
-                </Field>
               </div>
+              {isExternalIntakeLead && lead ? (
+                <LeadQuestionnaireFacts
+                  items={[
+                    { label: tx("Тип основного телефона", "Typ der Hauptnummer"), value: phoneTypeLabel(lead.primary_phone_type, tx) },
+                    {
+                      label: tx("Телефоны из опросника", "Telefonnummern aus dem Fragebogen"),
+                      value: lead.phones?.length
+                        ? lead.phones.map((item) => `${item.number} · ${phoneTypeLabel(item.type, tx)}`).join("\n")
+                        : tx("Не указано", "Nicht angegeben"),
+                      wide: true,
+                    },
+                  ]}
+                />
+              ) : null}
             </section>
           ) : null}
 
@@ -1961,23 +2170,31 @@ export function LeadWizard({
                   onChange={(event) => patch("concern", event.target.value)}
                 />
               </Field>
-              {lead.intake_source === "visitor_facade" ? (
-                <div className="grid gap-x-6 border-y border-border sm:grid-cols-2">
-                  {[
-                    [tx("Нужен переводчик", "Dolmetscher benötigt"), yesNoValue(lead.needs_interpreter, tx)],
-                    [tx("Может приехать", "Kann anreisen"), yesNoValue(lead.can_travel, tx)],
-                    [tx("Есть проездные документы", "Reisedokumente vorhanden"), yesNoValue(lead.has_travel_documents, tx)],
-                    [tx("Предпочитаемое место", "Bevorzugter Ort"), lead.preferred_location || lead.location_detailed || lead.location || tx("Не указано", "Nicht angegeben")],
-                    [tx("Желаемый срок", "Gewünschter Zeitraum"), lead.visit_timing || tx("Не указано", "Nicht angegeben")],
-                    [tx("Интерес к программе", "Interesse am Programm"), lead.selected_program ? serviceNeedLabel(lead.selected_program, tx) : yesNoValue(lead.wants_membership, tx)],
-                  ].map(([label, value]) => (
-                    <div key={label} className="flex items-start justify-between gap-4 border-b border-border/70 py-3 text-sm">
-                      <span className="text-muted-foreground">{label}</span><span className="text-right font-medium text-foreground">{value}</span>
-                    </div>
-                  ))}
-                </div>
+              {isQuestionnaireLead ? (
+                <LeadQuestionnaireFacts
+                  items={[
+                    { label: tx("Нужен переводчик", "Dolmetscher benötigt"), value: yesNoValue(lead.needs_interpreter, tx) },
+                    { label: tx("Может приехать", "Kann anreisen"), value: yesNoValue(lead.can_travel, tx) },
+                    { label: tx("Есть проездные документы", "Reisedokumente vorhanden"), value: yesNoValue(lead.has_travel_documents, tx) },
+                    { label: tx("Регион нахождения", "Aufenthaltsregion"), value: lead.location ? leadLocationLabel(lead.location, t) : tx("Не указано", "Nicht angegeben") },
+                    { label: tx("Детальная локация", "Detaillierter Standort"), value: lead.location_detailed ? leadLocationDetailedLabel(lead.location_detailed, t) : tx("Не указано", "Nicht angegeben") },
+                    { label: tx("Предпочитаемое место лечения", "Bevorzugter Behandlungsort"), value: lead.preferred_location ? leadPreferredLocationLabel(lead.preferred_location, t) : tx("Не указано", "Nicht angegeben") },
+                    { label: tx("Желаемый срок", "Gewünschter Zeitraum"), value: lead.visit_timing ? leadVisitTimingLabel(lead.visit_timing, t) : tx("Не указано", "Nicht angegeben") },
+                    { label: tx("Интерес к программе", "Interesse an einem Programm"), value: yesNoValue(lead.wants_membership, tx) },
+                    { label: tx("Выбранная программа", "Gewähltes Programm"), value: lead.selected_program ? leadProgramServiceLabel(lead.selected_program, t) : tx("Не указано", "Nicht angegeben") },
+                  ]}
+                />
               ) : null}
-              <div className="space-y-3"><span className="block text-sm font-medium text-foreground">{tx("Запрошенные услуги", "Gewünschte Leistungen")}</span><div className="grid gap-2 sm:grid-cols-2">{Array.from(new Set([...SERVICE_NEED_OPTIONS, ...draft.serviceNeeds, ...(lead.selected_program ? [lead.selected_program] : [])])).map((value) => <label key={value} className="flex items-center gap-3 rounded-md border border-border px-3 py-2.5"><input type="checkbox" className="size-4 accent-[var(--brand)]" checked={draft.serviceNeeds.includes(value)} onChange={(event) => patch("serviceNeeds", event.target.checked ? [...draft.serviceNeeds, value] : draft.serviceNeeds.filter((item) => item !== value))} /><span className="text-sm text-foreground">{serviceNeedLabel(value, tx)}</span></label>)}</div></div>
+              {lead.message ? (
+                <LeadQuestionnaireFacts
+                  items={[{
+                    label: tx("Комментарий клиента", "Kundennachricht"),
+                    value: lead.message,
+                    wide: true,
+                  }]}
+                />
+              ) : null}
+              <div className="space-y-3"><span className="block text-sm font-medium text-foreground">{tx("Запрошенные услуги", "Gewünschte Leistungen")}</span><div className="grid gap-2 sm:grid-cols-2">{Array.from(new Set([...SERVICE_NEED_OPTIONS, ...draft.serviceNeeds, ...(lead.selected_program ? [lead.selected_program] : [])])).map((value) => <label key={value} className="flex items-center gap-3 rounded-md border border-border px-3 py-2.5"><input type="checkbox" className="size-4 accent-[var(--brand)]" checked={draft.serviceNeeds.includes(value)} onChange={(event) => patch("serviceNeeds", event.target.checked ? [...draft.serviceNeeds, value] : draft.serviceNeeds.filter((item) => item !== value))} /><span className="text-sm text-foreground">{knownLeadProgramServiceLabel(value, t) ?? serviceNeedLabel(value, tx)}</span></label>)}</div></div>
               <Field label={tx("Комментарий менеджера", "Kommentar des Managers")}><textarea className={cn(textareaClass, "min-h-24")} value={draft.serviceNotes} onChange={(event) => patch("serviceNotes", event.target.value)} /></Field>
               <Field label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")}>
                 <Input
@@ -2114,6 +2331,46 @@ export function LeadWizard({
                   </div>
                 );
               })}
+              {supplementaryDocuments.length > 0 ? (
+                <div className="space-y-3 border-y border-border py-3">
+                  <div className="text-sm font-medium text-foreground">
+                    {tx("Другие документы", "Weitere Dokumente")}
+                  </div>
+                  <div className="divide-y divide-border rounded-md border border-border">
+                    {supplementaryDocuments.map((document) => (
+                      <div key={document.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
+                        <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-medium text-foreground">
+                            {document.original_filename || document.auto_name}
+                          </div>
+                          <div className="mt-0.5 text-xs text-muted-foreground">
+                            {formatFileSize(document.file_size, lang)}
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button type="button" variant="ghost" size="icon-sm" title={tx("Скачать файл", "Datei herunterladen")} aria-label={tx("Скачать файл", "Datei herunterladen")} disabled={isBusy} onClick={() => void downloadDocument(document)}>
+                            {busy === `download-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+                          </Button>
+                          <Button type="button" variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" title={tx("Удалить файл", "Datei löschen")} aria-label={tx("Удалить файл", "Datei löschen")} disabled={isBusy} onClick={() => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}>
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {isExternalIntakeLead && lead ? (
+                <LeadQuestionnaireFacts
+                  items={[
+                    { label: tx("Согласие на связь по E-Mail", "Einwilligung zur Kontaktaufnahme per E-Mail"), value: yesNoValue(lead.email_consent, tx) },
+                    { label: tx("Согласие на связь по WhatsApp", "Einwilligung zur Kontaktaufnahme per WhatsApp"), value: yesNoValue(lead.whatsapp_consent, tx) },
+                    { label: tx("Согласие на автоматизированный контакт", "Einwilligung zur automatisierten Kontaktaufnahme"), value: yesNoValue(lead.consent_automated_contact, tx) },
+                    { label: tx("Информация о праве отказа подтверждена", "Hinweis zum Widerruf bestätigt"), value: yesNoValue(lead.consent_opt_out, tx) },
+                  ]}
+                />
+              ) : null}
               <div className="border-y border-border"><ToggleRow checked={draft.privacyConsent} disabled={isBusy} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} /><ToggleRow checked={draft.healthcareConsent} disabled={isBusy} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} /></div>
             </section>
           ) : null}
@@ -2122,6 +2379,17 @@ export function LeadWizard({
             <section className="space-y-5">
               <h3 className="text-sm font-semibold text-foreground">{tx("Договор, заказ и смета", "Vertrag, Auftrag und Kostenvoranschlag")}</h3>
               <div className="flex flex-wrap items-center justify-between gap-3 border-y border-border py-3"><div><div className="text-sm font-medium text-foreground">{tx("Рамочный договор", "Rahmenvertrag")}</div><div className="mt-1 text-xs text-muted-foreground">{contract?.contract_number ?? tx("Договор ещё не создан", "Vertrag noch nicht erstellt")}</div></div><div className="flex items-center gap-2"><StateMark done={contract?.status === "signed"} label={contract?.status === "signed" ? tx("Договор подписан", "Vertrag unterzeichnet") : tx("Договор не подписан", "Vertrag nicht unterzeichnet")} /><Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void signContract()}>{busy === "contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileCheck2 className="size-3.5" />}{tx("Подписать договор", "Vertrag unterzeichnen")}</Button></div></div>
+              {draft.serviceNeeds.length > 0 ? (
+                <LeadQuestionnaireFacts
+                  items={[
+                    {
+                      label: tx("Запрос клиента", "Kundenbedarf"),
+                      value: draft.serviceNeeds.map((value) => knownLeadProgramServiceLabel(value, t) ?? serviceNeedLabel(value, tx)).join(", "),
+                      wide: true,
+                    },
+                  ]}
+                />
+              ) : null}
               <div className="space-y-3">
                 <span className="text-sm font-medium text-foreground">{tx("Услуги", "Leistungen")}</span>
                 <NativeComboboxSelect

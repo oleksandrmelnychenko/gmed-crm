@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeLeadConversionGate,
   filterLeadsByContact,
+  leadIntakeTypeFromLead,
   leadLanguageLabel,
   leadSourceLabel,
   leadTypeFromLead,
@@ -211,6 +212,22 @@ describe("leadTypeFromLead", () => {
         }),
       ),
     ).toBe("console");
+  });
+});
+
+describe("leadIntakeTypeFromLead", () => {
+  it("keeps questionnaire origin after the lead is promoted into the console", () => {
+    expect(
+      leadIntakeTypeFromLead(
+        lead({
+          lead_type: "console",
+          intake_source: "website_wizard",
+          source: "Website Wizard",
+          flow: "medical",
+          console_promoted_at: "2026-06-30T12:00:00Z",
+        }),
+      ),
+    ).toBe("questionnaire");
   });
 });
 

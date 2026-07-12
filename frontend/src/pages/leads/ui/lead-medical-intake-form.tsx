@@ -11,6 +11,8 @@ import {
   CaseClinicalEditorSection,
   CaseClinicalField,
 } from "@/pages/cases/ui/case-clinical-editor-section";
+import { LeadQuestionnaireFacts } from "@/pages/leads/ui/lead-questionnaire-facts";
+import { leadIntakeTypeFromLead } from "@/pages/leads/model/leads-model";
 import {
   DARREICHUNGSFORM_OPTIONS,
   EINNAHMEFORM_OPTIONS,
@@ -93,8 +95,8 @@ function clinicalId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function yesNoValue(value: boolean | null, tx: Tx) {
-  if (value === null) return tx("Не указано", "Nicht angegeben");
+function yesNoValue(value: boolean | null | undefined, tx: Tx) {
+  if (value == null) return tx("Не указано", "Nicht angegeben");
   return value ? tx("Да", "Ja") : tx("Нет", "Nein");
 }
 
@@ -143,22 +145,17 @@ export function LeadMedicalIntakeForm({
 
   return (
     <section className="space-y-4">
-      {lead.intake_source === "visitor_facade" ? (
-        <div className="grid gap-x-6 border-y border-border sm:grid-cols-2">
-          {[
-            [tx("Сейчас проходит лечение", "Derzeit in Behandlung"), yesNoValue(lead.currently_in_treatment, tx)],
-            [tx("Риск для поездки", "Gesundheitsrisiko für die Reise"), yesNoValue(lead.has_health_risk_for_travel, tx)],
-            [tx("Есть медицинские документы", "Medizinische Unterlagen vorhanden"), optionValue(lead.has_medical_records, tx)],
-            [tx("Документы на принятом языке", "Unterlagen in akzeptierter Sprache"), yesNoValue(lead.records_in_accepted_language, tx)],
-            [tx("Есть страховка", "Krankenversicherung vorhanden"), yesNoValue(lead.has_insurance, tx)],
-            [tx("Страховка покрывает лечение в Германии", "Versicherungsschutz in Deutschland"), optionValue(lead.insurance_covers_germany, tx)],
-          ].map(([label, value]) => (
-            <div key={label} className="flex items-start justify-between gap-4 border-b border-border/70 py-3 text-sm">
-              <span className="text-muted-foreground">{label}</span>
-              <span className="text-right font-medium text-foreground">{value}</span>
-            </div>
-          ))}
-        </div>
+      {leadIntakeTypeFromLead(lead) === "questionnaire" ? (
+        <LeadQuestionnaireFacts
+          items={[
+            { label: tx("Сейчас проходит лечение", "Derzeit in Behandlung"), value: yesNoValue(lead.currently_in_treatment, tx) },
+            { label: tx("Риск для поездки", "Gesundheitsrisiko für die Reise"), value: yesNoValue(lead.has_health_risk_for_travel, tx) },
+            { label: tx("Есть медицинские документы", "Medizinische Unterlagen vorhanden"), value: optionValue(lead.has_medical_records, tx) },
+            { label: tx("Документы на принятом языке", "Unterlagen in akzeptierter Sprache"), value: yesNoValue(lead.records_in_accepted_language, tx) },
+            { label: tx("Есть страховка", "Krankenversicherung vorhanden"), value: yesNoValue(lead.has_insurance, tx) },
+            { label: tx("Страховка покрывает лечение в Германии", "Versicherungsschutz in Deutschland"), value: optionValue(lead.insurance_covers_germany, tx) },
+          ]}
+        />
       ) : null}
 
       <CaseClinicalEditorSection

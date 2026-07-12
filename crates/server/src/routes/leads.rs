@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::routes::documents::{NewStoredDocument, persist_document_file};
 use crate::state::AppState;
 use gmed_domain::role::Role;
 
@@ -34,6 +35,10 @@ pub fn router() -> Router<AppState> {
         .route("/leads", get(list_leads).post(create_lead))
         .route("/leads/{lead_id}", get(get_lead))
         .route("/leads/{lead_id}/update", post(update_lead))
+        .route(
+            "/leads/{lead_id}/import-attachments",
+            post(import_lead_attachments),
+        )
         .route(
             "/leads/{lead_id}/promote-console",
             post(promote_lead_to_console),
@@ -57,6 +62,62 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         })),
     )
         .into_response()
+}
+
+fn normalized_language_code(value: &str) -> Option<&'static str> {
+    let normalized = value.trim().to_lowercase().replace('_', "-");
+    let base = normalized.split('-').next().unwrap_or_default();
+    match normalized.as_str() {
+        "deutsch" | "german" => Some("de"),
+        "englisch" | "english" => Some("en"),
+        "russisch" | "russian" => Some("ru"),
+        "ukrainisch" | "ukrainian" => Some("uk"),
+        "arabisch" | "arabic" => Some("ar"),
+        "portugiesisch" | "portuguese" => Some("pt"),
+        "französisch" | "french" => Some("fr"),
+        "spanisch" | "spanish" => Some("es"),
+        "italienisch" | "italian" => Some("it"),
+        "türkisch" | "turkish" => Some("tr"),
+        "polnisch" | "polish" => Some("pl"),
+        "tschechisch" | "czech" => Some("cs"),
+        "dänisch" | "danish" => Some("da"),
+        "griechisch" | "greek" => Some("el"),
+        "lettisch" | "latvian" => Some("lv"),
+        "chinesisch" | "chinese" => Some("zh"),
+        "persisch" | "persian" | "farsi" => Some("fa"),
+        "urdu" => Some("ur"),
+        _ => match base {
+            "de" => Some("de"),
+            "uk" | "ua" => Some("uk"),
+            "ru" => Some("ru"),
+            "en" => Some("en"),
+            "ar" => Some("ar"),
+            "fa" => Some("fa"),
+            "pt" => Some("pt"),
+            "fr" => Some("fr"),
+            "es" => Some("es"),
+            "it" => Some("it"),
+            "tr" => Some("tr"),
+            "pl" => Some("pl"),
+            "cs" | "cz" => Some("cs"),
+            "da" => Some("da"),
+            "el" | "gr" => Some("el"),
+            "lv" => Some("lv"),
+            "zh" => Some("zh"),
+            "ur" => Some("ur"),
+            _ => None,
+        },
+    }
+}
+
+pub(crate) fn normalize_intake_language(
+    value: Option<&str>,
+    locale: Option<&str>,
+) -> Option<String> {
+    value
+        .and_then(normalized_language_code)
+        .or_else(|| locale.and_then(normalized_language_code))
+        .map(str::to_string)
 }
 
 // ----------------------------------------------------------------------------
@@ -101,10 +162,14 @@ struct UpdateLeadRequest {
     // Wizard-editable fields (#12): the staff wizard edits far more than the
     // original gate form. All optional + COALESCE, so partial saves are fine.
     first_name: Option<String>,
+    middle_name: Option<String>,
     last_name: Option<String>,
+    suffix: Option<String>,
     street_address: Option<String>,
     city: Option<String>,
+    state: Option<String>,
     zip_code: Option<String>,
+    whatsapp_number: Option<String>,
     needs_interpreter: Option<bool>,
     primary_concern_text: Option<String>,
     additional_concerns: Option<String>,
@@ -1016,7 +1081,8 @@ async fn get_lead(
     };
 
     let attachments = match sqlx::query(
-        r#"SELECT id, file_name, content_type, size_bytes, uploaded_at
+        r#"SELECT id, file_name, content_type, size_bytes, uploaded_at,
+                  imported_document_id, imported_at
            FROM lead_attachments
            WHERE lead_id = $1
            ORDER BY uploaded_at ASC"#,
@@ -1037,6 +1103,13 @@ async fn get_lead(
                         .try_get::<chrono::DateTime<chrono::Utc>, _>("uploaded_at")
                         .map(|v| v.to_rfc3339())
                         .unwrap_or_default(),
+                    "imported_document_id": r
+                        .try_get::<Option<Uuid>, _>("imported_document_id")
+                        .unwrap_or_default(),
+                    "imported_at": r
+                        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("imported_at")
+                        .unwrap_or_default()
+                        .map(|value| value.to_rfc3339()),
                 })
             })
             .collect::<Vec<_>>(),
@@ -1353,6 +1426,17 @@ async fn update_lead(
         _ => None,
     };
 
+    let primary_language = match body.primary_language.as_deref() {
+        Some(value) if value.trim().is_empty() => Some(String::new()),
+        Some(value) => match normalized_language_code(value) {
+            Some(value) => Some(value.to_string()),
+            None => {
+                return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid primary_language");
+            }
+        },
+        None => None,
+    };
+
     let first_name = match body.first_name.as_deref() {
         Some(value) if value.trim().is_empty() => {
             return err(
@@ -1401,10 +1485,14 @@ async fn update_lead(
         && body.consent_privacy_practices.is_none()
         && body.notes.is_none()
         && body.first_name.is_none()
+        && body.middle_name.is_none()
         && body.last_name.is_none()
+        && body.suffix.is_none()
         && body.street_address.is_none()
         && body.city.is_none()
+        && body.state.is_none()
         && body.zip_code.is_none()
+        && body.whatsapp_number.is_none()
         && body.needs_interpreter.is_none()
         && body.primary_concern_text.is_none()
         && body.additional_concerns.is_none()
@@ -1439,14 +1527,18 @@ async fn update_lead(
                selected_program = COALESCE($20, selected_program),
                services = COALESCE($21, services),
                requested_specialties = COALESCE($22::jsonb, requested_specialties),
-               wizard_state = COALESCE($23::jsonb, wizard_state)
+               wizard_state = COALESCE($23::jsonb, wizard_state),
+               middle_name = COALESCE($24, middle_name),
+               suffix = COALESCE($25, suffix),
+               state = COALESCE($26, state),
+               whatsapp_number = COALESCE($27, whatsapp_number)
            WHERE id = $1"#,
     )
     .bind(lead_id)
     .bind(body.email.as_deref())
     .bind(body.phone.as_deref())
     .bind(body.country.as_deref())
-    .bind(body.primary_language.as_deref())
+    .bind(primary_language.as_deref())
     .bind(date_of_birth)
     .bind(legal_sex)
     .bind(compliance_status)
@@ -1469,6 +1561,10 @@ async fn update_lead(
             .map(|value| value.to_string()),
     )
     .bind(body.wizard_state.as_ref().map(|value| value.to_string()))
+    .bind(body.middle_name.as_deref().map(str::trim))
+    .bind(body.suffix.as_deref().map(str::trim))
+    .bind(body.state.as_deref().map(str::trim))
+    .bind(body.whatsapp_number.as_deref().map(str::trim))
     .execute(&state.db)
     .await
     {
@@ -2053,6 +2149,341 @@ async fn transfer_lead_clinical_profile(
     Ok(())
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct LeadPatientContact {
+    contact_kind: &'static str,
+    contact_type: &'static str,
+    value: String,
+    is_primary: bool,
+    notes: Option<String>,
+}
+
+fn contact_key(kind: &str, value: &str) -> String {
+    if kind == "phone" {
+        value
+            .chars()
+            .filter(|character| character.is_ascii_digit())
+            .collect()
+    } else {
+        value.trim().to_lowercase()
+    }
+}
+
+fn push_lead_contact(
+    contacts: &mut Vec<LeadPatientContact>,
+    contact_kind: &'static str,
+    contact_type: &'static str,
+    value: &str,
+    is_primary: bool,
+    note: Option<&str>,
+) {
+    let value = value.trim();
+    if value.is_empty() {
+        return;
+    }
+    let key = contact_key(contact_kind, value);
+    if key.is_empty() {
+        return;
+    }
+
+    if let Some(existing) = contacts.iter_mut().find(|contact| {
+        contact.contact_kind == contact_kind
+            && contact_key(contact.contact_kind, &contact.value) == key
+    }) {
+        existing.is_primary |= is_primary;
+        if let Some(note) = note.filter(|note| !note.trim().is_empty()) {
+            match existing.notes.as_mut() {
+                Some(notes) if !notes.split("; ").any(|item| item == note) => {
+                    notes.push_str("; ");
+                    notes.push_str(note);
+                }
+                None => existing.notes = Some(note.to_string()),
+                _ => {}
+            }
+        }
+        return;
+    }
+
+    contacts.push(LeadPatientContact {
+        contact_kind,
+        contact_type,
+        value: value.to_string(),
+        is_primary,
+        notes: note.map(str::to_string),
+    });
+}
+
+fn patient_contact_type(value: Option<&str>) -> (&'static str, Option<&'static str>) {
+    match value.unwrap_or_default().trim().to_lowercase().as_str() {
+        "work" | "business" => ("work", Some("Work")),
+        "mobile" | "cell" => ("private", Some("Mobile")),
+        "home" => ("private", Some("Home")),
+        "private" => ("private", None),
+        "" => ("private", None),
+        _ => ("other", Some("Other")),
+    }
+}
+
+fn questionnaire_contact_consent_note(value: Option<bool>) -> Option<&'static str> {
+    match value {
+        Some(true) => Some("Questionnaire contact consent: granted"),
+        Some(false) => Some("Questionnaire contact consent: declined"),
+        None => None,
+    }
+}
+
+fn lead_patient_contacts(
+    email: Option<&str>,
+    email_consent: Option<bool>,
+    primary_phone: Option<&str>,
+    phones: &Value,
+    whatsapp_number: Option<&str>,
+    whatsapp_consent: Option<bool>,
+) -> Vec<LeadPatientContact> {
+    let mut contacts = Vec::new();
+    if let Some(email) = email {
+        push_lead_contact(
+            &mut contacts,
+            "email",
+            "private",
+            email,
+            true,
+            questionnaire_contact_consent_note(email_consent),
+        );
+    }
+    if let Some(phone) = primary_phone {
+        push_lead_contact(&mut contacts, "phone", "private", phone, true, None);
+    }
+
+    if let Some(entries) = phones.as_array() {
+        for entry in entries {
+            let Some(number) = entry.get("number").and_then(Value::as_str) else {
+                continue;
+            };
+            let (contact_type, note) =
+                patient_contact_type(entry.get("type").and_then(Value::as_str));
+            let has_primary_phone = contacts
+                .iter()
+                .any(|contact| contact.contact_kind == "phone" && contact.is_primary);
+            push_lead_contact(
+                &mut contacts,
+                "phone",
+                contact_type,
+                number,
+                !has_primary_phone,
+                note,
+            );
+        }
+    }
+
+    if let Some(number) = whatsapp_number {
+        let has_primary_phone = contacts
+            .iter()
+            .any(|contact| contact.contact_kind == "phone" && contact.is_primary);
+        push_lead_contact(
+            &mut contacts,
+            "phone",
+            "private",
+            number,
+            !has_primary_phone,
+            Some("WhatsApp"),
+        );
+        if let Some(note) = questionnaire_contact_consent_note(whatsapp_consent) {
+            push_lead_contact(
+                &mut contacts,
+                "phone",
+                "private",
+                number,
+                !has_primary_phone,
+                Some(note),
+            );
+        }
+    }
+
+    contacts
+}
+
+fn patient_country(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    let normalized = value.to_uppercase();
+    let canonical = match normalized.as_str() {
+        "DE" | "GERMANY" => "Germany",
+        "UA" | "UKRAINE" => "Ukraine",
+        "AT" | "AUSTRIA" => "Austria",
+        "CH" | "SWITZERLAND" => "Switzerland",
+        "PL" | "POLAND" => "Poland",
+        "CZ" | "CZECH REPUBLIC" => "Czech Republic",
+        "DK" | "DENMARK" => "Denmark",
+        "LV" | "LATVIA" => "Latvia",
+        "GR" | "GREECE" => "Greece",
+        "TR" | "TURKEY" => "Turkey",
+        "AE" | "UNITED ARAB EMIRATES" => "United Arab Emirates",
+        "SA" | "SAUDI ARABIA" => "Saudi Arabia",
+        "EG" | "EGYPT" => "Egypt",
+        "NG" | "NIGERIA" => "Nigeria",
+        "GH" | "GHANA" => "Ghana",
+        "BR" | "BRAZIL" => "Brazil",
+        "CN" | "CHINA" => "China",
+        "RU" | "RUSSIA" => "Russia",
+        "PK" | "PAKISTAN" => "Pakistan",
+        "GB" | "UNITED KINGDOM" => "United Kingdom",
+        "US" | "UNITED STATES" => "United States",
+        _ => value,
+    };
+    Some(canonical.to_string())
+}
+
+async fn import_lead_attachments_internal(
+    state: &AppState,
+    lead_id: Uuid,
+    uploaded_by: Uuid,
+) -> Result<usize, axum::response::Response> {
+    let lead_exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM leads WHERE id = $1)",
+    )
+    .bind(lead_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, lead_id = %lead_id, "check lead before attachment import");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })?;
+    if !lead_exists {
+        return Err(err(StatusCode::NOT_FOUND, "Lead not found"));
+    }
+
+    let attachments = sqlx::query(
+        r#"SELECT id, file_name, content_type, data
+           FROM lead_attachments
+           WHERE lead_id = $1 AND imported_at IS NULL
+           ORDER BY uploaded_at, id"#,
+    )
+    .bind(lead_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, lead_id = %lead_id, "load questionnaire attachments for import");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to import attachments")
+    })?;
+
+    let mut imported = 0usize;
+    for attachment in attachments {
+        let attachment_id: Uuid = attachment.try_get("id").unwrap_or_default();
+        let file_name: String = attachment.try_get("file_name").unwrap_or_default();
+        let content_type: Option<String> = attachment.try_get("content_type").unwrap_or_default();
+        let data: Vec<u8> = attachment.try_get("data").unwrap_or_default();
+
+        let document_exists =
+            sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM documents WHERE id = $1)")
+                .bind(attachment_id)
+                .fetch_one(&state.db)
+                .await
+                .unwrap_or(false);
+
+        if !document_exists {
+            let mime_type = content_type
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("application/octet-stream");
+            let input = NewStoredDocument {
+                document_id: Some(attachment_id),
+                patient_id: None,
+                lead_id: Some(lead_id),
+                order_id: None,
+                appointment_id: None,
+                auto_name: &file_name,
+                original_filename: &file_name,
+                art: "questionnaire_attachment",
+                category: Some("medical"),
+                status: "active",
+                visibility: "internal",
+                is_medical: true,
+                mime_type,
+                klinik: None,
+                ursprung: Some("questionnaire"),
+                notes: Some("Imported from the client questionnaire"),
+                document_direction: Some("incoming"),
+                document_variant: Some("original"),
+                document_language: None,
+                access_category: None,
+                document_date: None,
+                source_person: None,
+                source_institution: None,
+                addressee_person: None,
+                addressee_institution: None,
+                financial_status: None,
+                payment_due_date: None,
+                payment_date: None,
+                payment_method: None,
+                generated_template_id: None,
+                version_root_document_id: None,
+                replaces_document_id: None,
+                version_number: 1,
+                uploaded_by,
+            };
+            match persist_document_file(state, &data, &input).await {
+                Ok(_) => imported += 1,
+                Err(response) => {
+                    let created_concurrently = sqlx::query_scalar::<_, bool>(
+                        "SELECT EXISTS (SELECT 1 FROM documents WHERE id = $1)",
+                    )
+                    .bind(attachment_id)
+                    .fetch_one(&state.db)
+                    .await
+                    .unwrap_or(false);
+                    if !created_concurrently {
+                        return Err(response);
+                    }
+                }
+            }
+        }
+
+        sqlx::query(
+            r#"UPDATE lead_attachments
+               SET imported_document_id = $2, imported_at = now()
+               WHERE id = $1 AND imported_at IS NULL"#,
+        )
+        .bind(attachment_id)
+        .bind(attachment_id)
+        .execute(&state.db)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, lead_id = %lead_id, attachment_id = %attachment_id, "mark questionnaire attachment imported");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to import attachments")
+        })?;
+    }
+
+    if imported > 0 {
+        state.audit_sender.try_send(audit::domain_event(
+            "import_lead_attachments",
+            Some(uploaded_by),
+            "lead",
+            Some(lead_id),
+            json!({ "imported_count": imported }),
+        ));
+    }
+
+    Ok(imported)
+}
+
+async fn import_lead_attachments(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
+        return response;
+    }
+
+    match import_lead_attachments_internal(&state, lead_id, auth.user_id).await {
+        Ok(imported) => Json(json!({ "imported": imported })).into_response(),
+        Err(response) => response,
+    }
+}
+
 async fn convert_lead(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -2060,6 +2491,42 @@ async fn convert_lead(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
         return e;
+    }
+
+    let preflight = match sqlx::query(
+        "SELECT converted_patient_id, failed_outcome_status FROM leads WHERE id = $1",
+    )
+    .bind(lead_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
+        Err(error) => {
+            tracing::error!(error = %error, lead_id = %lead_id, "preflight lead conversion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if preflight
+        .try_get::<Option<Uuid>, _>("converted_patient_id")
+        .unwrap_or_default()
+        .is_some()
+    {
+        return err(StatusCode::CONFLICT, "Lead already converted");
+    }
+    if preflight
+        .try_get::<String, _>("failed_outcome_status")
+        .unwrap_or_else(|_| "none".to_string())
+        != "none"
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Failed leads cannot be converted into patients",
+        );
+    }
+
+    if let Err(response) = import_lead_attachments_internal(&state, lead_id, auth.user_id).await {
+        return response;
     }
 
     let mut tx = match state.db.begin().await {
@@ -2071,9 +2538,13 @@ async fn convert_lead(
     };
 
     let lead = match sqlx::query(
-        r#"SELECT id, first_name, last_name, email, phone, country, primary_language,
+        r#"SELECT id, first_name, middle_name, last_name, suffix,
+                  email, email_consent, phone, phones, whatsapp_number, whatsapp_consent,
+                  country, primary_language, locale,
+                  has_insurance,
                   date_of_birth, legal_sex, qualification_status, converted_patient_id,
-                  failed_outcome_status, street_address, city, zip_code, wizard_state
+                  failed_outcome_status, street_address, city, zip_code, notes,
+                  wizard_state
            FROM leads WHERE id = $1
            FOR UPDATE"#,
     )
@@ -2149,23 +2620,70 @@ async fn convert_lead(
     };
     let pid = format!("P-{}-{:04}", chrono::Utc::now().format("%Y%m%d"), seq);
 
-    let first_name: String = lead.try_get("first_name").unwrap_or_default();
-    let last_name: String = lead.try_get("last_name").unwrap_or_default();
+    let first_name = [
+        lead.try_get::<String, _>("first_name").unwrap_or_default(),
+        lead.try_get::<Option<String>, _>("middle_name")
+            .unwrap_or_default()
+            .unwrap_or_default(),
+    ]
+    .into_iter()
+    .filter(|value| !value.trim().is_empty())
+    .collect::<Vec<_>>()
+    .join(" ");
+    let last_name = [
+        lead.try_get::<String, _>("last_name").unwrap_or_default(),
+        lead.try_get::<Option<String>, _>("suffix")
+            .unwrap_or_default()
+            .unwrap_or_default(),
+    ]
+    .into_iter()
+    .filter(|value| !value.trim().is_empty())
+    .collect::<Vec<_>>()
+    .join(" ");
     let email: Option<String> = lead.try_get("email").ok().flatten();
+    let email_consent: Option<bool> = lead.try_get("email_consent").ok().flatten();
     let phone: Option<String> = lead.try_get("phone").ok().flatten();
-    let country: Option<String> = lead.try_get("country").ok().flatten();
+    let phones: Value = lead.try_get("phones").unwrap_or_else(|_| json!([]));
+    let whatsapp_number: Option<String> = lead.try_get("whatsapp_number").ok().flatten();
+    let whatsapp_consent: Option<bool> = lead.try_get("whatsapp_consent").ok().flatten();
+    let lead_country: Option<String> = lead.try_get("country").ok().flatten();
+    let country = patient_country(lead_country.as_deref());
     let primary_language: Option<String> = lead.try_get("primary_language").ok().flatten();
-    let languages: Vec<String> = primary_language.into_iter().collect();
+    let locale: Option<String> = lead.try_get("locale").ok().flatten();
+    let languages: Vec<String> =
+        normalize_intake_language(primary_language.as_deref(), locale.as_deref())
+            .into_iter()
+            .collect();
+    let has_insurance: Option<bool> = lead.try_get("has_insurance").ok().flatten();
+    let insurance_type = match has_insurance {
+        Some(false) => Some("self_pay"),
+        Some(true) if country.as_deref() != Some("Germany") => Some("foreign"),
+        _ => None,
+    };
     let street_address: Option<String> = lead.try_get("street_address").ok().flatten();
     let city: Option<String> = lead.try_get("city").ok().flatten();
     let zip_code: Option<String> = lead.try_get("zip_code").ok().flatten();
+    let lead_notes: Option<String> = lead.try_get("notes").ok().flatten();
     let wizard_state: Value = lead.try_get("wizard_state").unwrap_or_else(|_| json!({}));
+    let contacts = lead_patient_contacts(
+        email.as_deref(),
+        email_consent,
+        phone.as_deref(),
+        &phones,
+        whatsapp_number.as_deref(),
+        whatsapp_consent,
+    );
+    let phone_secondary = contacts
+        .iter()
+        .find(|contact| contact.contact_kind == "phone" && !contact.is_primary)
+        .map(|contact| contact.value.as_str());
 
     let patient_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender,
-                                 email, phone_primary, nationality, languages,
-                                 address_street, address_city, address_zip, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                                 email, phone_primary, phone_secondary, residence_country,
+                                 languages, address_street, address_city, address_zip,
+                                 address_country, insurance_type, legal_status, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
            RETURNING id"#,
     )
     .bind(&pid)
@@ -2174,12 +2692,24 @@ async fn convert_lead(
     .bind(birth_date)
     .bind(gender)
     .bind(email)
-    .bind(phone)
-    .bind(country)
+    .bind(phone.as_deref())
+    .bind(phone_secondary)
+    .bind(country.as_deref())
     .bind(&languages)
     .bind(street_address)
     .bind(city)
     .bind(zip_code)
+    .bind(country.as_deref())
+    .bind(insurance_type)
+    .bind(json!({
+        "dsgvo_signed": true,
+        "confidentiality_release_signed": false,
+        "identity_verified": true,
+        "document_pack_complete": true,
+        "compliance_completed": true,
+        "contract_status": "signed",
+        "notes": null,
+    }))
     .bind(auth.user_id)
     .fetch_one(&mut *tx)
     .await
@@ -2191,6 +2721,26 @@ async fn convert_lead(
         }
     };
 
+    for contact in &contacts {
+        if let Err(error) = sqlx::query(
+            r#"INSERT INTO patient_contacts
+                      (patient_id, contact_kind, contact_type, value, is_primary, notes)
+               VALUES ($1, $2, $3, $4, $5, $6)"#,
+        )
+        .bind(patient_id)
+        .bind(contact.contact_kind)
+        .bind(contact.contact_type)
+        .bind(&contact.value)
+        .bind(contact.is_primary)
+        .bind(contact.notes.as_deref())
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "transfer lead contact");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
+
     if let Err(error) =
         transfer_lead_clinical_profile(&mut tx, lead_id, patient_id, &wizard_state).await
     {
@@ -2201,7 +2751,12 @@ async fn convert_lead(
     if let Err(error) = sqlx::query(
         r#"WITH moved_cases AS (
                UPDATE cases
-               SET patient_id = $2, lead_id = NULL
+               SET patient_id = $2,
+                   lead_id = NULL,
+                   notes = COALESCE(
+                       NULLIF(btrim(notes), ''),
+                       NULLIF(btrim($3), '')
+                   )
                WHERE lead_id = $1
                RETURNING id
            ), moved_documents AS (
@@ -2234,6 +2789,7 @@ async fn convert_lead(
     )
     .bind(lead_id)
     .bind(patient_id)
+    .bind(lead_notes.as_deref())
     .execute(&mut *tx)
     .await
     {
@@ -2906,6 +3462,8 @@ async fn ingest_lead_intake(
     let submitted_at = parsed.bundle.get("submittedAt").and_then(str_opt);
     let flow = parsed.bundle.get("flow").and_then(str_opt);
     let locale = parsed.bundle.get("locale").and_then(str_opt);
+    let primary_language =
+        normalize_intake_language(payload["primaryLanguage"].as_str(), locale.as_deref());
     let (intake_source, lead_source, lifecycle_note) =
         public_intake_labels(parsed.bundle.get("source").and_then(str_opt));
 
@@ -2989,7 +3547,7 @@ async fn ingest_lead_intake(
     .bind(str_opt(&payload["city"]))
     .bind(str_opt_without_zero_placeholder(&payload["state"]))
     .bind(str_opt_without_zero_placeholder(&payload["zipCode"]))
-    .bind(str_opt(&payload["primaryLanguage"]))
+    .bind(primary_language)
     .bind(yes_no_to_bool(&payload["needsInterpreter"]))
     .bind(str_opt(&payload["location"]))
     .bind(str_opt(&payload["locationDetailed"]))
@@ -3355,6 +3913,86 @@ pub async fn auto_purge_stale_archived(
     }
 
     Ok(report)
+}
+
+#[cfg(test)]
+mod questionnaire_mapping_tests {
+    use super::*;
+
+    #[test]
+    fn intake_language_uses_supported_code_or_locale_fallback() {
+        assert_eq!(
+            normalize_intake_language(Some("English"), Some("de")),
+            Some("en".to_string())
+        );
+        assert_eq!(
+            normalize_intake_language(Some("broken@example.com"), Some("ru-RU")),
+            Some("ru".to_string())
+        );
+        assert_eq!(
+            normalize_intake_language(None, Some("uk_UA")),
+            Some("uk".to_string())
+        );
+    }
+
+    #[test]
+    fn questionnaire_country_codes_become_patient_country_names() {
+        assert_eq!(patient_country(Some("DE")), Some("Germany".to_string()));
+        assert_eq!(
+            patient_country(Some("Ukraine")),
+            Some("Ukraine".to_string())
+        );
+        assert_eq!(patient_country(Some("  ")), None);
+    }
+
+    #[test]
+    fn questionnaire_contacts_are_deduplicated_and_keep_whatsapp_context() {
+        let contacts = lead_patient_contacts(
+            Some("person@example.com"),
+            Some(true),
+            Some("+49 151 123 45 67"),
+            &json!([
+                { "number": "+491511234567", "type": "mobile" },
+                { "number": "+49 30 9988", "type": "work" }
+            ]),
+            Some("+49 (151) 123-45-67"),
+            Some(false),
+        );
+
+        assert_eq!(contacts.len(), 3);
+        assert_eq!(
+            contacts
+                .iter()
+                .filter(|contact| contact.contact_kind == "phone" && contact.is_primary)
+                .count(),
+            1
+        );
+        let primary_phone = contacts
+            .iter()
+            .find(|contact| contact.contact_kind == "phone" && contact.is_primary)
+            .expect("primary phone contact");
+        assert!(
+            primary_phone
+                .notes
+                .as_deref()
+                .is_some_and(|notes| notes.contains("WhatsApp"))
+        );
+        assert!(
+            primary_phone
+                .notes
+                .as_deref()
+                .is_some_and(|notes| { notes.contains("Questionnaire contact consent: declined") })
+        );
+        assert!(contacts.iter().any(|contact| {
+            contact.contact_kind == "email"
+                && contact.notes.as_deref() == Some("Questionnaire contact consent: granted")
+        }));
+        assert!(contacts.iter().any(|contact| {
+            contact.contact_kind == "phone"
+                && contact.contact_type == "work"
+                && contact.value == "+49 30 9988"
+        }));
+    }
 }
 
 #[cfg(test)]

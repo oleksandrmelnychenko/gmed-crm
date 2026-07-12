@@ -53,6 +53,10 @@ export function promoteLeadToConsole(leadId: string) {
   return postJson<void>(`/leads/${leadId}/promote-console`, {});
 }
 
+export function importLeadAttachments(leadId: string) {
+  return postJson<{ imported: number }>(`/leads/${leadId}/import-attachments`, {});
+}
+
 export function resolveFailedLead(leadId: string, payload: JsonPayload) {
   return postJson<void>(`/leads/${leadId}/failed-flow`, payload);
 }

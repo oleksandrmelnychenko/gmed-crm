@@ -419,6 +419,33 @@ function normalizeLeadOrigin(value: string | null | undefined) {
   return value?.trim().toLowerCase().replace(/[-\s]+/g, "_") ?? "";
 }
 
+export function leadIntakeTypeFromLead(
+  lead: Pick<Lead, "lead_type" | "intake_source" | "source" | "flow">,
+) {
+  const intakeSource = normalizeLeadOrigin(lead.intake_source);
+  const source = normalizeLeadOrigin(lead.source);
+  const flow = normalizeLeadOrigin(lead.flow);
+  const explicitType = normalizeLeadOrigin(lead.lead_type);
+
+  if (
+    ["visitor_facade", "website_wizard", "wizard", "questionnaire", "oprosnik"].includes(intakeSource) ||
+    ["website_wizard", "visitor_facade", "questionnaire", "oprosnik"].includes(source)
+  ) {
+    return "questionnaire";
+  }
+  if (
+    ["website_contact", "website_form", "contact_form"].includes(intakeSource) ||
+    ["website_contact_form", "contact_form"].includes(source) ||
+    flow === "contact"
+  ) {
+    return "form";
+  }
+  if (explicitType === "questionnaire" || explicitType === "form") {
+    return explicitType;
+  }
+  return "console";
+}
+
 export function leadTypeFromLead(
   lead: Pick<Lead, "lead_type" | "console_promoted_at" | "intake_source" | "source" | "flow">,
 ) {
@@ -493,6 +520,16 @@ export function leadProgramServiceLabel(
     LEAD_PROGRAM_SERVICE_LABEL_KEYS,
     runtimeTranslations(translations),
   );
+}
+
+export function knownLeadProgramServiceLabel(
+  value: string | null | undefined,
+  translations?: Translations,
+) {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return null;
+  const labelKey = (LEAD_PROGRAM_SERVICE_LABEL_KEYS as Partial<Record<string, TranslationKey>>)[normalized];
+  return labelKey ? runtimeTranslations(translations)[labelKey] : null;
 }
 
 export function leadLocationDetailedLabel(

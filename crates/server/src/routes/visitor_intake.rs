@@ -9,6 +9,7 @@ use chrono::NaiveDate;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+use crate::routes::leads::normalize_intake_language;
 use crate::state::AppState;
 
 const MAX_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
@@ -246,6 +247,8 @@ async fn ingest_visitor_intake(
     let submitted_at = parsed.bundle.get("submittedAt").and_then(str_opt);
     let flow = parsed.bundle.get("flow").and_then(str_opt);
     let locale = parsed.bundle.get("locale").and_then(str_opt);
+    let primary_language =
+        normalize_intake_language(payload["primaryLanguage"].as_str(), locale.as_deref());
     let source = parsed
         .bundle
         .get("source")
@@ -332,7 +335,7 @@ async fn ingest_visitor_intake(
     .bind(str_opt(&payload["city"]))
     .bind(str_opt_without_zero_placeholder(&payload["state"]))
     .bind(str_opt_without_zero_placeholder(&payload["zipCode"]))
-    .bind(str_opt(&payload["primaryLanguage"]))
+    .bind(primary_language)
     .bind(yes_no_to_bool(&payload["needsInterpreter"]))
     .bind(str_opt(&payload["location"]))
     .bind(str_opt(&payload["locationDetailed"]))

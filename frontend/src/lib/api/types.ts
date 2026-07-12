@@ -58,6 +58,8 @@ interface LeadAttachment {
   content_type: string | null;
   size_bytes: number;
   uploaded_at: string;
+  imported_document_id?: string | null;
+  imported_at?: string | null;
 }
 
 interface LeadReadinessCheck {

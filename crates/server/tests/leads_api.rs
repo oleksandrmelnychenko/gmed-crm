@@ -434,11 +434,12 @@ async fn public_lead_intake_stores_wizard_submissions_as_questionnaire_leads() {
             "source": "website_wizard",
             "flow": "medical",
             "submittedAt": "2026-05-27T12:00:00Z",
-            "locale": "de",
+            "locale": "ru-RU",
             "payload": {
                 "firstName": "Grace",
                 "lastName": "Hopper",
                 "email": "grace.questionnaire@example.com",
+                "primaryLanguage": "broken@example.com",
                 "phones": [{ "number": "+49111222333", "type": "mobile" }],
                 "services": ["medical_treatment"],
                 "primaryConcernText": "Full medical intake questionnaire.",
@@ -461,6 +462,7 @@ async fn public_lead_intake_stores_wizard_submissions_as_questionnaire_leads() {
     assert_eq!(detail["source"], "Website Wizard");
     assert_eq!(detail["intake_source"], "visitor_facade");
     assert_eq!(detail["lead_type"], "questionnaire");
+    assert_eq!(detail["primary_language"], "ru");
 
     let (status, list) = json_request(
         &app,
@@ -1160,14 +1162,19 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     let email = format!("atomic-{}@example.com", Uuid::new_v4().simple());
     let lead_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO leads (
-                first_name, last_name, email, phone, country, primary_language,
+                first_name, middle_name, last_name, suffix, email, email_consent,
+                phone, phones, whatsapp_number, whatsapp_consent,
+                country, primary_language, locale, has_insurance, notes,
                 date_of_birth, legal_sex, street_address, city, zip_code,
                 primary_concern_text, requested_specialties,
                 qualification_status, compliance_status,
                 consent_healthcare, consent_privacy_practices, intake_source, created_by,
                 wizard_state
            ) VALUES (
-                'Atomic', 'Onboarding', $1, '+4915112345678', 'DE', 'de',
+                'Atomic', 'Marie', 'Onboarding', 'Jr.', $1, true, '+4915112345678',
+                '[{"number":"+4915112345678","type":"mobile"},{"number":"+49 30 4444","type":"work"}]'::jsonb,
+                '+49 (151) 123-45-678', false, 'UA', 'broken@example.com', 'uk-UA', true,
+                'Manager service note from the lead',
                 DATE '1990-05-01', 'female', 'Hauptstr. 1', 'Berlin', '10115',
                 'Chronic knee pain', '["orthopedics"]'::jsonb,
                 'qualified', 'signed', true, true, 'staff_wizard', $2,
@@ -1237,6 +1244,18 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     .await
     .unwrap();
     let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    let source_attachment_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO lead_attachments
+               (id, lead_id, file_name, content_type, size_bytes, data)
+           VALUES ($1, $2, 'medical-history.txt', 'text/plain', 22, $3)"#,
+    )
+    .bind(source_attachment_id)
+    .bind(lead_id)
+    .bind(b"Questionnaire document".as_slice())
+    .execute(pool)
+    .await
+    .unwrap();
 
     let pm = app.auth_header("patient_manager");
     let (status, lead) =
@@ -1269,14 +1288,109 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     assert_eq!(status, StatusCode::OK, "{converted}");
     let patient_id = Uuid::parse_str(converted["patient_id"].as_str().unwrap()).unwrap();
 
-    let (case_patient_id, case_lead_id): (Option<Uuid>, Option<Uuid>) =
-        sqlx::query_as("SELECT patient_id, lead_id FROM cases WHERE id = $1")
+    let patient: (
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Vec<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Value,
+    ) = sqlx::query_as(
+        r#"SELECT first_name, last_name, nationality, residence_country, languages,
+                  phone_secondary, address_country, insurance_type, legal_status
+           FROM patients WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(patient.0, "Atomic Marie");
+    assert_eq!(patient.1, "Onboarding Jr.");
+    assert_eq!(patient.2, None, "country must not be stored as nationality");
+    assert_eq!(patient.3.as_deref(), Some("Ukraine"));
+    assert_eq!(patient.4, vec!["uk".to_string()]);
+    assert_eq!(patient.5.as_deref(), Some("+49 30 4444"));
+    assert_eq!(patient.6.as_deref(), Some("Ukraine"));
+    assert_eq!(patient.7.as_deref(), Some("foreign"));
+    assert_eq!(patient.8["dsgvo_signed"], true);
+    assert_eq!(patient.8["identity_verified"], true);
+    assert_eq!(patient.8["document_pack_complete"], true);
+    assert_eq!(patient.8["compliance_completed"], true);
+    assert_eq!(patient.8["contract_status"], "signed");
+
+    let contacts: Vec<(String, String, String, bool, Option<String>)> = sqlx::query_as(
+        r#"SELECT contact_kind, contact_type, value, is_primary, notes
+           FROM patient_contacts WHERE patient_id = $1
+           ORDER BY contact_kind, is_primary DESC, value"#,
+    )
+    .bind(patient_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(contacts.len(), 3);
+    assert!(contacts.iter().any(|contact| {
+        contact.0 == "email"
+            && contact.2 == email
+            && contact.3
+            && contact
+                .4
+                .as_deref()
+                .is_some_and(|notes| notes.contains("granted"))
+    }));
+    assert!(contacts.iter().any(|contact| {
+        contact.0 == "phone"
+            && contact.2 == "+4915112345678"
+            && contact.3
+            && contact
+                .4
+                .as_deref()
+                .is_some_and(|notes| notes.contains("WhatsApp") && notes.contains("declined"))
+    }));
+    assert!(contacts.iter().any(|contact| {
+        contact.0 == "phone" && contact.1 == "work" && contact.2 == "+49 30 4444"
+    }));
+
+    let imported_document: (
+        Option<Uuid>,
+        Option<Uuid>,
+        Option<String>,
+        bool,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT patient_id, lead_id, ursprung, is_medical, category FROM documents WHERE id = $1",
+    )
+    .bind(source_attachment_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(imported_document.0, Some(patient_id));
+    assert_eq!(imported_document.1, None);
+    assert_eq!(imported_document.2.as_deref(), Some("questionnaire"));
+    assert!(imported_document.3);
+    assert_eq!(imported_document.4.as_deref(), Some("medical"));
+    let imported_at_exists: bool =
+        sqlx::query_scalar("SELECT imported_at IS NOT NULL FROM lead_attachments WHERE id = $1")
+            .bind(source_attachment_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(imported_at_exists);
+
+    let (case_patient_id, case_lead_id, case_notes): (Option<Uuid>, Option<Uuid>, Option<String>) =
+        sqlx::query_as("SELECT patient_id, lead_id, notes FROM cases WHERE id = $1")
             .bind(artifacts.case_id)
             .fetch_one(pool)
             .await
             .unwrap();
     assert_eq!(case_patient_id, Some(patient_id));
     assert!(case_lead_id.is_none());
+    assert_eq!(
+        case_notes.as_deref(),
+        Some("Manager service note from the lead")
+    );
 
     let moved_document_count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM documents WHERE id = ANY($1) AND patient_id = $2 AND lead_id IS NULL",
@@ -1395,6 +1509,23 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     .await
     .unwrap();
     assert!(narrative.is_some_and(|value| !value.trim().is_empty()));
+
+    let (delete_status, delete_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{source_attachment_id}/delete"),
+        &pm,
+        Some(json!({ "reason": "Questionnaire source file is no longer required" })),
+    )
+    .await;
+    assert_eq!(delete_status, StatusCode::OK, "{delete_body}");
+    let source_storage: (i32, i64) =
+        sqlx::query_as("SELECT octet_length(data), size_bytes FROM lead_attachments WHERE id = $1")
+            .bind(source_attachment_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(source_storage, (0, 0));
 }
 
 #[tokio::test]
@@ -1406,9 +1537,11 @@ async fn lead_order_draft_is_idempotent_before_patient_conversion() {
     let lead_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO leads
                (first_name, last_name, email, phone, country, primary_language,
-                date_of_birth, legal_sex, qualification_status, compliance_status, intake_source)
+                date_of_birth, legal_sex, qualification_status, compliance_status,
+                intake_source, needs_interpreter, services)
            VALUES ('Retry','Wizard','retry@example.com','+49151','DE','de',
-                   DATE '1990-05-01','female','new','pending','staff_wizard')
+                   DATE '1990-05-01','female','new','pending','staff_wizard',
+                   true, ARRAY['driver', 'concierge'])
            RETURNING id"#,
     )
     .fetch_one(pool)
@@ -1426,6 +1559,17 @@ async fn lead_order_draft_is_idempotent_before_patient_conversion() {
     assert_eq!(first_status, StatusCode::CREATED, "{first}");
     let order_id = first["id"].as_str().unwrap();
     let order_uuid = Uuid::parse_str(order_id).unwrap();
+    let planning: (bool, bool, String) = sqlx::query_as(
+        r#"SELECT interpreter_required, non_medical_required, interpreter_briefing_status
+           FROM order_planning_preparation WHERE order_id = $1"#,
+    )
+    .bind(order_uuid)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(planning.0);
+    assert!(planning.1);
+    assert_eq!(planning.2, "pending");
 
     sqlx::query("DELETE FROM order_execution_flows WHERE order_id = $1")
         .bind(order_uuid)
@@ -1608,7 +1752,12 @@ async fn wizard_lead_fields_round_trip_through_update() {
         Some(json!({
             "primary_concern_text": "Chronic knee pain",
             "services": ["surgery", "rehab"],
+            "middle_name": "Marie",
+            "suffix": "Jr.",
             "street_address": "Hauptstr. 1",
+            "state": "Berlin",
+            "whatsapp_number": "+49 151 1234567",
+            "primary_language": "Spanish",
             "requested_specialties": ["orthopedics", "surgery"],
             "wizard_state": { "step": 3, "completed": ["identity", "eligibility"] }
         })),
@@ -1621,7 +1770,12 @@ async fn wizard_lead_fields_round_trip_through_update() {
         json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(lead["primary_concern_text"], "Chronic knee pain");
+    assert_eq!(lead["middle_name"], "Marie");
+    assert_eq!(lead["suffix"], "Jr.");
     assert_eq!(lead["street_address"], "Hauptstr. 1");
+    assert_eq!(lead["state"], "Berlin");
+    assert_eq!(lead["whatsapp_number"], "+49 151 1234567");
+    assert_eq!(lead["primary_language"], "es");
     assert_eq!(
         lead["requested_specialties"],
         json!(["orthopedics", "surgery"])
