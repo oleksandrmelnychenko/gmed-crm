@@ -222,7 +222,7 @@ async fn list_leads(
                   converted_patient_id, date_of_birth, legal_sex,
                   consent_privacy_practices, consent_healthcare,
                   submitted_at, created_at, console_promoted_at, console_promoted_by,
-                  failed_outcome_status, failed_reason, failed_processed_at,
+                  failed_outcome_status, failed_reason, failed_processed_at, status_changed_at,
                   (SELECT COUNT(*) FROM lead_attachments a WHERE a.lead_id = leads.id) AS attachment_count
            FROM leads
            WHERE ($1::bool = true OR qualification_status != 'archived')
@@ -307,6 +307,10 @@ async fn list_leads(
                         .map(|value| value.to_rfc3339()),
                     "console_promoted_by": r.try_get::<Option<Uuid>, _>("console_promoted_by").unwrap_or_default(),
                     "qualification_status": r.try_get::<String, _>("qualification_status").unwrap_or_default(),
+                    "status_changed_at": r
+                        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("status_changed_at")
+                        .unwrap_or_default()
+                        .map(|value| value.to_rfc3339()),
                     "compliance_status": r.try_get::<String, _>("compliance_status").unwrap_or_default(),
                     "qualification_ready": readiness.qualification_ready,
                     "conversion_ready": readiness.conversion_ready,
@@ -420,6 +424,34 @@ fn current_lead_stage(qualification_status: &str, failed_outcome_status: &str) -
     } else {
         qualification_status.to_string()
     }
+}
+
+/// Allowed lead lifecycle transitions — the single source of truth for how a
+/// lead moves through its status. See docs/lead-status-strategy-ua.md.
+/// `converted` and `deleted` are terminal. `converted` is set only by
+/// `convert_lead`; `archived`/`deleted` only by the failed-lead workflow.
+fn lead_status_transition_allowed(from: &str, to: &str) -> bool {
+    if from == to {
+        return true;
+    }
+    matches!(
+        (from, to),
+        ("new", "in_progress")
+            | ("new", "qualified")
+            | ("new", "not_qualified")
+            | ("new", "archived")
+            | ("in_progress", "qualified")
+            | ("in_progress", "not_qualified")
+            | ("in_progress", "archived")
+            | ("qualified", "converted")
+            | ("qualified", "in_progress")
+            | ("qualified", "not_qualified")
+            | ("qualified", "archived")
+            | ("not_qualified", "in_progress")
+            | ("not_qualified", "archived")
+            | ("archived", "in_progress")
+            | ("archived", "deleted")
+    )
 }
 
 fn failed_outcome_payload(row: &sqlx::postgres::PgRow) -> Value {
@@ -1069,7 +1101,7 @@ async fn get_lead(
                   failed_outcome_status, failed_from_status, failed_reason, failed_note,
                   failed_processed_at, failed_processed_by,
                   notes, user_agent, created_at, updated_at,
-                  requested_specialties, wizard_state
+                  requested_specialties, wizard_state, status_changed_at
            FROM leads
            WHERE id = $1"#,
     )
@@ -1315,6 +1347,12 @@ async fn get_lead(
     obj.insert(
         "qualification_status".into(),
         Value::String(s_req(&row, "qualification_status")),
+    );
+    obj.insert(
+        "status_changed_at".into(),
+        rfc(row
+            .try_get::<chrono::DateTime<chrono::Utc>, _>("status_changed_at")
+            .ok()),
     );
     obj.insert(
         "converted_patient_id".into(),
@@ -1814,11 +1852,8 @@ async fn qualify_lead(
             "Lead payload is already deleted via failed-lead workflow",
         );
     }
-    if current_status == "archived" && body.status != current_status {
-        return err(
-            StatusCode::CONFLICT,
-            "Archived leads must be handled through the failed-lead workflow",
-        );
+    if !lead_status_transition_allowed(&current_status, &body.status) {
+        return err(StatusCode::CONFLICT, "Status transition is not allowed");
     }
 
     if body.status == "qualified" {
@@ -1836,7 +1871,13 @@ async fn qualify_lead(
         }
     }
 
-    match sqlx::query("UPDATE leads SET qualification_status = $2 WHERE id = $1")
+    match sqlx::query(
+        "UPDATE leads
+         SET qualification_status = $2,
+             status_changed_at = CASE WHEN qualification_status <> $2 THEN now() ELSE status_changed_at END,
+             failed_outcome_status = CASE WHEN $2 IN ('new', 'in_progress', 'qualified') THEN 'none' ELSE failed_outcome_status END
+         WHERE id = $1",
+    )
         .bind(lead_id)
         .bind(&body.status)
         .execute(&state.db)
@@ -2963,7 +3004,7 @@ async fn convert_lead(
                RETURNING service.id
            )
            UPDATE leads
-           SET qualification_status = 'converted', converted_patient_id = $2
+           SET qualification_status = 'converted', converted_patient_id = $2, status_changed_at = now()
            WHERE id = $1 AND converted_patient_id IS NULL"#,
     )
     .bind(lead_id)
@@ -3195,6 +3236,7 @@ async fn resolve_failed_lead(
         sqlx::query(
             r#"UPDATE leads
                SET qualification_status = 'archived',
+                   status_changed_at = now(),
                    failed_outcome_status = 'archived',
                    failed_from_status = $2,
                    failed_reason = $3,
@@ -3955,7 +3997,8 @@ async fn anonymize_lead_pii(
                remote_ip = NULL,
                user_agent = NULL,
                notes = NULL,
-               qualification_status = 'archived',
+               qualification_status = 'deleted',
+               status_changed_at = now(),
                failed_outcome_status = 'delete_anonymized',
                failed_from_status = $2,
                failed_reason = $3,

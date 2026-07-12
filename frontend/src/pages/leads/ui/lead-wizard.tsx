@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Archive,
   Check,
@@ -84,7 +93,7 @@ import {
 import { fetchProviders, fetchSpecializations } from "@/pages/providers/data/provider-api";
 import type { ProviderSummary, SpecializationItem } from "@/pages/providers/model/types";
 import {
-  LEAD_QUESTIONNAIRE_SERVICE_OPTIONS,
+  LEAD_WIZARD_SERVICE_OPTIONS,
   leadIntakeTypeFromLead,
   leadErrorBlockingReasons,
   leadErrorMessage,
@@ -95,10 +104,11 @@ import {
   leadProgramServiceLabel,
   leadSourceLabel,
   leadVisitTimingLabel,
+  normalizeLeadServiceSelection,
   normalizeLeadServiceValue,
+  updateLeadServiceSelection,
 } from "@/pages/leads/model/leads-model";
 
-import { LeadMedicalIntakeForm } from "./lead-medical-intake-form";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 
 import {
@@ -220,6 +230,7 @@ type ValidationIssue = {
 type ValidationContext =
   | { kind: "master" }
   | { kind: "medical" }
+  | { kind: "documents" }
   | { kind: "order" }
   | { kind: "server"; reasons: string[] };
 
@@ -233,6 +244,11 @@ type WizardDocumentPreview = {
 
 const AUTOSAVE_DELAY_MS = 800;
 const MAX_DOCUMENT_FILE_SIZE = 25 * 1024 * 1024;
+const LeadMedicalIntakeForm = lazy(() =>
+  import("./lead-medical-intake-form").then((module) => ({
+    default: module.LeadMedicalIntakeForm,
+  })),
+);
 const SERVICE_CONCERN_ID = "lead-wizard-concern";
 const SERVICE_SPECIALTIES_ID = "lead-wizard-specialties";
 const MEDICAL_ANAMNESE_ID = "lead-wizard-anamnese";
@@ -369,6 +385,7 @@ function autosavePayload(
     primary_concern_text: draft.concern.trim(),
     additional_concerns: draft.anamnese.trim(),
     services: draft.serviceNeeds,
+    needs_interpreter: draft.serviceNeeds.includes("interpreter_support"),
     notes: draft.serviceNotes.trim(),
     requested_specialties: draft.specialties,
     consent_privacy_practices: draft.privacyConsent,
@@ -674,10 +691,10 @@ function draftFromLead(lead: LeadDetail): Draft {
     medications: clinical.medications,
     allergies: clinical.allergies,
     caves: clinical.caves,
-    serviceNeeds: Array.from(new Set([
+    serviceNeeds: normalizeLeadServiceSelection([
       ...(lead.services ?? []),
       ...(lead.needs_interpreter ? ["interpreter_support"] : []),
-    ].map(normalizeLeadServiceValue).filter(Boolean))),
+    ]),
     serviceComments: serviceCommentsFromLead(lead),
     discoverySource: inputString(lead.wizard_state?.["discovery_source"]) || questionnaireText(lead, "discoverySource", "howDidYouHearAboutUs", "referralSource"),
     referrer: inputString(lead.wizard_state?.["referrer"]),
@@ -1062,6 +1079,28 @@ function orderValidationIssues(draft: Draft | null, tx: Tx): ValidationIssue[] {
   return issues;
 }
 
+function documentsValidationIssues(draft: Draft | null, tx: Tx): ValidationIssue[] {
+  if (!draft) return [];
+  const issues: ValidationIssue[] = [];
+  if (!draft.privacyConsent) {
+    issues.push({
+      key: "privacy-consent",
+      step: "documents",
+      message: readinessReasonLabel("Privacy practices consent is missing", tx),
+      fieldId: PRIVACY_CONSENT_ID,
+    });
+  }
+  if (!draft.healthcareConsent) {
+    issues.push({
+      key: "healthcare-consent",
+      step: "documents",
+      message: readinessReasonLabel("Healthcare consent is missing", tx),
+      fieldId: HEALTHCARE_CONSENT_ID,
+    });
+  }
+  return issues;
+}
+
 function validateMasterDraft(draft: Draft | null, tx: Tx): MasterValidationErrors {
   if (!draft) return {};
 
@@ -1198,6 +1237,8 @@ export function LeadWizard({
   const [agencyServices, setAgencyServices] = useState<AgencyServiceItem[]>([]);
   const [clinicalProviders, setClinicalProviders] = useState<ProviderSummary[]>([]);
   const [allDoctors, setAllDoctors] = useState<AllDoctorOption[]>([]);
+  const [medicalLookupsLoading, setMedicalLookupsLoading] = useState(false);
+  const [commercialLookupsLoading, setCommercialLookupsLoading] = useState(false);
   const [lines, setLines] = useState<ServiceLine[]>([]);
   const [prepayment, setPrepayment] = useState(false);
   const [signedPatient, setSignedPatient] = useState(false);
@@ -1227,6 +1268,8 @@ export function LeadWizard({
   const lastSavedAutosaveSignatureRef = useRef("");
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const medicalSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const stepNavigationInFlightRef = useRef(false);
+  const reloadVersionRef = useRef(0);
   const caseIdRef = useRef<string | null>(null);
   const documentPreviewUrlRef = useRef<string | null>(null);
   // Service options that were present when the draft was hydrated. Kept so that
@@ -1242,8 +1285,15 @@ export function LeadWizard({
   const showWizardError = useCallback((nextError: unknown) => {
     const reasons = leadErrorBlockingReasons(nextError);
     if (reasons.length > 0) {
+      const firstReason = reasons[0];
+      if (!firstReason) return;
       setError("");
       setValidationContext({ kind: "server", reasons });
+      setStep(readinessReasonStep(firstReason));
+      const fieldId = readinessReasonFieldId(firstReason, null);
+      if (fieldId) {
+        window.requestAnimationFrame(() => document.getElementById(fieldId)?.focus());
+      }
       return;
     }
     setValidationContext(null);
@@ -1272,43 +1322,93 @@ export function LeadWizard({
 
   const reload = useCallback(async (hydrateDraft: boolean, hydrateCommercial = false) => {
     if (!leadId) return;
+    const reloadVersion = reloadVersionRef.current + 1;
+    reloadVersionRef.current = reloadVersion;
+    const isCurrentReload = () => reloadVersionRef.current === reloadVersion;
     setLoading(true);
+    setMedicalLookupsLoading(true);
+    setCommercialLookupsLoading(true);
     setError("");
     setValidationContext(null);
     replaceDocumentPreview(null);
     try {
-      let attachmentImportError: unknown = null;
       const leadPromise = fetchLeadDetail(leadId);
+      const initialDocumentsPromise = fetchDocuments(
+        "/documents?lead_id=" + encodeURIComponent(leadId),
+      ).catch(() => []);
       const documentsPromise = leadPromise.then(async (nextLead) => {
+        let attachmentImportError: unknown = null;
+        let nextDocuments = await initialDocumentsPromise;
         if (nextLead.attachments?.some((attachment) => !attachment.imported_at)) {
           try {
             await importLeadAttachments(leadId);
+            nextDocuments = await fetchDocuments(
+              "/documents?lead_id=" + encodeURIComponent(leadId),
+            ).catch(() => nextDocuments);
           } catch (nextError) {
             attachmentImportError = nextError;
           }
         }
-        return fetchDocuments("/documents?lead_id=" + encodeURIComponent(leadId)).catch(() => []);
+        return { attachmentImportError, documents: nextDocuments };
       });
-      const [nextLead, nextDocuments, nextCases, nextContracts, nextOrders, nextQuotes, nextSpecialties, nextAgencyServices, nextProviders, nextAllDoctors] = await Promise.all([
+      const medicalLookupsPromise = Promise.all([
+        fetchProviders("/providers?active_only=true&provider_type=medical").catch(() => []),
+        fetchAllDoctors().catch(() => []),
+      ]);
+      const commercialLookupsPromise = Promise.all([
+        fetchSpecializations().catch(() => []),
+        fetchAgencyServices("/agency-services?active_only=true").catch(() => []),
+      ]);
+
+      void documentsPromise.then(({ attachmentImportError, documents: nextDocuments }) => {
+        if (!isCurrentReload()) return;
+        setDocuments(nextDocuments);
+        if (attachmentImportError) {
+          setError(
+            `${tx("Не удалось импортировать файлы опросника", "Fragebogendateien konnten nicht importiert werden")}: ${errorText(attachmentImportError, tx)}`,
+          );
+        }
+      }).catch(() => undefined);
+      void medicalLookupsPromise
+        .then(([nextProviders, nextAllDoctors]) => {
+          if (!isCurrentReload()) return;
+          setClinicalProviders(
+            nextProviders.filter((item) => item.provider_type === "medical"),
+          );
+          setAllDoctors(nextAllDoctors);
+        })
+        .finally(() => {
+          if (isCurrentReload()) setMedicalLookupsLoading(false);
+        });
+      void commercialLookupsPromise
+        .then(([nextSpecialties, nextAgencyServices]) => {
+          if (!isCurrentReload()) return;
+          setSpecialties(nextSpecialties);
+          setAgencyServices(nextAgencyServices.filter((item) => item.is_active));
+        })
+        .finally(() => {
+          if (isCurrentReload()) setCommercialLookupsLoading(false);
+        });
+
+      const [nextLead, nextCases, nextContracts, nextOrders, nextQuotes] = await Promise.all([
         leadPromise,
-        documentsPromise,
         fetchCases("/cases?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
         fetchContracts("/framework-contracts?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
         fetchOrders("/orders?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
         fetchQuotes("/quotes?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
-        fetchSpecializations().catch(() => []),
-        fetchAgencyServices("/agency-services?active_only=true").catch(() => []),
-        fetchProviders("/providers?active_only=true&provider_type=medical").catch(() => []),
-        fetchAllDoctors().catch(() => []),
       ]);
+      if (!isCurrentReload()) return;
       const nextOrder = nextOrders[0] ?? null;
       const nextCase = nextCases[0] as CaseListItem | undefined;
-      const nextCaseDetail = nextCase
-        ? await fetchCaseDetail(nextCase.id).catch(() => null)
-        : null;
-      const nextOrderDetail = nextOrder && (hydrateDraft || hydrateCommercial)
-        ? await fetchOrder(nextOrder.id).catch(() => null)
-        : null;
+      const [nextCaseDetail, nextOrderDetail] = await Promise.all([
+        nextCase && hydrateDraft
+          ? fetchCaseDetail(nextCase.id).catch(() => null)
+          : Promise.resolve(null),
+        nextOrder && (hydrateDraft || hydrateCommercial)
+          ? fetchOrder(nextOrder.id).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+      if (!isCurrentReload()) return;
       const paymentQuote = nextQuotes.find((item) => item.status === "accepted") ?? nextQuotes[0];
       const storedCommercialDraft = storedCommercialDraftFromLead(nextLead);
       const storedLeadDraft = draftFromLead(nextLead);
@@ -1367,15 +1467,14 @@ export function LeadWizard({
         medications: nextCaseDetail.medikamente.length > 0
           ? nextCaseDetail.medikamente.map((item, itemIndex) => {
               const existing = leadDraft.medications[itemIndex];
-              const doctor = nextAllDoctors.find((option) => option.id === item.verordnender_arzt_id);
               return {
                 id: existing?.id ?? item.id ?? `case-medication-${itemIndex + 1}`,
-                provider_id: doctor?.provider_id ?? existing?.provider_id ?? null,
-                provider_name: doctor?.provider_name ?? existing?.provider_name ?? null,
+                provider_id: existing?.provider_id ?? null,
+                provider_name: existing?.provider_name ?? null,
                 doctor_id: item.verordnender_arzt_id ?? existing?.doctor_id ?? null,
-                doctor_name: doctor?.name ?? item.verordnender_arzt ?? existing?.doctor_name ?? null,
-                doctor_title: doctor?.title ?? existing?.doctor_title ?? null,
-                doctor_fachbereich: doctor?.fachbereich ?? existing?.doctor_fachbereich ?? null,
+                doctor_name: item.verordnender_arzt ?? existing?.doctor_name ?? null,
+                doctor_title: existing?.doctor_title ?? null,
+                doctor_fachbereich: existing?.doctor_fachbereich ?? null,
                 category: existing?.category ?? (item.med_typ === "permanent" ? "dauer" : "besondere"),
                 wirkstoff: item.wirkstoff ?? null,
                 handelsname: item.handelsname,
@@ -1432,16 +1531,11 @@ export function LeadWizard({
           : String(paymentQuote.paid_amount);
 
       setLead(nextLead);
-      setDocuments(nextDocuments);
       setCases(nextCases as CaseListItem[]);
       caseIdRef.current = nextCase?.id ?? null;
       setContracts(nextContracts);
       setOrders(nextOrders);
       setQuotes(nextQuotes);
-      setSpecialties(nextSpecialties);
-      setAgencyServices(nextAgencyServices.filter((item) => item.is_active));
-      setClinicalProviders(nextProviders.filter((item) => item.provider_type === "medical"));
-      setAllDoctors(nextAllDoctors);
       wizardStateBaseRef.current = nextLead.wizard_state ?? {};
       if (hydrateDraft || hydrated.current !== leadId) {
         hydrated.current = leadId;
@@ -1474,15 +1568,10 @@ export function LeadWizard({
         setAutosaveError("");
         setAutosaveStatus("saved");
       }
-      if (attachmentImportError) {
-        setError(
-          `${tx("Не удалось импортировать файлы опросника", "Fragebogendateien konnten nicht importiert werden")}: ${errorText(attachmentImportError, tx)}`,
-        );
-      }
     } catch (nextError) {
-      showWizardError(nextError);
+      if (isCurrentReload()) showWizardError(nextError);
     } finally {
-      setLoading(false);
+      if (isCurrentReload()) setLoading(false);
     }
   }, [leadId, replaceDocumentPreview, showWizardError, tx]);
 
@@ -1531,6 +1620,8 @@ export function LeadWizard({
     setAgencyServices([]);
     setClinicalProviders([]);
     setAllDoctors([]);
+    setMedicalLookupsLoading(false);
+    setCommercialLookupsLoading(false);
     setLines([]);
     setPrepayment(false);
     setSignedPatient(false);
@@ -1556,15 +1647,35 @@ export function LeadWizard({
     if (open && leadId) void reload(hydrated.current !== leadId);
   }, [leadId, open, reload]);
 
+  // Opening the wizard on a brand-new lead moves it into "in progress"
+  // (see docs/lead-status-strategy-ua.md). Guarded to fire once per lead.
+  const promotedInProgressRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open || !leadId || lead?.qualification_status !== "new") return;
+    if (promotedInProgressRef.current === leadId) return;
+    promotedInProgressRef.current = leadId;
+    void updateLeadStatus(leadId, "in_progress")
+      .then(() => refreshLeadState())
+      .catch(() => undefined);
+  }, [open, leadId, lead?.qualification_status, refreshLeadState]);
+
   useEffect(() => {
     if (open) return;
+    reloadVersionRef.current += 1;
     setCreatedLeadId(null);
     hydrated.current = null;
     setLead(null);
     setDraft(null);
+    setDocuments([]);
+    setCases([]);
+    setContracts([]);
+    setOrders([]);
+    setQuotes([]);
     setError("");
     setAutosaveError("");
     setAutosaveStatus("idle");
+    setMedicalLookupsLoading(false);
+    setCommercialLookupsLoading(false);
     setArchiveConfirmOpen(false);
     setDeleteDocument(null);
     setDeleteReason("");
@@ -1640,6 +1751,7 @@ export function LeadWizard({
     return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, gross: Math.round((net + vat) * 100) / 100 };
   }, [lines]);
   const masterErrors = useMemo(() => validateMasterDraft(draft, tx), [draft, tx]);
+  const orderIssues = useMemo(() => orderValidationIssues(draft, tx), [draft, tx]);
   const validationIssues = useMemo<ValidationIssue[]>(() => {
     if (!validationContext) return [];
     if (validationContext.kind === "master") {
@@ -1666,8 +1778,11 @@ export function LeadWizard({
       }
       return issues;
     }
+    if (validationContext.kind === "documents") {
+      return documentsValidationIssues(draft, tx);
+    }
     if (validationContext.kind === "order") {
-      return orderValidationIssues(draft, tx);
+      return orderIssues;
     }
     return validationContext.reasons.map((reason) => ({
       key: reason,
@@ -1675,13 +1790,14 @@ export function LeadWizard({
       message: readinessReasonLabel(reason, tx),
       fieldId: readinessReasonFieldId(reason, draft),
     }));
-  }, [draft, masterErrors, tx, validationContext]);
-  const visibleOrderErrors = useMemo(
-    () => orderValidationAttempted ? orderValidationIssues(draft, tx) : [],
-    [draft, orderValidationAttempted, tx],
-  );
+  }, [draft, masterErrors, orderIssues, tx, validationContext]);
+  const visibleOrderErrors = orderValidationAttempted ? orderIssues : [];
   const orderFieldError = (...keys: string[]) =>
     visibleOrderErrors.find((issue) => keys.includes(issue.key))?.message;
+  const autosaveSnapshot = useMemo<AutosaveSnapshot | null>(
+    () => draft ? { draft, lines, paidAmount, prepayment, step } : null,
+    [draft, lines, paidAmount, prepayment, step],
+  );
 
   const persistMedicalDraft = useCallback(async (medicalDraft: Draft) => {
     const run = async () => {
@@ -1759,8 +1875,12 @@ export function LeadWizard({
     return queued;
   }, [allDoctors, leadId]);
 
-  const persistSnapshot = useCallback((snapshot: AutosaveSnapshot, force = false) => {
-    const signature = autosaveSnapshotSignature(snapshot);
+  const persistSnapshot = useCallback((
+    snapshot: AutosaveSnapshot,
+    force = false,
+    knownSignature?: string,
+  ) => {
+    const signature = knownSignature ?? autosaveSnapshotSignature(snapshot);
     const previousWizardState = wizardStateBaseRef.current;
     const payload = autosavePayload(snapshot, previousWizardState);
 
@@ -1828,16 +1948,9 @@ export function LeadWizard({
   }, [leadId, onCreated, tx]);
 
   useEffect(() => {
-    if (!open || !leadId || !draft || loading) return;
+    if (!open || !autosaveSnapshot || loading) return;
 
-    const snapshot: AutosaveSnapshot = {
-      draft,
-      lines,
-      paidAmount,
-      prepayment,
-      step,
-    };
-    const signature = autosaveSnapshotSignature(snapshot);
+    const signature = autosaveSnapshotSignature(autosaveSnapshot);
     currentAutosaveSignatureRef.current = signature;
 
     if (signature === lastSavedAutosaveSignatureRef.current) {
@@ -1848,12 +1961,19 @@ export function LeadWizard({
 
     setAutosaveError("");
     setAutosaveStatus("dirty");
+    if (!leadId) return;
     const timer = window.setTimeout(() => {
-      void persistSnapshot(snapshot).catch(() => undefined);
+      void persistSnapshot(autosaveSnapshot, false, signature).catch(() => undefined);
     }, AUTOSAVE_DELAY_MS);
 
     return () => window.clearTimeout(timer);
-  }, [draft, leadId, lines, loading, open, paidAmount, persistSnapshot, prepayment, step]);
+  }, [
+    autosaveSnapshot,
+    leadId,
+    loading,
+    open,
+    persistSnapshot,
+  ]);
 
   const patch = <K extends keyof Draft>(key: K, value: Draft[K]) => {
     setError("");
@@ -1862,21 +1982,18 @@ export function LeadWizard({
   };
 
   const toggleServiceNeed = (value: string, checked: boolean) => {
-    const normalized = normalizeLeadServiceValue(value);
     setError("");
     clearServerValidation();
     setDraft((current) => {
       if (!current) return current;
-      if (checked) {
-        return current.serviceNeeds.includes(normalized)
-          ? current
-          : { ...current, serviceNeeds: [...current.serviceNeeds, normalized] };
-      }
-      const serviceComments = { ...current.serviceComments };
-      delete serviceComments[normalized];
+      const serviceNeeds = updateLeadServiceSelection(current.serviceNeeds, value, checked);
+      const selectedServices = new Set(serviceNeeds);
+      const serviceComments = Object.fromEntries(
+        Object.entries(current.serviceComments).filter(([service]) => selectedServices.has(service)),
+      );
       return {
         ...current,
-        serviceNeeds: current.serviceNeeds.filter((item) => item !== normalized),
+        serviceNeeds,
         serviceComments,
       };
     });
@@ -1951,11 +2068,12 @@ export function LeadWizard({
 
   async function finishOrder(targetStep: StepId): Promise<boolean> {
     if (!leadId || !draft) return false;
-    const issues = orderValidationIssues(draft, tx);
+    const issues = orderIssues;
     if (issues.length > 0) {
       setError("");
       setValidationContext({ kind: "order" });
       setOrderValidationAttempted(true);
+      setStep("order");
       window.requestAnimationFrame(() => document.getElementById(issues[0]?.fieldId ?? "")?.focus());
       return false;
     }
@@ -1975,6 +2093,7 @@ export function LeadWizard({
       setError("");
       setValidationContext({ kind: "medical" });
       setMedicalValidationAttempted(true);
+      setStep("medical");
       const fieldId = !draft.concern.trim() ? SERVICE_CONCERN_ID : MEDICAL_ANAMNESE_ID;
       window.requestAnimationFrame(() => document.getElementById(fieldId)?.focus());
       return false;
@@ -2005,6 +2124,15 @@ export function LeadWizard({
       setStep("medical");
       const fieldId = !draft.concern.trim() ? SERVICE_CONCERN_ID : MEDICAL_ANAMNESE_ID;
       window.requestAnimationFrame(() => document.getElementById(fieldId)?.focus());
+      return false;
+    }
+    const documentIssues = documentsValidationIssues(draft, tx);
+    if (documentIssues.length > 0) {
+      setValidationContext({ kind: "documents" });
+      setStep("documents");
+      window.requestAnimationFrame(() => {
+        document.getElementById(documentIssues[0]?.fieldId ?? "")?.focus();
+      });
       return false;
     }
     setBusy("intake");
@@ -2190,16 +2318,18 @@ ${serviceCommentLines.join("\n")}`
         date_to: draft.programDateTo,
       })).id;
     }
-    for (const line of lines.filter(validLine)) {
-      await createOrderLeistung(orderId, {
-        agency_service_id: line.agencyServiceId,
-        description: line.description.trim(),
-        quantity: money(line.quantity),
-        unit_price: money(line.price),
-        vat_rate: money(line.vat),
-        client_reference: line.clientReference ?? "lead-wizard:" + leadId + ":" + line.id,
-      });
-    }
+    await Promise.all(
+      lines.filter(validLine).map((line) =>
+        createOrderLeistung(orderId, {
+          agency_service_id: line.agencyServiceId,
+          description: line.description.trim(),
+          quantity: money(line.quantity),
+          unit_price: money(line.price),
+          vat_rate: money(line.vat),
+          client_reference: line.clientReference ?? "lead-wizard:" + leadId + ":" + line.id,
+        }),
+      ),
+    );
     await updateOrderCommercialBasis(orderId, {
       contract_id: contractId,
       total_estimated: estimate.gross.toFixed(2),
@@ -2371,34 +2501,50 @@ ${serviceCommentLines.join("\n")}`
     }
   }
 
+  async function navigateForward(target: StepId, targetIndex: number) {
+    try {
+      if (!ensureMasterDataReady()) return;
+
+      if (!leadId && createMode) {
+        const created = await save("medical");
+        if (!created) return;
+        setStep("medical");
+        if (targetIndex > 1) {
+          setValidationContext({ kind: "medical" });
+          setMedicalValidationAttempted(true);
+          window.requestAnimationFrame(() => {
+            document.getElementById(SERVICE_CONCERN_ID)?.focus();
+          });
+        }
+        return;
+      }
+
+      let saved = false;
+      if (targetIndex === 1) {
+        saved = await save(target);
+      } else if (targetIndex <= 3) {
+        saved = await finishMedical(target);
+      } else if (targetIndex === 4) {
+        saved = await finishIntake(target);
+      } else {
+        const intakeReady = index >= 4 || await finishIntake("order");
+        if (!intakeReady) return;
+        saved = await finishOrder(target);
+      }
+      if (saved) setStep(target);
+    } finally {
+      stepNavigationInFlightRef.current = false;
+    }
+  }
+
   function navigateToStep(target: StepId, targetIndex: number) {
-    if (target === step || busy !== null) return;
+    if (target === step || busy !== null || stepNavigationInFlightRef.current) return;
     if (targetIndex < index) {
       setStep(target);
       return;
     }
-    if (step === "master_data" && !ensureMasterDataReady()) return;
-    if (step === "documents") {
-      void finishIntake(target).then((saved) => {
-        if (saved) setStep(target);
-      });
-      return;
-    }
-    if (step === "medical") {
-      void finishMedical(target).then((saved) => {
-        if (saved) setStep(target);
-      });
-      return;
-    }
-    if (step === "order") {
-      void finishOrder(target).then((saved) => {
-        if (saved) setStep(target);
-      });
-      return;
-    }
-    void save(target).then((saved) => {
-      if (saved) setStep(target);
-    });
+    stepNavigationInFlightRef.current = true;
+    void navigateForward(target, targetIndex).catch(showWizardError);
   }
 
   function updateLine(id: string, patchValue: Partial<ServiceLine>) {
@@ -2443,12 +2589,9 @@ ${serviceCommentLines.join("\n")}`
 
   if (!leadId && !createMode) return null;
   const isBusy = busy !== null;
-  const renderedAutosaveSignature = draft
-    ? autosaveSnapshotSignature({ draft, lines, paidAmount, prepayment, step })
-    : "";
-  const autosaveIsDirty = Boolean(
-    draft && renderedAutosaveSignature !== lastSavedAutosaveSignatureRef.current,
-  ) || autosaveStatus === "saving" || autosaveStatus === "error";
+  const autosaveIsDirty = autosaveStatus === "dirty"
+    || autosaveStatus === "saving"
+    || autosaveStatus === "error";
   return (
     <>
       <Dialog open={open} dirty={autosaveIsDirty} onOpenChange={onOpenChange}>
@@ -2476,6 +2619,40 @@ ${serviceCommentLines.join("\n")}`
             ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            {leadId && lead && ["new", "in_progress", "qualified"].includes(lead.qualification_status) ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 text-destructive hover:text-destructive"
+                disabled={loading || isBusy}
+                onClick={() => {
+                  if (!leadId) return;
+                  void updateLeadStatus(leadId, "not_qualified")
+                    .then(() => refreshLeadState())
+                    .catch((error) => setError(errorText(error, tx)));
+                }}
+              >
+                {tx("Не подходит", "Nicht geeignet")}
+              </Button>
+            ) : null}
+            {leadId && lead && ["not_qualified", "archived"].includes(lead.qualification_status) ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8"
+                disabled={loading || isBusy}
+                onClick={() => {
+                  if (!leadId) return;
+                  void updateLeadStatus(leadId, "in_progress")
+                    .then(() => refreshLeadState())
+                    .catch((error) => setError(errorText(error, tx)));
+                }}
+              >
+                {tx("Вернуть в работу", "Zurück in Bearbeitung")}
+              </Button>
+            ) : null}
             {leadId ? (
               <Button
                 type="button"
@@ -2522,7 +2699,7 @@ ${serviceCommentLines.join("\n")}`
               const done = item.id === "medical"
                 ? Boolean(draft?.concern.trim() && draft.anamnese.trim())
                 : item.id === "order"
-                  ? Boolean(draft && orderValidationIssues(draft, tx).length === 0)
+                  ? Boolean(draft && orderIssues.length === 0)
                   : readiness.get(item.id) ?? false;
               return (
                 <button
@@ -2880,33 +3057,51 @@ ${serviceCommentLines.join("\n")}`
                   onChange={(event) => patch("concern", event.target.value)}
                 />
               </Field>
-              <LeadMedicalIntakeForm
-                lead={lead}
-                tx={tx}
-                lang={lang}
-                anamneseId={MEDICAL_ANAMNESE_ID}
-                narrative={draft.narrative}
-                diagnoses={draft.diagnoses}
-                medications={draft.medications}
-                allergies={draft.allergies}
-                caves={draft.caves}
-                providers={clinicalProviders}
-                allDoctors={allDoctors}
-                validationAttempted={medicalValidationAttempted}
-                onNarrativeChange={(value) => {
-                  setError("");
-                  clearServerValidation();
-                  setDraft((current) => current ? {
-                    ...current,
-                    narrative: value,
-                    anamnese: value.anamnese_aktuelle ?? "",
-                  } : current);
-                }}
-                onDiagnosesChange={(value) => patch("diagnoses", value)}
-                onMedicationsChange={(value) => patch("medications", value)}
-                onAllergiesChange={(value) => patch("allergies", value)}
-                onCavesChange={(value) => patch("caves", value)}
-              />
+              {medicalLookupsLoading ? (
+                <div
+                  role="status"
+                  className="flex items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
+                >
+                  <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" />
+                  {tx("Загружаются справочники врачей и клиник…", "Ärzte- und Klinikkataloge werden geladen…")}
+                </div>
+              ) : null}
+              <Suspense
+                fallback={(
+                  <div role="status" className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+                    <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
+                    {tx("Загрузка медицинской формы…", "Medizinisches Formular wird geladen…")}
+                  </div>
+                )}
+              >
+                <LeadMedicalIntakeForm
+                  lead={lead}
+                  tx={tx}
+                  lang={lang}
+                  anamneseId={MEDICAL_ANAMNESE_ID}
+                  narrative={draft.narrative}
+                  diagnoses={draft.diagnoses}
+                  medications={draft.medications}
+                  allergies={draft.allergies}
+                  caves={draft.caves}
+                  providers={clinicalProviders}
+                  allDoctors={allDoctors}
+                  validationAttempted={medicalValidationAttempted}
+                  onNarrativeChange={(value) => {
+                    setError("");
+                    clearServerValidation();
+                    setDraft((current) => current ? {
+                      ...current,
+                      narrative: value,
+                      anamnese: value.anamnese_aktuelle ?? "",
+                    } : current);
+                  }}
+                  onDiagnosesChange={(value) => patch("diagnoses", value)}
+                  onMedicationsChange={(value) => patch("medications", value)}
+                  onAllergiesChange={(value) => patch("allergies", value)}
+                  onCavesChange={(value) => patch("caves", value)}
+                />
+              </Suspense>
             </section>
           ) : null}
 
@@ -2916,7 +3111,7 @@ ${serviceCommentLines.join("\n")}`
               {isQuestionnaireLead ? (
                 <LeadQuestionnaireFacts
                   items={[
-                    { label: tx("Нужен переводчик", "Dolmetscher benötigt"), value: yesNoValue(lead.needs_interpreter, tx) },
+                    { label: tx("Нужен переводчик", "Dolmetscher benötigt"), value: yesNoValue(draft.serviceNeeds.includes("interpreter_support"), tx) },
                     { label: tx("Может приехать", "Kann anreisen"), value: yesNoValue(lead.can_travel, tx) },
                     { label: tx("Есть проездные документы", "Reisedokumente vorhanden"), value: yesNoValue(lead.has_travel_documents, tx) },
                     { label: tx("Регион нахождения", "Aufenthaltsregion"), value: lead.location ? leadLocationLabel(lead.location, t) : tx("Не указано", "Nicht angegeben") },
@@ -2943,7 +3138,7 @@ ${serviceCommentLines.join("\n")}`
                 </span>
                 <div className="grid items-start gap-2 sm:grid-cols-2">
                   {Array.from(new Set([
-                    ...LEAD_QUESTIONNAIRE_SERVICE_OPTIONS,
+                    ...LEAD_WIZARD_SERVICE_OPTIONS,
                     ...initialServiceOptionsRef.current,
                     ...draft.serviceNeeds,
                   ])).map((value, index) => {
@@ -3139,6 +3334,15 @@ ${serviceCommentLines.join("\n")}`
 
           {draft && step === "order" ? (
             <section className="space-y-5">
+              {commercialLookupsLoading ? (
+                <div
+                  role="status"
+                  className="flex items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
+                >
+                  <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" />
+                  {tx("Загружаются каталоги специализаций и услуг…", "Fachrichtungs- und Leistungskataloge werden geladen…")}
+                </div>
+              ) : null}
               <div className="space-y-3">
                 <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   {tx("Специализации", "Fachrichtungen")}
@@ -3236,6 +3440,15 @@ ${serviceCommentLines.join("\n")}`
 
           {draft && step === "commercial" ? (
             <section className="space-y-5">
+              {commercialLookupsLoading ? (
+                <div
+                  role="status"
+                  className="flex items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
+                >
+                  <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" />
+                  {tx("Загружается каталог услуг…", "Leistungskatalog wird geladen…")}
+                </div>
+              ) : null}
               <h3 className="text-sm font-semibold text-foreground">{tx("Договор, заказ и смета", "Vertrag, Auftrag und Kostenvoranschlag")}</h3>
               <div className="flex flex-wrap items-center justify-between gap-3 border-y border-border py-3"><div><div className="text-sm font-medium text-foreground">{tx("Рамочный договор", "Rahmenvertrag")}</div><div className="mt-1 text-xs text-muted-foreground">{contract?.contract_number ?? tx("Договор ещё не создан", "Vertrag noch nicht erstellt")}</div></div><div className="flex items-center gap-2"><StateMark done={contract?.status === "signed"} label={contract?.status === "signed" ? tx("Договор подписан", "Vertrag unterzeichnet") : tx("Договор не подписан", "Vertrag nicht unterzeichnet")} /><Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void signContract()}>{busy === "contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileCheck2 className="size-3.5" />}{tx("Подписать договор", "Vertrag unterzeichnen")}</Button></div></div>
               {draft.serviceNeeds.length > 0 ? (

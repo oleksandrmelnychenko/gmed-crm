@@ -33,6 +33,8 @@ export interface Lead {
   console_promoted_at?: string | null;
   console_promoted_by?: string | null;
   qualification_status: string;
+  /** ISO timestamp of the last status change — drives the "days in status" indicator. */
+  status_changed_at?: string | null;
   compliance_status?: string;
   /**
    * Mirrors the backend `LeadConversionReadiness::conversion_ready` flag on

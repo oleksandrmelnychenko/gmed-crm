@@ -186,6 +186,7 @@ const LEAD_STATUS_LABEL_KEYS = {
   not_qualified: "lead_status_not_qualified",
   converted: "lead_status_converted",
   archived: "lead_status_archived",
+  deleted: "lead_status_deleted",
 } satisfies Partial<Record<string, TranslationKey>>;
 
 const LEAD_COMPLIANCE_LABEL_KEYS = {
@@ -272,9 +273,26 @@ export const LEAD_QUESTIONNAIRE_SERVICE_OPTIONS = [
   "not-sure",
 ] as const;
 
+export const LEAD_WIZARD_SERVICE_OPTIONS = [
+  "driver",
+  "concierge",
+  "interpreter_support",
+  "medical-transport",
+  "air-ambulance",
+  "business-aviation",
+  "none",
+  "not-sure",
+] as const;
+
 const LEAD_SERVICE_VALUE_ALIASES = {
   driver: "driver",
+  chauffeur: "driver",
+  transfer: "driver",
+  "airport-transfer": "driver",
+  airport_transfer: "driver",
   concierge: "concierge",
+  "concierge-support": "concierge",
+  concierge_support: "concierge",
   "medical-transport": "medical-transport",
   medical_transport: "medical-transport",
   "air-ambulance": "air-ambulance",
@@ -284,7 +302,14 @@ const LEAD_SERVICE_VALUE_ALIASES = {
   none: "none",
   "not-sure": "not-sure",
   not_sure: "not-sure",
+  interpreter: "interpreter_support",
+  translator: "interpreter_support",
+  dolmetscher: "interpreter_support",
+  "interpreter-support": "interpreter_support",
+  interpreter_support: "interpreter_support",
 } satisfies Record<string, string>;
+
+const LEAD_EXCLUSIVE_SERVICE_OPTIONS = new Set(["none", "not-sure"]);
 
 const LEAD_PROGRAM_SERVICE_LABEL_KEYS = {
   standard: "lead_option_program_standard",
@@ -695,6 +720,36 @@ export function normalizeLeadServiceValue(value: string) {
   const normalized = trimmed.toLowerCase();
   return (LEAD_SERVICE_VALUE_ALIASES as Partial<Record<string, string>>)[normalized]
     ?? trimmed;
+}
+
+export function normalizeLeadServiceSelection(values: readonly string[]) {
+  const normalized = Array.from(new Set(
+    values.map(normalizeLeadServiceValue).filter(Boolean),
+  ));
+  const actualServices = normalized.filter(
+    (value) => !LEAD_EXCLUSIVE_SERVICE_OPTIONS.has(value),
+  );
+  if (actualServices.length > 0) return actualServices;
+  return normalized.length > 0 ? [normalized[0]] : [];
+}
+
+export function updateLeadServiceSelection(
+  current: readonly string[],
+  value: string,
+  checked: boolean,
+) {
+  const normalizedValue = normalizeLeadServiceValue(value);
+  const normalizedCurrent = normalizeLeadServiceSelection(current);
+  if (!checked) {
+    return normalizedCurrent.filter((item) => item !== normalizedValue);
+  }
+  if (LEAD_EXCLUSIVE_SERVICE_OPTIONS.has(normalizedValue)) {
+    return [normalizedValue];
+  }
+  return Array.from(new Set([
+    ...normalizedCurrent.filter((item) => !LEAD_EXCLUSIVE_SERVICE_OPTIONS.has(item)),
+    normalizedValue,
+  ]));
 }
 
 export function knownLeadProgramServiceLabel(

@@ -281,6 +281,7 @@ export interface OperationsTranslations {
   lead_status_not_qualified: string;
   lead_status_converted: string;
   lead_status_archived: string;
+  lead_status_deleted: string;
   lead_compliance_status: string;
   lead_compliance_pending: string;
   lead_compliance_documents_sent: string;
@@ -832,9 +833,10 @@ export const operationsRu: OperationsTranslations = {
   lead_status_new: "Новый",
   lead_status_in_progress: "В работе",
   lead_status_qualified: "Квалифицирован",
-  lead_status_not_qualified: "Не квалифицирован",
-  lead_status_converted: "Конвертирован",
+  lead_status_not_qualified: "Не подходит",
+  lead_status_converted: "Пациент создан",
   lead_status_archived: "В архиве",
+  lead_status_deleted: "Удалён",
   lead_compliance_status: "Статус compliance",
   lead_compliance_pending: "Ожидает",
   lead_compliance_documents_sent: "Документы отправлены",
@@ -1407,9 +1409,10 @@ export const operationsDe: OperationsTranslations = {
   lead_status_new: "Neu",
   lead_status_in_progress: "In Bearbeitung",
   lead_status_qualified: "Qualifiziert",
-  lead_status_not_qualified: "Nicht qualifiziert",
-  lead_status_converted: "Konvertiert",
+  lead_status_not_qualified: "Nicht geeignet",
+  lead_status_converted: "Patient angelegt",
   lead_status_archived: "Archiviert",
+  lead_status_deleted: "Gelöscht",
   lead_compliance_status: "Compliance-Status",
   lead_compliance_pending: "Ausstehend",
   lead_compliance_documents_sent: "Dokumente gesendet",

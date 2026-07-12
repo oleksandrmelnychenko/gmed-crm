@@ -1,4 +1,6 @@
 import {
+  Suspense,
+  lazy,
   startTransition,
   useCallback,
   useDeferredValue,
@@ -73,6 +75,8 @@ import type { CreateLeadBody, LeadDetail, LeadsStats } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 import {
   complianceTone,
+  daysInStatus,
+  daysInStatusLabel,
   failedOutcomeTone,
   leadRowAccent,
   leadStatusTone,
@@ -136,14 +140,27 @@ import type {
   LeadGateForm,
   LeadListItem,
 } from "./model/types";
-import { LeadWizard } from "./ui/lead-wizard";
-
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
 const LEAD_DEFAULT_FROZEN_COLUMNS = ["lead"];
 const LEAD_MAX_FROZEN_COLUMNS = 2;
 const FAILED_OUTCOME_OPTIONS = ["archived", "delete_anonymized"] as const;
 const ACTIVE_WIZARD_LEAD_STATUSES = new Set(["new", "in_progress", "qualified"]);
+let leadWizardModulePromise: Promise<typeof import("./ui/lead-wizard")> | null = null;
+
+function loadLeadWizardModule() {
+  leadWizardModulePromise ??= import("./ui/lead-wizard");
+  return leadWizardModulePromise;
+}
+
+function preloadLeadWizard() {
+  void loadLeadWizardModule();
+}
+
+const LeadWizard = lazy(() =>
+  loadLeadWizardModule().then((module) => ({ default: module.LeadWizard })),
+);
+
 type LeadPaneTab = "overview" | "process" | "qualification" | "details";
 type LeadTypeTone = "warning" | "brand" | "info" | "neutral";
 const LEAD_REALTIME_EVENTS = [
@@ -340,6 +357,10 @@ function useLeadsPageContent() {
   const failedLoadMessage = t.common_failed_load;
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => leadPermissions(user?.role), [user?.role]);
+  useEffect(() => {
+    if (!permissions.canConvert) return;
+    preloadLeadWizard();
+  }, [permissions.canConvert]);
   type PersistedLeadFilters = Pick<LeadFilters, "status" | "leadType" | "source" | "country" | "includeArchived">;
   const [persistedLeadFilters, setPersistedLeadFilters] = useSecurePersistedState<PersistedLeadFilters>(
     "leads.filters",
@@ -580,11 +601,21 @@ function useLeadsPageContent() {
         group: "qualification",
         sortable: true,
         width: 180,
-        render: (row) => (
-          <StatusBadge tone={leadStatusTone(row.qualification_status)}>
-            {statusLabel(row.qualification_status, t)}
-          </StatusBadge>
-        ),
+        render: (row) => {
+          const days = daysInStatus(row.status_changed_at);
+          return (
+            <div className="flex flex-col items-start gap-1">
+              <StatusBadge tone={leadStatusTone(row.qualification_status)}>
+                {statusLabel(row.qualification_status, t)}
+              </StatusBadge>
+              {days != null ? (
+                <span className="whitespace-nowrap text-[11px] tabular-nums text-muted-foreground">
+                  {daysInStatusLabel(days, lang)}
+                </span>
+              ) : null}
+            </div>
+          );
+        },
       },
       {
         id: "received_at",
@@ -859,6 +890,7 @@ function useLeadsPageContent() {
   }
 
   function openLeadWizard(leadId: string) {
+    preloadLeadWizard();
     setDetailOpen(false);
     setNewLeadWizardOpen(false);
     setWizardLeadId(leadId);
@@ -1235,6 +1267,11 @@ function useLeadsPageContent() {
                     <StatusBadge tone={leadStatusTone(detail.qualification_status)}>
                       {statusLabel(detail.qualification_status, t)}
                     </StatusBadge>
+                    {daysInStatus(detail.status_changed_at) != null ? (
+                      <span className="text-[11px] tabular-nums text-muted-foreground">
+                        · {daysInStatusLabel(daysInStatus(detail.status_changed_at)!, lang)}
+                      </span>
+                    ) : null}
                     {detail.submitted_at ? (
                       <Badge variant="outline" className="rounded-full">
                         {t.lead_submitted_at} {formatDate(detail.submitted_at, locale, t.common_not_set)}
@@ -2373,6 +2410,7 @@ function useLeadsPageContent() {
                   className="h-9 rounded-lg px-3.5"
                   onClick={() => {
                     if (permissions.canConvert) {
+                      preloadLeadWizard();
                       setDetailOpen(false);
                       setWizardLeadId(null);
                       setNewLeadWizardOpen(true);
@@ -2682,41 +2720,60 @@ function useLeadsPageContent() {
         </SheetContent>
       </Sheet>
 
-      <LeadWizard
-        leadId={wizardLeadId}
-        open={wizardLeadId !== null || newLeadWizardOpen}
-        createMode={newLeadWizardOpen}
-        onCreated={(leadId) => {
-          setNewLeadWizardOpen(false);
-          setWizardLeadId(leadId);
-          syncLeadQuery(leadId, { replace: true, view: "wizard" });
-        }}
-        onOpenChange={(open) => {
-          if (open) return;
-          setNewLeadWizardOpen(false);
-          setWizardLeadId(null);
-          syncLeadQuery(undefined, { replace: false });
-          reload();
-        }}
-        onArchived={() => {
-          setNewLeadWizardOpen(false);
-          setWizardLeadId(null);
-          syncLeadQuery(undefined, { replace: false });
-          setSuccessMessage(lang === "de" ? "Lead archiviert." : "Лид архивирован.");
-          reload();
-        }}
-        onShowDetails={(leadId) => openLeadDetail(leadId)}
-        onConverted={(patientId) => {
-          setNewLeadWizardOpen(false);
-          setWizardLeadId(null);
-          staffGo(`/patients/${patientId}`);
-        }}
-        onOrderCreated={(orderId) => {
-          setNewLeadWizardOpen(false);
-          setWizardLeadId(null);
-          staffGo(`/orders/${orderId}`);
-        }}
-      />
+      {wizardLeadId !== null || newLeadWizardOpen ? (
+        <Suspense
+          fallback={(
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-2 backdrop-blur-[1px]">
+              <div className="flex h-[90vh] w-full items-center justify-center rounded-lg border border-border bg-background shadow-xl sm:h-[min(88vh,52rem)] sm:w-[min(96vw,84rem)]">
+                <div
+                  role="status"
+                  aria-label={lang === "de" ? "Lead-Aufnahme" : "Оформление обращения"}
+                  className="flex items-center gap-2 text-sm text-muted-foreground"
+                >
+                  <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
+                  {lang === "de" ? "Wizard wird geladen…" : "Загрузка визарда…"}
+                </div>
+              </div>
+            </div>
+          )}
+        >
+          <LeadWizard
+            leadId={wizardLeadId}
+            open
+            createMode={newLeadWizardOpen}
+            onCreated={(leadId) => {
+              setNewLeadWizardOpen(false);
+              setWizardLeadId(leadId);
+              syncLeadQuery(leadId, { replace: true, view: "wizard" });
+            }}
+            onOpenChange={(open) => {
+              if (open) return;
+              setNewLeadWizardOpen(false);
+              setWizardLeadId(null);
+              syncLeadQuery(undefined, { replace: false });
+              reload();
+            }}
+            onArchived={() => {
+              setNewLeadWizardOpen(false);
+              setWizardLeadId(null);
+              syncLeadQuery(undefined, { replace: false });
+              setSuccessMessage(lang === "de" ? "Lead archiviert." : "Лид архивирован.");
+              reload();
+            }}
+            onShowDetails={(leadId) => openLeadDetail(leadId)}
+            onConverted={(patientId) => {
+              setNewLeadWizardOpen(false);
+              setWizardLeadId(null);
+              staffGo(`/patients/${patientId}`);
+            }}
+            onOrderCreated={(orderId) => {
+              setNewLeadWizardOpen(false);
+              setWizardLeadId(null);
+              staffGo(`/orders/${orderId}`);
+            }}
+          />
+        </Suspense>
+      ) : null}
 
       <Dialog
         open={pendingConvertLead !== null}

@@ -9914,6 +9914,24 @@ pub(crate) async fn persist_document_file(
         ));
     }
 
+    // A collected lead document advances compliance 'pending' -> 'documents_sent'
+    // (see docs/lead-status-strategy-ua.md). Non-fatal; signing the DSGVO form
+    // later advances it to 'signed'.
+    if let Some(lead_id) = input.lead_id
+        && let Err(error) = sqlx::query(
+            r#"UPDATE leads
+               SET compliance_status = 'documents_sent', updated_at = now()
+               WHERE id = $1
+                 AND compliance_status = 'pending'
+                 AND converted_patient_id IS NULL"#,
+        )
+        .bind(lead_id)
+        .execute(&state.db)
+        .await
+    {
+        tracing::warn!(error = %error, lead_id = %lead_id, "advance lead compliance to documents_sent");
+    }
+
     Ok((document_id, file_size, original_filename, storage_key))
 }
 

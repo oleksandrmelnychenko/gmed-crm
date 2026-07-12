@@ -12,6 +12,7 @@ import type {
 type JsonPayload = Record<string, unknown>;
 
 const CONTRACT_LOOKUPS_CACHE_TTL_MS = 60_000;
+const CONTRACT_CATALOG_CACHE_TTL_MS = 300_000;
 
 function postJson<T>(path: string, payload: JsonPayload) {
   return apiFetch<T>(path, {
@@ -41,7 +42,9 @@ export function fetchQuotes(path: string) {
 }
 
 export function fetchAgencyServices(path: string) {
-  return apiFetch<AgencyServiceItem[]>(path);
+  return apiFetch<AgencyServiceItem[]>(path, {
+    cacheTtlMs: CONTRACT_CATALOG_CACHE_TTL_MS,
+  });
 }
 
 export function fetchContract(contractId: string) {

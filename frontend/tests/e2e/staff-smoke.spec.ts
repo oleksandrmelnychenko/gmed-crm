@@ -319,6 +319,8 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
         has_insurance: lead.conversion_ready ? true : null,
         insurance_covers_germany: lead.conversion_ready ? "not_sure" : null,
         needs_interpreter: lead.conversion_ready ? true : null,
+        primary_concern_text: lead.conversion_ready ? "Orthopedic consultation" : null,
+        additional_concerns: lead.conversion_ready ? "Initial medical history" : null,
         message: lead.conversion_ready
           ? "Please coordinate an orthopedic consultation and airport transfer."
           : null,
@@ -937,6 +939,9 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
           city: null,
           state: null,
           zip_code: null,
+          primary_concern_text: null,
+          additional_concerns: null,
+          requested_specialties: [],
           notes: payload.notes ?? null,
           wizard_state: {},
         });
@@ -2090,6 +2095,44 @@ test.describe("lead onboarding wizard", () => {
     await expect(wizard.getByText("Formular", { exact: true })).toBeVisible();
   });
 
+  test("opens master data before optional wizard catalogs finish loading", async ({
+    page,
+  }) => {
+    let releaseLookups = () => undefined;
+    const lookupsGate = new Promise<void>((resolve) => {
+      releaseLookups = resolve;
+    });
+    const delayedLookupPaths = new Set([
+      "/api/v1/providers/specializations",
+      "/api/v1/agency-services",
+      "/api/v1/providers",
+      "/api/v1/doctors",
+    ]);
+
+    await page.route("**/api/v1/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (delayedLookupPaths.has(path)) {
+        await lookupsGate;
+      }
+      await route.fallback();
+    });
+
+    try {
+      await page.goto("/leads");
+      await page.getByRole("row").filter({ hasText: "Ready Lead" }).click();
+
+      const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+      await expect(wizard).toBeVisible();
+      await expect(wizard.locator("#lead-wizard-first-name")).toBeVisible({
+        timeout: 1_500,
+      });
+      releaseLookups();
+      await page.waitForLoadState("networkidle");
+    } finally {
+      releaseLookups();
+    }
+  });
+
   test("new lead starts in the wizard and is created after valid master data", async ({
     page,
   }) => {
@@ -2112,7 +2155,7 @@ test.describe("lead onboarding wizard", () => {
     await expect(wizard.getByText("Neuer Lead", { exact: true })).toBeVisible();
     expect(createRequests).toBe(0);
 
-    const medicalStep = wizard.getByRole("button", { name: "Medizinische Merkmale" });
+    const medicalStep = wizard.locator('[data-step="medical"]');
     const firstName = wizard.locator("#lead-wizard-first-name");
     await medicalStep.click();
     await expect(firstName).toHaveAttribute("aria-invalid", "true");
@@ -2155,6 +2198,17 @@ test.describe("lead onboarding wizard", () => {
       medicalStep,
     ).toHaveAttribute("aria-current", "step");
     expect(createRequests).toBe(1);
+
+    const navigation = wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" });
+    await navigation.getByRole("button", { name: /Personendaten/i }).click();
+    await navigation.getByRole("button", { name: /Servicehistorie/i }).click();
+    await expect(medicalStep).toHaveAttribute("aria-current", "step");
+    await expect(
+      wizard.getByRole("button", {
+        name: "Medizinische Merkmale: Anliegen: Pflichtfeld",
+        exact: true,
+      }),
+    ).toBeVisible();
   });
 
   test("wizard localizes backend errors in German and Russian", async ({ page }) => {
@@ -2472,6 +2526,137 @@ test.describe("lead onboarding wizard", () => {
       wizard.getByRole("combobox", { name: "Leistung aus dem Katalog auswählen" }),
     ).toBeVisible();
     await expect(wizard.getByText("Kundenbedarf", { exact: true })).toBeVisible();
+  });
+
+  test("service checkboxes persist interpreter support and keep exclusive choices consistent", async ({
+    page,
+  }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    await page.goto(`/leads?lead=${leadId}`);
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    const navigation = wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" });
+    await navigation.getByRole("button", { name: /Servicehistorie/i }).click();
+
+    const interpreter = wizard.getByRole("checkbox", {
+      name: "Dolmetscherbegleitung",
+      exact: true,
+    });
+    await expect(interpreter).toBeVisible();
+    await expect(interpreter).toBeChecked();
+
+    const interpreterDisabledRequest = page.waitForRequest((request) => {
+      if (request.method() !== "POST" || !request.url().endsWith(`/leads/${leadId}/update`)) {
+        return false;
+      }
+      const payload = request.postDataJSON() as {
+        needs_interpreter?: boolean;
+        services?: string[];
+      };
+      return payload.needs_interpreter === false
+        && !payload.services?.includes("interpreter_support");
+    });
+    await interpreter.uncheck();
+    const disabledRequest = await interpreterDisabledRequest;
+    expect(disabledRequest.postDataJSON()).toMatchObject({ needs_interpreter: false });
+    expect((await disabledRequest.response())?.ok()).toBe(true);
+
+    await wizard.getByRole("button", { name: "Aktualisieren" }).click();
+    await navigation.getByRole("button", { name: /Servicehistorie/i }).click();
+    await expect(interpreter).not.toBeChecked();
+
+    const noServices = wizard.getByRole("checkbox", {
+      name: "Keinen der genannten Services",
+      exact: true,
+    });
+    const noneRequest = page.waitForRequest((request) => {
+      if (request.method() !== "POST" || !request.url().endsWith(`/leads/${leadId}/update`)) {
+        return false;
+      }
+      const payload = request.postDataJSON() as {
+        needs_interpreter?: boolean;
+        services?: string[];
+      };
+      return payload.needs_interpreter === false
+        && payload.services?.length === 1
+        && payload.services[0] === "none";
+    });
+    await noServices.check();
+    expect((await noneRequest).postDataJSON()).toMatchObject({
+      needs_interpreter: false,
+      services: ["none"],
+    });
+
+    const interpreterEnabledRequest = page.waitForRequest((request) => {
+      if (request.method() !== "POST" || !request.url().endsWith(`/leads/${leadId}/update`)) {
+        return false;
+      }
+      const payload = request.postDataJSON() as {
+        needs_interpreter?: boolean;
+        services?: string[];
+      };
+      return payload.needs_interpreter === true
+        && payload.services?.length === 1
+        && payload.services[0] === "interpreter_support";
+    });
+    await interpreter.check();
+    expect((await interpreterEnabledRequest).postDataJSON()).toMatchObject({
+      needs_interpreter: true,
+      services: ["interpreter_support"],
+    });
+    await expect(noServices).not.toBeChecked();
+  });
+
+  test("forward tab navigation cannot bypass document or order validation", async ({ page }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    await page.goto(`/leads?lead=${leadId}`);
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    const navigation = wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" });
+    const masterStep = navigation.getByRole("button", { name: /Personendaten/i });
+    const documentsStep = navigation.getByRole("button", { name: /Unterlagen/i });
+    const orderStep = navigation.getByRole("button", { name: /Auftragserfassung/i });
+    const commercialStep = navigation.getByRole("button", { name: /Vertrag & Angebot/i });
+
+    await documentsStep.click();
+    await expect(documentsStep).toHaveAttribute("aria-current", "step");
+    const privacyConsent = wizard.getByRole("checkbox", {
+      name: "Datenschutzhinweise wurden bestätigt",
+      exact: true,
+    });
+    await privacyConsent.uncheck();
+
+    await orderStep.click();
+    await expect(documentsStep).toHaveAttribute("aria-current", "step");
+    await expect(
+      wizard.getByRole("button", {
+        name: "Unterlagen: Datenschutzhinweise bestätigen",
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    await masterStep.click();
+    await commercialStep.click();
+    await expect(documentsStep).toHaveAttribute("aria-current", "step");
+
+    await privacyConsent.check();
+    await orderStep.click();
+    await expect(orderStep).toHaveAttribute("aria-current", "step");
+
+    await commercialStep.click();
+    await expect(orderStep).toHaveAttribute("aria-current", "step");
+    await expect(
+      wizard.getByRole("button", {
+        name: "Auftragserfassung: Mindestens eine Fachrichtung auswählen",
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    await masterStep.click();
+    await commercialStep.click();
+    await expect(orderStep).toHaveAttribute("aria-current", "step");
   });
 
   test("healthcare consent makes the complete address required", async ({ page }) => {
@@ -2805,6 +2990,8 @@ test.describe("lead onboarding wizard", () => {
         compliance_status: "signed",
         date_of_birth: "1990-01-01",
         legal_sex: "female",
+        primary_concern_text: "Orthopedic consultation",
+        additional_concerns: "Initial medical history",
         requested_specialties: ["orthopedics"],
         services: [],
         consent_healthcare: true,

@@ -250,7 +250,7 @@ export type AllDoctorOption = {
 };
 
 export function fetchAllDoctors() {
-  return apiFetch<AllDoctorOption[]>("/doctors");
+  return apiFetch<AllDoctorOption[]>("/doctors", { cacheTtlMs: 60_000 });
 }
 
 export function fetchPatientClinical(patientId: string) {

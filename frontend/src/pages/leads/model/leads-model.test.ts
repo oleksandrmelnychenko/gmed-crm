@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   LEAD_QUESTIONNAIRE_SERVICE_OPTIONS,
+  LEAD_WIZARD_SERVICE_OPTIONS,
   formatDateTime,
   leadErrorBlockingReasons,
   leadErrorMessage,
+  normalizeLeadServiceSelection,
   normalizeLeadServiceValue,
+  updateLeadServiceSelection,
 } from "./leads-model";
 
 describe("lead questionnaire services", () => {
@@ -25,7 +28,45 @@ describe("lead questionnaire services", () => {
     expect(normalizeLeadServiceValue("medical_transport")).toBe("medical-transport");
     expect(normalizeLeadServiceValue("AIR_AMBULANCE")).toBe("air-ambulance");
     expect(normalizeLeadServiceValue("not_sure")).toBe("not-sure");
+    expect(normalizeLeadServiceValue("interpreter")).toBe("interpreter_support");
+    expect(normalizeLeadServiceValue("translator")).toBe("interpreter_support");
+    expect(normalizeLeadServiceValue("concierge_support")).toBe("concierge");
+    expect(normalizeLeadServiceValue("airport_transfer")).toBe("driver");
     expect(normalizeLeadServiceValue("medical_support")).toBe("medical_support");
+  });
+
+  it("always offers interpreter support in the staff wizard", () => {
+    expect(LEAD_WIZARD_SERVICE_OPTIONS).toContain("interpreter_support");
+  });
+
+  it("removes contradictory exclusive choices from imported services", () => {
+    expect(normalizeLeadServiceSelection([
+      "none",
+      "driver",
+      "interpreter",
+      "not_sure",
+    ])).toEqual(["driver", "interpreter_support"]);
+  });
+
+  it("deduplicates legacy aliases from imported service payloads", () => {
+    expect(normalizeLeadServiceSelection([
+      "concierge_support",
+      "concierge",
+      "airport_transfer",
+      "driver",
+    ])).toEqual(["concierge", "driver"]);
+  });
+
+  it("keeps none and not-sure mutually exclusive with actual services", () => {
+    expect(updateLeadServiceSelection(["driver", "concierge"], "none", true)).toEqual([
+      "none",
+    ]);
+    expect(updateLeadServiceSelection(["none"], "translator", true)).toEqual([
+      "interpreter_support",
+    ]);
+    expect(updateLeadServiceSelection(["interpreter_support"], "not-sure", true)).toEqual([
+      "not-sure",
+    ]);
   });
 });
 

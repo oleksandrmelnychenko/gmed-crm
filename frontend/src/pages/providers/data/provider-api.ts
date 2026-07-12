@@ -15,6 +15,9 @@ import type {
 
 type JsonPayload = Record<string, unknown>;
 
+const PROVIDER_LOOKUP_CACHE_TTL_MS = 60_000;
+const PROVIDER_STATIC_META_CACHE_TTL_MS = 300_000;
+
 function arrayOrEmpty<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
@@ -136,7 +139,9 @@ function post(path: string) {
 }
 
 export function fetchProviders(path: string) {
-  return apiFetch<unknown>(path).then((rows) => {
+  return apiFetch<unknown>(path, {
+    cacheTtlMs: PROVIDER_LOOKUP_CACHE_TTL_MS,
+  }).then((rows) => {
     if (!Array.isArray(rows)) {
       throw new Error("Invalid providers response");
     }
@@ -165,7 +170,9 @@ export function fetchSpecializations(includeInactive = false) {
   const path = includeInactive
     ? "/providers/specializations?include_inactive=true"
     : "/providers/specializations";
-  return apiFetch<SpecializationItem[]>(path).then((items) =>
+  return apiFetch<SpecializationItem[]>(path, {
+    cacheTtlMs: PROVIDER_STATIC_META_CACHE_TTL_MS,
+  }).then((items) =>
     items.map(normalizeSpecializationItem),
   );
 }
