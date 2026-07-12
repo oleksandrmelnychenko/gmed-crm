@@ -229,6 +229,32 @@ async fn settings_update_accepts_agency_profile_values() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], true);
 
+    for (key, value) in [
+        ("agency_principal_birth_date", "1994-12-12"),
+        ("agency_privacy_email", "privacy@gmed.de"),
+        ("agency_sign_place", "München"),
+        ("agency_data_system_name", "Configured CRM"),
+        (
+            "agency_data_processor_notice",
+            "Configured processor and transfer notice.",
+        ),
+        ("agency_bank_holder", "GMED Operations"),
+        ("agency_bank_name", "Musterbank"),
+        ("agency_bank_swift", "MUSTERBIC"),
+        ("agency_bank_iban", "DE00 0000 0000 0000 0000 00"),
+    ] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/admin/settings/{key}"),
+            &admin,
+            Some(json!({"value": value})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{key}: {body:?}");
+        assert_eq!(body["ok"], true, "{key}");
+    }
+
     let (status, body) = json_request(
         &app,
         "POST",

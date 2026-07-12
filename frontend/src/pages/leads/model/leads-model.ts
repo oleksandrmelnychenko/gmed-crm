@@ -39,6 +39,15 @@ const LEAD_ERROR_MESSAGES: Record<string, LeadErrorTranslation> = {
   "failed to create quote": ["Не удалось создать смету", "Kostenvoranschlag konnte nicht erstellt werden"],
   "case intake is incomplete": ["Заполните причину обращения и анамнез", "Anliegen und Anamnese vollständig ausfüllen"],
   "failed to import attachments": ["Не удалось импортировать файлы лида", "Lead-Dateien konnten nicht importiert werden"],
+  "invalid compliance_status": ["Выберите корректный статус согласий", "Gültigen Einwilligungsstatus auswählen"],
+  "invalid legal_sex": ["Выберите пол по документам", "Geschlecht laut Ausweisdokument auswählen"],
+  "invalid date_of_birth (yyyy-mm-dd)": ["Укажите корректную дату рождения", "Gültiges Geburtsdatum angeben"],
+  "invalid primary_language": ["Выберите язык из списка", "Sprache aus der Liste auswählen"],
+  "first_name cannot be empty": ["Укажите имя", "Vorname angeben"],
+  "last_name cannot be empty": ["Укажите фамилию", "Nachname angeben"],
+  "requested_specialties must be a json array": ["Не удалось сохранить специализации", "Fachrichtungen konnten nicht gespeichert werden"],
+  "wizard_state must be a json object": ["Не удалось сохранить данные мастера", "Wizard-Daten konnten nicht gespeichert werden"],
+  "date_to cannot be earlier than date_from": ["Дата окончания программы не может быть раньше даты начала", "Das Programmende darf nicht vor dem Programmbeginn liegen"],
 };
 
 const LEAD_ERROR_PATTERNS: Array<readonly [pattern: RegExp, translation: LeadErrorTranslation]> = [
@@ -61,6 +70,36 @@ function leadErrorStatus(error: unknown) {
   if (!error || typeof error !== "object" || !("status" in error)) return null;
   const status = (error as { status?: unknown }).status;
   return typeof status === "number" ? status : null;
+}
+
+function leadErrorBody(error: unknown): Record<string, unknown> | null {
+  if (!error || typeof error !== "object" || !("body" in error)) return null;
+  const body = (error as { body?: unknown }).body;
+  return body && typeof body === "object" && !Array.isArray(body)
+    ? body as Record<string, unknown>
+    : null;
+}
+
+export function leadErrorBlockingReasons(error: unknown) {
+  const body = leadErrorBody(error);
+  if (!body) return [];
+
+  const readiness = body.readiness && typeof body.readiness === "object" && !Array.isArray(body.readiness)
+    ? body.readiness as Record<string, unknown>
+    : null;
+  const candidates = [
+    body.blocking_reasons,
+    readiness?.blocking_reasons,
+    readiness?.qualification_reasons,
+  ];
+
+  for (const candidate of candidates) {
+    if (!Array.isArray(candidate)) continue;
+    return Array.from(new Set(candidate.flatMap((reason) => (
+      typeof reason === "string" && reason.trim() ? [reason.trim()] : []
+    ))));
+  }
+  return [];
 }
 
 export function leadErrorMessage(

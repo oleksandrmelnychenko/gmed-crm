@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   LEAD_QUESTIONNAIRE_SERVICE_OPTIONS,
   formatDateTime,
+  leadErrorBlockingReasons,
   leadErrorMessage,
   normalizeLeadServiceValue,
 } from "./leads-model";
@@ -51,6 +52,30 @@ describe("lead errors", () => {
     expect(leadErrorMessage(new Error("Case intake is incomplete"), de)).toBe(
       "Anliegen und Anamnese vollständig ausfüllen",
     );
+    expect(leadErrorMessage(new Error("Invalid legal_sex"), ru)).toBe(
+      "Выберите пол по документам",
+    );
+    expect(leadErrorMessage(new Error("Invalid legal_sex"), de)).toBe(
+      "Geschlecht laut Ausweisdokument auswählen",
+    );
+  });
+
+  it("keeps every structured blocking reason returned by a lead gate", () => {
+    const error = Object.assign(new Error("Lead is not qualification-ready"), {
+      status: 422,
+      body: {
+        blocking_reasons: [
+          "Birth date is missing",
+          "Healthcare consent is missing",
+          "Birth date is missing",
+        ],
+      },
+    });
+
+    expect(leadErrorBlockingReasons(error)).toEqual([
+      "Birth date is missing",
+      "Healthcare consent is missing",
+    ]);
   });
 
   it("uses localized HTTP fallbacks without leaking English", () => {

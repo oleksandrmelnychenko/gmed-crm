@@ -137,6 +137,7 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
         Some(json!({
             "items": [{
                 "handelsname": "Atorvastatin",
+                "wirkstoff": "Atorvastatin",
                 "med_typ": "permanent",
                 "expiry_date": expired_on,
                 "dosis": "20",

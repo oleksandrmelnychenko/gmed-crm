@@ -295,6 +295,8 @@ export function updateOrderCommercialBasis(
     signed_agency?: boolean;
     prepayment_required?: boolean;
     needs_description?: string;
+    date_from?: string;
+    date_to?: string;
   },
 ) {
   return postJson<{
@@ -310,6 +312,8 @@ export function updateOrderCommercialBasis(
     signed_agency_at: string | null;
     signed_at: string | null;
     prepayment_required: boolean;
+    date_from: string | null;
+    date_to: string | null;
   }>(`/orders/${orderId}/commercial-basis`, payload);
 }
 

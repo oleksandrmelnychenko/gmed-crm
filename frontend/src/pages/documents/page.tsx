@@ -43,7 +43,7 @@ import { DocumentsGrid } from "@/components/documents-grid";
 import { localizeDocumentCode } from "@/lib/required-document-labels";
 import {
   DOCUMENT_BINDING_FIELDS,
-  prefillDocumentBindingsFromText,
+  hydrateDocumentBindings,
 } from "@/pages/documents/model/document-bindings";
 import { localizeTextBlock } from "@/pages/documents/model/text-block-labels";
 import {
@@ -2083,9 +2083,13 @@ function StaffDocumentsPage({
       paymentMethod: document.payment_method ?? "",
       notes: document.notes ?? "",
       textBlockKeys: [],
-      manualText: "",
-      manualTextDirty: false,
-      bindings: prefillDocumentBindingsFromText(template.id, extractedText),
+      manualText: document.generated_manual_text ?? "",
+      manualTextDirty: Boolean(document.generated_manual_text?.trim()),
+      bindings: hydrateDocumentBindings(
+        template.id,
+        document.generated_bindings,
+        extractedText,
+      ),
     });
     setGenerateError("");
     setTemplateOpen(true);

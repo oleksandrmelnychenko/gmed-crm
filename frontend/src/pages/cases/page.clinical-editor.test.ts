@@ -3,20 +3,26 @@ import { describe, expect, it } from "vitest";
 import { casesClinicalEditorTestUtils as editor } from "./page";
 
 describe("cases clinical editor helpers", () => {
-  it("blocks medication rows with empty required names before sanitizing", () => {
+  it("requires active ingredient but allows an empty trade name", () => {
     const validMedication = {
       ...editor.blankMedikament(),
-      handelsname: "Ibuprofen",
+      handelsname: "",
+      wirkstoff: "Ibuprofen",
     };
     const emptyMedication = {
       ...editor.blankMedikament(),
-      handelsname: " ",
+      handelsname: "Optional brand",
+      wirkstoff: " ",
     };
 
     expect(
       editor.medicationRequiredValidationMessage([validMedication, emptyMedication]),
     ).not.toBe("");
     expect(editor.sanitizeMedikamente([validMedication, emptyMedication], [])).toHaveLength(1);
+    expect(editor.sanitizeMedikamente([validMedication], [])[0]).toMatchObject({
+      handelsname: "",
+      wirkstoff: "Ibuprofen",
+    });
   });
 
   it("blocks pain rows with empty required locations before sanitizing", () => {

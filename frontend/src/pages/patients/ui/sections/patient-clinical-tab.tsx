@@ -857,10 +857,21 @@ function FieldLabel({ children }: { children: ReactNode }) {
 
 // A label that wraps its control, so the visible caption is also the control's
 // accessible name (implicit association — no id juggling needed).
-function Field({ label, children }: { label: ReactNode; children: ReactNode }) {
+function Field({
+  label,
+  children,
+  required = false,
+}: {
+  label: ReactNode;
+  children: ReactNode;
+  required?: boolean;
+}) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[11px] font-medium text-muted-foreground">{label}</span>
+      <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
+        {label}
+        {required ? <span aria-hidden="true" className="ml-0.5 text-destructive">*</span> : null}
+      </span>
       {children}
     </label>
   );
@@ -905,7 +916,8 @@ function MedicationHoldDialog({
   tx: Bilingual;
 }) {
   const draft = editor?.draft;
-  const medicationName = editor?.medication.handelsname?.trim();
+  const medicationName =
+    editor?.medication.handelsname?.trim() || editor?.medication.wirkstoff?.trim();
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2029,7 +2041,7 @@ export function PatientClinicalTab({
         title={tx("Медикаменты", "Medikation")}
         items={medications}
         blank={blankMedication}
-        isValid={(m) => m.handelsname.trim() !== "" && Boolean(m.einnahmeform) && Boolean(m.form)}
+        isValid={(m) => Boolean(m.wirkstoff?.trim() && m.einnahmeform && m.form)}
         canManage={canManage}
         tx={tx}
         groups={[
@@ -2157,8 +2169,9 @@ export function PatientClinicalTab({
                   placeholder="Bisoprolol-ratiopharm"
                 />
               </Field>
-              <Field label={tx("Действующее вещество", "Wirkstoff")}>
+              <Field required label={tx("Действующее вещество", "Wirkstoff")}>
                 <Input
+                  required
                   value={draft.wirkstoff ?? ""}
                   onChange={(e) => set({ wirkstoff: blankToNull(e.target.value) })}
                   className={inputClass}

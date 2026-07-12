@@ -1160,6 +1160,23 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     };
     let pool = &app.suite.pool;
     let email = format!("atomic-{}@example.com", Uuid::new_v4().simple());
+    let clinical_provider_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO providers (name, provider_type)
+           VALUES ($1, 'medical') RETURNING id"#,
+    )
+    .bind(format!("Lead conversion clinic {email}"))
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let clinical_doctor_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO provider_doctors (provider_id, name, title, fachbereich)
+           VALUES ($1, 'Lead Conversion Doctor', 'Dr. med.', 'Orthopädie')
+           RETURNING id"#,
+    )
+    .bind(clinical_provider_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
     let lead_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO leads (
                 first_name, middle_name, last_name, suffix, email, email_consent,
@@ -1186,44 +1203,105 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     .bind(
         json!({
             "clinical_draft": {
-                "diagnoses": [{
-                    "id": "diagnosis-1",
-                    "kind": "main",
-                    "label": "Gonarthrose",
-                    "icdCode": "M17.9",
-                    "certainty": "bestaetigt",
-                    "chronification": "chronisch",
-                    "diagnosedOn": "2024-03-01",
-                    "note": "Rechtes Knie"
-                }],
-                "medications": [{
-                    "id": "medication-1",
-                    "name": "Ibuprofen",
-                    "activeIngredient": "Ibuprofen",
-                    "dose": "400",
-                    "doseUnit": "mg",
-                    "schedule": "1-0-1",
-                    "form": "FTBL",
-                    "route": "Oral",
-                    "unit": "Stück",
-                    "category": "besondere",
-                    "status": "aktiv",
-                    "doseMorning": "1",
-                    "doseNoon": "0",
-                    "doseEvening": "1",
-                    "doseNight": "0",
-                    "prescribedOn": "2026-06-30",
-                    "pharmacyOnly": true,
-                    "prescriptionOnly": false,
-                    "btm": false,
-                    "autIdemBlocked": true,
-                    "dispensingRestricted": false,
-                    "reason": "Schmerzen",
-                    "since": "2026-07-01",
-                    "expiryDate": "2026-07-31",
-                    "medicationType": "temporary",
-                    "note": "Nach dem Essen"
-                }],
+                "narrative": {
+                    "anamnese_aktuelle": "Belastungsabhängige Knieschmerzen",
+                    "anamnese_vorgeschichte": "Arthroskopie 2018",
+                    "anamnese_vegetative": "Unauffällig",
+                    "anamnese_sozial": "Lebt selbstständig",
+                    "beurteilung": "Orthopädische Abklärung empfohlen",
+                    "is_active": true
+                },
+                "diagnoses": [
+                    {
+                        "id": "diagnosis-1",
+                        "kind": "main",
+                        "label": "Gonarthrose",
+                        "icdCode": "M17.9",
+                        "certainty": "bestaetigt",
+                        "chronification": "chronisch",
+                        "diagnosedOn": "2024-03-01",
+                        "note": "Rechtes Knie",
+                        "provider_id": clinical_provider_id,
+                        "doctor_id": clinical_doctor_id
+                    },
+                    {
+                        "cid": "procedure-1",
+                        "parent_cid": "diagnosis-1",
+                        "kind": "prozedur",
+                        "label": "Kniearthroskopie",
+                        "ops_code": "5-810.0h",
+                        "diagnosed_on": "2018-05-14",
+                        "source_mode": "intern"
+                    },
+                    {
+                        "cid": "external-diagnosis-1",
+                        "kind": "secondary",
+                        "label": "Hypertonie",
+                        "icd_code": "I10",
+                        "certainty": "bestaetigt",
+                        "chronifizierung": "chronisch",
+                        "source_mode": "extern",
+                        "external_clinic": "Kyiv Heart Center",
+                        "external_doctor": "Dr. Kovalenko",
+                        "external_country": "UA"
+                    }
+                ],
+                "medications": [
+                    {
+                        "id": "medication-1",
+                        "name": "Ibuprofen",
+                        "activeIngredient": "Ibuprofen",
+                        "dose": "400",
+                        "doseUnit": "mg",
+                        "schedule": "1-0-1",
+                        "form": "FTBL",
+                        "route": "Oral",
+                        "unit": "Stück",
+                        "category": "besondere",
+                        "status": "aktiv",
+                        "doseMorning": "1",
+                        "doseNoon": "0",
+                        "doseEvening": "1",
+                        "doseNight": "0",
+                        "prescribedOn": "2026-06-30",
+                        "pharmacyOnly": true,
+                        "prescriptionOnly": false,
+                        "btm": false,
+                        "autIdemBlocked": true,
+                        "dispensingRestricted": false,
+                        "reason": "Schmerzen",
+                        "since": "2026-07-01",
+                        "expiryDate": "2026-07-31",
+                        "medicationType": "temporary",
+                        "note": "Nach dem Essen"
+                    },
+                    {
+                        "id": "medication-2",
+                        "category": "dauer",
+                        "wirkstoff": "Bisoprolol",
+                        "handelsname": "Bisoprolol-ratiopharm",
+                        "staerke": "5 mg",
+                        "form": "TABL",
+                        "einnahmeform": "Oral",
+                        "dose_morgens": "1",
+                        "dose_mittags": "0",
+                        "dose_abends": "0",
+                        "dose_nachts": "0",
+                        "einheit": "Stück",
+                        "hinweis": "Vor dem Frühstück",
+                        "grund": "Hypertonie",
+                        "verordnet_am": "2026-06-01",
+                        "einnahme_von": "2026-06-02",
+                        "status": "pausiert",
+                        "rezeptpflichtig": true,
+                        "sonstige_vermerke": "Blutdruck kontrollieren",
+                        "on_hold": true,
+                        "hold_until": "2026-08-01",
+                        "hold_note": "Vor Eingriff pausieren",
+                        "provider_id": clinical_provider_id,
+                        "doctor_id": clinical_doctor_id
+                    }
+                ],
                 "allergies": [{
                     "id": "allergy-1",
                     "label": "Penicillin",
@@ -1476,8 +1554,8 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     assert_eq!(allergy.1.as_deref(), Some("Exanthem"));
     assert_eq!(allergy.2.as_deref(), Some("mittel"));
 
-    let diagnosis: (String, Option<String>, Option<String>) = sqlx::query_as(
-        "SELECT label, icd_code, chronifizierung FROM patient_diagnoses WHERE patient_id = $1",
+    let diagnosis: (String, Option<String>, Option<String>, Option<Uuid>, Option<Uuid>) = sqlx::query_as(
+        "SELECT label, icd_code, chronifizierung, provider_id, doctor_id FROM patient_diagnoses WHERE patient_id = $1 AND label = 'Gonarthrose'",
     )
     .bind(patient_id)
     .fetch_one(pool)
@@ -1486,9 +1564,40 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     assert_eq!(diagnosis.0, "Gonarthrose");
     assert_eq!(diagnosis.1.as_deref(), Some("M17.9"));
     assert_eq!(diagnosis.2.as_deref(), Some("chronisch"));
+    assert_eq!(diagnosis.3, Some(clinical_provider_id));
+    assert_eq!(diagnosis.4, Some(clinical_doctor_id));
+
+    let procedure: (String, Option<String>, Option<String>) = sqlx::query_as(
+        r#"SELECT procedure.label, procedure.ops_code, parent.label
+           FROM patient_diagnoses procedure
+           LEFT JOIN patient_diagnoses parent ON parent.id = procedure.parent_id
+           WHERE procedure.patient_id = $1 AND procedure.kind = 'prozedur'"#,
+    )
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(procedure.0, "Kniearthroskopie");
+    assert_eq!(procedure.1.as_deref(), Some("5-810.0h"));
+    assert_eq!(procedure.2.as_deref(), Some("Gonarthrose"));
+
+    let external_diagnosis: (String, Option<String>, Option<String>, Option<String>) =
+        sqlx::query_as(
+            r#"SELECT source_mode, external_clinic, external_doctor, external_country
+               FROM patient_diagnoses
+               WHERE patient_id = $1 AND label = 'Hypertonie'"#,
+        )
+        .bind(patient_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(external_diagnosis.0, "extern");
+    assert_eq!(external_diagnosis.1.as_deref(), Some("Kyiv Heart Center"));
+    assert_eq!(external_diagnosis.2.as_deref(), Some("Dr. Kovalenko"));
+    assert_eq!(external_diagnosis.3.as_deref(), Some("UA"));
 
     let medication: (String, Option<String>, Option<String>, Option<String>, bool, bool) = sqlx::query_as(
-        "SELECT handelsname, einnahmeform, hinweis, dose_morgens, apothekenpflichtig, aut_idem_sperre FROM patient_medications WHERE patient_id = $1",
+        "SELECT handelsname, einnahmeform, hinweis, dose_morgens, apothekenpflichtig, aut_idem_sperre FROM patient_medications WHERE patient_id = $1 AND handelsname = 'Ibuprofen'",
     )
     .bind(patient_id)
     .fetch_one(pool)
@@ -1501,14 +1610,63 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     assert!(medication.4);
     assert!(medication.5);
 
-    let narrative: Option<String> = sqlx::query_scalar(
-        "SELECT anamnese_aktuelle FROM patient_clinical_narrative WHERE patient_id = $1 AND is_active",
+    let held_medication: (
+        String,
+        Option<String>,
+        String,
+        bool,
+        Option<String>,
+        Option<String>,
+        bool,
+        Option<Uuid>,
+        Option<Uuid>,
+    ) = sqlx::query_as(
+        r#"SELECT handelsname, staerke, status, on_hold, hold_until, hold_note,
+                  rezeptpflichtig, provider_id, doctor_id
+               FROM patient_medications
+               WHERE patient_id = $1 AND handelsname = 'Bisoprolol-ratiopharm'"#,
     )
     .bind(patient_id)
     .fetch_one(pool)
     .await
     .unwrap();
-    assert!(narrative.is_some_and(|value| !value.trim().is_empty()));
+    assert_eq!(held_medication.0, "Bisoprolol-ratiopharm");
+    assert_eq!(held_medication.1.as_deref(), Some("5 mg"));
+    assert_eq!(held_medication.2, "pausiert");
+    assert!(held_medication.3);
+    assert_eq!(held_medication.4.as_deref(), Some("2026-08-01"));
+    assert_eq!(held_medication.5.as_deref(), Some("Vor Eingriff pausieren"));
+    assert!(held_medication.6);
+    assert_eq!(held_medication.7, Some(clinical_provider_id));
+    assert_eq!(held_medication.8, Some(clinical_doctor_id));
+
+    let narrative: (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = sqlx::query_as(
+        r#"SELECT anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative,
+                  anamnese_sozial, beurteilung
+           FROM patient_clinical_narrative
+           WHERE patient_id = $1 AND is_active"#,
+    )
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        narrative.0.as_deref(),
+        Some("Belastungsabhängige Knieschmerzen")
+    );
+    assert_eq!(narrative.1.as_deref(), Some("Arthroskopie 2018"));
+    assert_eq!(narrative.2.as_deref(), Some("Unauffällig"));
+    assert_eq!(narrative.3.as_deref(), Some("Lebt selbstständig"));
+    assert_eq!(
+        narrative.4.as_deref(),
+        Some("Orthopädische Abklärung empfohlen")
+    );
 
     let (delete_status, delete_body) = json_request(
         &app,

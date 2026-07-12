@@ -1901,12 +1901,18 @@ async fn transfer_lead_clinical_profile(
 
     sqlx::query(
         r#"INSERT INTO patient_clinical_narrative
-                  (patient_id, anamnese_aktuelle, is_active)
+                  (patient_id, anamnese_aktuelle, anamnese_vorgeschichte,
+                   anamnese_vegetative, anamnese_sozial, beurteilung, is_active)
            SELECT $2,
                   COALESCE(
+                      NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_aktuelle}'), ''),
                       NULLIF(btrim(case_data.aktuelle_anamnese), ''),
                       NULLIF(btrim(lead.additional_concerns), '')
                   ),
+                  NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_vorgeschichte}'), ''),
+                  NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_vegetative}'), ''),
+                  NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_sozial}'), ''),
+                  NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,beurteilung}'), ''),
                   true
            FROM leads lead
            LEFT JOIN LATERAL (
@@ -1917,48 +1923,162 @@ async fn transfer_lead_clinical_profile(
                LIMIT 1
            ) case_data ON true
            WHERE lead.id = $1
-             AND COALESCE(
-                 NULLIF(btrim(case_data.aktuelle_anamnese), ''),
-                 NULLIF(btrim(lead.additional_concerns), '')
-             ) IS NOT NULL"#,
+             AND (
+                 COALESCE(
+                     NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_aktuelle}'), ''),
+                     NULLIF(btrim(case_data.aktuelle_anamnese), ''),
+                     NULLIF(btrim(lead.additional_concerns), '')
+                 ) IS NOT NULL
+                 OR NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_vorgeschichte}'), '') IS NOT NULL
+                 OR NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_vegetative}'), '') IS NOT NULL
+                 OR NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_sozial}'), '') IS NOT NULL
+                 OR NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,beurteilung}'), '') IS NOT NULL
+             )"#,
     )
     .bind(lead_id)
     .bind(patient_id)
+    .bind(&wizard_state_json)
     .execute(&mut **tx)
     .await?;
 
     sqlx::query(
-        r#"INSERT INTO patient_diagnoses
-                  (patient_id, kind, label, icd_code, certainty, chronifizierung,
-                   status, diagnosed_on, note, sort_order, source_mode)
-           SELECT $1,
+        r#"WITH draft AS MATERIALIZED (
+               SELECT uuid_generate_v4() AS id,
+                      entry.value,
+                      entry.ordinality,
+                      COALESCE(
+                          NULLIF(btrim(entry.value->>'cid'), ''),
+                          NULLIF(btrim(entry.value->>'id'), ''),
+                          'lead-diagnosis-' || entry.ordinality::text
+                      ) AS cid,
+                      NULLIF(btrim(COALESCE(
+                          entry.value->>'parent_cid',
+                          entry.value->>'parentCid',
+                          entry.value->>'parent_id'
+                      )), '') AS parent_cid,
+                      CASE
+                          WHEN entry.value->>'kind' IN ('main', 'secondary', 'prozedur')
+                          THEN entry.value->>'kind'
+                          WHEN entry.ordinality = 1 THEN 'main'
+                          ELSE 'secondary'
+                      END AS kind,
+                      CASE
+                          WHEN COALESCE(entry.value->>'provider_id', entry.value->>'providerId', '')
+                               ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                          THEN COALESCE(entry.value->>'provider_id', entry.value->>'providerId')::uuid
+                          ELSE NULL
+                      END AS provider_uuid,
+                      CASE
+                          WHEN COALESCE(entry.value->>'doctor_id', entry.value->>'doctorId', '')
+                               ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                          THEN COALESCE(entry.value->>'doctor_id', entry.value->>'doctorId')::uuid
+                          ELSE NULL
+                      END AS doctor_uuid,
+                      CASE
+                          WHEN COALESCE(entry.value->>'treating_doctor_id', entry.value->>'treatingDoctorId', '')
+                               ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                          THEN COALESCE(entry.value->>'treating_doctor_id', entry.value->>'treatingDoctorId')::uuid
+                          ELSE NULL
+                      END AS treating_uuid
+               FROM jsonb_array_elements(
+                   COALESCE($2::jsonb #> '{clinical_draft,diagnoses}', '[]'::jsonb)
+               ) WITH ORDINALITY AS entry(value, ordinality)
+               WHERE btrim(COALESCE(entry.value->>'label', '')) <> ''
+           )
+           INSERT INTO patient_diagnoses
+                  (id, patient_id, parent_id, provider_id, doctor_id, kind, label,
+                   icd_code, ops_code, certainty, chronifizierung, status,
+                   diagnosed_on, note, sort_order, source_mode, external_clinic,
+                   external_doctor, external_country, treating_doctor_id, treating_none)
+           SELECT draft.id,
+                  $1,
+                  CASE WHEN draft.kind = 'main' THEN NULL ELSE parent.id END,
                   CASE
-                      WHEN entry.value->>'kind' = 'secondary'
-                           OR (entry.value->>'kind' IS NULL AND entry.ordinality > 1)
-                      THEN 'secondary'
-                      ELSE 'main'
+                      WHEN COALESCE(draft.value->>'source_mode', draft.value->>'sourceMode') = 'extern'
+                      THEN NULL
+                      ELSE COALESCE(
+                          provider.id,
+                          CASE WHEN doctor_provider.id IS NOT NULL THEN doctor.provider_id END
+                      )
                   END,
-                  btrim(entry.value->>'label'),
-                  NULLIF(btrim(entry.value->>'icdCode'), ''),
                   CASE
-                      WHEN entry.value->>'certainty' IN ('verdacht', 'bestaetigt', 'zustand_nach')
-                      THEN entry.value->>'certainty'
+                      WHEN COALESCE(draft.value->>'source_mode', draft.value->>'sourceMode') = 'extern'
+                      THEN NULL
+                      WHEN doctor_provider.id IS NOT NULL
+                           AND (provider.id IS NULL OR doctor_link.doctor_id IS NOT NULL)
+                      THEN doctor.id
+                      ELSE NULL
+                  END,
+                  draft.kind,
+                  btrim(draft.value->>'label'),
+                  NULLIF(btrim(COALESCE(draft.value->>'icd_code', draft.value->>'icdCode')), ''),
+                  NULLIF(btrim(COALESCE(draft.value->>'ops_code', draft.value->>'opsCode')), ''),
+                  CASE
+                      WHEN draft.kind = 'prozedur' THEN NULL
+                      WHEN draft.value->>'certainty' IN ('verdacht', 'bestaetigt', 'zustand_nach')
+                      THEN draft.value->>'certainty'
                       ELSE 'bestaetigt'
                   END,
                   CASE
-                      WHEN entry.value->>'chronification' IN ('akut', 'chronisch', 'rezidivierend')
-                      THEN entry.value->>'chronification'
+                      WHEN COALESCE(draft.value->>'chronifizierung', draft.value->>'chronification')
+                           IN ('akut', 'chronisch', 'rezidivierend')
+                      THEN COALESCE(draft.value->>'chronifizierung', draft.value->>'chronification')
                       ELSE NULL
                   END,
-                  CASE WHEN entry.value->>'chronification' = 'chronisch' THEN 'chronic' ELSE 'active' END,
-                  NULLIF(btrim(entry.value->>'diagnosedOn'), ''),
-                  NULLIF(btrim(entry.value->>'note'), ''),
-                  (entry.ordinality - 1)::int,
-                  'intern'
-           FROM jsonb_array_elements(
-               COALESCE($2::jsonb #> '{clinical_draft,diagnoses}', '[]'::jsonb)
-           ) WITH ORDINALITY AS entry(value, ordinality)
-           WHERE btrim(COALESCE(entry.value->>'label', '')) <> ''"#,
+                  CASE
+                      WHEN draft.value->>'status' IN ('active', 'chronic', 'resolved')
+                      THEN draft.value->>'status'
+                      WHEN COALESCE(draft.value->>'chronifizierung', draft.value->>'chronification') = 'chronisch'
+                      THEN 'chronic'
+                      ELSE 'active'
+                  END,
+                  NULLIF(btrim(COALESCE(draft.value->>'diagnosed_on', draft.value->>'diagnosedOn')), ''),
+                  NULLIF(btrim(draft.value->>'note'), ''),
+                  (draft.ordinality - 1)::int,
+                  CASE
+                      WHEN COALESCE(draft.value->>'source_mode', draft.value->>'sourceMode') = 'extern'
+                      THEN 'extern'
+                      ELSE 'intern'
+                  END,
+                  CASE
+                      WHEN COALESCE(draft.value->>'source_mode', draft.value->>'sourceMode') = 'extern'
+                      THEN NULLIF(btrim(COALESCE(draft.value->>'external_clinic', draft.value->>'externalClinic')), '')
+                      ELSE NULL
+                  END,
+                  CASE
+                      WHEN COALESCE(draft.value->>'source_mode', draft.value->>'sourceMode') = 'extern'
+                      THEN NULLIF(btrim(COALESCE(draft.value->>'external_doctor', draft.value->>'externalDoctor')), '')
+                      ELSE NULL
+                  END,
+                  CASE
+                      WHEN COALESCE(draft.value->>'source_mode', draft.value->>'sourceMode') = 'extern'
+                      THEN NULLIF(btrim(COALESCE(draft.value->>'external_country', draft.value->>'externalCountry')), '')
+                      ELSE NULL
+                  END,
+                  CASE
+                      WHEN COALESCE(draft.value->>'treating_none', draft.value->>'treatingNone', 'false') = 'true'
+                      THEN NULL
+                      WHEN treating_provider.id IS NOT NULL THEN treating.id
+                      ELSE NULL
+                  END,
+                  COALESCE(draft.value->>'treating_none', draft.value->>'treatingNone', 'false') = 'true'
+           FROM draft
+           LEFT JOIN draft parent ON parent.cid = draft.parent_cid
+           LEFT JOIN providers provider
+                  ON provider.id = draft.provider_uuid
+                 AND provider.provider_type = 'medical'
+           LEFT JOIN provider_doctors doctor ON doctor.id = draft.doctor_uuid
+           LEFT JOIN providers doctor_provider
+                  ON doctor_provider.id = doctor.provider_id
+                 AND doctor_provider.provider_type = 'medical'
+           LEFT JOIN provider_doctor_links doctor_link
+                  ON doctor_link.provider_id = provider.id
+                 AND doctor_link.doctor_id = doctor.id
+           LEFT JOIN provider_doctors treating ON treating.id = draft.treating_uuid
+           LEFT JOIN providers treating_provider
+                  ON treating_provider.id = treating.provider_id
+                 AND treating_provider.provider_type = 'medical'
+           WHERE draft.kind <> 'prozedur' OR parent.id IS NOT NULL"#,
     )
     .bind(patient_id)
     .bind(&wizard_state_json)
@@ -1997,63 +2117,112 @@ async fn transfer_lead_clinical_profile(
     .await?;
 
     sqlx::query(
-        r#"INSERT INTO patient_medications
+        r#"WITH draft AS (
+               SELECT entry.value,
+                      entry.ordinality,
+                      CASE
+                          WHEN COALESCE(entry.value->>'provider_id', entry.value->>'providerId', '')
+                               ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                          THEN COALESCE(entry.value->>'provider_id', entry.value->>'providerId')::uuid
+                          ELSE NULL
+                      END AS provider_uuid,
+                      CASE
+                          WHEN COALESCE(
+                                   entry.value->>'doctor_id',
+                                   entry.value->>'doctorId',
+                                   entry.value->>'prescriberId',
+                                   ''
+                               ) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                          THEN COALESCE(
+                              entry.value->>'doctor_id',
+                              entry.value->>'doctorId',
+                              entry.value->>'prescriberId'
+                          )::uuid
+                          ELSE NULL
+                      END AS doctor_uuid
+               FROM jsonb_array_elements(
+                   COALESCE($2::jsonb #> '{clinical_draft,medications}', '[]'::jsonb)
+               ) WITH ORDINALITY AS entry(value, ordinality)
+               WHERE btrim(COALESCE(
+                   entry.value->>'wirkstoff', entry.value->>'activeIngredient',
+                   entry.value->>'handelsname', entry.value->>'name', ''
+               )) <> ''
+           )
+           INSERT INTO patient_medications
                   (patient_id, provider_id, doctor_id, category, wirkstoff,
                    handelsname, staerke, form, einheit, hinweis, grund,
                    einnahmeform, dose_morgens, dose_mittags, dose_abends,
                    dose_nachts, verordnet_am, einnahme_von, einnahme_bis,
                    status, apothekenpflichtig, rezeptpflichtig, btm,
                    aut_idem_sperre, abgabebeschraenkung,
-                   sonstige_vermerke, sort_order)
+                   sonstige_vermerke, on_hold, hold_until, hold_note, sort_order)
            SELECT $1,
-                  doctor.provider_id,
-                  doctor.id,
+                  COALESCE(
+                      provider.id,
+                      CASE WHEN doctor_provider.id IS NOT NULL THEN doctor.provider_id END
+                  ),
                   CASE
-                      WHEN entry.value->>'category' IN ('dauer', 'besondere', 'selbst')
-                      THEN entry.value->>'category'
-                      WHEN entry.value->>'medicationType' = 'permanent' THEN 'dauer'
+                      WHEN doctor_provider.id IS NOT NULL
+                           AND (provider.id IS NULL OR doctor_link.doctor_id IS NOT NULL)
+                      THEN doctor.id
+                      ELSE NULL
+                  END,
+                  CASE
+                      WHEN draft.value->>'category' IN ('dauer', 'besondere', 'selbst')
+                      THEN draft.value->>'category'
+                      WHEN draft.value->>'medicationType' = 'permanent' THEN 'dauer'
                       ELSE 'besondere'
                   END,
-                  NULLIF(btrim(entry.value->>'activeIngredient'), ''),
-                  btrim(entry.value->>'name'),
-                  NULLIF(btrim(concat_ws(' ', entry.value->>'dose', entry.value->>'doseUnit')), ''),
-                  NULLIF(btrim(entry.value->>'form'), ''),
-                  NULLIF(btrim(entry.value->>'unit'), ''),
-                  NULLIF(btrim(entry.value->>'schedule'), ''),
-                  NULLIF(btrim(entry.value->>'reason'), ''),
-                  NULLIF(btrim(entry.value->>'route'), ''),
-                  NULLIF(btrim(entry.value->>'doseMorning'), ''),
-                  NULLIF(btrim(entry.value->>'doseNoon'), ''),
-                  NULLIF(btrim(entry.value->>'doseEvening'), ''),
-                  NULLIF(btrim(entry.value->>'doseNight'), ''),
-                  NULLIF(btrim(entry.value->>'prescribedOn'), ''),
-                  NULLIF(btrim(entry.value->>'since'), ''),
-                  NULLIF(btrim(entry.value->>'expiryDate'), ''),
+                   btrim(COALESCE(
+                       draft.value->>'wirkstoff', draft.value->>'activeIngredient',
+                       draft.value->>'handelsname', draft.value->>'name'
+                   )),
+                   btrim(COALESCE(draft.value->>'handelsname', draft.value->>'name', '')),
+                  COALESCE(
+                      NULLIF(btrim(draft.value->>'staerke'), ''),
+                      NULLIF(btrim(concat_ws(' ', draft.value->>'dose', draft.value->>'doseUnit')), '')
+                  ),
+                  NULLIF(btrim(draft.value->>'form'), ''),
+                  NULLIF(btrim(COALESCE(draft.value->>'einheit', draft.value->>'unit')), ''),
+                  NULLIF(btrim(COALESCE(draft.value->>'hinweis', draft.value->>'schedule')), ''),
+                  NULLIF(btrim(COALESCE(draft.value->>'grund', draft.value->>'reason')), ''),
+                  NULLIF(btrim(COALESCE(draft.value->>'einnahmeform', draft.value->>'route')), ''),
+                  NULLIF(btrim(COALESCE(draft.value->>'dose_morgens', draft.value->>'doseMorning')), ''),
+                  NULLIF(btrim(COALESCE(draft.value->>'dose_mittags', draft.value->>'doseNoon')), ''),
+                  NULLIF(btrim(COALESCE(draft.value->>'dose_abends', draft.value->>'doseEvening')), ''),
+                  NULLIF(btrim(COALESCE(draft.value->>'dose_nachts', draft.value->>'doseNight')), ''),
+                  NULLIF(btrim(COALESCE(draft.value->>'verordnet_am', draft.value->>'prescribedOn')), ''),
+                  NULLIF(btrim(COALESCE(draft.value->>'einnahme_von', draft.value->>'since')), ''),
+                  NULLIF(btrim(COALESCE(draft.value->>'einnahme_bis', draft.value->>'expiryDate')), ''),
                   CASE
-                      WHEN entry.value->>'status' IN ('aktiv', 'pausiert', 'abgesetzt', 'geplant')
-                      THEN entry.value->>'status'
+                      WHEN draft.value->>'status' IN ('aktiv', 'pausiert', 'abgesetzt', 'geplant')
+                      THEN draft.value->>'status'
                       ELSE 'aktiv'
                   END,
-                  COALESCE((entry.value->>'pharmacyOnly')::boolean, false),
-                  COALESCE((entry.value->>'prescriptionOnly')::boolean, false),
-                  COALESCE((entry.value->>'btm')::boolean, false),
-                  COALESCE((entry.value->>'autIdemBlocked')::boolean, false),
-                  COALESCE((entry.value->>'dispensingRestricted')::boolean, false),
-                  NULLIF(btrim(concat_ws(E'\n', entry.value->>'note', entry.value->>'otherNotes')), ''),
-                  (entry.ordinality - 1)::int
-           FROM jsonb_array_elements(
-               COALESCE($2::jsonb #> '{clinical_draft,medications}', '[]'::jsonb)
-           ) WITH ORDINALITY AS entry(value, ordinality)
-           LEFT JOIN LATERAL (
-               SELECT id, provider_id
-               FROM provider_doctors
-               WHERE id = CASE
-                   WHEN COALESCE(entry.value->>'prescriberId', '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-                   THEN (entry.value->>'prescriberId')::uuid
-                   ELSE NULL
-               END
-           ) doctor ON true
-           WHERE btrim(COALESCE(entry.value->>'name', '')) <> ''"#,
+                  COALESCE(draft.value->>'apothekenpflichtig', draft.value->>'pharmacyOnly', 'false') = 'true',
+                  COALESCE(draft.value->>'rezeptpflichtig', draft.value->>'prescriptionOnly', 'false') = 'true',
+                  COALESCE(draft.value->>'btm', 'false') = 'true',
+                  COALESCE(draft.value->>'aut_idem_sperre', draft.value->>'autIdemBlocked', 'false') = 'true',
+                  COALESCE(draft.value->>'abgabebeschraenkung', draft.value->>'dispensingRestricted', 'false') = 'true',
+                  COALESCE(
+                      NULLIF(btrim(draft.value->>'sonstige_vermerke'), ''),
+                      NULLIF(btrim(concat_ws(E'\n', draft.value->>'note', draft.value->>'otherNotes')), '')
+                  ),
+                  COALESCE(draft.value->>'on_hold', draft.value->>'onHold', 'false') = 'true',
+                  NULLIF(btrim(COALESCE(draft.value->>'hold_until', draft.value->>'holdUntil')), ''),
+                  NULLIF(btrim(COALESCE(draft.value->>'hold_note', draft.value->>'holdNote')), ''),
+                  (draft.ordinality - 1)::int
+           FROM draft
+           LEFT JOIN providers provider
+                  ON provider.id = draft.provider_uuid
+                 AND provider.provider_type = 'medical'
+           LEFT JOIN provider_doctors doctor ON doctor.id = draft.doctor_uuid
+           LEFT JOIN providers doctor_provider
+                  ON doctor_provider.id = doctor.provider_id
+                 AND doctor_provider.provider_type = 'medical'
+           LEFT JOIN provider_doctor_links doctor_link
+                  ON doctor_link.provider_id = provider.id
+                 AND doctor_link.doctor_id = doctor.id"#,
     )
     .bind(patient_id)
     .bind(&wizard_state_json)
@@ -2090,7 +2259,10 @@ async fn transfer_lead_clinical_profile(
                  FROM jsonb_array_elements(
                      COALESCE($3::jsonb #> '{clinical_draft,medications}', '[]'::jsonb)
                  ) AS draft(value)
-                 WHERE btrim(COALESCE(draft.value->>'name', '')) <> ''
+                  WHERE btrim(COALESCE(
+                      draft.value->>'wirkstoff', draft.value->>'activeIngredient',
+                      draft.value->>'handelsname', draft.value->>'name', ''
+                  )) <> ''
              )
            ORDER BY medication.sort_order"#,
     )
@@ -2424,6 +2596,8 @@ async fn import_lead_attachments_internal(
                 payment_date: None,
                 payment_method: None,
                 generated_template_id: None,
+                generated_bindings: None,
+                generated_manual_text: None,
                 version_root_document_id: None,
                 replaces_document_id: None,
                 version_number: 1,

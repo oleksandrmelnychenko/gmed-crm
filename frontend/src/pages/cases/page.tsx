@@ -933,8 +933,8 @@ function requiredClinicalItemMessage(section: "medikamente" | "pain") {
   const lang = getLang();
   if (section === "medikamente") {
     return lang === "de"
-      ? "Bitte geben Sie für jede Medikamentenzeile einen Handelsnamen ein oder entfernen Sie leere Zeilen."
-      : "Укажите торговое название в каждой строке медикаментов или удалите пустые строки.";
+      ? "Bitte geben Sie für jede Medikamentenzeile einen Wirkstoff ein oder entfernen Sie leere Zeilen."
+      : "Укажите действующее вещество в каждой строке медикаментов или удалите пустые строки.";
   }
 
   return lang === "de"
@@ -947,7 +947,7 @@ function requiredClinicalFieldMessage() {
 }
 
 function medicationRequiredValidationMessage(items: MedikamentItem[]) {
-  return items.some((item) => !item.handelsname.trim())
+  return items.some((item) => !(item.wirkstoff ?? "").trim())
     ? requiredClinicalItemMessage("medikamente")
     : "";
 }
@@ -966,7 +966,7 @@ function medicationRequiredFieldError(
   item: MedikamentItem,
   sectionError: string | undefined,
 ) {
-  return sectionError && !item.handelsname.trim() ? requiredClinicalFieldMessage() : "";
+  return sectionError && !(item.wirkstoff ?? "").trim() ? requiredClinicalFieldMessage() : "";
 }
 
 function painRequiredFieldError(
@@ -1134,10 +1134,11 @@ function sanitizeOperationen(items: OperationItem[], doctors: DoctorOption[]) {
 function sanitizeMedikamente(items: MedikamentItem[], doctors: DoctorOption[]) {
   return items.flatMap((item) => {
     const handelsname = item.handelsname.trim();
-    if (!handelsname) return [];
+    const wirkstoff = (item.wirkstoff ?? "").trim();
+    if (!wirkstoff) return [];
     return [{
       handelsname,
-      wirkstoff: toOptionalText(item.wirkstoff ?? ""),
+      wirkstoff,
       dosis: toOptionalText(item.dosis ?? ""),
       dosis_einheit: toOptionalText(item.dosis_einheit ?? ""),
       einnahmeschema: toOptionalText(item.einnahmeschema ?? ""),
@@ -3384,14 +3385,14 @@ function useCasesPageContent({
                   ))}
                 </ItemEditorSection>
 
-                <ItemEditorSection title={t.cases_medication} description={t.cases_subtitle} count={countFilled(medikamente, "handelsname")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "medikamente"} error={sectionErrors.medikamente ?? ""} canEdit={permissions.canEdit} onAdd={() => setMedikamente((current) => [...current, blankMedikament()])} onSave={handleSaveMedikamente}>
+                <ItemEditorSection title={t.cases_medication} description={t.cases_subtitle} count={countFilled(medikamente, "wirkstoff")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "medikamente"} error={sectionErrors.medikamente ?? ""} canEdit={permissions.canEdit} onAdd={() => setMedikamente((current) => [...current, blankMedikament()])} onSave={handleSaveMedikamente}>
                   {medikamente.map((item, index) => {
-                    const handelsnameError = medicationRequiredFieldError(item, sectionErrors.medikamente);
+                    const wirkstoffError = medicationRequiredFieldError(item, sectionErrors.medikamente);
                     return (
                     <div key={medikamentItemKey(item, index)} className="rounded-xl border border-border bg-muted/20 p-4">
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                        <Field label={t.cases_medications} required error={handelsnameError}><Input value={item.handelsname} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { handelsname: event.target.value }))} className={requiredInputClassName(handelsnameError)} aria-invalid={Boolean(handelsnameError)} /></Field>
-                        <Field label={t.cases_medications}><Input value={item.wirkstoff ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { wirkstoff: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_medications_brand_name}><Input value={item.handelsname} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { handelsname: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
+                        <Field label={t.cases_medications_active_ingredient} required error={wirkstoffError}><Input required value={item.wirkstoff ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { wirkstoff: event.target.value }))} className={requiredInputClassName(wirkstoffError)} aria-invalid={Boolean(wirkstoffError)} /></Field>
                         <Field label={t.documents_category}>
                           <NativeComboboxSelect
                             value={item.med_typ || "permanent"}

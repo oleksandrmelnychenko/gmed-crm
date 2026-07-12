@@ -612,6 +612,8 @@ async fn upload_interpreter_profile_document(
         payment_date: None,
         payment_method: None,
         generated_template_id: None,
+        generated_bindings: None,
+        generated_manual_text: None,
         version_root_document_id: None,
         replaces_document_id: None,
         version_number: 1,

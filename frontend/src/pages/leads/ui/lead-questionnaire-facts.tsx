@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { cn } from "@/lib/utils";
+
 export type LeadQuestionnaireFact = {
   label: ReactNode;
   value: ReactNode;
@@ -8,13 +10,15 @@ export type LeadQuestionnaireFact = {
 
 export function LeadQuestionnaireFacts({
   items,
+  topBorder = true,
 }: {
   items: LeadQuestionnaireFact[];
+  topBorder?: boolean;
 }) {
   if (items.length === 0) return null;
 
   return (
-    <dl className="grid gap-x-6 border-y border-border sm:grid-cols-2">
+    <dl className={cn("grid gap-x-6 border-b border-border sm:grid-cols-2", topBorder && "border-t")}>
       {items.map((item, index) => (
         <div
           key={`${String(item.label)}-${index}`}

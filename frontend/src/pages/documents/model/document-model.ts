@@ -753,7 +753,9 @@ export function buildGenerateDocumentPayload(input: {
   fallbackDate?: string | Date | null;
 }): Record<string, unknown> {
   const { form, template } = input;
-  const manualText = (input.displayedManualText ?? form.manualText).trim();
+  const manualText = form.manualTextDirty
+    ? (input.displayedManualText ?? form.manualText).trim()
+    : "";
   return {
     template_id: template.id,
     patient_id: form.patientId || null,

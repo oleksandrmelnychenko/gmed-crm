@@ -2063,6 +2063,7 @@ async fn case_doctor_registry_metadata_and_fk_round_trip_work() {
         Some(json!({
             "items": [{
                 "handelsname": "Medication A",
+                "wirkstoff": "Medication A",
                 "med_typ": "permanent",
                 "verordnender_arzt_id": doctor_id
             }]
@@ -2130,6 +2131,7 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
         Some(json!({
             "items": [{
                 "handelsname": "Atorvastatin",
+                "wirkstoff": "Atorvastatin",
                 "med_typ": "permanent",
                 "expiry_date": expired_on,
                 "dosis": "20",

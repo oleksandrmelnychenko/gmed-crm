@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DOCUMENT_BINDING_FIELDS,
   buildBindingsPayload,
+  hydrateDocumentBindings,
   prefillDocumentBindingsFromText,
 } from "./document-bindings";
 
@@ -159,5 +160,65 @@ describe("document template binding payloads", () => {
         DOCUMENT_BINDING_FIELDS[templateId].map((field) => field.key),
       ).toEqual(["kt1", "kt2", "cost_code"]);
     }
+  });
+
+  it("hydrates every persisted scalar and structured binding for a new version", () => {
+    expect(
+      hydrateDocumentBindings(
+        "cost_coverage_declaration",
+        {
+          order_sequence: 3,
+          payer_name: "Justus Geldgeber",
+          payer_sign_place: "Monaco",
+          service_lines: [
+            {
+              description: "Dolmetscher-/Betreuungsleistung",
+              fee: "100,00 EUR/1 Stunde",
+              quantity: "4",
+              line_total: "400,00 EUR",
+              note: "Leistungsumfang 10, 11",
+            },
+          ],
+        },
+        null,
+      ),
+    ).toEqual({
+      order_sequence: "3",
+      payer_name: "Justus Geldgeber",
+      payer_sign_place: "Monaco",
+      service_lines_text:
+        "Dolmetscher-/Betreuungsleistung | 100,00 EUR/1 Stunde | 4 | 400,00 EUR | Leistungsumfang 10, 11",
+    });
+  });
+
+  it("keeps explicit per-party signatures ahead of legacy shared signatures", () => {
+    expect(
+      hydrateDocumentBindings(
+        "single_order",
+        {
+          sign_place: "Legacy place",
+          sign_date: "2025-11-11",
+          party_sign_place: "Patient place",
+          party_sign_date: "2025-11-12",
+        },
+        null,
+      ),
+    ).toMatchObject({
+      party_sign_place: "Patient place",
+      party_sign_date: "2025-11-12",
+    });
+  });
+
+  it("falls back to PDF passport extraction only when no persisted value exists", () => {
+    expect(
+      hydrateDocumentBindings(
+        "appointment_confirmation",
+        { passport_number: "PERSISTED-1" },
+        "Reisepass Nr.: EXTRACTED-2, gültig bis 31.12.2049, sämtliche Termine",
+      ),
+    ).toMatchObject({
+      passport_number: "PERSISTED-1",
+      passport_valid_until: "2049-12-31",
+    });
   });
 });

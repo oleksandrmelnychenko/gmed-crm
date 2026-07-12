@@ -24,6 +24,8 @@ export type OrderSummary = {
   signed_patient?: boolean;
   signed_agency?: boolean;
   prepayment_required?: boolean;
+  date_from?: string | null;
+  date_to?: string | null;
   created_at: string;
 };
 
@@ -91,6 +93,8 @@ export type OrderDetail = {
   phase: OrderPhase | string;
   status: OrderStatus | string;
   needs_description: string | null;
+  date_from?: string | null;
+  date_to?: string | null;
   signed_patient?: boolean | null;
   signed_agency?: boolean | null;
   total_estimated: unknown;

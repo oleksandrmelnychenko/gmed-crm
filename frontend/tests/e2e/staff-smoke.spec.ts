@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import { chooseComboboxOption } from "./helpers";
 
 function json(route: Route, body: unknown, status = 200) {
@@ -23,6 +23,20 @@ function localIsoDate(date = new Date()) {
   const month = `${date.getMonth() + 1}`.padStart(2, "0");
   const day = `${date.getDate()}`.padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+async function setDatePickerValue(input: Locator, value: string) {
+  await input.evaluate((node, nextValue) => {
+    const nativeInput = node as HTMLInputElement;
+    const valueSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    valueSetter?.call(nativeInput, nextValue);
+    nativeInput.dispatchEvent(new Event("input", { bubbles: true }));
+    nativeInput.dispatchEvent(new Event("change", { bubbles: true }));
+  }, value);
+  await expect(input).toHaveValue(value);
 }
 
 async function loginAsStaff(page: Page, email: string) {
@@ -826,6 +840,19 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
           id: "00000000-0000-0000-0000-000000000202",
           name: "Doctor Cologne",
           fachbereich: "Cardiology",
+        },
+      ]);
+    }
+
+    if (path === "/doctors") {
+      return json(route, [
+        {
+          id: "00000000-0000-0000-0000-000000000202",
+          name: "Doctor Cologne",
+          title: "Dr. med.",
+          fachbereich: "Cardiology",
+          provider_id: "00000000-0000-0000-0000-000000000201",
+          provider_name: "Clinic Cologne",
         },
       ]);
     }
@@ -2089,20 +2116,18 @@ test.describe("lead onboarding wizard", () => {
     const firstName = wizard.locator("#lead-wizard-first-name");
     await medicalStep.click();
     await expect(firstName).toHaveAttribute("aria-invalid", "true");
+    await expect(wizard.getByText("Bitte prüfen", { exact: true })).toBeVisible();
+    await expect(
+      wizard.getByRole("button", { name: "Personendaten: Vorname: Pflichtfeld", exact: true }),
+    ).toBeVisible();
+    await expect(
+      wizard.getByRole("button", { name: "Personendaten: E-Mail oder Telefonnummer angeben", exact: true }),
+    ).toBeVisible();
     expect(createRequests).toBe(0);
 
     await firstName.fill("Neue");
     await wizard.locator("#lead-wizard-last-name").fill("Person");
-    await wizard.locator("#lead-wizard-birth-date").evaluate((node) => {
-      const input = node as HTMLInputElement;
-      const valueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        "value",
-      )?.set;
-      valueSetter?.call(input, "1992-06-15");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    await setDatePickerValue(wizard.locator("#lead-wizard-birth-date"), "1992-06-15");
     await chooseComboboxOption(
       page,
       wizard.getByRole("combobox", {
@@ -2146,7 +2171,7 @@ test.describe("lead onboarding wizard", () => {
     const germanWizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
     await expect(germanWizard).toBeVisible();
     await germanWizard.getByRole("button", { name: "Medizinische Merkmale" }).click();
-    await expect(germanWizard.getByText("Eingegebene Daten prüfen", { exact: true })).toBeVisible();
+    await expect(germanWizard.getByText("Geschlecht laut Ausweisdokument auswählen", { exact: true })).toBeVisible();
     await expect(germanWizard.getByText("Invalid legal_sex")).toHaveCount(0);
 
     await page.goto("/leads");
@@ -2155,11 +2180,45 @@ test.describe("lead onboarding wizard", () => {
     const russianWizard = page.getByRole("dialog", { name: "Оформление обращения" });
     await expect(russianWizard).toBeVisible();
     await russianWizard.getByRole("button", { name: "Медицинская характеристика" }).click();
-    await expect(russianWizard.getByText("Проверьте введённые данные", { exact: true })).toBeVisible();
+    await expect(russianWizard.getByText("Выберите пол по документам", { exact: true })).toBeVisible();
     await expect(russianWizard.getByText("Invalid legal_sex")).toHaveCount(0);
   });
 
-  test("wizard renders six onboarding stages and catalog-backed specialties", async ({
+  test("wizard lists every server-side field blocking qualification", async ({ page }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    await page.route(`**/api/v1/leads/${leadId}/update`, (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      return json(route, {
+        error: "unprocessable_entity",
+        message: "Lead is not qualification-ready",
+        blocking_reasons: [
+          "Birth date is missing",
+          "Healthcare consent is missing",
+        ],
+      }, 422);
+    });
+
+    await page.goto(`/leads?lead=${leadId}`);
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    const navigation = wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" });
+    await navigation.getByRole("button", { name: /Medizinische Merkmale/i }).click();
+
+    await expect(wizard.getByText("Bitte prüfen", { exact: true })).toBeVisible();
+    await expect(
+      wizard.getByRole("button", { name: "Personendaten: Geburtsdatum angeben", exact: true }),
+    ).toBeVisible();
+    await expect(
+      wizard.getByRole("button", {
+        name: "Unterlagen: Einwilligung zur Verarbeitung von Gesundheitsdaten einholen",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(wizard.getByText("Eingegebene Daten prüfen", { exact: true })).toHaveCount(0);
+  });
+
+  test("wizard renders seven onboarding stages and catalog-backed specialties", async ({
     page,
   }) => {
     const readyLeadId = "00000000-0000-0000-0000-000000000902";
@@ -2176,7 +2235,8 @@ test.describe("lead onboarding wizard", () => {
     expect(Math.abs((wizardBox?.x ?? 0) + (wizardBox?.width ?? 0) / 2 - viewport.width / 2)).toBeLessThanOrEqual(2);
     expect(Math.abs((wizardBox?.y ?? 0) + (wizardBox?.height ?? 0) / 2 - viewport.height / 2)).toBeLessThanOrEqual(2);
     const navigation = wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" });
-    await expect(navigation.getByRole("button")).toHaveCount(6);
+    await expect(navigation.getByRole("button")).toHaveCount(7);
+    await expect(navigation.getByRole("button", { name: "Auftragserfassung" })).toBeVisible();
     await expect(wizard.getByText("Fragebogen", { exact: true })).toBeVisible();
     await expect(wizard.getByText("Eingangskanal", { exact: true })).toBeVisible();
     await expect(wizard.getByText("Formulartyp", { exact: true })).toBeVisible();
@@ -2190,35 +2250,117 @@ test.describe("lead onboarding wizard", () => {
     await expect(wizard.getByRole("button", { name: "Zurück", exact: true })).toHaveCount(0);
     await expect(wizard.getByRole("button", { name: "Weiter", exact: true })).toHaveCount(0);
 
+    const discoverySource = wizard.getByRole("combobox", {
+      name: "Wie sind Sie auf uns aufmerksam geworden?",
+    });
+    await expect(discoverySource).toBeVisible();
+    await discoverySource.click();
+    for (const sourceLabel of [
+      "Empfehlung eines Kunden",
+      "Online",
+      "Empfehlung eines Mitarbeiters",
+      "Empfehlung eines Arztes oder einer Klinik",
+      "Partner oder Agentur",
+    ]) {
+      await expect(page.getByText(sourceLabel, { exact: true })).toBeVisible();
+    }
+    const discoverySourceRequest = page.waitForRequest((request) => {
+      if (request.method() !== "POST" || !request.url().endsWith(`/leads/${readyLeadId}/update`)) return false;
+      const payload = request.postDataJSON() as {
+        wizard_state?: { discovery_source?: string };
+      };
+      return payload.wizard_state?.discovery_source === "customer_referral";
+    });
+    await page.getByText("Empfehlung eines Kunden", { exact: true }).click();
+    expect((await discoverySourceRequest).postDataJSON()).toMatchObject({
+      wizard_state: { discovery_source: "customer_referral" },
+    });
+
     await navigation.getByRole("button", { name: /Medizinische Merkmale/i }).click();
     await expect(wizard.getByText("Krankenversicherung vorhanden", { exact: true })).toBeVisible();
-    await wizard.getByRole("textbox", { name: "Aktuelle Anamnese" }).fill("Beschwerden seit drei Wochen");
-    await wizard.getByRole("button", { name: "Hinzufügen" }).nth(0).click();
-    await wizard.getByRole("textbox", { name: "Diagnose", exact: true }).fill("Gonarthrose");
-    await wizard.getByRole("button", { name: "Hinzufügen" }).nth(1).click();
-    await wizard.getByRole("textbox", { name: "Handelsname" }).fill("Ibuprofen");
-    await wizard.getByRole("combobox", { name: "Einnahmeform" }).click();
-    await page.getByText("Oral / Per os (p.o.)", { exact: true }).click();
-    await wizard.getByRole("textbox", { name: "Morgens" }).fill("1");
-    await wizard.getByRole("checkbox", { name: "Apothekenpflichtig" }).check();
-    await wizard.getByRole("button", { name: "Hinzufügen" }).nth(2).click();
-    await wizard.getByRole("textbox", { name: "Allergen", exact: true }).fill("Penicillin");
+    await wizard.getByRole("textbox", { name: "Anliegen", exact: true }).fill("Orthopädische Beratung");
+
+    const allergySection = wizard.getByRole("heading", { name: "Allergien" }).locator("..").locator("..");
+    await allergySection.getByRole("button", { name: "Hinzufügen" }).click();
+    const allergySheet = page.getByRole("dialog", { name: "Hinzufügen: Allergien" });
+    await expect(allergySheet).toBeVisible();
+    await allergySheet.getByRole("textbox", { name: "Allergen", exact: true }).fill("Penicillin");
+    await allergySheet.getByRole("button", { name: "Speichern" }).click();
+
+    await wizard.getByRole("button", { name: "Hauptdiagnose hinzufügen" }).click();
+    const diagnosisSheet = page.getByRole("dialog", { name: "Hinzufügen: Hauptdiagnose" });
+    await expect(diagnosisSheet).toBeVisible();
+    await diagnosisSheet.getByRole("textbox", { name: "Diagnose", exact: true }).fill("Gonarthrose");
+    await diagnosisSheet.getByRole("button", { name: "Speichern" }).click();
+
+    const anamneseSection = wizard.getByRole("heading", { name: "Anamnese" }).locator("..").locator("..");
+    await anamneseSection.getByRole("button", { name: "Neue Version" }).click();
+    const anamneseSheet = page.getByRole("dialog", { name: "Neue Version: Anamnese" });
+    await expect(anamneseSheet).toBeVisible();
+    await anamneseSheet.getByRole("textbox", { name: "Aktuelle Anamnese" }).fill("Beschwerden seit drei Wochen");
+    await anamneseSheet.getByRole("button", { name: "Speichern" }).click();
+
+    const medicationSection = wizard.getByRole("heading", { name: "Medikation" }).locator("..").locator("..");
+    await medicationSection.getByRole("button", { name: "Hinzufügen" }).click();
+    const medicationSheet = page.getByRole("dialog", { name: "Hinzufügen: Medikation" });
+    await expect(medicationSheet).toBeVisible();
+    await medicationSheet.getByRole("textbox", { name: "Wirkstoff" }).fill("Ibuprofen");
+    await chooseComboboxOption(
+      page,
+      medicationSheet.getByRole("combobox", { name: "Darreichungsform" }),
+      "Filmtabletten",
+    );
+    await chooseComboboxOption(
+      page,
+      medicationSheet.getByRole("combobox", { name: "Einnahmeform" }),
+      "Oral / Per os (p.o.)",
+    );
+    await medicationSheet.getByRole("textbox", { name: "Dosis morgens" }).fill("1");
+    await medicationSheet.getByRole("checkbox", { name: "Apothekenpflichtig" }).check();
+    await medicationSheet.getByRole("button", { name: "Speichern" }).click();
+
+    const holdDraftRequest = page.waitForRequest((request) => {
+      if (request.method() !== "POST" || !request.url().endsWith(`/leads/${readyLeadId}/update`)) return false;
+      const payload = request.postDataJSON() as {
+        wizard_state?: { clinical_draft?: { medications?: Array<{ on_hold?: boolean }> } };
+      };
+      return payload.wizard_state?.clinical_draft?.medications?.[0]?.on_hold === true;
+    });
+    await wizard.getByRole("button", { name: "Auf Hold setzen" }).click();
+    const holdDialog = page.getByRole("dialog", { name: "Auf Hold" });
+    await holdDialog
+      .getByRole("checkbox", { name: "Patient nimmt das Medikament nicht" })
+      .check();
+    await holdDialog.getByRole("textbox", { name: "Notiz" }).fill("Vor Untersuchung pausieren");
+    await holdDialog.getByRole("button", { name: "Hold speichern" }).click();
+    await holdDraftRequest;
+
     const diagnosisRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/vorerkrankungen"));
     const allergyRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/allergien"));
     const medicationRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/medikamente"));
     const clinicalDraftRequest = page.waitForRequest((request) => {
       if (request.method() !== "POST" || !request.url().endsWith(`/leads/${readyLeadId}/update`)) return false;
-      const payload = request.postDataJSON() as { wizard_state?: { clinical_draft?: { medications?: Array<{ name?: string }> } } };
-      return payload.wizard_state?.clinical_draft?.medications?.[0]?.name === "Ibuprofen";
+      const payload = request.postDataJSON() as { wizard_state?: { clinical_draft?: { medications?: Array<{ wirkstoff?: string }> } } };
+      return payload.wizard_state?.clinical_draft?.medications?.[0]?.wirkstoff === "Ibuprofen";
     });
     await navigation.getByRole("button", { name: /Servicehistorie/i }).click();
     expect((await diagnosisRequest).postDataJSON()).toMatchObject({ items: [{ erkrankung: "Gonarthrose" }] });
     expect((await allergyRequest).postDataJSON()).toMatchObject({ items: [{ allergie: "Penicillin" }] });
-    expect((await medicationRequest).postDataJSON()).toMatchObject({ items: [{ handelsname: "Ibuprofen", med_typ: "permanent" }] });
+    expect((await medicationRequest).postDataJSON()).toMatchObject({ items: [{ handelsname: "", wirkstoff: "Ibuprofen", med_typ: "permanent" }] });
     expect((await clinicalDraftRequest).postDataJSON()).toMatchObject({
       wizard_state: {
         clinical_draft: {
-          medications: [{ name: "Ibuprofen", route: "Oral", doseMorning: "1", pharmacyOnly: true }],
+          narrative: { anamnese_aktuelle: "Beschwerden seit drei Wochen" },
+          medications: [{
+            handelsname: null,
+            wirkstoff: "Ibuprofen",
+            form: "FTBL",
+            einnahmeform: "Oral",
+            dose_morgens: "1",
+            apothekenpflichtig: true,
+            on_hold: true,
+            hold_note: "Vor Untersuchung pausieren",
+          }],
         },
       },
     });
@@ -2270,24 +2412,6 @@ test.describe("lead onboarding wizard", () => {
         },
       },
     });
-    await wizard.getByRole("textbox", { name: "Anliegen", exact: true }).fill("Orthopädische Beratung");
-    await expect(
-      wizard.getByRole("textbox", { name: "Wie sind Sie auf uns aufmerksam geworden?" }),
-    ).toBeVisible();
-    const specialtySelect = wizard.getByRole("combobox");
-    await specialtySelect.click();
-    await expect(page.getByText("Orthopädie", { exact: true })).toBeVisible();
-    await page.getByText("Orthopädie", { exact: true }).click();
-    const selectedSpecialty = wizard.getByText("Orthopädie", { exact: true });
-    await expect(selectedSpecialty).toBeVisible();
-    const [specialtySelectBox, selectedSpecialtyBox] = await Promise.all([
-      specialtySelect.boundingBox(),
-      selectedSpecialty.boundingBox(),
-    ]);
-    expect((selectedSpecialtyBox?.y ?? 0)).toBeGreaterThan(
-      (specialtySelectBox?.y ?? 0) + (specialtySelectBox?.height ?? 0),
-    );
-
     await expect(wizard.getByRole("button", { name: "Angaben bestätigen" })).toHaveCount(0);
     await navigation.getByRole("button", { name: /Unterlagen/i }).click();
     await expect(wizard.getByText("Ausweisdokument")).toBeVisible();
@@ -2303,7 +2427,7 @@ test.describe("lead onboarding wizard", () => {
     const qualificationRequest = page.waitForRequest((request) =>
       request.method() === "POST" && request.url().endsWith(`/leads/${readyLeadId}/qualify`),
     );
-    await navigation.getByRole("button", { name: /Vertrag & Angebot/i }).click();
+    await navigation.getByRole("button", { name: /Auftragserfassung/i }).click();
     const intakeRequest = await intakeCompletionRequest;
     expect(intakeRequest.postDataJSON()).toEqual({
       completed: true,
@@ -2311,6 +2435,35 @@ test.describe("lead onboarding wizard", () => {
       aktuelle_anamnese: "Beschwerden seit drei Wochen",
     });
     expect((await qualificationRequest).postDataJSON()).toEqual({ status: "qualified" });
+    const specialtySelect = wizard.getByRole("combobox", { name: "Fachrichtung hinzufügen" });
+    await specialtySelect.click();
+    await expect(page.getByText("Orthopädie", { exact: true })).toBeVisible();
+    await page.getByText("Orthopädie", { exact: true }).click();
+    const selectedSpecialty = wizard.getByText("Orthopädie", { exact: true });
+    await expect(selectedSpecialty).toBeVisible();
+    const [specialtySelectBox, selectedSpecialtyBox] = await Promise.all([
+      specialtySelect.boundingBox(),
+      selectedSpecialty.boundingBox(),
+    ]);
+    expect((selectedSpecialtyBox?.y ?? 0)).toBeGreaterThan(
+      (specialtySelectBox?.y ?? 0) + (specialtySelectBox?.height ?? 0),
+    );
+    await setDatePickerValue(
+      wizard.locator("#lead-wizard-program-date-from"),
+      "2026-09-01",
+    );
+    await navigation.getByRole("button", { name: /Vertrag & Angebot/i }).click();
+    await expect(
+      wizard.getByRole("button", {
+        name: "Auftragserfassung: Enddatum des Programms angeben",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await setDatePickerValue(
+      wizard.locator("#lead-wizard-program-date-to"),
+      "2026-09-15",
+    );
+    await navigation.getByRole("button", { name: /Vertrag & Angebot/i }).click();
     await expect(wizard.getByText("Vertrag, Auftrag und Kostenvoranschlag")).toBeVisible();
     await expect(
       wizard.getByText("Diese Unterlagen gehören bis zur Freigabe dem Lead."),
@@ -2406,7 +2559,13 @@ test.describe("lead onboarding wizard", () => {
     });
 
     await navigation.getByRole("button", { name: /Medizinische Merkmale/i }).click();
-    await expect(wizard.getByRole("textbox", { name: "Aktuelle Anamnese" })).toBeVisible();
+    await wizard
+      .getByRole("textbox", { name: "Anliegen", exact: true })
+      .fill("Orthopädische Beratung");
+    const anamneseSection = wizard.getByRole("heading", { name: "Anamnese" }).locator("..").locator("..");
+    await anamneseSection.getByRole("button", { name: "Neue Version" }).click();
+    const anamneseSheet = page.getByRole("dialog", { name: "Neue Version: Anamnese" });
+    await expect(anamneseSheet.getByRole("textbox", { name: "Aktuelle Anamnese" })).toBeVisible();
     await page.waitForTimeout(150);
     expect(repeatedReads).toEqual([]);
 
@@ -2415,9 +2574,10 @@ test.describe("lead onboarding wizard", () => {
       return (request.postDataJSON() as { additional_concerns?: string }).additional_concerns
         === "Performance-Test Anamnese";
     });
-    await wizard
+    await anamneseSheet
       .getByRole("textbox", { name: "Aktuelle Anamnese" })
       .fill("Performance-Test Anamnese");
+    await anamneseSheet.getByRole("button", { name: "Speichern" }).click();
     const medicalAutosaveRequest = await medicalAutosave;
     expect(medicalAutosaveRequest.postDataJSON()).toMatchObject({
       additional_concerns: "Performance-Test Anamnese",
@@ -2433,7 +2593,9 @@ test.describe("lead onboarding wizard", () => {
     await reopenedWizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" })
       .getByRole("button", { name: /Medizinische Merkmale/i })
       .click();
-    await expect(reopenedWizard.getByRole("textbox", { name: "Aktuelle Anamnese" }))
+    const reopenedAnamnese = reopenedWizard.getByRole("heading", { name: "Anamnese" }).locator("..").locator("..");
+    await reopenedAnamnese.getByRole("button", { name: "Bearbeiten" }).click();
+    await expect(page.getByRole("dialog", { name: "Bearbeiten: Anamnese" }).getByRole("textbox", { name: "Aktuelle Anamnese" }))
       .toHaveValue("Performance-Test Anamnese");
   });
 
@@ -2449,22 +2611,33 @@ test.describe("lead onboarding wizard", () => {
     await expect(wizard.getByText("Тип формы", { exact: true })).toBeVisible();
 
     await navigation.getByRole("button", { name: /Медицинская характеристика/i }).click();
-    await wizard.getByRole("textbox", { name: "Анамнез" }).fill("Жалобы в течение трёх недель");
+    await wizard
+      .getByRole("textbox", { name: "Причина обращения", exact: true })
+      .fill("Консультация ортопеда");
+    const anamneseSection = wizard.getByRole("heading", { name: "Анамнез" }).locator("..").locator("..");
+    await anamneseSection.getByRole("button", { name: "Новая версия" }).click();
+    const anamneseSheet = page.getByRole("dialog", { name: "Новая версия: Анамнез" });
+    await anamneseSheet.getByRole("textbox", { name: "Актуальный анамнез" }).fill("Жалобы в течение трёх недель");
+    await anamneseSheet.getByRole("button", { name: "Сохранить" }).click();
     await navigation.getByRole("button", { name: /Сервисная история/i }).click();
 
     await expect(navigation.getByRole("button", { name: /Сервисная история/i })).toHaveAttribute("aria-current", "step");
     await expect(wizard.getByText("Причина обращения и специализации")).toHaveCount(0);
     await expect(wizard.getByText("Выберите подходящие специализации из справочника.")).toHaveCount(0);
     await expect(wizard.getByText("Данные обращения подтверждены")).toHaveCount(0);
-    await wizard.getByRole("textbox", { name: "Причина обращения" }).fill("Консультация ортопеда");
-    await wizard.getByRole("combobox").click();
-    await page.getByText("Ортопедия", { exact: true }).click();
 
     await navigation.getByRole("button", { name: /Документы/i }).click();
     await expect(wizard.getByText("Документ, удостоверяющий личность")).toBeVisible();
     await expect(wizard.getByText("Согласие на обработку персональных данных")).toBeVisible();
     await expect(wizard.getByText("Заполните документы и анамнез")).toHaveCount(0);
     await expect(wizard.getByRole("button", { name: "Сохранить анамнез" })).toHaveCount(0);
+    await navigation.getByRole("button", { name: /Оформление заказа/i }).click();
+    await chooseComboboxOption(
+      page,
+      wizard.getByRole("combobox", { name: "Добавить специализацию" }),
+      "Ортопедия",
+    );
+    await expect(wizard.getByText("Ортопедия", { exact: true })).toBeVisible();
     await navigation.getByRole("button", { name: /Договор и смета/i }).click();
     await expect(wizard.getByRole("heading", { name: "Договор, заказ и смета" })).toBeVisible();
     await expect(wizard.getByText(/кошторис/i)).toHaveCount(0);
@@ -2537,6 +2710,80 @@ test.describe("lead onboarding wizard", () => {
     await expect(deleteDialog).toBeHidden();
     await expect(wizard.getByText("passport-alfred.pdf", { exact: true })).toHaveCount(0);
     await expect(wizard.getByText("Keine Dateien hinzugefügt").first()).toBeVisible();
+  });
+
+  test("wizard previews PDF files inline and downloads ZIP files", async ({ page }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    const pdfDocumentId = "00000000-0000-0000-0000-000000000973";
+    const zipDocumentId = "00000000-0000-0000-0000-000000000974";
+
+    await page.route(`**/api/v1/documents?lead_id=${leadId}`, (route) =>
+      json(route, [
+        {
+          id: pdfDocumentId,
+          lead_id: leadId,
+          patient_id: null,
+          auto_name: "Medical report",
+          original_filename: "medical-report.pdf",
+          art: "medical_report",
+          category: "report",
+          status: "active",
+          visibility: "internal",
+          mime_type: "application/pdf",
+          file_size: 2048,
+          has_stored_file: true,
+          file_deleted_at: null,
+        },
+        {
+          id: zipDocumentId,
+          lead_id: leadId,
+          patient_id: null,
+          auto_name: "Source archive",
+          original_filename: "source-files.zip",
+          art: "attachment",
+          category: "other",
+          status: "active",
+          visibility: "internal",
+          mime_type: "application/zip",
+          file_size: 4096,
+          has_stored_file: true,
+          file_deleted_at: null,
+        },
+      ]),
+    );
+    await page.route(`**/api/v1/documents/${pdfDocumentId}/download`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/pdf",
+        body: "%PDF-1.4\n%%EOF",
+      }),
+    );
+    await page.route(`**/api/v1/documents/${zipDocumentId}/download`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/zip",
+        body: "PK\u0003\u0004mock-archive",
+      }),
+    );
+
+    await page.goto(`/leads?lead=${leadId}`);
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    await wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" })
+      .getByRole("button", { name: /Unterlagen/i })
+      .click();
+
+    await expect(wizard.getByRole("button", { name: "Datei ansehen" })).toHaveCount(1);
+    await wizard.getByRole("button", { name: "Datei ansehen" }).click();
+    const preview = page.getByRole("dialog", { name: "medical-report.pdf" });
+    await expect(preview).toBeVisible();
+    await expect(preview.locator("iframe")).toHaveAttribute("src", /^blob:/);
+    await preview.getByRole("button", { name: "Schließen" }).click();
+
+    const downloadPromise = page.waitForEvent("download");
+    await wizard.getByRole("button", { name: "source-files.zip", exact: true }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("source-files.zip");
   });
 
   test("final release reflects server readiness and does not expose an early conversion", async ({
@@ -2735,14 +2982,15 @@ test.describe("responsive staff workspace", () => {
     );
 
     await navigation.getByRole("button", { name: /Medizinische Merkmale/i }).click();
-    await wizard.getByRole("textbox", { name: "Aktuelle Anamnese" }).fill("Beschwerden seit drei Wochen");
-    await navigation.getByRole("button", { name: /Servicehistorie/i }).click();
     await wizard
       .getByRole("textbox", { name: "Anliegen", exact: true })
       .fill("Orthopädische Beratung");
-    await wizard.getByRole("combobox").click();
-    await page.getByText("Orthopädie", { exact: true }).click();
-    await expect(wizard.getByText("Orthopädie", { exact: true })).toBeVisible();
+    const anamneseSection = wizard.getByRole("heading", { name: "Anamnese" }).locator("..").locator("..");
+    await anamneseSection.getByRole("button", { name: "Neue Version" }).click();
+    const anamneseSheet = page.getByRole("dialog", { name: "Neue Version: Anamnese" });
+    await anamneseSheet.getByRole("textbox", { name: "Aktuelle Anamnese" }).fill("Beschwerden seit drei Wochen");
+    await anamneseSheet.getByRole("button", { name: "Speichern" }).click();
+    await navigation.getByRole("button", { name: /Servicehistorie/i }).click();
 
     const serviceCommentRequest = page.waitForRequest((candidate) => {
       if (
@@ -2770,6 +3018,7 @@ test.describe("responsive staff workspace", () => {
       },
     });
 
+    await navigation.getByRole("button", { name: /Personendaten/i }).click();
     const discoverySourceRequest = page.waitForRequest((candidate) => {
       if (
         candidate.method() !== "POST" ||
@@ -2780,15 +3029,33 @@ test.describe("responsive staff workspace", () => {
       const payload = candidate.postDataJSON() as {
         wizard_state?: { discovery_source?: string };
       };
-      return payload.wizard_state?.discovery_source === "Empfehlung einer Freundin";
+      return payload.wizard_state?.discovery_source === "customer_referral";
     });
-    await wizard
-      .getByRole("textbox", { name: "Wie sind Sie auf uns aufmerksam geworden?" })
-      .fill("Empfehlung einer Freundin");
+    await chooseComboboxOption(
+      page,
+      wizard.getByRole("combobox", { name: "Wie sind Sie auf uns aufmerksam geworden?" }),
+      "Empfehlung eines Kunden",
+    );
     const discoveryRequest = await discoverySourceRequest;
     expect(discoveryRequest.postDataJSON()).toMatchObject({
-      wizard_state: { discovery_source: "Empfehlung einer Freundin" },
+      wizard_state: { discovery_source: "customer_referral" },
     });
+
+    await navigation.getByRole("button", { name: /Auftragserfassung/i }).click();
+    await chooseComboboxOption(
+      page,
+      wizard.getByRole("combobox", { name: "Fachrichtung hinzufügen" }),
+      "Orthopädie",
+    );
+    await expect(wizard.getByText("Orthopädie", { exact: true })).toBeVisible();
+    await setDatePickerValue(
+      wizard.locator("#lead-wizard-program-date-from"),
+      "2026-09-01",
+    );
+    await setDatePickerValue(
+      wizard.locator("#lead-wizard-program-date-to"),
+      "2026-09-15",
+    );
 
     const commercialStep = navigation.getByRole("button", { name: /Vertrag & Angebot/i });
     await commercialStep.click();
@@ -2849,7 +3116,10 @@ test.describe("responsive staff workspace", () => {
     await closeButton.click();
     await expect(wizard).toBeHidden();
     await readyLeadCell.click();
-    await expect(wizard.getByRole("heading", { name: "Personendaten" })).toBeVisible();
+    await expect(
+      navigation.getByRole("button", { name: /Personendaten/i }),
+    ).toHaveAttribute("aria-current", "step");
+    await expect(wizard.locator('input[name="first_name"]')).toBeVisible();
     await navigation.getByRole("button", { name: /Vertrag & Angebot/i }).click();
     await expect(wizard.getByText("Transport coordination", { exact: true })).toBeVisible();
     await expect(wizard.getByText("12.500,00 EUR", { exact: false }).first()).toBeVisible();
@@ -2859,7 +3129,11 @@ test.describe("responsive staff workspace", () => {
     const quoteId = "00000000-0000-0000-0000-000000000963";
     let quoteCreated = false;
     let orderCreated = false;
-    let orderCreatePayload: { needs_description?: string } | null = null;
+    let orderCreatePayload: {
+      needs_description?: string;
+      date_from?: string;
+      date_to?: string;
+    } | null = null;
     let signedPatient = false;
     let signedAgency = false;
     let prepaymentRequired = false;
@@ -2868,6 +3142,8 @@ test.describe("responsive staff workspace", () => {
       signed_patient?: boolean;
       signed_agency?: boolean;
       prepayment_required?: boolean;
+      date_from?: string;
+      date_to?: string;
     }> = [];
     let releaseCommercialBasis = () => undefined;
     const commercialBasisGate = new Promise<void>((resolve) => {
@@ -2892,6 +3168,8 @@ test.describe("responsive staff workspace", () => {
       if (route.request().method() === "POST") {
         orderCreatePayload = route.request().postDataJSON() as {
           needs_description?: string;
+          date_from?: string;
+          date_to?: string;
         };
         orderCreated = true;
         return json(route, { id: orderId }, 201);
@@ -2925,6 +3203,8 @@ test.describe("responsive staff workspace", () => {
         signed_patient?: boolean;
         signed_agency?: boolean;
         prepayment_required?: boolean;
+        date_from?: string;
+        date_to?: string;
       };
       commercialBasisRequests += 1;
       commercialBasisPayloads.push(payload);
@@ -2976,6 +3256,14 @@ test.describe("responsive staff workspace", () => {
     expect(orderCreatePayload?.needs_description).toContain(
       "Limousinenservice und privater Fahrer: Abholung am BER, Terminal 1",
     );
+    expect(orderCreatePayload).toMatchObject({
+      date_from: "2026-09-01",
+      date_to: "2026-09-15",
+    });
+    expect(commercialBasisPayloads[0]).toMatchObject({
+      date_from: "2026-09-01",
+      date_to: "2026-09-15",
+    });
     releaseCommercialBasis();
     await expect(patientSignatureToggle).toBeEnabled();
     await expect(patientSignatureToggle).toBeChecked();

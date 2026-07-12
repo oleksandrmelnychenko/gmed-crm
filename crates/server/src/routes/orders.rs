@@ -85,6 +85,8 @@ struct CreateOrderRequest {
     contract_id: Option<Uuid>,
     needs_description: Option<String>,
     source_lead_id: Option<Uuid>,
+    date_from: Option<String>,
+    date_to: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -102,6 +104,8 @@ struct UpdateOrderCommercialBasisRequest {
     signed_agency: Option<bool>,
     prepayment_required: Option<bool>,
     needs_description: Option<String>,
+    date_from: Option<String>,
+    date_to: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -260,6 +264,20 @@ fn parse_optional_order_date(
     }
 }
 
+#[allow(clippy::result_large_err)]
+fn validate_order_date_range(
+    date_from: Option<chrono::NaiveDate>,
+    date_to: Option<chrono::NaiveDate>,
+) -> Result<(), axum::response::Response> {
+    if date_from.zip(date_to).is_some_and(|(from, to)| to < from) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "date_to cannot be earlier than date_from",
+        ));
+    }
+    Ok(())
+}
+
 async fn list_orders(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -285,7 +303,7 @@ async fn list_orders(
     match sqlx::query(
         r#"SELECT o.id, o.order_number, o.patient_id, o.source_lead_id, o.phase, o.status,
                   o.total_estimated, o.signed_patient, o.signed_agency,
-                  o.prepayment_required, o.created_at,
+                  o.prepayment_required, o.date_from, o.date_to, o.created_at,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
                   COALESCE(p.last_name, l.last_name) AS subject_last_name,
                   p.patient_id AS p_pid
@@ -402,6 +420,8 @@ async fn list_orders(
                     "signed_patient": r.try_get::<bool, _>("signed_patient").unwrap_or(false),
                     "signed_agency": r.try_get::<bool, _>("signed_agency").unwrap_or(false),
                     "prepayment_required": r.try_get::<bool, _>("prepayment_required").unwrap_or(false),
+                    "date_from": r.try_get::<Option<chrono::NaiveDate>, _>("date_from").unwrap_or_default().map(|value| value.to_string()),
+                    "date_to": r.try_get::<Option<chrono::NaiveDate>, _>("date_to").unwrap_or_default().map(|value| value.to_string()),
                     "created_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                 }));
             }
@@ -2040,7 +2060,20 @@ async fn create_order(
         contract_id,
         needs_description,
         source_lead_id,
+        date_from,
+        date_to,
     } = body;
+    let date_from = match parse_optional_order_date(date_from.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let date_to = match parse_optional_order_date(date_to.as_deref()) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = validate_order_date_range(date_from, date_to) {
+        return resp;
+    }
     if patient_id.is_none() && source_lead_id.is_none() {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -2243,9 +2276,11 @@ async fn create_order(
                contract_id,
                needs_description,
                source_lead_id,
+               date_from,
+               date_to,
                created_by
            )
-           VALUES ($1, $2, $3, $4, $5, $6)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            ON CONFLICT (source_lead_id) WHERE source_lead_id IS NOT NULL DO NOTHING
            RETURNING id, order_number, created_at"#,
     )
@@ -2254,6 +2289,8 @@ async fn create_order(
     .bind(contract_id)
     .bind(needs_description)
     .bind(source_lead_id)
+    .bind(date_from)
+    .bind(date_to)
     .bind(auth.user_id)
     .fetch_optional(&state.db)
     .await
@@ -2322,6 +2359,8 @@ async fn create_order(
                     "order_number": order_number,
                     "patient_id": patient_id,
                     "lead_id": source_lead_id,
+                    "date_from": date_from.map(|value| value.to_string()),
+                    "date_to": date_to.map(|value| value.to_string()),
                     "created_at": r.created_at,
                 })),
             )
@@ -2405,6 +2444,24 @@ async fn get_order(
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
     }
+
+    let (order_date_from, order_date_to) =
+        match sqlx::query("SELECT date_from, date_to FROM orders WHERE id = $1")
+            .bind(order_id)
+            .fetch_one(&state.db)
+            .await
+        {
+            Ok(row) => (
+                row.try_get::<Option<chrono::NaiveDate>, _>("date_from")
+                    .unwrap_or_default(),
+                row.try_get::<Option<chrono::NaiveDate>, _>("date_to")
+                    .unwrap_or_default(),
+            ),
+            Err(error) => {
+                tracing::error!(error = %error, order_id = %order_id, "load order service period");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
 
     let leistungen = sqlx::query(
         r#"SELECT ol.id, ol.description, ol.quantity, ol.unit_price, ol.currency, ol.vat_rate,
@@ -2565,6 +2622,8 @@ async fn get_order(
         "patient_pid": order.p_pid,
         "phase": order.phase, "status": order.status,
         "needs_description": order.needs_description,
+        "date_from": order_date_from.map(|value| value.to_string()),
+        "date_to": order_date_to.map(|value| value.to_string()),
         "signed_patient": order.signed_patient, "signed_agency": order.signed_agency,
         "total_estimated": order.total_estimated, "total_actual": order.total_actual,
         "leistungen": leist_json,
@@ -2591,10 +2650,12 @@ async fn update_order_commercial_basis(
         return resp;
     }
 
-    let order = match sqlx::query("SELECT patient_id, source_lead_id FROM orders WHERE id = $1")
-        .bind(order_id)
-        .fetch_optional(&state.db)
-        .await
+    let order = match sqlx::query(
+        "SELECT patient_id, source_lead_id, date_from, date_to FROM orders WHERE id = $1",
+    )
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await
     {
         Ok(Some(row)) => row,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
@@ -2608,6 +2669,12 @@ async fn update_order_commercial_basis(
         .unwrap_or_default();
     let order_lead_id = order
         .try_get::<Option<Uuid>, _>("source_lead_id")
+        .unwrap_or_default();
+    let current_date_from = order
+        .try_get::<Option<chrono::NaiveDate>, _>("date_from")
+        .unwrap_or_default();
+    let current_date_to = order
+        .try_get::<Option<chrono::NaiveDate>, _>("date_to")
         .unwrap_or_default();
     match can_access_order(&state, &auth, order_id, order_patient_id).await {
         Ok(true) => {}
@@ -2627,6 +2694,25 @@ async fn update_order_commercial_basis(
         },
         None => None,
     };
+    let date_from_patch = match body.date_from.as_deref() {
+        Some(value) => match parse_optional_order_date(Some(value)) {
+            Ok(value) => Some(value),
+            Err(resp) => return resp,
+        },
+        None => None,
+    };
+    let date_to_patch = match body.date_to.as_deref() {
+        Some(value) => match parse_optional_order_date(Some(value)) {
+            Ok(value) => Some(value),
+            Err(resp) => return resp,
+        },
+        None => None,
+    };
+    let effective_date_from = date_from_patch.unwrap_or(current_date_from);
+    let effective_date_to = date_to_patch.unwrap_or(current_date_to);
+    if let Err(resp) = validate_order_date_range(effective_date_from, effective_date_to) {
+        return resp;
+    }
 
     if let Some(contract_id) = body.contract_id {
         let contract = match sqlx::query(
@@ -2678,6 +2764,8 @@ async fn update_order_commercial_basis(
              signed_agency = COALESCE($5, signed_agency),
              prepayment_required = COALESCE($6, prepayment_required),
              needs_description = COALESCE($7, needs_description),
+             date_from = CASE WHEN $8 THEN $9 ELSE date_from END,
+             date_to = CASE WHEN $10 THEN $11 ELSE date_to END,
              signed_patient_at = CASE
                  WHEN $4 IS TRUE THEN COALESCE(signed_patient_at, now())
                  WHEN $4 IS FALSE THEN NULL
@@ -2696,7 +2784,8 @@ async fn update_order_commercial_basis(
              updated_at = now()
          WHERE id = $1
          RETURNING contract_id, total_estimated, signed_patient, signed_agency,
-                   signed_patient_at, signed_agency_at, prepayment_required, signed_at"#,
+                   signed_patient_at, signed_agency_at, prepayment_required, signed_at,
+                   date_from, date_to"#,
     )
     .bind(order_id)
     .bind(total_estimated)
@@ -2705,6 +2794,10 @@ async fn update_order_commercial_basis(
     .bind(body.signed_agency)
     .bind(body.prepayment_required)
     .bind(body.needs_description.as_deref())
+    .bind(date_from_patch.is_some())
+    .bind(date_from_patch.flatten())
+    .bind(date_to_patch.is_some())
+    .bind(date_to_patch.flatten())
     .fetch_optional(&state.db)
     .await
     {
@@ -2729,6 +2822,12 @@ async fn update_order_commercial_basis(
             let signed_at = row
                 .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_at")
                 .unwrap_or_default();
+            let date_from = row
+                .try_get::<Option<chrono::NaiveDate>, _>("date_from")
+                .unwrap_or_default();
+            let date_to = row
+                .try_get::<Option<chrono::NaiveDate>, _>("date_to")
+                .unwrap_or_default();
             state.audit_sender.try_send(audit::domain_event(
                 "update_order_commercial_basis",
                 Some(auth.user_id),
@@ -2740,6 +2839,8 @@ async fn update_order_commercial_basis(
                     "signed_patient": signed_patient,
                     "signed_agency": signed_agency,
                     "prepayment_required": prepayment_required,
+                    "date_from": date_from.map(|value| value.to_string()),
+                    "date_to": date_to.map(|value| value.to_string()),
                 }),
             ));
             Json(serde_json::json!({
@@ -2755,6 +2856,8 @@ async fn update_order_commercial_basis(
                 "signed_agency_at": signed_agency_at.map(|value| value.to_rfc3339()),
                 "signed_at": signed_at.map(|value| value.to_rfc3339()),
                 "prepayment_required": prepayment_required,
+                "date_from": date_from.map(|value| value.to_string()),
+                "date_to": date_to.map(|value| value.to_string()),
             }))
             .into_response()
         }
@@ -6085,5 +6188,30 @@ async fn ensure_order_service_patient_allowed(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Patient is not covered by this MAIN order",
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn order_service_period_accepts_empty_or_forward_ranges() {
+        let from = chrono::NaiveDate::from_ymd_opt(2026, 9, 1).expect("valid date");
+        let to = chrono::NaiveDate::from_ymd_opt(2026, 9, 15).expect("valid date");
+
+        assert!(validate_order_date_range(None, None).is_ok());
+        assert!(validate_order_date_range(Some(from), None).is_ok());
+        assert!(validate_order_date_range(Some(from), Some(to)).is_ok());
+    }
+
+    #[test]
+    fn order_service_period_rejects_a_reversed_range() {
+        let from = chrono::NaiveDate::from_ymd_opt(2026, 9, 15).expect("valid date");
+        let to = chrono::NaiveDate::from_ymd_opt(2026, 9, 1).expect("valid date");
+
+        let response = validate_order_date_range(Some(from), Some(to))
+            .expect_err("reversed period must be rejected");
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 }

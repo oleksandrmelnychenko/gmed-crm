@@ -517,9 +517,18 @@ export interface Translations
   settings_agency_profile: string;
   settings_agency_name: string;
   settings_agency_care_of: string;
+  settings_agency_principal_birth_date: string;
   settings_agency_address: string;
   settings_agency_phone: string;
   settings_agency_email: string;
+  settings_agency_privacy_email: string;
+  settings_agency_sign_place: string;
+  settings_agency_data_system_name: string;
+  settings_agency_data_processor_notice: string;
+  settings_agency_bank_holder: string;
+  settings_agency_bank_name: string;
+  settings_agency_bank_swift: string;
+  settings_agency_bank_iban: string;
   settings_agency_hint: string;
   settings_document_requirements: string;
   settings_document_requirements_hint: string;

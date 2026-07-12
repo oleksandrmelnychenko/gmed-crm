@@ -3823,12 +3823,18 @@ async fn inherited_invoice_payer(
     InheritedInvoicePayer {
         payer_patient_relation_id: rel_id,
         payer_contact_name: row.try_get::<Option<String>, _>("name").unwrap_or_default(),
-        payer_contact_email: row.try_get::<Option<String>, _>("email").unwrap_or_default(),
-        payer_contact_phone: row.try_get::<Option<String>, _>("phone").unwrap_or_default(),
+        payer_contact_email: row
+            .try_get::<Option<String>, _>("email")
+            .unwrap_or_default(),
+        payer_contact_phone: row
+            .try_get::<Option<String>, _>("phone")
+            .unwrap_or_default(),
         payer_contact_relationship: row
             .try_get::<Option<String>, _>("relationship")
             .unwrap_or_default(),
-        payer_notes: row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+        payer_notes: row
+            .try_get::<Option<String>, _>("notes")
+            .unwrap_or_default(),
     }
 }
 

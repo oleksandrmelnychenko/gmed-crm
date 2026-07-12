@@ -22,6 +22,21 @@ const PATIENT_PARTY_BINDING_FIELDS: BindingFieldDef[] = [
   { key: "party_phone", label: "Patient Telefon", kind: "text" },
 ];
 
+const PARTY_SIGNATURE_BINDING_FIELDS: BindingFieldDef[] = [
+  { key: "party_sign_place", label: "Auftraggeber Unterzeichnungsort", kind: "text" },
+  { key: "party_sign_date", label: "Auftraggeber Unterzeichnungsdatum", kind: "date" },
+];
+
+const AGENCY_SIGNATURE_BINDING_FIELDS: BindingFieldDef[] = [
+  { key: "agency_sign_place", label: "Auftragnehmer Unterzeichnungsort", kind: "text" },
+  { key: "agency_sign_date", label: "Auftragnehmer Unterzeichnungsdatum", kind: "date" },
+];
+
+const PAYER_SIGNATURE_BINDING_FIELDS: BindingFieldDef[] = [
+  { key: "payer_sign_place", label: "Kostenübernehmer Unterzeichnungsort", kind: "text" },
+  { key: "payer_sign_date", label: "Kostenübernehmer Unterzeichnungsdatum", kind: "date" },
+];
+
 // Manual "binding socket" fields per generated template id. Field keys match
 // the backend `bindings` field names; `*_text` keys are parsed into arrays.
 export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
@@ -35,8 +50,8 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
       label: "Zusätzliche Datenempfänger / Entbindung",
       kind: "textarea",
     },
-    { key: "sign_place", label: "Unterzeichnungsort", kind: "text" },
-    { key: "sign_date", label: "Unterzeichnungsdatum", kind: "date" },
+    ...PARTY_SIGNATURE_BINDING_FIELDS,
+    ...AGENCY_SIGNATURE_BINDING_FIELDS,
   ],
   single_order: [
     { key: "order_sequence", label: "Laufende Nr. des Einzelauftrags", kind: "number" },
@@ -57,8 +72,18 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
       label: "Bestandteile / Rangfolge",
       kind: "textarea",
     },
-    { key: "sign_place", label: "Unterzeichnungsort", kind: "text" },
-    { key: "sign_date", label: "Unterzeichnungsdatum", kind: "date" },
+    { key: "quote_number", label: "Kostenvoranschlag-Nr.", kind: "text" },
+    {
+      key: "service_lines_text",
+      label: "Leistungen (Beschreibung | Honorar | Menge | Summe | Anmerkung)",
+      kind: "textarea",
+    },
+    { key: "bank_holder", label: "Kontoinhaber", kind: "text" },
+    { key: "bank_name", label: "Bank", kind: "text" },
+    { key: "bank_swift", label: "SWIFT/BIC", kind: "text" },
+    { key: "bank_iban", label: "IBAN", kind: "text" },
+    ...PARTY_SIGNATURE_BINDING_FIELDS,
+    ...AGENCY_SIGNATURE_BINDING_FIELDS,
   ],
   cost_coverage_declaration: [
     { key: "order_sequence", label: "Laufende Nr. des Einzelauftrags", kind: "number" },
@@ -82,8 +107,8 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
       label: "Leistungen (eine pro Zeile: Beschreibung | Honorar | Menge | Summe)",
       kind: "textarea",
     },
-    { key: "sign_place", label: "Unterzeichnungsort", kind: "text" },
-    { key: "sign_date", label: "Unterzeichnungsdatum", kind: "date" },
+    ...PAYER_SIGNATURE_BINDING_FIELDS,
+    ...AGENCY_SIGNATURE_BINDING_FIELDS,
   ],
   cost_estimate: [
     { key: "order_date", label: "Datum", kind: "date" },
@@ -106,6 +131,11 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     },
     { key: "recipient_block", label: "Empfänger (Adressblock)", kind: "textarea" },
     { key: "contact_phones", label: "Rückfragen-Telefon(e)", kind: "text" },
+    {
+      key: "continuation_statement",
+      label: "Hinweis zur Fortsetzung der Behandlung",
+      kind: "textarea",
+    },
     { key: "sign_place", label: "Ort", kind: "text" },
     { key: "sign_date", label: "Datum", kind: "date" },
   ],
@@ -129,10 +159,12 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     { key: "child_name", label: "Kind (Name)", kind: "text" },
     { key: "child_birth_date", label: "Kind (geb. am)", kind: "date" },
     { key: "child_address", label: "Adresse des Kindes", kind: "text" },
-    { key: "guardian_name", label: "Mutter (Name)", kind: "text" },
-    { key: "guardian_birth_date", label: "Mutter (geb. am)", kind: "date" },
-    { key: "guardian2_name", label: "Vater (Name)", kind: "text" },
-    { key: "guardian2_birth_date", label: "Vater (geb. am)", kind: "date" },
+    { key: "guardian_name", label: "Sorgeberechtigte/r 1 (Name)", kind: "text" },
+    { key: "guardian_birth_date", label: "Sorgeberechtigte/r 1 (geb. am)", kind: "date" },
+    { key: "guardian_label", label: "Rolle Sorgeberechtigte/r 1", kind: "text" },
+    { key: "guardian2_name", label: "Sorgeberechtigte/r 2 (Name)", kind: "text" },
+    { key: "guardian2_birth_date", label: "Sorgeberechtigte/r 2 (geb. am)", kind: "date" },
+    { key: "guardian2_label", label: "Rolle Sorgeberechtigte/r 2", kind: "text" },
     {
       key: "extra_release_recipients",
       label: "Zusätzliche Entbindung gegenüber",
@@ -270,4 +302,85 @@ export function prefillDocumentBindingsFromText(
     return prefillPassportBindingsFromText(text);
   }
   return {};
+}
+
+function pipeRow(values: unknown[]) {
+  const parts = values.map((value) =>
+    typeof value === "string" || typeof value === "number" ? String(value).trim() : "",
+  );
+  while (parts.at(-1) === "") parts.pop();
+  return parts.join(" | ");
+}
+
+function persistedStructuredBindings(value: Record<string, unknown>) {
+  const bindings: DocumentBindingForm = {};
+  if (Array.isArray(value.service_lines)) {
+    const rows = value.service_lines
+      .map((entry) => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) return "";
+        const line = entry as Record<string, unknown>;
+        return pipeRow([
+          line.description,
+          line.fee,
+          line.quantity,
+          line.line_total,
+          line.note,
+        ]);
+      })
+      .filter(Boolean);
+    if (rows.length) bindings.service_lines_text = rows.join("\n");
+  }
+  if (Array.isArray(value.clinics)) {
+    const rows = value.clinics
+      .map((entry) => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) return "";
+        const clinic = entry as Record<string, unknown>;
+        return pipeRow([clinic.name, clinic.address]);
+      })
+      .filter(Boolean);
+    if (rows.length) bindings.clinics_text = rows.join("\n");
+  }
+  return bindings;
+}
+
+function legacySignatureBindings(templateId: string, value: Record<string, unknown>) {
+  const place = typeof value.sign_place === "string" ? value.sign_place.trim() : "";
+  const date = typeof value.sign_date === "string" ? value.sign_date.trim() : "";
+  if (!place && !date) return {};
+  if (templateId === "cost_coverage_declaration") {
+    return {
+      ...(place ? { payer_sign_place: place } : {}),
+      ...(date ? { payer_sign_date: date } : {}),
+    };
+  }
+  if (templateId === "framework_contract" || templateId === "single_order") {
+    return {
+      ...(place ? { party_sign_place: place } : {}),
+      ...(date ? { party_sign_date: date } : {}),
+    };
+  }
+  return {};
+}
+
+export function hydrateDocumentBindings(
+  templateId: string,
+  persisted: Record<string, unknown> | null | undefined,
+  extractedText: string | null | undefined,
+): DocumentBindingForm {
+  const extracted = prefillDocumentBindingsFromText(templateId, extractedText);
+  if (!persisted) return extracted;
+
+  const allowed = new Set((DOCUMENT_BINDING_FIELDS[templateId] ?? []).map((field) => field.key));
+  const hydrated: DocumentBindingForm = { ...extracted };
+  for (const [key, value] of Object.entries(persisted)) {
+    if (!allowed.has(key) || key === "service_lines_text" || key === "clinics_text") continue;
+    if (typeof value !== "string" && typeof value !== "number") continue;
+    const normalized = String(value).trim();
+    if (normalized) hydrated[key] = normalized;
+  }
+  for (const [key, value] of Object.entries(legacySignatureBindings(templateId, persisted))) {
+    if (!hydrated[key]) hydrated[key] = value;
+  }
+  Object.assign(hydrated, persistedStructuredBindings(persisted));
+  return hydrated;
 }

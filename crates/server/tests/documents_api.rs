@@ -2997,7 +2997,7 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
     let cases: [(&str, &str, serde_json::Value); 6] = [
         (
             "single_order",
-            "contract",
+            "administrative_single_order",
             json!({
                 "order_number": "EA-2026-1",
                 "order_date": "2025-11-11",
@@ -3011,7 +3011,7 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
         ),
         (
             "cost_coverage_declaration",
-            "finance",
+            "finance_cost_coverage",
             json!({
                 "order_date": "2025-11-11",
                 "contract_date": "2025-11-11",
@@ -3024,7 +3024,7 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
         ),
         (
             "cost_estimate",
-            "finance",
+            "finance_cost_estimate",
             json!({
                 "order_date": "2025-11-11",
                 "estimate_total": "200,00 - 2000,00 €",
@@ -3035,7 +3035,7 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
         ),
         (
             "appointment_confirmation",
-            "clinic_correspondence",
+            "administrative_appointment_confirmation",
             json!({
                 "doc_id": "1251119",
                 "passport_number": "MA1234567",
@@ -3069,6 +3069,7 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
     ];
 
     for (template_id, expected_category, bindings) in cases {
+        let expected_bindings = bindings.clone();
         let (status, body) = json_request(
             &app,
             "POST",
@@ -3102,7 +3103,14 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
             detail_body["generated_template_id"], template_id,
             "{template_id}"
         );
-        let expected_sensitivity = if matches!(expected_category, "contract" | "finance") {
+        assert_eq!(
+            detail_body["generated_bindings"], expected_bindings,
+            "{template_id} must persist its exact binding snapshot"
+        );
+        let expected_sensitivity = if matches!(
+            template_id,
+            "single_order" | "cost_coverage_declaration" | "cost_estimate"
+        ) {
             "Financial"
         } else {
             "Patient Identity"
@@ -3279,7 +3287,8 @@ async fn consent_child_autofills_guardians_from_patient_relations() {
     let tag = unique_tag("consent-guardian-autofill");
     let child_id = seed_patient(&pool, admin_id, &tag).await;
 
-    // The child has two guardians recorded as relations (no gender stored, ordered by time).
+    // The child has two unlinked guardians recorded as relations. Their roles must
+    // remain neutral because no related patient gender is available.
     // Short single-token names so they don't wrap in the generated PDF.
     let guardian_one = "Erikaautofillmother";
     let guardian_two = "Hansautofillfather";
@@ -3324,9 +3333,82 @@ async fn consent_child_autofills_guardians_from_patient_relations() {
         pdf_text.contains(guardian_one),
         "first guardian must be auto-filled from relations; got: {pdf_text:?}"
     );
+    assert!(pdf_text.contains("Sorgeberechtigte/r 1"), "{pdf_text:?}");
+    assert!(pdf_text.contains("Sorgeberechtigte/r 2"), "{pdf_text:?}");
     assert!(
         pdf_text.contains(guardian_two),
         "second guardian must be auto-filled from relations; got: {pdf_text:?}"
+    );
+}
+
+#[tokio::test]
+async fn consent_child_labels_linked_parents_by_gender_not_relation_order() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("consent-guardian-gender");
+    let child_id = seed_patient(&pool, admin_id, &format!("{tag}-child")).await;
+    let father_id = seed_patient(&pool, admin_id, &format!("{tag}-father")).await;
+    let mother_id = seed_patient(&pool, admin_id, &format!("{tag}-mother")).await;
+    sqlx::query("UPDATE patients SET gender = 'male' WHERE id = $1")
+        .bind(father_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE patients SET gender = 'female' WHERE id = $1")
+        .bind(mother_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let father_name = "Fathergenderbinding";
+    let mother_name = "Mothergenderbinding";
+    sqlx::query(
+        r#"INSERT INTO patient_relations (
+                patient_id, related_patient_id, related_name, relation_type, created_at
+           ) VALUES
+                ($1, $2, $3, 'parent', now() - interval '1 minute'),
+                ($1, $4, $5, 'parent', now())"#,
+    )
+    .bind(child_id)
+    .bind(father_id)
+    .bind(father_name)
+    .bind(mother_id)
+    .bind(mother_name)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "consent_data_release_child",
+            "patient_id": child_id,
+            "language": "de"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "generate consent: {body:?}");
+    let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+    let (status, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &admin_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let pdf_text = extract_pdf_text(&bytes);
+    assert!(
+        pdf_text.contains(&format!("{father_name}, geb. am 01.01.1990 (Vater)")),
+        "{pdf_text:?}"
+    );
+    assert!(
+        pdf_text.contains(&format!("{mother_name}, geb. am 01.01.1990 (Mutter)")),
+        "{pdf_text:?}"
     );
 }
 
@@ -3429,7 +3511,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
         TemplateCase {
             template_id: "treatment_plan",
             expected_art: "treatment_plan",
-            expected_category: "generated",
+            expected_category: "treatment_plan",
             order_id: None,
             appointment_id: Some(appointment_id),
             bindings: json!({}),
@@ -3440,7 +3522,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
         TemplateCase {
             template_id: "medication_summary",
             expected_art: "medication_summary",
-            expected_category: "generated",
+            expected_category: "medication_summary",
             order_id: None,
             appointment_id: None,
             bindings: json!({}),
@@ -3462,7 +3544,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
         TemplateCase {
             template_id: "visa_invitation_letter",
             expected_art: "visa_invitation",
-            expected_category: "generated",
+            expected_category: "visa_invitation_letter",
             order_id: Some(order_id),
             appointment_id: Some(appointment_id),
             bindings: json!({}),
@@ -3506,7 +3588,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
         TemplateCase {
             template_id: "single_order",
             expected_art: "single_order",
-            expected_category: "contract",
+            expected_category: "administrative_single_order",
             order_id: Some(order_id),
             appointment_id: None,
             bindings: json!({
@@ -3531,7 +3613,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
         TemplateCase {
             template_id: "cost_coverage_declaration",
             expected_art: "cost_coverage_declaration",
-            expected_category: "finance",
+            expected_category: "finance_cost_coverage",
             order_id: Some(order_id),
             appointment_id: None,
             bindings: json!({
@@ -3550,7 +3632,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
         TemplateCase {
             template_id: "cost_estimate",
             expected_art: "cost_estimate",
-            expected_category: "finance",
+            expected_category: "finance_cost_estimate",
             order_id: Some(order_id),
             appointment_id: None,
             bindings: json!({
@@ -3563,7 +3645,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
         TemplateCase {
             template_id: "appointment_confirmation",
             expected_art: "appointment_confirmation",
-            expected_category: "clinic_correspondence",
+            expected_category: "administrative_appointment_confirmation",
             order_id: Some(order_id),
             appointment_id: Some(appointment_id),
             bindings: json!({
@@ -3806,6 +3888,129 @@ async fn cost_coverage_declaration_includes_contract_obligations_and_annexes() {
 }
 
 #[tokio::test]
+async fn single_order_without_payer_includes_quote_annex_and_separate_signatures() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-single-order-annex");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let contract_id = seed_framework_contract(&pool, patient_id, admin_id, &tag).await;
+    let order_id = seed_order_with_contract(&pool, patient_id, contract_id, admin_id, &tag).await;
+    let _quote_id = seed_quote_for_order(&pool, order_id, admin_id, &tag).await;
+
+    let bindings = json!({
+        "party_sign_place": "Paris-signature",
+        "party_sign_date": "2026-04-03",
+        "agency_sign_place": "Munich-signature",
+        "agency_sign_date": "2026-04-02",
+        "bank_holder": "Configured account holder",
+        "bank_iban": "DE00 0000 0000 0000 0000 00"
+    });
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "single_order",
+            "patient_id": patient_id,
+            "order_id": order_id,
+            "language": "de",
+            "bindings": bindings
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "generate single order: {body:?}");
+    let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["generated_bindings"], bindings);
+
+    let (status, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &admin_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let pdf_text = extract_pdf_text(&bytes);
+    assert!(
+        pdf_text.contains("Anlage 1 zum 1. Einzelauftrag"),
+        "{pdf_text:?}"
+    );
+    assert!(pdf_text.contains(&format!("KV-{tag}")), "{pdf_text:?}");
+    assert!(
+        pdf_text.contains("Koordination vor stationärer Aufnahme"),
+        "{pdf_text:?}"
+    );
+    assert!(
+        pdf_text.contains("Configured account holder"),
+        "{pdf_text:?}"
+    );
+    assert!(pdf_text.contains("Paris-signature"), "{pdf_text:?}");
+    assert!(pdf_text.contains("Munich-signature"), "{pdf_text:?}");
+}
+
+#[tokio::test]
+async fn appointment_confirmation_autofills_clinic_and_date_from_appointment() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-appointment-autofill");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id =
+        seed_provider_with_type_and_specialty(&pool, &tag, "medical", "Dermatologie").await;
+    let doctor_id = seed_doctor_with_specialty(&pool, provider_id, &tag, "Endokrinologie").await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "appointment_confirmation",
+            "patient_id": patient_id,
+            "appointment_id": appointment_id,
+            "language": "de"
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "generate appointment confirmation: {body:?}"
+    );
+    let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+    let (status, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &admin_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let pdf_text = extract_pdf_text(&bytes);
+    assert!(pdf_text.contains(&format!("Clinic {tag}")), "{pdf_text:?}");
+    assert!(pdf_text.contains("Clinic Street 1"), "{pdf_text:?}");
+    assert!(pdf_text.contains("15.04.2026"), "{pdf_text:?}");
+    assert!(
+        pdf_text.contains("Die Behandlung wurde in Deutschland begonnen"),
+        "{pdf_text:?}"
+    );
+}
+
+#[tokio::test]
 async fn cost_estimate_uses_order_quote_when_manual_lines_are_omitted() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
@@ -3893,6 +4098,35 @@ async fn cost_estimate_manual_lines_do_not_reuse_quote_total() {
     let preview_html = body["preview_html"].as_str().unwrap();
     assert!(preview_html.contains("Manuelle Zusatzleistung"));
     assert!(!preview_html.contains("1428"));
+}
+
+#[tokio::test]
+async fn patient_manager_cannot_resolve_an_unassigned_patient_through_order_context() {
+    let Some((app, pool, admin_id, _admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-generate-resolved-assignment");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let contract_id = seed_framework_contract(&pool, patient_id, admin_id, &tag).await;
+    let order_id = seed_order_with_contract(&pool, patient_id, contract_id, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &pm_bearer,
+        Some(json!({
+            "template_id": "cost_estimate",
+            "order_id": order_id,
+            "language": "de"
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body:?}");
+    assert_eq!(body["message"], "You are not assigned to this patient");
 }
 
 #[tokio::test]
@@ -4245,7 +4479,7 @@ async fn document_templates_can_generate_medication_summary_pdf_document() {
     seed_case_medication(
         &pool,
         active_case,
-        "Ramipril 5",
+        "",
         "Ramipril",
         "5",
         "mg",
@@ -4329,7 +4563,7 @@ async fn document_templates_can_generate_medication_summary_pdf_document() {
     let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
     let preview_html = body["preview_html"].as_str().unwrap();
     assert!(preview_html.contains("Medikamentenübersicht"));
-    assert!(preview_html.contains("Ramipril 5"));
+    assert!(preview_html.contains("Ramipril"));
     assert!(preview_html.contains("Metformin 500"));
     assert!(preview_html.contains("Bis: 31.07.2026"));
     assert!(preview_html.contains("Dr. Active"));
@@ -4458,7 +4692,9 @@ async fn document_templates_can_generate_framework_contract_pdf_document() {
     let pdf_text = extract_pdf_text(&bytes);
     assert!(pdf_text.contains("Informationsblatt zum Datenschutz"));
     assert!(pdf_text.contains("Beschwerderecht"));
-    assert!(pdf_text.contains("datenschutz@gmed-health.com"));
+    assert!(pdf_text.contains("Datenschutzkontakt"));
+    assert!(!pdf_text.contains("Salesforce"));
+    assert!(!pdf_text.contains("Heorhii Hudiiev"));
     assert!(pdf_text.contains("Override Str. 9 | 80331 Muenchen | Deutschland"));
     assert!(pdf_text.contains("override.patient@example.test"));
     assert!(pdf_text.contains("+49 89 123456"));

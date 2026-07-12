@@ -97,7 +97,7 @@ interface PendingLogin {
 type SettingFieldMeta = {
   key: string;
   labelKey: string;
-  inputType: "number" | "text" | "email" | "textarea";
+  inputType: "number" | "text" | "email" | "date" | "textarea";
   min?: number;
   rows?: number;
 };
@@ -128,9 +128,27 @@ const TOKEN_SETTING_FIELDS: SettingFieldMeta[] = [
 const AGENCY_SETTING_FIELDS: SettingFieldMeta[] = [
   { key: "agency_name", labelKey: "settings_agency_name", inputType: "text" },
   { key: "agency_care_of", labelKey: "settings_agency_care_of", inputType: "text" },
+  {
+    key: "agency_principal_birth_date",
+    labelKey: "settings_agency_principal_birth_date",
+    inputType: "date",
+  },
   { key: "agency_address", labelKey: "settings_agency_address", inputType: "textarea", rows: 3 },
   { key: "agency_phone", labelKey: "settings_agency_phone", inputType: "text" },
   { key: "agency_email", labelKey: "settings_agency_email", inputType: "email" },
+  { key: "agency_privacy_email", labelKey: "settings_agency_privacy_email", inputType: "email" },
+  { key: "agency_sign_place", labelKey: "settings_agency_sign_place", inputType: "text" },
+  { key: "agency_data_system_name", labelKey: "settings_agency_data_system_name", inputType: "text" },
+  {
+    key: "agency_data_processor_notice",
+    labelKey: "settings_agency_data_processor_notice",
+    inputType: "textarea",
+    rows: 5,
+  },
+  { key: "agency_bank_holder", labelKey: "settings_agency_bank_holder", inputType: "text" },
+  { key: "agency_bank_name", labelKey: "settings_agency_bank_name", inputType: "text" },
+  { key: "agency_bank_swift", labelKey: "settings_agency_bank_swift", inputType: "text" },
+  { key: "agency_bank_iban", labelKey: "settings_agency_bank_iban", inputType: "text" },
 ];
 
 const DOCUMENT_REQUIREMENT_SETTING_FIELDS: SettingFieldMeta[] = [

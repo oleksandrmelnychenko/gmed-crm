@@ -6491,8 +6491,14 @@ fn build_patient_detail_json(
                     "passport_status".to_string(),
                     Value::String(status.to_string()),
                 );
-                map.insert("passport_expired".to_string(), Value::Bool(status == "expired"));
-                map.insert("passport_expiring".to_string(), Value::Bool(status == "expiring"));
+                map.insert(
+                    "passport_expired".to_string(),
+                    Value::Bool(status == "expired"),
+                );
+                map.insert(
+                    "passport_expiring".to_string(),
+                    Value::Bool(status == "expiring"),
+                );
                 map.insert(
                     "passport_days_until_expiry".to_string(),
                     days.map(Value::from).unwrap_or(Value::Null),
@@ -7811,7 +7817,6 @@ async fn save_patient_diagnoses(
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
     }
-
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -7998,6 +8003,17 @@ async fn save_patient_medications(
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
     }
+    if body.items.iter().any(|item| {
+        item.wirkstoff
+            .as_deref()
+            .map(str::trim)
+            .is_none_or(str::is_empty)
+    }) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "wirkstoff is required for every medication",
+        );
+    }
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -8016,9 +8032,9 @@ async fn save_patient_medications(
     }
     let mut saved = 0i32;
     for item in body.items {
-        let Some(handelsname) = clinical_opt_text(item.handelsname) else {
-            continue;
-        };
+        let wirkstoff = clinical_opt_text(item.wirkstoff)
+            .expect("medication active ingredient validated before transaction");
+        let handelsname = clinical_opt_text(item.handelsname).unwrap_or_default();
         let category = clinical_one_of(item.category, &["dauer", "besondere", "selbst"])
             .unwrap_or_else(|| "dauer".to_string());
         let status = clinical_one_of(item.status, &["aktiv", "pausiert", "abgesetzt", "geplant"])
@@ -8036,7 +8052,7 @@ async fn save_patient_medications(
         .bind(provider_id)
         .bind(doctor_id)
         .bind(&category)
-        .bind(clinical_opt_text(item.wirkstoff))
+        .bind(&wirkstoff)
         .bind(&handelsname)
         .bind(clinical_opt_text(item.staerke))
         .bind(clinical_opt_text(item.form))

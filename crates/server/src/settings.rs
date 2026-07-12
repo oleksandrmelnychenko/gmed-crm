@@ -111,6 +111,23 @@ pub async fn update_setting(
         "agency_address" => validate_string_setting(value, 500, true, "Agency address")?,
         "agency_phone" => validate_string_setting(value, 64, true, "Agency phone")?,
         "agency_email" => validate_email_setting(value)?,
+        "agency_principal_birth_date" => validate_optional_date_setting(value)?,
+        "agency_privacy_email" => validate_email_setting(value)?,
+        "agency_sign_place" => {
+            validate_string_setting(value, 160, false, "Agency signature place")?
+        }
+        "agency_data_system_name" => {
+            validate_string_setting(value, 160, false, "Agency data system name")?
+        }
+        "agency_data_processor_notice" => {
+            validate_string_setting(value, 4_000, true, "Agency data processor notice")?
+        }
+        "agency_bank_holder" => {
+            validate_string_setting(value, 160, true, "Agency bank account holder")?
+        }
+        "agency_bank_name" => validate_string_setting(value, 160, true, "Agency bank name")?,
+        "agency_bank_swift" => validate_string_setting(value, 32, true, "Agency SWIFT/BIC")?,
+        "agency_bank_iban" => validate_string_setting(value, 64, true, "Agency IBAN")?,
         "required_patient_documents" => validate_required_patient_documents_setting(value)?,
         _ => validate_positive_integer_setting(key, value)?,
     };
@@ -228,6 +245,16 @@ fn validate_email_setting(value: &str) -> Result<Value, UpdateError> {
         return Err(UpdateError::InvalidValue("Agency email is invalid".into()));
     }
 
+    Ok(Value::String(trimmed.to_string()))
+}
+
+fn validate_optional_date_setting(value: &str) -> Result<Value, UpdateError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(Value::String(String::new()));
+    }
+    chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
+        .map_err(|_| UpdateError::InvalidValue("Date must use YYYY-MM-DD".into()))?;
     Ok(Value::String(trimmed.to_string()))
 }
 

@@ -559,8 +559,8 @@ export function clinicalNarrativePayload(
 export function clinicalMedicationPayload(
   intake: ClinicalIntakeDraft,
 ): ClinicalMedication | null {
-  const handelsname = trimOrNull(intake.medicationName);
-  if (!handelsname) return null;
+  const wirkstoff = trimOrNull(intake.medicationName);
+  if (!wirkstoff) return null;
   return {
     provider_id: null,
     provider_name: null,
@@ -569,8 +569,8 @@ export function clinicalMedicationPayload(
     doctor_title: null,
     doctor_fachbereich: null,
     category: "dauer",
-    wirkstoff: null,
-    handelsname,
+    wirkstoff,
+    handelsname: "",
     staerke: trimOrNull(intake.medicationStrength),
     form: trimOrNull(intake.medicationForm) ?? "TABL",
     einnahmeform: trimOrNull(intake.medicationRoute) ?? "Oral",
@@ -603,6 +603,7 @@ function normalizedFingerprint(parts: Array<string | null | undefined>): string 
 
 export function clinicalMedicationFingerprint(item: ClinicalMedicationLike): string {
   return normalizedFingerprint([
+    item.wirkstoff,
     item.handelsname,
     item.staerke,
     item.form,
@@ -615,7 +616,14 @@ export function clinicalMedicationFingerprint(item: ClinicalMedicationLike): str
 
 type ClinicalMedicationLike = Pick<
   ClinicalMedication,
-  "handelsname" | "staerke" | "form" | "einnahmeform" | "dose_morgens" | "grund" | "hinweis"
+  | "wirkstoff"
+  | "handelsname"
+  | "staerke"
+  | "form"
+  | "einnahmeform"
+  | "dose_morgens"
+  | "grund"
+  | "hinweis"
 >;
 
 type ClinicalWarningLike = Pick<

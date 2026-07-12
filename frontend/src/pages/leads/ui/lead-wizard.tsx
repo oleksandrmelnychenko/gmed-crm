@@ -30,7 +30,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { selectClass, textareaClass } from "@/components/ui-shell";
+import { selectClass, StatusBadge, textareaClass } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import type { LeadDetail } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
@@ -38,7 +38,6 @@ import {
   completeCaseIntake,
   createCase,
   fetchCaseDetail,
-  fetchCaseDoctors,
   fetchCases,
   saveCaseAllergien,
   saveCaseMedikamente,
@@ -56,10 +55,12 @@ import {
 } from "@/pages/contracts/data/contracts-api";
 import type { AgencyServiceItem, ContractItem, QuoteItem } from "@/pages/contracts/model/types";
 import {
+  createDocumentPreviewObjectUrl,
   deleteStoredDocumentFile,
   downloadDocumentFile,
   fetchDocuments,
   markDocumentSigned,
+  revokeDocumentPreviewObjectUrl,
   uploadDocument,
   type DocumentComplianceKind,
 } from "@/pages/documents/data/document-api";
@@ -72,12 +73,20 @@ import {
   updateOrderCommercialBasis,
 } from "@/pages/orders/data/order-api";
 import type { Leistung, OrderSummary } from "@/pages/orders/model/types";
-import type { DoctorOption } from "@/pages/cases/model/types";
-import { fetchSpecializations } from "@/pages/providers/data/provider-api";
-import type { SpecializationItem } from "@/pages/providers/model/types";
+import {
+  fetchAllDoctors,
+  type AllDoctorOption,
+  type ClinicalDiagnosis,
+  type ClinicalMedication,
+  type ClinicalNarrative,
+  type ClinicalWarning,
+} from "@/pages/patients/data/patient-clinical";
+import { fetchProviders, fetchSpecializations } from "@/pages/providers/data/provider-api";
+import type { ProviderSummary, SpecializationItem } from "@/pages/providers/model/types";
 import {
   LEAD_QUESTIONNAIRE_SERVICE_OPTIONS,
   leadIntakeTypeFromLead,
+  leadErrorBlockingReasons,
   leadErrorMessage,
   knownLeadProgramServiceLabel,
   leadLocationDetailedLabel,
@@ -89,13 +98,7 @@ import {
   normalizeLeadServiceValue,
 } from "@/pages/leads/model/leads-model";
 
-import {
-  LeadMedicalIntakeForm,
-  type LeadAllergyDraft,
-  type LeadCaveDraft,
-  type LeadDiagnosisDraft,
-  type LeadMedicationDraft,
-} from "./lead-medical-intake-form";
+import { LeadMedicalIntakeForm } from "./lead-medical-intake-form";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 
 import {
@@ -109,7 +112,7 @@ import {
 } from "../data/leads-api";
 
 type Tx = (ru: string, de: string) => string;
-type StepId = "master_data" | "medical" | "service" | "documents" | "commercial" | "release";
+type StepId = "master_data" | "medical" | "service" | "documents" | "order" | "commercial" | "release";
 type CaseListItem = { id: string };
 
 type LeadWizardProps = {
@@ -142,16 +145,19 @@ type Draft = {
   whatsappNumber: string;
   concern: string;
   anamnese: string;
-  diagnoses: LeadDiagnosisDraft[];
-  medications: LeadMedicationDraft[];
-  allergies: LeadAllergyDraft[];
-  caves: LeadCaveDraft[];
+  narrative: ClinicalNarrative | null;
+  diagnoses: ClinicalDiagnosis[];
+  medications: ClinicalMedication[];
+  allergies: ClinicalWarning[];
+  caves: ClinicalWarning[];
   serviceNeeds: string[];
   serviceComments: Record<string, string>;
   discoverySource: string;
   referrer: string;
   serviceNotes: string;
   specialties: string[];
+  programDateFrom: string;
+  programDateTo: string;
   privacyConsent: boolean;
   healthcareConsent: boolean;
 };
@@ -204,11 +210,49 @@ type MasterFieldKey =
 
 type MasterValidationErrors = Partial<Record<MasterFieldKey, string>>;
 
+type ValidationIssue = {
+  key: string;
+  step: StepId;
+  message: string;
+  fieldId?: string;
+};
+
+type ValidationContext =
+  | { kind: "master" }
+  | { kind: "medical" }
+  | { kind: "order" }
+  | { kind: "server"; reasons: string[] };
+
+type WizardDocumentPreview = {
+  contentType: string;
+  id: string;
+  kind: "image" | "pdf";
+  title: string;
+  url: string;
+};
+
 const AUTOSAVE_DELAY_MS = 800;
 const MAX_DOCUMENT_FILE_SIZE = 25 * 1024 * 1024;
 const SERVICE_CONCERN_ID = "lead-wizard-concern";
 const SERVICE_SPECIALTIES_ID = "lead-wizard-specialties";
 const MEDICAL_ANAMNESE_ID = "lead-wizard-anamnese";
+const ORDER_DATE_FROM_ID = "lead-wizard-program-date-from";
+const ORDER_DATE_TO_ID = "lead-wizard-program-date-to";
+const PRIVACY_CONSENT_ID = "lead-wizard-privacy-consent";
+const HEALTHCARE_CONSENT_ID = "lead-wizard-healthcare-consent";
+
+const DISCOVERY_SOURCE_OPTIONS = [
+  { value: "customer_referral", ru: "Рекомендация клиента", de: "Empfehlung eines Kunden" },
+  { value: "online", ru: "Онлайн", de: "Online" },
+  { value: "employee_referral", ru: "Рекомендация сотрудника", de: "Empfehlung eines Mitarbeiters" },
+  { value: "medical_referral", ru: "Рекомендация врача или клиники", de: "Empfehlung eines Arztes oder einer Klinik" },
+  { value: "partner_referral", ru: "Партнёр или агентство", de: "Partner oder Agentur" },
+  { value: "insurance_referral", ru: "Страховая компания", de: "Versicherung" },
+  { value: "social_media", ru: "Социальные сети", de: "Soziale Medien" },
+  { value: "advertising", ru: "Реклама", de: "Werbung" },
+  { value: "event", ru: "Мероприятие", de: "Veranstaltung" },
+  { value: "other", ru: "Другое", de: "Sonstiges" },
+] as const;
 
 const MASTER_FIELD_ORDER: MasterFieldKey[] = [
   "firstName",
@@ -239,6 +283,7 @@ const STEPS: Array<{ id: StepId; ru: string; de: string }> = [
   { id: "medical", ru: "Медицинская характеристика", de: "Medizinische Merkmale" },
   { id: "service", ru: "Сервисная история", de: "Servicehistorie" },
   { id: "documents", ru: "Документы", de: "Unterlagen" },
+  { id: "order", ru: "Оформление заказа", de: "Auftragserfassung" },
   { id: "commercial", ru: "Договор и смета", de: "Vertrag & Angebot" },
   { id: "release", ru: "Создание пациента", de: "Freigabe" },
 ];
@@ -334,12 +379,15 @@ function autosavePayload(
       onboarding_version: 3,
       discovery_source: draft.discoverySource,
       referrer: draft.referrer,
+      program_date_from: draft.programDateFrom,
+      program_date_to: draft.programDateTo,
       service_comments: draft.serviceNeeds.reduce<Record<string, string>>((comments, value) => {
         const comment = draft.serviceComments[value];
         if (comment?.trim()) comments[value] = comment;
         return comments;
       }, {}),
       clinical_draft: {
+        narrative: draft.narrative,
         diagnoses: draft.diagnoses,
         medications: draft.medications,
         allergies: draft.allergies,
@@ -373,12 +421,20 @@ function recordFromUnknown(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function stringFromUnknown(value: unknown) {
-  return typeof value === "string" ? value : "";
+function firstString(record: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return "";
 }
 
-function booleanFromUnknown(value: unknown) {
-  return value === true;
+function nullableString(record: Record<string, unknown>, ...keys: string[]) {
+  return firstString(record, ...keys).trim() || null;
+}
+
+function firstBoolean(record: Record<string, unknown>, ...keys: string[]) {
+  return keys.some((key) => record[key] === true);
 }
 
 function serviceCommentsFromLead(lead: LeadDetail) {
@@ -444,69 +500,139 @@ function clinicalRowsFromLead(lead: LeadDetail) {
       ? (clinical[key] as unknown[]).map((item, index) => map(recordFromUnknown(item), index))
       : []
   );
+  const narrativeRow = asRecord(clinical["narrative"]);
+  const fallbackAnamnese = lead.additional_concerns?.trim() || null;
+  const narrative: ClinicalNarrative | null = narrativeRow || fallbackAnamnese
+    ? {
+        id: narrativeRow && typeof narrativeRow.id === "string" ? narrativeRow.id : null,
+        anamnese_aktuelle: narrativeRow
+          ? nullableString(narrativeRow, "anamnese_aktuelle") ?? fallbackAnamnese
+          : fallbackAnamnese,
+        anamnese_vorgeschichte: narrativeRow
+          ? nullableString(narrativeRow, "anamnese_vorgeschichte")
+          : null,
+        anamnese_vegetative: narrativeRow
+          ? nullableString(narrativeRow, "anamnese_vegetative")
+          : null,
+        anamnese_sozial: narrativeRow
+          ? nullableString(narrativeRow, "anamnese_sozial")
+          : null,
+        beurteilung: narrativeRow ? nullableString(narrativeRow, "beurteilung") : null,
+        is_active: narrativeRow?.is_active !== false,
+        created_at: narrativeRow ? nullableString(narrativeRow, "created_at") : null,
+        updated_at: narrativeRow ? nullableString(narrativeRow, "updated_at") : null,
+      }
+    : null;
+
   return {
-    diagnoses: rows("diagnoses", (row, index): LeadDiagnosisDraft => ({
-      id: stringFromUnknown(row["id"]) || `diagnosis-${index + 1}`,
-      label: stringFromUnknown(row["label"]),
-      diagnosedOn: stringFromUnknown(row["diagnosedOn"]),
-      note: stringFromUnknown(row["note"]),
-      kind: row["kind"] === "secondary" || (row["kind"] !== "main" && index > 0)
-        ? "secondary"
-        : "main",
-      icdCode: stringFromUnknown(row["icdCode"]),
-      certainty: ["verdacht", "bestaetigt", "zustand_nach"].includes(stringFromUnknown(row["certainty"]))
-        ? stringFromUnknown(row["certainty"]) as LeadDiagnosisDraft["certainty"]
-        : "bestaetigt",
-      chronification: ["akut", "chronisch", "rezidivierend"].includes(stringFromUnknown(row["chronification"]))
-        ? stringFromUnknown(row["chronification"]) as LeadDiagnosisDraft["chronification"]
-        : "",
+    narrative,
+    diagnoses: rows("diagnoses", (row, index): ClinicalDiagnosis => {
+      const kindValue = firstString(row, "kind");
+      const certaintyValue = firstString(row, "certainty");
+      const chronificationValue = firstString(row, "chronifizierung", "chronification");
+      const statusValue = firstString(row, "status");
+      const sourceMode = firstString(row, "source_mode", "sourceMode");
+      return {
+        id: null,
+        cid: firstString(row, "cid", "id") || `lead-diagnosis-${index + 1}`,
+        parent_cid: nullableString(row, "parent_cid", "parentCid", "parent_id"),
+        parent_id: null,
+        kind: ["main", "secondary", "prozedur"].includes(kindValue)
+          ? kindValue as ClinicalDiagnosis["kind"]
+          : index === 0 ? "main" : "secondary",
+        label: firstString(row, "label"),
+        certainty: ["verdacht", "bestaetigt", "zustand_nach"].includes(certaintyValue)
+          ? certaintyValue as ClinicalDiagnosis["certainty"]
+          : "bestaetigt",
+        chronifizierung: ["akut", "chronisch", "rezidivierend"].includes(chronificationValue)
+          ? chronificationValue as ClinicalDiagnosis["chronifizierung"]
+          : null,
+        icd_code: nullableString(row, "icd_code", "icdCode"),
+        ops_code: nullableString(row, "ops_code", "opsCode"),
+        diagnosed_on: nullableString(row, "diagnosed_on", "diagnosedOn"),
+        note: nullableString(row, "note"),
+        source_mode: sourceMode === "extern" ? "extern" : "intern",
+        provider_id: nullableString(row, "provider_id", "providerId"),
+        provider_name: nullableString(row, "provider_name", "providerName"),
+        doctor_id: nullableString(row, "doctor_id", "doctorId"),
+        doctor_name: nullableString(row, "doctor_name", "doctorName"),
+        doctor_title: nullableString(row, "doctor_title", "doctorTitle"),
+        doctor_fachbereich: nullableString(row, "doctor_fachbereich", "doctorFachbereich"),
+        external_clinic: nullableString(row, "external_clinic", "externalClinic"),
+        external_doctor: nullableString(row, "external_doctor", "externalDoctor"),
+        external_country: nullableString(row, "external_country", "externalCountry"),
+        treating_doctor_id: nullableString(row, "treating_doctor_id", "treatingDoctorId"),
+        treating_doctor_name: nullableString(row, "treating_doctor_name", "treatingDoctorName"),
+        treating_doctor_title: nullableString(row, "treating_doctor_title", "treatingDoctorTitle"),
+        treating_none: firstBoolean(row, "treating_none", "treatingNone"),
+        status: ["active", "chronic", "resolved"].includes(statusValue)
+          ? statusValue as ClinicalDiagnosis["status"]
+          : chronificationValue === "chronisch" ? "chronic" : "active",
+      };
+    }),
+    medications: rows("medications", (row, index): ClinicalMedication => {
+      const categoryValue = firstString(row, "category");
+      const statusValue = firstString(row, "status");
+      const legacyStrength = [firstString(row, "dose"), firstString(row, "doseUnit")]
+        .filter(Boolean)
+        .join(" ");
+      return {
+        id: firstString(row, "id") || `lead-medication-${index + 1}`,
+        provider_id: nullableString(row, "provider_id", "providerId"),
+        provider_name: nullableString(row, "provider_name", "providerName"),
+        doctor_id: nullableString(row, "doctor_id", "doctorId", "prescriberId"),
+        doctor_name: nullableString(row, "doctor_name", "doctorName", "prescriber"),
+        doctor_title: nullableString(row, "doctor_title", "doctorTitle"),
+        doctor_fachbereich: nullableString(row, "doctor_fachbereich", "doctorFachbereich"),
+        category: ["dauer", "besondere", "selbst"].includes(categoryValue)
+          ? categoryValue as ClinicalMedication["category"]
+          : firstString(row, "medicationType") === "permanent" ? "dauer" : "besondere",
+        wirkstoff:
+          nullableString(row, "wirkstoff", "activeIngredient") ??
+          nullableString(row, "handelsname", "name"),
+        handelsname: firstString(row, "handelsname", "name"),
+        staerke: (nullableString(row, "staerke") ?? legacyStrength) || null,
+        form: nullableString(row, "form"),
+        einnahmeform: nullableString(row, "einnahmeform", "route"),
+        dose_morgens: nullableString(row, "dose_morgens", "doseMorning"),
+        dose_mittags: nullableString(row, "dose_mittags", "doseNoon"),
+        dose_abends: nullableString(row, "dose_abends", "doseEvening"),
+        dose_nachts: nullableString(row, "dose_nachts", "doseNight"),
+        einheit: nullableString(row, "einheit", "unit"),
+        hinweis: nullableString(row, "hinweis", "schedule", "note"),
+        grund: nullableString(row, "grund", "reason"),
+        verordnet_am: nullableString(row, "verordnet_am", "prescribedOn"),
+        einnahme_von: nullableString(row, "einnahme_von", "since"),
+        einnahme_bis: nullableString(row, "einnahme_bis", "expiryDate"),
+        status: ["aktiv", "pausiert", "abgesetzt", "geplant"].includes(statusValue)
+          ? statusValue as ClinicalMedication["status"]
+          : "aktiv",
+        apothekenpflichtig: firstBoolean(row, "apothekenpflichtig", "pharmacyOnly"),
+        rezeptpflichtig: firstBoolean(row, "rezeptpflichtig", "prescriptionOnly"),
+        btm: firstBoolean(row, "btm"),
+        aut_idem_sperre: firstBoolean(row, "aut_idem_sperre", "autIdemBlocked"),
+        abgabebeschraenkung: firstBoolean(row, "abgabebeschraenkung", "dispensingRestricted"),
+        sonstige_vermerke: nullableString(row, "sonstige_vermerke", "otherNotes"),
+        on_hold: firstBoolean(row, "on_hold", "onHold"),
+        hold_until: nullableString(row, "hold_until", "holdUntil"),
+        hold_note: nullableString(row, "hold_note", "holdNote"),
+      };
+    }),
+    allergies: rows("allergies", (row, index): ClinicalWarning => ({
+      id: firstString(row, "id") || `lead-allergy-${index + 1}`,
+      kind: "allergie",
+      label: firstString(row, "label"),
+      reaction: nullableString(row, "reaction"),
+      severity: nullableString(row, "severity"),
+      note: nullableString(row, "note"),
     })),
-    medications: rows("medications", (row, index): LeadMedicationDraft => ({
-      id: stringFromUnknown(row["id"]) || `medication-${index + 1}`,
-      name: stringFromUnknown(row["name"]),
-      activeIngredient: stringFromUnknown(row["activeIngredient"]),
-      dose: stringFromUnknown(row["dose"]),
-      schedule: stringFromUnknown(row["schedule"]),
-      form: stringFromUnknown(row["form"]),
-      route: stringFromUnknown(row["route"]),
-      doseUnit: stringFromUnknown(row["doseUnit"]),
-      unit: stringFromUnknown(row["unit"]),
-      note: stringFromUnknown(row["note"]),
-      reason: stringFromUnknown(row["reason"]),
-      since: stringFromUnknown(row["since"]),
-      prescriberId: stringFromUnknown(row["prescriberId"]),
-      prescriber: stringFromUnknown(row["prescriber"]),
-      medicationType: stringFromUnknown(row["medicationType"]) || "permanent",
-      expiryDate: stringFromUnknown(row["expiryDate"]),
-      category: ["dauer", "besondere", "selbst"].includes(stringFromUnknown(row["category"]))
-        ? stringFromUnknown(row["category"]) as LeadMedicationDraft["category"]
-        : stringFromUnknown(row["medicationType"]) === "permanent" ? "dauer" : "besondere",
-      status: ["aktiv", "pausiert", "abgesetzt", "geplant"].includes(stringFromUnknown(row["status"]))
-        ? stringFromUnknown(row["status"]) as LeadMedicationDraft["status"]
-        : "aktiv",
-      doseMorning: stringFromUnknown(row["doseMorning"]),
-      doseNoon: stringFromUnknown(row["doseNoon"]),
-      doseEvening: stringFromUnknown(row["doseEvening"]),
-      doseNight: stringFromUnknown(row["doseNight"]),
-      prescribedOn: stringFromUnknown(row["prescribedOn"]),
-      pharmacyOnly: booleanFromUnknown(row["pharmacyOnly"]),
-      prescriptionOnly: booleanFromUnknown(row["prescriptionOnly"]),
-      btm: booleanFromUnknown(row["btm"]),
-      autIdemBlocked: booleanFromUnknown(row["autIdemBlocked"]),
-      dispensingRestricted: booleanFromUnknown(row["dispensingRestricted"]),
-      otherNotes: stringFromUnknown(row["otherNotes"]),
-    })),
-    allergies: rows("allergies", (row, index): LeadAllergyDraft => ({
-      id: stringFromUnknown(row["id"]) || `allergy-${index + 1}`,
-      label: stringFromUnknown(row["label"]),
-      reaction: stringFromUnknown(row["reaction"]),
-      severity: stringFromUnknown(row["severity"]),
-      note: stringFromUnknown(row["note"]),
-    })),
-    caves: rows("caves", (row, index): LeadCaveDraft => ({
-      id: stringFromUnknown(row["id"]) || `cave-${index + 1}`,
-      label: stringFromUnknown(row["label"]),
-      note: stringFromUnknown(row["note"]),
+    caves: rows("caves", (row, index): ClinicalWarning => ({
+      id: firstString(row, "id") || `lead-cave-${index + 1}`,
+      kind: "cave",
+      label: firstString(row, "label"),
+      reaction: null,
+      severity: null,
+      note: nullableString(row, "note"),
     })),
   };
 }
@@ -515,8 +641,11 @@ function hasStoredClinicalDraft(lead: LeadDetail) {
   const clinical = asRecord(lead.wizard_state?.["clinical_draft"]);
   return Boolean(
     clinical
-    && ["diagnoses", "medications", "allergies", "caves"]
-      .some((key) => Array.isArray(clinical[key])),
+    && (
+      asRecord(clinical["narrative"])
+      || ["diagnoses", "medications", "allergies", "caves"]
+        .some((key) => Array.isArray(clinical[key]))
+    ),
   );
 }
 
@@ -539,7 +668,8 @@ function draftFromLead(lead: LeadDetail): Draft {
     language: normalizedLanguageCode(lead.primary_language) || normalizedLanguageCode(lead.locale),
     whatsappNumber: lead.whatsapp_number ?? "",
     concern: lead.primary_concern_text ?? "",
-    anamnese: lead.additional_concerns ?? "",
+    anamnese: clinical.narrative?.anamnese_aktuelle ?? lead.additional_concerns ?? "",
+    narrative: clinical.narrative,
     diagnoses: clinical.diagnoses,
     medications: clinical.medications,
     allergies: clinical.allergies,
@@ -553,6 +683,8 @@ function draftFromLead(lead: LeadDetail): Draft {
     referrer: inputString(lead.wizard_state?.["referrer"]),
     serviceNotes: lead.notes ?? "",
     specialties: lead.requested_specialties ?? [],
+    programDateFrom: inputString(lead.wizard_state?.["program_date_from"]),
+    programDateTo: inputString(lead.wizard_state?.["program_date_to"]),
     privacyConsent: lead.consent_privacy_practices,
     healthcareConsent: lead.consent_healthcare,
   };
@@ -577,6 +709,7 @@ function blankDraft(): Draft {
     whatsappNumber: "",
     concern: "",
     anamnese: "",
+    narrative: null,
     diagnoses: [],
     medications: [],
     allergies: [],
@@ -587,6 +720,8 @@ function blankDraft(): Draft {
     referrer: "",
     serviceNotes: "",
     specialties: [],
+    programDateFrom: "",
+    programDateTo: "",
     privacyConsent: false,
     healthcareConsent: false,
   };
@@ -600,6 +735,17 @@ function intakeTypeLabel(lead: LeadDetail, tx: Tx) {
       return tx("Форма", "Formular");
     default:
       return tx("Внутреннее обращение", "Interne Anfrage");
+  }
+}
+
+function intakeTypeTone(lead: LeadDetail) {
+  switch (leadIntakeTypeFromLead(lead)) {
+    case "questionnaire":
+      return "brand" as const;
+    case "form":
+      return "warning" as const;
+    default:
+      return "info" as const;
   }
 }
 
@@ -726,6 +872,20 @@ function formatFileSize(size: number | null, lang: string) {
   return `${formatter.format(size / 1024)} KB`;
 }
 
+function wizardDocumentFilename(document: DocumentItem) {
+  return document.original_filename || document.auto_name || "document";
+}
+
+function wizardDocumentPreviewKind(document: DocumentItem): "image" | "pdf" | null {
+  const mimeType = document.mime_type?.trim().toLowerCase() ?? "";
+  const filename = wizardDocumentFilename(document).toLowerCase();
+  if (mimeType.startsWith("image/") || /\.(?:avif|bmp|gif|jpe?g|png|webp)$/.test(filename)) {
+    return "image";
+  }
+  if (mimeType === "application/pdf" || filename.endsWith(".pdf")) return "pdf";
+  return null;
+}
+
 function errorText(error: unknown, tx: Tx): string {
   return leadErrorMessage(error, tx);
 }
@@ -737,6 +897,7 @@ function readinessStepLabel(key: string, tx: Tx) {
     service: tx("Сервисная история", "Servicehistorie"),
     need: tx("Сервисная история", "Servicehistorie"),
     documents: tx("Документы", "Unterlagen"),
+    order: tx("Оформление заказа", "Auftragserfassung"),
     commercial: tx("Договор, заказ и смета", "Vertrag, Auftrag und Kostenvoranschlag"),
     release: tx("Готовность к созданию пациента", "Bereit zur Patientenanlage"),
   };
@@ -769,6 +930,136 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Lead is already converted": tx("Пациент уже создан", "Patient wurde bereits angelegt"),
   };
   return labels[reason] ?? tx("Проверьте незавершённые данные", "Unvollständige Angaben prüfen");
+}
+
+function readinessReasonStep(reason: string): StepId {
+  const steps: Record<string, StepId> = {
+    "Lead must be qualified before conversion": "documents",
+    "Compliance is not signed yet": "documents",
+    "Birth date is missing": "master_data",
+    "Legal sex is missing": "master_data",
+    "Email or phone is required": "master_data",
+    "Privacy practices consent is missing": "documents",
+    "Healthcare consent is missing": "documents",
+    "Complete street, city and postal code": "master_data",
+    "Complete city and postal code": "master_data",
+    "Primary concern is missing": "medical",
+    "Requested specialty is missing": "order",
+    "Identity document is not verified": "documents",
+    "Signed DSGVO document is missing": "documents",
+    "Anamnesis intake is incomplete": "medical",
+    "Framework contract is not signed": "commercial",
+    "Onboarding order is missing": "commercial",
+    "Order needs at least one valid service": "commercial",
+    "Customer order signature is missing": "commercial",
+    "Agency order signature is missing": "commercial",
+    "Quote is not accepted": "commercial",
+    "Required prepayment is not complete": "commercial",
+    "Lead is already converted": "release",
+  };
+  return steps[reason] ?? "release";
+}
+
+function readinessReasonFieldId(reason: string, draft: Draft | null) {
+  const fields: Record<string, string> = {
+    "Birth date is missing": MASTER_FIELD_IDS.birthDate,
+    "Legal sex is missing": MASTER_FIELD_IDS.legalSex,
+    "Email or phone is required": MASTER_FIELD_IDS.email,
+    "Privacy practices consent is missing": PRIVACY_CONSENT_ID,
+    "Healthcare consent is missing": HEALTHCARE_CONSENT_ID,
+    "Primary concern is missing": SERVICE_CONCERN_ID,
+    "Requested specialty is missing": SERVICE_SPECIALTIES_ID,
+    "Identity document is not verified": "lead-file-identity",
+    "Signed DSGVO document is missing": "lead-file-dsgvo",
+    "Anamnesis intake is incomplete": MEDICAL_ANAMNESE_ID,
+  };
+  if (reason === "Complete street, city and postal code" || reason === "Complete city and postal code") {
+    if (!draft?.street.trim() && reason !== "Complete city and postal code") return MASTER_FIELD_IDS.street;
+    if (!draft?.city.trim()) return MASTER_FIELD_IDS.city;
+    return MASTER_FIELD_IDS.zip;
+  }
+  return fields[reason];
+}
+
+function masterValidationIssues(errors: MasterValidationErrors, tx: Tx): ValidationIssue[] {
+  const labels: Record<MasterFieldKey, string> = {
+    firstName: tx("Имя", "Vorname"),
+    lastName: tx("Фамилия", "Nachname"),
+    birthDate: tx("Дата рождения", "Geburtsdatum"),
+    legalSex: tx("Пол по документам", "Geschlecht laut Ausweisdokument"),
+    email: tx("Электронная почта", "E-Mail-Adresse"),
+    phone: tx("Телефон", "Telefonnummer"),
+    street: tx("Улица и дом", "Straße und Hausnummer"),
+    city: tx("Город", "Ort"),
+    zip: tx("Почтовый индекс", "Postleitzahl"),
+  };
+  const sharedContactError = errors.email && errors.email === errors.phone
+    ? errors.email
+    : null;
+
+  return MASTER_FIELD_ORDER.flatMap((field) => {
+    const message = errors[field];
+    if (!message) return [];
+    if (field === "phone" && sharedContactError) return [];
+    if (field === "email" && sharedContactError) {
+      return [{
+        key: "primary-contact",
+        step: "master_data" as const,
+        message: sharedContactError,
+        fieldId: MASTER_FIELD_IDS.email,
+      }];
+    }
+    return [{
+      key: field,
+      step: "master_data" as const,
+      message: `${labels[field]}: ${message}`,
+      fieldId: MASTER_FIELD_IDS[field],
+    }];
+  });
+}
+
+function orderValidationIssues(draft: Draft | null, tx: Tx): ValidationIssue[] {
+  if (!draft) return [];
+  const issues: ValidationIssue[] = [];
+  if (draft.specialties.length === 0) {
+    issues.push({
+      key: "specialties",
+      step: "order",
+      message: tx("Выберите хотя бы одну специализацию", "Mindestens eine Fachrichtung auswählen"),
+      fieldId: SERVICE_SPECIALTIES_ID,
+    });
+  }
+  if (!draft.programDateFrom && draft.programDateTo) {
+    issues.push({
+      key: "program-date-from",
+      step: "order",
+      message: tx("Укажите дату начала программы", "Startdatum des Programms angeben"),
+      fieldId: ORDER_DATE_FROM_ID,
+    });
+  }
+  if (draft.programDateFrom && !draft.programDateTo) {
+    issues.push({
+      key: "program-date-to",
+      step: "order",
+      message: tx("Укажите дату окончания программы", "Enddatum des Programms angeben"),
+      fieldId: ORDER_DATE_TO_ID,
+    });
+  } else if (
+    draft.programDateFrom
+    && draft.programDateTo
+    && draft.programDateTo < draft.programDateFrom
+  ) {
+    issues.push({
+      key: "program-date-range",
+      step: "order",
+      message: tx(
+        "Дата окончания не может быть раньше даты начала",
+        "Das Enddatum darf nicht vor dem Startdatum liegen",
+      ),
+      fieldId: ORDER_DATE_TO_ID,
+    });
+  }
+  return issues;
 }
 
 function validateMasterDraft(draft: Draft | null, tx: Tx): MasterValidationErrors {
@@ -861,11 +1152,13 @@ function StateMark({ done, label }: { done: boolean; label: string }) {
 }
 
 function ToggleRow({
+  id,
   checked,
   label,
   onChange,
   disabled,
 }: {
+  id?: string;
   checked: boolean;
   label: string;
   onChange: (checked: boolean) => void;
@@ -873,7 +1166,7 @@ function ToggleRow({
 }) {
   return (
     <label className="flex cursor-pointer items-center gap-3 border-b border-border/70 py-3 last:border-b-0">
-      <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className="size-4 accent-[var(--brand)]" />
+      <input id={id} type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className="size-4 accent-[var(--brand)]" />
       <span className="text-sm text-foreground">{label}</span>
     </label>
   );
@@ -903,7 +1196,8 @@ export function LeadWizard({
   const [quotes, setQuotes] = useState<QuoteItem[]>([]);
   const [specialties, setSpecialties] = useState<SpecializationItem[]>([]);
   const [agencyServices, setAgencyServices] = useState<AgencyServiceItem[]>([]);
-  const [doctors, setDoctors] = useState<DoctorOption[]>([]);
+  const [clinicalProviders, setClinicalProviders] = useState<ProviderSummary[]>([]);
+  const [allDoctors, setAllDoctors] = useState<AllDoctorOption[]>([]);
   const [lines, setLines] = useState<ServiceLine[]>([]);
   const [prepayment, setPrepayment] = useState(false);
   const [signedPatient, setSignedPatient] = useState(false);
@@ -918,12 +1212,14 @@ export function LeadWizard({
   const [deleteDocument, setDeleteDocument] = useState<DocumentItem | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
   const [deleteError, setDeleteError] = useState("");
+  const [documentPreview, setDocumentPreview] = useState<WizardDocumentPreview | null>(null);
   const [touchedMasterFields, setTouchedMasterFields] = useState<Set<MasterFieldKey>>(
     () => new Set(),
   );
   const [masterValidationAttempted, setMasterValidationAttempted] = useState(false);
-  const [serviceValidationAttempted, setServiceValidationAttempted] = useState(false);
+  const [orderValidationAttempted, setOrderValidationAttempted] = useState(false);
   const [medicalValidationAttempted, setMedicalValidationAttempted] = useState(false);
+  const [validationContext, setValidationContext] = useState<ValidationContext | null>(null);
   const hydrated = useRef<string | null>(null);
   const stepNavRef = useRef<HTMLElement | null>(null);
   const wizardStateBaseRef = useRef<Record<string, unknown>>({});
@@ -932,16 +1228,54 @@ export function LeadWizard({
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const medicalSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const caseIdRef = useRef<string | null>(null);
+  const documentPreviewUrlRef = useRef<string | null>(null);
+  // Service options that were present when the draft was hydrated. Kept so that
+  // unchecking a lead-supplied service (one outside the fixed questionnaire options)
+  // leaves its row in place instead of removing it and making it unrecoverable.
+  const initialServiceOptionsRef = useRef<string[]>([]);
   const commercialFlagRequestVersionRef = useRef<Record<CommercialFlagKey, number>>({
     signed_patient: 0,
     signed_agency: 0,
     prepayment_required: 0,
   });
 
+  const showWizardError = useCallback((nextError: unknown) => {
+    const reasons = leadErrorBlockingReasons(nextError);
+    if (reasons.length > 0) {
+      setError("");
+      setValidationContext({ kind: "server", reasons });
+      return;
+    }
+    setValidationContext(null);
+    setError(errorText(nextError, tx));
+  }, [tx]);
+
+  const clearServerValidation = useCallback(() => {
+    setValidationContext((current) => current?.kind === "server" ? null : current);
+  }, []);
+
+  const replaceDocumentPreview = useCallback((nextPreview: WizardDocumentPreview | null) => {
+    const currentUrl = documentPreviewUrlRef.current;
+    if (currentUrl && currentUrl !== nextPreview?.url) {
+      revokeDocumentPreviewObjectUrl(currentUrl);
+    }
+    documentPreviewUrlRef.current = nextPreview?.url ?? null;
+    setDocumentPreview(nextPreview);
+  }, []);
+
+  useEffect(() => () => {
+    if (documentPreviewUrlRef.current) {
+      revokeDocumentPreviewObjectUrl(documentPreviewUrlRef.current);
+      documentPreviewUrlRef.current = null;
+    }
+  }, []);
+
   const reload = useCallback(async (hydrateDraft: boolean, hydrateCommercial = false) => {
     if (!leadId) return;
     setLoading(true);
     setError("");
+    setValidationContext(null);
+    replaceDocumentPreview(null);
     try {
       let attachmentImportError: unknown = null;
       const leadPromise = fetchLeadDetail(leadId);
@@ -955,7 +1289,7 @@ export function LeadWizard({
         }
         return fetchDocuments("/documents?lead_id=" + encodeURIComponent(leadId)).catch(() => []);
       });
-      const [nextLead, nextDocuments, nextCases, nextContracts, nextOrders, nextQuotes, nextSpecialties, nextAgencyServices, nextDoctors] = await Promise.all([
+      const [nextLead, nextDocuments, nextCases, nextContracts, nextOrders, nextQuotes, nextSpecialties, nextAgencyServices, nextProviders, nextAllDoctors] = await Promise.all([
         leadPromise,
         documentsPromise,
         fetchCases("/cases?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
@@ -964,7 +1298,8 @@ export function LeadWizard({
         fetchQuotes("/quotes?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
         fetchSpecializations().catch(() => []),
         fetchAgencyServices("/agency-services?active_only=true").catch(() => []),
-        fetchCaseDoctors().catch(() => []),
+        fetchProviders("/providers?active_only=true&provider_type=medical").catch(() => []),
+        fetchAllDoctors().catch(() => []),
       ]);
       const nextOrder = nextOrders[0] ?? null;
       const nextCase = nextCases[0] as CaseListItem | undefined;
@@ -976,64 +1311,108 @@ export function LeadWizard({
         : null;
       const paymentQuote = nextQuotes.find((item) => item.status === "accepted") ?? nextQuotes[0];
       const storedCommercialDraft = storedCommercialDraftFromLead(nextLead);
-      const leadDraft = draftFromLead(nextLead);
+      const storedLeadDraft = draftFromLead(nextLead);
+      const leadDraft: Draft = {
+        ...storedLeadDraft,
+        programDateFrom: storedLeadDraft.programDateFrom || nextOrder?.date_from || "",
+        programDateTo: storedLeadDraft.programDateTo || nextOrder?.date_to || "",
+      };
+      const caseAnamnese = nextCaseDetail?.aktuelle_anamnese?.trim() || "";
       const nextDraft: Draft = nextCaseDetail && !hasStoredClinicalDraft(nextLead) ? {
         ...leadDraft,
         concern: nextCaseDetail.hauptanfragegrund || leadDraft.concern,
-        anamnese: nextCaseDetail.aktuelle_anamnese || leadDraft.anamnese,
+        anamnese: caseAnamnese || leadDraft.anamnese,
+        narrative: caseAnamnese
+          ? {
+              id: null,
+              anamnese_aktuelle: caseAnamnese,
+              anamnese_vorgeschichte: leadDraft.narrative?.anamnese_vorgeschichte ?? null,
+              anamnese_vegetative: leadDraft.narrative?.anamnese_vegetative ?? null,
+              anamnese_sozial: leadDraft.narrative?.anamnese_sozial ?? null,
+              beurteilung: leadDraft.narrative?.beurteilung ?? null,
+              is_active: true,
+            }
+          : leadDraft.narrative,
         referrer: nextCaseDetail.zuweiser || leadDraft.referrer,
         diagnoses: nextCaseDetail.vorerkrankungen.length > 0
           ? nextCaseDetail.vorerkrankungen.map((item, itemIndex) => ({
-              id: leadDraft.diagnoses[itemIndex]?.id ?? `case-diagnosis-${itemIndex + 1}`,
+              id: null,
+              cid: leadDraft.diagnoses[itemIndex]?.cid ?? `case-diagnosis-${itemIndex + 1}`,
+              parent_cid: null,
+              parent_id: null,
               label: item.erkrankung,
-              diagnosedOn: item.erstdiagnose ?? "",
-              note: item.notiz ?? "",
               kind: leadDraft.diagnoses[itemIndex]?.kind ?? (itemIndex === 0 ? "main" : "secondary"),
-              icdCode: leadDraft.diagnoses[itemIndex]?.icdCode ?? "",
               certainty: leadDraft.diagnoses[itemIndex]?.certainty ?? "bestaetigt",
-              chronification: leadDraft.diagnoses[itemIndex]?.chronification ?? "",
+              chronifizierung: leadDraft.diagnoses[itemIndex]?.chronifizierung ?? null,
+              icd_code: leadDraft.diagnoses[itemIndex]?.icd_code ?? null,
+              ops_code: null,
+              diagnosed_on: item.erstdiagnose ?? null,
+              note: item.notiz ?? null,
+              source_mode: "intern" as const,
+              provider_id: null,
+              provider_name: null,
+              doctor_id: null,
+              doctor_name: null,
+              doctor_title: null,
+              doctor_fachbereich: null,
+              external_clinic: null,
+              external_doctor: null,
+              external_country: null,
+              treating_doctor_id: null,
+              treating_doctor_name: null,
+              treating_doctor_title: null,
+              treating_none: false,
             }))
           : leadDraft.diagnoses,
         medications: nextCaseDetail.medikamente.length > 0
-          ? nextCaseDetail.medikamente.map((item, itemIndex) => ({
-              id: leadDraft.medications[itemIndex]?.id ?? item.id ?? `case-medication-${itemIndex + 1}`,
-              name: item.handelsname,
-              activeIngredient: item.wirkstoff ?? "",
-              dose: item.dosis ?? "",
-              schedule: item.einnahmeschema ?? "",
-              form: item.darreichungsform ?? "",
-              route: leadDraft.medications[itemIndex]?.route ?? "",
-              doseUnit: item.dosis_einheit ?? "",
-              unit: item.einheit ?? "",
-              note: item.anmerkung ?? "",
-              reason: item.grund ?? "",
-              since: item.seit ?? "",
-              prescriberId: item.verordnender_arzt_id ?? "",
-              prescriber: item.verordnender_arzt ?? "",
-              medicationType: leadDraft.medications[itemIndex]?.medicationType ?? item.med_typ ?? "permanent",
-              expiryDate: item.expiry_date ?? "",
-              category: leadDraft.medications[itemIndex]?.category ?? (item.med_typ === "permanent" ? "dauer" : "besondere"),
-              status: leadDraft.medications[itemIndex]?.status ?? "aktiv",
-              doseMorning: leadDraft.medications[itemIndex]?.doseMorning ?? "",
-              doseNoon: leadDraft.medications[itemIndex]?.doseNoon ?? "",
-              doseEvening: leadDraft.medications[itemIndex]?.doseEvening ?? "",
-              doseNight: leadDraft.medications[itemIndex]?.doseNight ?? "",
-              prescribedOn: leadDraft.medications[itemIndex]?.prescribedOn ?? "",
-              pharmacyOnly: leadDraft.medications[itemIndex]?.pharmacyOnly ?? false,
-              prescriptionOnly: leadDraft.medications[itemIndex]?.prescriptionOnly ?? false,
-              btm: leadDraft.medications[itemIndex]?.btm ?? false,
-              autIdemBlocked: leadDraft.medications[itemIndex]?.autIdemBlocked ?? false,
-              dispensingRestricted: leadDraft.medications[itemIndex]?.dispensingRestricted ?? false,
-              otherNotes: leadDraft.medications[itemIndex]?.otherNotes ?? "",
-            }))
+          ? nextCaseDetail.medikamente.map((item, itemIndex) => {
+              const existing = leadDraft.medications[itemIndex];
+              const doctor = nextAllDoctors.find((option) => option.id === item.verordnender_arzt_id);
+              return {
+                id: existing?.id ?? item.id ?? `case-medication-${itemIndex + 1}`,
+                provider_id: doctor?.provider_id ?? existing?.provider_id ?? null,
+                provider_name: doctor?.provider_name ?? existing?.provider_name ?? null,
+                doctor_id: item.verordnender_arzt_id ?? existing?.doctor_id ?? null,
+                doctor_name: doctor?.name ?? item.verordnender_arzt ?? existing?.doctor_name ?? null,
+                doctor_title: doctor?.title ?? existing?.doctor_title ?? null,
+                doctor_fachbereich: doctor?.fachbereich ?? existing?.doctor_fachbereich ?? null,
+                category: existing?.category ?? (item.med_typ === "permanent" ? "dauer" : "besondere"),
+                wirkstoff: item.wirkstoff ?? null,
+                handelsname: item.handelsname,
+                staerke: [item.dosis, item.dosis_einheit].filter(Boolean).join(" ") || null,
+                form: item.darreichungsform ?? null,
+                einnahmeform: existing?.einnahmeform ?? null,
+                dose_morgens: existing?.dose_morgens ?? item.dosis ?? null,
+                dose_mittags: existing?.dose_mittags ?? null,
+                dose_abends: existing?.dose_abends ?? null,
+                dose_nachts: existing?.dose_nachts ?? null,
+                einheit: item.einheit ?? null,
+                hinweis: [item.einnahmeschema, item.anmerkung].filter(Boolean).join("\n") || null,
+                grund: item.grund ?? null,
+                verordnet_am: existing?.verordnet_am ?? null,
+                einnahme_von: item.seit ?? null,
+                einnahme_bis: item.expiry_date ?? null,
+                status: existing?.status ?? "aktiv",
+                apothekenpflichtig: existing?.apothekenpflichtig ?? false,
+                rezeptpflichtig: existing?.rezeptpflichtig ?? false,
+                btm: existing?.btm ?? false,
+                aut_idem_sperre: existing?.aut_idem_sperre ?? false,
+                abgabebeschraenkung: existing?.abgabebeschraenkung ?? false,
+                sonstige_vermerke: existing?.sonstige_vermerke ?? null,
+                on_hold: existing?.on_hold ?? false,
+                hold_until: existing?.hold_until ?? null,
+                hold_note: existing?.hold_note ?? null,
+              };
+            })
           : leadDraft.medications,
         allergies: nextCaseDetail.allergien.length > 0
           ? nextCaseDetail.allergien.map((item, itemIndex) => ({
               id: leadDraft.allergies[itemIndex]?.id ?? `case-allergy-${itemIndex + 1}`,
+              kind: "allergie" as const,
               label: item.allergie,
-              reaction: item.reaktion ?? "",
-              severity: leadDraft.allergies[itemIndex]?.severity ?? "",
-              note: leadDraft.allergies[itemIndex]?.note ?? "",
+              reaction: item.reaktion ?? null,
+              severity: leadDraft.allergies[itemIndex]?.severity ?? null,
+              note: leadDraft.allergies[itemIndex]?.note ?? null,
             }))
           : leadDraft.allergies,
       } : leadDraft;
@@ -1061,16 +1440,19 @@ export function LeadWizard({
       setQuotes(nextQuotes);
       setSpecialties(nextSpecialties);
       setAgencyServices(nextAgencyServices.filter((item) => item.is_active));
-      setDoctors(nextDoctors);
+      setClinicalProviders(nextProviders.filter((item) => item.provider_type === "medical"));
+      setAllDoctors(nextAllDoctors);
       wizardStateBaseRef.current = nextLead.wizard_state ?? {};
       if (hydrateDraft || hydrated.current !== leadId) {
         hydrated.current = leadId;
         setDraft(nextDraft);
+        initialServiceOptionsRef.current = nextDraft.serviceNeeds;
         setStep(nextStep);
         setTouchedMasterFields(new Set());
         setMasterValidationAttempted(false);
-        setServiceValidationAttempted(false);
+        setOrderValidationAttempted(false);
         setMedicalValidationAttempted(false);
+        setValidationContext(null);
       }
       if (hydrateDraft || hydrateCommercial) {
         setLines(nextLines);
@@ -1098,11 +1480,11 @@ export function LeadWizard({
         );
       }
     } catch (nextError) {
-      setError(errorText(nextError, tx));
+      showWizardError(nextError);
     } finally {
       setLoading(false);
     }
-  }, [leadId, tx]);
+  }, [leadId, replaceDocumentPreview, showWizardError, tx]);
 
   const refreshLeadState = useCallback(async () => {
     if (!leadId) return null;
@@ -1147,7 +1529,8 @@ export function LeadWizard({
     setQuotes([]);
     setSpecialties([]);
     setAgencyServices([]);
-    setDoctors([]);
+    setClinicalProviders([]);
+    setAllDoctors([]);
     setLines([]);
     setPrepayment(false);
     setSignedPatient(false);
@@ -1159,12 +1542,14 @@ export function LeadWizard({
     setAutosaveStatus("idle");
     setTouchedMasterFields(new Set());
     setMasterValidationAttempted(false);
-    setServiceValidationAttempted(false);
+    setOrderValidationAttempted(false);
     setMedicalValidationAttempted(false);
+    setValidationContext(null);
     wizardStateBaseRef.current = {};
     currentAutosaveSignatureRef.current = signature;
     lastSavedAutosaveSignatureRef.current = signature;
     caseIdRef.current = null;
+    initialServiceOptionsRef.current = [];
   }, [createMode, leadId, open]);
 
   useEffect(() => {
@@ -1184,15 +1569,18 @@ export function LeadWizard({
     setDeleteDocument(null);
     setDeleteReason("");
     setDeleteError("");
+    replaceDocumentPreview(null);
     setTouchedMasterFields(new Set());
     setMasterValidationAttempted(false);
-    setServiceValidationAttempted(false);
+    setOrderValidationAttempted(false);
     setMedicalValidationAttempted(false);
+    setValidationContext(null);
     currentAutosaveSignatureRef.current = "";
     lastSavedAutosaveSignatureRef.current = "";
     wizardStateBaseRef.current = {};
     caseIdRef.current = null;
-  }, [open]);
+    initialServiceOptionsRef.current = [];
+  }, [open, replaceDocumentPreview]);
 
   useEffect(() => {
     if (!open) return;
@@ -1252,6 +1640,48 @@ export function LeadWizard({
     return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, gross: Math.round((net + vat) * 100) / 100 };
   }, [lines]);
   const masterErrors = useMemo(() => validateMasterDraft(draft, tx), [draft, tx]);
+  const validationIssues = useMemo<ValidationIssue[]>(() => {
+    if (!validationContext) return [];
+    if (validationContext.kind === "master") {
+      return masterValidationIssues(masterErrors, tx);
+    }
+    if (validationContext.kind === "medical") {
+      if (!draft) return [];
+      const issues: ValidationIssue[] = [];
+      if (!draft.concern.trim()) {
+        issues.push({
+          key: "concern",
+          step: "medical",
+          message: tx("Причина обращения: обязательное поле", "Anliegen: Pflichtfeld"),
+          fieldId: SERVICE_CONCERN_ID,
+        });
+      }
+      if (!draft.anamnese.trim()) {
+        issues.push({
+          key: "anamnese",
+          step: "medical",
+          message: tx("Анамнез: обязательное поле", "Anamnese: Pflichtfeld"),
+          fieldId: MEDICAL_ANAMNESE_ID,
+        });
+      }
+      return issues;
+    }
+    if (validationContext.kind === "order") {
+      return orderValidationIssues(draft, tx);
+    }
+    return validationContext.reasons.map((reason) => ({
+      key: reason,
+      step: readinessReasonStep(reason),
+      message: readinessReasonLabel(reason, tx),
+      fieldId: readinessReasonFieldId(reason, draft),
+    }));
+  }, [draft, masterErrors, tx, validationContext]);
+  const visibleOrderErrors = useMemo(
+    () => orderValidationAttempted ? orderValidationIssues(draft, tx) : [],
+    [draft, orderValidationAttempted, tx],
+  );
+  const orderFieldError = (...keys: string[]) =>
+    visibleOrderErrors.find((issue) => keys.includes(issue.key))?.message;
 
   const persistMedicalDraft = useCallback(async (medicalDraft: Draft) => {
     const run = async () => {
@@ -1273,44 +1703,61 @@ export function LeadWizard({
         zuweiser: medicalDraft.referrer.trim(),
       });
       await Promise.all([
-      saveCaseVorerkrankungen(id, {
-        items: medicalDraft.diagnoses.filter((item) => item.label.trim()).map((item) => ({
-          erkrankung: item.label.trim(),
-          erstdiagnose: item.diagnosedOn || null,
-          notiz: item.note.trim() || null,
-        })),
-      }),
-      saveCaseAllergien(id, {
-        items: medicalDraft.allergies.filter((item) => item.label.trim()).map((item) => ({
-          allergie: item.label.trim(),
-          reaktion: item.reaction.trim() || null,
-        })),
-      }),
-      saveCaseMedikamente(id, {
-        items: medicalDraft.medications.filter((item) => item.name.trim()).map((item) => ({
-          handelsname: item.name.trim(),
-          wirkstoff: item.activeIngredient.trim() || null,
-          dosis: item.dose.trim() || null,
-          dosis_einheit: item.doseUnit.trim() || null,
-          einnahmeschema: item.schedule.trim() || null,
-          darreichungsform: item.form || null,
-          einheit: item.unit.trim() || null,
-          anmerkung: item.note.trim() || null,
-          grund: item.reason.trim() || null,
-          seit: item.since.trim() || null,
-          verordnender_arzt_id: doctors.some((doctor) => doctor.id === item.prescriberId) ? item.prescriberId : null,
-          verordnender_arzt: item.prescriber.trim() || null,
-          med_typ: item.category === "dauer" ? "permanent" : "temporary",
-          expiry_date: item.expiryDate || null,
-        })),
-      }),
+        saveCaseVorerkrankungen(id, {
+          items: medicalDraft.diagnoses.filter((item) => item.label.trim()).map((item) => ({
+            erkrankung: item.label.trim(),
+            erstdiagnose: item.diagnosed_on || null,
+            notiz: item.note?.trim() || null,
+          })),
+        }),
+        saveCaseAllergien(id, {
+          items: medicalDraft.allergies.filter((item) => item.label.trim()).map((item) => ({
+            allergie: item.label.trim(),
+            reaktion: item.reaction?.trim() || null,
+          })),
+        }),
+        saveCaseMedikamente(id, {
+          items: medicalDraft.medications
+            .filter((item) => item.wirkstoff?.trim())
+            .map((item) => {
+              const schedule = [
+                item.dose_morgens ? `M ${item.dose_morgens}` : "",
+                item.dose_mittags ? `Mi ${item.dose_mittags}` : "",
+                item.dose_abends ? `A ${item.dose_abends}` : "",
+                item.dose_nachts ? `N ${item.dose_nachts}` : "",
+              ].filter(Boolean).join(" · ");
+              return {
+                handelsname: item.handelsname?.trim() || "",
+                wirkstoff: item.wirkstoff!.trim(),
+                dosis: item.staerke?.trim() || null,
+                dosis_einheit: null,
+                einnahmeschema: schedule || null,
+                darreichungsform: item.form || null,
+                einheit: item.einheit?.trim() || null,
+                anmerkung: [item.hinweis, item.sonstige_vermerke]
+                  .filter(Boolean)
+                  .join("\n") || null,
+                grund: item.grund?.trim() || null,
+                seit: item.einnahme_von || null,
+                verordnender_arzt_id: item.doctor_id
+                  && allDoctors.some((doctor) => doctor.id === item.doctor_id)
+                  ? item.doctor_id
+                  : null,
+                verordnender_arzt: [item.doctor_title, item.doctor_name]
+                  .filter(Boolean)
+                  .join(" ") || null,
+                med_typ: item.category === "dauer" ? "permanent" : "temporary",
+                expiry_date: item.einnahme_bis || null,
+              };
+            }),
+        }),
       ]);
       return id;
     };
     const queued = medicalSaveQueueRef.current.then(run, run);
     medicalSaveQueueRef.current = queued.then(() => undefined, () => undefined);
     return queued;
-  }, [doctors, leadId]);
+  }, [allDoctors, leadId]);
 
   const persistSnapshot = useCallback((snapshot: AutosaveSnapshot, force = false) => {
     const signature = autosaveSnapshotSignature(snapshot);
@@ -1410,12 +1857,14 @@ export function LeadWizard({
 
   const patch = <K extends keyof Draft>(key: K, value: Draft[K]) => {
     setError("");
+    clearServerValidation();
     setDraft((current) => current ? { ...current, [key]: value } : current);
   };
 
   const toggleServiceNeed = (value: string, checked: boolean) => {
     const normalized = normalizeLeadServiceValue(value);
     setError("");
+    clearServerValidation();
     setDraft((current) => {
       if (!current) return current;
       if (checked) {
@@ -1436,6 +1885,7 @@ export function LeadWizard({
   const patchServiceComment = (value: string, comment: string) => {
     const normalized = normalizeLeadServiceValue(value);
     setError("");
+    clearServerValidation();
     setDraft((current) => current ? {
       ...current,
       serviceComments: {
@@ -1461,7 +1911,12 @@ export function LeadWizard({
 
   const ensureMasterDataReady = () => {
     const firstInvalid = MASTER_FIELD_ORDER.find((field) => masterErrors[field]);
-    if (!firstInvalid) return true;
+    if (!firstInvalid) {
+      setValidationContext((current) => current?.kind === "master" ? null : current);
+      return true;
+    }
+    setError("");
+    setValidationContext({ kind: "master" });
     setMasterValidationAttempted(true);
     setStep("master_data");
     window.requestAnimationFrame(() => {
@@ -1474,6 +1929,7 @@ export function LeadWizard({
     if (!draft || (!leadId && !createMode)) return false;
     if (trackBusy) setBusy("save");
     setError("");
+    setValidationContext(null);
     try {
       const snapshot: AutosaveSnapshot = {
         draft,
@@ -1486,23 +1942,25 @@ export function LeadWizard({
       await persistSnapshot(snapshot, true);
       return true;
     } catch (nextError) {
-      setError(errorText(nextError, tx));
+      showWizardError(nextError);
       return false;
     } finally {
       if (trackBusy) setBusy(null);
     }
   }
 
-  async function finishService(targetStep: StepId): Promise<boolean> {
+  async function finishOrder(targetStep: StepId): Promise<boolean> {
     if (!leadId || !draft) return false;
-    if (!draft.concern.trim() || draft.specialties.length === 0) {
-      setServiceValidationAttempted(true);
-      const targetId = !draft.concern.trim() ? SERVICE_CONCERN_ID : SERVICE_SPECIALTIES_ID;
-      window.requestAnimationFrame(() => document.getElementById(targetId)?.focus());
+    const issues = orderValidationIssues(draft, tx);
+    if (issues.length > 0) {
+      setError("");
+      setValidationContext({ kind: "order" });
+      setOrderValidationAttempted(true);
+      window.requestAnimationFrame(() => document.getElementById(issues[0]?.fieldId ?? "")?.focus());
       return false;
     }
     const saved = await save(targetStep);
-    if (saved) setServiceValidationAttempted(false);
+    if (saved) setOrderValidationAttempted(false);
     return saved;
   }
 
@@ -1513,20 +1971,24 @@ export function LeadWizard({
 
   async function finishMedical(targetStep: StepId): Promise<boolean> {
     if (!draft) return false;
-    if (!draft.anamnese.trim()) {
+    if (!draft.concern.trim() || !draft.anamnese.trim()) {
+      setError("");
+      setValidationContext({ kind: "medical" });
       setMedicalValidationAttempted(true);
-      window.requestAnimationFrame(() => document.getElementById(MEDICAL_ANAMNESE_ID)?.focus());
+      const fieldId = !draft.concern.trim() ? SERVICE_CONCERN_ID : MEDICAL_ANAMNESE_ID;
+      window.requestAnimationFrame(() => document.getElementById(fieldId)?.focus());
       return false;
     }
     setBusy("intake");
     setError("");
+    setValidationContext(null);
     try {
       await persistMedicalCase();
       const saved = await save(targetStep, false);
       if (saved) setMedicalValidationAttempted(false);
       return saved;
     } catch (nextError) {
-      setError(errorText(nextError, tx));
+      showWizardError(nextError);
       return false;
     } finally {
       setBusy(null);
@@ -1537,19 +1999,16 @@ export function LeadWizard({
     if (!leadId || !draft) return false;
     setError("");
     if (!ensureMasterDataReady()) return false;
-    if (!draft.concern.trim()) {
-      setServiceValidationAttempted(true);
-      setStep("service");
-      window.requestAnimationFrame(() => document.getElementById(SERVICE_CONCERN_ID)?.focus());
-      return false;
-    }
-    if (!draft.anamnese.trim()) {
+    if (!draft.concern.trim() || !draft.anamnese.trim()) {
+      setValidationContext({ kind: "medical" });
       setMedicalValidationAttempted(true);
       setStep("medical");
-      window.requestAnimationFrame(() => document.getElementById(MEDICAL_ANAMNESE_ID)?.focus());
+      const fieldId = !draft.concern.trim() ? SERVICE_CONCERN_ID : MEDICAL_ANAMNESE_ID;
+      window.requestAnimationFrame(() => document.getElementById(fieldId)?.focus());
       return false;
     }
     setBusy("intake");
+    setValidationContext(null);
     try {
       const id = await persistMedicalCase();
       await completeCaseIntake(id, true, {
@@ -1563,7 +2022,7 @@ export function LeadWizard({
       if (saved) await refreshLeadState();
       return saved;
     } catch (nextError) {
-      setError(errorText(nextError, tx));
+      showWizardError(nextError);
       return false;
     } finally {
       setBusy(null);
@@ -1587,7 +2046,7 @@ export function LeadWizard({
       await uploadDocument(form);
       await refreshDocumentsState();
     } catch (nextError) {
-      setError(errorText(nextError, tx));
+      showWizardError(nextError);
     } finally {
       setBusy(null);
     }
@@ -1599,10 +2058,34 @@ export function LeadWizard({
     try {
       await downloadDocumentFile(
         document.id,
-        document.original_filename || document.auto_name || "document",
+        wizardDocumentFilename(document),
       );
     } catch (nextError) {
-      setError(errorText(nextError, tx));
+      showWizardError(nextError);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function openOrDownloadDocument(document: DocumentItem) {
+    const previewKind = wizardDocumentPreviewKind(document);
+    if (!previewKind) {
+      await downloadDocument(document);
+      return;
+    }
+
+    setBusy(`preview-${document.id}`);
+    setError("");
+    try {
+      const preview = await createDocumentPreviewObjectUrl(document.id);
+      replaceDocumentPreview({
+        ...preview,
+        id: document.id,
+        kind: previewKind,
+        title: wizardDocumentFilename(document),
+      });
+    } catch (nextError) {
+      showWizardError(nextError);
     } finally {
       setBusy(null);
     }
@@ -1636,7 +2119,7 @@ export function LeadWizard({
       await markDocumentSigned(id, kind);
       await refreshDocumentsState();
     } catch (nextError) {
-      setError(errorText(nextError, tx));
+      showWizardError(nextError);
     } finally {
       setBusy(null);
     }
@@ -1703,6 +2186,8 @@ ${serviceCommentLines.join("\n")}`
         source_lead_id: leadId,
         contract_id: contractId,
         needs_description: needsDescription,
+        date_from: draft.programDateFrom,
+        date_to: draft.programDateTo,
       })).id;
     }
     for (const line of lines.filter(validLine)) {
@@ -1722,6 +2207,8 @@ ${serviceCommentLines.join("\n")}`
       signed_patient: flags.signed_patient ?? signedPatient,
       signed_agency: flags.signed_agency ?? signedAgency,
       needs_description: needsDescription,
+      date_from: draft.programDateFrom,
+      date_to: draft.programDateTo,
     });
     return { contractId, orderId };
   }
@@ -1732,7 +2219,7 @@ ${serviceCommentLines.join("\n")}`
       await ensureCommercial();
       await reload(false, true);
     } catch (nextError) {
-      setError(errorText(nextError, tx));
+      showWizardError(nextError);
     } finally {
       setBusy(null);
     }
@@ -1745,7 +2232,7 @@ ${serviceCommentLines.join("\n")}`
       await updateContractStatus(result.contractId, { status: "signed" });
       await reload(false, true);
     } catch (nextError) {
-      setError(errorText(nextError, tx));
+      showWizardError(nextError);
     } finally {
       setBusy(null);
     }
@@ -1783,7 +2270,7 @@ ${serviceCommentLines.join("\n")}`
       }
     } catch (nextError) {
       if (hydrated.current === targetLeadId) {
-        setError(errorText(nextError, tx));
+        showWizardError(nextError);
         flagKeys.forEach((key) => {
           if (commercialFlagRequestVersionRef.current[key] !== requestVersions.get(key)) return;
           const rollback = rollbackValue[key];
@@ -1843,7 +2330,7 @@ ${serviceCommentLines.join("\n")}`
       }
       void reload(false, true);
     } catch (nextError) {
-      setError(errorText(nextError, tx));
+      showWizardError(nextError);
     } finally {
       setBusy(null);
     }
@@ -1858,8 +2345,8 @@ ${serviceCommentLines.join("\n")}`
       onConverted?.(result.patient_id);
       onOpenChange(false);
     } catch (nextError) {
-      setError(errorText(nextError, tx));
       await reload(false);
+      showWizardError(nextError);
     } finally {
       setBusy(null);
     }
@@ -1878,7 +2365,7 @@ ${serviceCommentLines.join("\n")}`
       if (onArchived) onArchived();
       else onOpenChange(false);
     } catch (nextError) {
-      setError(errorText(nextError, tx));
+      showWizardError(nextError);
     } finally {
       setBusy(null);
     }
@@ -1903,8 +2390,8 @@ ${serviceCommentLines.join("\n")}`
       });
       return;
     }
-    if (step === "service") {
-      void finishService(target).then((saved) => {
+    if (step === "order") {
+      void finishOrder(target).then((saved) => {
         if (saved) setStep(target);
       });
       return;
@@ -1936,6 +2423,14 @@ ${serviceCommentLines.join("\n")}`
     });
   }
 
+  function openValidationIssue(issue: ValidationIssue) {
+    setStep(issue.step);
+    if (!issue.fieldId) return;
+    window.requestAnimationFrame(() => {
+      document.getElementById(issue.fieldId ?? "")?.focus();
+    });
+  }
+
   function specialtyLabel(value: string) {
     const specialty = specialties.find(
       (item) => (item.code || item.name_en) === value,
@@ -1957,7 +2452,7 @@ ${serviceCommentLines.join("\n")}`
   return (
     <>
       <Dialog open={open} dirty={autosaveIsDirty} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(88vh,52rem)] sm:w-[min(92vw,64rem)] sm:max-w-5xl">
+      <DialogContent className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(88vh,52rem)] sm:w-[min(96vw,84rem)] sm:max-w-[84rem]">
         <DialogTitle className="sr-only">{tx("Оформление обращения", "Lead-Aufnahme")}</DialogTitle>
         <header className="flex min-h-16 items-center justify-between gap-4 border-b border-border px-4 py-3 pr-14 sm:px-5 sm:pr-14">
           <div className="min-w-0">
@@ -2021,12 +2516,14 @@ ${serviceCommentLines.join("\n")}`
           className="overflow-x-auto overscroll-x-contain border-b border-border"
           aria-label={tx("Этапы оформления", "Schritte der Lead-Aufnahme")}
         >
-          <div className="grid min-w-[52rem] grid-cols-6 sm:min-w-0">
+          <div className="grid min-w-[60rem] grid-cols-7 sm:min-w-0">
             {STEPS.map((item, itemIndex) => {
               const selected = item.id === step;
               const done = item.id === "medical"
-                ? Boolean(draft?.anamnese.trim())
-                : readiness.get(item.id) ?? false;
+                ? Boolean(draft?.concern.trim() && draft.anamnese.trim())
+                : item.id === "order"
+                  ? Boolean(draft && orderValidationIssues(draft, tx).length === 0)
+                  : readiness.get(item.id) ?? false;
               return (
                 <button
                   key={item.id}
@@ -2056,15 +2553,37 @@ ${serviceCommentLines.join("\n")}`
 
         <main aria-busy={loading || isBusy} className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-5">
           {error ? <div role="alert" className="mb-5 border-l-2 border-destructive bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div> : null}
+          {validationIssues.length > 0 ? (
+            <div role="alert" aria-live="assertive" className="mb-5 border-l-2 border-destructive bg-destructive/5 px-3 py-3 text-sm text-destructive">
+              <div className="flex items-center gap-2 font-medium">
+                <CircleAlert aria-hidden="true" className="size-4 shrink-0" />
+                {tx("Требуют внимания", "Bitte prüfen")}
+              </div>
+              <ul className="mt-2 space-y-1.5">
+                {validationIssues.map((issue) => (
+                  <li key={issue.key}>
+                    <button
+                      type="button"
+                      className="w-full text-left text-xs leading-5 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => openValidationIssue(issue)}
+                    >
+                      <span className="font-medium">{readinessStepLabel(issue.step, tx)}:</span>{" "}
+                      {issue.message}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {loading && !lead ? <div role="status" aria-live="polite" className="flex items-center gap-2 py-12 text-sm text-muted-foreground"><LoaderCircle aria-hidden="true" className="size-4 animate-spin" />{tx("Загрузка…", "Wird geladen…")}</div> : null}
 
           {draft && step === "master_data" ? (
             <section className="space-y-5">
-              <h3 className="text-sm font-semibold text-foreground">{tx("Данные клиента", "Personendaten")}</h3>
               {lead ? (
                 <LeadQuestionnaireFacts
+                  topBorder={false}
                   items={[
-                    { label: tx("Тип", "Typ"), value: intakeTypeLabel(lead, tx) },
+                    { label: tx("Тип", "Typ"), value: <StatusBadge tone={intakeTypeTone(lead)}>{intakeTypeLabel(lead, tx)}</StatusBadge> },
                     { label: tx("Канал поступления", "Eingangskanal"), value: lead.source ? leadSourceLabel(lead.source, t) : tx("Не указано", "Nicht angegeben") },
                     { label: tx("Тип формы", "Formulartyp"), value: intakeFlowLabel(lead.flow, tx) },
                     ...(isExternalIntakeLead ? [{
@@ -2077,6 +2596,27 @@ ${serviceCommentLines.join("\n")}`
                 />
               ) : null}
               <div className="grid gap-4 md:grid-cols-2">
+                <Field label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")}>
+                  <NativeComboboxSelect
+                    aria-label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")}
+                    name="discovery_source"
+                    value={draft.discoverySource}
+                    onChange={(event) => patch("discoverySource", event.target.value)}
+                    className={selectClass}
+                  >
+                    <option value="">{tx("Выберите источник", "Quelle auswählen")}</option>
+                    {draft.discoverySource && !DISCOVERY_SOURCE_OPTIONS.some((option) => option.value === draft.discoverySource) ? (
+                      <option value={draft.discoverySource}>
+                        {tx("Текущее значение", "Aktueller Wert")}: {draft.discoverySource}
+                      </option>
+                    ) : null}
+                    {DISCOVERY_SOURCE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {lang === "de" ? option.de : option.ru}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                </Field>
                 <Field
                   label={tx("Имя", "Vorname")}
                   required
@@ -2319,32 +2859,12 @@ ${serviceCommentLines.join("\n")}`
           ) : null}
 
           {draft && lead && step === "medical" ? (
-            <LeadMedicalIntakeForm
-              lead={lead}
-              tx={tx}
-              anamneseId={MEDICAL_ANAMNESE_ID}
-              anamnese={draft.anamnese}
-              diagnoses={draft.diagnoses}
-              medications={draft.medications}
-              allergies={draft.allergies}
-              caves={draft.caves}
-              doctors={doctors}
-              validationAttempted={medicalValidationAttempted}
-              onAnamneseChange={(value) => patch("anamnese", value)}
-              onDiagnosesChange={(value) => patch("diagnoses", value)}
-              onMedicationsChange={(value) => patch("medications", value)}
-              onAllergiesChange={(value) => patch("allergies", value)}
-              onCavesChange={(value) => patch("caves", value)}
-            />
-          ) : null}
-
-
-          {draft && lead && step === "service" ? (
             <section className="space-y-5">
+              <Field label={tx("Направивший врач", "Zuweisender Arzt")} className="block pb-2"><Input value={draft.referrer} onChange={(event) => patch("referrer", event.target.value)} /></Field>
               <Field
                 required
                 label={tx("Причина обращения", "Anliegen")}
-                error={serviceValidationAttempted && !draft.concern.trim() ? tx("Обязательное поле", "Pflichtfeld") : undefined}
+                error={medicalValidationAttempted && !draft.concern.trim() ? tx("Обязательное поле", "Pflichtfeld") : undefined}
                 errorId={`${SERVICE_CONCERN_ID}-error`}
               >
                 <textarea
@@ -2352,14 +2872,47 @@ ${serviceCommentLines.join("\n")}`
                   className={cn(
                     textareaClass,
                     "min-h-28",
-                    serviceValidationAttempted && !draft.concern.trim() && "border-destructive",
+                    medicalValidationAttempted && !draft.concern.trim() && "border-destructive",
                   )}
-                  aria-invalid={serviceValidationAttempted && !draft.concern.trim()}
-                  aria-describedby={serviceValidationAttempted && !draft.concern.trim() ? `${SERVICE_CONCERN_ID}-error` : undefined}
+                  aria-invalid={medicalValidationAttempted && !draft.concern.trim()}
+                  aria-describedby={medicalValidationAttempted && !draft.concern.trim() ? `${SERVICE_CONCERN_ID}-error` : undefined}
                   value={draft.concern}
                   onChange={(event) => patch("concern", event.target.value)}
                 />
               </Field>
+              <LeadMedicalIntakeForm
+                lead={lead}
+                tx={tx}
+                lang={lang}
+                anamneseId={MEDICAL_ANAMNESE_ID}
+                narrative={draft.narrative}
+                diagnoses={draft.diagnoses}
+                medications={draft.medications}
+                allergies={draft.allergies}
+                caves={draft.caves}
+                providers={clinicalProviders}
+                allDoctors={allDoctors}
+                validationAttempted={medicalValidationAttempted}
+                onNarrativeChange={(value) => {
+                  setError("");
+                  clearServerValidation();
+                  setDraft((current) => current ? {
+                    ...current,
+                    narrative: value,
+                    anamnese: value.anamnese_aktuelle ?? "",
+                  } : current);
+                }}
+                onDiagnosesChange={(value) => patch("diagnoses", value)}
+                onMedicationsChange={(value) => patch("medications", value)}
+                onAllergiesChange={(value) => patch("allergies", value)}
+                onCavesChange={(value) => patch("caves", value)}
+              />
+            </section>
+          ) : null}
+
+
+          {draft && lead && step === "service" ? (
+            <section className="space-y-5">
               {isQuestionnaireLead ? (
                 <LeadQuestionnaireFacts
                   items={[
@@ -2391,6 +2944,7 @@ ${serviceCommentLines.join("\n")}`
                 <div className="grid items-start gap-2 sm:grid-cols-2">
                   {Array.from(new Set([
                     ...LEAD_QUESTIONNAIRE_SERVICE_OPTIONS,
+                    ...initialServiceOptionsRef.current,
                     ...draft.serviceNeeds,
                   ])).map((value, index) => {
                     const checked = draft.serviceNeeds.includes(value);
@@ -2444,64 +2998,6 @@ ${serviceCommentLines.join("\n")}`
                 </div>
               </div>
               <Field label={tx("Общий комментарий", "Allgemeiner Kommentar")}><textarea className={cn(textareaClass, "min-h-24")} value={draft.serviceNotes} onChange={(event) => patch("serviceNotes", event.target.value)} /></Field>
-              <Field label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")}>
-                <Input
-                  name="discovery_source"
-                  autoComplete="off"
-                  value={draft.discoverySource}
-                  onChange={(event) => patch("discoverySource", event.target.value)}
-                />
-              </Field>
-              <div className="space-y-3 pt-2">
-                <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  {tx("Специализации", "Fachrichtungen")}
-                  <span aria-hidden="true" className="ml-0.5 text-destructive">*</span>
-                </span>
-                <NativeComboboxSelect
-                  id={SERVICE_SPECIALTIES_ID}
-                  aria-label={tx("Добавить специализацию", "Fachrichtung hinzufügen")}
-                  aria-invalid={serviceValidationAttempted && draft.specialties.length === 0}
-                  aria-describedby={serviceValidationAttempted && draft.specialties.length === 0 ? `${SERVICE_SPECIALTIES_ID}-error` : undefined}
-                  name="specialty"
-                  value=""
-                  onChange={(event) => {
-                    const selected = specialties.find((item) => item.id === event.target.value);
-                    if (!selected) return;
-                    const value = selected.code || selected.name_en;
-                    if (!draft.specialties.includes(value)) patch("specialties", [...draft.specialties, value]);
-                  }}
-                  className={cn(selectClass, serviceValidationAttempted && draft.specialties.length === 0 && "border-destructive")}
-                >
-                  <option value="">{tx("Добавить специализацию", "Fachrichtung hinzufügen")}</option>
-                  {specialties.map((item) => <option key={item.id} value={item.id}>{lang === "de" ? item.name_de || item.name_en : item.name_ru || item.name_de || item.name_en}</option>)}
-                </NativeComboboxSelect>
-                {serviceValidationAttempted && draft.specialties.length === 0 ? (
-                  <span id={`${SERVICE_SPECIALTIES_ID}-error`} role="alert" className="block text-xs leading-4 text-destructive">
-                    {tx("Выберите хотя бы одну специализацию", "Mindestens eine Fachrichtung auswählen")}
-                  </span>
-                ) : null}
-                {draft.specialties.length > 0 ? (
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {draft.specialties.map((value) => (
-                      <div key={value} className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-border bg-muted/25 px-3 py-2">
-                        <span className="min-w-0 break-words text-sm text-foreground">{specialtyLabel(value)}</span>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          className="shrink-0"
-                          title={tx("Удалить специализацию", "Fachrichtung entfernen")}
-                          aria-label={tx("Удалить специализацию", "Fachrichtung entfernen")}
-                          onClick={() => patch("specialties", draft.specialties.filter((item) => item !== value))}
-                        >
-                          <X aria-hidden="true" className="size-3.5" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-              <Field label={tx("Направивший врач", "Zuweisender Arzt")}><Input value={draft.referrer} onChange={(event) => patch("referrer", event.target.value)} /></Field>
             </section>
           ) : null}
 
@@ -2550,15 +3046,24 @@ ${serviceCommentLines.join("\n")}`
                             <div key={document.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
                               <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
                               <div className="min-w-0 flex-1">
-                                <div className="truncate text-sm font-medium text-foreground">
-                                  {document.original_filename || document.auto_name}
-                                </div>
+                                <button
+                                  type="button"
+                                  className="block max-w-full truncate text-left text-sm font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                  onClick={() => void openOrDownloadDocument(document)}
+                                >
+                                  {wizardDocumentFilename(document)}
+                                </button>
                                 <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                                   {sizeLabel ? <span className="font-mono tabular-nums">{sizeLabel}</span> : null}
                                   <StateMark done={signed} label={signed ? tx("Подтверждён", "Bestätigt") : tx("Не подтверждён", "Nicht bestätigt")} />
                                 </div>
                               </div>
                               <div className="flex shrink-0 items-center gap-1">
+                                {wizardDocumentPreviewKind(document) ? (
+                                  <Button type="button" variant="ghost" size="icon-sm" title={tx("Просмотреть файл", "Datei ansehen")} aria-label={tx("Просмотреть файл", "Datei ansehen")} disabled={isBusy} onClick={() => void openOrDownloadDocument(document)}>
+                                    {busy === `preview-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Eye className="size-3.5" />}
+                                  </Button>
+                                ) : null}
                                 <Button type="button" variant="ghost" size="icon-sm" title={tx("Скачать файл", "Datei herunterladen")} aria-label={tx("Скачать файл", "Datei herunterladen")} disabled={isBusy} onClick={() => void downloadDocument(document)}>
                                   {busy === `download-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
                                 </Button>
@@ -2587,16 +3092,25 @@ ${serviceCommentLines.join("\n")}`
                   <div className="divide-y divide-border rounded-md border border-border">
                     {supplementaryDocuments.map((document) => (
                       <div key={document.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
-                        <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-medium text-foreground">
-                            {document.original_filename || document.auto_name}
-                          </div>
+                      <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                          <button
+                            type="button"
+                            className="block max-w-full truncate text-left text-sm font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            onClick={() => void openOrDownloadDocument(document)}
+                          >
+                            {wizardDocumentFilename(document)}
+                          </button>
                           <div className="mt-0.5 text-xs text-muted-foreground">
                             {formatFileSize(document.file_size, lang)}
                           </div>
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
+                          {wizardDocumentPreviewKind(document) ? (
+                            <Button type="button" variant="ghost" size="icon-sm" title={tx("Просмотреть файл", "Datei ansehen")} aria-label={tx("Просмотреть файл", "Datei ansehen")} disabled={isBusy} onClick={() => void openOrDownloadDocument(document)}>
+                              {busy === `preview-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Eye className="size-3.5" />}
+                            </Button>
+                          ) : null}
                           <Button type="button" variant="ghost" size="icon-sm" title={tx("Скачать файл", "Datei herunterladen")} aria-label={tx("Скачать файл", "Datei herunterladen")} disabled={isBusy} onClick={() => void downloadDocument(document)}>
                             {busy === `download-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
                           </Button>
@@ -2619,7 +3133,104 @@ ${serviceCommentLines.join("\n")}`
                   ]}
                 />
               ) : null}
-              <div className="border-y border-border"><ToggleRow checked={draft.privacyConsent} disabled={isBusy} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} /><ToggleRow checked={draft.healthcareConsent} disabled={isBusy} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} /></div>
+              <div className="border-y border-border"><ToggleRow id={PRIVACY_CONSENT_ID} checked={draft.privacyConsent} disabled={isBusy} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} /><ToggleRow id={HEALTHCARE_CONSENT_ID} checked={draft.healthcareConsent} disabled={isBusy} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} /></div>
+            </section>
+          ) : null}
+
+          {draft && step === "order" ? (
+            <section className="space-y-5">
+              <div className="space-y-3">
+                <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {tx("Специализации", "Fachrichtungen")}
+                  <span aria-hidden="true" className="ml-0.5 text-destructive">*</span>
+                </span>
+                <NativeComboboxSelect
+                  id={SERVICE_SPECIALTIES_ID}
+                  aria-label={tx("Добавить специализацию", "Fachrichtung hinzufügen")}
+                  aria-invalid={Boolean(orderFieldError("specialties"))}
+                  aria-describedby={orderFieldError("specialties") ? `${SERVICE_SPECIALTIES_ID}-error` : undefined}
+                  name="specialty"
+                  value=""
+                  onChange={(event) => {
+                    const selected = specialties.find((item) => item.id === event.target.value);
+                    if (!selected) return;
+                    const value = selected.code || selected.name_en;
+                    if (!draft.specialties.includes(value)) patch("specialties", [...draft.specialties, value]);
+                  }}
+                  className={cn(selectClass, orderFieldError("specialties") && "border-destructive")}
+                >
+                  <option value="">{tx("Добавить специализацию", "Fachrichtung hinzufügen")}</option>
+                  {specialties.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {lang === "de" ? item.name_de || item.name_en : item.name_ru || item.name_de || item.name_en}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+                {orderFieldError("specialties") ? (
+                  <span id={`${SERVICE_SPECIALTIES_ID}-error`} role="alert" className="block text-xs leading-4 text-destructive">
+                    {orderFieldError("specialties")}
+                  </span>
+                ) : null}
+                {draft.specialties.length > 0 ? (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {draft.specialties.map((value) => (
+                      <div key={value} className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-border bg-muted/25 px-3 py-2">
+                        <span className="min-w-0 break-words text-sm text-foreground">{specialtyLabel(value)}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="shrink-0"
+                          title={tx("Удалить специализацию", "Fachrichtung entfernen")}
+                          aria-label={tx("Удалить специализацию", "Fachrichtung entfernen")}
+                          onClick={() => patch("specialties", draft.specialties.filter((item) => item !== value))}
+                        >
+                          <X aria-hidden="true" className="size-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field
+                  label={tx("Начало программы", "Programmbeginn")}
+                  required={Boolean(draft.programDateTo)}
+                  error={orderFieldError("program-date-from")}
+                  errorId={`${ORDER_DATE_FROM_ID}-error`}
+                >
+                  <Input
+                    id={ORDER_DATE_FROM_ID}
+                    name="program_date_from"
+                    type="date"
+                    required={Boolean(draft.programDateTo)}
+                    aria-invalid={Boolean(orderFieldError("program-date-from"))}
+                    aria-describedby={orderFieldError("program-date-from") ? `${ORDER_DATE_FROM_ID}-error` : undefined}
+                    className={cn(orderFieldError("program-date-from") && "border-destructive")}
+                    value={draft.programDateFrom}
+                    onChange={(event) => patch("programDateFrom", event.target.value)}
+                  />
+                </Field>
+                <Field
+                  label={tx("Окончание программы", "Programmende")}
+                  required={Boolean(draft.programDateFrom)}
+                  error={orderFieldError("program-date-to", "program-date-range")}
+                  errorId={`${ORDER_DATE_TO_ID}-error`}
+                >
+                  <Input
+                    id={ORDER_DATE_TO_ID}
+                    name="program_date_to"
+                    type="date"
+                    min={draft.programDateFrom || undefined}
+                    required={Boolean(draft.programDateFrom)}
+                    aria-invalid={Boolean(orderFieldError("program-date-to", "program-date-range"))}
+                    aria-describedby={orderFieldError("program-date-to", "program-date-range") ? `${ORDER_DATE_TO_ID}-error` : undefined}
+                    className={cn(orderFieldError("program-date-to", "program-date-range") && "border-destructive")}
+                    value={draft.programDateTo}
+                    onChange={(event) => patch("programDateTo", event.target.value)}
+                  />
+                </Field>
+              </div>
             </section>
           ) : null}
 
@@ -2744,6 +3355,55 @@ ${serviceCommentLines.join("\n")}`
         </main>
 
       </DialogContent>
+      </Dialog>
+      <Dialog
+        open={Boolean(documentPreview)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) replaceDocumentPreview(null);
+        }}
+      >
+        <DialogContent className="flex h-[86vh] w-[calc(100vw-1rem)] max-w-6xl flex-col gap-0 overflow-hidden rounded-lg p-0 sm:w-[min(92vw,72rem)]">
+          <DialogHeader className="border-b border-border px-4 py-3 pr-14 sm:px-5 sm:pr-14">
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <div className="min-w-0">
+                <DialogTitle className="truncate text-base">
+                  {documentPreview?.title ?? tx("Просмотр документа", "Dokumentvorschau")}
+                </DialogTitle>
+                <DialogDescription className="truncate">
+                  {documentPreview?.contentType ?? ""}
+                </DialogDescription>
+              </div>
+              {documentPreview ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  className="shrink-0"
+                  title={tx("Скачать файл", "Datei herunterladen")}
+                  aria-label={tx("Скачать файл", "Datei herunterladen")}
+                  onClick={() => void downloadDocumentFile(documentPreview.id, documentPreview.title)}
+                >
+                  <Download aria-hidden="true" className="size-3.5" />
+                </Button>
+              ) : null}
+            </div>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-auto bg-muted/30 p-3">
+            {documentPreview?.kind === "image" ? (
+              <img
+                src={documentPreview.url}
+                alt={documentPreview.title}
+                className="mx-auto h-full max-h-full w-full object-contain"
+              />
+            ) : documentPreview ? (
+              <iframe
+                title={documentPreview.title}
+                src={documentPreview.url}
+                className="h-full min-h-[32rem] w-full border border-border bg-white"
+              />
+            ) : null}
+          </div>
+        </DialogContent>
       </Dialog>
       <Dialog
         open={Boolean(deleteDocument)}

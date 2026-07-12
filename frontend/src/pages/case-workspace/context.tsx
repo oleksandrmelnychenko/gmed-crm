@@ -599,10 +599,11 @@ function useCaseWorkspaceProviderContent({
         (list) =>
           list.flatMap((item) => {
             const handelsname = item.handelsname.trim();
-            if (!handelsname) return [];
+            const wirkstoff = (item.wirkstoff ?? "").trim();
+            if (!wirkstoff) return [];
             return [{
               handelsname,
-              wirkstoff: toOptionalText(item.wirkstoff ?? ""),
+              wirkstoff,
               dosis: toOptionalText(item.dosis ?? ""),
               dosis_einheit: toOptionalText(item.dosis_einheit ?? ""),
               einnahmeschema: toOptionalText(item.einnahmeschema ?? ""),

@@ -81,7 +81,6 @@ export function OrderAmendmentsPanel({ orderId }: { orderId: string }) {
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
 
   async function run(action: () => Promise<unknown>) {

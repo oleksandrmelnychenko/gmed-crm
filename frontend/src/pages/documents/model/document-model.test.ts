@@ -232,21 +232,22 @@ describe("buildGenerateDocumentPayload", () => {
     });
   });
 
-  it("sends the displayed generated text as the authoritative PDF text", () => {
+  it("keeps the structured template renderer active until the operator edits the text", () => {
     expect(
       buildGenerateDocumentPayload({
         template: template(),
         form: generateForm({ manualText: "Edited text", manualTextDirty: false }),
         patients,
-        displayedManualText: "Edited text",
+        displayedManualText: "Generated preview text",
       }).manual_text,
-    ).toBe("Edited text");
+    ).toBeNull();
 
     expect(
       buildGenerateDocumentPayload({
         template: template(),
         form: generateForm({ manualText: "Form fallback text", manualTextDirty: true }),
         patients,
+        displayedManualText: "Form fallback text",
       }).manual_text,
     ).toBe("Form fallback text");
   });

@@ -118,7 +118,7 @@ struct OperationItem {
 #[derive(Deserialize, Serialize, Clone)]
 struct MedikamentItem {
     id: Option<Uuid>,
-    handelsname: String,
+    handelsname: Option<String>,
     wirkstoff: Option<String>,
     dosis: Option<String>,
     dosis_einheit: Option<String>,
@@ -1769,6 +1769,17 @@ async fn save_medikamente(
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
     }
+    if body.items.iter().any(|item| {
+        item.wirkstoff
+            .as_deref()
+            .map(str::trim)
+            .is_none_or(str::is_empty)
+    }) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "wirkstoff is required for every medication",
+        );
+    }
     let old_value = match load_case_section_snapshot(&state.db, case_uuid, "medikamente").await {
         Ok(value) => value.unwrap_or(serde_json::json!([])),
         Err(e) => {
@@ -1811,8 +1822,13 @@ async fn save_medikamente(
             "INSERT INTO medikamente (case_id, handelsname, wirkstoff, dosis, dosis_einheit, einnahmeschema, darreichungsform, einheit, anmerkung, grund, seit, verordnender_arzt_id, verordnender_arzt, med_typ, expiry_date, sort_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)",
         )
         .bind(case_uuid)
-        .bind(&item.handelsname)
-        .bind(item.wirkstoff.clone())
+        .bind(
+            item.handelsname
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or_default(),
+        )
+        .bind(item.wirkstoff.as_deref().map(str::trim).unwrap_or_default())
         .bind(item.dosis.clone())
         .bind(item.dosis_einheit.clone())
         .bind(item.einnahmeschema.clone())

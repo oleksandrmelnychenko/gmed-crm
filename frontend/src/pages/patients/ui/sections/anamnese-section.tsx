@@ -95,6 +95,7 @@ export function AnamneseSection({
   onDelete,
   onSave,
   loadHistory,
+  requireCurrent = false,
 }: {
   active: ClinicalNarrative | null;
   canManage: boolean;
@@ -102,11 +103,13 @@ export function AnamneseSection({
   onDelete?: (id: string) => Promise<unknown>;
   onSave: (n: ClinicalNarrative) => Promise<unknown>;
   loadHistory: () => Promise<ClinicalNarrative[]>;
+  requireCurrent?: boolean;
 }): JSX.Element {
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
   const fields = narrativeFields(tx);
 
   const [editing, setEditing] = useState<ClinicalNarrative | null>(null);
+  const [editingMode, setEditingMode] = useState<"new" | "edit">("new");
   const [busy, setBusy] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ClinicalNarrative | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -151,6 +154,16 @@ export function AnamneseSection({
     );
   }
 
+  function openNew(version: ClinicalNarrative) {
+    setEditingMode("new");
+    setEditing(version);
+  }
+
+  function openEdit(version: ClinicalNarrative) {
+    setEditingMode("edit");
+    setEditing(version);
+  }
+
   async function submit() {
     if (!editing) return;
     setBusy(true);
@@ -191,6 +204,9 @@ export function AnamneseSection({
         return Boolean(value && value.trim());
       })
     : [];
+  const currentMissing = Boolean(
+    editing && requireCurrent && !editing.anamnese_aktuelle?.trim(),
+  );
 
   return (
     <section className="rounded-xl border border-border/70 bg-card">
@@ -215,7 +231,7 @@ export function AnamneseSection({
                 size="sm"
                 variant="outline"
                 className="h-8 rounded-lg"
-                onClick={() => setEditing(blankVersion())}
+                onClick={() => openNew(blankVersion())}
               >
                 <Plus className="size-3.5" />
                 {tx("Новая версия", "Neue Version")}
@@ -227,7 +243,7 @@ export function AnamneseSection({
                     size="sm"
                     variant="outline"
                     className="h-8 rounded-lg"
-                    onClick={() => setEditing(copyNarrativeVersion(active))}
+                    onClick={() => openNew(copyNarrativeVersion(active))}
                   >
                     <Copy className="size-3.5" />
                     {tx("Копировать", "Kopieren")}
@@ -236,7 +252,7 @@ export function AnamneseSection({
                     type="button"
                     size="sm"
                     className="h-8 rounded-lg"
-                    onClick={() => setEditing({ ...active })}
+                    onClick={() => openEdit({ ...active })}
                   >
                     <Pencil className="size-3.5" />
                     {tx("Редактировать", "Bearbeiten")}
@@ -370,7 +386,7 @@ export function AnamneseSection({
                             className="size-7 rounded-md p-0"
                             aria-label={tx("Копировать", "Kopieren")}
                             title={tx("Копировать", "Kopieren")}
-                            onClick={() => setEditing(copyNarrativeVersion(version))}
+                            onClick={() => openNew(copyNarrativeVersion(version))}
                           >
                             <Copy className="size-3.5" />
                           </Button>
@@ -381,7 +397,7 @@ export function AnamneseSection({
                             className="size-7 rounded-md p-0"
                             aria-label={tx("Редактировать", "Bearbeiten")}
                             title={tx("Редактировать", "Bearbeiten")}
-                            onClick={() => setEditing({ ...version })}
+                            onClick={() => openEdit({ ...version })}
                           >
                             <Pencil className="size-3.5" />
                           </Button>
@@ -416,7 +432,7 @@ export function AnamneseSection({
         }}
         width="form-heavy"
         title={
-          editing && editing.id
+          editingMode === "edit"
             ? `${tx("Редактировать", "Bearbeiten")}: ${tx("Анамнез", "Anamnese")}`
             : `${tx("Новая версия", "Neue Version")}: ${tx("Анамнез", "Anamnese")}`
         }
@@ -435,7 +451,7 @@ export function AnamneseSection({
               type="button"
               size="sm"
               className="h-8 rounded-lg"
-              disabled={busy || !editing}
+              disabled={busy || !editing || currentMissing}
               onClick={() => void submit()}
             >
               {tx("Сохранить", "Speichern")}
@@ -450,12 +466,26 @@ export function AnamneseSection({
                 <label key={field.key} className="block">
                   <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
                     {field.label}
+                    {requireCurrent && field.key === "anamnese_aktuelle" ? (
+                      <span aria-hidden="true" className="ml-0.5 text-destructive">*</span>
+                    ) : null}
                   </span>
                   <textarea
+                    required={requireCurrent && field.key === "anamnese_aktuelle"}
+                    aria-invalid={currentMissing && field.key === "anamnese_aktuelle"}
                     value={editing[field.key] ?? ""}
                     onChange={(event) => setField(field.key, event.target.value)}
-                    className={cn(inputClass, "h-24 py-2")}
+                    className={cn(
+                      inputClass,
+                      "h-24 py-2",
+                      currentMissing && field.key === "anamnese_aktuelle" && "border-destructive",
+                    )}
                   />
+                  {currentMissing && field.key === "anamnese_aktuelle" ? (
+                    <span role="alert" className="mt-1 block text-xs text-destructive">
+                      {tx("Обязательное поле", "Pflichtfeld")}
+                    </span>
+                  ) : null}
                 </label>
               ))}
             </div>

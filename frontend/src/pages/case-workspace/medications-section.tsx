@@ -232,10 +232,10 @@ function MedicationCardContent({ item, t }: MedicationCardContentProps) {
       <div className="flex min-w-0 items-center gap-2">
         <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
         <p className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
-          {item.handelsname || t.cases_medications_untitled}
+          {item.handelsname || item.wirkstoff || t.cases_medications_untitled}
         </p>
       </div>
-      {item.wirkstoff ? (
+      {item.wirkstoff && item.handelsname ? (
         <p className="break-words text-xs text-muted-foreground">{item.wirkstoff}</p>
       ) : null}
       <div className="flex flex-wrap gap-1.5">
@@ -299,7 +299,7 @@ function MedicationFormContent({
     <>
       <Panel title={t.cases_medications_group_identity}>
         <div className="grid gap-3 md:grid-cols-2">
-          <Field label={t.cases_medications_brand_name} required>
+          <Field label={t.cases_medications_brand_name}>
             <Input
               value={form.handelsname}
               onChange={(event) => updateField("handelsname", event.target.value)}
@@ -307,8 +307,9 @@ function MedicationFormContent({
               disabled={disabled}
             />
           </Field>
-          <Field label={t.cases_medications_active_ingredient}>
+          <Field label={t.cases_medications_active_ingredient} required>
             <Input
+              required
               value={form.wirkstoff ?? ""}
               onChange={(event) => updateField("wirkstoff", event.target.value)}
               className={inputBaseClassName}
@@ -576,14 +577,18 @@ function MedicationReferenceWorkspace({
             >
               {medicationOptions.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.handelsname}
-                  {item.wirkstoff ? ` - ${item.wirkstoff}` : ""}
+                  {item.handelsname || item.wirkstoff || t.cases_medications_untitled}
+                  {item.handelsname && item.wirkstoff ? ` - ${item.wirkstoff}` : ""}
                 </option>
               ))}
             </NativeComboboxSelect>
           </Field>
           <MedicationEquivalentsPanel
-            medicationName={selectedEquivalentMedication.handelsname}
+            medicationName={
+              selectedEquivalentMedication.handelsname ||
+              selectedEquivalentMedication.wirkstoff ||
+              t.cases_medications_untitled
+            }
             medicationSubstance={selectedEquivalentMedication.wirkstoff}
             candidates={equivalentCandidates}
             includeCandidates={includeEquivalentCandidates}
@@ -1112,7 +1117,7 @@ function useMedicationsSectionContent() {
         items={medications}
         blankItem={BLANK}
         cloneItem={(item) => ({ ...BLANK, ...item })}
-        isValid={(form) => form.handelsname.trim().length > 0}
+        isValid={(form) => (form.wirkstoff ?? "").trim().length > 0}
         save={saveMedications}
         busy={sectionBusy === "medications"}
         sectionError={sectionError}
@@ -1124,7 +1129,7 @@ function useMedicationsSectionContent() {
         sheetWidth="wide"
         emptyTitle={t.cases_medications_empty_title}
         addFirstLabel={t.cases_medications_add_first}
-        missingPrimaryMessage={t.cases_medications_missing_brand}
+        missingPrimaryMessage={t.cases_medications_missing_active_ingredient}
         cardContent={(item) => <MedicationCardContent item={item} t={t} />}
         formContent={(props) => (
           <MedicationFormContent {...props} doctors={doctors} lang={lang} t={t} />

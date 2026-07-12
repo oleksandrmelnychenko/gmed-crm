@@ -137,6 +137,7 @@ export interface CasesClinicalTranslations {
   cases_medications_empty_title: string;
   cases_medications_add_first: string;
   cases_medications_missing_brand: string;
+  cases_medications_missing_active_ingredient: string;
   cases_medications_untitled: string;
   cases_medications_brand_name: string;
   cases_medications_active_ingredient: string;
@@ -390,6 +391,7 @@ export const casesClinicalRu: CasesClinicalTranslations = {
   cases_medications_empty_title: "Медикаментов пока нет.",
   cases_medications_add_first: "Добавить первый медикамент",
   cases_medications_missing_brand: "Укажите торговое название.",
+  cases_medications_missing_active_ingredient: "Укажите действующее вещество.",
   cases_medications_untitled: "Без названия",
   cases_medications_brand_name: "Торговое название",
   cases_medications_active_ingredient: "Действующее вещество",
@@ -668,6 +670,7 @@ export const casesClinicalDe: CasesClinicalTranslations = {
   cases_medications_empty_title: "Keine Medikamente erfasst.",
   cases_medications_add_first: "Erstes Medikament hinzufügen",
   cases_medications_missing_brand: "Bitte den Handelsnamen eingeben.",
+  cases_medications_missing_active_ingredient: "Bitte den Wirkstoff eingeben.",
   cases_medications_untitled: "Ohne Namen",
   cases_medications_brand_name: "Handelsname",
   cases_medications_active_ingredient: "Wirkstoff",

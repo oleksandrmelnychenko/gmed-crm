@@ -770,6 +770,56 @@ async fn save_medikamente_round_trips_full_repeat_block_fields() {
     assert_eq!(second["darreichungsform"].as_str(), Some("TABL"));
 }
 
+#[tokio::test]
+async fn medication_requires_active_ingredient_but_not_trade_name() {
+    let Some((app, _pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let bearer = auth_header_for(admin_id, "ceo");
+    let tag = unique_tag("case-meds-required-ingredient");
+    let patient_id = create_patient(&app, &bearer, &tag).await;
+    let case_uuid = create_case(&app, &bearer, patient_id).await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_uuid}/medikamente"),
+        &bearer,
+        Some(json!({
+            "items": [{
+                "wirkstoff": "Ibuprofen",
+                "handelsname": "",
+                "med_typ": "permanent"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let case = fetch_case(&app, &bearer, case_uuid).await;
+    assert_eq!(case["medikamente"][0]["wirkstoff"], "Ibuprofen");
+    assert_eq!(case["medikamente"][0]["handelsname"], "");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/cases/{case_uuid}/medikamente"),
+        &bearer,
+        Some(json!({
+            "items": [{ "handelsname": "Optional brand only" }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        body["message"],
+        "wirkstoff is required for every medication"
+    );
+
+    let case = fetch_case(&app, &bearer, case_uuid).await;
+    assert_eq!(case["medikamente"].as_array().unwrap().len(), 1);
+    assert_eq!(case["medikamente"][0]["wirkstoff"], "Ibuprofen");
+}
+
 // ============================================================================
 // EPIC 2 RBAC — interpreter cannot create or update case (anamnesis is PM/Ceo only)
 // ============================================================================

@@ -79,6 +79,9 @@ def main() -> int:
         )
 
     steps.append(
+        ("Print Binding Audit", [sys.executable, "scripts/audit_print_bindings.py"], None),
+    )
+    steps.append(
         ("Repo Hygiene", [sys.executable, "scripts/check_repo_hygiene.py"], None),
     )
 

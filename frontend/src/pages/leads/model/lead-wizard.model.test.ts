@@ -475,7 +475,8 @@ describe("Phase B clinical intake (#8)", () => {
 
     expect(clinicalIntakeHasMedication(intake)).toBe(true);
     expect(payload).toMatchObject({
-      handelsname: "Ibuprofen",
+      handelsname: "",
+      wirkstoff: "Ibuprofen",
       staerke: "400 mg",
       form: "TABL",
       einnahmeform: "Oral",
@@ -486,7 +487,8 @@ describe("Phase B clinical intake (#8)", () => {
     });
     expect(
       clinicalMedicationFingerprint({
-        handelsname: " ibuprofen ",
+        wirkstoff: " ibuprofen ",
+        handelsname: "",
         staerke: "400 mg",
         form: "TABL",
         einnahmeform: "Oral",

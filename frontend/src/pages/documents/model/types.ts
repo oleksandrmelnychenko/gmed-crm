@@ -74,6 +74,8 @@ export type DocumentItem = {
   payment_date: string | null;
   payment_method: DocumentPaymentMethod | null;
   generated_template_id: string | null;
+  generated_bindings?: Record<string, unknown> | null;
+  generated_manual_text?: string | null;
   notes: string | null;
   signed_at?: string | null;
   signed_by?: string | null;

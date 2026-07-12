@@ -155,6 +155,73 @@ async fn patient_notes_update_does_not_require_unrelated_minor_guardian_fix() {
 }
 
 #[tokio::test]
+async fn patient_medication_requires_active_ingredient_but_allows_no_trade_name() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("patient-med-required-ingredient");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/medications"),
+        &pm_bearer,
+        Some(json!({
+            "items": [{
+                "wirkstoff": "Ibuprofen",
+                "handelsname": "",
+                "category": "dauer"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+
+    let (status, clinical) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(clinical["medications"][0]["wirkstoff"], "Ibuprofen");
+    assert_eq!(clinical["medications"][0]["handelsname"], "");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/medications"),
+        &pm_bearer,
+        Some(json!({
+            "items": [{ "handelsname": "Optional brand only" }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        body["message"],
+        "wirkstoff is required for every medication"
+    );
+
+    let (status, clinical) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(clinical["medications"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn patient_passport_round_trips_and_flags_expiry() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
@@ -188,7 +255,10 @@ async fn patient_passport_round_trips_and_flags_expiry() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(detail["passport_number"], "X1234567");
     assert_eq!(detail["passport_expiry"], "2020-01-01");
-    assert_eq!(detail["passport_expired"], true, "past expiry must flag expired");
+    assert_eq!(
+        detail["passport_expired"], true,
+        "past expiry must flag expired"
+    );
     assert_eq!(detail["passport_status"], "expired");
 
     // Renew to a future date -> no longer expired; number preserved when omitted.
@@ -1135,6 +1205,7 @@ async fn patient_medications_reject_non_medical_provider_attribution() {
                 {
                     "category": "dauer",
                     "handelsname": "Ibuprofen",
+                    "wirkstoff": "Ibuprofen",
                     "provider_id": non_medical_provider_id.to_string(),
                 },
             ],
@@ -1153,6 +1224,7 @@ async fn patient_medications_reject_non_medical_provider_attribution() {
                 {
                     "category": "dauer",
                     "handelsname": "Paracetamol",
+                    "wirkstoff": "Paracetamol",
                     "doctor_id": non_medical_doctor_id.to_string(),
                 },
             ],

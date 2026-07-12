@@ -222,12 +222,12 @@ function blankNode(kind: DiagnosisKind, parentCid: string | null): WorkingNode {
   };
 }
 
-/** Map the flat props payload into working nodes (cid = id, parent_cid = parent_id). */
+/** Map server rows and unsaved lead-draft rows into stable working nodes. */
 function nodesFromItems(items: ClinicalDiagnosis[]): WorkingNode[] {
   return items.map((item) => ({
     ...item,
-    cid: item.id ?? nextCid(),
-    parent_cid: item.parent_id ?? null,
+    cid: item.id ?? item.cid ?? nextCid(),
+    parent_cid: item.parent_id ?? item.parent_cid ?? null,
     id: item.id ?? null,
     parent_id: item.parent_id ?? null,
   }));
@@ -276,10 +276,21 @@ function descendantCids(nodes: WorkingNode[], rootCid: string): Set<string> {
 
 // A label that wraps its control, so the visible caption is also the control's
 // accessible name (implicit association — no id juggling).
-function Field({ label, children }: { label: ReactNode; children: ReactNode }) {
+function Field({
+  label,
+  children,
+  required = false,
+}: {
+  label: ReactNode;
+  children: ReactNode;
+  required?: boolean;
+}) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[11px] font-medium text-muted-foreground">{label}</span>
+      <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
+        {label}
+        {required ? <span aria-hidden="true" className="ml-0.5 text-destructive">*</span> : null}
+      </span>
       {children}
     </label>
   );
@@ -658,8 +669,9 @@ function DiagnosisForm({
         </div>
       ) : null}
 
-      <Field label={tx("Диагноз", "Diagnose")}>
+      <Field required label={tx("Диагноз", "Diagnose")}>
         <Input
+          required
           value={draft.label}
           onChange={(e) => set({ label: e.target.value })}
           className={inputClass}
@@ -856,7 +868,7 @@ function DiagnosisForm({
                 />
               </Field>
             </div>
-            <Field label={tx("Страна", "Land")}>
+            <Field required label={tx("Страна", "Land")}>
               <CountrySelect
                 value={draft.external_country}
                 lang={lang}
