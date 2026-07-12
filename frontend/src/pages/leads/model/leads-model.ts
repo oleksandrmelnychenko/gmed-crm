@@ -139,6 +139,30 @@ const LEAD_LANGUAGE_LABEL_KEYS = {
   zh: "lead_language_zh",
 } satisfies Partial<Record<string, TranslationKey>>;
 
+export const LEAD_QUESTIONNAIRE_SERVICE_OPTIONS = [
+  "driver",
+  "concierge",
+  "medical-transport",
+  "air-ambulance",
+  "business-aviation",
+  "none",
+  "not-sure",
+] as const;
+
+const LEAD_SERVICE_VALUE_ALIASES = {
+  driver: "driver",
+  concierge: "concierge",
+  "medical-transport": "medical-transport",
+  medical_transport: "medical-transport",
+  "air-ambulance": "air-ambulance",
+  air_ambulance: "air-ambulance",
+  "business-aviation": "business-aviation",
+  business_aviation: "business-aviation",
+  none: "none",
+  "not-sure": "not-sure",
+  not_sure: "not-sure",
+} satisfies Record<string, string>;
+
 const LEAD_PROGRAM_SERVICE_LABEL_KEYS = {
   standard: "lead_option_program_standard",
   care: "lead_option_program_care",
@@ -520,6 +544,13 @@ export function leadProgramServiceLabel(
     LEAD_PROGRAM_SERVICE_LABEL_KEYS,
     runtimeTranslations(translations),
   );
+}
+
+export function normalizeLeadServiceValue(value: string) {
+  const trimmed = value.trim();
+  const normalized = trimmed.toLowerCase();
+  return (LEAD_SERVICE_VALUE_ALIASES as Partial<Record<string, string>>)[normalized]
+    ?? trimmed;
 }
 
 export function knownLeadProgramServiceLabel(

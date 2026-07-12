@@ -2070,7 +2070,43 @@ test.describe("lead onboarding wizard", () => {
       wizard.getByText("Please coordinate an orthopedic consultation and airport transfer.", { exact: true }),
     ).toBeVisible();
     await expect(wizard.getByText("Unbekannter Wert", { exact: true })).toHaveCount(0);
-    await expect(wizard.getByText("Medizinische Betreuung", { exact: true })).toBeVisible();
+    for (const serviceLabel of [
+      "Limousinenservice und privater Fahrer",
+      "Concierge-Services",
+      "Bodengebundener medizinischer Transport",
+      "Ambulanzflug",
+      "Business Jet / Privatflugzeug",
+      "Keinen der genannten Services",
+      "Ich bin mir noch nicht sicher",
+    ]) {
+      await expect(wizard.getByRole("checkbox", { name: serviceLabel, exact: true })).toBeVisible();
+    }
+    await expect(
+      wizard.getByRole("checkbox", { name: "Medizinische Behandlung", exact: true }),
+    ).toBeChecked();
+    const serviceCommentRequest = page.waitForRequest((request) => {
+      if (request.method() !== "POST" || !request.url().endsWith(`/leads/${readyLeadId}/update`)) return false;
+      const payload = request.postDataJSON() as {
+        wizard_state?: { service_comments?: Record<string, string> };
+      };
+      return payload.wizard_state?.service_comments?.driver === "Abholung am Flughafen BER um 14:30";
+    });
+    await wizard
+      .getByRole("checkbox", { name: "Limousinenservice und privater Fahrer", exact: true })
+      .check();
+    await wizard
+      .getByRole("textbox", {
+        name: "Kommentar zur Leistung: Limousinenservice und privater Fahrer",
+      })
+      .fill("Abholung am Flughafen BER um 14:30");
+    expect((await serviceCommentRequest).postDataJSON()).toMatchObject({
+      services: expect.arrayContaining(["driver"]),
+      wizard_state: {
+        service_comments: {
+          driver: "Abholung am Flughafen BER um 14:30",
+        },
+      },
+    });
     await wizard.getByRole("textbox", { name: "Anliegen", exact: true }).fill("Orthopädische Beratung");
     await expect(
       wizard.getByRole("textbox", { name: "Wie sind Sie auf uns aufmerksam geworden?" }),
@@ -2424,6 +2460,32 @@ test.describe("responsive staff workspace", () => {
     await page.getByText("Orthopädie", { exact: true }).click();
     await expect(wizard.getByText("Orthopädie", { exact: true })).toBeVisible();
 
+    const serviceCommentRequest = page.waitForRequest((candidate) => {
+      if (
+        candidate.method() !== "POST" ||
+        !candidate.url().endsWith(`/api/v1/leads/${leadId}/update`)
+      ) {
+        return false;
+      }
+      const payload = candidate.postDataJSON() as {
+        wizard_state?: { service_comments?: Record<string, string> };
+      };
+      return payload.wizard_state?.service_comments?.driver === "Abholung am BER, Terminal 1";
+    });
+    await wizard
+      .getByRole("checkbox", { name: "Limousinenservice und privater Fahrer", exact: true })
+      .check();
+    await wizard
+      .getByRole("textbox", {
+        name: "Kommentar zur Leistung: Limousinenservice und privater Fahrer",
+      })
+      .fill("Abholung am BER, Terminal 1");
+    expect((await serviceCommentRequest).postDataJSON()).toMatchObject({
+      wizard_state: {
+        service_comments: { driver: "Abholung am BER, Terminal 1" },
+      },
+    });
+
     const discoverySourceRequest = page.waitForRequest((candidate) => {
       if (
         candidate.method() !== "POST" ||
@@ -2626,6 +2688,10 @@ test.describe("responsive staff workspace", () => {
     expect(orderCreatePayload?.needs_description).toContain("Kann anreisen: Ja");
     expect(orderCreatePayload?.needs_description).toContain("Reisedokumente: Ja");
     expect(orderCreatePayload?.needs_description).toContain("Dolmetscher benötigt");
+    expect(orderCreatePayload?.needs_description).toContain("Kommentare zu Leistungen");
+    expect(orderCreatePayload?.needs_description).toContain(
+      "Limousinenservice und privater Fahrer: Abholung am BER, Terminal 1",
+    );
     releaseCommercialBasis();
     await expect(patientSignatureToggle).toBeEnabled();
     await expect(patientSignatureToggle).toBeChecked();

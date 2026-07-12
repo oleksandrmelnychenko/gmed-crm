@@ -78,6 +78,7 @@ import type { DoctorOption } from "@/pages/cases/model/types";
 import { fetchSpecializations } from "@/pages/providers/data/provider-api";
 import type { SpecializationItem } from "@/pages/providers/model/types";
 import {
+  LEAD_QUESTIONNAIRE_SERVICE_OPTIONS,
   leadIntakeTypeFromLead,
   knownLeadProgramServiceLabel,
   leadLocationDetailedLabel,
@@ -86,6 +87,7 @@ import {
   leadProgramServiceLabel,
   leadSourceLabel,
   leadVisitTimingLabel,
+  normalizeLeadServiceValue,
 } from "@/pages/leads/model/leads-model";
 
 import {
@@ -143,6 +145,7 @@ type Draft = {
   allergies: LeadAllergyDraft[];
   caves: LeadCaveDraft[];
   serviceNeeds: string[];
+  serviceComments: Record<string, string>;
   discoverySource: string;
   referrer: string;
   serviceNotes: string;
@@ -204,7 +207,6 @@ const MAX_DOCUMENT_FILE_SIZE = 25 * 1024 * 1024;
 const SERVICE_CONCERN_ID = "lead-wizard-concern";
 const SERVICE_SPECIALTIES_ID = "lead-wizard-specialties";
 const MEDICAL_ANAMNESE_ID = "lead-wizard-anamnese";
-const SERVICE_NEED_OPTIONS = ["medical_support", "driver", "transfer", "concierge_support"] as const;
 
 const MASTER_FIELD_ORDER: MasterFieldKey[] = [
   "firstName",
@@ -326,9 +328,14 @@ function autosavePayload(
     wizard_state: {
       ...previousWizardState,
       step,
-      onboarding_version: 2,
+      onboarding_version: 3,
       discovery_source: draft.discoverySource,
       referrer: draft.referrer,
+      service_comments: draft.serviceNeeds.reduce<Record<string, string>>((comments, value) => {
+        const comment = draft.serviceComments[value];
+        if (comment?.trim()) comments[value] = comment;
+        return comments;
+      }, {}),
       clinical_draft: {
         diagnoses: draft.diagnoses,
         medications: draft.medications,
@@ -369,6 +376,15 @@ function stringFromUnknown(value: unknown) {
 
 function booleanFromUnknown(value: unknown) {
   return value === true;
+}
+
+function serviceCommentsFromLead(lead: LeadDetail) {
+  const stored = recordFromUnknown(lead.wizard_state?.["service_comments"]);
+  return Object.entries(stored).reduce<Record<string, string>>((comments, [value, comment]) => {
+    if (typeof comment !== "string" || !value.trim()) return comments;
+    comments[normalizeLeadServiceValue(value)] = comment;
+    return comments;
+  }, {});
 }
 
 function normalizedLanguageCode(value: string | null | undefined) {
@@ -518,9 +534,9 @@ function draftFromLead(lead: LeadDetail): Draft {
     caves: clinical.caves,
     serviceNeeds: Array.from(new Set([
       ...(lead.services ?? []),
-      ...(lead.selected_program ? [lead.selected_program] : []),
       ...(lead.needs_interpreter ? ["interpreter_support"] : []),
-    ])),
+    ].map(normalizeLeadServiceValue).filter(Boolean))),
+    serviceComments: serviceCommentsFromLead(lead),
     discoverySource: inputString(lead.wizard_state?.["discovery_source"]) || questionnaireText(lead, "discoverySource", "howDidYouHearAboutUs", "referralSource"),
     referrer: inputString(lead.wizard_state?.["referrer"]),
     serviceNotes: lead.notes ?? "",
@@ -1273,6 +1289,38 @@ export function LeadWizard({
     setDraft((current) => current ? { ...current, [key]: value } : current);
   };
 
+  const toggleServiceNeed = (value: string, checked: boolean) => {
+    const normalized = normalizeLeadServiceValue(value);
+    setError("");
+    setDraft((current) => {
+      if (!current) return current;
+      if (checked) {
+        return current.serviceNeeds.includes(normalized)
+          ? current
+          : { ...current, serviceNeeds: [...current.serviceNeeds, normalized] };
+      }
+      const serviceComments = { ...current.serviceComments };
+      delete serviceComments[normalized];
+      return {
+        ...current,
+        serviceNeeds: current.serviceNeeds.filter((item) => item !== normalized),
+        serviceComments,
+      };
+    });
+  };
+
+  const patchServiceComment = (value: string, comment: string) => {
+    const normalized = normalizeLeadServiceValue(value);
+    setError("");
+    setDraft((current) => current ? {
+      ...current,
+      serviceComments: {
+        ...current.serviceComments,
+        [normalized]: comment,
+      },
+    } : current);
+  };
+
   const touchMasterField = (field: MasterFieldKey) => {
     setTouchedMasterFields((current) => {
       if (current.has(field)) return current;
@@ -1459,6 +1507,48 @@ export function LeadWizard({
     }
   }
 
+  function commercialNeedsDescription() {
+    if (!draft) return "";
+    const serviceCommentLines = draft.serviceNeeds.flatMap((value) => {
+      const comment = draft.serviceComments[value]?.trim();
+      if (!comment) return [];
+      const label = knownLeadProgramServiceLabel(value, t) ?? serviceNeedLabel(value, tx);
+      return [`- ${label}: ${comment}`];
+    });
+
+    return [
+      draft.concern.trim(),
+      lead?.message ? `${tx("Комментарий клиента", "Kundennachricht")}: ${lead.message.trim()}` : "",
+      draft.serviceNeeds.length > 0
+        ? `${tx("Запрошенные услуги", "Gewünschte Leistungen")}: ${draft.serviceNeeds.map((value) => knownLeadProgramServiceLabel(value, t) ?? serviceNeedLabel(value, tx)).join(", ")}`
+        : "",
+      serviceCommentLines.length > 0
+        ? `${tx("Комментарии к услугам", "Kommentare zu Leistungen")}:
+${serviceCommentLines.join("\n")}`
+        : "",
+      lead?.location_detailed
+        ? `${tx("Текущее местонахождение", "Aktueller Aufenthaltsort")}: ${leadLocationDetailedLabel(lead.location_detailed, t)}`
+        : lead?.location
+          ? `${tx("Текущее местонахождение", "Aktueller Aufenthaltsort")}: ${leadLocationLabel(lead.location, t)}`
+          : "",
+      lead?.preferred_location
+        ? `${tx("Предпочитаемое место лечения", "Bevorzugter Behandlungsort")}: ${leadPreferredLocationLabel(lead.preferred_location, t)}`
+        : "",
+      lead?.visit_timing
+        ? `${tx("Желаемый срок", "Gewünschter Zeitraum")}: ${leadVisitTimingLabel(lead.visit_timing, t)}`
+        : "",
+      lead?.needs_interpreter
+        ? tx("Нужен переводчик", "Dolmetscher benötigt")
+        : "",
+      lead?.can_travel != null
+        ? `${tx("Может приехать", "Kann anreisen")}: ${yesNoValue(lead.can_travel, tx)}`
+        : "",
+      lead?.has_travel_documents != null
+        ? `${tx("Проездные документы", "Reisedokumente")}: ${yesNoValue(lead.has_travel_documents, tx)}`
+        : "",
+    ].filter(Boolean).join("\n");
+  }
+
   async function ensureCommercial(flags: CommercialFlagsPatch = {}) {
     if (!leadId || !draft) throw new Error(tx("Обращение не выбрано", "Kein Lead ausgewählt"));
     if (!lines.some(validLine)) throw new Error(tx("Добавьте корректную услугу", "Mindestens eine gültige Leistung ist erforderlich"));
@@ -1472,34 +1562,8 @@ export function LeadWizard({
       })).id;
     }
     let orderId = order?.id;
+    const needsDescription = commercialNeedsDescription();
     if (!orderId) {
-      const needsDescription = [
-        draft.concern.trim(),
-        lead?.message ? `${tx("Комментарий клиента", "Kundennachricht")}: ${lead.message.trim()}` : "",
-        draft.serviceNeeds.length > 0
-          ? `${tx("Запрошенные услуги", "Gewünschte Leistungen")}: ${draft.serviceNeeds.map((value) => knownLeadProgramServiceLabel(value, t) ?? serviceNeedLabel(value, tx)).join(", ")}`
-          : "",
-        lead?.location_detailed
-          ? `${tx("Текущее местонахождение", "Aktueller Aufenthaltsort")}: ${leadLocationDetailedLabel(lead.location_detailed, t)}`
-          : lead?.location
-            ? `${tx("Текущее местонахождение", "Aktueller Aufenthaltsort")}: ${leadLocationLabel(lead.location, t)}`
-            : "",
-        lead?.preferred_location
-          ? `${tx("Предпочитаемое место лечения", "Bevorzugter Behandlungsort")}: ${leadPreferredLocationLabel(lead.preferred_location, t)}`
-          : "",
-        lead?.visit_timing
-          ? `${tx("Желаемый срок", "Gewünschter Zeitraum")}: ${leadVisitTimingLabel(lead.visit_timing, t)}`
-          : "",
-        lead?.needs_interpreter
-          ? tx("Нужен переводчик", "Dolmetscher benötigt")
-          : "",
-        lead?.can_travel != null
-          ? `${tx("Может приехать", "Kann anreisen")}: ${yesNoValue(lead.can_travel, tx)}`
-          : "",
-        lead?.has_travel_documents != null
-          ? `${tx("Проездные документы", "Reisedokumente")}: ${yesNoValue(lead.has_travel_documents, tx)}`
-          : "",
-      ].filter(Boolean).join("\n");
       orderId = (await createOrder({
         source_lead_id: leadId,
         contract_id: contractId,
@@ -1522,6 +1586,7 @@ export function LeadWizard({
       prepayment_required: flags.prepayment_required ?? prepayment,
       signed_patient: flags.signed_patient ?? signedPatient,
       signed_agency: flags.signed_agency ?? signedAgency,
+      needs_description: needsDescription,
     });
     return { contractId, orderId };
   }
@@ -2194,8 +2259,66 @@ export function LeadWizard({
                   }]}
                 />
               ) : null}
-              <div className="space-y-3"><span className="block text-sm font-medium text-foreground">{tx("Запрошенные услуги", "Gewünschte Leistungen")}</span><div className="grid gap-2 sm:grid-cols-2">{Array.from(new Set([...SERVICE_NEED_OPTIONS, ...draft.serviceNeeds, ...(lead.selected_program ? [lead.selected_program] : [])])).map((value) => <label key={value} className="flex items-center gap-3 rounded-md border border-border px-3 py-2.5"><input type="checkbox" className="size-4 accent-[var(--brand)]" checked={draft.serviceNeeds.includes(value)} onChange={(event) => patch("serviceNeeds", event.target.checked ? [...draft.serviceNeeds, value] : draft.serviceNeeds.filter((item) => item !== value))} /><span className="text-sm text-foreground">{knownLeadProgramServiceLabel(value, t) ?? serviceNeedLabel(value, tx)}</span></label>)}</div></div>
-              <Field label={tx("Комментарий менеджера", "Kommentar des Managers")}><textarea className={cn(textareaClass, "min-h-24")} value={draft.serviceNotes} onChange={(event) => patch("serviceNotes", event.target.value)} /></Field>
+              <div className="space-y-3">
+                <span className="block text-sm font-medium text-foreground">
+                  {tx("Запрошенные услуги", "Gewünschte Leistungen")}
+                </span>
+                <div className="grid items-start gap-2 sm:grid-cols-2">
+                  {Array.from(new Set([
+                    ...LEAD_QUESTIONNAIRE_SERVICE_OPTIONS,
+                    ...draft.serviceNeeds,
+                  ])).map((value, index) => {
+                    const checked = draft.serviceNeeds.includes(value);
+                    const label = knownLeadProgramServiceLabel(value, t) ?? serviceNeedLabel(value, tx);
+                    const fieldKey = `${index}-${value.replace(/[^a-z0-9_-]/gi, "-")}`;
+                    const checkboxId = `lead-service-${fieldKey}`;
+                    const commentId = `lead-service-comment-${fieldKey}`;
+                    const commentLabel = tx("Комментарий к услуге", "Kommentar zur Leistung");
+                    return (
+                      <div
+                        key={value}
+                        className={cn(
+                          "overflow-hidden rounded-md border bg-background",
+                          checked ? "border-[var(--brand)]" : "border-border",
+                        )}
+                      >
+                        <label
+                          htmlFor={checkboxId}
+                          className="flex min-h-11 cursor-pointer items-center gap-3 px-3 py-2.5"
+                        >
+                          <input
+                            id={checkboxId}
+                            type="checkbox"
+                            className="size-4 shrink-0 accent-[var(--brand)]"
+                            checked={checked}
+                            onChange={(event) => toggleServiceNeed(value, event.target.checked)}
+                          />
+                          <span className="min-w-0 break-words text-sm text-foreground">{label}</span>
+                        </label>
+                        {checked ? (
+                          <div className="space-y-1.5 border-t border-border px-3 pb-3 pt-2.5">
+                            <label
+                              htmlFor={commentId}
+                              className="block text-[11px] font-medium uppercase text-muted-foreground"
+                            >
+                              {commentLabel}
+                            </label>
+                            <textarea
+                              id={commentId}
+                              aria-label={`${commentLabel}: ${label}`}
+                              className={cn(textareaClass, "min-h-20 resize-y")}
+                              value={draft.serviceComments[value] ?? ""}
+                              onChange={(event) => patchServiceComment(value, event.target.value)}
+                              placeholder={tx("Детали по этой услуге", "Details zu dieser Leistung")}
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <Field label={tx("Общий комментарий", "Allgemeiner Kommentar")}><textarea className={cn(textareaClass, "min-h-24")} value={draft.serviceNotes} onChange={(event) => patch("serviceNotes", event.target.value)} /></Field>
               <Field label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")}>
                 <Input
                   name="discovery_source"

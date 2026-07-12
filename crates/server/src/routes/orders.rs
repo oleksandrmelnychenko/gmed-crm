@@ -101,6 +101,7 @@ struct UpdateOrderCommercialBasisRequest {
     signed_patient: Option<bool>,
     signed_agency: Option<bool>,
     prepayment_required: Option<bool>,
+    needs_description: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -2676,6 +2677,7 @@ async fn update_order_commercial_basis(
              signed_patient = COALESCE($4, signed_patient),
              signed_agency = COALESCE($5, signed_agency),
              prepayment_required = COALESCE($6, prepayment_required),
+             needs_description = COALESCE($7, needs_description),
              signed_patient_at = CASE
                  WHEN $4 IS TRUE THEN COALESCE(signed_patient_at, now())
                  WHEN $4 IS FALSE THEN NULL
@@ -2702,6 +2704,7 @@ async fn update_order_commercial_basis(
     .bind(body.signed_patient)
     .bind(body.signed_agency)
     .bind(body.prepayment_required)
+    .bind(body.needs_description.as_deref())
     .fetch_optional(&state.db)
     .await
     {

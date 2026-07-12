@@ -437,7 +437,8 @@ async fn lead_order_and_service_are_idempotent_without_creating_patient() {
             "contract_id": contract_id,
             "signed_patient": true,
             "signed_agency": true,
-            "prepayment_required": true
+            "prepayment_required": true,
+            "needs_description": "Driver: airport pickup at 14:30"
         })),
     )
     .await;
@@ -449,6 +450,17 @@ async fn lead_order_and_service_are_idempotent_without_creating_patient() {
     assert!(commercial["signed_patient_at"].as_str().is_some());
     assert!(commercial["signed_agency_at"].as_str().is_some());
     assert!(commercial["signed_at"].as_str().is_some());
+
+    let needs_description: Option<String> =
+        sqlx::query_scalar("SELECT needs_description FROM orders WHERE id = $1")
+            .bind(Uuid::parse_str(order_id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        needs_description.as_deref(),
+        Some("Driver: airport pickup at 14:30")
+    );
 
     let (status, orders) = json_request(
         &app,

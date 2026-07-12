@@ -294,6 +294,7 @@ export function updateOrderCommercialBasis(
     signed_patient?: boolean;
     signed_agency?: boolean;
     prepayment_required?: boolean;
+    needs_description?: string;
   },
 ) {
   return postJson<{
