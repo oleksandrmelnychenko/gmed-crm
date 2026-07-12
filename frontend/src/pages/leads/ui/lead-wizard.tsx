@@ -215,6 +215,7 @@ const MASTER_FIELD_ORDER: MasterFieldKey[] = [
   "legalSex",
   "email",
   "phone",
+  "street",
   "city",
   "zip",
 ];
@@ -715,7 +716,7 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Email or phone is required": tx("Укажите электронную почту или телефон", "E-Mail-Adresse oder Telefonnummer angeben"),
     "Privacy practices consent is missing": tx("Подтвердите ознакомление с политикой конфиденциальности", "Datenschutzhinweise bestätigen"),
     "Healthcare consent is missing": tx("Получите согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten einholen"),
-    "Complete street, city and postal code": tx("Заполните город и почтовый индекс", "Ort und Postleitzahl vollständig angeben"),
+    "Complete street, city and postal code": tx("Заполните улицу, город и почтовый индекс", "Straße, Ort und Postleitzahl vollständig angeben"),
     "Complete city and postal code": tx("Заполните город и почтовый индекс", "Ort und Postleitzahl vollständig angeben"),
     "Primary concern is missing": tx("Укажите причину обращения", "Anliegen angeben"),
     "Requested specialty is missing": tx("Выберите хотя бы одну специализацию", "Mindestens eine Fachrichtung auswählen"),
@@ -775,8 +776,11 @@ function validateMasterDraft(draft: Draft | null, tx: Tx): MasterValidationError
     }
   }
 
-  if (!draft.city.trim()) errors.city = required;
-  if (!draft.zip.trim()) errors.zip = required;
+  if (draft.healthcareConsent) {
+    if (!draft.street.trim()) errors.street = required;
+    if (!draft.city.trim()) errors.city = required;
+    if (!draft.zip.trim()) errors.zip = required;
+  }
   return errors;
 }
 
@@ -1335,6 +1339,17 @@ export function LeadWizard({
       ? masterErrors[field]
       : undefined;
 
+  const ensureMasterDataReady = () => {
+    const firstInvalid = MASTER_FIELD_ORDER.find((field) => masterErrors[field]);
+    if (!firstInvalid) return true;
+    setMasterValidationAttempted(true);
+    setStep("master_data");
+    window.requestAnimationFrame(() => {
+      document.getElementById(MASTER_FIELD_IDS[firstInvalid])?.focus();
+    });
+    return false;
+  };
+
   async function save(target = step, trackBusy = true): Promise<boolean> {
     if (!leadId || !draft) return false;
     if (trackBusy) setBusy("save");
@@ -1402,6 +1417,7 @@ export function LeadWizard({
   async function finishIntake(targetStep: StepId): Promise<boolean> {
     if (!leadId || !draft) return false;
     setError("");
+    if (!ensureMasterDataReady()) return false;
     if (!draft.concern.trim()) {
       setServiceValidationAttempted(true);
       setStep("service");
@@ -1752,16 +1768,7 @@ ${serviceCommentLines.join("\n")}`
   }
 
   function next() {
-    if (step === "master_data" && Object.keys(masterErrors).length > 0) {
-      setMasterValidationAttempted(true);
-      const firstInvalid = MASTER_FIELD_ORDER.find((field) => masterErrors[field]);
-      if (firstInvalid) {
-        window.requestAnimationFrame(() => {
-          document.getElementById(MASTER_FIELD_IDS[firstInvalid])?.focus();
-        });
-      }
-      return;
-    }
+    if (step === "master_data" && !ensureMasterDataReady()) return;
 
     const target = STEPS[index + 1];
     if (!target) return;
@@ -2117,18 +2124,26 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label={tx("Улица и дом", "Straße und Hausnummer")}
+                  required={draft.healthcareConsent}
+                  error={visibleMasterError("street")}
+                  errorId={`${MASTER_FIELD_IDS.street}-error`}
                 >
                   <Input
                     id={MASTER_FIELD_IDS.street}
                     name="street_address"
                     autoComplete="street-address"
+                    required={draft.healthcareConsent}
+                    aria-invalid={Boolean(visibleMasterError("street"))}
+                    aria-describedby={visibleMasterError("street") ? `${MASTER_FIELD_IDS.street}-error` : undefined}
+                    className={cn(visibleMasterError("street") && "border-destructive")}
                     value={draft.street}
+                    onBlur={() => touchMasterField("street")}
                     onChange={(event) => patch("street", event.target.value)}
                   />
                 </Field>
                 <Field
                   label={tx("Город", "Ort")}
-                  required
+                  required={draft.healthcareConsent}
                   error={visibleMasterError("city")}
                   errorId={`${MASTER_FIELD_IDS.city}-error`}
                 >
@@ -2136,7 +2151,7 @@ ${serviceCommentLines.join("\n")}`
                     id={MASTER_FIELD_IDS.city}
                     name="city"
                     autoComplete="address-level2"
-                    required
+                    required={draft.healthcareConsent}
                     aria-invalid={Boolean(visibleMasterError("city"))}
                     aria-describedby={visibleMasterError("city") ? `${MASTER_FIELD_IDS.city}-error` : undefined}
                     className={cn(visibleMasterError("city") && "border-destructive")}
@@ -2155,7 +2170,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label={tx("Почтовый индекс", "Postleitzahl")}
-                  required
+                  required={draft.healthcareConsent}
                   error={visibleMasterError("zip")}
                   errorId={`${MASTER_FIELD_IDS.zip}-error`}
                 >
@@ -2163,7 +2178,7 @@ ${serviceCommentLines.join("\n")}`
                     id={MASTER_FIELD_IDS.zip}
                     name="postal_code"
                     autoComplete="postal-code"
-                    required
+                    required={draft.healthcareConsent}
                     aria-invalid={Boolean(visibleMasterError("zip"))}
                     aria-describedby={visibleMasterError("zip") ? `${MASTER_FIELD_IDS.zip}-error` : undefined}
                     className={cn(visibleMasterError("zip") && "border-destructive")}

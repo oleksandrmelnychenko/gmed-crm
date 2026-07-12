@@ -276,7 +276,10 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
         legal_sex: lead.conversion_ready ? "female" : null,
         primary_language: lead.conversion_ready ? "de" : "",
         locale: lead.conversion_ready ? "ru-RU" : "de",
+        street_address: lead.conversion_ready ? "Hauptstr. 1" : null,
+        city: lead.conversion_ready ? "Berlin" : null,
         state: lead.conversion_ready ? "Berlin" : null,
+        zip_code: lead.conversion_ready ? "10115" : null,
         primary_phone_type: lead.conversion_ready ? "mobile" : null,
         phones: lead.conversion_ready
           ? [
@@ -2156,6 +2159,54 @@ test.describe("lead onboarding wizard", () => {
       wizard.getByRole("combobox", { name: "Leistung aus dem Katalog auswählen" }),
     ).toBeVisible();
     await expect(wizard.getByText("Kundenbedarf", { exact: true })).toBeVisible();
+  });
+
+  test("healthcare consent makes the complete address required", async ({ page }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    await page.goto(`/leads?lead=${leadId}`);
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    const navigation = wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" });
+    const consentName = "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor";
+
+    await navigation.getByRole("button", { name: /Unterlagen/i }).click();
+    const healthcareConsent = wizard.getByRole("checkbox", { name: consentName });
+    await expect(healthcareConsent).toBeChecked();
+    const consentRemovedRequest = page.waitForRequest((request) => {
+      if (request.method() !== "POST" || !request.url().endsWith(`/leads/${leadId}/update`)) return false;
+      return (request.postDataJSON() as { consent_healthcare?: boolean }).consent_healthcare === false;
+    });
+    await healthcareConsent.uncheck();
+    await consentRemovedRequest;
+
+    await navigation.getByRole("button", { name: /Personendaten/i }).click();
+    const street = wizard.locator('input[name="street_address"]');
+    const city = wizard.locator('input[name="city"]');
+    const postalCode = wizard.locator('input[name="postal_code"]');
+    await street.fill("");
+    await city.fill("");
+    await postalCode.fill("");
+    await expect(street).not.toHaveAttribute("required", "");
+    await expect(city).not.toHaveAttribute("required", "");
+    await expect(postalCode).not.toHaveAttribute("required", "");
+
+    await navigation.getByRole("button", { name: /Unterlagen/i }).click();
+    const consentGrantedRequest = page.waitForRequest((request) => {
+      if (request.method() !== "POST" || !request.url().endsWith(`/leads/${leadId}/update`)) return false;
+      return (request.postDataJSON() as { consent_healthcare?: boolean }).consent_healthcare === true;
+    });
+    await wizard.getByRole("checkbox", { name: consentName }).check();
+    await consentGrantedRequest;
+
+    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
+    await expect(navigation.getByRole("button", { name: /Personendaten/i })).toHaveAttribute("aria-current", "step");
+    await expect(street).toHaveAttribute("required", "");
+    await expect(city).toHaveAttribute("required", "");
+    await expect(postalCode).toHaveAttribute("required", "");
+    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
+    await expect(street).toBeFocused();
+    await expect(wizard.getByText("Pflichtfeld", { exact: true }).first()).toBeVisible();
   });
 
   test("wizard uses clear Russian copy across all stages", async ({ page }) => {

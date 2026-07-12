@@ -455,6 +455,7 @@ struct LeadConversionReadinessInput {
     legal_sex: Option<String>,
     email: Option<String>,
     phone: Option<String>,
+    street_address: Option<String>,
     city: Option<String>,
     zip_code: Option<String>,
     primary_concern_text: Option<String>,
@@ -488,11 +489,14 @@ fn evaluate_lead_conversion_readiness(
             .phone
             .as_deref()
             .is_some_and(|value| !value.trim().is_empty());
-    let address_present = [&input.city, &input.zip_code].into_iter().all(|value| {
-        value
-            .as_deref()
-            .is_some_and(|value| !value.trim().is_empty())
-    });
+    let address_present = [&input.street_address, &input.city, &input.zip_code]
+        .into_iter()
+        .all(|value| {
+            value
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+        });
+    let address_ready = !input.consent_healthcare || address_present;
     let primary_concern_present = input
         .primary_concern_text
         .as_deref()
@@ -507,7 +511,7 @@ fn evaluate_lead_conversion_readiness(
         _ => false,
     };
     let master_data_ready =
-        birth_date_present && legal_sex_present && primary_contact_present && address_present;
+        birth_date_present && legal_sex_present && primary_contact_present && address_ready;
     let medical_ready = input.intake_completed;
     let service_ready = primary_concern_present && specialties_present;
     let documents_ready = compliance_completed
@@ -575,8 +579,8 @@ fn evaluate_lead_conversion_readiness(
         }),
         json!({
             "key": "address_present",
-            "label": "Address captured",
-            "passed": address_present,
+            "label": "Address captured when healthcare consent exists",
+            "passed": address_ready,
             "blocking_for": "conversion",
             "stage": "master_data",
         }),
@@ -691,8 +695,8 @@ fn evaluate_lead_conversion_readiness(
     if !lead_qualified {
         conversion_reasons.insert(0, "Lead must be qualified before conversion".to_string());
     }
-    if !address_present {
-        conversion_reasons.push("Complete city and postal code".to_string());
+    if input.consent_healthcare && !address_present {
+        conversion_reasons.push("Complete street, city and postal code".to_string());
     }
     if !primary_concern_present {
         conversion_reasons.push("Primary concern is missing".to_string());
@@ -767,6 +771,7 @@ fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversio
         legal_sex: row.try_get("legal_sex").unwrap_or_default(),
         email: row.try_get("email").unwrap_or_default(),
         phone: row.try_get("phone").unwrap_or_default(),
+        street_address: row.try_get("street_address").unwrap_or_default(),
         city: row.try_get("city").unwrap_or_default(),
         zip_code: row.try_get("zip_code").unwrap_or_default(),
         primary_concern_text: row.try_get("primary_concern_text").unwrap_or_default(),
@@ -4010,6 +4015,7 @@ mod lead_conversion_readiness_tests {
             legal_sex: Some("female".to_string()),
             email: Some("lead@example.com".to_string()),
             phone: None,
+            street_address: Some("Hauptstr. 1".to_string()),
             city: Some("Berlin".to_string()),
             zip_code: Some("10115".to_string()),
             primary_concern_text: Some("Knee pain".to_string()),
@@ -4040,15 +4046,52 @@ mod lead_conversion_readiness_tests {
     }
 
     #[test]
-    fn city_and_postal_code_are_sufficient_address_data() {
+    fn address_is_not_required_before_healthcare_consent() {
         let mut input = ready_input();
-        input.city = Some("Berlin".to_string());
-        input.zip_code = Some("10115".to_string());
+        input.consent_healthcare = false;
+        input.street_address = None;
+        input.city = None;
+        input.zip_code = None;
 
         let readiness = evaluate_lead_conversion_readiness(&input);
 
-        assert!(readiness.conversion_ready);
-        assert!(readiness.conversion_reasons.is_empty());
+        assert!(!readiness.conversion_ready);
+        assert_eq!(
+            readiness.qualification_reasons,
+            vec!["Healthcare consent is missing".to_string()]
+        );
+        assert!(
+            !readiness
+                .conversion_reasons
+                .contains(&"Complete street, city and postal code".to_string())
+        );
+        assert_eq!(readiness.payload["steps"][0]["ready"], true);
+    }
+
+    #[test]
+    fn complete_address_is_required_after_healthcare_consent() {
+        for missing_field in ["street", "city", "postal_code"] {
+            let mut input = ready_input();
+            match missing_field {
+                "street" => input.street_address = None,
+                "city" => input.city = None,
+                "postal_code" => input.zip_code = None,
+                _ => unreachable!(),
+            }
+
+            let readiness = evaluate_lead_conversion_readiness(&input);
+
+            assert!(!readiness.conversion_ready, "missing {missing_field}");
+            assert_eq!(
+                readiness.conversion_reasons,
+                vec!["Complete street, city and postal code".to_string()],
+                "missing {missing_field}"
+            );
+            assert_eq!(
+                readiness.payload["steps"][0]["ready"], false,
+                "missing {missing_field}"
+            );
+        }
     }
 
     #[test]
