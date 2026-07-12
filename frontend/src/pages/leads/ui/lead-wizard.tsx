@@ -2,8 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   Archive,
   Check,
-  ChevronLeft,
-  ChevronRight,
   CircleAlert,
   Download,
   Eye,
@@ -1792,31 +1790,33 @@ ${serviceCommentLines.join("\n")}`
     }
   }
 
-  function next() {
+  function navigateToStep(target: StepId, targetIndex: number) {
+    if (target === step || busy !== null) return;
+    if (targetIndex < index) {
+      setStep(target);
+      return;
+    }
     if (step === "master_data" && !ensureMasterDataReady()) return;
-
-    const target = STEPS[index + 1];
-    if (!target) return;
     if (step === "documents") {
-      void finishIntake(target.id).then((saved) => {
-        if (saved) setStep(target.id);
+      void finishIntake(target).then((saved) => {
+        if (saved) setStep(target);
       });
       return;
     }
     if (step === "medical") {
-      void finishMedical(target.id).then((saved) => {
-        if (saved) setStep(target.id);
+      void finishMedical(target).then((saved) => {
+        if (saved) setStep(target);
       });
       return;
     }
     if (step === "service") {
-      void finishService(target.id).then((saved) => {
-        if (saved) setStep(target.id);
+      void finishService(target).then((saved) => {
+        if (saved) setStep(target);
       });
       return;
     }
-    void save(target.id).then((saved) => {
-      if (saved) setStep(target.id);
+    void save(target).then((saved) => {
+      if (saved) setStep(target);
     });
   }
 
@@ -1928,30 +1928,11 @@ ${serviceCommentLines.join("\n")}`
                   key={item.id}
                   type="button"
                   data-step={item.id}
-                  onClick={() => {
-                    if (step === "medical" && itemIndex > index) {
-                      void finishMedical(item.id).then((saved) => {
-                        if (saved) setStep(item.id);
-                      });
-                      return;
-                    }
-                    if (step === "service" && itemIndex > index) {
-                      void finishService(item.id).then((saved) => {
-                        if (saved) setStep(item.id);
-                      });
-                      return;
-                    }
-                    if (step === "documents" && itemIndex > index) {
-                      void finishIntake(item.id).then((saved) => {
-                        if (saved) setStep(item.id);
-                      });
-                      return;
-                    }
-                    setStep(item.id);
-                  }}
+                  disabled={loading || isBusy}
+                  onClick={() => navigateToStep(item.id, itemIndex)}
                   aria-current={selected ? "step" : undefined}
                   className={cn(
-                    "relative min-w-0 border-r border-border px-3 py-3 text-left last:border-r-0 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                    "relative min-w-0 border-r border-border px-3 py-3 text-left last:border-r-0 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
                     selected && "bg-muted/50 after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:bg-[var(--brand)]",
                   )}
                 >
@@ -1980,8 +1961,8 @@ ${serviceCommentLines.join("\n")}`
                 <LeadQuestionnaireFacts
                   items={[
                     { label: tx("Тип", "Typ"), value: intakeTypeLabel(lead, tx) },
-                    { label: tx("Источник", "Quelle"), value: lead.source ? leadSourceLabel(lead.source, t) : tx("Не указано", "Nicht angegeben") },
-                    { label: tx("Сценарий", "Ablauf"), value: intakeFlowLabel(lead.flow, tx) },
+                    { label: tx("Канал поступления", "Eingangskanal"), value: lead.source ? leadSourceLabel(lead.source, t) : tx("Не указано", "Nicht angegeben") },
+                    { label: tx("Тип формы", "Formulartyp"), value: intakeFlowLabel(lead.flow, tx) },
                     ...(isExternalIntakeLead ? [{
                       label: tx("Язык заполнения", "Eingabesprache"),
                       value: normalizedLanguageCode(lead.locale)
@@ -2346,7 +2327,7 @@ ${serviceCommentLines.join("\n")}`
                             <textarea
                               id={commentId}
                               aria-label={`${commentLabel}: ${label}`}
-                              className={cn(textareaClass, "min-h-20 resize-y")}
+                              className={cn(textareaClass, "min-h-20 resize-y bg-white text-slate-900")}
                               value={draft.serviceComments[value] ?? ""}
                               onChange={(event) => patchServiceComment(value, event.target.value)}
                               placeholder={tx("Детали по этой услуге", "Details zu dieser Leistung")}
@@ -2658,10 +2639,6 @@ ${serviceCommentLines.join("\n")}`
           ) : null}
         </main>
 
-        <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
-          <Button type="button" variant="outline" size="sm" disabled={isBusy || index === 0} onClick={() => setStep(STEPS[index - 1].id)}><ChevronLeft className="size-3.5" />{tx("Назад", "Zurück")}</Button>
-          {step !== "release" ? <Button type="button" size="sm" disabled={isBusy} onClick={next}>{busy === "save" || busy === "intake" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}{tx("Далее", "Weiter")}<ChevronRight className="size-3.5" /></Button> : null}
-        </footer>
       </DialogContent>
       </Dialog>
       <Dialog

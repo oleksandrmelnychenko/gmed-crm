@@ -2022,6 +2022,8 @@ test.describe("lead onboarding wizard", () => {
     const navigation = wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" });
     await expect(navigation.getByRole("button")).toHaveCount(6);
     await expect(wizard.getByText("Fragebogen", { exact: true })).toBeVisible();
+    await expect(wizard.getByText("Eingangskanal", { exact: true })).toBeVisible();
+    await expect(wizard.getByText("Formulartyp", { exact: true })).toBeVisible();
     await expect(wizard.getByText("Website-Assistent", { exact: true })).toBeVisible();
     await expect(wizard.getByText("Russisch (ru)", { exact: true })).toBeVisible();
     await expect(wizard.getByRole("textbox", { name: "WhatsApp" })).toHaveValue("+49 30 100002");
@@ -2029,6 +2031,8 @@ test.describe("lead onboarding wizard", () => {
       wizard.getByText("Ein Patient wird erst nach der finalen Freigabe angelegt."),
     ).toHaveCount(0);
     await expect(wizard.getByRole("button", { name: "Patient anlegen" })).toHaveCount(0);
+    await expect(wizard.getByRole("button", { name: "Zurück", exact: true })).toHaveCount(0);
+    await expect(wizard.getByRole("button", { name: "Weiter", exact: true })).toHaveCount(0);
 
     await navigation.getByRole("button", { name: /Medizinische Merkmale/i }).click();
     await expect(wizard.getByText("Krankenversicherung vorhanden", { exact: true })).toBeVisible();
@@ -2051,7 +2055,7 @@ test.describe("lead onboarding wizard", () => {
       const payload = request.postDataJSON() as { wizard_state?: { clinical_draft?: { medications?: Array<{ name?: string }> } } };
       return payload.wizard_state?.clinical_draft?.medications?.[0]?.name === "Ibuprofen";
     });
-    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
+    await navigation.getByRole("button", { name: /Servicehistorie/i }).click();
     expect((await diagnosisRequest).postDataJSON()).toMatchObject({ items: [{ erkrankung: "Gonarthrose" }] });
     expect((await allergyRequest).postDataJSON()).toMatchObject({ items: [{ allergie: "Penicillin" }] });
     expect((await medicationRequest).postDataJSON()).toMatchObject({ items: [{ handelsname: "Ibuprofen", med_typ: "permanent" }] });
@@ -2097,11 +2101,11 @@ test.describe("lead onboarding wizard", () => {
     await wizard
       .getByRole("checkbox", { name: "Limousinenservice und privater Fahrer", exact: true })
       .check();
-    await wizard
-      .getByRole("textbox", {
-        name: "Kommentar zur Leistung: Limousinenservice und privater Fahrer",
-      })
-      .fill("Abholung am Flughafen BER um 14:30");
+    const driverComment = wizard.getByRole("textbox", {
+      name: "Kommentar zur Leistung: Limousinenservice und privater Fahrer",
+    });
+    await expect(driverComment).toHaveCSS("background-color", "rgb(255, 255, 255)");
+    await driverComment.fill("Abholung am Flughafen BER um 14:30");
     expect((await serviceCommentRequest).postDataJSON()).toMatchObject({
       services: expect.arrayContaining(["driver"]),
       wizard_state: {
@@ -2129,7 +2133,7 @@ test.describe("lead onboarding wizard", () => {
     );
 
     await expect(wizard.getByRole("button", { name: "Angaben bestätigen" })).toHaveCount(0);
-    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
+    await navigation.getByRole("button", { name: /Unterlagen/i }).click();
     await expect(wizard.getByText("Ausweisdokument")).toBeVisible();
     await expect(wizard.getByText("Datenschutzeinwilligung (DSGVO)")).toBeVisible();
     await expect(
@@ -2199,12 +2203,12 @@ test.describe("lead onboarding wizard", () => {
     await wizard.getByRole("checkbox", { name: consentName }).check();
     await consentGrantedRequest;
 
-    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
+    await navigation.getByRole("button", { name: /Vertrag & Angebot/i }).click();
     await expect(navigation.getByRole("button", { name: /Personendaten/i })).toHaveAttribute("aria-current", "step");
     await expect(street).toHaveAttribute("required", "");
     await expect(city).toHaveAttribute("required", "");
     await expect(postalCode).toHaveAttribute("required", "");
-    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
+    await navigation.getByRole("button", { name: /Medizinische Merkmale/i }).click();
     await expect(street).toBeFocused();
     await expect(wizard.getByText("Pflichtfeld", { exact: true }).first()).toBeVisible();
   });
@@ -2216,6 +2220,7 @@ test.describe("lead onboarding wizard", () => {
 
     const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
     await expect(wizard.locator('input[name="first_name"]')).toBeVisible();
+    const navigation = wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" });
     const repeatedReads: string[] = [];
     const clinicalWrites: string[] = [];
     page.on("request", (request) => {
@@ -2244,7 +2249,7 @@ test.describe("lead onboarding wizard", () => {
       }
     });
 
-    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
+    await navigation.getByRole("button", { name: /Medizinische Merkmale/i }).click();
     await expect(wizard.getByRole("textbox", { name: "Aktuelle Anamnese" })).toBeVisible();
     await page.waitForTimeout(150);
     expect(repeatedReads).toEqual([]);
@@ -2284,10 +2289,12 @@ test.describe("lead onboarding wizard", () => {
     const wizard = page.getByRole("dialog", { name: "Оформление обращения" });
     const navigation = wizard.getByRole("navigation", { name: "Этапы оформления" });
     await expect(navigation.getByRole("button", { name: /Данные клиента/i })).toBeVisible();
+    await expect(wizard.getByText("Канал поступления", { exact: true })).toBeVisible();
+    await expect(wizard.getByText("Тип формы", { exact: true })).toBeVisible();
 
     await navigation.getByRole("button", { name: /Медицинская характеристика/i }).click();
     await wizard.getByRole("textbox", { name: "Анамнез" }).fill("Жалобы в течение трёх недель");
-    await wizard.getByRole("button", { name: "Далее", exact: true }).click();
+    await navigation.getByRole("button", { name: /Сервисная история/i }).click();
 
     await expect(navigation.getByRole("button", { name: /Сервисная история/i })).toHaveAttribute("aria-current", "step");
     await expect(wizard.getByText("Причина обращения и специализации")).toHaveCount(0);
@@ -2388,6 +2395,9 @@ test.describe("lead onboarding wizard", () => {
         email: "ready.lead@example.com",
         phone: "+49 30 100002",
         country: "DE",
+        street_address: "Hauptstr. 1",
+        city: "Berlin",
+        zip_code: "10115",
         qualification_status: "qualified",
         compliance_status: "signed",
         date_of_birth: "1990-01-01",
@@ -2521,7 +2531,7 @@ test.describe("responsive staff workspace", () => {
     await firstNameInput.blur();
     await expect(wizard.getByText("Pflichtfeld", { exact: true }).first()).toBeVisible();
     await expect(wizard.getByText("Pflichtfelder ausfüllen", { exact: true })).toHaveCount(0);
-    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
+    await navigation.getByRole("button", { name: /Medizinische Merkmale/i }).click();
     await expect(firstNameInput).toBeFocused();
 
     const autosaveRequest = page.waitForRequest((request) => {
@@ -2570,7 +2580,7 @@ test.describe("responsive staff workspace", () => {
 
     await navigation.getByRole("button", { name: /Medizinische Merkmale/i }).click();
     await wizard.getByRole("textbox", { name: "Aktuelle Anamnese" }).fill("Beschwerden seit drei Wochen");
-    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
+    await navigation.getByRole("button", { name: /Servicehistorie/i }).click();
     await wizard
       .getByRole("textbox", { name: "Anliegen", exact: true })
       .fill("Orthopädische Beratung");
