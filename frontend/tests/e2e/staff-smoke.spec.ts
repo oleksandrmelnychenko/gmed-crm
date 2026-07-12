@@ -2209,6 +2209,73 @@ test.describe("lead onboarding wizard", () => {
     await expect(wizard.getByText("Pflichtfeld", { exact: true }).first()).toBeVisible();
   });
 
+  test("wizard autosave avoids redundant reloads and clinical writes", async ({ page }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    await page.goto(`/leads?lead=${leadId}`);
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    await expect(wizard.locator('input[name="first_name"]')).toBeVisible();
+    const repeatedReads: string[] = [];
+    const clinicalWrites: string[] = [];
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname.replace(/^\/api\/v1/, "");
+      if (request.method() === "GET" && (
+        path === `/leads/${leadId}`
+        || path.startsWith("/documents")
+        || path.startsWith("/cases?")
+        || path.startsWith("/framework-contracts")
+        || path.startsWith("/orders")
+        || path.startsWith("/quotes")
+        || path.startsWith("/providers/specializations")
+        || path.startsWith("/agency-services")
+        || path === "/cases/meta/doctors"
+      )) {
+        repeatedReads.push(path);
+      }
+      if (request.method() === "POST" && (
+        path === "/cases"
+        || path.endsWith("/anamnesis")
+        || path.endsWith("/vorerkrankungen")
+        || path.endsWith("/allergien")
+        || path.endsWith("/medikamente")
+      )) {
+        clinicalWrites.push(path);
+      }
+    });
+
+    await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
+    await expect(wizard.getByRole("textbox", { name: "Aktuelle Anamnese" })).toBeVisible();
+    await page.waitForTimeout(150);
+    expect(repeatedReads).toEqual([]);
+
+    const medicalAutosave = page.waitForRequest((request) => {
+      if (request.method() !== "POST" || !request.url().endsWith(`/leads/${leadId}/update`)) return false;
+      return (request.postDataJSON() as { additional_concerns?: string }).additional_concerns
+        === "Performance-Test Anamnese";
+    });
+    await wizard
+      .getByRole("textbox", { name: "Aktuelle Anamnese" })
+      .fill("Performance-Test Anamnese");
+    const medicalAutosaveRequest = await medicalAutosave;
+    expect(medicalAutosaveRequest.postDataJSON()).toMatchObject({
+      additional_concerns: "Performance-Test Anamnese",
+    });
+    expect((await medicalAutosaveRequest.response())?.ok()).toBe(true);
+    await page.waitForTimeout(250);
+    expect(clinicalWrites).toEqual([]);
+
+    await wizard.getByRole("button", { name: "Schließen" }).click();
+    await expect(wizard).toBeHidden();
+    await page.getByRole("row").filter({ hasText: "Ready Lead" }).click();
+    const reopenedWizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    await reopenedWizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" })
+      .getByRole("button", { name: /Medizinische Merkmale/i })
+      .click();
+    await expect(reopenedWizard.getByRole("textbox", { name: "Aktuelle Anamnese" }))
+      .toHaveValue("Performance-Test Anamnese");
+  });
+
   test("wizard uses clear Russian copy across all stages", async ({ page }) => {
     await page.goto("/leads");
     await page.getByRole("button", { name: "Sprache wechseln" }).click();

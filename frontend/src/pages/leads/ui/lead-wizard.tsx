@@ -509,6 +509,15 @@ function clinicalRowsFromLead(lead: LeadDetail) {
   };
 }
 
+function hasStoredClinicalDraft(lead: LeadDetail) {
+  const clinical = asRecord(lead.wizard_state?.["clinical_draft"]);
+  return Boolean(
+    clinical
+    && ["diagnoses", "medications", "allergies", "caves"]
+      .some((key) => Array.isArray(clinical[key])),
+  );
+}
+
 function draftFromLead(lead: LeadDetail): Draft {
   const clinical = clinicalRowsFromLead(lead);
   return {
@@ -937,7 +946,7 @@ export function LeadWizard({
       const paymentQuote = nextQuotes.find((item) => item.status === "accepted") ?? nextQuotes[0];
       const storedCommercialDraft = storedCommercialDraftFromLead(nextLead);
       const leadDraft = draftFromLead(nextLead);
-      const nextDraft: Draft = nextCaseDetail ? {
+      const nextDraft: Draft = nextCaseDetail && !hasStoredClinicalDraft(nextLead) ? {
         ...leadDraft,
         concern: nextCaseDetail.hauptanfragegrund || leadDraft.concern,
         anamnese: nextCaseDetail.aktuelle_anamnese || leadDraft.anamnese,
@@ -1063,6 +1072,26 @@ export function LeadWizard({
       setLoading(false);
     }
   }, [leadId, tx]);
+
+  const refreshLeadState = useCallback(async () => {
+    if (!leadId) return null;
+    const nextLead = await fetchLeadDetail(leadId);
+    if (hydrated.current === leadId) {
+      setLead(nextLead);
+    }
+    return nextLead;
+  }, [leadId]);
+
+  const refreshDocumentsState = useCallback(async () => {
+    if (!leadId) return;
+    const [nextLead, nextDocuments] = await Promise.all([
+      fetchLeadDetail(leadId),
+      fetchDocuments("/documents?lead_id=" + encodeURIComponent(leadId)),
+    ]);
+    if (hydrated.current !== leadId) return;
+    setLead(nextLead);
+    setDocuments(nextDocuments);
+  }, [leadId]);
 
   useEffect(() => {
     if (open && leadId) void reload(true);
@@ -1229,7 +1258,6 @@ export function LeadWizard({
 
       try {
         await updateLeadWizard(targetLeadId, payload);
-        if (snapshot.step === "medical") await persistMedicalDraft(snapshot.draft);
         if (hydrated.current !== targetLeadId) return;
 
         wizardStateBaseRef.current = payload.wizard_state;
@@ -1258,7 +1286,7 @@ export function LeadWizard({
       () => undefined,
     );
     return queued;
-  }, [leadId, persistMedicalDraft, tx]);
+  }, [leadId, tx]);
 
   useEffect(() => {
     if (!open || !leadId || !draft || loading) return;
@@ -1364,7 +1392,6 @@ export function LeadWizard({
       };
       currentAutosaveSignatureRef.current = autosaveSnapshotSignature(snapshot);
       await persistSnapshot(snapshot, true);
-      await reload(false);
       return true;
     } catch (nextError) {
       setError(errorText(nextError, tx));
@@ -1440,8 +1467,8 @@ export function LeadWizard({
       const saved = await save(targetStep, false);
       if (saved && lead?.qualification_status !== "qualified") {
         await updateLeadStatus(leadId, "qualified");
-        await reload(false);
       }
+      if (saved) await refreshLeadState();
       return saved;
     } catch (nextError) {
       setError(errorText(nextError, tx));
@@ -1466,7 +1493,7 @@ export function LeadWizard({
       form.set("art", kind === "identity" ? "identity" : "consent");
       form.set("category", kind === "identity" ? "identity" : "consent");
       await uploadDocument(form);
-      await reload(false);
+      await refreshDocumentsState();
     } catch (nextError) {
       setError(errorText(nextError, tx));
     } finally {
@@ -1503,7 +1530,7 @@ export function LeadWizard({
       await deleteStoredDocumentFile(deleteDocument.id, reason);
       setDeleteDocument(null);
       setDeleteReason("");
-      await reload(false);
+      await refreshDocumentsState();
     } catch (nextError) {
       setDeleteError(errorText(nextError, tx));
     } finally {
@@ -1515,7 +1542,7 @@ export function LeadWizard({
     setBusy("sign-" + kind);
     try {
       await markDocumentSigned(id, kind);
-      await reload(false);
+      await refreshDocumentsState();
     } catch (nextError) {
       setError(errorText(nextError, tx));
     } finally {
@@ -1656,9 +1683,7 @@ ${serviceCommentLines.join("\n")}`
         )));
 
         if (targetLeadId) {
-          void fetchLeadDetail(targetLeadId).then((nextLead) => {
-            if (hydrated.current === targetLeadId) setLead(nextLead);
-          }).catch(() => undefined);
+          void refreshLeadState().catch(() => undefined);
         }
       } else {
         await ensureCommercial(patchValue);
