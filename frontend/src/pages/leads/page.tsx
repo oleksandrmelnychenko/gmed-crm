@@ -165,7 +165,6 @@ function titleWithDot(title: ReactNode) {
 
 function shouldOpenWizardFromRow(lead: LeadListItem, canConvert: boolean) {
   return canConvert &&
-    leadTypeFromLead(lead) === "console" &&
     ACTIVE_WIZARD_LEAD_STATUSES.has(lead.qualification_status) &&
     (!lead.failed_outcome || lead.failed_outcome.status === "none");
 }
@@ -328,6 +327,7 @@ function useLeadsPageContent() {
   );
   const { staffGo } = useStaffNavigate();
   const [wizardLeadId, setWizardLeadId] = useState<string | null>(null);
+  const [newLeadWizardOpen, setNewLeadWizardOpen] = useState(false);
   const failedLoadMessage = t.common_failed_load;
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => leadPermissions(user?.role), [user?.role]);
@@ -839,6 +839,7 @@ function useLeadsPageContent() {
   }
 
   function openLeadDetail(leadId: string) {
+    setNewLeadWizardOpen(false);
     setWizardLeadId(null);
     if (leadId !== selectedLeadId) {
       setPaneTab("overview");
@@ -850,6 +851,7 @@ function useLeadsPageContent() {
 
   function openLeadWizard(leadId: string) {
     setDetailOpen(false);
+    setNewLeadWizardOpen(false);
     setWizardLeadId(leadId);
     syncLeadQuery(leadId, { replace: false, view: "wizard" });
   }
@@ -903,10 +905,11 @@ function useLeadsPageContent() {
     };
 
     try {
-      await createLead(payload);
+      const created = await createLead(payload);
       setCreateOpen(false);
       setCreateForm(blankLeadForm());
-      reload();
+      if (permissions.canConvert) openLeadWizard(created.id);
+      else reload();
     } catch (createFetchError) {
       setCreateError(
         createFetchError instanceof Error ? createFetchError.message : t.common_failed_create
@@ -2371,9 +2374,16 @@ function useLeadsPageContent() {
                   type="button"
                   className="h-9 rounded-lg px-3.5"
                   onClick={() => {
-                    setCreateError("");
-                    setCreateForm(blankLeadForm());
-                    setCreateOpen(true);
+                    if (permissions.canConvert) {
+                      setDetailOpen(false);
+                      setWizardLeadId(null);
+                      setNewLeadWizardOpen(true);
+                      syncLeadQuery(undefined, { replace: false });
+                    } else {
+                      setCreateError("");
+                      setCreateForm(blankLeadForm());
+                      setCreateOpen(true);
+                    }
                   }}
                 >
                   <Plus className="size-4" />
@@ -2676,14 +2686,22 @@ function useLeadsPageContent() {
 
       <LeadWizard
         leadId={wizardLeadId}
-        open={wizardLeadId !== null}
+        open={wizardLeadId !== null || newLeadWizardOpen}
+        createMode={newLeadWizardOpen}
+        onCreated={(leadId) => {
+          setNewLeadWizardOpen(false);
+          setWizardLeadId(leadId);
+          syncLeadQuery(leadId, { replace: true, view: "wizard" });
+        }}
         onOpenChange={(open) => {
           if (open) return;
+          setNewLeadWizardOpen(false);
           setWizardLeadId(null);
           syncLeadQuery(undefined, { replace: false });
           reload();
         }}
         onArchived={() => {
+          setNewLeadWizardOpen(false);
           setWizardLeadId(null);
           syncLeadQuery(undefined, { replace: false });
           setSuccessMessage(lang === "de" ? "Lead archiviert." : "Лид архивирован.");
@@ -2691,10 +2709,12 @@ function useLeadsPageContent() {
         }}
         onShowDetails={(leadId) => openLeadDetail(leadId)}
         onConverted={(patientId) => {
+          setNewLeadWizardOpen(false);
           setWizardLeadId(null);
           staffGo(`/patients/${patientId}`);
         }}
         onOrderCreated={(orderId) => {
+          setNewLeadWizardOpen(false);
           setWizardLeadId(null);
           staffGo(`/orders/${orderId}`);
         }}

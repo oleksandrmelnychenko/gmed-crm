@@ -98,6 +98,7 @@ import {
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 
 import {
+  createLead,
   fetchLeadDetail,
   importLeadAttachments,
   resolveFailedLead,
@@ -113,7 +114,9 @@ type CaseListItem = { id: string };
 type LeadWizardProps = {
   leadId: string | null;
   open: boolean;
+  createMode?: boolean;
   onOpenChange: (open: boolean) => void;
+  onCreated?: (leadId: string) => void;
   onConverted?: (patientId: string) => void;
   onArchived?: () => void;
   onShowDetails?: (leadId: string) => void;
@@ -554,6 +557,40 @@ function draftFromLead(lead: LeadDetail): Draft {
   };
 }
 
+function blankDraft(): Draft {
+  return {
+    firstName: "",
+    middleName: "",
+    lastName: "",
+    suffix: "",
+    birthDate: "",
+    legalSex: "",
+    email: "",
+    phone: "",
+    street: "",
+    city: "",
+    state: "",
+    zip: "",
+    country: "",
+    language: "",
+    whatsappNumber: "",
+    concern: "",
+    anamnese: "",
+    diagnoses: [],
+    medications: [],
+    allergies: [],
+    caves: [],
+    serviceNeeds: [],
+    serviceComments: {},
+    discoverySource: "",
+    referrer: "",
+    serviceNotes: "",
+    specialties: [],
+    privacyConsent: false,
+    healthcareConsent: false,
+  };
+}
+
 function intakeTypeLabel(lead: LeadDetail, tx: Tx) {
   switch (leadIntakeTypeFromLead(lead)) {
     case "questionnaire":
@@ -851,15 +888,19 @@ function ToggleRow({
 }
 
 export function LeadWizard({
-  leadId,
+  leadId: requestedLeadId,
   open,
+  createMode = false,
   onOpenChange,
+  onCreated,
   onConverted,
   onArchived,
   onShowDetails,
 }: LeadWizardProps) {
   const { lang, t } = useLang();
   const tx: Tx = useCallback((ru, de) => (lang === "de" ? de : ru), [lang]);
+  const [createdLeadId, setCreatedLeadId] = useState<string | null>(null);
+  const leadId = requestedLeadId ?? createdLeadId;
   const [lead, setLead] = useState<LeadDetail | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [step, setStep] = useState<StepId>("master_data");
@@ -1092,11 +1133,55 @@ export function LeadWizard({
   }, [leadId]);
 
   useEffect(() => {
-    if (open && leadId) void reload(true);
+    if (!open || !createMode || leadId || hydrated.current === "__new__") return;
+
+    const nextDraft = blankDraft();
+    const signature = autosaveSnapshotSignature({
+      draft: nextDraft,
+      lines: [],
+      paidAmount: "",
+      prepayment: false,
+      step: "master_data",
+    });
+
+    hydrated.current = "__new__";
+    setLead(null);
+    setDraft(nextDraft);
+    setStep("master_data");
+    setDocuments([]);
+    setCases([]);
+    setContracts([]);
+    setOrders([]);
+    setQuotes([]);
+    setSpecialties([]);
+    setAgencyServices([]);
+    setDoctors([]);
+    setLines([]);
+    setPrepayment(false);
+    setSignedPatient(false);
+    setSignedAgency(false);
+    setPaidAmount("");
+    setLoading(false);
+    setError("");
+    setAutosaveError("");
+    setAutosaveStatus("idle");
+    setTouchedMasterFields(new Set());
+    setMasterValidationAttempted(false);
+    setServiceValidationAttempted(false);
+    setMedicalValidationAttempted(false);
+    wizardStateBaseRef.current = {};
+    currentAutosaveSignatureRef.current = signature;
+    lastSavedAutosaveSignatureRef.current = signature;
+    caseIdRef.current = null;
+  }, [createMode, leadId, open]);
+
+  useEffect(() => {
+    if (open && leadId) void reload(hydrated.current !== leadId);
   }, [leadId, open, reload]);
 
   useEffect(() => {
     if (open) return;
+    setCreatedLeadId(null);
     hydrated.current = null;
     setLead(null);
     setDraft(null);
@@ -1236,9 +1321,6 @@ export function LeadWizard({
   }, [doctors, leadId]);
 
   const persistSnapshot = useCallback((snapshot: AutosaveSnapshot, force = false) => {
-    if (!leadId) return Promise.reject(new Error(tx("Обращение не выбрано", "Kein Lead ausgewählt")));
-
-    const targetLeadId = leadId;
     const signature = autosaveSnapshotSignature(snapshot);
     const previousWizardState = wizardStateBaseRef.current;
     const payload = autosavePayload(snapshot, previousWizardState);
@@ -1246,8 +1328,9 @@ export function LeadWizard({
     const run = async () => {
       if (!force && currentAutosaveSignatureRef.current !== signature) return;
 
+      let targetLeadId = leadId;
       if (
-        hydrated.current === targetLeadId &&
+        (hydrated.current === targetLeadId || (!targetLeadId && hydrated.current === "__new__")) &&
         currentAutosaveSignatureRef.current === signature
       ) {
         setAutosaveError("");
@@ -1255,10 +1338,29 @@ export function LeadWizard({
       }
 
       try {
+        let createdNow = false;
+        if (!targetLeadId) {
+          const created = await createLead({
+            first_name: snapshot.draft.firstName.trim(),
+            last_name: snapshot.draft.lastName.trim(),
+            email: snapshot.draft.email.trim() || null,
+            phone: snapshot.draft.phone.trim() || null,
+            source: "manual",
+            country: snapshot.draft.country.trim() || null,
+            notes: snapshot.draft.serviceNotes.trim() || null,
+          });
+          targetLeadId = created.id;
+          createdNow = true;
+          hydrated.current = targetLeadId;
+          setCreatedLeadId(targetLeadId);
+          onCreated?.(targetLeadId);
+        }
+
         await updateLeadWizard(targetLeadId, payload);
         if (hydrated.current !== targetLeadId) return;
 
         wizardStateBaseRef.current = payload.wizard_state;
+        if (createdNow) setLead(await fetchLeadDetail(targetLeadId));
         lastSavedAutosaveSignatureRef.current = signature;
         if (currentAutosaveSignatureRef.current === signature) {
           setAutosaveError("");
@@ -1284,7 +1386,7 @@ export function LeadWizard({
       () => undefined,
     );
     return queued;
-  }, [leadId, tx]);
+  }, [leadId, onCreated, tx]);
 
   useEffect(() => {
     if (!open || !leadId || !draft || loading) return;
@@ -1377,7 +1479,7 @@ export function LeadWizard({
   };
 
   async function save(target = step, trackBusy = true): Promise<boolean> {
-    if (!leadId || !draft) return false;
+    if (!draft || (!leadId && !createMode)) return false;
     if (trackBusy) setBusy("save");
     setError("");
     try {
@@ -1852,7 +1954,7 @@ ${serviceCommentLines.join("\n")}`
       : specialty.name_ru || specialty.name_de || specialty.name_en;
   }
 
-  if (!leadId) return null;
+  if (!leadId && !createMode) return null;
   const isBusy = busy !== null;
   const renderedAutosaveSignature = draft
     ? autosaveSnapshotSignature({ draft, lines, paidAmount, prepayment, step })
@@ -1867,7 +1969,13 @@ ${serviceCommentLines.join("\n")}`
         <DialogTitle className="sr-only">{tx("Оформление обращения", "Lead-Aufnahme")}</DialogTitle>
         <header className="flex min-h-16 items-center justify-between gap-4 border-b border-border px-4 py-3 pr-14 sm:px-5 sm:pr-14">
           <div className="min-w-0">
-            <h2 className="truncate text-base font-semibold text-foreground">{lead ? [lead.first_name, lead.last_name].filter(Boolean).join(" ") : tx("Оформление обращения", "Lead-Aufnahme")}</h2>
+            <h2 className="truncate text-base font-semibold text-foreground">
+              {lead
+                ? [lead.first_name, lead.last_name].filter(Boolean).join(" ")
+                : createMode
+                  ? tx("Новый лид", "Neuer Lead")
+                  : tx("Оформление обращения", "Lead-Aufnahme")}
+            </h2>
             {autosaveStatus === "error" ? (
               <div
                 role="alert"
@@ -1881,18 +1989,20 @@ ${serviceCommentLines.join("\n")}`
             ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              className="text-destructive hover:text-destructive"
-              title={tx("Архивировать обращение", "Lead archivieren")}
-              aria-label={tx("Архивировать обращение", "Lead archivieren")}
-              disabled={loading || isBusy}
-              onClick={() => setArchiveConfirmOpen(true)}
-            >
-              <Archive aria-hidden="true" className="size-3.5" />
-            </Button>
+            {leadId ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="text-destructive hover:text-destructive"
+                title={tx("Архивировать обращение", "Lead archivieren")}
+                aria-label={tx("Архивировать обращение", "Lead archivieren")}
+                disabled={loading || isBusy}
+                onClick={() => setArchiveConfirmOpen(true)}
+              >
+                <Archive aria-hidden="true" className="size-3.5" />
+              </Button>
+            ) : null}
             {onShowDetails && leadId ? (
               <Button
                 type="button"
@@ -1906,9 +2016,11 @@ ${serviceCommentLines.join("\n")}`
                 <Eye aria-hidden="true" className="size-3.5" />
               </Button>
             ) : null}
-            <Button type="button" variant="outline" size="icon-sm" title={tx("Обновить", "Aktualisieren")} aria-label={tx("Обновить", "Aktualisieren")} disabled={loading || isBusy} onClick={() => void reload(false)}>
-              <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
-            </Button>
+            {leadId ? (
+              <Button type="button" variant="outline" size="icon-sm" title={tx("Обновить", "Aktualisieren")} aria-label={tx("Обновить", "Aktualisieren")} disabled={loading || isBusy} onClick={() => void reload(false)}>
+                <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+              </Button>
+            ) : null}
           </div>
         </header>
 

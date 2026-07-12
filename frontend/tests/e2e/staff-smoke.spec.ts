@@ -862,6 +862,61 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
       return json(route, patientInvoices);
     }
 
+    if (path === "/leads" && route.request().method() === "POST") {
+      const payload = JSON.parse(route.request().postData() ?? "{}") as {
+        first_name?: string;
+        last_name?: string;
+        email?: string | null;
+        phone?: string | null;
+        source?: string | null;
+        country?: string | null;
+        notes?: string | null;
+      };
+      const createdId = "00000000-0000-0000-0000-000000000990";
+      const createdAt = "2026-04-05T09:00:00Z";
+      const listTemplate = leads[1];
+      const detailTemplate = leadDetails.get(listTemplate.id);
+      const createdLead = {
+        ...listTemplate,
+        id: createdId,
+        first_name: payload.first_name ?? "",
+        last_name: payload.last_name ?? "",
+        email: payload.email ?? null,
+        phone: payload.phone ?? null,
+        source: payload.source ?? null,
+        country: payload.country ?? null,
+        intake_source: "manual",
+        flow: null,
+        lead_type: "console",
+        console_promoted_at: null,
+        qualification_status: "new",
+        compliance_status: "pending",
+        conversion_ready: false,
+        submitted_at: null,
+        created_at: createdAt,
+      };
+      leads.push(createdLead);
+      if (detailTemplate) {
+        leadDetails.set(createdId, {
+          ...detailTemplate,
+          ...createdLead,
+          middle_name: null,
+          suffix: null,
+          date_of_birth: null,
+          legal_sex: null,
+          primary_language: "",
+          locale: "de",
+          street_address: null,
+          city: null,
+          state: null,
+          zip_code: null,
+          notes: payload.notes ?? null,
+          wizard_state: {},
+        });
+      }
+      return json(route, { id: createdId });
+    }
+
     if (path === "/leads" || path.startsWith("/leads?")) {
       return json(route, leads);
     }
@@ -1993,7 +2048,7 @@ test.describe("lead onboarding wizard", () => {
     await expect(page.getByText("Lead archiviert.")).toBeVisible();
   });
 
-  test("intake lead rows open details and promotion continues directly in the wizard", async ({
+  test("active form lead rows open the same wizard directly", async ({
     page,
   }) => {
     const leadId = "00000000-0000-0000-0000-000000000901";
@@ -2001,14 +2056,80 @@ test.describe("lead onboarding wizard", () => {
 
     const intakeRow = page.getByRole("row").filter({ hasText: "Blocked Lead" });
     await intakeRow.click();
-    await expect(page.getByRole("button", { name: "Bearbeiten", exact: true })).toBeVisible();
-    await expect(page).toHaveURL(new RegExp(`lead=${leadId}(?!.*view=wizard)`));
-    await expect(page.getByRole("dialog", { name: "Lead-Aufnahme" })).toBeHidden();
-
-    await page.getByRole("button", { name: "In Konsole übernehmen" }).last().click();
-    await expect(page.getByRole("dialog", { name: "Lead-Aufnahme" })).toBeVisible();
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    await expect(wizard).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`lead=${leadId}.*view=wizard`));
     await expect(page.getByRole("button", { name: "Bearbeiten", exact: true })).toHaveCount(0);
+    await expect(wizard.getByText("Formular", { exact: true })).toBeVisible();
+  });
+
+  test("new lead starts in the wizard and is created after valid master data", async ({
+    page,
+  }) => {
+    const createdId = "00000000-0000-0000-0000-000000000990";
+    let createRequests = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/v1/leads"
+      ) {
+        createRequests += 1;
+      }
+    });
+
+    await page.goto("/leads");
+    await page.getByRole("button", { name: "Neuer Lead" }).click();
+
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    await expect(wizard).toBeVisible();
+    await expect(wizard.getByText("Neuer Lead", { exact: true })).toBeVisible();
+    expect(createRequests).toBe(0);
+
+    const medicalStep = wizard.getByRole("button", { name: "Medizinische Merkmale" });
+    const firstName = wizard.locator("#lead-wizard-first-name");
+    await medicalStep.click();
+    await expect(firstName).toHaveAttribute("aria-invalid", "true");
+    expect(createRequests).toBe(0);
+
+    await firstName.fill("Neue");
+    await wizard.locator("#lead-wizard-last-name").fill("Person");
+    await wizard.locator("#lead-wizard-birth-date").evaluate((node) => {
+      const input = node as HTMLInputElement;
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      valueSetter?.call(input, "1992-06-15");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await chooseComboboxOption(
+      page,
+      wizard.getByRole("combobox", {
+        name: "Geschlecht laut Ausweisdokument",
+      }),
+      "Weiblich",
+    );
+    await wizard.locator("#lead-wizard-email").fill("neue.person@example.com");
+
+    const createRequest = page.waitForRequest((request) =>
+      request.method() === "POST" &&
+      new URL(request.url()).pathname === "/api/v1/leads",
+    );
+    await medicalStep.click();
+    const request = await createRequest;
+
+    expect(request.postDataJSON()).toMatchObject({
+      first_name: "Neue",
+      last_name: "Person",
+      email: "neue.person@example.com",
+      source: "manual",
+    });
+    await expect(page).toHaveURL(new RegExp(`lead=${createdId}.*view=wizard`));
+    await expect(
+      medicalStep,
+    ).toHaveAttribute("aria-current", "step");
+    expect(createRequests).toBe(1);
   });
 
   test("wizard renders six onboarding stages and catalog-backed specialties", async ({

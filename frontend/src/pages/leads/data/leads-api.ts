@@ -37,8 +37,12 @@ export function fetchLeadDetail(leadId: string) {
   return apiFetch<LeadDetail>(`/leads/${leadId}`);
 }
 
+export type CreateLeadResponse = {
+  id: string;
+};
+
 export function createLead(payload: CreateLeadBody) {
-  return postJson<void>("/leads", payload as unknown as JsonPayload);
+  return postJson<CreateLeadResponse>("/leads", payload as unknown as JsonPayload);
 }
 
 export function updateLeadStatus(leadId: string, status: string) {
