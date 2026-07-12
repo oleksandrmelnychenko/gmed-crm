@@ -1993,15 +1993,31 @@ test.describe("lead onboarding wizard", () => {
     await wizard.getByRole("textbox", { name: "Diagnose", exact: true }).fill("Gonarthrose");
     await wizard.getByRole("button", { name: "Hinzufügen" }).nth(1).click();
     await wizard.getByRole("textbox", { name: "Handelsname" }).fill("Ibuprofen");
-    await wizard.getByRole("button", { name: "Allergie hinzufügen" }).click();
-    await wizard.getByRole("textbox", { name: "Allergie", exact: true }).fill("Penicillin");
+    await wizard.getByRole("combobox", { name: "Einnahmeform" }).click();
+    await page.getByText("Oral / Per os (p.o.)", { exact: true }).click();
+    await wizard.getByRole("textbox", { name: "Morgens" }).fill("1");
+    await wizard.getByRole("checkbox", { name: "Apothekenpflichtig" }).check();
+    await wizard.getByRole("button", { name: "Hinzufügen" }).nth(2).click();
+    await wizard.getByRole("textbox", { name: "Allergen", exact: true }).fill("Penicillin");
     const diagnosisRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/vorerkrankungen"));
     const allergyRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/allergien"));
     const medicationRequest = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/medikamente"));
+    const clinicalDraftRequest = page.waitForRequest((request) => {
+      if (request.method() !== "POST" || !request.url().endsWith(`/leads/${readyLeadId}/update`)) return false;
+      const payload = request.postDataJSON() as { wizard_state?: { clinical_draft?: { medications?: Array<{ name?: string }> } } };
+      return payload.wizard_state?.clinical_draft?.medications?.[0]?.name === "Ibuprofen";
+    });
     await wizard.getByRole("button", { name: "Weiter", exact: true }).click();
     expect((await diagnosisRequest).postDataJSON()).toMatchObject({ items: [{ erkrankung: "Gonarthrose" }] });
     expect((await allergyRequest).postDataJSON()).toMatchObject({ items: [{ allergie: "Penicillin" }] });
     expect((await medicationRequest).postDataJSON()).toMatchObject({ items: [{ handelsname: "Ibuprofen", med_typ: "permanent" }] });
+    expect((await clinicalDraftRequest).postDataJSON()).toMatchObject({
+      wizard_state: {
+        clinical_draft: {
+          medications: [{ name: "Ibuprofen", route: "Oral", doseMorning: "1", pharmacyOnly: true }],
+        },
+      },
+    });
 
     await expect(navigation.getByRole("button", { name: /Servicehistorie/i })).toHaveAttribute("aria-current", "step");
     await expect(wizard.getByText("Anliegen und Fachrichtungen")).toHaveCount(0);

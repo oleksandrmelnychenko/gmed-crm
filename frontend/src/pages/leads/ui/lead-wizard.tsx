@@ -74,11 +74,17 @@ import {
   updateOrderCommercialBasis,
 } from "@/pages/orders/data/order-api";
 import type { Leistung, OrderSummary } from "@/pages/orders/model/types";
-import { CASE_MEDICATION_TYPE_VALUES } from "@/lib/i18n/catalogs/cases-clinical";
-import { DARREICHUNGSFORM_OPTIONS } from "@/pages/patients/data/medication-options";
 import type { DoctorOption } from "@/pages/cases/model/types";
 import { fetchSpecializations } from "@/pages/providers/data/provider-api";
 import type { SpecializationItem } from "@/pages/providers/model/types";
+
+import {
+  LeadMedicalIntakeForm,
+  type LeadAllergyDraft,
+  type LeadCaveDraft,
+  type LeadDiagnosisDraft,
+  type LeadMedicationDraft,
+} from "./lead-medical-intake-form";
 
 import {
   fetchLeadDetail,
@@ -91,27 +97,6 @@ import {
 type Tx = (ru: string, de: string) => string;
 type StepId = "master_data" | "medical" | "service" | "documents" | "commercial" | "release";
 type CaseListItem = { id: string };
-
-type DiagnosisDraft = { id: string; label: string; diagnosedOn: string; note: string };
-type MedicationDraft = {
-  id: string;
-  name: string;
-  activeIngredient: string;
-  dose: string;
-  schedule: string;
-  form: string;
-  doseUnit: string;
-  unit: string;
-  note: string;
-  reason: string;
-  since: string;
-  prescriberId: string;
-  prescriber: string;
-  medicationType: string;
-  expiryDate: string;
-};
-type AllergyDraft = { id: string; label: string; reaction: string };
-type CaveDraft = { id: string; label: string; note: string };
 
 type LeadWizardProps = {
   leadId: string | null;
@@ -137,10 +122,10 @@ type Draft = {
   language: string;
   concern: string;
   anamnese: string;
-  diagnoses: DiagnosisDraft[];
-  medications: MedicationDraft[];
-  allergies: AllergyDraft[];
-  caves: CaveDraft[];
+  diagnoses: LeadDiagnosisDraft[];
+  medications: LeadMedicationDraft[];
+  allergies: LeadAllergyDraft[];
+  caves: LeadCaveDraft[];
   serviceNeeds: string[];
   discoverySource: string;
   referrer: string;
@@ -362,6 +347,10 @@ function stringFromUnknown(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
+function booleanFromUnknown(value: unknown) {
+  return value === true;
+}
+
 function clinicalRowsFromLead(lead: LeadDetail) {
   const clinical = recordFromUnknown(lead.wizard_state?.["clinical_draft"]);
   const rows = <T,>(key: string, map: (row: Record<string, unknown>, index: number) => T) => (
@@ -370,19 +359,30 @@ function clinicalRowsFromLead(lead: LeadDetail) {
       : []
   );
   return {
-    diagnoses: rows("diagnoses", (row, index): DiagnosisDraft => ({
+    diagnoses: rows("diagnoses", (row, index): LeadDiagnosisDraft => ({
       id: stringFromUnknown(row["id"]) || `diagnosis-${index + 1}`,
       label: stringFromUnknown(row["label"]),
       diagnosedOn: stringFromUnknown(row["diagnosedOn"]),
       note: stringFromUnknown(row["note"]),
+      kind: row["kind"] === "secondary" || (row["kind"] !== "main" && index > 0)
+        ? "secondary"
+        : "main",
+      icdCode: stringFromUnknown(row["icdCode"]),
+      certainty: ["verdacht", "bestaetigt", "zustand_nach"].includes(stringFromUnknown(row["certainty"]))
+        ? stringFromUnknown(row["certainty"]) as LeadDiagnosisDraft["certainty"]
+        : "bestaetigt",
+      chronification: ["akut", "chronisch", "rezidivierend"].includes(stringFromUnknown(row["chronification"]))
+        ? stringFromUnknown(row["chronification"]) as LeadDiagnosisDraft["chronification"]
+        : "",
     })),
-    medications: rows("medications", (row, index): MedicationDraft => ({
+    medications: rows("medications", (row, index): LeadMedicationDraft => ({
       id: stringFromUnknown(row["id"]) || `medication-${index + 1}`,
       name: stringFromUnknown(row["name"]),
       activeIngredient: stringFromUnknown(row["activeIngredient"]),
       dose: stringFromUnknown(row["dose"]),
       schedule: stringFromUnknown(row["schedule"]),
       form: stringFromUnknown(row["form"]),
+      route: stringFromUnknown(row["route"]),
       doseUnit: stringFromUnknown(row["doseUnit"]),
       unit: stringFromUnknown(row["unit"]),
       note: stringFromUnknown(row["note"]),
@@ -392,13 +392,32 @@ function clinicalRowsFromLead(lead: LeadDetail) {
       prescriber: stringFromUnknown(row["prescriber"]),
       medicationType: stringFromUnknown(row["medicationType"]) || "permanent",
       expiryDate: stringFromUnknown(row["expiryDate"]),
+      category: ["dauer", "besondere", "selbst"].includes(stringFromUnknown(row["category"]))
+        ? stringFromUnknown(row["category"]) as LeadMedicationDraft["category"]
+        : stringFromUnknown(row["medicationType"]) === "permanent" ? "dauer" : "besondere",
+      status: ["aktiv", "pausiert", "abgesetzt", "geplant"].includes(stringFromUnknown(row["status"]))
+        ? stringFromUnknown(row["status"]) as LeadMedicationDraft["status"]
+        : "aktiv",
+      doseMorning: stringFromUnknown(row["doseMorning"]),
+      doseNoon: stringFromUnknown(row["doseNoon"]),
+      doseEvening: stringFromUnknown(row["doseEvening"]),
+      doseNight: stringFromUnknown(row["doseNight"]),
+      prescribedOn: stringFromUnknown(row["prescribedOn"]),
+      pharmacyOnly: booleanFromUnknown(row["pharmacyOnly"]),
+      prescriptionOnly: booleanFromUnknown(row["prescriptionOnly"]),
+      btm: booleanFromUnknown(row["btm"]),
+      autIdemBlocked: booleanFromUnknown(row["autIdemBlocked"]),
+      dispensingRestricted: booleanFromUnknown(row["dispensingRestricted"]),
+      otherNotes: stringFromUnknown(row["otherNotes"]),
     })),
-    allergies: rows("allergies", (row, index): AllergyDraft => ({
+    allergies: rows("allergies", (row, index): LeadAllergyDraft => ({
       id: stringFromUnknown(row["id"]) || `allergy-${index + 1}`,
       label: stringFromUnknown(row["label"]),
       reaction: stringFromUnknown(row["reaction"]),
+      severity: stringFromUnknown(row["severity"]),
+      note: stringFromUnknown(row["note"]),
     })),
-    caves: rows("caves", (row, index): CaveDraft => ({
+    caves: rows("caves", (row, index): LeadCaveDraft => ({
       id: stringFromUnknown(row["id"]) || `cave-${index + 1}`,
       label: stringFromUnknown(row["label"]),
       note: stringFromUnknown(row["note"]),
@@ -450,18 +469,6 @@ function yesNoValue(value: boolean | null, tx: Tx) {
   return value ? tx("Да", "Ja") : tx("Нет", "Nein");
 }
 
-function optionValue(value: string | null, tx: Tx) {
-  if (!value) return tx("Не указано", "Nicht angegeben");
-  const labels: Record<string, [string, string]> = {
-    yes: ["Да", "Ja"],
-    no: ["Нет", "Nein"],
-    unknown: ["Неизвестно", "Unbekannt"],
-    not_sure: ["Не уверен", "Nicht sicher"],
-  };
-  const label = labels[value.trim().toLowerCase()];
-  return label ? tx(label[0], label[1]) : value;
-}
-
 function serviceNeedLabel(value: string, tx: Tx) {
   const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
   const labels: Record<string, [string, string]> = {
@@ -478,24 +485,6 @@ function serviceNeedLabel(value: string, tx: Tx) {
   };
   const label = labels[normalized];
   return label ? tx(label[0], label[1]) : value;
-}
-
-function newClinicalId(prefix: string) {
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-}
-
-function medicationTypeLabel(value: string, tx: Tx) {
-  const labels: Record<string, [string, string]> = {
-    permanent: ["Постоянный приём", "Dauermedikation"],
-    temporary: ["Временный приём", "Zeitlich begrenzt"],
-    as_needed: ["По необходимости", "Bedarfsmedikation"],
-  };
-  const label = labels[value];
-  return label ? tx(label[0], label[1]) : value;
-}
-
-function doctorLabel(doctor: DoctorOption) {
-  return [doctor.title, doctor.name, doctor.provider_name].filter(Boolean).join(" · ");
 }
 
 function newLine(index = 1): ServiceLine {
@@ -821,34 +810,60 @@ export function LeadWizard({
         concern: nextCaseDetail.hauptanfragegrund || leadDraft.concern,
         anamnese: nextCaseDetail.aktuelle_anamnese || leadDraft.anamnese,
         referrer: nextCaseDetail.zuweiser || leadDraft.referrer,
-        diagnoses: nextCaseDetail.vorerkrankungen.map((item, itemIndex) => ({
-          id: `case-diagnosis-${itemIndex + 1}`,
-          label: item.erkrankung,
-          diagnosedOn: item.erstdiagnose ?? "",
-          note: item.notiz ?? "",
-        })),
-        medications: nextCaseDetail.medikamente.map((item, itemIndex) => ({
-          id: item.id ?? `case-medication-${itemIndex + 1}`,
-          name: item.handelsname,
-          activeIngredient: item.wirkstoff ?? "",
-          dose: item.dosis ?? "",
-          schedule: item.einnahmeschema ?? "",
-          form: item.darreichungsform ?? "",
-          doseUnit: item.dosis_einheit ?? "",
-          unit: item.einheit ?? "",
-          note: item.anmerkung ?? "",
-          reason: item.grund ?? "",
-          since: item.seit ?? "",
-          prescriberId: item.verordnender_arzt_id ?? "",
-          prescriber: item.verordnender_arzt ?? "",
-          medicationType: item.med_typ ?? "permanent",
-          expiryDate: item.expiry_date ?? "",
-        })),
-        allergies: nextCaseDetail.allergien.map((item, itemIndex) => ({
-          id: `case-allergy-${itemIndex + 1}`,
-          label: item.allergie,
-          reaction: item.reaktion ?? "",
-        })),
+        diagnoses: nextCaseDetail.vorerkrankungen.length > 0
+          ? nextCaseDetail.vorerkrankungen.map((item, itemIndex) => ({
+              id: leadDraft.diagnoses[itemIndex]?.id ?? `case-diagnosis-${itemIndex + 1}`,
+              label: item.erkrankung,
+              diagnosedOn: item.erstdiagnose ?? "",
+              note: item.notiz ?? "",
+              kind: leadDraft.diagnoses[itemIndex]?.kind ?? (itemIndex === 0 ? "main" : "secondary"),
+              icdCode: leadDraft.diagnoses[itemIndex]?.icdCode ?? "",
+              certainty: leadDraft.diagnoses[itemIndex]?.certainty ?? "bestaetigt",
+              chronification: leadDraft.diagnoses[itemIndex]?.chronification ?? "",
+            }))
+          : leadDraft.diagnoses,
+        medications: nextCaseDetail.medikamente.length > 0
+          ? nextCaseDetail.medikamente.map((item, itemIndex) => ({
+              id: leadDraft.medications[itemIndex]?.id ?? item.id ?? `case-medication-${itemIndex + 1}`,
+              name: item.handelsname,
+              activeIngredient: item.wirkstoff ?? "",
+              dose: item.dosis ?? "",
+              schedule: item.einnahmeschema ?? "",
+              form: item.darreichungsform ?? "",
+              route: leadDraft.medications[itemIndex]?.route ?? "",
+              doseUnit: item.dosis_einheit ?? "",
+              unit: item.einheit ?? "",
+              note: item.anmerkung ?? "",
+              reason: item.grund ?? "",
+              since: item.seit ?? "",
+              prescriberId: item.verordnender_arzt_id ?? "",
+              prescriber: item.verordnender_arzt ?? "",
+              medicationType: leadDraft.medications[itemIndex]?.medicationType ?? item.med_typ ?? "permanent",
+              expiryDate: item.expiry_date ?? "",
+              category: leadDraft.medications[itemIndex]?.category ?? (item.med_typ === "permanent" ? "dauer" : "besondere"),
+              status: leadDraft.medications[itemIndex]?.status ?? "aktiv",
+              doseMorning: leadDraft.medications[itemIndex]?.doseMorning ?? "",
+              doseNoon: leadDraft.medications[itemIndex]?.doseNoon ?? "",
+              doseEvening: leadDraft.medications[itemIndex]?.doseEvening ?? "",
+              doseNight: leadDraft.medications[itemIndex]?.doseNight ?? "",
+              prescribedOn: leadDraft.medications[itemIndex]?.prescribedOn ?? "",
+              pharmacyOnly: leadDraft.medications[itemIndex]?.pharmacyOnly ?? false,
+              prescriptionOnly: leadDraft.medications[itemIndex]?.prescriptionOnly ?? false,
+              btm: leadDraft.medications[itemIndex]?.btm ?? false,
+              autIdemBlocked: leadDraft.medications[itemIndex]?.autIdemBlocked ?? false,
+              dispensingRestricted: leadDraft.medications[itemIndex]?.dispensingRestricted ?? false,
+              otherNotes: leadDraft.medications[itemIndex]?.otherNotes ?? "",
+            }))
+          : leadDraft.medications,
+        allergies: nextCaseDetail.allergien.length > 0
+          ? nextCaseDetail.allergien.map((item, itemIndex) => ({
+              id: leadDraft.allergies[itemIndex]?.id ?? `case-allergy-${itemIndex + 1}`,
+              label: item.allergie,
+              reaction: item.reaktion ?? "",
+              severity: leadDraft.allergies[itemIndex]?.severity ?? "",
+              note: leadDraft.allergies[itemIndex]?.note ?? "",
+            }))
+          : leadDraft.allergies,
       } : leadDraft;
       const nextStep: StepId = "master_data";
       const nextLines = storedCommercialDraft?.lines.length
@@ -1033,7 +1048,7 @@ export function LeadWizard({
           seit: item.since.trim() || null,
           verordnender_arzt_id: doctors.some((doctor) => doctor.id === item.prescriberId) ? item.prescriberId : null,
           verordnender_arzt: item.prescriber.trim() || null,
-          med_typ: item.medicationType || "permanent",
+          med_typ: item.category === "dauer" ? "permanent" : "temporary",
           expiry_date: item.expiryDate || null,
         })),
       }),
@@ -1905,64 +1920,25 @@ export function LeadWizard({
           ) : null}
 
           {draft && lead && step === "medical" ? (
-            <section className="space-y-6">
-              {lead.intake_source === "visitor_facade" ? (
-                <div className="grid gap-x-6 border-y border-border sm:grid-cols-2">
-                  {[
-                    [tx("Сейчас проходит лечение", "Derzeit in Behandlung"), yesNoValue(lead.currently_in_treatment, tx)],
-                    [tx("Риск для поездки", "Gesundheitsrisiko für die Reise"), yesNoValue(lead.has_health_risk_for_travel, tx)],
-                    [tx("Есть медицинские документы", "Medizinische Unterlagen vorhanden"), optionValue(lead.has_medical_records, tx)],
-                    [tx("Документы на принятом языке", "Unterlagen in akzeptierter Sprache"), yesNoValue(lead.records_in_accepted_language, tx)],
-                    [tx("Есть страховка", "Krankenversicherung vorhanden"), yesNoValue(lead.has_insurance, tx)],
-                    [tx("Страховка покрывает лечение в Германии", "Versicherungsschutz in Deutschland"), optionValue(lead.insurance_covers_germany, tx)],
-                  ].map(([label, value]) => (
-                    <div key={label} className="flex items-start justify-between gap-4 border-b border-border/70 py-3 text-sm">
-                      <span className="text-muted-foreground">{label}</span><span className="text-right font-medium text-foreground">{value}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              <Field required label={tx("Анамнез", "Aktuelle Anamnese")} error={medicalValidationAttempted && !draft.anamnese.trim() ? tx("Обязательное поле", "Pflichtfeld") : undefined} errorId={`${MEDICAL_ANAMNESE_ID}-error`}>
-                <textarea id={MEDICAL_ANAMNESE_ID} className={cn(textareaClass, "min-h-28", medicalValidationAttempted && !draft.anamnese.trim() && "border-destructive")} aria-invalid={medicalValidationAttempted && !draft.anamnese.trim()} aria-describedby={medicalValidationAttempted && !draft.anamnese.trim() ? `${MEDICAL_ANAMNESE_ID}-error` : undefined} value={draft.anamnese} onChange={(event) => patch("anamnese", event.target.value)} />
-              </Field>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-foreground">{tx("Диагнозы", "Diagnosen")}</h3><Button type="button" variant="outline" size="sm" onClick={() => patch("diagnoses", [...draft.diagnoses, { id: newClinicalId("diagnosis"), label: "", diagnosedOn: "", note: "" }])}><Plus className="size-3.5" />{tx("Добавить", "Hinzufügen")}</Button></div>
-                {draft.diagnoses.map((item) => <div key={item.id} className="grid gap-3 rounded-md border border-border p-3 sm:grid-cols-[minmax(0,1fr)_10rem_auto]">
-                  <Field label={tx("Диагноз", "Diagnose")}><Input value={item.label} onChange={(event) => patch("diagnoses", draft.diagnoses.map((row) => row.id === item.id ? { ...row, label: event.target.value } : row))} /></Field>
-                  <Field label={tx("Дата постановки", "Erstdiagnose")}><Input type="date" value={item.diagnosedOn} onChange={(event) => patch("diagnoses", draft.diagnoses.map((row) => row.id === item.id ? { ...row, diagnosedOn: event.target.value } : row))} /></Field>
-                  <Button type="button" variant="ghost" size="icon-sm" className="self-end text-destructive" title={tx("Удалить", "Entfernen")} aria-label={tx("Удалить диагноз", "Diagnose entfernen")} onClick={() => patch("diagnoses", draft.diagnoses.filter((row) => row.id !== item.id))}><Trash2 className="size-3.5" /></Button>
-                  <div className="sm:col-span-3"><Field label={tx("Комментарий", "Kommentar")}><Input value={item.note} onChange={(event) => patch("diagnoses", draft.diagnoses.map((row) => row.id === item.id ? { ...row, note: event.target.value } : row))} /></Field></div>
-                </div>)}
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-foreground">{tx("Медикаменты", "Medikamente")}</h3><Button type="button" variant="outline" size="sm" onClick={() => patch("medications", [...draft.medications, { id: newClinicalId("medication"), name: "", activeIngredient: "", dose: "", schedule: "", form: "", doseUnit: "", unit: "", note: "", reason: "", since: "", prescriberId: "", prescriber: "", medicationType: "permanent", expiryDate: "" }])}><Plus className="size-3.5" />{tx("Добавить", "Hinzufügen")}</Button></div>
-                {draft.medications.map((item) => <div key={item.id} className="grid gap-3 rounded-md border border-border p-3 sm:grid-cols-2">
-                  <Field label={tx("Название", "Handelsname")}><Input value={item.name} onChange={(event) => patch("medications", draft.medications.map((row) => row.id === item.id ? { ...row, name: event.target.value } : row))} /></Field>
-                  <Field label={tx("Действующее вещество", "Wirkstoff")}><Input value={item.activeIngredient} onChange={(event) => patch("medications", draft.medications.map((row) => row.id === item.id ? { ...row, activeIngredient: event.target.value } : row))} /></Field>
-                  <Field label={tx("Дозировка", "Dosis")}><Input value={item.dose} onChange={(event) => patch("medications", draft.medications.map((row) => row.id === item.id ? { ...row, dose: event.target.value } : row))} /></Field>
-                  <Field label={tx("Единица дозировки", "Dosiseinheit")}><Input value={item.doseUnit} onChange={(event) => patch("medications", draft.medications.map((row) => row.id === item.id ? { ...row, doseUnit: event.target.value } : row))} /></Field>
-                  <Field label={tx("Схема приёма", "Einnahmeschema")}><Input value={item.schedule} onChange={(event) => patch("medications", draft.medications.map((row) => row.id === item.id ? { ...row, schedule: event.target.value } : row))} /></Field>
-                  <Field label={tx("Форма", "Darreichungsform")}><NativeComboboxSelect value={item.form} className={selectClass} onChange={(event) => patch("medications", draft.medications.map((row) => row.id === item.id ? { ...row, form: event.target.value } : row))}><option value="">{tx("Выберите", "Auswählen")}</option>{DARREICHUNGSFORM_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</NativeComboboxSelect></Field>
-                  <Field label={tx("Единица выдачи", "Einheit")}><Input value={item.unit} onChange={(event) => patch("medications", draft.medications.map((row) => row.id === item.id ? { ...row, unit: event.target.value } : row))} /></Field>
-                  <Field label={tx("Тип приёма", "Medikationstyp")}><NativeComboboxSelect value={item.medicationType} className={selectClass} onChange={(event) => patch("medications", draft.medications.map((row) => row.id === item.id ? { ...row, medicationType: event.target.value } : row))}>{CASE_MEDICATION_TYPE_VALUES.map((value) => <option key={value} value={value}>{medicationTypeLabel(value, tx)}</option>)}</NativeComboboxSelect></Field>
-                  <Field label={tx("Принимает с", "Seit")}><Input value={item.since} onChange={(event) => patch("medications", draft.medications.map((row) => row.id === item.id ? { ...row, since: event.target.value } : row))} /></Field>
-                  <Field label={tx("Действителен до", "Gültig bis")}><Input type="date" value={item.expiryDate} onChange={(event) => patch("medications", draft.medications.map((row) => row.id === item.id ? { ...row, expiryDate: event.target.value } : row))} /></Field>
-                  <Field label={tx("Причина назначения", "Grund")}><Input value={item.reason} onChange={(event) => patch("medications", draft.medications.map((row) => row.id === item.id ? { ...row, reason: event.target.value } : row))} /></Field>
-                  <Field label={tx("Врач из реестра", "Arzt aus dem Verzeichnis")}><NativeComboboxSelect value={item.prescriberId} className={selectClass} onChange={(event) => { const doctor = doctors.find((candidate) => candidate.id === event.target.value); patch("medications", draft.medications.map((row) => row.id === item.id ? { ...row, prescriberId: event.target.value, prescriber: doctor ? doctorLabel(doctor) : row.prescriber } : row)); }}><option value="">{tx("Не указан", "Nicht angegeben")}</option>{doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctorLabel(doctor)}</option>)}</NativeComboboxSelect></Field>
-                  <Field label={tx("Врач (вручную)", "Arzt (manuell)")}><Input value={item.prescriber} onChange={(event) => patch("medications", draft.medications.map((row) => row.id === item.id ? { ...row, prescriber: event.target.value } : row))} /></Field>
-                  <div className="sm:col-span-2"><Field label={tx("Примечание", "Anmerkung")}><Input value={item.note} onChange={(event) => patch("medications", draft.medications.map((row) => row.id === item.id ? { ...row, note: event.target.value } : row))} /></Field></div>
-                  <div className="flex items-end justify-end"><Button type="button" variant="ghost" size="icon-sm" className="text-destructive" title={tx("Удалить", "Entfernen")} aria-label={tx("Удалить медикамент", "Medikament entfernen")} onClick={() => patch("medications", draft.medications.filter((row) => row.id !== item.id))}><Trash2 className="size-3.5" /></Button></div>
-                </div>)}
-              </div>
-
-              <div className="grid gap-6 sm:grid-cols-2">
-                <div className="space-y-3"><div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-foreground">{tx("Аллергии", "Allergien")}</h3><Button type="button" variant="outline" size="icon-sm" title={tx("Добавить аллергию", "Allergie hinzufügen")} onClick={() => patch("allergies", [...draft.allergies, { id: newClinicalId("allergy"), label: "", reaction: "" }])}><Plus className="size-3.5" /></Button></div>{draft.allergies.map((item) => <div key={item.id} className="space-y-3 rounded-md border border-border p-3"><Field label={tx("Аллергия", "Allergie")}><Input value={item.label} onChange={(event) => patch("allergies", draft.allergies.map((row) => row.id === item.id ? { ...row, label: event.target.value } : row))} /></Field><div className="flex items-end gap-2"><div className="min-w-0 flex-1"><Field label={tx("Реакция", "Reaktion")}><Input value={item.reaction} onChange={(event) => patch("allergies", draft.allergies.map((row) => row.id === item.id ? { ...row, reaction: event.target.value } : row))} /></Field></div><Button type="button" variant="ghost" size="icon-sm" className="text-destructive" aria-label={tx("Удалить аллергию", "Allergie entfernen")} onClick={() => patch("allergies", draft.allergies.filter((row) => row.id !== item.id))}><Trash2 className="size-3.5" /></Button></div></div>)}</div>
-                <div className="space-y-3"><div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-foreground">CAVE</h3><Button type="button" variant="outline" size="icon-sm" title={tx("Добавить CAVE", "CAVE hinzufügen")} onClick={() => patch("caves", [...draft.caves, { id: newClinicalId("cave"), label: "", note: "" }])}><Plus className="size-3.5" /></Button></div>{draft.caves.map((item) => <div key={item.id} className="space-y-3 rounded-md border border-border p-3"><Field label={tx("Предупреждение", "Warnhinweis")}><Input value={item.label} onChange={(event) => patch("caves", draft.caves.map((row) => row.id === item.id ? { ...row, label: event.target.value } : row))} /></Field><div className="flex items-end gap-2"><div className="min-w-0 flex-1"><Field label={tx("Комментарий", "Kommentar")}><Input value={item.note} onChange={(event) => patch("caves", draft.caves.map((row) => row.id === item.id ? { ...row, note: event.target.value } : row))} /></Field></div><Button type="button" variant="ghost" size="icon-sm" className="text-destructive" aria-label={tx("Удалить CAVE", "CAVE entfernen")} onClick={() => patch("caves", draft.caves.filter((row) => row.id !== item.id))}><Trash2 className="size-3.5" /></Button></div></div>)}</div>
-              </div>
-            </section>
+            <LeadMedicalIntakeForm
+              lead={lead}
+              tx={tx}
+              anamneseId={MEDICAL_ANAMNESE_ID}
+              anamnese={draft.anamnese}
+              diagnoses={draft.diagnoses}
+              medications={draft.medications}
+              allergies={draft.allergies}
+              caves={draft.caves}
+              doctors={doctors}
+              validationAttempted={medicalValidationAttempted}
+              onAnamneseChange={(value) => patch("anamnese", value)}
+              onDiagnosesChange={(value) => patch("diagnoses", value)}
+              onMedicationsChange={(value) => patch("medications", value)}
+              onAllergiesChange={(value) => patch("allergies", value)}
+              onCavesChange={(value) => patch("caves", value)}
+            />
           ) : null}
+
 
           {draft && lead && step === "service" ? (
             <section className="space-y-5">

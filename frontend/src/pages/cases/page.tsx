@@ -70,6 +70,7 @@ import { cn } from "@/lib/utils";
 import { DARREICHUNGSFORM_OPTIONS } from "@/pages/patients/data/medication-options";
 import { doctorSpecialtyLabel, type SpecializationLabelLang } from "@/pages/providers/model/specialization-labels";
 import type { SpecializationItem } from "@/pages/providers/model/types";
+import { CaseClinicalEditorSection } from "@/pages/cases/ui/case-clinical-editor-section";
 import {
   CASE_TEXT_SNIPPET_PLACEHOLDERS,
   appendSnippetToNarrative,
@@ -4611,57 +4612,23 @@ function ItemEditorSection({
   onSave,
   children,
 }: ItemEditorSectionProps) {
-  const hasContent = Array.isArray(children) ? children.length > 0 : Boolean(children);
-  const populated = count > 0;
-  const itemsLabel = caseText("cases_items");
   return (
-    <Panel
+    <CaseClinicalEditorSection
       title={title}
       description={description}
-      action={
-        <>
-          <span
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em]",
-              populated
-                ? "border-primary/30 bg-primary/10 text-primary"
-                : "border-border bg-muted/30 text-muted-foreground",
-            )}
-          >
-            {populated ? (
-              <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
-            ) : null}
-            {count} {itemsLabel}
-          </span>
-          {canEdit ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="rounded-lg"
-              onClick={onAdd}
-            >
-              <Plus className="size-4" />
-              {addLabel}
-            </Button>
-          ) : null}
-        </>
-      }
+      count={count}
+      itemsLabel={caseText("cases_items")}
+      addLabel={addLabel}
+      emptyTitle={emptyTitle}
+      emptyText={emptyText}
+      busy={busy}
+      error={error}
+      canEdit={canEdit}
+      saveLabel={caseText("cases_save_section")}
+      onAdd={onAdd}
+      onSave={onSave}
     >
-      <form onSubmit={onSave} className="space-y-4">
-        {error ? <Banner tone="error">{error}</Banner> : null}
-        {!hasContent ? <EmptyPanel title={emptyTitle} text={emptyText} /> : children}
-        <div className="flex justify-end border-t border-border pt-4">
-          <Button
-            type="submit"
-            className="h-9 rounded-lg px-3.5"
-            disabled={busy || !canEdit}
-          >
-            {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-            {caseText("cases_save_section")}
-          </Button>
-        </div>
-      </form>
-    </Panel>
+      {children}
+    </CaseClinicalEditorSection>
   );
 }

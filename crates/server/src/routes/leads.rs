@@ -1790,6 +1790,269 @@ async fn qualify_lead(
     }
 }
 
+async fn transfer_lead_clinical_profile(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    patient_id: Uuid,
+    wizard_state: &Value,
+) -> Result<(), sqlx::Error> {
+    let wizard_state_json = wizard_state.to_string();
+
+    sqlx::query(
+        r#"INSERT INTO patient_clinical_narrative
+                  (patient_id, anamnese_aktuelle, is_active)
+           SELECT $2,
+                  COALESCE(
+                      NULLIF(btrim(case_data.aktuelle_anamnese), ''),
+                      NULLIF(btrim(lead.additional_concerns), '')
+                  ),
+                  true
+           FROM leads lead
+           LEFT JOIN LATERAL (
+               SELECT aktuelle_anamnese
+               FROM cases
+               WHERE lead_id = lead.id
+               ORDER BY created_at
+               LIMIT 1
+           ) case_data ON true
+           WHERE lead.id = $1
+             AND COALESCE(
+                 NULLIF(btrim(case_data.aktuelle_anamnese), ''),
+                 NULLIF(btrim(lead.additional_concerns), '')
+             ) IS NOT NULL"#,
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .execute(&mut **tx)
+    .await?;
+
+    sqlx::query(
+        r#"INSERT INTO patient_diagnoses
+                  (patient_id, kind, label, icd_code, certainty, chronifizierung,
+                   status, diagnosed_on, note, sort_order, source_mode)
+           SELECT $1,
+                  CASE
+                      WHEN entry.value->>'kind' = 'secondary'
+                           OR (entry.value->>'kind' IS NULL AND entry.ordinality > 1)
+                      THEN 'secondary'
+                      ELSE 'main'
+                  END,
+                  btrim(entry.value->>'label'),
+                  NULLIF(btrim(entry.value->>'icdCode'), ''),
+                  CASE
+                      WHEN entry.value->>'certainty' IN ('verdacht', 'bestaetigt', 'zustand_nach')
+                      THEN entry.value->>'certainty'
+                      ELSE 'bestaetigt'
+                  END,
+                  CASE
+                      WHEN entry.value->>'chronification' IN ('akut', 'chronisch', 'rezidivierend')
+                      THEN entry.value->>'chronification'
+                      ELSE NULL
+                  END,
+                  CASE WHEN entry.value->>'chronification' = 'chronisch' THEN 'chronic' ELSE 'active' END,
+                  NULLIF(btrim(entry.value->>'diagnosedOn'), ''),
+                  NULLIF(btrim(entry.value->>'note'), ''),
+                  (entry.ordinality - 1)::int,
+                  'intern'
+           FROM jsonb_array_elements(
+               COALESCE($2::jsonb #> '{clinical_draft,diagnoses}', '[]'::jsonb)
+           ) WITH ORDINALITY AS entry(value, ordinality)
+           WHERE btrim(COALESCE(entry.value->>'label', '')) <> ''"#,
+    )
+    .bind(patient_id)
+    .bind(&wizard_state_json)
+    .execute(&mut **tx)
+    .await?;
+
+    sqlx::query(
+        r#"INSERT INTO patient_diagnoses
+                  (patient_id, kind, label, certainty, status, diagnosed_on,
+                   note, sort_order, source_mode)
+           SELECT $2,
+                  CASE WHEN condition.sort_order = 0 THEN 'main' ELSE 'secondary' END,
+                  condition.erkrankung,
+                  'bestaetigt',
+                  'active',
+                  condition.erstdiagnose,
+                  condition.notiz,
+                  condition.sort_order,
+                  'intern'
+           FROM cases case_row
+           JOIN vorerkrankungen condition ON condition.case_id = case_row.id
+           WHERE case_row.lead_id = $1
+             AND NOT EXISTS (
+                 SELECT 1
+                 FROM jsonb_array_elements(
+                     COALESCE($3::jsonb #> '{clinical_draft,diagnoses}', '[]'::jsonb)
+                 ) AS draft(value)
+                 WHERE btrim(COALESCE(draft.value->>'label', '')) <> ''
+             )
+           ORDER BY condition.sort_order"#,
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .bind(&wizard_state_json)
+    .execute(&mut **tx)
+    .await?;
+
+    sqlx::query(
+        r#"INSERT INTO patient_medications
+                  (patient_id, provider_id, doctor_id, category, wirkstoff,
+                   handelsname, staerke, form, einheit, hinweis, grund,
+                   einnahmeform, dose_morgens, dose_mittags, dose_abends,
+                   dose_nachts, verordnet_am, einnahme_von, einnahme_bis,
+                   status, apothekenpflichtig, rezeptpflichtig, btm,
+                   aut_idem_sperre, abgabebeschraenkung,
+                   sonstige_vermerke, sort_order)
+           SELECT $1,
+                  doctor.provider_id,
+                  doctor.id,
+                  CASE
+                      WHEN entry.value->>'category' IN ('dauer', 'besondere', 'selbst')
+                      THEN entry.value->>'category'
+                      WHEN entry.value->>'medicationType' = 'permanent' THEN 'dauer'
+                      ELSE 'besondere'
+                  END,
+                  NULLIF(btrim(entry.value->>'activeIngredient'), ''),
+                  btrim(entry.value->>'name'),
+                  NULLIF(btrim(concat_ws(' ', entry.value->>'dose', entry.value->>'doseUnit')), ''),
+                  NULLIF(btrim(entry.value->>'form'), ''),
+                  NULLIF(btrim(entry.value->>'unit'), ''),
+                  NULLIF(btrim(entry.value->>'schedule'), ''),
+                  NULLIF(btrim(entry.value->>'reason'), ''),
+                  NULLIF(btrim(entry.value->>'route'), ''),
+                  NULLIF(btrim(entry.value->>'doseMorning'), ''),
+                  NULLIF(btrim(entry.value->>'doseNoon'), ''),
+                  NULLIF(btrim(entry.value->>'doseEvening'), ''),
+                  NULLIF(btrim(entry.value->>'doseNight'), ''),
+                  NULLIF(btrim(entry.value->>'prescribedOn'), ''),
+                  NULLIF(btrim(entry.value->>'since'), ''),
+                  NULLIF(btrim(entry.value->>'expiryDate'), ''),
+                  CASE
+                      WHEN entry.value->>'status' IN ('aktiv', 'pausiert', 'abgesetzt', 'geplant')
+                      THEN entry.value->>'status'
+                      ELSE 'aktiv'
+                  END,
+                  COALESCE((entry.value->>'pharmacyOnly')::boolean, false),
+                  COALESCE((entry.value->>'prescriptionOnly')::boolean, false),
+                  COALESCE((entry.value->>'btm')::boolean, false),
+                  COALESCE((entry.value->>'autIdemBlocked')::boolean, false),
+                  COALESCE((entry.value->>'dispensingRestricted')::boolean, false),
+                  NULLIF(btrim(concat_ws(E'\n', entry.value->>'note', entry.value->>'otherNotes')), ''),
+                  (entry.ordinality - 1)::int
+           FROM jsonb_array_elements(
+               COALESCE($2::jsonb #> '{clinical_draft,medications}', '[]'::jsonb)
+           ) WITH ORDINALITY AS entry(value, ordinality)
+           LEFT JOIN LATERAL (
+               SELECT id, provider_id
+               FROM provider_doctors
+               WHERE id = CASE
+                   WHEN COALESCE(entry.value->>'prescriberId', '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                   THEN (entry.value->>'prescriberId')::uuid
+                   ELSE NULL
+               END
+           ) doctor ON true
+           WHERE btrim(COALESCE(entry.value->>'name', '')) <> ''"#,
+    )
+    .bind(patient_id)
+    .bind(&wizard_state_json)
+    .execute(&mut **tx)
+    .await?;
+
+    sqlx::query(
+        r#"INSERT INTO patient_medications
+                  (patient_id, provider_id, doctor_id, category, wirkstoff,
+                   handelsname, staerke, form, einheit, hinweis, grund,
+                   einnahme_von, einnahme_bis, status, sonstige_vermerke, sort_order)
+           SELECT $2,
+                  doctor.provider_id,
+                  medication.verordnender_arzt_id,
+                  CASE WHEN medication.med_typ = 'permanent' THEN 'dauer' ELSE 'besondere' END,
+                  medication.wirkstoff,
+                  medication.handelsname,
+                  NULLIF(btrim(concat_ws(' ', medication.dosis, medication.dosis_einheit)), ''),
+                  medication.darreichungsform,
+                  medication.einheit,
+                  medication.einnahmeschema,
+                  medication.grund,
+                  medication.seit,
+                  medication.expiry_date::text,
+                  'aktiv',
+                  medication.anmerkung,
+                  medication.sort_order
+           FROM cases case_row
+           JOIN medikamente medication ON medication.case_id = case_row.id
+           LEFT JOIN provider_doctors doctor ON doctor.id = medication.verordnender_arzt_id
+           WHERE case_row.lead_id = $1
+             AND NOT EXISTS (
+                 SELECT 1
+                 FROM jsonb_array_elements(
+                     COALESCE($3::jsonb #> '{clinical_draft,medications}', '[]'::jsonb)
+                 ) AS draft(value)
+                 WHERE btrim(COALESCE(draft.value->>'name', '')) <> ''
+             )
+           ORDER BY medication.sort_order"#,
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .bind(&wizard_state_json)
+    .execute(&mut **tx)
+    .await?;
+
+    sqlx::query(
+        r#"WITH draft_warnings AS (
+               SELECT 'allergie'::text AS kind, entry.value, entry.ordinality
+               FROM jsonb_array_elements(
+                   COALESCE($2::jsonb #> '{clinical_draft,allergies}', '[]'::jsonb)
+               ) WITH ORDINALITY AS entry(value, ordinality)
+               UNION ALL
+               SELECT 'cave'::text AS kind, entry.value, entry.ordinality
+               FROM jsonb_array_elements(
+                   COALESCE($2::jsonb #> '{clinical_draft,caves}', '[]'::jsonb)
+               ) WITH ORDINALITY AS entry(value, ordinality)
+           )
+           INSERT INTO patient_clinical_warnings
+                  (patient_id, kind, label, reaction, severity, note, sort_order)
+           SELECT $1,
+                  warning.kind,
+                  btrim(warning.value->>'label'),
+                  CASE WHEN warning.kind = 'allergie' THEN NULLIF(btrim(warning.value->>'reaction'), '') ELSE NULL END,
+                  CASE WHEN warning.kind = 'allergie' THEN NULLIF(btrim(warning.value->>'severity'), '') ELSE NULL END,
+                  NULLIF(btrim(warning.value->>'note'), ''),
+                  (warning.ordinality - 1)::int
+           FROM draft_warnings warning
+           WHERE btrim(COALESCE(warning.value->>'label', '')) <> ''"#,
+    )
+    .bind(patient_id)
+    .bind(&wizard_state_json)
+    .execute(&mut **tx)
+    .await?;
+
+    sqlx::query(
+        r#"INSERT INTO patient_clinical_warnings
+                  (patient_id, kind, label, reaction, sort_order)
+           SELECT $2, 'allergie', allergy.allergie, allergy.reaktion, allergy.sort_order
+           FROM cases case_row
+           JOIN allergien allergy ON allergy.case_id = case_row.id
+           WHERE case_row.lead_id = $1
+             AND NOT EXISTS (
+                 SELECT 1
+                 FROM jsonb_array_elements(
+                     COALESCE($3::jsonb #> '{clinical_draft,allergies}', '[]'::jsonb)
+                 ) AS draft(value)
+                 WHERE btrim(COALESCE(draft.value->>'label', '')) <> ''
+             )
+           ORDER BY allergy.sort_order"#,
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .bind(&wizard_state_json)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
 async fn convert_lead(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -1928,22 +2191,10 @@ async fn convert_lead(
         }
     };
 
-    if let Err(error) = sqlx::query(
-        r#"INSERT INTO patient_clinical_warnings (patient_id, kind, label, note, sort_order)
-           SELECT $1, 'cave', btrim(entry.value->>'label'),
-                  NULLIF(btrim(entry.value->>'note'), ''),
-                  (entry.ordinality - 1)::int
-           FROM jsonb_array_elements(
-               COALESCE($2::jsonb #> '{clinical_draft,caves}', '[]'::jsonb)
-           ) WITH ORDINALITY AS entry(value, ordinality)
-           WHERE btrim(COALESCE(entry.value->>'label', '')) <> ''"#,
-    )
-    .bind(patient_id)
-    .bind(wizard_state.to_string())
-    .execute(&mut *tx)
-    .await
+    if let Err(error) =
+        transfer_lead_clinical_profile(&mut tx, lead_id, patient_id, &wizard_state).await
     {
-        tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "transfer lead CAVE warnings");
+        tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "transfer lead clinical profile");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 

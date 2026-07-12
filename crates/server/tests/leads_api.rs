@@ -1171,11 +1171,68 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
                 DATE '1990-05-01', 'female', 'Hauptstr. 1', 'Berlin', '10115',
                 'Chronic knee pain', '["orthopedics"]'::jsonb,
                 'qualified', 'signed', true, true, 'staff_wizard', $2,
-                '{"clinical_draft":{"caves":[{"label":"Antikoagulation","note":"Vor Eingriff prüfen"}]}}'::jsonb
+                $3::jsonb
            ) RETURNING id"#,
     )
     .bind(&email)
     .bind(app.patient_manager_id)
+    .bind(
+        json!({
+            "clinical_draft": {
+                "diagnoses": [{
+                    "id": "diagnosis-1",
+                    "kind": "main",
+                    "label": "Gonarthrose",
+                    "icdCode": "M17.9",
+                    "certainty": "bestaetigt",
+                    "chronification": "chronisch",
+                    "diagnosedOn": "2024-03-01",
+                    "note": "Rechtes Knie"
+                }],
+                "medications": [{
+                    "id": "medication-1",
+                    "name": "Ibuprofen",
+                    "activeIngredient": "Ibuprofen",
+                    "dose": "400",
+                    "doseUnit": "mg",
+                    "schedule": "1-0-1",
+                    "form": "FTBL",
+                    "route": "Oral",
+                    "unit": "Stück",
+                    "category": "besondere",
+                    "status": "aktiv",
+                    "doseMorning": "1",
+                    "doseNoon": "0",
+                    "doseEvening": "1",
+                    "doseNight": "0",
+                    "prescribedOn": "2026-06-30",
+                    "pharmacyOnly": true,
+                    "prescriptionOnly": false,
+                    "btm": false,
+                    "autIdemBlocked": true,
+                    "dispensingRestricted": false,
+                    "reason": "Schmerzen",
+                    "since": "2026-07-01",
+                    "expiryDate": "2026-07-31",
+                    "medicationType": "temporary",
+                    "note": "Nach dem Essen"
+                }],
+                "allergies": [{
+                    "id": "allergy-1",
+                    "label": "Penicillin",
+                    "reaction": "Exanthem",
+                    "severity": "mittel",
+                    "note": "Seit Kindheit"
+                }],
+                "caves": [{
+                    "id": "cave-1",
+                    "label": "Antikoagulation",
+                    "note": "Vor Eingriff prüfen"
+                }]
+            }
+        })
+        .to_string(),
+    )
     .fetch_one(pool)
     .await
     .unwrap();
@@ -1293,6 +1350,51 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     .unwrap();
     assert_eq!(cave.0, "Antikoagulation");
     assert_eq!(cave.1.as_deref(), Some("Vor Eingriff prüfen"));
+
+    let allergy: (String, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT label, reaction, severity FROM patient_clinical_warnings WHERE patient_id = $1 AND kind = 'allergie'",
+    )
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(allergy.0, "Penicillin");
+    assert_eq!(allergy.1.as_deref(), Some("Exanthem"));
+    assert_eq!(allergy.2.as_deref(), Some("mittel"));
+
+    let diagnosis: (String, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT label, icd_code, chronifizierung FROM patient_diagnoses WHERE patient_id = $1",
+    )
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(diagnosis.0, "Gonarthrose");
+    assert_eq!(diagnosis.1.as_deref(), Some("M17.9"));
+    assert_eq!(diagnosis.2.as_deref(), Some("chronisch"));
+
+    let medication: (String, Option<String>, Option<String>, Option<String>, bool, bool) = sqlx::query_as(
+        "SELECT handelsname, einnahmeform, hinweis, dose_morgens, apothekenpflichtig, aut_idem_sperre FROM patient_medications WHERE patient_id = $1",
+    )
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(medication.0, "Ibuprofen");
+    assert_eq!(medication.1.as_deref(), Some("Oral"));
+    assert_eq!(medication.2.as_deref(), Some("1-0-1"));
+    assert_eq!(medication.3.as_deref(), Some("1"));
+    assert!(medication.4);
+    assert!(medication.5);
+
+    let narrative: Option<String> = sqlx::query_scalar(
+        "SELECT anamnese_aktuelle FROM patient_clinical_narrative WHERE patient_id = $1 AND is_active",
+    )
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(narrative.is_some_and(|value| !value.trim().is_empty()));
 }
 
 #[tokio::test]
