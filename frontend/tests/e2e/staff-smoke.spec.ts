@@ -2132,6 +2132,33 @@ test.describe("lead onboarding wizard", () => {
     expect(createRequests).toBe(1);
   });
 
+  test("wizard localizes backend errors in German and Russian", async ({ page }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    await page.route(`**/api/v1/leads/${leadId}/update`, (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      return json(route, {
+        error: "unprocessable_entity",
+        message: "Invalid legal_sex",
+      }, 422);
+    });
+
+    await page.goto(`/leads?lead=${leadId}&view=wizard`);
+    const germanWizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    await expect(germanWizard).toBeVisible();
+    await germanWizard.getByRole("button", { name: "Medizinische Merkmale" }).click();
+    await expect(germanWizard.getByText("Eingegebene Daten prüfen", { exact: true })).toBeVisible();
+    await expect(germanWizard.getByText("Invalid legal_sex")).toHaveCount(0);
+
+    await page.goto("/leads");
+    await page.getByRole("button", { name: "Sprache wechseln" }).click();
+    await page.getByRole("row").filter({ hasText: "Ready Lead" }).click();
+    const russianWizard = page.getByRole("dialog", { name: "Оформление обращения" });
+    await expect(russianWizard).toBeVisible();
+    await russianWizard.getByRole("button", { name: "Медицинская характеристика" }).click();
+    await expect(russianWizard.getByText("Проверьте введённые данные", { exact: true })).toBeVisible();
+    await expect(russianWizard.getByText("Invalid legal_sex")).toHaveCount(0);
+  });
+
   test("wizard renders six onboarding stages and catalog-backed specialties", async ({
     page,
   }) => {

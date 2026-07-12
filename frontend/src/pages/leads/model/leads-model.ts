@@ -16,6 +16,90 @@ import type {
   LeadPermissions,
 } from "./types";
 
+type LeadErrorTranslator = (ru: string, de: string) => string;
+type LeadErrorTranslation = readonly [ru: string, de: string];
+
+const LEAD_ERROR_MESSAGES: Record<string, LeadErrorTranslation> = {
+  "lead is not selected": ["Обращение не выбрано", "Kein Lead ausgewählt"],
+  "lead could not be saved": ["Не удалось сохранить обращение", "Lead konnte nicht gespeichert werden"],
+  "lead not found": ["Лид больше не найден", "Der Lead wurde nicht gefunden"],
+  "case not found": ["Медицинское дело больше не найдено", "Der medizinische Fall wurde nicht gefunden"],
+  "document not found": ["Документ больше не найден", "Das Dokument wurde nicht gefunden"],
+  "attachment not found": ["Файл больше не найден", "Die Datei wurde nicht gefunden"],
+  "order not found": ["Заказ больше не найден", "Der Auftrag wurde nicht gefunden"],
+  "quote not found": ["Смета больше не найдена", "Der Kostenvoranschlag wurde nicht gefunden"],
+  "framework contract not found": ["Договор больше не найден", "Der Vertrag wurde nicht gefunden"],
+  "name required": ["Укажите имя и фамилию", "Vor- und Nachname angeben"],
+  "failure reason is required": ["Укажите причину архивации", "Grund für die Archivierung angeben"],
+  "audit reason is required": ["Укажите причину удаления", "Grund für die Löschung angeben"],
+  "insufficient permissions": ["Недостаточно прав для этого действия", "Keine Berechtigung für diese Aktion"],
+  "lead already converted": ["Пациент по этому лиду уже создан", "Für diesen Lead wurde bereits ein Patient angelegt"],
+  "lead is already converted": ["Пациент по этому лиду уже создан", "Für diesen Lead wurde bereits ein Patient angelegt"],
+  "no order services available for quote": ["Добавьте хотя бы одну услугу", "Mindestens eine Leistung hinzufügen"],
+  "failed to create quote": ["Не удалось создать смету", "Kostenvoranschlag konnte nicht erstellt werden"],
+  "case intake is incomplete": ["Заполните причину обращения и анамнез", "Anliegen und Anamnese vollständig ausfüllen"],
+  "failed to import attachments": ["Не удалось импортировать файлы лида", "Lead-Dateien konnten nicht importiert werden"],
+};
+
+const LEAD_ERROR_PATTERNS: Array<readonly [pattern: RegExp, translation: LeadErrorTranslation]> = [
+  [/(?:payload|file|request body).*(?:too large|exceeds)|413\b/i, ["Файл слишком большой. Максимальный размер — 25 МБ", "Die Datei ist zu groß. Maximal sind 25 MB erlaubt"]],
+  [/(?:networkerror|failed to fetch|network request|connection (?:failed|refused))/i, ["Нет соединения с сервером. Проверьте интернет и повторите попытку", "Keine Verbindung zum Server. Internetverbindung prüfen und erneut versuchen"]],
+  [/(?:timed? out|timeout|aborterror)/i, ["Сервер не ответил вовремя. Повторите попытку", "Der Server hat nicht rechtzeitig geantwortet. Bitte erneut versuchen"]],
+  [/(?:insufficient permissions|forbidden|not authorized|unauthori[sz]ed)/i, ["Недостаточно прав для этого действия", "Keine Berechtigung für diese Aktion"]],
+  [/(?:lead|case|document|attachment|file|order|quote|contract|patient).*not found/i, ["Запись больше не найдена. Обновите данные", "Der Eintrag wurde nicht gefunden. Daten aktualisieren"]],
+  [/already converted/i, ["Пациент по этому лиду уже создан", "Für diesen Lead wurde bereits ein Patient angelegt"]],
+  [/(?:case|anamn(?:esis|ese)|intake).*(?:incomplete|missing)/i, ["Заполните причину обращения и анамнез", "Anliegen und Anamnese vollständig ausfüllen"]],
+  [/(?:required|cannot be empty|is missing|must be (?:provided|set))/i, ["Заполните обязательные данные", "Pflichtangaben vervollständigen"]],
+  [/(?:invalid|must be a json|must be between|out of range)/i, ["Проверьте введённые данные", "Eingegebene Daten prüfen"]],
+  [/failed to (?:load|fetch|download|read)/i, ["Не удалось загрузить данные", "Daten konnten nicht geladen werden"]],
+  [/failed to (?:save|update|store|create|complete|resolve|upload|delete|import)/i, ["Не удалось выполнить действие. Повторите попытку", "Aktion konnte nicht abgeschlossen werden. Bitte erneut versuchen"]],
+];
+
+const LIKELY_ENGLISH_ERROR = /\b(?:failed|failure|invalid|missing|required|not found|cannot|could not|already|insufficient|unauthori[sz]ed|forbidden|request|network|timeout|error|must be|too large|unable)\b/i;
+
+function leadErrorStatus(error: unknown) {
+  if (!error || typeof error !== "object" || !("status" in error)) return null;
+  const status = (error as { status?: unknown }).status;
+  return typeof status === "number" ? status : null;
+}
+
+export function leadErrorMessage(
+  error: unknown,
+  tx: LeadErrorTranslator,
+  localizedFallback = "",
+) {
+  const fallback = localizedFallback.trim() || tx(
+    "Не удалось выполнить действие. Повторите попытку",
+    "Aktion konnte nicht abgeschlossen werden. Bitte erneut versuchen",
+  );
+  const message = error instanceof Error
+    ? error.message.trim()
+    : error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string"
+      ? ((error as { message: string }).message).trim()
+      : "";
+  const normalized = message.toLocaleLowerCase("en-US");
+  const exact = LEAD_ERROR_MESSAGES[normalized];
+  if (exact) return tx(exact[0], exact[1]);
+
+  for (const [pattern, translation] of LEAD_ERROR_PATTERNS) {
+    if (pattern.test(message)) return tx(translation[0], translation[1]);
+  }
+
+  const status = leadErrorStatus(error);
+  if (status === 401) return tx("Сессия завершена. Войдите снова", "Sitzung abgelaufen. Bitte erneut anmelden");
+  if (status === 403) return tx("Недостаточно прав для этого действия", "Keine Berechtigung für diese Aktion");
+  if (status === 404) return tx("Запись больше не найдена. Обновите данные", "Der Eintrag wurde nicht gefunden. Daten aktualisieren");
+  if (status === 408) return tx("Сервер не ответил вовремя. Повторите попытку", "Der Server hat nicht rechtzeitig geantwortet. Bitte erneut versuchen");
+  if (status === 409) return tx("Данные уже изменились. Обновите страницу и повторите действие", "Die Daten wurden bereits geändert. Seite aktualisieren und Aktion wiederholen");
+  if (status === 413) return tx("Файл слишком большой. Максимальный размер — 25 МБ", "Die Datei ist zu groß. Maximal sind 25 MB erlaubt");
+  if (status === 422) return tx("Проверьте введённые данные", "Eingegebene Daten prüfen");
+  if (status === 429) return tx("Слишком много запросов. Повторите попытку позже", "Zu viele Anfragen. Bitte später erneut versuchen");
+  if (status !== null && status >= 500) return tx("Ошибка сервера. Повторите попытку", "Serverfehler. Bitte erneut versuchen");
+
+  if (!message || LIKELY_ENGLISH_ERROR.test(message)) return fallback;
+  return message;
+}
+
 export const DEFAULT_FILTERS: LeadFilters = {
   search: "",
   status: "",

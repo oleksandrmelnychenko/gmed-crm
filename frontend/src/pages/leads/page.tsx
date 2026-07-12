@@ -106,6 +106,7 @@ import {
   formatDate,
   formatDateTime,
   formatSize,
+  leadErrorMessage,
   leadLocationDetailedLabel,
   leadLocationLabel,
   leadSourceLabel,
@@ -315,6 +316,14 @@ function useLeadsPageContent() {
   const { user } = useAuth();
   const { t, lang } = useLang();
   const locale = lang === "de" ? "de-DE" : "ru-RU";
+  const localizeLeadError = useCallback(
+    (error: unknown, fallback = "") => leadErrorMessage(
+      error,
+      (ru, de) => (lang === "de" ? de : ru),
+      fallback,
+    ),
+    [lang],
+  );
   const leadColumnGroupLabels = useMemo(
     () => ({
       identity: t.lead_column_group_identity,
@@ -736,7 +745,7 @@ function useLeadsPageContent() {
       .catch((fetchError: unknown) => {
         if (!cancelled) {
           dispatchListState({
-            error: fetchError instanceof Error ? fetchError.message : failedLoadMessage,
+            error: localizeLeadError(fetchError, failedLoadMessage),
             loading: false,
           });
         }
@@ -745,7 +754,7 @@ function useLeadsPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [failedLoadMessage, leadsPath, permissions.canViewPage, version]);
+  }, [failedLoadMessage, leadsPath, localizeLeadError, permissions.canViewPage, version]);
 
   useEffect(() => {
     if (!permissions.canViewPage) return;
@@ -788,7 +797,7 @@ function useLeadsPageContent() {
       .catch((fetchError: unknown) => {
         if (!cancelled) {
           dispatchDetailState({
-            detailError: fetchError instanceof Error ? fetchError.message : failedLoadMessage,
+            detailError: localizeLeadError(fetchError, failedLoadMessage),
             detailLoading: false,
           });
         }
@@ -797,7 +806,7 @@ function useLeadsPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [detailOpen, failedLoadMessage, selectedLeadId, version]);
+  }, [detailOpen, failedLoadMessage, localizeLeadError, selectedLeadId, version]);
 
   useEffect(() => {
     if (!detail) {
@@ -911,9 +920,7 @@ function useLeadsPageContent() {
       if (permissions.canConvert) openLeadWizard(created.id);
       else reload();
     } catch (createFetchError) {
-      setCreateError(
-        createFetchError instanceof Error ? createFetchError.message : t.common_failed_create
-      );
+      setCreateError(localizeLeadError(createFetchError, t.common_failed_create));
     } finally {
       setCreateBusy(false);
     }
@@ -925,8 +932,7 @@ function useLeadsPageContent() {
       await updateLeadStatus(leadId, status);
       reload();
     } catch (actionError) {
-      const message =
-        actionError instanceof Error ? actionError.message : t.common_failed_update;
+      const message = localizeLeadError(actionError, t.common_failed_update);
       setError(message);
       setDetailError(message);
     } finally {
@@ -950,8 +956,7 @@ function useLeadsPageContent() {
         openLeadWizard(leadId);
       }
     } catch (actionError) {
-      const message =
-        actionError instanceof Error ? actionError.message : t.common_failed_update;
+      const message = localizeLeadError(actionError, t.common_failed_update);
       setError(message);
       setDetailError(message);
     } finally {
@@ -979,8 +984,7 @@ function useLeadsPageContent() {
         staffGo(`/patients/${result.patient_id}`);
       }, 400);
     } catch (actionError) {
-      const message =
-        actionError instanceof Error ? actionError.message : t.common_failed_update;
+      const message = localizeLeadError(actionError, t.common_failed_update);
       setError(message);
       setDetailError(message);
     } finally {
@@ -1009,9 +1013,7 @@ function useLeadsPageContent() {
       });
       reload();
     } catch (saveError) {
-      setDetailError(
-        saveError instanceof Error ? saveError.message : t.common_failed_update
-      );
+      setDetailError(localizeLeadError(saveError, t.common_failed_update));
     } finally {
       setGateBusy(false);
     }
@@ -1032,9 +1034,7 @@ function useLeadsPageContent() {
       });
       reload();
     } catch (resolveError) {
-      setDetailError(
-        resolveError instanceof Error ? resolveError.message : t.common_failed_update
-      );
+      setDetailError(localizeLeadError(resolveError, t.common_failed_update));
     } finally {
       setFailedLeadBusy(false);
     }
@@ -1420,11 +1420,10 @@ function useLeadsPageContent() {
                                 a.remove();
                                 URL.revokeObjectURL(url);
                               } catch (downloadErr) {
-                                setDetailError(
-                                  downloadErr instanceof Error
-                                    ? downloadErr.message
-                                    : t.lead_download_attachment_failed
-                                );
+                                setDetailError(localizeLeadError(
+                                  downloadErr,
+                                  t.lead_download_attachment_failed,
+                                ));
                               }
                             }}
                           >
@@ -2324,11 +2323,10 @@ function useLeadsPageContent() {
                                 a.remove();
                                 URL.revokeObjectURL(url);
                               } catch (downloadErr) {
-                                setDetailError(
-                                  downloadErr instanceof Error
-                                    ? downloadErr.message
-                                    : t.lead_download_attachment_failed
-                                );
+                                setDetailError(localizeLeadError(
+                                  downloadErr,
+                                  t.lead_download_attachment_failed,
+                                ));
                               }
                             }}
                           >

@@ -78,6 +78,7 @@ import type { SpecializationItem } from "@/pages/providers/model/types";
 import {
   LEAD_QUESTIONNAIRE_SERVICE_OPTIONS,
   leadIntakeTypeFromLead,
+  leadErrorMessage,
   knownLeadProgramServiceLabel,
   leadLocationDetailedLabel,
   leadLocationLabel,
@@ -726,16 +727,7 @@ function formatFileSize(size: number | null, lang: string) {
 }
 
 function errorText(error: unknown, tx: Tx): string {
-  const message = error instanceof Error && error.message ? error.message : "Request failed";
-  const labels: Record<string, string> = {
-    "Request failed": tx("Не удалось выполнить действие", "Aktion konnte nicht abgeschlossen werden"),
-    "Lead is not selected": tx("Обращение не выбрано", "Kein Lead ausgewählt"),
-    "Lead could not be saved": tx("Не удалось сохранить обращение", "Lead konnte nicht gespeichert werden"),
-    "No order services available for quote": tx("Добавьте хотя бы одну услугу", "Mindestens eine Leistung hinzufügen"),
-    "Failed to create quote": tx("Не удалось создать смету", "Kostenvoranschlag konnte nicht erstellt werden"),
-    "Case intake is incomplete": tx("Заполните причину обращения и анамнез", "Anliegen und Anamnese vollständig ausfüllen"),
-  };
-  return labels[message] ?? message;
+  return leadErrorMessage(error, tx);
 }
 
 function readinessStepLabel(key: string, tx: Tx) {
@@ -2131,7 +2123,7 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("lastName", event.target.value)}
                   />
                 </Field>
-                <Field label={tx("Суффикс имени", "Namenszusatz")}>
+                <Field label={tx("Дополнение к имени", "Namenszusatz")}>
                   <Input
                     name="name_suffix"
                     value={draft.suffix}
