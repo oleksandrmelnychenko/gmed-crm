@@ -126,6 +126,7 @@ jobs:
           ignore-unfixed: true
           exit-code: '1'
           format: sarif
+          limit-severities-for-sarif: true
           output: trivy-${{ matrix.name }}.sarif
 
       # Upload findings to the Security tab even on success — gives a
@@ -160,14 +161,17 @@ jobs:
 
       - name: Output digest
         run: |
-          env_name="$(echo "${{ matrix.name }}" | tr a-z A-Z)"
+          env_name="${{ matrix.name }}"
+          env_name="${env_name^^}"
           if [[ "$env_name" == "SERVER" ]]; then
             env_name="BACKEND"
           fi
-          echo "## ${{ matrix.name }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Digest: \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Pin in PROD release.env:" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "GMED_${env_name}_IMAGE=${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## ${{ matrix.name }}"
+            echo "Digest: \`${{ steps.build.outputs.digest }}\`"
+            echo ""
+            echo "Pin in PROD release.env:"
+            echo '```'
+            echo "GMED_${env_name}_IMAGE=${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}@${{ steps.build.outputs.digest }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
