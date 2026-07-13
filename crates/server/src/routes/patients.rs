@@ -1203,7 +1203,7 @@ async fn get_patient(
                   insurance_provider, insurance_number, insurance_type,
                   emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
                   passport_number, passport_expiry,
-                  legal_status, clinical_warnings, notes, is_active, created_at, updated_at
+                  intake_profile, legal_status, clinical_warnings, notes, is_active, created_at, updated_at
            FROM patients WHERE id = $1"#,
     )
     .bind(patient_uuid)
@@ -1373,6 +1373,7 @@ async fn get_patient(
                     )?,
                     passport_number: r.try_get("passport_number").unwrap_or_default(),
                     passport_expiry: r.try_get("passport_expiry").unwrap_or_default(),
+                    intake_profile: r.try_get("intake_profile").unwrap_or_else(|_| json!({})),
                     legal_status: r.try_get("legal_status").map_err(|_| {
                         err(
                             StatusCode::INTERNAL_SERVER_ERROR,
@@ -6379,6 +6380,7 @@ struct PatientDetailInput {
     emergency_contact_relation: Option<String>,
     passport_number: Option<String>,
     passport_expiry: Option<chrono::NaiveDate>,
+    intake_profile: serde_json::Value,
     legal_status: serde_json::Value,
     clinical_warnings: Option<String>,
     notes: Option<String>,
@@ -6519,6 +6521,7 @@ fn build_patient_detail_json(
                 "emergency_contact_relation",
                 patient.emergency_contact_relation,
             );
+            map.insert("intake_profile".to_string(), patient.intake_profile);
             map.insert("legal_status".to_string(), patient.legal_status);
             insert_optional_string(map, "notes", patient.notes);
             insert_insurance_fields(
@@ -7243,6 +7246,7 @@ fn clinical_parse_uuid(value: Option<String>) -> Result<Option<Uuid>, axum::resp
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn clinical_parse_date(
     value: Option<String>,
     field_name: &str,
@@ -8276,17 +8280,16 @@ async fn save_patient_narrative(
     }
 
     // At most one active version per patient: deactivate the rest first.
-    if want_active {
-        if let Err(e) = sqlx::query(
+    if want_active
+        && let Err(e) = sqlx::query(
             "UPDATE patient_clinical_narrative SET is_active = false WHERE patient_id = $1",
         )
         .bind(patient_uuid)
         .execute(&mut *tx)
         .await
-        {
-            tracing::error!(error = %e, patient_id = %patient_uuid, "deactivate patient narratives");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "deactivate patient narratives");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 
     let saved_id = match target_id {

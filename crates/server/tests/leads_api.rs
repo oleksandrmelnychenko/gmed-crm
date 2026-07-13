@@ -16,6 +16,44 @@ use uuid::Uuid;
 use gmed_server::auth::jwt;
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
+type ConvertedPatientRow = (
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Vec<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Value,
+    Value,
+);
+
+type ConvertedMedicationRow = (
+    String,
+    Option<String>,
+    String,
+    bool,
+    Option<String>,
+    Option<String>,
+    bool,
+    Option<Uuid>,
+    Option<Uuid>,
+);
+
+type ConvertedNarrativeRow = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
 struct TestApp {
     suite: support::TestSuiteContext,
     sales_id: Uuid,
@@ -222,7 +260,7 @@ async fn seed_complete_lead_onboarding(app: &TestApp, lead_id: Uuid) -> SeededOn
     .unwrap();
 
     let mut document_ids = Vec::new();
-    for compliance_kind in ["identity", "dsgvo"] {
+    for compliance_kind in ["identity", "dsgvo", "confidentiality_release"] {
         let document_id = Uuid::new_v4();
         sqlx::query(
             r#"INSERT INTO documents (
@@ -307,6 +345,37 @@ async fn seed_complete_lead_onboarding(app: &TestApp, lead_id: Uuid) -> SeededOn
     .fetch_one(pool)
     .await
     .unwrap();
+
+    for (template_id, category) in [
+        ("framework_contract", "contract"),
+        ("single_order", "administrative_single_order"),
+        ("cost_estimate", "finance_cost_estimate"),
+    ] {
+        let document_id = Uuid::new_v4();
+        sqlx::query(
+            r#"INSERT INTO documents (
+                    id, lead_id, order_id, auto_name, original_filename, art, category,
+                    status, visibility, is_medical, mime_type, file_size,
+                    generated_template_id, version_root_document_id, version_number, uploaded_by
+               ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7,
+                    'active', 'patient_visible', false, 'application/pdf', 128,
+                    $6, $1, 1, $8
+               )"#,
+        )
+        .bind(document_id)
+        .bind(lead_id)
+        .bind(order_id)
+        .bind(format!("{template_id} {tag}"))
+        .bind(format!("{template_id}-{tag}.pdf"))
+        .bind(template_id)
+        .bind(category)
+        .bind(app.patient_manager_id)
+        .execute(pool)
+        .await
+        .unwrap();
+        document_ids.push(document_id);
+    }
 
     SeededOnboardingArtifacts {
         case_id,
@@ -1181,7 +1250,12 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
         r#"INSERT INTO leads (
                 first_name, middle_name, last_name, suffix, email, email_consent,
                 phone, phones, whatsapp_number, whatsapp_consent,
-                country, primary_language, locale, has_insurance, notes,
+                country, primary_language, locale, has_insurance,
+                insurance_covers_germany, insurance_provider, insurance_number, insurance_type,
+                trusted_contact_name, trusted_contact_phone, trusted_contact_relation,
+                trusted_contact_birth_date, trusted_contact_address,
+                source, flow, services, needs_interpreter, location, preferred_location,
+                visit_timing, selected_program, message, notes,
                 date_of_birth, legal_sex, street_address, city, zip_code,
                 primary_concern_text, requested_specialties,
                 qualification_status, compliance_status,
@@ -1191,6 +1265,12 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
                 'Atomic', 'Marie', 'Onboarding', 'Jr.', $1, true, '+4915112345678',
                 '[{"number":"+4915112345678","type":"mobile"},{"number":"+49 30 4444","type":"work"}]'::jsonb,
                 '+49 (151) 123-45-678', false, 'UA', 'broken@example.com', 'uk-UA', true,
+                'yes', 'Global Shield', 'POL-4242', 'foreign',
+                'Olena Onboarding', '+380 44 555 0101', 'Sister', DATE '1985-02-03',
+                'Khreshchatyk 1, Kyiv', 'website_questionnaire', 'medical',
+                ARRAY['medical_treatment', 'interpreter_support']::text[], true,
+                'outside_eu', 'berlin', 'within_4_weeks', 'orthopedics',
+                'Please coordinate an interpreter for every appointment',
                 'Manager service note from the lead',
                 DATE '1990-05-01', 'female', 'Hauptstr. 1', 'Berlin', '10115',
                 'Chronic knee pain', '["orthopedics"]'::jsonb,
@@ -1202,6 +1282,8 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     .bind(app.patient_manager_id)
     .bind(
         json!({
+            "discovery_source": "customer_referral",
+            "referrer": "Dr. Referral",
             "clinical_draft": {
                 "narrative": {
                     "anamnese_aktuelle": "Belastungsabhängige Knieschmerzen",
@@ -1366,19 +1448,11 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     assert_eq!(status, StatusCode::OK, "{converted}");
     let patient_id = Uuid::parse_str(converted["patient_id"].as_str().unwrap()).unwrap();
 
-    let patient: (
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        Vec<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Value,
-    ) = sqlx::query_as(
+    let patient: ConvertedPatientRow = sqlx::query_as(
         r#"SELECT first_name, last_name, nationality, residence_country, languages,
-                  phone_secondary, address_country, insurance_type, legal_status
+                  phone_secondary, address_country, insurance_type, insurance_provider,
+                  insurance_number, emergency_contact_name, emergency_contact_phone,
+                  emergency_contact_relation, intake_profile, legal_status
            FROM patients WHERE id = $1"#,
     )
     .bind(patient_id)
@@ -1393,11 +1467,35 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     assert_eq!(patient.5.as_deref(), Some("+49 30 4444"));
     assert_eq!(patient.6.as_deref(), Some("Ukraine"));
     assert_eq!(patient.7.as_deref(), Some("foreign"));
-    assert_eq!(patient.8["dsgvo_signed"], true);
-    assert_eq!(patient.8["identity_verified"], true);
-    assert_eq!(patient.8["document_pack_complete"], true);
-    assert_eq!(patient.8["compliance_completed"], true);
-    assert_eq!(patient.8["contract_status"], "signed");
+    assert_eq!(patient.8.as_deref(), Some("Global Shield"));
+    assert_eq!(patient.9.as_deref(), Some("POL-4242"));
+    assert_eq!(patient.10.as_deref(), Some("Olena Onboarding"));
+    assert_eq!(patient.11.as_deref(), Some("+380 44 555 0101"));
+    assert_eq!(patient.12.as_deref(), Some("Sister"));
+    assert_eq!(patient.13["source"], "website_questionnaire");
+    assert_eq!(patient.13["flow"], "medical");
+    assert_eq!(patient.13["needs_interpreter"], true);
+    assert_eq!(patient.13["services"][0], "medical_treatment");
+    assert_eq!(patient.13["services"][1], "interpreter_support");
+    assert_eq!(patient.13["preferred_location"], "berlin");
+    assert_eq!(patient.13["visit_timing"], "within_4_weeks");
+    assert_eq!(
+        patient.13["message"],
+        "Please coordinate an interpreter for every appointment"
+    );
+    assert_eq!(patient.13["discovery_source"], "customer_referral");
+    assert_eq!(patient.13["trusted_contact"]["birth_date"], "1985-02-03");
+    assert_eq!(
+        patient.13["trusted_contact"]["address"],
+        "Khreshchatyk 1, Kyiv"
+    );
+    assert!(patient.13.get("raw_payload").is_none());
+    assert_eq!(patient.14["dsgvo_signed"], true);
+    assert_eq!(patient.14["confidentiality_release_signed"], true);
+    assert_eq!(patient.14["identity_verified"], true);
+    assert_eq!(patient.14["document_pack_complete"], true);
+    assert_eq!(patient.14["compliance_completed"], true);
+    assert_eq!(patient.14["contract_status"], "signed");
 
     let contacts: Vec<(String, String, String, bool, Option<String>)> = sqlx::query_as(
         r#"SELECT contact_kind, contact_type, value, is_primary, notes
@@ -1478,7 +1576,7 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     .fetch_one(pool)
     .await
     .unwrap();
-    assert_eq!(moved_document_count, 2);
+    assert_eq!(moved_document_count, artifacts.document_ids.len() as i64);
 
     let (contract_patient_id, contract_lead_id): (Option<Uuid>, Option<Uuid>) =
         sqlx::query_as("SELECT patient_id, lead_id FROM framework_contracts WHERE id = $1")
@@ -1610,17 +1708,7 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     assert!(medication.4);
     assert!(medication.5);
 
-    let held_medication: (
-        String,
-        Option<String>,
-        String,
-        bool,
-        Option<String>,
-        Option<String>,
-        bool,
-        Option<Uuid>,
-        Option<Uuid>,
-    ) = sqlx::query_as(
+    let held_medication: ConvertedMedicationRow = sqlx::query_as(
         r#"SELECT handelsname, staerke, status, on_hold, hold_until, hold_note,
                   rezeptpflichtig, provider_id, doctor_id
                FROM patient_medications
@@ -1640,13 +1728,7 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     assert_eq!(held_medication.7, Some(clinical_provider_id));
     assert_eq!(held_medication.8, Some(clinical_doctor_id));
 
-    let narrative: (
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-    ) = sqlx::query_as(
+    let narrative: ConvertedNarrativeRow = sqlx::query_as(
         r#"SELECT anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative,
                   anamnese_sozial, beurteilung
            FROM patient_clinical_narrative
@@ -1916,6 +1998,16 @@ async fn wizard_lead_fields_round_trip_through_update() {
             "state": "Berlin",
             "whatsapp_number": "+49 151 1234567",
             "primary_language": "Spanish",
+            "has_insurance": true,
+            "insurance_covers_germany": "yes",
+            "insurance_provider": "Test Versicherung",
+            "insurance_number": "POL-123",
+            "insurance_type": "private",
+            "trusted_contact_name": "Alex Wizard",
+            "trusted_contact_phone": "+49 30 123456",
+            "trusted_contact_relation": "Partner",
+            "trusted_contact_birth_date": "1989-02-03",
+            "trusted_contact_address": "Nebenstr. 2, Berlin",
             "requested_specialties": ["orthopedics", "surgery"],
             "wizard_state": { "step": 3, "completed": ["identity", "eligibility"] }
         })),
@@ -1934,11 +2026,40 @@ async fn wizard_lead_fields_round_trip_through_update() {
     assert_eq!(lead["state"], "Berlin");
     assert_eq!(lead["whatsapp_number"], "+49 151 1234567");
     assert_eq!(lead["primary_language"], "es");
+    assert_eq!(lead["has_insurance"], true);
+    assert_eq!(lead["insurance_covers_germany"], "yes");
+    assert_eq!(lead["insurance_provider"], "Test Versicherung");
+    assert_eq!(lead["insurance_number"], "POL-123");
+    assert_eq!(lead["insurance_type"], "private");
+    assert_eq!(lead["trusted_contact_name"], "Alex Wizard");
+    assert_eq!(lead["trusted_contact_phone"], "+49 30 123456");
+    assert_eq!(lead["trusted_contact_relation"], "Partner");
+    assert_eq!(lead["trusted_contact_birth_date"], "1989-02-03");
+    assert_eq!(lead["trusted_contact_address"], "Nebenstr. 2, Berlin");
     assert_eq!(
         lead["requested_specialties"],
         json!(["orthopedics", "surgery"])
     );
     assert_eq!(lead["wizard_state"]["step"], 3);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({
+            "insurance_covers_germany": "",
+            "trusted_contact_birth_date": ""
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, cleared_lead) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(cleared_lead["insurance_covers_germany"].is_null());
+    assert!(cleared_lead["trusted_contact_birth_date"].is_null());
 
     // A non-array requested_specialties is rejected.
     let (status, _) = json_request(

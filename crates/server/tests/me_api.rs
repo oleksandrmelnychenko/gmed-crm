@@ -720,7 +720,7 @@ async fn patient_can_list_own_invoices_and_payment_proof_status() {
         &[
             ("upload_kind", "payment_proof".to_string()),
             ("order_id", order_id.to_string()),
-            ("auto_name", "Wire transfer receipt".to_string()),
+            ("auto_name", format!("Wire transfer receipt INV-{tag}")),
         ],
         "receipt.pdf",
         "application/pdf",

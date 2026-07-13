@@ -175,6 +175,16 @@ struct UpdateLeadRequest {
     additional_concerns: Option<String>,
     selected_program: Option<String>,
     services: Option<Vec<String>>,
+    has_insurance: Option<bool>,
+    insurance_covers_germany: Option<String>,
+    insurance_provider: Option<String>,
+    insurance_number: Option<String>,
+    insurance_type: Option<String>,
+    trusted_contact_name: Option<String>,
+    trusted_contact_phone: Option<String>,
+    trusted_contact_relation: Option<String>,
+    trusted_contact_birth_date: Option<String>,
+    trusted_contact_address: Option<String>,
     requested_specialties: Option<serde_json::Value>,
     wizard_state: Option<serde_json::Value>,
 }
@@ -496,13 +506,17 @@ struct LeadConversionReadinessInput {
     consent_healthcare: bool,
     identity_document_verified: bool,
     dsgvo_document_signed: bool,
+    confidentiality_release_signed: bool,
     intake_completed: bool,
     contract_signed: bool,
+    framework_document_generated: bool,
     order_exists: bool,
     order_service_ready: bool,
+    order_document_generated: bool,
     order_signed_patient: bool,
     order_signed_agency: bool,
     quote_accepted: bool,
+    cost_estimate_document_generated: bool,
     prepayment_ready: bool,
 }
 
@@ -550,13 +564,17 @@ fn evaluate_lead_conversion_readiness(
         && input.consent_privacy_practices
         && input.consent_healthcare
         && input.identity_document_verified
-        && input.dsgvo_document_signed;
+        && input.dsgvo_document_signed
+        && input.confidentiality_release_signed;
     let commercial_ready = input.contract_signed
+        && input.framework_document_generated
         && input.order_exists
         && input.order_service_ready
+        && input.order_document_generated
         && input.order_signed_patient
         && input.order_signed_agency
         && input.quote_accepted
+        && input.cost_estimate_document_generated
         && input.prepayment_ready;
 
     let checks = vec![
@@ -645,6 +663,13 @@ fn evaluate_lead_conversion_readiness(
             "stage": "documents",
         }),
         json!({
+            "key": "confidentiality_release_signed",
+            "label": "Confidentiality release signed",
+            "passed": input.confidentiality_release_signed,
+            "blocking_for": "conversion",
+            "stage": "documents",
+        }),
+        json!({
             "key": "intake_completed",
             "label": "Anamnesis intake completed",
             "passed": input.intake_completed,
@@ -659,6 +684,13 @@ fn evaluate_lead_conversion_readiness(
             "stage": "commercial",
         }),
         json!({
+            "key": "framework_document_generated",
+            "label": "Framework contract document generated",
+            "passed": input.framework_document_generated,
+            "blocking_for": "conversion",
+            "stage": "commercial",
+        }),
+        json!({
             "key": "order_exists",
             "label": "Order created",
             "passed": input.order_exists,
@@ -669,6 +701,13 @@ fn evaluate_lead_conversion_readiness(
             "key": "order_service_ready",
             "label": "Order service configured",
             "passed": input.order_service_ready,
+            "blocking_for": "conversion",
+            "stage": "commercial",
+        }),
+        json!({
+            "key": "order_document_generated",
+            "label": "Order document generated",
+            "passed": input.order_document_generated,
             "blocking_for": "conversion",
             "stage": "commercial",
         }),
@@ -690,6 +729,13 @@ fn evaluate_lead_conversion_readiness(
             "key": "quote_accepted",
             "label": "Quote accepted",
             "passed": input.quote_accepted,
+            "blocking_for": "conversion",
+            "stage": "commercial",
+        }),
+        json!({
+            "key": "cost_estimate_document_generated",
+            "label": "Cost estimate document generated",
+            "passed": input.cost_estimate_document_generated,
             "blocking_for": "conversion",
             "stage": "commercial",
         }),
@@ -742,17 +788,26 @@ fn evaluate_lead_conversion_readiness(
     if !input.dsgvo_document_signed {
         conversion_reasons.push("Signed DSGVO document is missing".to_string());
     }
+    if !input.confidentiality_release_signed {
+        conversion_reasons.push("Signed confidentiality release is missing".to_string());
+    }
     if !input.intake_completed {
         conversion_reasons.push("Anamnesis intake is incomplete".to_string());
     }
     if !input.contract_signed {
         conversion_reasons.push("Framework contract is not signed".to_string());
     }
+    if !input.framework_document_generated {
+        conversion_reasons.push("Framework contract document is missing".to_string());
+    }
     if !input.order_exists {
         conversion_reasons.push("Onboarding order is missing".to_string());
     }
     if !input.order_service_ready {
         conversion_reasons.push("Order needs at least one valid service".to_string());
+    }
+    if !input.order_document_generated {
+        conversion_reasons.push("Order document is missing".to_string());
     }
     if !input.order_signed_patient {
         conversion_reasons.push("Customer order signature is missing".to_string());
@@ -762,6 +817,9 @@ fn evaluate_lead_conversion_readiness(
     }
     if !input.quote_accepted {
         conversion_reasons.push("Quote is not accepted".to_string());
+    }
+    if !input.cost_estimate_document_generated {
+        conversion_reasons.push("Cost estimate document is missing".to_string());
     }
     if !input.prepayment_ready {
         conversion_reasons.push("Required prepayment is not complete".to_string());
@@ -814,13 +872,21 @@ fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversio
         consent_healthcare: row.try_get("consent_healthcare").unwrap_or(false),
         identity_document_verified: row.try_get("identity_document_verified").unwrap_or(false),
         dsgvo_document_signed: row.try_get("dsgvo_document_signed").unwrap_or(false),
+        confidentiality_release_signed: row
+            .try_get("confidentiality_release_signed")
+            .unwrap_or(false),
         intake_completed: row.try_get("intake_completed").unwrap_or(false),
         contract_signed: row.try_get("contract_signed").unwrap_or(false),
+        framework_document_generated: row.try_get("framework_document_generated").unwrap_or(false),
         order_exists: row.try_get("order_exists").unwrap_or(false),
         order_service_ready: row.try_get("order_service_ready").unwrap_or(false),
+        order_document_generated: row.try_get("order_document_generated").unwrap_or(false),
         order_signed_patient: row.try_get("order_signed_patient").unwrap_or(false),
         order_signed_agency: row.try_get("order_signed_agency").unwrap_or(false),
         quote_accepted: row.try_get("quote_accepted").unwrap_or(false),
+        cost_estimate_document_generated: row
+            .try_get("cost_estimate_document_generated")
+            .unwrap_or(false),
         prepayment_ready: row.try_get("prepayment_ready").unwrap_or(false),
     })
 }
@@ -859,6 +925,13 @@ async fn load_lead_conversion_readiness(
                         AND d.signed_at IS NOT NULL
                   ) AS dsgvo_document_signed,
                   EXISTS (
+                      SELECT 1 FROM documents d
+                      WHERE d.lead_id = leads.id
+                        AND d.status = 'active'
+                        AND d.compliance_kind = 'confidentiality_release'
+                        AND d.signed_at IS NOT NULL
+                  ) AS confidentiality_release_signed,
+                  EXISTS (
                       SELECT 1 FROM cases c
                       WHERE c.lead_id = leads.id
                         AND c.intake_completed_at IS NOT NULL
@@ -869,6 +942,13 @@ async fn load_lead_conversion_readiness(
                         AND fc.status = 'signed'
                         AND fc.signed_at IS NOT NULL
                   ) AS contract_signed,
+                  EXISTS (
+                      SELECT 1 FROM documents d
+                      WHERE d.lead_id = leads.id
+                        AND d.generated_template_id = 'framework_contract'
+                        AND d.status = 'active'
+                        AND d.file_deleted_at IS NULL
+                  ) AS framework_document_generated,
                   EXISTS (
                       SELECT 1 FROM orders o
                       WHERE o.source_lead_id = leads.id
@@ -882,6 +962,13 @@ async fn load_lead_conversion_readiness(
                         AND ol.quantity > 0
                         AND ol.unit_price >= 0
                   ) AS order_service_ready,
+                  EXISTS (
+                      SELECT 1 FROM documents d
+                      WHERE d.lead_id = leads.id
+                        AND d.generated_template_id = 'single_order'
+                        AND d.status = 'active'
+                        AND d.file_deleted_at IS NULL
+                  ) AS order_document_generated,
                   COALESCE((
                       SELECT o.signed_patient
                       FROM orders o
@@ -901,6 +988,13 @@ async fn load_lead_conversion_readiness(
                       WHERE o.source_lead_id = leads.id
                         AND q.status = 'accepted'
                   ) AS quote_accepted,
+                  EXISTS (
+                      SELECT 1 FROM documents d
+                      WHERE d.lead_id = leads.id
+                        AND d.generated_template_id = 'cost_estimate'
+                        AND d.status = 'active'
+                        AND d.file_deleted_at IS NULL
+                  ) AS cost_estimate_document_generated,
                   COALESCE((
                       SELECT CASE
                           WHEN NOT o.prepayment_required THEN true
@@ -1092,6 +1186,9 @@ async fn get_lead(
                   has_travel_documents, currently_in_treatment, has_health_risk_for_travel,
                   primary_concern_text, additional_concerns,
                   services, has_insurance, insurance_covers_germany,
+                  insurance_provider, insurance_number, insurance_type,
+                  trusted_contact_name, trusted_contact_phone, trusted_contact_relation,
+                  trusted_contact_birth_date, trusted_contact_address,
                   preferred_location, visit_timing, message,
                   consent_automated_contact, consent_healthcare,
                   consent_opt_out, consent_privacy_practices,
@@ -1265,6 +1362,36 @@ async fn get_lead(
     obj.insert(
         "insurance_covers_germany".into(),
         s_opt(&row, "insurance_covers_germany"),
+    );
+    obj.insert(
+        "insurance_provider".into(),
+        s_opt(&row, "insurance_provider"),
+    );
+    obj.insert("insurance_number".into(), s_opt(&row, "insurance_number"));
+    obj.insert("insurance_type".into(), s_opt(&row, "insurance_type"));
+    obj.insert(
+        "trusted_contact_name".into(),
+        s_opt(&row, "trusted_contact_name"),
+    );
+    obj.insert(
+        "trusted_contact_phone".into(),
+        s_opt(&row, "trusted_contact_phone"),
+    );
+    obj.insert(
+        "trusted_contact_relation".into(),
+        s_opt(&row, "trusted_contact_relation"),
+    );
+    obj.insert(
+        "trusted_contact_birth_date".into(),
+        row.try_get::<Option<NaiveDate>, _>("trusted_contact_birth_date")
+            .ok()
+            .flatten()
+            .map(|date| Value::String(date.format("%Y-%m-%d").to_string()))
+            .unwrap_or(Value::Null),
+    );
+    obj.insert(
+        "trusted_contact_address".into(),
+        s_opt(&row, "trusted_contact_address"),
     );
     obj.insert(
         "preferred_location".into(),
@@ -1469,6 +1596,52 @@ async fn update_lead(
         _ => None,
     };
 
+    let trusted_contact_birth_date_supplied = body.trusted_contact_birth_date.is_some();
+    let trusted_contact_birth_date = match body.trusted_contact_birth_date.as_deref() {
+        Some(value) if !value.trim().is_empty() => {
+            match NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d") {
+                Ok(value) => Some(value),
+                Err(_) => {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "Invalid trusted_contact_birth_date (YYYY-MM-DD)",
+                    );
+                }
+            }
+        }
+        _ => None,
+    };
+
+    let insurance_type = body
+        .insurance_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_lowercase);
+    if let Some(ref value) = insurance_type
+        && !matches!(
+            value.as_str(),
+            "private" | "public" | "self_pay" | "foreign"
+        )
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid insurance_type");
+    }
+    let insurance_covers_germany_supplied = body.insurance_covers_germany.is_some();
+    let insurance_covers_germany = body
+        .insurance_covers_germany
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_lowercase);
+    if let Some(ref value) = insurance_covers_germany
+        && !matches!(value.as_str(), "yes" | "no" | "not_sure")
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid insurance_covers_germany",
+        );
+    }
+
     let primary_language = match body.primary_language.as_deref() {
         Some(value) if value.trim().is_empty() => Some(String::new()),
         Some(value) => match normalized_language_code(value) {
@@ -1541,6 +1714,16 @@ async fn update_lead(
         && body.additional_concerns.is_none()
         && body.selected_program.is_none()
         && body.services.is_none()
+        && body.has_insurance.is_none()
+        && body.insurance_covers_germany.is_none()
+        && body.insurance_provider.is_none()
+        && body.insurance_number.is_none()
+        && body.insurance_type.is_none()
+        && body.trusted_contact_name.is_none()
+        && body.trusted_contact_phone.is_none()
+        && body.trusted_contact_relation.is_none()
+        && body.trusted_contact_birth_date.is_none()
+        && body.trusted_contact_address.is_none()
         && body.requested_specialties.is_none()
         && body.wizard_state.is_none()
     {
@@ -1574,7 +1757,23 @@ async fn update_lead(
                middle_name = COALESCE($24, middle_name),
                suffix = COALESCE($25, suffix),
                state = COALESCE($26, state),
-               whatsapp_number = COALESCE($27, whatsapp_number)
+               whatsapp_number = COALESCE($27, whatsapp_number),
+               insurance_provider = COALESCE($28, insurance_provider),
+               insurance_number = COALESCE($29, insurance_number),
+               insurance_type = COALESCE($30, insurance_type),
+               trusted_contact_name = COALESCE($31, trusted_contact_name),
+               trusted_contact_phone = COALESCE($32, trusted_contact_phone),
+               trusted_contact_relation = COALESCE($33, trusted_contact_relation),
+               trusted_contact_birth_date = CASE
+                   WHEN $34 THEN $35
+                   ELSE trusted_contact_birth_date
+               END,
+               trusted_contact_address = COALESCE($36, trusted_contact_address),
+               has_insurance = COALESCE($37, has_insurance),
+               insurance_covers_germany = CASE
+                   WHEN $38 THEN $39
+                   ELSE insurance_covers_germany
+               END
            WHERE id = $1"#,
     )
     .bind(lead_id)
@@ -1608,6 +1807,18 @@ async fn update_lead(
     .bind(body.suffix.as_deref().map(str::trim))
     .bind(body.state.as_deref().map(str::trim))
     .bind(body.whatsapp_number.as_deref().map(str::trim))
+    .bind(body.insurance_provider.as_deref().map(str::trim))
+    .bind(body.insurance_number.as_deref().map(str::trim))
+    .bind(insurance_type.as_deref())
+    .bind(body.trusted_contact_name.as_deref().map(str::trim))
+    .bind(body.trusted_contact_phone.as_deref().map(str::trim))
+    .bind(body.trusted_contact_relation.as_deref().map(str::trim))
+    .bind(trusted_contact_birth_date_supplied)
+    .bind(trusted_contact_birth_date)
+    .bind(body.trusted_contact_address.as_deref().map(str::trim))
+    .bind(body.has_insurance)
+    .bind(insurance_covers_germany_supplied)
+    .bind(insurance_covers_germany.as_deref())
     .execute(&state.db)
     .await
     {
@@ -2608,6 +2819,7 @@ async fn import_lead_attachments_internal(
                 .unwrap_or("application/octet-stream");
             let input = NewStoredDocument {
                 document_id: Some(attachment_id),
+                document_number: None,
                 patient_id: None,
                 lead_id: Some(lead_id),
                 order_id: None,
@@ -2760,8 +2972,16 @@ async fn convert_lead(
     let lead = match sqlx::query(
         r#"SELECT id, first_name, middle_name, last_name, suffix,
                   email, email_consent, phone, phones, whatsapp_number, whatsapp_consent,
-                  country, primary_language, locale,
-                  has_insurance,
+                  source, intake_source, flow, submitted_at,
+                  country, primary_language, locale, needs_interpreter,
+                  location, location_detailed, wants_membership, selected_program,
+                  can_travel, has_medical_records, records_in_accepted_language,
+                  has_travel_documents, currently_in_treatment, has_health_risk_for_travel,
+                  services, has_insurance, insurance_covers_germany,
+                  insurance_provider, insurance_number, insurance_type,
+                  trusted_contact_name, trusted_contact_phone, trusted_contact_relation,
+                  trusted_contact_birth_date, trusted_contact_address,
+                  preferred_location, visit_timing, message,
                   date_of_birth, legal_sex, qualification_status, converted_patient_id,
                   failed_outcome_status, street_address, city, zip_code, notes,
                   wizard_state
@@ -2875,16 +3095,94 @@ async fn convert_lead(
             .into_iter()
             .collect();
     let has_insurance: Option<bool> = lead.try_get("has_insurance").ok().flatten();
+    let explicit_insurance_type: Option<String> = lead
+        .try_get::<Option<String>, _>("insurance_type")
+        .ok()
+        .flatten();
     let insurance_type = match has_insurance {
-        Some(false) => Some("self_pay"),
-        Some(true) if country.as_deref() != Some("Germany") => Some("foreign"),
-        _ => None,
+        Some(false) => Some("self_pay".to_string()),
+        Some(true) => explicit_insurance_type
+            .or_else(|| (country.as_deref() != Some("Germany")).then(|| "foreign".to_string())),
+        None => explicit_insurance_type,
     };
+    let insurance_provider: Option<String> = lead
+        .try_get::<Option<String>, _>("insurance_provider")
+        .ok()
+        .flatten()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let insurance_number: Option<String> = lead
+        .try_get::<Option<String>, _>("insurance_number")
+        .ok()
+        .flatten()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let trusted_contact_name: Option<String> = lead
+        .try_get::<Option<String>, _>("trusted_contact_name")
+        .ok()
+        .flatten()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let trusted_contact_phone: Option<String> = lead
+        .try_get::<Option<String>, _>("trusted_contact_phone")
+        .ok()
+        .flatten()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let trusted_contact_relation: Option<String> = lead
+        .try_get::<Option<String>, _>("trusted_contact_relation")
+        .ok()
+        .flatten()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let trusted_contact_birth_date: Option<NaiveDate> =
+        lead.try_get("trusted_contact_birth_date").ok().flatten();
+    let trusted_contact_address: Option<String> = lead
+        .try_get::<Option<String>, _>("trusted_contact_address")
+        .ok()
+        .flatten()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
     let street_address: Option<String> = lead.try_get("street_address").ok().flatten();
     let city: Option<String> = lead.try_get("city").ok().flatten();
     let zip_code: Option<String> = lead.try_get("zip_code").ok().flatten();
     let lead_notes: Option<String> = lead.try_get("notes").ok().flatten();
     let wizard_state: Value = lead.try_get("wizard_state").unwrap_or_else(|_| json!({}));
+    let intake_profile = json!({
+        "source": lead.try_get::<Option<String>, _>("source").unwrap_or_default(),
+        "intake_source": lead.try_get::<Option<String>, _>("intake_source").unwrap_or_default(),
+        "flow": lead.try_get::<Option<String>, _>("flow").unwrap_or_default(),
+        "locale": locale,
+        "submitted_at": lead
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("submitted_at")
+            .unwrap_or_default()
+            .map(|value| value.to_rfc3339()),
+        "needs_interpreter": lead.try_get::<Option<bool>, _>("needs_interpreter").unwrap_or_default(),
+        "location": lead.try_get::<Option<String>, _>("location").unwrap_or_default(),
+        "location_detailed": lead.try_get::<Option<String>, _>("location_detailed").unwrap_or_default(),
+        "preferred_location": lead.try_get::<Option<String>, _>("preferred_location").unwrap_or_default(),
+        "visit_timing": lead.try_get::<Option<String>, _>("visit_timing").unwrap_or_default(),
+        "wants_membership": lead.try_get::<Option<bool>, _>("wants_membership").unwrap_or_default(),
+        "selected_program": lead.try_get::<Option<String>, _>("selected_program").unwrap_or_default(),
+        "can_travel": lead.try_get::<Option<bool>, _>("can_travel").unwrap_or_default(),
+        "has_medical_records": lead.try_get::<Option<String>, _>("has_medical_records").unwrap_or_default(),
+        "records_in_accepted_language": lead.try_get::<Option<bool>, _>("records_in_accepted_language").unwrap_or_default(),
+        "has_travel_documents": lead.try_get::<Option<bool>, _>("has_travel_documents").unwrap_or_default(),
+        "currently_in_treatment": lead.try_get::<Option<bool>, _>("currently_in_treatment").unwrap_or_default(),
+        "has_health_risk_for_travel": lead.try_get::<Option<bool>, _>("has_health_risk_for_travel").unwrap_or_default(),
+        "services": lead.try_get::<Vec<String>, _>("services").unwrap_or_default(),
+        "insurance_covers_germany": lead.try_get::<Option<String>, _>("insurance_covers_germany").unwrap_or_default(),
+        "message": lead.try_get::<Option<String>, _>("message").unwrap_or_default(),
+        "discovery_source": wizard_state.get("discovery_source").cloned().unwrap_or(Value::Null),
+        "referrer": wizard_state.get("referrer").cloned().unwrap_or(Value::Null),
+        "trusted_contact": {
+            "name": trusted_contact_name.clone(),
+            "phone": trusted_contact_phone.clone(),
+            "relation": trusted_contact_relation.clone(),
+            "birth_date": trusted_contact_birth_date.map(|value| value.to_string()),
+            "address": trusted_contact_address.clone(),
+        }
+    });
     let contacts = lead_patient_contacts(
         email.as_deref(),
         email_consent,
@@ -2902,8 +3200,11 @@ async fn convert_lead(
         r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender,
                                  email, phone_primary, phone_secondary, residence_country,
                                  languages, address_street, address_city, address_zip,
-                                 address_country, insurance_type, legal_status, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                                 address_country, insurance_provider, insurance_number,
+                                 insurance_type, emergency_contact_name, emergency_contact_phone,
+                                 emergency_contact_relation, intake_profile, legal_status, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                   $15, $16, $17, $18, $19, $20, $21, $22, $23)
            RETURNING id"#,
     )
     .bind(&pid)
@@ -2920,10 +3221,16 @@ async fn convert_lead(
     .bind(city)
     .bind(zip_code)
     .bind(country.as_deref())
+    .bind(insurance_provider)
+    .bind(insurance_number)
     .bind(insurance_type)
+    .bind(trusted_contact_name)
+    .bind(trusted_contact_phone)
+    .bind(trusted_contact_relation)
+    .bind(intake_profile)
     .bind(json!({
         "dsgvo_signed": true,
-        "confidentiality_release_signed": false,
+        "confidentiality_release_signed": true,
         "identity_verified": true,
         "document_pack_complete": true,
         "compliance_completed": true,
@@ -3986,6 +4293,14 @@ async fn anonymize_lead_pii(
                services = '{}'::text[],
                has_insurance = NULL,
                insurance_covers_germany = NULL,
+               insurance_provider = NULL,
+               insurance_number = NULL,
+               insurance_type = NULL,
+               trusted_contact_name = NULL,
+               trusted_contact_phone = NULL,
+               trusted_contact_relation = NULL,
+               trusted_contact_birth_date = NULL,
+               trusted_contact_address = NULL,
                preferred_location = NULL,
                visit_timing = NULL,
                message = NULL,
@@ -4241,13 +4556,17 @@ mod lead_conversion_readiness_tests {
             consent_healthcare: true,
             identity_document_verified: true,
             dsgvo_document_signed: true,
+            confidentiality_release_signed: true,
             intake_completed: true,
             contract_signed: true,
+            framework_document_generated: true,
             order_exists: true,
             order_service_ready: true,
+            order_document_generated: true,
             order_signed_patient: true,
             order_signed_agency: true,
             quote_accepted: true,
+            cost_estimate_document_generated: true,
             prepayment_ready: true,
         }
     }
@@ -4260,6 +4579,29 @@ mod lead_conversion_readiness_tests {
         assert!(readiness.conversion_ready);
         assert!(readiness.qualification_reasons.is_empty());
         assert!(readiness.conversion_reasons.is_empty());
+    }
+
+    #[test]
+    fn signed_confidentiality_release_is_required_for_conversion() {
+        let mut input = ready_input();
+        input.confidentiality_release_signed = false;
+
+        let readiness = evaluate_lead_conversion_readiness(&input);
+
+        assert!(!readiness.conversion_ready);
+        assert_eq!(
+            readiness.conversion_reasons,
+            vec!["Signed confidentiality release is missing".to_string()]
+        );
+        assert_eq!(
+            readiness.payload["checks"]
+                .as_array()
+                .and_then(|checks| checks
+                    .iter()
+                    .find(|check| { check["key"] == "confidentiality_release_signed" }))
+                .map(|check| &check["passed"]),
+            Some(&Value::Bool(false))
+        );
     }
 
     #[test]

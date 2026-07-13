@@ -676,12 +676,11 @@ async fn create_my_appointment_request(
         return resp;
     }
 
-    if let Some(order_id) = body.order_id {
-        if let Err(resp) =
+    if let Some(order_id) = body.order_id
+        && let Err(resp) =
             ensure_appointment_order_link_allowed(&state, &auth, patient_id, order_id).await
-        {
-            return resp;
-        }
+    {
+        return resp;
     }
 
     let reason = normalize_optional_text(body.reason);
@@ -1206,12 +1205,11 @@ async fn convert_appointment_request(
     }
 
     let order_id = body.order_id.or(request_order_id);
-    if let Some(order_id) = order_id {
-        if let Err(resp) =
+    if let Some(order_id) = order_id
+        && let Err(resp) =
             ensure_appointment_order_link_allowed(&state, &auth, patient_id, order_id).await
-        {
-            return resp;
-        }
+    {
+        return resp;
     }
 
     let category = normalize_optional_text(body.category);

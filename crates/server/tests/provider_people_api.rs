@@ -1161,7 +1161,7 @@ async fn provider_doctor_accepts_academic_title_combinations_and_keeps_salutatio
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     let message = invalid_body["message"].as_str().unwrap_or_default();
-    assert!(message.contains("academic titles"));
+    assert!(message.contains("akademische Titel"), "{invalid_body}");
     assert!(message.contains("Herr/Frau"));
 }
 

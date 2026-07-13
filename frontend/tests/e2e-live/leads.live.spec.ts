@@ -46,8 +46,26 @@ async function openLeadQualificationPane(
   return detailPane;
 }
 
-function leadConvertButton(page: Page, leadName: string) {
-  return leadCard(page, leadName).getByRole("button", { name: /Konvertieren|Convert/i });
+async function openLeadWizard(page: Page, leadName: string) {
+  await page.goto("/leads");
+  const card = leadCard(page, leadName);
+  await expect(card).toBeVisible();
+  await card.click();
+  const wizard = page
+    .getByRole("dialog")
+    .filter({ hasText: leadName })
+    .last();
+  await expect(wizard).toBeVisible();
+  return wizard;
+}
+
+async function openLeadReleaseStep(page: Page, leadName: string) {
+  const wizard = await openLeadWizard(page, leadName);
+  await wizard.getByRole("button", { name: /Freigabe|Создание пациента/i }).click();
+  await expect(
+    wizard.getByRole("heading", { name: /Patient anlegen|Создание пациента/i }),
+  ).toBeVisible();
+  return wizard;
 }
 
 async function selectLeadGateOption(
@@ -87,6 +105,140 @@ async function fillLeadGateDate(sheet: Locator, value: string) {
 }
 
 test.describe("lead live workflows", () => {
+  test("patient manager sees the centered onboarding document workflow on desktop", async ({
+    page,
+    request,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await setGermanLanguage(page);
+    const scenario = await bootstrapAndLogin(page, request, "pm");
+    const api = await authenticateApiClient(
+      request,
+      scenario.credentials.pm.email,
+      scenario.credentials.password,
+    );
+    const documentsResponse = await request.get(
+      `${api.backendUrl}/api/v1/documents?lead_id=${scenario.leads.ready.id}`,
+      { headers: api.headers },
+    );
+    expect(documentsResponse.ok()).toBe(true);
+    const leadDocuments = (await documentsResponse.json()) as Array<{ id: string }>;
+    expect(leadDocuments).toHaveLength(6);
+
+    const pageDocumentsResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes(`/api/v1/documents?lead_id=${scenario.leads.ready.id}`) &&
+        response.request().method() === "GET",
+    );
+    const wizard = await openLeadWizard(page, scenario.leads.ready.name);
+    const loadedDocumentsResponse = await pageDocumentsResponse;
+    expect(loadedDocumentsResponse.ok()).toBe(true);
+    expect((await loadedDocumentsResponse.json()) as unknown[]).toHaveLength(6);
+    await expect(wizard.getByText("Versicherung", { exact: true })).toBeVisible();
+
+    const desktopBox = await wizard.boundingBox();
+    expect(desktopBox).not.toBeNull();
+    expect(desktopBox!.width).toBeGreaterThan(1_100);
+    expect(Math.abs(desktopBox!.x + desktopBox!.width / 2 - 720)).toBeLessThan(3);
+
+    await wizard.getByRole("button", { name: /Unterlagen/i }).click();
+    await expect(
+      wizard.getByRole("heading", { name: "Schweigepflichtsentbindung" }),
+    ).toBeVisible();
+    await expect(wizard.getByText("Vertrauenskontakt", { exact: true })).toBeVisible();
+    await expect(
+      wizard.getByRole("heading", { name: "Einwilligungen" }),
+    ).toBeVisible();
+    await expect(
+      wizard.getByRole("heading", { name: "Ausweisdokument" }),
+    ).toBeVisible();
+
+    await wizard.getByRole("button", { name: "Vorschau" }).first().click();
+    const documentPreview = page
+      .getByRole("dialog")
+      .filter({ has: page.locator("iframe") })
+      .last();
+    await expect(documentPreview).toBeVisible();
+    await expect(documentPreview.locator("iframe")).toBeVisible();
+    await expect.poll(async () => {
+      const previewBox = await documentPreview.boundingBox();
+      return previewBox ? Math.abs(previewBox.width - desktopBox!.width) : Number.POSITIVE_INFINITY;
+    }).toBeLessThan(3);
+    await documentPreview.getByRole("button", { name: /Schließen/i }).click();
+
+    await wizard.getByRole("button", { name: /Vertrag & Angebot/i }).click();
+    await expect(
+      wizard.getByRole("heading", { name: "Rahmenvertrag" }),
+    ).toBeVisible();
+    await expect(
+      wizard.getByRole("heading", { name: "Einzelauftrag" }),
+    ).toBeVisible();
+    await expect(
+      wizard.getByRole("heading", { name: "Kostenvoranschlag" }),
+    ).toBeVisible();
+    await expect(wizard.getByText("Initial cardiology coordination")).toBeVisible();
+
+    await page.screenshot({
+      path: testInfo.outputPath("lead-wizard-desktop.png"),
+    });
+  });
+
+  test("lead onboarding modal stays contained on a mobile viewport", async ({
+    page,
+    request,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await setGermanLanguage(page);
+    const scenario = await bootstrapAndLogin(page, request, "pm");
+
+    const wizard = await openLeadWizard(page, scenario.leads.ready.name);
+    await expect(wizard.getByText("Versicherung", { exact: true })).toBeVisible();
+    await wizard.getByRole("button", { name: /Unterlagen/i }).click();
+    await expect(
+      wizard.getByRole("heading", { name: "Schweigepflichtsentbindung" }),
+    ).toBeVisible();
+
+    const mobileBox = await wizard.boundingBox();
+    expect(mobileBox).not.toBeNull();
+    expect(mobileBox!.x).toBeGreaterThanOrEqual(0);
+    expect(mobileBox!.width).toBeLessThanOrEqual(390);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath("lead-wizard-mobile.png"),
+    });
+  });
+
+  test("an incomplete lead can open order intake without breaking the wizard layout", async ({
+    page,
+    request,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await setGermanLanguage(page);
+    const scenario = await bootstrapAndLogin(page, request, "pm");
+
+    const wizard = await openLeadWizard(page, scenario.leads.blocked.name);
+    const initialBox = await wizard.boundingBox();
+    expect(initialBox).not.toBeNull();
+
+    const orderTab = wizard.getByRole("button", { name: /Auftragserfassung/i });
+    await orderTab.click();
+
+    await expect(orderTab).toHaveAttribute("aria-current", "step");
+    await expect(
+      wizard.getByRole("combobox", { name: /Fachrichtung hinzufügen/i }),
+    ).toBeVisible();
+    const orderBox = await wizard.boundingBox();
+    expect(orderBox).not.toBeNull();
+    expect(Math.abs(orderBox!.width - initialBox!.width)).toBeLessThan(3);
+    const horizontalLayout = await wizard.evaluate((node) => ({
+      clientWidth: node.clientWidth,
+      scrollWidth: node.scrollWidth,
+    }));
+    expect(horizontalLayout.scrollWidth).toBeLessThanOrEqual(horizontalLayout.clientWidth + 1);
+  });
+
   test("patient manager can complete blocked lead gate data and convert it into a patient", async ({
     page,
     request,
@@ -120,20 +272,9 @@ test.describe("lead live workflows", () => {
     );
     await detailSheet.getByRole("button", { name: /Gate-Daten speichern|Save gate data/i }).click();
     expect((await saveGateResponse).ok()).toBe(true);
-    await page.goto("/leads");
-
-    const convertButton = leadConvertButton(page, scenario.leads.blocked.name);
-    await expect(convertButton).toBeEnabled();
-    await convertButton.click();
-
-    const convertDialog = page.getByRole("dialog");
-    await expect(
-      convertDialog.getByRole("heading", {
-        name: /Lead in Patienten umwandeln\?|Convert lead to patient\?/i,
-      }),
-    ).toBeVisible();
-    await convertDialog
-      .getByRole("button", { name: /Patient anlegen|Create patient/i })
+    const wizard = await openLeadReleaseStep(page, scenario.leads.blocked.name);
+    await wizard
+      .getByRole("button", { name: /Patient anlegen|Создать пациента/i })
       .click();
 
     await page.waitForURL(/\/patients\/[^/]+$/);
@@ -224,7 +365,7 @@ test.describe("lead live workflows", () => {
         nextResponse.url().includes(`/api/v1/leads/${scenario.leads.ready.id}/failed-flow`) &&
         nextResponse.request().method() === "POST",
     );
-    await detailSheet.getByRole("button", { name: /Failed-Lead-Bearbeitung speichern|Save failed-lead resolution/i }).click();
+    await detailSheet.getByRole("button", { name: /Bearbeitung nicht erfolgreicher Leads speichern|Save failed-lead resolution/i }).click();
     expect((await failedFlowResponse).ok()).toBe(true);
 
     await expect(detailSheet.getByText(/^Archiviert$|^Archived$/i).first()).toBeVisible();
@@ -281,19 +422,9 @@ test.describe("lead live workflows", () => {
     await setGermanLanguage(page);
     const scenario = await bootstrapAndLogin(page, request, "pm");
 
-    await page.goto("/leads");
-    const convertButton = leadConvertButton(page, scenario.leads.ready.name);
-    await expect(convertButton).toBeEnabled();
-    await convertButton.click();
-
-    const convertDialog = page.getByRole("dialog");
-    await expect(
-      convertDialog.getByRole("heading", {
-        name: /Lead in Patienten umwandeln\?|Convert lead to patient\?/i,
-      }),
-    ).toBeVisible();
-    await convertDialog
-      .getByRole("button", { name: /Patient anlegen|Create patient/i })
+    const wizard = await openLeadReleaseStep(page, scenario.leads.ready.name);
+    await wizard
+      .getByRole("button", { name: /Patient anlegen|Создать пациента/i })
       .click();
 
     await page.waitForURL(/\/patients\/[^/]+$/);
@@ -407,25 +538,21 @@ test.describe("lead live workflows", () => {
     await expect(detailSheet.getByText(/Qualifikation bereit|Qualification ready/i)).toBeVisible();
     await expect(detailSheet.getByText(/Konvertierung blockiert|Conversion blocked/i)).toBeVisible();
 
-    await page.goto("/leads");
-    const refreshedLeadCard = leadCard(page, leadName);
-    await expect(
-      refreshedLeadCard.getByRole("button", { name: /Qualifizieren|Qualify/i }),
-    ).toBeVisible();
-
     const qualifyResponse = page.waitForResponse(
       (nextResponse) =>
         nextResponse.url().includes(`/api/v1/leads/${createdLead.id}/qualify`) &&
         nextResponse.request().method() === "POST",
     );
-    await refreshedLeadCard.getByRole("button", { name: /Qualifizieren|Qualify/i }).click();
+    await detailSheet
+      .getByRole("button", { name: /Als qualified markieren|Отметить квалифицированным/i })
+      .click();
     const qualifiedLeadResponse = await qualifyResponse;
     expect(qualifiedLeadResponse.ok()).toBe(true);
 
-    await expect(refreshedLeadCard.getByText(/Qualifiziert|Qualified/i)).toBeVisible();
+    await expect(detailSheet.getByText(/^Qualifiziert$|^Qualified$/i).first()).toBeVisible();
     await expect(
-      refreshedLeadCard.getByRole("button", { name: /Konvertieren|Convert/i }),
-    ).toHaveCount(0);
+      detailSheet.getByRole("button", { name: /Konvertieren|Convert/i }),
+    ).toBeDisabled();
 
     const leadResponse = await request.get(
       `${salesApi.backendUrl}/api/v1/leads/${createdLead.id}`,

@@ -16,6 +16,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { Translations } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import {
+  knownLeadProgramServiceLabel,
+  leadInsuranceCoverageLabel,
+  leadLocationDetailedLabel,
+  leadLocationLabel,
+  leadMedicalRecordsLabel,
+  leadPreferredLocationLabel,
+  leadProgramServiceLabel,
+  leadSourceLabel,
+  leadVisitTimingLabel,
+} from "@/pages/leads/model/leads-model";
 
 import type { PatientLegalStatus } from "../../model/legal-status";
 import type { PatientDetail } from "../../model/list-model";
@@ -62,6 +73,56 @@ type LegalStatusChecklistItem = {
   label: string;
   done: boolean;
 };
+
+function intakeProfileRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function intakeProfileString(profile: Record<string, unknown>, key: string) {
+  const value = profile[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function intakeProfileBoolean(profile: Record<string, unknown>, key: string) {
+  const value = profile[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+function intakeProfileHasValue(value: unknown): boolean {
+  if (typeof value === "string") return Boolean(value.trim());
+  if (typeof value === "boolean" || typeof value === "number") return true;
+  if (Array.isArray(value)) return value.some(intakeProfileHasValue);
+  if (value !== null && typeof value === "object") {
+    return Object.values(value).some(intakeProfileHasValue);
+  }
+  return false;
+}
+
+function intakeDiscoverySourceLabel(value: string | null, t: Translations) {
+  if (!value) return null;
+  const labels: Record<string, string> = {
+    customer_referral: t.patient_profile_discovery_customer_referral,
+    online: t.patient_profile_discovery_online,
+    employee_referral: t.patient_profile_discovery_employee_referral,
+    medical_referral: t.patient_profile_discovery_medical_referral,
+    partner_referral: t.patient_profile_discovery_partner_referral,
+    insurance_referral: t.patient_profile_discovery_insurance_referral,
+    social_media: t.patient_profile_discovery_social_media,
+    advertising: t.patient_profile_discovery_advertising,
+    event: t.patient_profile_discovery_event,
+    other: t.patient_profile_discovery_other,
+  };
+  return labels[value] ?? humanizeFunctionalLabel(value);
+}
+
+function intakeProfileStrings(profile: Record<string, unknown>, key: string) {
+  const value = profile[key];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    : [];
+}
 
 function ProfileDetailTile({
   label,
@@ -287,6 +348,7 @@ function usePatientProfileTabContent({
   detail,
   docsPreviewOpen,
   fieldValue,
+  formatDate,
   handleExportPatientCompliance,
   id,
   insuranceLabel,
@@ -342,6 +404,52 @@ function usePatientProfileTabContent({
     if (open) void loadPatientNotesSheet();
     onNotesSheetOpenChange(open);
   }
+
+  const intakeProfile = intakeProfileRecord(detail.intake_profile);
+  const trustedContactProfile = intakeProfileRecord(intakeProfile["trusted_contact"]);
+  const trustedContactBirthDate = intakeProfileString(trustedContactProfile, "birth_date");
+  const trustedContactAddress = intakeProfileString(trustedContactProfile, "address");
+  const intakeSource = intakeProfileString(intakeProfile, "source");
+  const intakeFlow = intakeProfileString(intakeProfile, "flow");
+  const intakeServices = intakeProfileStrings(intakeProfile, "services");
+  const selectedProgram = intakeProfileString(intakeProfile, "selected_program");
+  const locationDetailed = intakeProfileString(intakeProfile, "location_detailed");
+  const location = intakeProfileString(intakeProfile, "location");
+  const preferredLocation = intakeProfileString(intakeProfile, "preferred_location");
+  const visitTiming = intakeProfileString(intakeProfile, "visit_timing");
+  const intakeMessage = intakeProfileString(intakeProfile, "message");
+  const discoverySource = intakeProfileString(intakeProfile, "discovery_source");
+  const referrer = intakeProfileString(intakeProfile, "referrer");
+  const insuranceCoverage = intakeProfileString(intakeProfile, "insurance_covers_germany");
+  const medicalRecords = intakeProfileString(intakeProfile, "has_medical_records");
+  const recordsInAcceptedLanguage = intakeProfileBoolean(intakeProfile, "records_in_accepted_language");
+  const canTravel = intakeProfileBoolean(intakeProfile, "can_travel");
+  const hasTravelDocuments = intakeProfileBoolean(intakeProfile, "has_travel_documents");
+  const currentlyInTreatment = intakeProfileBoolean(intakeProfile, "currently_in_treatment");
+  const hasTravelHealthRisk = intakeProfileBoolean(intakeProfile, "has_health_risk_for_travel");
+  const wantsMembership = intakeProfileBoolean(intakeProfile, "wants_membership");
+  const interpreterNeeded = intakeProfileBoolean(intakeProfile, "needs_interpreter");
+  const intakeSourceValue = [
+    intakeSource ? leadSourceLabel(intakeSource, t) : null,
+    intakeFlow ? intakeFlow.replaceAll("_", " ") : null,
+  ].filter(Boolean).join(" · ");
+  const intakeServicesValue = [
+    ...intakeServices.map((value) => knownLeadProgramServiceLabel(value, t) ?? value),
+    selectedProgram ? leadProgramServiceLabel(selectedProgram, t) : null,
+  ].filter(Boolean).join(", ");
+  const intakeLocationValue = [
+    locationDetailed
+      ? leadLocationDetailedLabel(locationDetailed, t)
+      : location
+        ? leadLocationLabel(location, t)
+        : null,
+    preferredLocation ? leadPreferredLocationLabel(preferredLocation, t) : null,
+    visitTiming ? leadVisitTimingLabel(visitTiming, t) : null,
+  ].filter(Boolean).join(" · ");
+  const hasIntakeProfile = Object.values(intakeProfile).some(intakeProfileHasValue);
+  const booleanValue = (value: boolean | null) => (
+    value == null ? t.common_not_set : value ? l("patients_yes") : l("patients_no")
+  );
 
   return (
     <div className="space-y-5 mt-4 min-h-[400px]">
@@ -455,7 +563,80 @@ function usePatientProfileTabContent({
           <ProfileSummaryLine label={t.patients_emergency_name} value={fieldValue(detail.emergency_contact_name, t.common_not_set)} />
           <ProfileSummaryLine label={t.patients_emergency_phone} value={fieldValue(detail.emergency_contact_phone, t.common_not_set)} />
           <ProfileSummaryLine label={t.patients_emergency_relation} value={fieldValue(detail.emergency_contact_relation, t.common_not_set)} />
+          {trustedContactBirthDate ? (
+            <ProfileSummaryLine label={t.patients_birth_date} value={formatDate(trustedContactBirthDate)} />
+          ) : null}
+          {trustedContactAddress ? (
+            <ProfileSummaryLine label={t.patient_profile_editor_address} value={trustedContactAddress} />
+          ) : null}
         </ProfileSummaryCard>
+
+        {hasIntakeProfile ? (
+          <ProfileSummaryCard title={t.patient_profile_intake_data}>
+            <ProfileSummaryLine
+              label={t.patient_profile_intake_source}
+              value={fieldValue(intakeSourceValue, t.common_not_set)}
+            />
+            <ProfileSummaryLine
+              label={t.patient_profile_intake_services}
+              value={fieldValue(intakeServicesValue, t.common_not_set)}
+            />
+            <ProfileSummaryLine
+              label={t.patient_profile_intake_location}
+              value={fieldValue(intakeLocationValue, t.common_not_set)}
+            />
+            <ProfileSummaryLine
+              label={t.patient_profile_intake_interpreter}
+              value={interpreterNeeded == null ? t.common_not_set : interpreterNeeded ? l("patients_yes") : l("patients_no")}
+            />
+            <ProfileSummaryLine
+              label={t.patient_profile_intake_message}
+              value={fieldValue(intakeMessage, t.common_not_set)}
+            />
+            {discoverySource ? (
+              <ProfileSummaryLine
+                label={t.patient_profile_intake_discovery}
+                value={fieldValue(intakeDiscoverySourceLabel(discoverySource, t), t.common_not_set)}
+              />
+            ) : null}
+            {referrer ? (
+              <ProfileSummaryLine label={t.patient_profile_intake_referrer} value={referrer} />
+            ) : null}
+            {insuranceCoverage ? (
+              <ProfileSummaryLine
+                label={t.patient_profile_intake_insurance_coverage}
+                value={leadInsuranceCoverageLabel(insuranceCoverage, t)}
+              />
+            ) : null}
+            {medicalRecords ? (
+              <ProfileSummaryLine
+                label={t.patient_profile_intake_medical_records}
+                value={leadMedicalRecordsLabel(medicalRecords, t)}
+              />
+            ) : null}
+            {recordsInAcceptedLanguage != null ? (
+              <ProfileSummaryLine
+                label={t.patient_profile_intake_records_language}
+                value={booleanValue(recordsInAcceptedLanguage)}
+              />
+            ) : null}
+            {canTravel != null ? (
+              <ProfileSummaryLine label={t.patient_profile_intake_can_travel} value={booleanValue(canTravel)} />
+            ) : null}
+            {hasTravelDocuments != null ? (
+              <ProfileSummaryLine label={t.patient_profile_intake_travel_documents} value={booleanValue(hasTravelDocuments)} />
+            ) : null}
+            {currentlyInTreatment != null ? (
+              <ProfileSummaryLine label={t.patient_profile_intake_current_treatment} value={booleanValue(currentlyInTreatment)} />
+            ) : null}
+            {hasTravelHealthRisk != null ? (
+              <ProfileSummaryLine label={t.patient_profile_intake_travel_risk} value={booleanValue(hasTravelHealthRisk)} />
+            ) : null}
+            {wantsMembership != null ? (
+              <ProfileSummaryLine label={t.patient_profile_intake_membership} value={booleanValue(wantsMembership)} />
+            ) : null}
+          </ProfileSummaryCard>
+        ) : null}
 
         <ProfileSummaryCard title={t.patient_profile_editor_passport}>
           <ProfileSummaryLine

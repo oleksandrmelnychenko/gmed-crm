@@ -739,6 +739,7 @@ struct DocumentShareInsert<'a> {
 
 pub(crate) struct NewStoredDocument<'a> {
     pub(crate) document_id: Option<Uuid>,
+    pub(crate) document_number: Option<&'a str>,
     pub(crate) patient_id: Option<Uuid>,
     pub(crate) lead_id: Option<Uuid>,
     pub(crate) order_id: Option<Uuid>,
@@ -958,6 +959,36 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         art: "appointment_confirmation",
         category: "administrative_appointment_confirmation",
         default_auto_name: "Terminbestätigung",
+        default_status: "draft",
+        default_visibility: "patient_visible",
+        mime_type: "application/pdf",
+        file_extension: "pdf",
+        is_medical: false,
+        languages: &["de"],
+        text_block_keys: &[],
+    },
+    DocumentTemplateDefinition {
+        id: "confidentiality_release",
+        label: "Schweigepflichtsentbindung",
+        description: "Schweigepflichtsentbindung für volljährige Patientinnen und Patienten mit optionalem Vertrauenskontakt.",
+        art: "confidentiality_release",
+        category: "consent",
+        default_auto_name: "Schweigepflichtsentbindung",
+        default_status: "draft",
+        default_visibility: "patient_visible",
+        mime_type: "application/pdf",
+        file_extension: "pdf",
+        is_medical: false,
+        languages: &["de"],
+        text_block_keys: &[],
+    },
+    DocumentTemplateDefinition {
+        id: "privacy_consents",
+        label: "Einwilligungserklärung",
+        description: "Einwilligungen zur Verarbeitung und Übermittlung personenbezogener und medizinischer Daten.",
+        art: "privacy_consents",
+        category: "consent",
+        default_auto_name: "Einwilligungserklärung",
         default_status: "draft",
         default_visibility: "patient_visible",
         mime_type: "application/pdf",
@@ -1266,7 +1297,13 @@ async fn mark_document_signed(
     };
 
     if let Err(e) = sqlx::query(
-        "UPDATE documents SET signed_at = $2, signed_by = $3, compliance_kind = $4 WHERE id = $1",
+        r#"UPDATE documents
+           SET signed_at = $2,
+               signed_by = $3,
+               compliance_kind = $4,
+               status = CASE WHEN status = 'draft' THEN 'active' ELSE status END,
+               updated_at = now()
+           WHERE id = $1"#,
     )
     .bind(document_id)
     .bind(signed_at)
@@ -1630,6 +1667,7 @@ struct ShareableDocumentContext {
 struct GenerateDocumentRequest {
     template_id: String,
     patient_id: Option<Uuid>,
+    lead_id: Option<Uuid>,
     order_id: Option<Uuid>,
     appointment_id: Option<Uuid>,
     replace_document_id: Option<Uuid>,
@@ -1744,6 +1782,10 @@ struct DocumentBindingOverrides {
     guardian2_label: Option<String>,
     guardian2_birth_date: Option<NaiveDate>,
     extra_release_recipients: Option<String>,
+    consent_email: Option<bool>,
+    consent_messenger: Option<bool>,
+    consent_healthcare: Option<bool>,
+    consent_privacy: Option<bool>,
 }
 
 #[derive(Deserialize, Serialize, Default, Clone)]
@@ -3722,6 +3764,27 @@ fn generated_document_public_id(document_id: Uuid) -> String {
         .unwrap_or(simple.as_str())
         .to_ascii_uppercase();
     format!("DOC-{suffix}")
+}
+
+fn generated_compliance_document_number(
+    template_id: &str,
+    document_id: Uuid,
+    generated_at: chrono::DateTime<chrono::Utc>,
+) -> Option<String> {
+    let prefix = match template_id {
+        "confidentiality_release" => "SE",
+        "privacy_consents" | "consent_data_release_child" | "consent_data_release_single" => "EW",
+        _ => return None,
+    };
+    let simple = document_id.simple().to_string();
+    let suffix = simple
+        .get(..12)
+        .unwrap_or(simple.as_str())
+        .to_ascii_uppercase();
+    Some(format!(
+        "{prefix}-{}-{suffix}",
+        generated_at.format("%Y%m%d")
+    ))
 }
 
 fn build_treatment_plan_html(context: &GeneratedTreatmentPlanContext) -> String {
@@ -8850,6 +8913,7 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
 
     json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+        "document_number": row.try_get::<String, _>("document_number").unwrap_or_default(),
         "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
         "lead_id": row.try_get::<Option<Uuid>, _>("lead_id").unwrap_or_default(),
         "has_active_patient_portal_user": row.try_get::<bool, _>("has_active_patient_portal_user").unwrap_or(false),
@@ -9060,7 +9124,7 @@ async fn fetch_document_row(
     current_user_id: Uuid,
 ) -> Result<Option<sqlx::postgres::PgRow>, axum::response::Response> {
     sqlx::query(
-        r#"SELECT d.id, d.patient_id, d.lead_id, d.order_id, d.appointment_id,
+        r#"SELECT d.id, d.document_number, d.patient_id, d.lead_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
                   d.document_direction, d.document_variant, d.document_language, d.access_category,
@@ -9853,7 +9917,7 @@ pub(crate) async fn persist_document_file(
                 document_date, source_person, source_institution, addressee_person,
                 addressee_institution, financial_status, payment_due_date, payment_date,
                 payment_method, version_root_document_id, replaces_document_id,
-                version_number, uploaded_by
+                version_number, uploaded_by, document_number
            ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7,
                 $8, $9, $10, $11, $12, $13, $14,
@@ -9862,7 +9926,7 @@ pub(crate) async fn persist_document_file(
                 $22, $23, $24, $25,
                 $26, $27, $28, $29,
                 $30, $31, $32, $33,
-                $34, $35, $36, $37, $38
+                $34, $35, $36, $37, $38, $39
            )"#,
     )
     .bind(document_id)
@@ -9903,6 +9967,7 @@ pub(crate) async fn persist_document_file(
     .bind(input.replaces_document_id)
     .bind(input.version_number)
     .bind(input.uploaded_by)
+    .bind(input.document_number)
     .execute(&state.db)
     .await
     {
@@ -10421,6 +10486,7 @@ async fn generate_provider_document_from_template_internal(
 
     let persist_input = NewStoredDocument {
         document_id: None,
+        document_number: None,
         patient_id,
         lead_id: None,
         order_id,
@@ -10613,6 +10679,12 @@ async fn generate_document(
     }
 
     if let Some(provider_template_id) = parse_provider_template_public_id(body.template_id.trim()) {
+        if body.lead_id.is_some() {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Provider templates require a patient context",
+            );
+        }
         if access::requires_patient_assignment(auth.role) {
             let (resolved_patient_id, _, _, _) = match validate_document_context(
                 &state,
@@ -10689,10 +10761,10 @@ async fn generate_document(
         );
     }
 
-    let (patient_id, _lead_id, order_id, appointment_id) = match validate_document_context(
+    let (patient_id, lead_id, order_id, appointment_id) = match validate_document_context(
         &state,
         body.patient_id,
-        None,
+        body.lead_id,
         body.order_id,
         body.appointment_id,
     )
@@ -10702,37 +10774,110 @@ async fn generate_document(
         Err(resp) => return resp,
     };
 
-    let Some(patient_uuid) = patient_id else {
+    if patient_id.is_none() && lead_id.is_none() {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "Generated documents must be linked to a patient",
+            "Generated documents must be linked to a patient or lead",
         );
-    };
-    if let Err(resp) = require_generated_document_patient_access(&state, &auth, patient_uuid).await
+    }
+    if let Some(patient_uuid) = patient_id
+        && let Err(resp) =
+            require_generated_document_patient_access(&state, &auth, patient_uuid).await
     {
         return resp;
     }
 
-    let patient_row = match sqlx::query(
-        r#"SELECT patient_id, title, first_name, last_name, birth_date, gender,
-                  languages,
-                  nationality, residence_country, insurance_provider,
-                  email, phone_primary, address_street, address_city, address_zip, address_country
-           FROM patients
-           WHERE id = $1"#,
-    )
-    .bind(patient_uuid)
-    .fetch_optional(&state.db)
-    .await
+    if lead_id.is_some()
+        && !matches!(
+            template.id,
+            "framework_contract"
+                | "single_order"
+                | "cost_estimate"
+                | "confidentiality_release"
+                | "privacy_consents"
+                | "consent_data_release_child"
+                | "consent_data_release_single"
+        )
     {
-        Ok(Some(row)) => row,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Patient not found"),
-        Err(e) => {
-            tracing::error!(error = %e, patient_id = %patient_uuid, "load template patient context");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to load patient context",
-            );
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "This template is only available after patient conversion",
+        );
+    }
+    if lead_id.is_some() && body.replace_document_id.is_some() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Lead document versions must be generated as a new document",
+        );
+    }
+
+    let patient_uuid = patient_id.unwrap_or_else(Uuid::nil);
+
+    let patient_row = if let Some(patient_uuid) = patient_id {
+        match sqlx::query(
+            r#"SELECT patient_id, title, first_name, last_name, birth_date, gender,
+                      languages, nationality, residence_country, insurance_provider,
+                      email, phone_primary, address_street, address_city, address_zip, address_country
+               FROM patients
+               WHERE id = $1"#,
+        )
+        .bind(patient_uuid)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(Some(row)) => row,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Patient not found"),
+            Err(e) => {
+                tracing::error!(error = %e, patient_id = %patient_uuid, "load template patient context");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load patient context",
+                );
+            }
+        }
+    } else {
+        let lead_uuid = lead_id.unwrap_or_else(Uuid::nil);
+        match sqlx::query(
+            r#"SELECT
+                      'LEAD-' || upper(left(replace(id::text, '-', ''), 8)) AS patient_id,
+                      NULL::text AS title,
+                      first_name,
+                      last_name,
+                      date_of_birth AS birth_date,
+                      CASE legal_sex
+                          WHEN 'female' THEN 'female'
+                          WHEN 'male' THEN 'male'
+                          ELSE 'diverse'
+                      END AS gender,
+                      CASE
+                          WHEN NULLIF(btrim(primary_language), '') IS NULL THEN ARRAY[]::text[]
+                          ELSE ARRAY[primary_language]
+                      END AS languages,
+                      NULL::text AS nationality,
+                      country AS residence_country,
+                      insurance_provider,
+                      email,
+                      phone AS phone_primary,
+                      street_address AS address_street,
+                      city AS address_city,
+                      zip_code AS address_zip,
+                      country AS address_country
+               FROM leads
+               WHERE id = $1 AND converted_patient_id IS NULL"#,
+        )
+        .bind(lead_uuid)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(Some(row)) => row,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
+            Err(e) => {
+                tracing::error!(error = %e, lead_id = %lead_uuid, "load template lead context");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load lead context",
+                );
+            }
         }
     };
 
@@ -10848,7 +10993,11 @@ async fn generate_document(
 
     let generated_at = chrono::Utc::now();
     let generated_document_id = Uuid::new_v4();
-    let generated_doc_id = generated_document_public_id(generated_document_id);
+    let generated_document_number =
+        generated_compliance_document_number(template.id, generated_document_id, generated_at);
+    let generated_doc_id = generated_document_number
+        .clone()
+        .unwrap_or_else(|| generated_document_public_id(generated_document_id));
     let auto_name = body
         .auto_name
         .as_deref()
@@ -12016,6 +12165,77 @@ async fn generate_document(
             };
             (preview, pdf_bytes)
         }
+        "confidentiality_release" => {
+            let agency = match load_agency_contract_settings(&state).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+            let text = build_adult_confidentiality_release_text(
+                &patient_party,
+                &agency,
+                bindings.extra_release_recipients.as_deref(),
+                &generated_doc_id,
+            );
+            let preview = admin_preview_html(
+                "Schweigepflichtsentbindung",
+                &[
+                    patient_party.name.clone(),
+                    generated_doc_id.clone(),
+                    bindings
+                        .extra_release_recipients
+                        .clone()
+                        .unwrap_or_default(),
+                ],
+            );
+            let pdf_bytes = match build_manual_generated_text_pdf(
+                &auto_name,
+                "Schweigepflichtsentbindung",
+                &text,
+            ) {
+                Ok(bytes) => bytes,
+                Err(message) => {
+                    tracing::error!(
+                        template_id = template.id,
+                        ?patient_id,
+                        ?lead_id,
+                        "build confidentiality release PDF"
+                    );
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, message);
+                }
+            };
+            (preview, pdf_bytes)
+        }
+        "privacy_consents" => {
+            let agency = match load_agency_contract_settings(&state).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+            let text = build_adult_privacy_consents_text(
+                &patient_party,
+                &agency,
+                &bindings,
+                &generated_doc_id,
+            );
+            let preview = admin_preview_html(
+                "Einwilligungserklärung",
+                &[patient_party.name.clone(), generated_doc_id.clone()],
+            );
+            let pdf_bytes =
+                match build_manual_generated_text_pdf(&auto_name, "Einwilligungserklärung", &text)
+                {
+                    Ok(bytes) => bytes,
+                    Err(message) => {
+                        tracing::error!(
+                            template_id = template.id,
+                            ?patient_id,
+                            ?lead_id,
+                            "build privacy consents PDF"
+                        );
+                        return err(StatusCode::INTERNAL_SERVER_ERROR, message);
+                    }
+                };
+            (preview, pdf_bytes)
+        }
         "consent_data_release_child" | "consent_data_release_single" => {
             let sole_guardian = template.id == "consent_data_release_single";
             // Auto-fill guardians from the child's relations. A parent is labelled
@@ -12133,8 +12353,9 @@ async fn generate_document(
 
     let persist_input = NewStoredDocument {
         document_id: Some(generated_document_id),
+        document_number: generated_document_number.as_deref(),
         patient_id,
-        lead_id: None,
+        lead_id,
         order_id,
         appointment_id,
         auto_name: &auto_name,
@@ -13573,14 +13794,12 @@ fn cost_estimate_price_text(raw: &str) -> String {
 }
 
 fn cost_estimate_default_title() -> &'static str {
-    "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen / \
-     Ориентировочный расчёт стоимости медицинских услуг диагностики"
+    "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen"
 }
 
 fn cost_estimate_total_label() -> &'static str {
     "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen \
-     (gesamt) / Ориентировочный расчёт стоимости медицинских услуг диагностики \
-     (общий):"
+     (gesamt):"
 }
 
 fn cost_estimate_legal_notice() -> &'static str {
@@ -13593,16 +13812,7 @@ fn cost_estimate_legal_notice() -> &'static str {
      Verteilung und/oder Verwendung dieses Dokuments im Zusammenhang stehen. Die Aussagen \
      entsprechen dem Stand zum Zeitpunkt der Erstellung des Dokuments und entspricht den \
      Medianpreisen für aufgeführte medizinische Leistungen aufgrund unserer Erfahrung. Sie können \
-     aufgrund künftiger Entwicklungen überholt sein, ohne dass das Dokument geändert wurde. / \
-     Правовая информация: Стоимость медицинской диагностики и/или лечения может отличаться от \
-     заявленных цен/стоимостей и представлена исключительно в информационных целях. Следовательно, \
-     мы не предоставляем никаких гарантий или заявлений относительно точности, полноты или \
-     правильности любой информации или мнения, содержащихся здесь. Мы не несем ответственности за \
-     прямые или косвенные убытки, вызванные и/или связанные с распространением и/или использованием \
-     данного документа. Информация соответствует статусу на момент создания документа и \
-     соответствует среднему диапазону цен за указанные медицинские услуги исходя из нашего опыта. \
-     Дальнейшее развитие может сделать предоставленную информацию устаревшей без внесения \
-     изменений в данный документ."
+     aufgrund künftiger Entwicklungen überholt sein, ohne dass das Dokument geändert wurde."
 }
 
 /// Two-line institutional footer block for the cost estimate, mirroring the
@@ -13688,31 +13898,28 @@ fn build_cost_estimate_pdf(
     // is never a blank placeholder here.
     admin_block(
         &mut layout,
-        &format!("Datum/Дата: {}", fmt_de_date(context.estimate_date)),
+        &format!("Datum: {}", fmt_de_date(context.estimate_date)),
         0.0,
         0.5,
     );
     // Patient line uses the gendered salutation ("Herr Max Musterman").
     admin_block(
         &mut layout,
-        &format!(
-            "Patient/Пациент: {}",
-            context.patient.name_with_salutation()
-        ),
+        &format!("Patient: {}", context.patient.name_with_salutation()),
         0.0,
         0.5,
     );
     if let Some(birth) = context.patient.birth_date {
         admin_block(
             &mut layout,
-            &format!("Geb. am./дата рождения: {}", birth.format("%d.%m.%Y")),
+            &format!("Geburtsdatum: {}", birth.format("%d.%m.%Y")),
             0.0,
             2.0,
         );
     }
 
     layout.text_block(
-        "Medizinische Leistungen/Медицинские услуги",
+        "Medizinische Leistungen",
         12.0,
         true,
         0.0,
@@ -13721,7 +13928,7 @@ fn build_cost_estimate_pdf(
         0.0,
     );
     layout.text_block(
-        "Unverbindliche Kostenschätzung/Ориентировочная стоимость",
+        "Unverbindliche Kostenschätzung",
         11.0,
         true,
         0.0,
@@ -14135,6 +14342,53 @@ fn consent_value_or_blank(value: Option<&str>) -> String {
         .filter(|v| !v.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| consent_blank_long().to_string())
+}
+
+fn adult_consent_subject_line(party: &DocPartyBlock) -> String {
+    let birth_date = party
+        .birth_date
+        .map(|value| value.format("%d.%m.%Y").to_string())
+        .unwrap_or_else(|| "________________".to_string());
+    format!(
+        "{}, geb. am {}",
+        consent_value_or_blank(Some(party.name.as_str())),
+        birth_date
+    )
+}
+
+fn build_adult_confidentiality_release_text(
+    party: &DocPartyBlock,
+    agency: &AgencyContractSettings,
+    extra_recipients: Option<&str>,
+    document_reference: &str,
+) -> String {
+    let agency_person = fc_agency_person(agency);
+    let address = consent_value_or_blank(party.address_line().as_deref());
+    let recipients = consent_value_or_blank(extra_recipients);
+    format!(
+        "Dokument-Nr.: {document_reference}\n\nGültig bis: bis auf Widerruf\n\nIch, {subject}\nAdresse: {address}\n\nentbinde alle nach § 203 StGB schweigepflichtigen Personen, insbesondere Ärztinnen und Ärzte, Angehörige anderer Heilberufe sowie Mitarbeitende von Krankenhäusern, Privatpraxen, Laboren und anderen medizinischen Einrichtungen, von ihrer Schweigepflicht gegenüber {agency_person} und den von ihm beauftragten Mitarbeitenden.\n\nEbenso entbinde ich {agency_person} und beauftragte Mitarbeitende von der Schweigepflicht gegenüber behandelnden Ärztinnen und Ärzten, medizinischen Einrichtungen, Dolmetschern, Übersetzern, Gutachtern und Kostenträgern, soweit dies für die Koordination meiner Behandlung und der vereinbarten Leistungen erforderlich ist.\n\nZusätzlich gilt die Schweigepflichtsentbindung gegenüber folgendem Vertrauenskontakt beziehungsweise folgenden Personen oder Institutionen:\n{recipients}\n\nDie Schweigepflichtsentbindung ist freiwillig und kann jederzeit mit Wirkung für die Zukunft schriftlich widerrufen werden.\n\nOrt, Datum: __________________________   Unterschrift: __________________________________________",
+        subject = adult_consent_subject_line(party),
+    )
+}
+
+fn build_adult_privacy_consents_text(
+    party: &DocPartyBlock,
+    agency: &AgencyContractSettings,
+    bindings: &DocumentBindingOverrides,
+    document_reference: &str,
+) -> String {
+    let agency_identity = agency_legal_identity(agency);
+    let data_system_name = agency.data_system_name.trim();
+    let address = consent_value_or_blank(party.address_line().as_deref());
+    let checked = |value: Option<bool>| if value.unwrap_or(false) { "[x]" } else { "[ ]" };
+    format!(
+        "Dokument-Nr.: {document_reference}\n\nGültig bis: bis auf Widerruf\n\nIch, {subject}\nAdresse: {address}\n\nwillige ein, dass {agency_identity} und beauftragte Mitarbeitende meine personenbezogenen und medizinischen Daten, Ausweiskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche Dokumentation, Verträge, Kostenvoranschläge und Rechnungen einholen, bearbeiten, speichern und an die für meine Betreuung erforderlichen medizinischen und nichtmedizinischen Leistungserbringer übermitteln dürfen.\n\n{privacy} Datenschutzhinweise erhalten und zur Kenntnis genommen.\n{healthcare} Verarbeitung personenbezogener Gesundheitsdaten.\n{email} Kommunikation und Übermittlung von Unterlagen per E-Mail.\n{messenger} Kommunikation und Übermittlung von Unterlagen per WhatsApp oder einem vergleichbaren Messenger.\n\nDie Speicherung und Verarbeitung erfolgt im {data_system_name}. Mir ist bekannt, dass elektronische Kommunikationswege besondere Vertraulichkeitsrisiken haben können.\n\nDie Einwilligungen sind freiwillig und können jederzeit mit Wirkung für die Zukunft widerrufen werden. Die Rechtmäßigkeit der bis zum Widerruf erfolgten Verarbeitung bleibt unberührt. Die Rechte auf Auskunft, Berichtigung, Löschung und Einschränkung der Verarbeitung nach der DSGVO bleiben bestehen.\n\nOrt, Datum: __________________________   Unterschrift: __________________________________________",
+        subject = adult_consent_subject_line(party),
+        privacy = checked(bindings.consent_privacy),
+        healthcare = checked(bindings.consent_healthcare),
+        email = checked(bindings.consent_email),
+        messenger = checked(bindings.consent_messenger),
+    )
 }
 
 fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'static str> {
@@ -15110,7 +15364,7 @@ async fn list_documents(
         };
 
     let rows = match sqlx::query(
-        r#"SELECT d.id, d.patient_id, d.lead_id, d.order_id, d.appointment_id,
+        r#"SELECT d.id, d.document_number, d.patient_id, d.lead_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
                   d.document_direction, d.document_variant, d.document_language, d.access_category,
@@ -15186,7 +15440,7 @@ async fn list_documents(
            ) provider_context ON TRUE
            WHERE ($1::text IS NULL
                   OR de_normalize(concat_ws(' ',
-                       d.auto_name, d.original_filename, d.category, d.art,
+                       d.document_number, d.auto_name, d.original_filename, d.category, d.art,
                        d.generated_template_id, d.notes, d.klinik, d.mime_type,
                        d.document_direction, d.document_variant, d.document_language,
                        d.access_category, d.source_person, d.source_institution,
@@ -15275,7 +15529,7 @@ async fn list_document_intake_queue(
     };
 
     let rows = match sqlx::query(
-        r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
+        r#"SELECT d.id, d.document_number, d.patient_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
                   d.document_direction, d.document_variant, d.document_language, d.access_category,
@@ -15548,7 +15802,7 @@ async fn list_document_versions(
         .unwrap_or(id);
 
     let rows = match sqlx::query(
-        r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
+        r#"SELECT d.id, d.document_number, d.patient_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
                   d.document_direction, d.document_variant, d.document_language, d.access_category,
@@ -16338,6 +16592,7 @@ async fn create_translated_document_from_request(
     let notes = format!("Generated from translation request {request_id}");
     let persist_input = NewStoredDocument {
         document_id: None,
+        document_number: None,
         patient_id,
         lead_id: None,
         order_id,
@@ -16541,7 +16796,7 @@ async fn list_my_uploaded_documents(
     };
 
     match sqlx::query(
-        r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
+        r#"SELECT d.id, d.document_number, d.patient_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.klinik, d.ursprung, d.notes,
                   d.created_at, d.updated_at,
@@ -16792,6 +17047,7 @@ async fn upload_my_document(
     let original_filename = file_name.unwrap_or_else(|| "document".to_string());
     let persist_input = NewStoredDocument {
         document_id: None,
+        document_number: None,
         patient_id,
         lead_id: None,
         order_id,
@@ -17340,6 +17596,7 @@ async fn upload_document(
     );
     let persist_input = NewStoredDocument {
         document_id: None,
+        document_number: None,
         patient_id,
         lead_id,
         order_id,
@@ -19277,12 +19534,38 @@ mod tests {
         DocumentBindingOverrides, GeneratedContractLineItem, GeneratedPatientStickerContext,
         ServiceLineInput, build_manual_generated_text_pdf, build_patient_sticker_pdf,
         compute_line_item_totals, cost_coverage_money_cell, cost_estimate_price_text,
-        generated_binding_snapshot, pdf_text_font_handles,
+        generated_binding_snapshot, generated_compliance_document_number, pdf_text_font_handles,
     };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
-    use chrono::NaiveDate;
+    use chrono::{NaiveDate, TimeZone, Utc};
     use printpdf::{BuiltinFont, PdfFontHandle};
     use serde_json::json;
+    use uuid::Uuid;
+
+    #[test]
+    fn compliance_document_numbers_encode_type_date_and_stable_id() {
+        let document_id = Uuid::parse_str("01234567-89ab-cdef-0123-456789abcdef").unwrap();
+        let generated_at = Utc.with_ymd_and_hms(2026, 7, 13, 9, 30, 0).unwrap();
+
+        assert_eq!(
+            generated_compliance_document_number(
+                "confidentiality_release",
+                document_id,
+                generated_at,
+            )
+            .as_deref(),
+            Some("SE-20260713-0123456789AB")
+        );
+        assert_eq!(
+            generated_compliance_document_number("privacy_consents", document_id, generated_at)
+                .as_deref(),
+            Some("EW-20260713-0123456789AB")
+        );
+        assert!(
+            generated_compliance_document_number("framework_contract", document_id, generated_at)
+                .is_none()
+        );
+    }
 
     #[test]
     fn patient_sticker_pdf_uses_renderable_builtin_font_text() {

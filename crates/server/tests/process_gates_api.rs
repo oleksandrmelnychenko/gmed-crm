@@ -369,7 +369,7 @@ async fn qualifying_lead_requires_readiness_gates() {
 }
 
 #[tokio::test]
-async fn updating_lead_gates_allows_qualification_and_conversion() {
+async fn updating_lead_gates_allows_qualification_but_conversion_requires_onboarding() {
     let Some((app, pool, _admin_id)) = test_context().await else {
         return;
     };
@@ -416,8 +416,16 @@ async fn updating_lead_gates_allows_qualification_and_conversion() {
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(converted["patient_id"].as_str().is_some());
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{converted}");
+    assert_eq!(converted["message"], "Lead is not conversion-ready");
+    assert!(
+        converted["blocking_reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons
+                .iter()
+                .any(|reason| { reason == "Signed confidentiality release is missing" })),
+        "{converted}"
+    );
 }
 
 #[tokio::test]
@@ -2154,7 +2162,7 @@ async fn main_order_accepts_related_patient_appointment() {
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{relation}");
+    assert_eq!(status, StatusCode::CREATED, "{relation}");
 
     let (status, body) = json_request(
         &app,
@@ -2172,6 +2180,13 @@ async fn main_order_accepts_related_patient_appointment() {
     .await;
 
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    assert_eq!(body["patient_id"], child.to_string());
-    assert_eq!(body["order_id"], head_order.to_string());
+    let appointment_id = Uuid::parse_str(body["id"].as_str().expect("appointment id")).unwrap();
+    let persisted_link: (Uuid, Option<Uuid>) =
+        sqlx::query_as("SELECT patient_id, order_id FROM appointments WHERE id = $1")
+            .bind(appointment_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(persisted_link.0, child);
+    assert_eq!(persisted_link.1, Some(head_order));
 }

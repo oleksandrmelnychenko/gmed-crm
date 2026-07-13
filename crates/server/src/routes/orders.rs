@@ -850,7 +850,7 @@ fn normalize_optional_text(value: Option<String>) -> Option<String> {
 async fn load_order_process_readiness(
     state: &AppState,
     order_id: Uuid,
-    patient_id: Uuid,
+    patient_id: Option<Uuid>,
 ) -> Result<OrderProcessReadiness, axum::response::Response> {
     let gate_row = sqlx::query(
         r#"SELECT billing_release_status,
@@ -914,7 +914,7 @@ async fn load_order_process_readiness(
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
-        tracing::error!(error = %e, patient_id = %patient_id, order_id = %order_id, "load order finance gates");
+        tracing::error!(error = %e, patient_id = ?patient_id, order_id = %order_id, "load order finance gates");
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to load order process gates",
@@ -2423,11 +2423,17 @@ async fn get_order(
         return e;
     }
 
-    let order = match sqlx::query!(
-        r#"SELECT o.*, p.first_name, p.last_name, p.patient_id AS p_pid
-           FROM orders o JOIN patients p ON p.id = o.patient_id WHERE o.id = $1"#,
-        order_id
+    let order = match sqlx::query(
+        r#"SELECT o.id, o.order_number, o.patient_id, o.source_lead_id,
+                  o.phase, o.status, o.needs_description, o.signed_patient,
+                  o.signed_agency, o.total_estimated, o.total_actual,
+                  o.created_at, o.updated_at,
+                  p.first_name, p.last_name, p.patient_id AS p_pid
+           FROM orders o
+           LEFT JOIN patients p ON p.id = o.patient_id
+           WHERE o.id = $1"#,
     )
+    .bind(order_id)
     .fetch_optional(&state.db)
     .await
     {
@@ -2439,7 +2445,52 @@ async fn get_order(
         }
     };
 
-    match can_access_order(&state, &auth, order.id, Some(order.patient_id)).await {
+    let order_db_id = order.try_get::<Uuid, _>("id").unwrap_or(order_id);
+    let order_number = order
+        .try_get::<String, _>("order_number")
+        .unwrap_or_default();
+    let patient_id = order
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default();
+    let source_lead_id = order
+        .try_get::<Option<Uuid>, _>("source_lead_id")
+        .unwrap_or_default();
+    let phase = order.try_get::<String, _>("phase").unwrap_or_default();
+    let status = order.try_get::<String, _>("status").unwrap_or_default();
+    let needs_description = order
+        .try_get::<Option<String>, _>("needs_description")
+        .unwrap_or_default();
+    let signed_patient = order.try_get::<bool, _>("signed_patient").unwrap_or(false);
+    let signed_agency = order.try_get::<bool, _>("signed_agency").unwrap_or(false);
+    let total_estimated = order
+        .try_get::<Option<rust_decimal::Decimal>, _>("total_estimated")
+        .unwrap_or_default();
+    let total_actual = order
+        .try_get::<Option<rust_decimal::Decimal>, _>("total_actual")
+        .unwrap_or_default();
+    let created_at = order
+        .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+        .unwrap_or_else(|_| chrono::Utc::now());
+    let updated_at = order
+        .try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")
+        .unwrap_or(created_at);
+    let patient_name = [
+        order
+            .try_get::<Option<String>, _>("first_name")
+            .unwrap_or_default(),
+        order
+            .try_get::<Option<String>, _>("last_name")
+            .unwrap_or_default(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" ");
+    let patient_pid = order
+        .try_get::<Option<String>, _>("p_pid")
+        .unwrap_or_default();
+
+    match can_access_order(&state, &auth, order_db_id, patient_id).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -2585,7 +2636,7 @@ async fn get_order(
     }
 
     let process_gate_readiness =
-        match load_order_process_readiness(&state, order_id, order.patient_id).await {
+        match load_order_process_readiness(&state, order_id, patient_id).await {
             Ok(value) => value,
             Err(resp) => return resp,
         };
@@ -2605,8 +2656,8 @@ async fn get_order(
     let lifecycle = match load_order_lifecycle(
         &state,
         order_id,
-        &order.phase,
-        order.created_at,
+        &phase,
+        created_at,
         &process_gate_readiness,
     )
     .await
@@ -2616,16 +2667,17 @@ async fn get_order(
     };
 
     Json(serde_json::json!({
-        "id": order.id, "order_number": order.order_number,
-        "patient_id": order.patient_id,
-        "patient_name": format!("{} {}", order.first_name, order.last_name),
-        "patient_pid": order.p_pid,
-        "phase": order.phase, "status": order.status,
-        "needs_description": order.needs_description,
+        "id": order_db_id, "order_number": order_number,
+        "patient_id": patient_id,
+        "source_lead_id": source_lead_id,
+        "patient_name": patient_name,
+        "patient_pid": patient_pid,
+        "phase": phase, "status": status,
+        "needs_description": needs_description,
         "date_from": order_date_from.map(|value| value.to_string()),
         "date_to": order_date_to.map(|value| value.to_string()),
-        "signed_patient": order.signed_patient, "signed_agency": order.signed_agency,
-        "total_estimated": order.total_estimated, "total_actual": order.total_actual,
+        "signed_patient": signed_patient, "signed_agency": signed_agency,
+        "total_estimated": total_estimated, "total_actual": total_actual,
         "leistungen": leist_json,
         "external_invoices": external_invoices_json,
         "process_gates": process_gates,
@@ -2633,7 +2685,7 @@ async fn get_order(
         "execution_flow": execution_flow,
         "followup_flow": followup_flow,
         "lifecycle": lifecycle,
-        "created_at": order.created_at, "updated_at": order.updated_at,
+        "created_at": created_at, "updated_at": updated_at,
     }))
     .into_response()
 }
@@ -2945,7 +2997,7 @@ async fn update_phase(
         }
     }
 
-    let readiness = match load_order_process_readiness(&state, order_id, patient_id).await {
+    let readiness = match load_order_process_readiness(&state, order_id, Some(patient_id)).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -3151,7 +3203,7 @@ async fn update_process_gates(
             )
             .await;
 
-            match load_order_process_readiness(&state, order_id, patient_id).await {
+            match load_order_process_readiness(&state, order_id, Some(patient_id)).await {
                 Ok(readiness) => Json(readiness.payload).into_response(),
                 Err(resp) => resp,
             }
@@ -3339,7 +3391,7 @@ async fn update_debt_management(
             )
             .await;
 
-            match load_order_process_readiness(&state, order_id, patient_id).await {
+            match load_order_process_readiness(&state, order_id, Some(patient_id)).await {
                 Ok(readiness) => Json(readiness.payload).into_response(),
                 Err(resp) => resp,
             }

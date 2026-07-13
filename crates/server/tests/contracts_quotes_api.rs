@@ -376,6 +376,29 @@ async fn lead_order_and_service_are_idempotent_without_creating_patient() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "response: {service}");
 
+    let (status, order_detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {order_detail}");
+    assert_eq!(order_detail["source_lead_id"], lead_id.to_string());
+    assert!(order_detail["patient_id"].is_null());
+    assert_eq!(
+        order_detail["leistungen"]
+            .as_array()
+            .expect("order services")
+            .len(),
+        1
+    );
+    assert_eq!(
+        order_detail["leistungen"][0]["description"],
+        "Organisation der Behandlung"
+    );
+
     let (status, quote) = json_request(
         &app,
         "POST",

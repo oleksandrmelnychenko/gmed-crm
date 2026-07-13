@@ -583,6 +583,7 @@ async fn upload_interpreter_profile_document(
     });
     let persist_input = NewStoredDocument {
         document_id: None,
+        document_number: None,
         patient_id: None,
         lead_id: None,
         order_id: None,

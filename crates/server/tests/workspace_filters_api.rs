@@ -10795,7 +10795,7 @@ async fn non_medical_provider_rejects_provider_specializations() {
             .as_str()
             .unwrap_or_default()
             .to_lowercase()
-            .contains("title")
+            .contains("titel")
     );
 
     let (status, doctor_body) = json_request(

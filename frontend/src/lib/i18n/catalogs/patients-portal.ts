@@ -706,6 +706,32 @@ export interface PatientsPortalTranslations {
   patient_profile_insurance_and_payer: string;
   patient_profile_address: string;
   patient_profile_emergency_contact: string;
+  patient_profile_intake_data: string;
+  patient_profile_intake_source: string;
+  patient_profile_intake_services: string;
+  patient_profile_intake_location: string;
+  patient_profile_intake_interpreter: string;
+  patient_profile_intake_message: string;
+  patient_profile_intake_discovery: string;
+  patient_profile_intake_referrer: string;
+  patient_profile_intake_insurance_coverage: string;
+  patient_profile_intake_medical_records: string;
+  patient_profile_intake_records_language: string;
+  patient_profile_intake_can_travel: string;
+  patient_profile_intake_travel_documents: string;
+  patient_profile_intake_current_treatment: string;
+  patient_profile_intake_travel_risk: string;
+  patient_profile_intake_membership: string;
+  patient_profile_discovery_customer_referral: string;
+  patient_profile_discovery_online: string;
+  patient_profile_discovery_employee_referral: string;
+  patient_profile_discovery_medical_referral: string;
+  patient_profile_discovery_partner_referral: string;
+  patient_profile_discovery_insurance_referral: string;
+  patient_profile_discovery_social_media: string;
+  patient_profile_discovery_advertising: string;
+  patient_profile_discovery_event: string;
+  patient_profile_discovery_other: string;
   patient_profile_edit: string;
   patient_profile_edit_field_aria: string;
   patient_label_print_dob: string;
@@ -1534,7 +1560,7 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   patient_profile_editor_public: "Государственная",
   patient_profile_editor_self_pay: "Самооплата",
   patient_profile_editor_foreign: "Иностранная",
-  patient_profile_editor_emergency_contact: "Экстренный контакт",
+  patient_profile_editor_emergency_contact: "Доверенный контакт",
   patient_profile_editor_contact_2: "Контакт",
   patient_profile_editor_phone: "Телефон",
   patient_profile_editor_relation: "Связь",
@@ -1555,7 +1581,33 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   patient_profile_contact: "Контакты",
   patient_profile_insurance_and_payer: "Страхование и плательщик",
   patient_profile_address: "Адрес",
-  patient_profile_emergency_contact: "Экстренный контакт",
+  patient_profile_emergency_contact: "Доверенный контакт",
+  patient_profile_intake_data: "Данные первичного обращения",
+  patient_profile_intake_source: "Источник и форма",
+  patient_profile_intake_services: "Запрошенные услуги",
+  patient_profile_intake_location: "Локация и срок",
+  patient_profile_intake_interpreter: "Переводчик",
+  patient_profile_intake_message: "Сообщение клиента",
+  patient_profile_intake_discovery: "Откуда узнали о нас",
+  patient_profile_intake_referrer: "Кто рекомендовал",
+  patient_profile_intake_insurance_coverage: "Покрытие лечения в Германии",
+  patient_profile_intake_medical_records: "Медицинские документы",
+  patient_profile_intake_records_language: "Документы на принятом языке",
+  patient_profile_intake_can_travel: "Может приехать",
+  patient_profile_intake_travel_documents: "Проездные документы",
+  patient_profile_intake_current_treatment: "Сейчас проходит лечение",
+  patient_profile_intake_travel_risk: "Риск для поездки по состоянию здоровья",
+  patient_profile_intake_membership: "Интерес к программе сопровождения",
+  patient_profile_discovery_customer_referral: "Рекомендация клиента",
+  patient_profile_discovery_online: "Онлайн",
+  patient_profile_discovery_employee_referral: "Рекомендация сотрудника",
+  patient_profile_discovery_medical_referral: "Рекомендация врача или клиники",
+  patient_profile_discovery_partner_referral: "Партнёр или агентство",
+  patient_profile_discovery_insurance_referral: "Страховая компания",
+  patient_profile_discovery_social_media: "Социальные сети",
+  patient_profile_discovery_advertising: "Реклама",
+  patient_profile_discovery_event: "Мероприятие",
+  patient_profile_discovery_other: "Другое",
   patient_profile_edit: "Редактировать",
   patient_profile_compliance_and_legal_status: "Комплаенс и правовой статус",
   patient_profile_contract_readiness_required_confirmations_and_patient_legal_note: "Готовность по договорам, обязательные подтверждения и правовые заметки пациента с прямыми переходами в связанные разделы.",
@@ -2376,7 +2428,7 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   patient_profile_editor_public: "Gesetzlich",
   patient_profile_editor_self_pay: "Selbstzahler",
   patient_profile_editor_foreign: "Ausland",
-  patient_profile_editor_emergency_contact: "Notfallkontakt",
+  patient_profile_editor_emergency_contact: "Vertrauenskontakt",
   patient_profile_editor_contact_2: "Notfallkontakt",
   patient_profile_editor_phone: "Notfalltelefon",
   patient_profile_editor_relation: "Beziehung",
@@ -2397,7 +2449,33 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   patient_profile_contact: "Kontakt",
   patient_profile_insurance_and_payer: "Versicherung und Kostenträger",
   patient_profile_address: "Adresse",
-  patient_profile_emergency_contact: "Notfallkontakt",
+  patient_profile_emergency_contact: "Vertrauenskontakt",
+  patient_profile_intake_data: "Angaben aus der Erstanfrage",
+  patient_profile_intake_source: "Quelle und Formular",
+  patient_profile_intake_services: "Gewünschte Leistungen",
+  patient_profile_intake_location: "Ort und Zeitraum",
+  patient_profile_intake_interpreter: "Dolmetscher",
+  patient_profile_intake_message: "Kundennachricht",
+  patient_profile_intake_discovery: "Wie auf uns aufmerksam geworden",
+  patient_profile_intake_referrer: "Empfohlen durch",
+  patient_profile_intake_insurance_coverage: "Deckung der Behandlung in Deutschland",
+  patient_profile_intake_medical_records: "Medizinische Unterlagen",
+  patient_profile_intake_records_language: "Unterlagen in akzeptierter Sprache",
+  patient_profile_intake_can_travel: "Kann anreisen",
+  patient_profile_intake_travel_documents: "Reisedokumente",
+  patient_profile_intake_current_treatment: "Derzeit in Behandlung",
+  patient_profile_intake_travel_risk: "Gesundheitsrisiko für die Reise",
+  patient_profile_intake_membership: "Interesse am Betreuungsprogramm",
+  patient_profile_discovery_customer_referral: "Empfehlung eines Kunden",
+  patient_profile_discovery_online: "Online",
+  patient_profile_discovery_employee_referral: "Empfehlung eines Mitarbeiters",
+  patient_profile_discovery_medical_referral: "Empfehlung eines Arztes oder einer Klinik",
+  patient_profile_discovery_partner_referral: "Partner oder Agentur",
+  patient_profile_discovery_insurance_referral: "Versicherung",
+  patient_profile_discovery_social_media: "Soziale Medien",
+  patient_profile_discovery_advertising: "Werbung",
+  patient_profile_discovery_event: "Veranstaltung",
+  patient_profile_discovery_other: "Sonstiges",
   patient_profile_edit: "Bearbeiten",
   patient_profile_compliance_and_legal_status: "Compliance und Rechtsstatus",
   patient_profile_contract_readiness_required_confirmations_and_patient_legal_note: "Vertragsbereitschaft, Pflichtbestätigungen und patientenbezogene Rechtsnotizen mit direkten Verknüpfungen in die zugehörigen Bereiche.",

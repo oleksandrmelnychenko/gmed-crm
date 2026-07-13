@@ -68,6 +68,7 @@ import {
   deleteStoredDocumentFile,
   downloadDocumentFile,
   fetchDocuments,
+  generateDocument,
   markDocumentSigned,
   revokeDocumentPreviewObjectUrl,
   uploadDocument,
@@ -153,6 +154,16 @@ type Draft = {
   country: string;
   language: string;
   whatsappNumber: string;
+  hasInsurance: "" | "yes" | "no";
+  insuranceCoversGermany: string;
+  insuranceType: string;
+  insuranceProvider: string;
+  insuranceNumber: string;
+  trustedContactName: string;
+  trustedContactPhone: string;
+  trustedContactRelation: string;
+  trustedContactBirthDate: string;
+  trustedContactAddress: string;
   concern: string;
   anamnese: string;
   narrative: ClinicalNarrative | null;
@@ -183,7 +194,8 @@ type ServiceLine = {
 };
 
 type AutosaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
-type WizardDocumentKind = "identity" | "dsgvo";
+type WizardDocumentKind = "identity" | "confidentiality_release" | "privacy_consents";
+type CommercialDocumentKind = "framework_contract" | "single_order" | "cost_estimate";
 
 type AutosaveSnapshot = {
   draft: Draft;
@@ -216,7 +228,10 @@ type MasterFieldKey =
   | "phone"
   | "street"
   | "city"
-  | "zip";
+  | "zip"
+  | "insuranceType"
+  | "insuranceProvider"
+  | "insuranceNumber";
 
 type MasterValidationErrors = Partial<Record<MasterFieldKey, string>>;
 
@@ -256,6 +271,11 @@ const ORDER_DATE_FROM_ID = "lead-wizard-program-date-from";
 const ORDER_DATE_TO_ID = "lead-wizard-program-date-to";
 const PRIVACY_CONSENT_ID = "lead-wizard-privacy-consent";
 const HEALTHCARE_CONSENT_ID = "lead-wizard-healthcare-consent";
+const CONFIDENTIALITY_RELEASE_ID = "lead-wizard-confidentiality-release";
+const PRIVACY_DOCUMENT_ID = "lead-wizard-privacy-document";
+const FRAMEWORK_DOCUMENT_ID = "lead-wizard-framework-document";
+const ORDER_DOCUMENT_ID = "lead-wizard-order-document";
+const COST_ESTIMATE_DOCUMENT_ID = "lead-wizard-cost-estimate-document";
 
 const DISCOVERY_SOURCE_OPTIONS = [
   { value: "customer_referral", ru: "Рекомендация клиента", de: "Empfehlung eines Kunden" },
@@ -280,6 +300,9 @@ const MASTER_FIELD_ORDER: MasterFieldKey[] = [
   "street",
   "city",
   "zip",
+  "insuranceType",
+  "insuranceProvider",
+  "insuranceNumber",
 ];
 
 const MASTER_FIELD_IDS: Record<MasterFieldKey, string> = {
@@ -292,6 +315,9 @@ const MASTER_FIELD_IDS: Record<MasterFieldKey, string> = {
   street: "lead-wizard-street",
   city: "lead-wizard-city",
   zip: "lead-wizard-zip",
+  insuranceType: "lead-wizard-insurance-type",
+  insuranceProvider: "lead-wizard-insurance-provider",
+  insuranceNumber: "lead-wizard-insurance-number",
 };
 
 const STEPS: Array<{ id: StepId; ru: string; de: string }> = [
@@ -376,6 +402,16 @@ function autosavePayload(
     middle_name: draft.middleName.trim(),
     suffix: draft.suffix.trim(),
     whatsapp_number: draft.whatsappNumber.trim(),
+    has_insurance: draft.hasInsurance ? draft.hasInsurance === "yes" : undefined,
+    insurance_covers_germany: draft.insuranceCoversGermany || undefined,
+    insurance_type: draft.insuranceType || undefined,
+    insurance_provider: draft.insuranceProvider.trim(),
+    insurance_number: draft.insuranceNumber.trim(),
+    trusted_contact_name: draft.trustedContactName.trim(),
+    trusted_contact_phone: draft.trustedContactPhone.trim(),
+    trusted_contact_relation: draft.trustedContactRelation.trim(),
+    trusted_contact_birth_date: draft.trustedContactBirthDate || undefined,
+    trusted_contact_address: draft.trustedContactAddress.trim(),
     street_address: draft.street.trim(),
     city: draft.city.trim(),
     state: draft.state.trim(),
@@ -684,6 +720,16 @@ function draftFromLead(lead: LeadDetail): Draft {
     country: lead.country ?? "",
     language: normalizedLanguageCode(lead.primary_language) || normalizedLanguageCode(lead.locale),
     whatsappNumber: lead.whatsapp_number ?? "",
+    hasInsurance: lead.has_insurance == null ? "" : lead.has_insurance ? "yes" : "no",
+    insuranceCoversGermany: lead.insurance_covers_germany ?? "",
+    insuranceType: lead.insurance_type ?? "",
+    insuranceProvider: lead.insurance_provider ?? "",
+    insuranceNumber: lead.insurance_number ?? "",
+    trustedContactName: lead.trusted_contact_name ?? questionnaireText(lead, "emergencyContactName", "trustedContactName"),
+    trustedContactPhone: lead.trusted_contact_phone ?? questionnaireText(lead, "emergencyContactPhone", "trustedContactPhone"),
+    trustedContactRelation: lead.trusted_contact_relation ?? questionnaireText(lead, "emergencyContactRelation", "trustedContactRelation"),
+    trustedContactBirthDate: lead.trusted_contact_birth_date ?? "",
+    trustedContactAddress: lead.trusted_contact_address ?? questionnaireText(lead, "emergencyContactAddress", "trustedContactAddress"),
     concern: lead.primary_concern_text ?? "",
     anamnese: clinical.narrative?.anamnese_aktuelle ?? lead.additional_concerns ?? "",
     narrative: clinical.narrative,
@@ -724,6 +770,16 @@ function blankDraft(): Draft {
     country: "",
     language: "",
     whatsappNumber: "",
+    hasInsurance: "",
+    insuranceCoversGermany: "",
+    insuranceType: "",
+    insuranceProvider: "",
+    insuranceNumber: "",
+    trustedContactName: "",
+    trustedContactPhone: "",
+    trustedContactRelation: "",
+    trustedContactBirthDate: "",
+    trustedContactAddress: "",
     concern: "",
     anamnese: "",
     narrative: null,
@@ -865,7 +921,19 @@ function lineFromOrderLeistung(item: Leistung): ServiceLine {
 
 function wizardDocumentKind(item: DocumentItem): WizardDocumentKind | null {
   const complianceKind = item.compliance_kind?.trim().toLowerCase();
-  if (complianceKind === "identity" || complianceKind === "dsgvo") return complianceKind;
+  if (complianceKind === "identity" || complianceKind === "confidentiality_release") {
+    return complianceKind;
+  }
+  if (complianceKind === "dsgvo") return "privacy_consents";
+
+  if (item.generated_template_id === "confidentiality_release") return "confidentiality_release";
+  if (
+    item.generated_template_id === "privacy_consents"
+    || item.generated_template_id === "consent_data_release_child"
+    || item.generated_template_id === "consent_data_release_single"
+  ) {
+    return "privacy_consents";
+  }
 
   const classification = [item.art, item.category, item.auto_name, item.original_filename]
     .filter(Boolean)
@@ -874,8 +942,11 @@ function wizardDocumentKind(item: DocumentItem): WizardDocumentKind | null {
   if (classification.includes("identity") || classification.includes("passport") || classification.includes("ausweis")) {
     return "identity";
   }
-  if (classification.includes("dsgvo") || classification.includes("datenschutz")) {
-    return "dsgvo";
+  if (classification.includes("schweigepflicht")) {
+    return "confidentiality_release";
+  }
+  if (classification.includes("dsgvo") || classification.includes("datenschutz") || classification.includes("einwilligung")) {
+    return "privacy_consents";
   }
   return null;
 }
@@ -935,14 +1006,18 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Primary concern is missing": tx("Укажите причину обращения", "Anliegen angeben"),
     "Requested specialty is missing": tx("Выберите хотя бы одну специализацию", "Mindestens eine Fachrichtung auswählen"),
     "Identity document is not verified": tx("Подтвердите документ, удостоверяющий личность", "Ausweisdokument bestätigen"),
-    "Signed DSGVO document is missing": tx("Загрузите и подтвердите согласие на обработку персональных данных", "Datenschutzeinwilligung hochladen und bestätigen"),
+    "Signed DSGVO document is missing": tx("Создайте и подтвердите документ согласий", "Einwilligungsdokument erstellen und bestätigen"),
+    "Signed confidentiality release is missing": tx("Создайте и подтвердите освобождение от врачебной тайны", "Schweigepflichtsentbindung erstellen und bestätigen"),
     "Anamnesis intake is incomplete": tx("Заполните и сохраните анамнез", "Anamnese ausfüllen und abschließen"),
     "Framework contract is not signed": tx("Подпишите рамочный договор", "Rahmenvertrag unterzeichnen"),
+    "Framework contract document is missing": tx("Создайте документ рамочного договора", "Rahmenvertragsdokument erstellen"),
     "Onboarding order is missing": tx("Создайте заказ", "Auftrag erstellen"),
     "Order needs at least one valid service": tx("Добавьте в заказ хотя бы одну услугу", "Mindestens eine Leistung zum Auftrag hinzufügen"),
+    "Order document is missing": tx("Создайте документ заказа", "Einzelauftrag erstellen"),
     "Customer order signature is missing": tx("Получите подпись клиента на заказе", "Unterschrift des Kunden für den Auftrag einholen"),
     "Agency order signature is missing": tx("Подтвердите заказ со стороны агентства", "Auftrag durch die Agentur bestätigen"),
     "Quote is not accepted": tx("Подтвердите смету", "Kostenvoranschlag annehmen"),
+    "Cost estimate document is missing": tx("Создайте документ сметы", "Kostenvoranschlag als Dokument erstellen"),
     "Required prepayment is not complete": tx("Укажите полученную предоплату", "Erforderliche Vorauszahlung erfassen"),
     "Lead is already converted": tx("Пациент уже создан", "Patient wurde bereits angelegt"),
   };
@@ -964,13 +1039,17 @@ function readinessReasonStep(reason: string): StepId {
     "Requested specialty is missing": "order",
     "Identity document is not verified": "documents",
     "Signed DSGVO document is missing": "documents",
+    "Signed confidentiality release is missing": "documents",
     "Anamnesis intake is incomplete": "medical",
     "Framework contract is not signed": "commercial",
+    "Framework contract document is missing": "commercial",
     "Onboarding order is missing": "commercial",
     "Order needs at least one valid service": "commercial",
+    "Order document is missing": "commercial",
     "Customer order signature is missing": "commercial",
     "Agency order signature is missing": "commercial",
     "Quote is not accepted": "commercial",
+    "Cost estimate document is missing": "commercial",
     "Required prepayment is not complete": "commercial",
     "Lead is already converted": "release",
   };
@@ -987,8 +1066,13 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
     "Primary concern is missing": SERVICE_CONCERN_ID,
     "Requested specialty is missing": SERVICE_SPECIALTIES_ID,
     "Identity document is not verified": "lead-file-identity",
-    "Signed DSGVO document is missing": "lead-file-dsgvo",
+    "Signed DSGVO document is missing": PRIVACY_DOCUMENT_ID,
+    "Signed confidentiality release is missing": CONFIDENTIALITY_RELEASE_ID,
     "Anamnesis intake is incomplete": MEDICAL_ANAMNESE_ID,
+    "Framework contract is not signed": FRAMEWORK_DOCUMENT_ID,
+    "Framework contract document is missing": FRAMEWORK_DOCUMENT_ID,
+    "Order document is missing": ORDER_DOCUMENT_ID,
+    "Cost estimate document is missing": COST_ESTIMATE_DOCUMENT_ID,
   };
   if (reason === "Complete street, city and postal code" || reason === "Complete city and postal code") {
     if (!draft?.street.trim() && reason !== "Complete city and postal code") return MASTER_FIELD_IDS.street;
@@ -1009,6 +1093,9 @@ function masterValidationIssues(errors: MasterValidationErrors, tx: Tx): Validat
     street: tx("Улица и дом", "Straße und Hausnummer"),
     city: tx("Город", "Ort"),
     zip: tx("Почтовый индекс", "Postleitzahl"),
+    insuranceType: tx("Тип страхования", "Versicherungsart"),
+    insuranceProvider: tx("Страховая компания", "Versicherer"),
+    insuranceNumber: tx("Номер полиса", "Versicherungsnummer"),
   };
   const sharedContactError = errors.email && errors.email === errors.phone
     ? errors.email
@@ -1079,7 +1166,11 @@ function orderValidationIssues(draft: Draft | null, tx: Tx): ValidationIssue[] {
   return issues;
 }
 
-function documentsValidationIssues(draft: Draft | null, tx: Tx): ValidationIssue[] {
+function documentsValidationIssues(
+  draft: Draft | null,
+  documents: Record<WizardDocumentKind, DocumentItem[]>,
+  tx: Tx,
+): ValidationIssue[] {
   if (!draft) return [];
   const issues: ValidationIssue[] = [];
   if (!draft.privacyConsent) {
@@ -1096,6 +1187,36 @@ function documentsValidationIssues(draft: Draft | null, tx: Tx): ValidationIssue
       step: "documents",
       message: readinessReasonLabel("Healthcare consent is missing", tx),
       fieldId: HEALTHCARE_CONSENT_ID,
+    });
+  }
+  if (!documents.confidentiality_release.some((document) => (
+    document.signed_at && document.compliance_kind === "confidentiality_release"
+  ))) {
+    issues.push({
+      key: "confidentiality-release",
+      step: "documents",
+      message: readinessReasonLabel("Signed confidentiality release is missing", tx),
+      fieldId: CONFIDENTIALITY_RELEASE_ID,
+    });
+  }
+  if (!documents.privacy_consents.some((document) => (
+    document.signed_at && document.compliance_kind === "dsgvo"
+  ))) {
+    issues.push({
+      key: "privacy-document",
+      step: "documents",
+      message: readinessReasonLabel("Signed DSGVO document is missing", tx),
+      fieldId: PRIVACY_DOCUMENT_ID,
+    });
+  }
+  if (!documents.identity.some((document) => (
+    document.signed_at && document.compliance_kind === "identity"
+  ))) {
+    issues.push({
+      key: "identity-document",
+      step: "documents",
+      message: readinessReasonLabel("Identity document is not verified", tx),
+      fieldId: "lead-file-identity",
     });
   }
   return issues;
@@ -1146,6 +1267,11 @@ function validateMasterDraft(draft: Draft | null, tx: Tx): MasterValidationError
     if (!draft.street.trim()) errors.street = required;
     if (!draft.city.trim()) errors.city = required;
     if (!draft.zip.trim()) errors.zip = required;
+  }
+  if (draft.hasInsurance === "yes") {
+    if (!draft.insuranceType) errors.insuranceType = required;
+    if (!draft.insuranceProvider.trim()) errors.insuranceProvider = required;
+    if (!draft.insuranceNumber.trim()) errors.insuranceNumber = required;
   }
   return errors;
 }
@@ -1208,6 +1334,91 @@ function ToggleRow({
       <input id={id} type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className="size-4 accent-[var(--brand)]" />
       <span className="text-sm text-foreground">{label}</span>
     </label>
+  );
+}
+
+function WizardDocumentRows({
+  documents,
+  complianceKind,
+  emptyLabel,
+  lang,
+  busy,
+  disabled,
+  tx,
+  onOpen,
+  onDownload,
+  onSign,
+  onDelete,
+}: {
+  documents: DocumentItem[];
+  complianceKind?: DocumentComplianceKind;
+  emptyLabel: string;
+  lang: string;
+  busy: string | null;
+  disabled: boolean;
+  tx: Tx;
+  onOpen: (document: DocumentItem) => void;
+  onDownload: (document: DocumentItem) => void;
+  onSign?: (document: DocumentItem, kind: DocumentComplianceKind) => void;
+  onDelete: (document: DocumentItem) => void;
+}) {
+  if (documents.length === 0) {
+    return <p className="text-xs text-muted-foreground">{emptyLabel}</p>;
+  }
+
+  return (
+    <div className="divide-y divide-border rounded-md border border-border">
+      {documents.map((document) => {
+        const signed = Boolean(
+          complianceKind
+          && document.signed_at
+          && document.compliance_kind === complianceKind,
+        );
+        const sizeLabel = formatFileSize(document.file_size, lang);
+        return (
+          <div key={document.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
+            <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <button
+                type="button"
+                className="block max-w-full truncate text-left text-sm font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => onOpen(document)}
+              >
+                {wizardDocumentFilename(document)}
+              </button>
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <span className="font-mono tabular-nums">{document.document_number || `DOC-${document.id.slice(0, 8).toUpperCase()}`}</span>
+                {sizeLabel ? <span className="font-mono tabular-nums">{sizeLabel}</span> : null}
+                {complianceKind ? (
+                  <StateMark
+                    done={signed}
+                    label={signed ? tx("Подписан", "Unterzeichnet") : tx("Ожидает подписи", "Unterschrift offen")}
+                  />
+                ) : null}
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              {wizardDocumentPreviewKind(document) ? (
+                <Button type="button" variant="ghost" size="icon-sm" title={tx("Просмотреть", "Vorschau")} aria-label={tx("Просмотреть", "Vorschau")} disabled={disabled} onClick={() => onOpen(document)}>
+                  {busy === `preview-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Eye className="size-3.5" />}
+                </Button>
+              ) : null}
+              <Button type="button" variant="ghost" size="icon-sm" title={tx("Скачать", "Herunterladen")} aria-label={tx("Скачать", "Herunterladen")} disabled={disabled} onClick={() => onDownload(document)}>
+                {busy === `download-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+              </Button>
+              {complianceKind && onSign ? (
+                <Button type="button" variant="ghost" size="icon-sm" title={tx("Подтвердить подпись", "Unterschrift bestätigen")} aria-label={tx("Подтвердить подпись", "Unterschrift bestätigen")} disabled={signed || disabled} onClick={() => onSign(document, complianceKind)}>
+                  <FileCheck2 className={cn("size-3.5", signed && "text-emerald-700")} />
+                </Button>
+              ) : null}
+              <Button type="button" variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" title={tx("Удалить", "Löschen")} aria-label={tx("Удалить", "Löschen")} disabled={disabled} onClick={() => onDelete(document)}>
+                <Trash2 className="size-3.5" />
+              </Button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1360,15 +1571,6 @@ export function LeadWizard({
         fetchAgencyServices("/agency-services?active_only=true").catch(() => []),
       ]);
 
-      void documentsPromise.then(({ attachmentImportError, documents: nextDocuments }) => {
-        if (!isCurrentReload()) return;
-        setDocuments(nextDocuments);
-        if (attachmentImportError) {
-          setError(
-            `${tx("Не удалось импортировать файлы опросника", "Fragebogendateien konnten nicht importiert werden")}: ${errorText(attachmentImportError, tx)}`,
-          );
-        }
-      }).catch(() => undefined);
       void medicalLookupsPromise
         .then(([nextProviders, nextAllDoctors]) => {
           if (!isCurrentReload()) return;
@@ -1390,14 +1592,28 @@ export function LeadWizard({
           if (isCurrentReload()) setCommercialLookupsLoading(false);
         });
 
-      const [nextLead, nextCases, nextContracts, nextOrders, nextQuotes] = await Promise.all([
+      const [
+        nextLead,
+        nextDocumentState,
+        nextCases,
+        nextContracts,
+        nextOrders,
+        nextQuotes,
+      ] = await Promise.all([
         leadPromise,
+        documentsPromise,
         fetchCases("/cases?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
         fetchContracts("/framework-contracts?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
         fetchOrders("/orders?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
         fetchQuotes("/quotes?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
       ]);
       if (!isCurrentReload()) return;
+      setDocuments(nextDocumentState.documents);
+      if (nextDocumentState.attachmentImportError) {
+        setError(
+          `${tx("Не удалось импортировать файлы опросника", "Fragebogendateien konnten nicht importiert werden")}: ${errorText(nextDocumentState.attachmentImportError, tx)}`,
+        );
+      }
       const nextOrder = nextOrders[0] ?? null;
       const nextCase = nextCases[0] as CaseListItem | undefined;
       const [nextCaseDetail, nextOrderDetail] = await Promise.all([
@@ -1695,15 +1911,15 @@ export function LeadWizard({
 
   useEffect(() => {
     if (!open) return;
-    const activeStep = stepNavRef.current?.querySelector<HTMLElement>(
+    const stepNav = stepNavRef.current;
+    const activeStep = stepNav?.querySelector<HTMLElement>(
       `[data-step="${step}"]`,
     );
-    if (!activeStep) return;
+    if (!stepNav || !activeStep) return;
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    activeStep.scrollIntoView({
+    stepNav.scrollTo({
       behavior: reduceMotion ? "auto" : "smooth",
-      block: "nearest",
-      inline: "center",
+      left: activeStep.offsetLeft - (stepNav.clientWidth - activeStep.offsetWidth) / 2,
     });
   }, [open, step]);
 
@@ -1718,7 +1934,8 @@ export function LeadWizard({
   const wizardDocuments = useMemo(() => {
     const grouped: Record<WizardDocumentKind, DocumentItem[]> = {
       identity: [],
-      dsgvo: [],
+      confidentiality_release: [],
+      privacy_consents: [],
     };
     documents.forEach((item) => {
       if (item.file_deleted_at || item.has_stored_file === false) return;
@@ -1727,11 +1944,25 @@ export function LeadWizard({
     });
     return grouped;
   }, [documents]);
+  const commercialDocuments = useMemo(() => {
+    const grouped: Record<CommercialDocumentKind, DocumentItem[]> = {
+      framework_contract: [],
+      single_order: [],
+      cost_estimate: [],
+    };
+    documents.forEach((item) => {
+      if (item.file_deleted_at || item.has_stored_file === false) return;
+      const templateId = item.generated_template_id as CommercialDocumentKind | null;
+      if (templateId && templateId in grouped) grouped[templateId].push(item);
+    });
+    return grouped;
+  }, [documents]);
   const supplementaryDocuments = useMemo(
     () => documents.filter((item) => (
       !item.file_deleted_at
       && item.has_stored_file !== false
       && !wizardDocumentKind(item)
+      && !["framework_contract", "single_order", "cost_estimate"].includes(item.generated_template_id ?? "")
     )),
     [documents],
   );
@@ -1739,7 +1970,6 @@ export function LeadWizard({
   const isQuestionnaireLead = intakeType === "questionnaire";
   const isExternalIntakeLead = intakeType === "questionnaire" || intakeType === "form";
   const readiness = useMemo(() => new Map((lead?.readiness.steps ?? []).map((item) => [item.key, item.ready])), [lead?.readiness.steps]);
-  const index = STEPS.findIndex((item) => item.id === step);
   const estimate = useMemo(() => {
     let net = 0;
     let vat = 0;
@@ -1779,7 +2009,7 @@ export function LeadWizard({
       return issues;
     }
     if (validationContext.kind === "documents") {
-      return documentsValidationIssues(draft, tx);
+      return documentsValidationIssues(draft, wizardDocuments, tx);
     }
     if (validationContext.kind === "order") {
       return orderIssues;
@@ -1790,7 +2020,7 @@ export function LeadWizard({
       message: readinessReasonLabel(reason, tx),
       fieldId: readinessReasonFieldId(reason, draft),
     }));
-  }, [draft, masterErrors, orderIssues, tx, validationContext]);
+  }, [draft, masterErrors, orderIssues, tx, validationContext, wizardDocuments]);
   const visibleOrderErrors = orderValidationAttempted ? orderIssues : [];
   const orderFieldError = (...keys: string[]) =>
     visibleOrderErrors.find((issue) => keys.includes(issue.key))?.message;
@@ -2087,33 +2317,6 @@ export function LeadWizard({
     return persistMedicalDraft(draft);
   }
 
-  async function finishMedical(targetStep: StepId): Promise<boolean> {
-    if (!draft) return false;
-    if (!draft.concern.trim() || !draft.anamnese.trim()) {
-      setError("");
-      setValidationContext({ kind: "medical" });
-      setMedicalValidationAttempted(true);
-      setStep("medical");
-      const fieldId = !draft.concern.trim() ? SERVICE_CONCERN_ID : MEDICAL_ANAMNESE_ID;
-      window.requestAnimationFrame(() => document.getElementById(fieldId)?.focus());
-      return false;
-    }
-    setBusy("intake");
-    setError("");
-    setValidationContext(null);
-    try {
-      await persistMedicalCase();
-      const saved = await save(targetStep, false);
-      if (saved) setMedicalValidationAttempted(false);
-      return saved;
-    } catch (nextError) {
-      showWizardError(nextError);
-      return false;
-    } finally {
-      setBusy(null);
-    }
-  }
-
   async function finishIntake(targetStep: StepId): Promise<boolean> {
     if (!leadId || !draft) return false;
     setError("");
@@ -2126,7 +2329,7 @@ export function LeadWizard({
       window.requestAnimationFrame(() => document.getElementById(fieldId)?.focus());
       return false;
     }
-    const documentIssues = documentsValidationIssues(draft, tx);
+    const documentIssues = documentsValidationIssues(draft, wizardDocuments, tx);
     if (documentIssues.length > 0) {
       setValidationContext({ kind: "documents" });
       setStep("documents");
@@ -2157,7 +2360,7 @@ export function LeadWizard({
     }
   }
 
-  async function upload(kind: "identity" | "dsgvo", file: File) {
+  async function upload(kind: "identity", file: File) {
     if (!leadId) return;
     if (file.size > MAX_DOCUMENT_FILE_SIZE) {
       setError(tx("Размер файла не должен превышать 25 МБ", "Die Datei darf höchstens 25 MB groß sein"));
@@ -2168,9 +2371,9 @@ export function LeadWizard({
       const form = new FormData();
       form.set("lead_id", leadId);
       form.set("file", file);
-      form.set("auto_name", kind === "identity" ? "Identity document" : "DSGVO consent");
-      form.set("art", kind === "identity" ? "identity" : "consent");
-      form.set("category", kind === "identity" ? "identity" : "consent");
+      form.set("auto_name", "Identity document");
+      form.set("art", "identity");
+      form.set("category", "identity");
       await uploadDocument(form);
       await refreshDocumentsState();
     } catch (nextError) {
@@ -2246,6 +2449,61 @@ export function LeadWizard({
     try {
       await markDocumentSigned(id, kind);
       await refreshDocumentsState();
+    } catch (nextError) {
+      showWizardError(nextError);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function trustedContactRecipient() {
+    if (!draft?.trustedContactName.trim()) return "";
+    const identity = [
+      draft.trustedContactName.trim(),
+      draft.trustedContactBirthDate
+        ? `${tx("дата рождения", "geb. am")} ${draft.trustedContactBirthDate}`
+        : "",
+    ].filter(Boolean).join(", ");
+    return [
+      identity,
+      draft.trustedContactRelation.trim(),
+      draft.trustedContactAddress.trim(),
+      draft.trustedContactPhone.trim(),
+    ].filter(Boolean).join(" · ");
+  }
+
+  async function generateLeadComplianceDocument(
+    templateId: "confidentiality_release" | "privacy_consents",
+  ) {
+    if (!leadId || !draft || !lead) return;
+    setBusy(`generate-${templateId}`);
+    setError("");
+    try {
+      if (!(await save("documents", false))) return;
+      const generated = await generateDocument({
+        template_id: templateId,
+        lead_id: leadId,
+        language: "de",
+        document_language: "de",
+        document_direction: "outgoing",
+        document_variant: "original",
+        access_category: "patient",
+        status: "active",
+        bindings: templateId === "confidentiality_release"
+          ? {
+              extra_release_recipients: trustedContactRecipient(),
+            }
+          : {
+              consent_privacy: draft.privacyConsent,
+              consent_healthcare: draft.healthcareConsent,
+              consent_email: Boolean(lead.email_consent),
+              consent_messenger: Boolean(lead.whatsapp_consent),
+            },
+      });
+      const nextDocuments = await fetchDocuments(`/documents?lead_id=${encodeURIComponent(leadId)}`);
+      setDocuments(nextDocuments);
+      const generatedDocument = nextDocuments.find((document) => document.id === generated.id);
+      if (generatedDocument) await openOrDownloadDocument(generatedDocument);
     } catch (nextError) {
       showWizardError(nextError);
     } finally {
@@ -2355,11 +2613,12 @@ ${serviceCommentLines.join("\n")}`
     }
   }
 
-  async function signContract() {
+  async function signContract(documentId?: string) {
     setBusy("contract");
     try {
       const result = await ensureCommercial();
       await updateContractStatus(result.contractId, { status: "signed" });
+      if (documentId) await markDocumentSigned(documentId, "framework_contract");
       await reload(false, true);
     } catch (nextError) {
       showWizardError(nextError);
@@ -2466,14 +2725,61 @@ ${serviceCommentLines.join("\n")}`
     }
   }
 
+  async function generateCommercialDocument(templateId: CommercialDocumentKind) {
+    if (!leadId || !draft) return;
+    setBusy(`generate-${templateId}`);
+    setError("");
+    try {
+      const commercial = await ensureCommercial();
+      if (templateId === "cost_estimate" && !quote) {
+        await createQuote(commercial.orderId, {});
+      }
+      const generated = await generateDocument({
+        template_id: templateId,
+        lead_id: leadId,
+        order_id: commercial.orderId,
+        language: "de",
+        document_language: "de",
+        document_direction: "outgoing",
+        document_variant: "original",
+        access_category: templateId === "cost_estimate" ? "financial" : "patient",
+        status: "active",
+        bindings: {
+          specialties: draft.specialties.map((value) => specialtyDocumentLabel(value)).join(", "),
+          period_from: draft.programDateFrom || undefined,
+          period_to: draft.programDateTo || undefined,
+          estimate_total: `${estimate.gross.toFixed(2)} EUR`,
+          service_lines: lines.filter(validLine).map((line) => ({
+            description: serviceDocumentDescription(line),
+            quantity: line.quantity,
+            fee: `${money(line.price).toFixed(2)} EUR`,
+            line_total: `${(money(line.quantity) * money(line.price)).toFixed(2)} EUR`,
+          })),
+        },
+      });
+      const [nextDocuments] = await Promise.all([
+        fetchDocuments(`/documents?lead_id=${encodeURIComponent(leadId)}`),
+        reload(false, true),
+      ]);
+      setDocuments(nextDocuments);
+      const generatedDocument = nextDocuments.find((document) => document.id === generated.id);
+      if (generatedDocument) await openOrDownloadDocument(generatedDocument);
+    } catch (nextError) {
+      showWizardError(nextError);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function convert() {
     if (!leadId) return;
+    if (!(await finishIntake("release"))) return;
+    if (!(await finishOrder("release"))) return;
     setBusy("convert");
     try {
-      if (!(await save("release", false))) return;
       const result = await wizardConvertLead(leadId);
-      onConverted?.(result.patient_id);
-      onOpenChange(false);
+      if (onConverted) onConverted(result.patient_id);
+      else onOpenChange(false);
     } catch (nextError) {
       await reload(false);
       showWizardError(nextError);
@@ -2501,50 +2807,29 @@ ${serviceCommentLines.join("\n")}`
     }
   }
 
-  async function navigateForward(target: StepId, targetIndex: number) {
+  async function createLeadAndNavigate(target: StepId) {
     try {
       if (!ensureMasterDataReady()) return;
-
-      if (!leadId && createMode) {
-        const created = await save("medical");
-        if (!created) return;
-        setStep("medical");
-        if (targetIndex > 1) {
-          setValidationContext({ kind: "medical" });
-          setMedicalValidationAttempted(true);
-          window.requestAnimationFrame(() => {
-            document.getElementById(SERVICE_CONCERN_ID)?.focus();
-          });
-        }
-        return;
-      }
-
-      let saved = false;
-      if (targetIndex === 1) {
-        saved = await save(target);
-      } else if (targetIndex <= 3) {
-        saved = await finishMedical(target);
-      } else if (targetIndex === 4) {
-        saved = await finishIntake(target);
-      } else {
-        const intakeReady = index >= 4 || await finishIntake("order");
-        if (!intakeReady) return;
-        saved = await finishOrder(target);
-      }
-      if (saved) setStep(target);
+      if (await save(target)) setStep(target);
     } finally {
       stepNavigationInFlightRef.current = false;
     }
   }
 
-  function navigateToStep(target: StepId, targetIndex: number) {
+  function navigateToStep(target: StepId) {
     if (target === step || busy !== null || stepNavigationInFlightRef.current) return;
-    if (targetIndex < index) {
-      setStep(target);
+    setError("");
+    setValidationContext(null);
+    setOrderValidationAttempted(false);
+    setMedicalValidationAttempted(false);
+
+    if (!leadId && createMode) {
+      stepNavigationInFlightRef.current = true;
+      void createLeadAndNavigate(target).catch(showWizardError);
       return;
     }
-    stepNavigationInFlightRef.current = true;
-    void navigateForward(target, targetIndex).catch(showWizardError);
+
+    setStep(target);
   }
 
   function updateLine(id: string, patchValue: Partial<ServiceLine>) {
@@ -2585,6 +2870,20 @@ ${serviceCommentLines.join("\n")}`
     return lang === "de"
       ? specialty.name_de || specialty.name_en
       : specialty.name_ru || specialty.name_de || specialty.name_en;
+  }
+
+  function specialtyDocumentLabel(value: string) {
+    const specialty = specialties.find(
+      (item) => (item.code || item.name_en) === value,
+    );
+    return specialty?.name_de || specialty?.name_en || specialty?.name_ru || value;
+  }
+
+  function serviceDocumentDescription(line: ServiceLine) {
+    const catalogService = agencyServices.find(
+      (service) => service.id === line.agencyServiceId,
+    );
+    return catalogService?.service_name.trim() || line.description.trim();
   }
 
   if (!leadId && !createMode) return null;
@@ -2693,21 +2992,23 @@ ${serviceCommentLines.join("\n")}`
           className="overflow-x-auto overscroll-x-contain border-b border-border"
           aria-label={tx("Этапы оформления", "Schritte der Lead-Aufnahme")}
         >
-          <div className="grid min-w-[60rem] grid-cols-7 sm:min-w-0">
+          <div className="grid min-w-[72rem] grid-cols-7 sm:min-w-0">
             {STEPS.map((item, itemIndex) => {
               const selected = item.id === step;
-              const done = item.id === "medical"
-                ? Boolean(draft?.concern.trim() && draft.anamnese.trim())
-                : item.id === "order"
-                  ? Boolean(draft && orderIssues.length === 0)
-                  : readiness.get(item.id) ?? false;
+              const done = item.id === "master_data"
+                ? Boolean(draft && Object.keys(masterErrors).length === 0)
+                : item.id === "medical"
+                  ? Boolean(draft?.concern.trim() && draft.anamnese.trim())
+                  : item.id === "order"
+                    ? Boolean(draft && orderIssues.length === 0)
+                    : readiness.get(item.id) ?? false;
               return (
                 <button
                   key={item.id}
                   type="button"
                   data-step={item.id}
                   disabled={loading || isBusy}
-                  onClick={() => navigateToStep(item.id, itemIndex)}
+                  onClick={() => navigateToStep(item.id)}
                   aria-current={selected ? "step" : undefined}
                   className={cn(
                     "relative min-w-0 border-r border-border px-3 py-3 text-left last:border-r-0 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
@@ -2728,7 +3029,7 @@ ${serviceCommentLines.join("\n")}`
           </div>
         </nav>
 
-        <main aria-busy={loading || isBusy} className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-5">
+        <main aria-busy={loading || isBusy} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-5 sm:px-5">
           {error ? <div role="alert" className="mb-5 border-l-2 border-destructive bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div> : null}
           {validationIssues.length > 0 ? (
             <div role="alert" aria-live="assertive" className="mb-5 border-l-2 border-destructive bg-destructive/5 px-3 py-3 text-sm text-destructive">
@@ -2755,7 +3056,7 @@ ${serviceCommentLines.join("\n")}`
           {loading && !lead ? <div role="status" aria-live="polite" className="flex items-center gap-2 py-12 text-sm text-muted-foreground"><LoaderCircle aria-hidden="true" className="size-4 animate-spin" />{tx("Загрузка…", "Wird geladen…")}</div> : null}
 
           {draft && step === "master_data" ? (
-            <section className="space-y-5">
+            <section className="min-w-0 space-y-5">
               {lead ? (
                 <LeadQuestionnaireFacts
                   topBorder={false}
@@ -3017,6 +3318,111 @@ ${serviceCommentLines.join("\n")}`
                 <Field label={tx("Страна", "Land")} className="md:col-span-2">
                   <CountrySelect value={draft.country} lang={lang} className={selectClass} aria-label={tx("Страна", "Land")} onChange={(value) => patch("country", value ?? "")} />
                 </Field>
+                <div className="border-t border-border pt-4 md:col-span-2">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {tx("Страхование", "Versicherung")}
+                  </h3>
+                </div>
+                <Field label={tx("Есть страхование", "Versicherung vorhanden")}>
+                  <NativeComboboxSelect
+                    name="has_insurance"
+                    value={draft.hasInsurance}
+                    className={selectClass}
+                    onChange={(event) => {
+                      const value = event.target.value as Draft["hasInsurance"];
+                      clearServerValidation();
+                      setDraft((current) => current ? {
+                        ...current,
+                        hasInsurance: value,
+                        ...(value === "no" ? {
+                          insuranceType: "self_pay",
+                          insuranceProvider: "",
+                          insuranceNumber: "",
+                          insuranceCoversGermany: "",
+                        } : {}),
+                      } : current);
+                    }}
+                  >
+                    <option value="">{tx("Не указано", "Nicht angegeben")}</option>
+                    <option value="yes">{tx("Да", "Ja")}</option>
+                    <option value="no">{tx("Нет, самооплата", "Nein, Selbstzahler")}</option>
+                  </NativeComboboxSelect>
+                </Field>
+                <Field
+                  label={tx("Тип страхования", "Versicherungsart")}
+                  required={draft.hasInsurance === "yes"}
+                  error={visibleMasterError("insuranceType")}
+                  errorId={`${MASTER_FIELD_IDS.insuranceType}-error`}
+                >
+                  <NativeComboboxSelect
+                    id={MASTER_FIELD_IDS.insuranceType}
+                    name="insurance_type"
+                    value={draft.insuranceType}
+                    required={draft.hasInsurance === "yes"}
+                    aria-invalid={Boolean(visibleMasterError("insuranceType"))}
+                    aria-describedby={visibleMasterError("insuranceType") ? `${MASTER_FIELD_IDS.insuranceType}-error` : undefined}
+                    className={cn(selectClass, visibleMasterError("insuranceType") && "border-destructive")}
+                    onBlur={() => touchMasterField("insuranceType")}
+                    onChange={(event) => patch("insuranceType", event.target.value)}
+                  >
+                    <option value="">{tx("Выберите", "Auswählen")}</option>
+                    <option value="private">{tx("Частное", "Privat")}</option>
+                    <option value="public">{tx("Государственное", "Gesetzlich")}</option>
+                    <option value="foreign">{tx("Иностранное", "Ausland")}</option>
+                    <option value="self_pay">{tx("Самооплата", "Selbstzahler")}</option>
+                  </NativeComboboxSelect>
+                </Field>
+                <Field
+                  label={tx("Страховая компания", "Versicherer")}
+                  required={draft.hasInsurance === "yes"}
+                  error={visibleMasterError("insuranceProvider")}
+                  errorId={`${MASTER_FIELD_IDS.insuranceProvider}-error`}
+                >
+                  <Input
+                    id={MASTER_FIELD_IDS.insuranceProvider}
+                    name="insurance_provider"
+                    required={draft.hasInsurance === "yes"}
+                    aria-invalid={Boolean(visibleMasterError("insuranceProvider"))}
+                    aria-describedby={visibleMasterError("insuranceProvider") ? `${MASTER_FIELD_IDS.insuranceProvider}-error` : undefined}
+                    className={cn(visibleMasterError("insuranceProvider") && "border-destructive")}
+                    value={draft.insuranceProvider}
+                    onBlur={() => touchMasterField("insuranceProvider")}
+                    onChange={(event) => patch("insuranceProvider", event.target.value)}
+                  />
+                </Field>
+                <Field
+                  label={tx("Номер полиса", "Versicherungsnummer")}
+                  required={draft.hasInsurance === "yes"}
+                  error={visibleMasterError("insuranceNumber")}
+                  errorId={`${MASTER_FIELD_IDS.insuranceNumber}-error`}
+                >
+                  <Input
+                    id={MASTER_FIELD_IDS.insuranceNumber}
+                    name="insurance_number"
+                    autoComplete="off"
+                    required={draft.hasInsurance === "yes"}
+                    aria-invalid={Boolean(visibleMasterError("insuranceNumber"))}
+                    aria-describedby={visibleMasterError("insuranceNumber") ? `${MASTER_FIELD_IDS.insuranceNumber}-error` : undefined}
+                    className={cn(visibleMasterError("insuranceNumber") && "border-destructive")}
+                    value={draft.insuranceNumber}
+                    onBlur={() => touchMasterField("insuranceNumber")}
+                    onChange={(event) => patch("insuranceNumber", event.target.value)}
+                  />
+                </Field>
+                <Field label={tx("Покрывает лечение в Германии", "Deckung in Deutschland")}>
+                  <NativeComboboxSelect
+                    name="insurance_covers_germany"
+                    value={draft.insuranceCoversGermany}
+                    className={selectClass}
+                    disabled={draft.hasInsurance === "no"}
+                    onChange={(event) => patch("insuranceCoversGermany", event.target.value)}
+                  >
+                    <option value="">{tx("Не указано", "Nicht angegeben")}</option>
+                    <option value="yes">{tx("Да", "Ja")}</option>
+                    <option value="no">{tx("Нет", "Nein")}</option>
+                    <option value="not_sure">{tx("Неизвестно", "Nicht sicher")}</option>
+                  </NativeComboboxSelect>
+                </Field>
               </div>
               {isExternalIntakeLead && lead ? (
                 <LeadQuestionnaireFacts
@@ -3198,142 +3604,149 @@ ${serviceCommentLines.join("\n")}`
 
           {draft && step === "documents" ? (
             <section className="space-y-5">
-              {(["identity", "dsgvo"] as const).map((kind) => {
-                const kindDocuments = wizardDocuments[kind];
-                const label = kind === "identity" ? tx("Документ, удостоверяющий личность", "Ausweisdokument") : tx("Согласие на обработку персональных данных", "Datenschutzeinwilligung (DSGVO)");
-                const fileId = "lead-file-" + kind;
-                return (
-                  <div key={kind} className="space-y-3 border-y border-border py-3">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="text-sm font-medium text-foreground">{label}</div>
-                      <input
-                        id={fileId}
-                        type="file"
-                        className="peer sr-only"
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        disabled={isBusy}
-                        onChange={(event) => {
-                          const file = event.currentTarget.files?.[0];
-                          if (file) {
-                            void upload(kind, file);
-                            event.currentTarget.value = "";
-                          }
-                        }}
-                      />
-                      <label
-                        htmlFor={fileId}
-                        className={cn(
-                          "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-3 text-xs font-medium text-foreground shadow-xs hover:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
-                          isBusy && "pointer-events-none opacity-50",
-                        )}
-                      >
-                        <Upload aria-hidden="true" className="size-3.5" />
-                        {kindDocuments.length > 0 ? tx("Добавить файл", "Datei hinzufügen") : tx("Загрузить файл", "Datei hochladen")}
-                      </label>
-                    </div>
-
-                    {kindDocuments.length > 0 ? (
-                      <div className="divide-y divide-border rounded-md border border-border">
-                        {kindDocuments.map((document) => {
-                          const signed = Boolean(document.signed_at && document.compliance_kind === kind);
-                          const sizeLabel = formatFileSize(document.file_size, lang);
-                          return (
-                            <div key={document.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
-                              <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-                              <div className="min-w-0 flex-1">
-                                <button
-                                  type="button"
-                                  className="block max-w-full truncate text-left text-sm font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                  onClick={() => void openOrDownloadDocument(document)}
-                                >
-                                  {wizardDocumentFilename(document)}
-                                </button>
-                                <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                                  {sizeLabel ? <span className="font-mono tabular-nums">{sizeLabel}</span> : null}
-                                  <StateMark done={signed} label={signed ? tx("Подтверждён", "Bestätigt") : tx("Не подтверждён", "Nicht bestätigt")} />
-                                </div>
-                              </div>
-                              <div className="flex shrink-0 items-center gap-1">
-                                {wizardDocumentPreviewKind(document) ? (
-                                  <Button type="button" variant="ghost" size="icon-sm" title={tx("Просмотреть файл", "Datei ansehen")} aria-label={tx("Просмотреть файл", "Datei ansehen")} disabled={isBusy} onClick={() => void openOrDownloadDocument(document)}>
-                                    {busy === `preview-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Eye className="size-3.5" />}
-                                  </Button>
-                                ) : null}
-                                <Button type="button" variant="ghost" size="icon-sm" title={tx("Скачать файл", "Datei herunterladen")} aria-label={tx("Скачать файл", "Datei herunterladen")} disabled={isBusy} onClick={() => void downloadDocument(document)}>
-                                  {busy === `download-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
-                                </Button>
-                                <Button type="button" variant="ghost" size="icon-sm" title={tx("Подтвердить документ", "Dokument bestätigen")} aria-label={tx("Подтвердить документ", "Dokument bestätigen")} disabled={signed || isBusy} onClick={() => void signDocument(document.id, kind)}>
-                                  <FileCheck2 className={cn("size-3.5", signed && "text-emerald-700")} />
-                                </Button>
-                                <Button type="button" variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" title={tx("Удалить файл", "Datei löschen")} aria-label={tx("Удалить файл", "Datei löschen")} disabled={isBusy} onClick={() => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}>
-                                  <Trash2 className="size-3.5" />
-                                </Button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-xs text-muted-foreground">{tx("Файлы не добавлены", "Keine Dateien hinzugefügt")}</div>
-                    )}
+              <div id={CONFIDENTIALITY_RELEASE_ID} tabIndex={-1} className="space-y-4 border-y border-border py-4 focus:outline-none">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {tx("Освобождение от врачебной тайны", "Schweigepflichtsentbindung")}
+                  </h3>
+                  <Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("confidentiality_release")}>
+                    {busy === "generate-confidentiality_release" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
+                    {wizardDocuments.confidentiality_release.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
+                  </Button>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="border-t border-border pt-3 md:col-span-2">
+                    <span className="text-xs font-semibold uppercase text-muted-foreground">
+                      {tx("Доверенный контакт", "Vertrauenskontakt")}
+                    </span>
                   </div>
-                );
-              })}
+                  <Field label={tx("Имя и фамилия", "Vor- und Nachname")}>
+                    <Input value={draft.trustedContactName} onChange={(event) => patch("trustedContactName", event.target.value)} />
+                  </Field>
+                  <Field label={tx("Телефон", "Telefon")}>
+                    <Input type="tel" value={draft.trustedContactPhone} onChange={(event) => patch("trustedContactPhone", event.target.value)} />
+                  </Field>
+                  <Field label={tx("Кем приходится клиенту", "Beziehung zur Person")}>
+                    <Input value={draft.trustedContactRelation} onChange={(event) => patch("trustedContactRelation", event.target.value)} />
+                  </Field>
+                  <Field label={tx("Дата рождения", "Geburtsdatum")}>
+                    <Input type="date" value={draft.trustedContactBirthDate} onChange={(event) => patch("trustedContactBirthDate", event.target.value)} />
+                  </Field>
+                  <Field label={tx("Адрес", "Adresse")} className="md:col-span-2">
+                    <Input value={draft.trustedContactAddress} onChange={(event) => patch("trustedContactAddress", event.target.value)} />
+                  </Field>
+                </div>
+                <WizardDocumentRows
+                  documents={wizardDocuments.confidentiality_release}
+                  complianceKind="confidentiality_release"
+                  emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
+                  lang={lang}
+                  busy={busy}
+                  disabled={isBusy}
+                  tx={tx}
+                  onOpen={(document) => void openOrDownloadDocument(document)}
+                  onDownload={(document) => void downloadDocument(document)}
+                  onSign={(document, kind) => void signDocument(document.id, kind)}
+                  onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                />
+              </div>
+
+              <div id={PRIVACY_DOCUMENT_ID} tabIndex={-1} className="space-y-4 border-b border-border pb-4 focus:outline-none">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {tx("Согласия", "Einwilligungen")}
+                  </h3>
+                  <Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_consents")}>
+                    {busy === "generate-privacy_consents" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
+                    {wizardDocuments.privacy_consents.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
+                  </Button>
+                </div>
+                <div className="border-y border-border">
+                  <ToggleRow id={PRIVACY_CONSENT_ID} checked={draft.privacyConsent} disabled={isBusy} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} />
+                  <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={draft.healthcareConsent} disabled={isBusy} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} />
+                </div>
+                <WizardDocumentRows
+                  documents={wizardDocuments.privacy_consents}
+                  complianceKind="dsgvo"
+                  emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
+                  lang={lang}
+                  busy={busy}
+                  disabled={isBusy}
+                  tx={tx}
+                  onOpen={(document) => void openOrDownloadDocument(document)}
+                  onDownload={(document) => void downloadDocument(document)}
+                  onSign={(document, kind) => void signDocument(document.id, kind)}
+                  onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                />
+              </div>
+
+              <div className="space-y-3 border-b border-border pb-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {tx("Документ, удостоверяющий личность", "Ausweisdokument")}
+                  </h3>
+                  <input
+                    id="lead-file-identity"
+                    type="file"
+                    className="peer sr-only"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    disabled={isBusy}
+                    onChange={(event) => {
+                      const file = event.currentTarget.files?.[0];
+                      if (file) {
+                        void upload("identity", file);
+                        event.currentTarget.value = "";
+                      }
+                    }}
+                  />
+                  <label
+                    htmlFor="lead-file-identity"
+                    className={cn(
+                      "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-3 text-xs font-medium text-foreground shadow-xs hover:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
+                      isBusy && "pointer-events-none opacity-50",
+                    )}
+                  >
+                    <Upload aria-hidden="true" className="size-3.5" />
+                    {wizardDocuments.identity.length > 0 ? tx("Добавить файл", "Datei hinzufügen") : tx("Загрузить файл", "Datei hochladen")}
+                  </label>
+                </div>
+                <WizardDocumentRows
+                  documents={wizardDocuments.identity}
+                  complianceKind="identity"
+                  emptyLabel={tx("Файл не загружен", "Keine Datei hochgeladen")}
+                  lang={lang}
+                  busy={busy}
+                  disabled={isBusy}
+                  tx={tx}
+                  onOpen={(document) => void openOrDownloadDocument(document)}
+                  onDownload={(document) => void downloadDocument(document)}
+                  onSign={(document, kind) => void signDocument(document.id, kind)}
+                  onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                />
+              </div>
               {supplementaryDocuments.length > 0 ? (
-                <div className="space-y-3 border-y border-border py-3">
+                <div className="space-y-3 border-b border-border pb-4">
                   <div className="text-sm font-medium text-foreground">
                     {tx("Другие документы", "Weitere Dokumente")}
                   </div>
-                  <div className="divide-y divide-border rounded-md border border-border">
-                    {supplementaryDocuments.map((document) => (
-                      <div key={document.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
-                      <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-                      <div className="min-w-0 flex-1">
-                          <button
-                            type="button"
-                            className="block max-w-full truncate text-left text-sm font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            onClick={() => void openOrDownloadDocument(document)}
-                          >
-                            {wizardDocumentFilename(document)}
-                          </button>
-                          <div className="mt-0.5 text-xs text-muted-foreground">
-                            {formatFileSize(document.file_size, lang)}
-                          </div>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1">
-                          {wizardDocumentPreviewKind(document) ? (
-                            <Button type="button" variant="ghost" size="icon-sm" title={tx("Просмотреть файл", "Datei ansehen")} aria-label={tx("Просмотреть файл", "Datei ansehen")} disabled={isBusy} onClick={() => void openOrDownloadDocument(document)}>
-                              {busy === `preview-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Eye className="size-3.5" />}
-                            </Button>
-                          ) : null}
-                          <Button type="button" variant="ghost" size="icon-sm" title={tx("Скачать файл", "Datei herunterladen")} aria-label={tx("Скачать файл", "Datei herunterladen")} disabled={isBusy} onClick={() => void downloadDocument(document)}>
-                            {busy === `download-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
-                          </Button>
-                          <Button type="button" variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" title={tx("Удалить файл", "Datei löschen")} aria-label={tx("Удалить файл", "Datei löschen")} disabled={isBusy} onClick={() => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}>
-                            <Trash2 className="size-3.5" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <WizardDocumentRows
+                    documents={supplementaryDocuments}
+                    emptyLabel=""
+                    lang={lang}
+                    busy={busy}
+                    disabled={isBusy}
+                    tx={tx}
+                    onOpen={(document) => void openOrDownloadDocument(document)}
+                    onDownload={(document) => void downloadDocument(document)}
+                    onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                  />
                 </div>
               ) : null}
-              {isExternalIntakeLead && lead ? (
-                <LeadQuestionnaireFacts
-                  items={[
-                    { label: tx("Согласие на связь по E-Mail", "Einwilligung zur Kontaktaufnahme per E-Mail"), value: yesNoValue(lead.email_consent, tx) },
-                    { label: tx("Согласие на связь по WhatsApp", "Einwilligung zur Kontaktaufnahme per WhatsApp"), value: yesNoValue(lead.whatsapp_consent, tx) },
-                    { label: tx("Согласие на автоматизированный контакт", "Einwilligung zur automatisierten Kontaktaufnahme"), value: yesNoValue(lead.consent_automated_contact, tx) },
-                    { label: tx("Информация о праве отказа подтверждена", "Hinweis zum Widerruf bestätigt"), value: yesNoValue(lead.consent_opt_out, tx) },
-                  ]}
-                />
-              ) : null}
-              <div className="border-y border-border"><ToggleRow id={PRIVACY_CONSENT_ID} checked={draft.privacyConsent} disabled={isBusy} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} /><ToggleRow id={HEALTHCARE_CONSENT_ID} checked={draft.healthcareConsent} disabled={isBusy} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} /></div>
             </section>
           ) : null}
 
           {draft && step === "order" ? (
-            <section className="space-y-5">
+            <section className="min-w-0 space-y-5">
               {commercialLookupsLoading ? (
                 <div
                   role="status"
@@ -3449,8 +3862,40 @@ ${serviceCommentLines.join("\n")}`
                   {tx("Загружается каталог услуг…", "Leistungskatalog wird geladen…")}
                 </div>
               ) : null}
-              <h3 className="text-sm font-semibold text-foreground">{tx("Договор, заказ и смета", "Vertrag, Auftrag und Kostenvoranschlag")}</h3>
-              <div className="flex flex-wrap items-center justify-between gap-3 border-y border-border py-3"><div><div className="text-sm font-medium text-foreground">{tx("Рамочный договор", "Rahmenvertrag")}</div><div className="mt-1 text-xs text-muted-foreground">{contract?.contract_number ?? tx("Договор ещё не создан", "Vertrag noch nicht erstellt")}</div></div><div className="flex items-center gap-2"><StateMark done={contract?.status === "signed"} label={contract?.status === "signed" ? tx("Договор подписан", "Vertrag unterzeichnet") : tx("Договор не подписан", "Vertrag nicht unterzeichnet")} /><Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void signContract()}>{busy === "contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileCheck2 className="size-3.5" />}{tx("Подписать договор", "Vertrag unterzeichnen")}</Button></div></div>
+              <div id={FRAMEWORK_DOCUMENT_ID} tabIndex={-1} className="space-y-3 border-y border-border py-4 focus:outline-none">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-foreground">{tx("Рамочный договор", "Rahmenvertrag")}</h3>
+                    <div className="mt-1 font-mono text-xs tabular-nums text-muted-foreground">
+                      {contract?.contract_number ?? "FC-…"}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StateMark done={contract?.status === "signed"} label={contract?.status === "signed" ? tx("Подписан", "Unterzeichnet") : tx("Ожидает подписи", "Unterschrift offen")} />
+                    <Button type="button" variant="outline" size="sm" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("framework_contract")}>
+                      {busy === "generate-framework_contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
+                      {commercialDocuments.framework_contract.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" disabled={isBusy || !contract || commercialDocuments.framework_contract.length === 0} onClick={() => void signContract(commercialDocuments.framework_contract[0]?.id)}>
+                      {busy === "contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileCheck2 className="size-3.5" />}
+                      {tx("Подтвердить подпись", "Unterschrift bestätigen")}
+                    </Button>
+                  </div>
+                </div>
+                <WizardDocumentRows
+                  documents={commercialDocuments.framework_contract}
+                  complianceKind="framework_contract"
+                  emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
+                  lang={lang}
+                  busy={busy}
+                  disabled={isBusy}
+                  tx={tx}
+                  onOpen={(document) => void openOrDownloadDocument(document)}
+                  onDownload={(document) => void downloadDocument(document)}
+                  onSign={(document) => void signContract(document.id)}
+                  onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                />
+              </div>
               {draft.serviceNeeds.length > 0 ? (
                 <LeadQuestionnaireFacts
                   items={[
@@ -3514,6 +3959,31 @@ ${serviceCommentLines.join("\n")}`
                   <span className="font-semibold text-foreground">{tx("Итого", "Gesamt")}: <span className="font-mono tabular-nums">{formatMoneyValue(estimate.gross, lang)} EUR</span></span>
                 </div>
               </div>
+              <div id={ORDER_DOCUMENT_ID} tabIndex={-1} className="space-y-3 border-y border-border py-4 focus:outline-none">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-foreground">{tx("Документ заказа", "Einzelauftrag")}</h3>
+                    <div className="mt-1 font-mono text-xs tabular-nums text-muted-foreground">
+                      {order?.order_number ?? "A-…"}
+                    </div>
+                  </div>
+                  <Button type="button" variant="outline" size="sm" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("single_order")}>
+                    {busy === "generate-single_order" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
+                    {commercialDocuments.single_order.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
+                  </Button>
+                </div>
+                <WizardDocumentRows
+                  documents={commercialDocuments.single_order}
+                  emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
+                  lang={lang}
+                  busy={busy}
+                  disabled={isBusy}
+                  tx={tx}
+                  onOpen={(document) => void openOrDownloadDocument(document)}
+                  onDownload={(document) => void downloadDocument(document)}
+                  onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                />
+              </div>
               <div className="border-y border-border">
                 <ToggleRow
                   checked={signedPatient}
@@ -3552,7 +4022,46 @@ ${serviceCommentLines.join("\n")}`
                   label={tx("Требуется предоплата", "Vorauszahlung erforderlich")}
                 />
               </div>
-              <div className="grid gap-3 border-b border-border pb-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end"><Field label={tx("Полученная предоплата", "Erhaltene Vorauszahlung")}><Input className="font-mono tabular-nums" inputMode="decimal" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} disabled={!prepayment} placeholder="0.00" /></Field><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" disabled={isBusy || !lines.some(validLine)} onClick={() => void createOrAcceptQuote(false)}>{busy === "quote" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}{quote ? tx("Создать новую смету", "Neuen Kostenvoranschlag erstellen") : tx("Создать смету", "Kostenvoranschlag erstellen")}</Button><Button type="button" variant="outline" disabled={isBusy || !quote} onClick={() => void createOrAcceptQuote(true)}>{busy === "accept" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}{tx("Подтвердить смету", "Kostenvoranschlag annehmen")}</Button></div></div>
+              <div className="grid gap-3 border-b border-border pb-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                <Field label={tx("Полученная предоплата", "Erhaltene Vorauszahlung")}>
+                  <Input className="font-mono tabular-nums" inputMode="decimal" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} disabled={!prepayment} placeholder="0.00" />
+                </Field>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" disabled={isBusy || !lines.some(validLine)} onClick={() => void createOrAcceptQuote(false)}>
+                    {busy === "quote" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+                    {quote ? tx("Пересчитать смету", "Kostenvoranschlag neu berechnen") : tx("Рассчитать смету", "Kostenvoranschlag berechnen")}
+                  </Button>
+                  <Button type="button" variant="outline" disabled={isBusy || !quote} onClick={() => void createOrAcceptQuote(true)}>
+                    {busy === "accept" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+                    {tx("Подтвердить смету", "Kostenvoranschlag annehmen")}
+                  </Button>
+                </div>
+              </div>
+              <div id={COST_ESTIMATE_DOCUMENT_ID} tabIndex={-1} className="space-y-3 border-b border-border pb-4 focus:outline-none">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-foreground">{tx("Документ сметы", "Kostenvoranschlag")}</h3>
+                    <div className="mt-1 font-mono text-xs tabular-nums text-muted-foreground">
+                      {quote?.quote_number ?? "KV-…"}
+                    </div>
+                  </div>
+                  <Button type="button" variant="outline" size="sm" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("cost_estimate")}>
+                    {busy === "generate-cost_estimate" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
+                    {commercialDocuments.cost_estimate.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
+                  </Button>
+                </div>
+                <WizardDocumentRows
+                  documents={commercialDocuments.cost_estimate}
+                  emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
+                  lang={lang}
+                  busy={busy}
+                  disabled={isBusy}
+                  tx={tx}
+                  onOpen={(document) => void openOrDownloadDocument(document)}
+                  onDownload={(document) => void downloadDocument(document)}
+                  onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                />
+              </div>
               <div className="flex flex-wrap items-center justify-between gap-3"><StateMark done={Boolean(readiness.get("commercial"))} label={acceptedQuote ? tx("Смета подтверждена", "Kostenvoranschlag angenommen") : quote ? tx("Смета создана и ожидает подтверждения", "Kostenvoranschlag erstellt, Annahme ausstehend") : tx("Смета ещё не создана", "Kostenvoranschlag noch nicht erstellt")} /><Button type="button" disabled={isBusy || !lines.some(validLine)} onClick={() => void prepareCommercial()}>{busy === "commercial" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}{tx("Сохранить договор и заказ", "Vertrag und Auftrag speichern")}</Button></div>
             </section>
           ) : null}
@@ -3575,7 +4084,7 @@ ${serviceCommentLines.join("\n")}`
           if (!nextOpen) replaceDocumentPreview(null);
         }}
       >
-        <DialogContent className="flex h-[86vh] w-[calc(100vw-1rem)] max-w-6xl flex-col gap-0 overflow-hidden rounded-lg p-0 sm:w-[min(92vw,72rem)]">
+        <DialogContent className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(88vh,52rem)] sm:w-[min(96vw,84rem)] sm:max-w-[84rem]">
           <DialogHeader className="border-b border-border px-4 py-3 pr-14 sm:px-5 sm:pr-14">
             <div className="flex min-w-0 items-center justify-between gap-3">
               <div className="min-w-0">

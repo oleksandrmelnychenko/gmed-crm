@@ -181,6 +181,8 @@ async fn seed_full_smoke(state: &AppState) -> Result<serde_json::Value, String> 
 
     let blocked_lead = create_lead(state, &tag, pm.id, "Blocked", false).await?;
     let ready_lead = create_lead(state, &tag, pm.id, "Ready", true).await?;
+    seed_complete_lead_onboarding(state, blocked_lead.id, pm.id, false).await?;
+    seed_complete_lead_onboarding(state, ready_lead.id, pm.id, true).await?;
     let feedback = create_feedback(
         state,
         patient.id,
@@ -986,6 +988,199 @@ async fn create_lead(
         id,
         name: format!("{first_name} {last_name}"),
     })
+}
+
+async fn seed_complete_lead_onboarding(
+    state: &AppState,
+    lead_id: Uuid,
+    created_by: Uuid,
+    gate_ready: bool,
+) -> Result<(), String> {
+    let tag = lead_id.simple().to_string();
+
+    sqlx::query(
+        r#"UPDATE leads
+           SET street_address = 'Hauptstr. 1',
+               city = 'Berlin',
+               zip_code = '10115',
+               primary_concern_text = 'Cardiology follow-up',
+               requested_specialties = '["cardiology"]'::jsonb,
+               wizard_state = jsonb_set(
+                   COALESCE(wizard_state, '{}'::jsonb),
+                   '{clinical_draft}',
+                   '{"anamnese":"Symptoms require a cardiology follow-up."}'::jsonb,
+                   true
+               ),
+               compliance_status = CASE WHEN $2 THEN 'signed' ELSE compliance_status END,
+               consent_healthcare = CASE WHEN $2 THEN true ELSE consent_healthcare END,
+               consent_privacy_practices = CASE WHEN $2 THEN true ELSE consent_privacy_practices END
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(gate_ready)
+    .execute(&state.db)
+    .await
+    .map_err(|error| format!("prepare lead onboarding fixture: {error}"))?;
+
+    sqlx::query(
+        r#"INSERT INTO cases (
+                case_id, lead_id, manager_id, status, hauptanfragegrund,
+                aktuelle_anamnese, zuweiser, intake_completed_at, intake_completed_by
+           ) VALUES (
+                $1, $2, $3, 'open', 'Cardiology follow-up',
+                'Symptoms require a cardiology follow-up.', 'Self referral', now(), $3
+           )"#,
+    )
+    .bind(format!("C-E2E-{tag}"))
+    .bind(lead_id)
+    .bind(created_by)
+    .execute(&state.db)
+    .await
+    .map_err(|error| format!("insert lead intake fixture: {error}"))?;
+
+    for compliance_kind in ["identity", "dsgvo", "confidentiality_release"] {
+        let document_id = Uuid::new_v4();
+        let storage_key = format!("e2e/{tag}/{compliance_kind}-{document_id}.pdf");
+        let file_path = FsPath::new(UPLOAD_DIR).join(&storage_key);
+        if let Some(parent) = file_path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|error| format!("create lead document fixture directory: {error}"))?;
+        }
+        tokio::fs::write(
+            &file_path,
+            format!("GMED live E2E lead fixture\n{compliance_kind}\n{lead_id}"),
+        )
+        .await
+        .map_err(|error| format!("write lead compliance fixture: {error}"))?;
+        sqlx::query(
+            r#"INSERT INTO documents (
+                    id, lead_id, auto_name, original_filename, art, category,
+                    status, visibility, is_medical, mime_type, file_size, storage_key,
+                    version_root_document_id, version_number, uploaded_by,
+                    signed_at, signed_by, compliance_kind
+               ) VALUES (
+                    $1, $2, $3, $4, $5, 'administrative',
+                    'active', 'internal', false, 'application/pdf', 128, $6,
+                    $1, 1, $7, now(), $7, $5
+               )"#,
+        )
+        .bind(document_id)
+        .bind(lead_id)
+        .bind(format!("{compliance_kind} {tag}"))
+        .bind(format!("{compliance_kind}-{tag}.pdf"))
+        .bind(compliance_kind)
+        .bind(storage_key)
+        .bind(created_by)
+        .execute(&state.db)
+        .await
+        .map_err(|error| format!("insert lead compliance fixture: {error}"))?;
+    }
+
+    let contract_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO framework_contracts (
+                lead_id, contract_number, signed_at, status, created_by, client_reference
+           ) VALUES ($1, $2, now(), 'signed', $3, $4)
+           RETURNING id"#,
+    )
+    .bind(lead_id)
+    .bind(format!("FC-E2E-{tag}"))
+    .bind(created_by)
+    .bind(format!("lead-onboarding:{lead_id}:framework"))
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| format!("insert lead contract fixture: {error}"))?;
+
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (
+                order_number, contract_id, source_lead_id, needs_description,
+                signed_patient, signed_agency, signed_patient_at, signed_agency_at,
+                signed_at, prepayment_required, total_estimated, created_by
+           ) VALUES (
+                $1, $2, $3, 'Coordinate cardiology follow-up',
+                true, true, now(), now(), now(), true, 119, $4
+           ) RETURNING id"#,
+    )
+    .bind(format!("A-E2E-{tag}"))
+    .bind(contract_id)
+    .bind(lead_id)
+    .bind(created_by)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| format!("insert lead order fixture: {error}"))?;
+
+    sqlx::query(
+        r#"INSERT INTO order_leistungen (
+                order_id, description, quantity, unit_price, vat_rate, client_reference
+           ) VALUES ($1, 'Initial cardiology coordination', 1, 100, 19, $2)"#,
+    )
+    .bind(order_id)
+    .bind(format!("lead-onboarding:{lead_id}:service:1"))
+    .execute(&state.db)
+    .await
+    .map_err(|error| format!("insert lead order service fixture: {error}"))?;
+
+    sqlx::query(
+        r#"INSERT INTO quotes (
+                order_id, quote_number, total_net, total_vat, total_gross,
+                status, paid_amount, paid_at, line_items, created_by
+           ) VALUES (
+                $1, $2, 100, 19, 119,
+                'accepted', 119, now(), '[]'::jsonb, $3
+           )"#,
+    )
+    .bind(order_id)
+    .bind(format!("KV-E2E-{tag}"))
+    .bind(created_by)
+    .execute(&state.db)
+    .await
+    .map_err(|error| format!("insert lead quote fixture: {error}"))?;
+
+    for (template_id, category) in [
+        ("framework_contract", "contract"),
+        ("single_order", "administrative_single_order"),
+        ("cost_estimate", "finance_cost_estimate"),
+    ] {
+        let document_id = Uuid::new_v4();
+        let storage_key = format!("e2e/{tag}/{template_id}-{document_id}.pdf");
+        let file_path = FsPath::new(UPLOAD_DIR).join(&storage_key);
+        if let Some(parent) = file_path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|error| format!("create commercial fixture directory: {error}"))?;
+        }
+        tokio::fs::write(
+            &file_path,
+            format!("GMED live E2E lead fixture\n{template_id}\n{lead_id}"),
+        )
+        .await
+        .map_err(|error| format!("write lead commercial document fixture: {error}"))?;
+        sqlx::query(
+            r#"INSERT INTO documents (
+                    id, lead_id, order_id, auto_name, original_filename, art, category,
+                    status, visibility, is_medical, mime_type, file_size, storage_key,
+                    generated_template_id, version_root_document_id, version_number, uploaded_by
+               ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7,
+                    'active', 'patient_visible', false, 'application/pdf', 128, $8,
+                    $6, $1, 1, $9
+               )"#,
+        )
+        .bind(document_id)
+        .bind(lead_id)
+        .bind(order_id)
+        .bind(format!("{template_id} {tag}"))
+        .bind(format!("{template_id}-{tag}.pdf"))
+        .bind(template_id)
+        .bind(category)
+        .bind(storage_key)
+        .bind(created_by)
+        .execute(&state.db)
+        .await
+        .map_err(|error| format!("insert lead commercial document fixture: {error}"))?;
+    }
+
+    Ok(())
 }
 
 async fn create_feedback(

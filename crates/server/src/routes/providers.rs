@@ -2554,10 +2554,9 @@ async fn update_doctor_relationship(
             );
         }
     }
-    if previous_target_doctor_id != relationship.target_doctor_id
-        || previous_relationship_type != relationship.relationship_type
-    {
-        if let Err(e) = sqlx::query(
+    if (previous_target_doctor_id != relationship.target_doctor_id
+        || previous_relationship_type != relationship.relationship_type)
+        && let Err(e) = sqlx::query(
             r#"DELETE FROM provider_doctor_relationships
                WHERE source_doctor_id = $1
                  AND target_doctor_id = $2
@@ -2568,13 +2567,12 @@ async fn update_doctor_relationship(
         .bind(previous_relationship_type)
         .execute(&mut *tx)
         .await
-        {
-            tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, relationship_id = %relationship_id, "Failed to delete stale reciprocal doctor relationship");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to update doctor relationship",
-            );
-        }
+    {
+        tracing::error!(error = %e, provider_id = %provider_id, doctor_id = %doctor_id, relationship_id = %relationship_id, "Failed to delete stale reciprocal doctor relationship");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update doctor relationship",
+        );
     }
     let reciprocal = relationship.reciprocal(doctor_id);
     if let Err(e) =

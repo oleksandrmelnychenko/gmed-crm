@@ -150,6 +150,7 @@ export type StandardDocumentNameMetadataInput = Omit<
 
 const DOCUMENT_ART_LABELS: Record<string, string> = {
   appointment_confirmation: "Terminbestätigung",
+  confidentiality_release: "Schweigepflichtsentbindung",
   consent_data_release: "Einverständniserklärung",
   consent_data_release_child: "Einverständniserklärung (Kind)",
   consent_data_release_single: "Einverständniserklärung (alleiniges Sorgerecht)",
@@ -158,6 +159,7 @@ const DOCUMENT_ART_LABELS: Record<string, string> = {
   framework_contract: "Rahmendienstleistungsvertrag",
   medication_summary: "Medikamentenübersicht",
   patient_sticker: "Patientenetikett",
+  privacy_consents: "Einwilligungserklärung",
   single_order: "Einzelauftrag",
   treatment_plan: "Behandlungsplan",
   visa_invitation: "Einladungsschreiben (Visum)",

@@ -37,6 +37,7 @@ type DocumentClassificationSuggestion = {
 
 export type DocumentItem = {
   id: string;
+  document_number?: string;
   patient_id: string | null;
   lead_id?: string | null;
   lead_name?: string | null;

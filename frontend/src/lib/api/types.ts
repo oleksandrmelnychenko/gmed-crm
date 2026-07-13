@@ -157,6 +157,15 @@ export interface LeadDetail extends Lead {
   services: string[];
   has_insurance: boolean | null;
   insurance_covers_germany: string | null;
+  insurance_provider: string | null;
+  insurance_number: string | null;
+  insurance_type: "private" | "public" | "self_pay" | "foreign" | null;
+
+  trusted_contact_name: string | null;
+  trusted_contact_phone: string | null;
+  trusted_contact_relation: string | null;
+  trusted_contact_birth_date: string | null;
+  trusted_contact_address: string | null;
 
   requested_specialties: string[];
   wizard_state: Record<string, unknown> | null;

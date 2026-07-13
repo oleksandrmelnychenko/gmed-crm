@@ -5235,7 +5235,8 @@ function StaffDocumentsPage({
                           .filter(Boolean)
                           .join(" · ")}
                       </p>
-                      <p className="mt-1 text-[11px] font-mono text-muted-foreground/80">
+                      <p className="mt-1 text-[11px] font-mono tabular-nums text-muted-foreground/80">
+                        {detail.document_number ? `${detail.document_number} · ` : ""}
                         {text.versionOf(detail.version_number, detail.version_count)}
                         {detail.is_latest_version
                           ? ` · ${text.current}`
@@ -6783,7 +6784,7 @@ function DocumentIntakeQueueTable({
         id: "document",
         label: t.documents_filename,
         accessor: (item) =>
-          `${localizeDocumentCode(item.auto_name, l)} ${item.original_filename ?? ""}`.trim(),
+          `${item.document_number ?? ""} ${localizeDocumentCode(item.auto_name, l)} ${item.original_filename ?? ""}`.trim(),
         searchable: true,
         sortable: true,
         required: true,
@@ -6801,8 +6802,11 @@ function DocumentIntakeQueueTable({
                 </span>
               ) : null}
             </div>
-            <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-              {item.original_filename ?? t.documents_unlinked_document}
+            <div className="mt-0.5 flex min-w-0 items-baseline gap-1.5 text-[11px] text-muted-foreground">
+              {item.document_number ? (
+                <span className="shrink-0 font-mono tabular-nums">{item.document_number}</span>
+              ) : null}
+              <span className="truncate">{item.original_filename ?? t.documents_unlinked_document}</span>
             </div>
           </div>
         ),

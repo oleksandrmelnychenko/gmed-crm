@@ -231,11 +231,11 @@ pub async fn load_medication_german_equivalents(
     let medication_substance = row
         .try_get::<Option<String>, _>("wirkstoff")
         .unwrap_or_default();
-    let medication_name = trade_name
-        .trim()
-        .is_empty()
-        .then(|| medication_substance.clone().unwrap_or_default())
-        .unwrap_or(trade_name);
+    let medication_name = if trade_name.trim().is_empty() {
+        medication_substance.clone().unwrap_or_default()
+    } else {
+        trade_name
+    };
 
     let mut candidates = Vec::new();
     let matched_products = sqlx::query_scalar::<_, Uuid>(

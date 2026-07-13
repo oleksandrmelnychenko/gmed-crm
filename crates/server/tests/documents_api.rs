@@ -4041,7 +4041,10 @@ async fn cost_estimate_uses_order_quote_when_manual_lines_are_omitted() {
     assert_eq!(body["language"], "de");
     let preview_html = body["preview_html"].as_str().unwrap();
     assert!(preview_html.contains("Koordination vor stationärer Aufnahme"));
-    assert!(preview_html.contains("Ориентировочный расчёт стоимости"));
+    assert!(preview_html.contains(
+        "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen"
+    ));
+    assert!(!preview_html.contains("Ориентировочный"));
     // Quote total is now rendered in German currency format ("1.428,00 EUR").
     assert!(preview_html.contains("1.428,00"));
 
@@ -4058,11 +4061,8 @@ async fn cost_estimate_uses_order_quote_when_manual_lines_are_omitted() {
     assert!(bytes.len() > 800);
     let pdf_text = extract_pdf_text(&bytes);
     assert!(pdf_text.contains("Medizinische Leistungen"));
-    // The PDF embeds the Cyrillic content correctly, but pdf_extract decodes
-    // those glyphs non-deterministically (it depends on font-cache state primed
-    // by earlier tests in the run), which makes asserting Russian text via the
-    // extracted PDF flaky. The Russian content is verified deterministically on
-    // `preview_html` above; the German line here keeps the PDF render covered.
+    assert!(pdf_text.contains("Unverbindliche Kostenschätzung"));
+    assert!(!pdf_text.contains("???"), "{pdf_text}");
 }
 
 #[tokio::test]
@@ -4702,6 +4702,116 @@ async fn document_templates_can_generate_framework_contract_pdf_document() {
     assert!(pdf_text.contains("2.500,00 EUR"));
     assert!(pdf_text.contains("Klinik Datenschutzstelle"));
     assert!(!pdf_text.contains("(E-Mail-Adresse"));
+}
+
+#[tokio::test]
+async fn onboarding_documents_generate_for_a_lead_with_matching_human_numbers() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("lead-onboarding-docs");
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, phone, date_of_birth, legal_sex,
+                primary_language, country, street_address, city, zip_code, created_by
+           ) VALUES (
+                'Anna', 'Beispiel', $1, '+49 30 123456', DATE '1988-04-12', 'female',
+                'de', 'DE', 'Musterstr. 1', 'Berlin', '10115', $2
+           ) RETURNING id"#,
+    )
+    .bind(format!("{tag}@example.test"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    for (template_id, compliance_kind, number_prefix) in [
+        ("confidentiality_release", "confidentiality_release", "SE-"),
+        ("privacy_consents", "dsgvo", "EW-"),
+    ] {
+        let (status, generated) = json_request(
+            &app,
+            "POST",
+            "/api/v1/documents/generate",
+            &admin_bearer,
+            Some(json!({
+                "template_id": template_id,
+                "lead_id": lead_id,
+                "language": "de",
+                "status": "active",
+                "bindings": {
+                    "extra_release_recipients": "Maria Beispiel, Vertrauenskontakt",
+                    "consent_privacy": true,
+                    "consent_healthcare": true,
+                    "consent_email": true,
+                    "consent_messenger": false
+                }
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{generated}");
+        let document_id = Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap();
+
+        let (status, detail) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{document_id}"),
+            &admin_bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{detail}");
+        let document_number = detail["document_number"].as_str().unwrap();
+        assert!(document_number.starts_with(number_prefix), "{detail}");
+        assert_eq!(detail["lead_id"], lead_id.to_string());
+        assert!(detail["patient_id"].is_null());
+        assert_eq!(detail["generated_template_id"], template_id);
+
+        let (status, bytes) = bytes_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{document_id}/download"),
+            &admin_bearer,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(extract_pdf_text(&bytes).contains(document_number));
+
+        let (status, signed) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/documents/{document_id}/mark-signed"),
+            &admin_bearer,
+            Some(json!({ "compliance_kind": compliance_kind })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{signed}");
+
+        let row: (String, Option<String>, bool) = sqlx::query_as(
+            "SELECT status, compliance_kind, signed_at IS NOT NULL FROM documents WHERE id = $1",
+        )
+        .bind(document_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.0, "active");
+        assert_eq!(row.1.as_deref(), Some(compliance_kind));
+        assert!(row.2);
+    }
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "patient_sticker_standard",
+            "lead_id": lead_id,
+            "language": "de"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
 }
 
 #[tokio::test]
