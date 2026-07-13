@@ -42,7 +42,7 @@ http = "1"
 sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "json", "rust_decimal"] }
 rust_decimal = "1"
 printpdf = { version = "0.9.1", default-features = false }
-pdf-extract = "0.10.0"
+pdf-extract = "0.12.0"
 datamatrix = "0.3"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 

@@ -33,6 +33,18 @@ ignore = [
     # replace printpdf with an alternative PDF generator.
     "RUSTSEC-2024-0370",
 
+    # lopdf <0.42 — deeply nested input can overflow the parser stack.
+    # Uploaded PDFs are parsed through pdf-extract 0.12 / lopdf >=0.42. The
+    # remaining old lopdf is private to printpdf, which we only use to generate
+    # documents and never to parse external input.
+    # Re-evaluate: when printpdf upgrades its lopdf dependency to >=0.42.
+    "RUSTSEC-2026-0187",
+
+    # ttf-parser 0.25 — unmaintained, with no reported vulnerability.
+    # It remains transitive through printpdf's generation-only lopdf path.
+    # Re-evaluate: when printpdf removes or replaces this dependency.
+    "RUSTSEC-2026-0192",
+
     # rand 0.8.5 / 0.9.2 — unsound with a custom global logger replacing
     # `rand::rng()`. We do not replace the global rand logger anywhere in
     # our code or in any dependency we audit. This advisory is a soundness

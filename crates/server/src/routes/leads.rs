@@ -3760,9 +3760,7 @@ async fn download_attachment(
 // ----------------------------------------------------------------------------
 
 fn required_env(name: &str) -> Option<String> {
-    std::env::var(name)
-        .ok()
-        .and_then(|v| if v.trim().is_empty() { None } else { Some(v) })
+    std::env::var(name).ok().filter(|v| !v.trim().is_empty())
 }
 
 fn required_env_any(names: &[&str]) -> Option<String> {

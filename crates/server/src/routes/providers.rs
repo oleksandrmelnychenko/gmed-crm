@@ -5158,7 +5158,7 @@ fn normalize_doctor_title(value: Option<String>) -> Option<String> {
 }
 
 fn normalize_json(value: Option<Value>) -> Option<Value> {
-    value.and_then(|raw| if raw.is_null() { None } else { Some(raw) })
+    value.filter(|raw| !raw.is_null())
 }
 
 fn normalize_taxonomy_attributes(value: Option<Value>) -> Result<Option<Value>, &'static str> {
