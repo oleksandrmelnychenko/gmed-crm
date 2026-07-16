@@ -4725,6 +4725,27 @@ async fn onboarding_documents_generate_for_a_lead_with_matching_human_numbers() 
     .await
     .unwrap();
 
+    let (status, rejected_override) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "privacy_consents",
+            "lead_id": lead_id,
+            "language": "de",
+            "manual_text": "This must not replace the fixed legal document"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        rejected_override
+            .to_string()
+            .contains("Fixed legal templates"),
+        "{rejected_override}"
+    );
+
     for (template_id, compliance_kind, number_prefix) in [
         ("confidentiality_release", "confidentiality_release", "SE-"),
         ("privacy_consents", "dsgvo", "EW-"),
@@ -4743,8 +4764,11 @@ async fn onboarding_documents_generate_for_a_lead_with_matching_human_numbers() 
                     "extra_release_recipients": "Maria Beispiel, Vertrauenskontakt",
                     "consent_privacy": true,
                     "consent_healthcare": true,
+                    "consent_provider_release": false,
                     "consent_email": true,
-                    "consent_messenger": false
+                    "consent_threema": true,
+                    "consent_whatsapp": false,
+                    "consent_telegram": true
                 }
             })),
         )
@@ -4791,6 +4815,9 @@ async fn onboarding_documents_generate_for_a_lead_with_matching_human_numbers() 
                 assert!(pdf_text.contains("Maria Beispiel, Vertrauenskontakt"));
                 assert!(pdf_text.contains("[x]"));
                 assert!(pdf_text.contains("[ ]"));
+                assert!(pdf_text.contains("[x] Threema-Messenger"));
+                assert!(pdf_text.contains("[ ] WhatsApp-Messenger"));
+                assert!(pdf_text.contains("[x] Telegram-Messenger"));
             }
             _ => unreachable!(),
         }

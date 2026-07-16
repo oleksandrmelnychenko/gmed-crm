@@ -43,7 +43,9 @@ import { DocumentsGrid } from "@/components/documents-grid";
 import { localizeDocumentCode } from "@/lib/required-document-labels";
 import {
   DOCUMENT_BINDING_FIELDS,
+  documentBindingFieldLabel,
   hydrateDocumentBindings,
+  isFixedLegalDocumentTemplate,
 } from "@/pages/documents/model/document-bindings";
 import { localizeTextBlock } from "@/pages/documents/model/text-block-labels";
 import {
@@ -631,6 +633,10 @@ function formatGenerateDocumentError(error: unknown, l: (key: string) => string)
     return l("documents_scope_4");
   }
 
+  if (message.includes("Fixed legal templates do not support free-form text overrides")) {
+    return l("documents_fixed_legal_text_override");
+  }
+
   return message;
 }
 
@@ -958,6 +964,12 @@ function StaffDocumentsPage({
     noPaymentMethod: lang === "ru" ? "Не указано" : "Nicht angegeben",
     finalGeneratedText:
       lang === "ru" ? "Финальный текст PDF" : "Finaler PDF-Text",
+    documentTitle:
+      lang === "ru" ? "Заголовок документа" : "Dokumenttitel",
+    legalConsents:
+      lang === "ru" ? "Согласия и подпись" : "Einwilligungen und Unterschrift",
+    legalSignature:
+      lang === "ru" ? "Подпись" : "Unterschrift",
     finalGeneratedTextHint:
       lang === "ru"
         ? "Текст ниже собран из текущих данных формы. Если его изменить, PDF будет создан именно из этого текста."
@@ -1297,6 +1309,12 @@ function StaffDocumentsPage({
       null,
     [generateForm.templateId, templates],
   );
+  const selectedTemplateIsFixedLegal = Boolean(
+    selectedTemplate && isFixedLegalDocumentTemplate(selectedTemplate.id),
+  );
+  const selectedTemplateBindingFields = selectedTemplate
+    ? (DOCUMENT_BINDING_FIELDS[selectedTemplate.id] ?? [])
+    : [];
   const selectedTemplateNeedsFrameworkContract =
     selectedTemplate?.id === "framework_contract";
   const selectedFrameworkContract = generateFrameworkContracts?.[0] ?? null;
@@ -3342,6 +3360,8 @@ function StaffDocumentsPage({
                   ))}
                 </NativeComboboxSelect>
               </Field>
+              {!selectedTemplateIsFixedLegal ? (
+                <>
               <Field label={t.orders_title}>
                 <NativeComboboxSelect
                   value={generateForm.orderId}
@@ -3385,6 +3405,8 @@ function StaffDocumentsPage({
                   ))}
                 </NativeComboboxSelect>
               </Field>
+                </>
+              ) : null}
                   </div>
                 </DocumentSheetSection>
 
@@ -3426,7 +3448,24 @@ function StaffDocumentsPage({
                   ))}
                 </NativeComboboxSelect>
               </Field>
-              <Field label={t.documents_filename}>
+              {selectedTemplateIsFixedLegal ? (
+                <Field label={metaText.documentDate}>
+                  <Input
+                    type="date"
+                    value={generateForm.documentDate}
+                    onChange={(event) =>
+                      setGenerateForm((current) => ({
+                        ...current,
+                        documentDate: event.target.value,
+                      }))
+                    }
+                    className={shellInputClassName}
+                  />
+                </Field>
+              ) : null}
+              {!selectedTemplateIsFixedLegal ? (
+                <>
+              <Field label={metaText.documentTitle}>
                 <Input
                   value={generateForm.titleOverride}
                   onChange={(event) =>
@@ -3665,15 +3704,49 @@ function StaffDocumentsPage({
                   ))}
                 </NativeComboboxSelect>
               </Field>
+                </>
+              ) : null}
                   </div>
                 </DocumentSheetSection>
-                {selectedTemplate && DOCUMENT_BINDING_FIELDS[selectedTemplate.id] ? (
-                  <DocumentSheetSection title={t.documents_section_bindings}>
+                {selectedTemplateBindingFields.length > 0 ? (
+                  <DocumentSheetSection
+                    title={
+                      selectedTemplate?.id === "privacy_consents"
+                        ? metaText.legalConsents
+                        : selectedTemplate?.id === "confidentiality_release"
+                          ? metaText.legalSignature
+                          : t.documents_section_bindings
+                    }
+                  >
                     <div className="grid gap-4 md:grid-cols-2">
-                      {DOCUMENT_BINDING_FIELDS[selectedTemplate.id].map((field) =>
-                        field.kind === "textarea" ? (
+                      {selectedTemplateBindingFields.map((field) =>
+                        field.kind === "boolean" ? (
+                          <label
+                            htmlFor={`generate-binding-${field.key}`}
+                            key={field.key}
+                            className="flex min-h-11 items-start gap-3 rounded-lg border border-border/70 bg-background px-3 py-2.5 text-sm text-foreground md:col-span-2"
+                          >
+                            <input
+                              id={`generate-binding-${field.key}`}
+                              type="checkbox"
+                              checked={
+                                generateForm.bindings[field.key] === "true"
+                              }
+                              onChange={(event) =>
+                                updateBindingField(
+                                  field.key,
+                                  String(event.target.checked),
+                                )
+                              }
+                              className={cn(checkboxClass, "mt-0.5 shrink-0")}
+                            />
+                            <span className="min-w-0 leading-5">
+                              {documentBindingFieldLabel(field, lang)}
+                            </span>
+                          </label>
+                        ) : field.kind === "textarea" ? (
                           <div key={field.key} className="md:col-span-2">
-                            <Field label={field.label}>
+                            <Field label={documentBindingFieldLabel(field, lang)}>
                               <textarea
                                 value={generateForm.bindings[field.key] ?? ""}
                                 onChange={(event) =>
@@ -3685,7 +3758,10 @@ function StaffDocumentsPage({
                             </Field>
                           </div>
                         ) : (
-                          <Field key={field.key} label={field.label}>
+                          <Field
+                            key={field.key}
+                            label={documentBindingFieldLabel(field, lang)}
+                          >
                             <Input
                               type={
                                 field.kind === "date"
@@ -3759,6 +3835,23 @@ function StaffDocumentsPage({
                   </DocumentSheetSection>
                 ) : null}
 
+                {selectedTemplateIsFixedLegal ? (
+                  <DocumentSheetSection title={t.documents_section_additional}>
+                    <Field label={t.documents_internal_note}>
+                      <textarea
+                        value={generateForm.notes}
+                        onChange={(event) =>
+                          setGenerateForm((current) => ({
+                            ...current,
+                            notes: event.target.value,
+                          }))
+                        }
+                        className={cn(textareaClassName, "min-h-[96px]")}
+                        placeholder={t.patients_notes}
+                      />
+                    </Field>
+                  </DocumentSheetSection>
+                ) : (
                 <DocumentSheetSection title={t.documents_section_text_notes}>
                   <div className="grid gap-4 md:grid-cols-2">
                     <Field label={t.documents_introduction}>
@@ -3837,6 +3930,7 @@ function StaffDocumentsPage({
                     />
                   </Field>
                 </DocumentSheetSection>
+                )}
               </div>
             </AdminSheetScaffold>
           </form>

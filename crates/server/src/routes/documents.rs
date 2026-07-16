@@ -1785,7 +1785,11 @@ struct DocumentBindingOverrides {
     extra_release_recipients: Option<String>,
     consent_email: Option<bool>,
     consent_messenger: Option<bool>,
+    consent_threema: Option<bool>,
+    consent_whatsapp: Option<bool>,
+    consent_telegram: Option<bool>,
     consent_healthcare: Option<bool>,
+    consent_provider_release: Option<bool>,
     consent_privacy: Option<bool>,
 }
 
@@ -2657,6 +2661,10 @@ fn document_template_by_id(template_id: &str) -> Option<DocumentTemplateDefiniti
         .iter()
         .copied()
         .find(|template| template.id == template_id)
+}
+
+fn is_fixed_legal_document_template(template_id: &str) -> bool {
+    matches!(template_id, "confidentiality_release" | "privacy_consents")
 }
 
 fn generated_template_id_from_source(value: Option<&str>) -> Option<String> {
@@ -10835,6 +10843,29 @@ async fn generate_document(
         );
     };
 
+    let has_free_form_override = body
+        .manual_text
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+        || body
+            .title_override
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        || body
+            .introduction
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        || body
+            .closing_note
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
+    if is_fixed_legal_document_template(template.id) && has_free_form_override {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Fixed legal templates do not support free-form text overrides",
+        );
+    }
+
     let status = body
         .status
         .as_deref()
@@ -14844,9 +14875,15 @@ fn build_adult_privacy_consents_pdf(
         agency.data_system_name.trim()
     };
     let healthcare = bindings.consent_healthcare.unwrap_or(false);
+    let provider_release = bindings.consent_provider_release.unwrap_or(healthcare);
     let privacy = bindings.consent_privacy.unwrap_or(false);
     let email = bindings.consent_email.unwrap_or(false);
-    let messenger = bindings.consent_messenger.unwrap_or(false);
+    let threema = bindings.consent_threema.unwrap_or(false);
+    let whatsapp = bindings
+        .consent_whatsapp
+        .or(bindings.consent_messenger)
+        .unwrap_or(false);
+    let telegram = bindings.consent_telegram.unwrap_or(false);
     let recipients = bindings
         .extra_release_recipients
         .as_deref()
@@ -14870,7 +14907,7 @@ fn build_adult_privacy_consents_pdf(
     );
     adult_legal_checkbox(
         &mut layout,
-        healthcare,
+        provider_release,
         &format!(
             "dass alle meine behandelnden Ärzte und medizinischen Einrichtungen meine Behandlungsunterlagen und medizinischen Informationen an {agency_identity} übermitteln dürfen;"
         ),
@@ -14912,13 +14949,13 @@ fn build_adult_privacy_consents_pdf(
     }
     adult_legal_checkbox(
         &mut layout,
-        email || messenger,
+        email || threema || whatsapp || telegram,
         "dass meine personenbezogenen und medizinischen Daten sowie erforderliche Unterlagen über folgende Kommunikationsmedien eingeholt und/oder übermittelt werden:",
     );
     adult_legal_channel(&mut layout, email, "E-mail");
-    adult_legal_channel(&mut layout, false, "Threema-Messenger");
-    adult_legal_channel(&mut layout, messenger, "WhatsApp-Messenger");
-    adult_legal_channel(&mut layout, false, "Telegram-Messenger");
+    adult_legal_channel(&mut layout, threema, "Threema-Messenger");
+    adult_legal_channel(&mut layout, whatsapp, "WhatsApp-Messenger");
+    adult_legal_channel(&mut layout, telegram, "Telegram-Messenger");
     layout.page_break();
     fc_body(
         &mut layout,
@@ -20236,8 +20273,11 @@ mod tests {
             extra_release_recipients: Some("Maria Beispiel, Vertrauenskontakt".to_string()),
             consent_privacy: Some(true),
             consent_healthcare: Some(true),
+            consent_provider_release: Some(false),
             consent_email: Some(true),
-            consent_messenger: Some(false),
+            consent_threema: Some(true),
+            consent_whatsapp: Some(false),
+            consent_telegram: Some(true),
             ..Default::default()
         };
 
@@ -20282,7 +20322,10 @@ mod tests {
         assert!(privacy_text.contains("Maria Beispiel, Vertrauenskontakt"));
         assert!(privacy_text.contains("[x]"));
         assert!(privacy_text.contains("[ ]"));
-        assert!(privacy_text.matches("Seite:").count() >= 4);
+        assert!(privacy_text.contains("[x] Threema-Messenger"));
+        assert!(privacy_text.contains("[ ] WhatsApp-Messenger"));
+        assert!(privacy_text.contains("[x] Telegram-Messenger"));
+        assert_eq!(privacy_text.matches("Seite:").count(), 5);
         assert!(!privacy_text.contains('?'));
     }
 

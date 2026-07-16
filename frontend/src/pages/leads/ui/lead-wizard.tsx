@@ -2499,8 +2499,9 @@ export function LeadWizard({
               extra_release_recipients: trustedContactRecipient(),
               consent_privacy: draft.privacyConsent,
               consent_healthcare: draft.healthcareConsent,
+              consent_provider_release: draft.healthcareConsent,
               consent_email: Boolean(lead.email_consent),
-              consent_messenger: Boolean(lead.whatsapp_consent),
+              consent_whatsapp: Boolean(lead.whatsapp_consent),
             }
           : {},
       });

@@ -252,6 +252,34 @@ describe("buildGenerateDocumentPayload", () => {
     ).toBe("Form fallback text");
   });
 
+  it("never sends free-form overrides for fixed legal templates", () => {
+    const payload = buildGenerateDocumentPayload({
+      template: template({
+        id: "privacy_consents",
+        art: "privacy_consents",
+        category: "consent",
+      }),
+      form: generateForm({
+        templateId: "privacy_consents",
+        titleOverride: "Changed title",
+        introduction: "Changed introduction",
+        closingNote: "Changed closing note",
+        manualText: "Arbitrary replacement",
+        manualTextDirty: true,
+      }),
+      patients,
+      displayedManualText: "Arbitrary replacement",
+    });
+
+    expect(payload).toMatchObject({
+      title_override: null,
+      introduction: null,
+      closing_note: null,
+      manual_text: null,
+      text_block_keys: [],
+    });
+  });
+
   it("resolves generated finance templates to financial access", () => {
     const payload = buildGenerateDocumentPayload({
       template: template({

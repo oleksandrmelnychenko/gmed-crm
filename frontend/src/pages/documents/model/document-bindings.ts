@@ -1,11 +1,33 @@
-export type BindingFieldKind = "text" | "date" | "number" | "textarea";
+export type BindingFieldKind =
+  | "text"
+  | "date"
+  | "number"
+  | "textarea"
+  | "boolean";
 export type BindingFieldDef = {
   key: string;
   label: string;
+  labelRu?: string;
   kind: BindingFieldKind;
 };
 
 export type DocumentBindingForm = Record<string, string>;
+
+const FIXED_LEGAL_TEMPLATE_IDS = new Set([
+  "confidentiality_release",
+  "privacy_consents",
+]);
+
+export function isFixedLegalDocumentTemplate(templateId: string) {
+  return FIXED_LEGAL_TEMPLATE_IDS.has(templateId);
+}
+
+export function documentBindingFieldLabel(
+  field: BindingFieldDef,
+  lang: "de" | "ru",
+) {
+  return lang === "ru" ? (field.labelRu ?? field.label) : field.label;
+}
 
 const PATIENT_STICKER_BINDING_FIELDS: BindingFieldDef[] = [
   { key: "kt1", label: "KT1", kind: "text" },
@@ -155,12 +177,80 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
   patient_sticker_compact: PATIENT_STICKER_BINDING_FIELDS,
   patient_sticker_standard: PATIENT_STICKER_BINDING_FIELDS,
   patient_sticker_sheet: PATIENT_STICKER_BINDING_FIELDS,
-  confidentiality_release: [],
+  confidentiality_release: [
+    {
+      key: "party_sign_place",
+      label: "Unterzeichnungsort",
+      labelRu: "Место подписания",
+      kind: "text",
+    },
+    {
+      key: "party_sign_date",
+      label: "Unterzeichnungsdatum",
+      labelRu: "Дата подписания",
+      kind: "date",
+    },
+  ],
   privacy_consents: [
     {
+      key: "consent_healthcare",
+      label: "Erhebung, Verarbeitung und Übermittlung medizinischer Daten",
+      labelRu: "Сбор, обработка и передача медицинских данных",
+      kind: "boolean",
+    },
+    {
+      key: "consent_provider_release",
+      label: "Übermittlung der Behandlungsunterlagen durch Ärzte und Einrichtungen",
+      labelRu: "Получение медицинских данных от врачей и клиник",
+      kind: "boolean",
+    },
+    {
+      key: "consent_privacy",
+      label: "Speicherung und Verarbeitung im GMED-CRM-System",
+      labelRu: "Хранение и обработка данных в GMED-CRM",
+      kind: "boolean",
+    },
+    {
       key: "extra_release_recipients",
-      label: "Vertrauenskontakt / zusätzlicher Empfänger",
+      label: "Zusätzliche Empfänger der Daten",
+      labelRu: "Дополнительные получатели данных",
       kind: "textarea",
+    },
+    {
+      key: "consent_email",
+      label: "E-mail",
+      labelRu: "E-mail",
+      kind: "boolean",
+    },
+    {
+      key: "consent_threema",
+      label: "Threema-Messenger",
+      labelRu: "Threema",
+      kind: "boolean",
+    },
+    {
+      key: "consent_whatsapp",
+      label: "WhatsApp-Messenger",
+      labelRu: "WhatsApp",
+      kind: "boolean",
+    },
+    {
+      key: "consent_telegram",
+      label: "Telegram-Messenger",
+      labelRu: "Telegram",
+      kind: "boolean",
+    },
+    {
+      key: "party_sign_place",
+      label: "Unterzeichnungsort",
+      labelRu: "Место подписания",
+      kind: "text",
+    },
+    {
+      key: "party_sign_date",
+      label: "Unterzeichnungsdatum",
+      labelRu: "Дата подписания",
+      kind: "date",
     },
   ],
   consent_data_release_child: [
@@ -243,15 +333,24 @@ export function buildBindingsPayload(
     ) {
       continue;
     }
+    const field = fieldDefsByKey.get(key);
+    if (field?.kind === "boolean") {
+      out[key] = value === "true";
+      continue;
+    }
     const trimmed = (value ?? "").trim();
     if (!trimmed) continue;
-    const field = fieldDefsByKey.get(key);
     if (field?.kind === "number") {
       const parsed = Number(trimmed);
       if (Number.isInteger(parsed) && parsed >= 1) out[key] = parsed;
       continue;
     }
     out[key] = trimmed;
+  }
+  for (const field of fieldDefs) {
+    if (field.kind === "boolean" && !(field.key in out)) {
+      out[field.key] = bindings[field.key] === "true";
+    }
   }
   if (fieldKeys.has("service_lines_text")) {
     const serviceLines = parseBindingServiceLines(
@@ -382,9 +481,15 @@ export function hydrateDocumentBindings(
   const hydrated: DocumentBindingForm = { ...extracted };
   for (const [key, value] of Object.entries(persisted)) {
     if (!allowed.has(key) || key === "service_lines_text" || key === "clinics_text") continue;
-    if (typeof value !== "string" && typeof value !== "number") continue;
+    if (
+      typeof value !== "string" &&
+      typeof value !== "number" &&
+      typeof value !== "boolean"
+    ) {
+      continue;
+    }
     const normalized = String(value).trim();
-    if (normalized) hydrated[key] = normalized;
+    if (normalized || typeof value === "boolean") hydrated[key] = normalized;
   }
   for (const [key, value] of Object.entries(legacySignatureBindings(templateId, persisted))) {
     if (!hydrated[key]) hydrated[key] = value;

@@ -4,6 +4,7 @@ import {
   DOCUMENT_BINDING_FIELDS,
   buildBindingsPayload,
   hydrateDocumentBindings,
+  isFixedLegalDocumentTemplate,
   prefillDocumentBindingsFromText,
 } from "./document-bindings";
 
@@ -150,6 +151,46 @@ describe("document template binding payloads", () => {
     ).toBeNull();
   });
 
+  it("serializes every privacy checkbox as a boolean", () => {
+    expect(
+      buildBindingsPayload("privacy_consents", {
+        consent_healthcare: "true",
+        consent_provider_release: "false",
+        consent_privacy: "true",
+        consent_email: "true",
+        consent_threema: "false",
+        consent_whatsapp: "true",
+        consent_telegram: "false",
+      }),
+    ).toMatchObject({
+      consent_healthcare: true,
+      consent_provider_release: false,
+      consent_privacy: true,
+      consent_email: true,
+      consent_threema: false,
+      consent_whatsapp: true,
+      consent_telegram: false,
+    });
+  });
+
+  it("sends explicit false defaults for untouched privacy checkboxes", () => {
+    expect(buildBindingsPayload("privacy_consents", {})).toMatchObject({
+      consent_healthcare: false,
+      consent_provider_release: false,
+      consent_privacy: false,
+      consent_email: false,
+      consent_threema: false,
+      consent_whatsapp: false,
+      consent_telegram: false,
+    });
+  });
+
+  it("keeps fixed legal templates on the protected renderer", () => {
+    expect(isFixedLegalDocumentTemplate("confidentiality_release")).toBe(true);
+    expect(isFixedLegalDocumentTemplate("privacy_consents")).toBe(true);
+    expect(isFixedLegalDocumentTemplate("cost_estimate")).toBe(false);
+  });
+
   it("exposes code fields for every patient sticker template", () => {
     for (const templateId of [
       "patient_sticker_compact",
@@ -219,6 +260,26 @@ describe("document template binding payloads", () => {
     ).toMatchObject({
       passport_number: "PERSISTED-1",
       passport_valid_until: "2049-12-31",
+    });
+  });
+
+  it("hydrates persisted checked and unchecked consent values", () => {
+    expect(
+      hydrateDocumentBindings(
+        "privacy_consents",
+        {
+          consent_healthcare: true,
+          consent_provider_release: false,
+          consent_whatsapp: true,
+          consent_telegram: false,
+        },
+        null,
+      ),
+    ).toMatchObject({
+      consent_healthcare: "true",
+      consent_provider_release: "false",
+      consent_whatsapp: "true",
+      consent_telegram: "false",
     });
   });
 });

@@ -8,7 +8,11 @@ import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { generateDocument } from "@/pages/documents/data/document-api";
-import { DOCUMENT_BINDING_FIELDS } from "@/pages/documents/model/document-bindings";
+import {
+  DOCUMENT_BINDING_FIELDS,
+  documentBindingFieldLabel,
+  isFixedLegalDocumentTemplate,
+} from "@/pages/documents/model/document-bindings";
 import {
   buildGeneratedDocumentManualTextDraft,
   buildGenerateDocumentAutoName,
@@ -99,6 +103,9 @@ export function PatientDocumentGenerateDialog({
 
   const selectedTemplate = templates.find((t) => t.id === form.templateId) ?? null;
   const bindingFields = selectedTemplate ? DOCUMENT_BINDING_FIELDS[selectedTemplate.id] ?? [] : [];
+  const fixedLegalTemplate = Boolean(
+    selectedTemplate && isFixedLegalDocumentTemplate(selectedTemplate.id),
+  );
   const patientLabel = patientOptions[0] ? patientOptionLabel(patientOptions[0]) : "";
   const patientAddressee = patientDocumentAddresseeLabel(
     patientId ?? "",
@@ -313,47 +320,90 @@ export function PatientDocumentGenerateDialog({
           {bindingFields.length > 0 ? (
             <div className="space-y-3 rounded-lg border border-border/60 p-3">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                {tx("Поля шаблона", "Vorlagenfelder")}
+                {selectedTemplate.id === "privacy_consents"
+                  ? tx("Согласия и подпись", "Einwilligungen und Unterschrift")
+                  : selectedTemplate.id === "confidentiality_release"
+                    ? tx("Подпись", "Unterschrift")
+                    : tx("Поля шаблона", "Vorlagenfelder")}
               </p>
               <div className="grid gap-3 md:grid-cols-2">
                 {bindingFields.map((field) => (
-                  <label key={field.key} className="block">
-                    <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
-                      {field.label}
-                    </span>
-                    {field.kind === "textarea" ? (
-                      <textarea
-                        value={form.bindings[field.key] ?? ""}
-                        onChange={(e) =>
-                          setForm((current) => ({
-                            ...current,
-                            manualText: "",
-                            manualTextDirty: false,
-                            bindings: {
-                              ...current.bindings,
-                              [field.key]: e.target.value,
-                            },
-                          }))
-                        }
-                        className={cn(fieldInputClass, "h-20 py-2")}
-                      />
+                  <label
+                    key={field.key}
+                    className={cn(
+                      "block",
+                      field.kind === "boolean" &&
+                        "flex min-h-11 items-start gap-3 rounded-lg border border-border/70 px-3 py-2.5 md:col-span-2",
+                    )}
+                  >
+                    {field.kind === "boolean" ? (
+                      <>
+                        <input
+                          type="checkbox"
+                          checked={form.bindings[field.key] === "true"}
+                          onChange={(e) =>
+                            setForm((current) => ({
+                              ...current,
+                              manualText: "",
+                              manualTextDirty: false,
+                              bindings: {
+                                ...current.bindings,
+                                [field.key]: String(e.target.checked),
+                              },
+                            }))
+                          }
+                          className="mt-0.5 size-4 shrink-0 accent-[var(--brand)]"
+                        />
+                        <span className="min-w-0 text-sm leading-5 text-foreground">
+                          {documentBindingFieldLabel(field, lang)}
+                        </span>
+                      </>
                     ) : (
-                      <Input
-                        type={field.kind === "date" ? "date" : field.kind === "number" ? "number" : "text"}
-                        value={form.bindings[field.key] ?? ""}
-                        onChange={(e) =>
-                          setForm((current) => ({
-                            ...current,
-                            manualText: "",
-                            manualTextDirty: false,
-                            bindings: {
-                              ...current.bindings,
-                              [field.key]: e.target.value,
-                            },
-                          }))
-                        }
-                        className={fieldInputClass}
-                      />
+                      <>
+                        <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
+                          {documentBindingFieldLabel(field, lang)}
+                        </span>
+                        {field.kind === "textarea" ? (
+                          <textarea
+                            value={form.bindings[field.key] ?? ""}
+                            onChange={(e) =>
+                              setForm((current) => ({
+                                ...current,
+                                manualText: "",
+                                manualTextDirty: false,
+                                bindings: {
+                                  ...current.bindings,
+                                  [field.key]: e.target.value,
+                                },
+                              }))
+                            }
+                            className={cn(fieldInputClass, "h-20 py-2")}
+                          />
+                        ) : (
+                          <Input
+                            type={
+                              field.kind === "date"
+                                ? "date"
+                                : field.kind === "number"
+                                  ? "number"
+                                  : "text"
+                            }
+                            value={form.bindings[field.key] ?? ""}
+                            onChange={(e) =>
+                              setForm((current) => ({
+                                ...current,
+                                manualText: "",
+                                manualTextDirty: false,
+                                bindings: {
+                                  ...current.bindings,
+                                  [field.key]: e.target.value,
+                                },
+                              }))
+                            }
+                            className={fieldInputClass}
+                          />
+                        )}
+                      </>
                     )}
                   </label>
                 ))}
@@ -361,46 +411,51 @@ export function PatientDocumentGenerateDialog({
             </div>
           ) : null}
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[11px] font-medium text-muted-foreground">
-                {tx("Финальный текст PDF", "Finaler PDF-Text")}
-              </span>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 rounded-lg"
-                disabled={!form.manualTextDirty}
-                onClick={() =>
+          {!fixedLegalTemplate ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  {tx("Финальный текст PDF", "Finaler PDF-Text")}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg"
+                  disabled={!form.manualTextDirty}
+                  onClick={() =>
+                    setForm((current) => ({
+                      ...current,
+                      manualText: "",
+                      manualTextDirty: false,
+                    }))
+                  }
+                >
+                  {tx("Вернуть текст шаблона", "Vorlagentext wiederherstellen")}
+                </Button>
+              </div>
+              <textarea
+                value={displayedGeneratedManualText}
+                onChange={(e) =>
                   setForm((current) => ({
                     ...current,
-                    manualText: "",
-                    manualTextDirty: false,
+                    manualText: e.target.value,
+                    manualTextDirty: true,
                   }))
                 }
-              >
-                {tx("Вернуть текст шаблона", "Vorlagentext wiederherstellen")}
-              </Button>
+                className={cn(
+                  fieldInputClass,
+                  "min-h-[220px] py-2 leading-relaxed",
+                )}
+              />
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                {tx(
+                  "Если изменить текст, PDF будет создан именно из этой версии.",
+                  "Wenn der Text bearbeitet wird, entsteht das PDF genau aus dieser Version.",
+                )}
+              </p>
             </div>
-            <textarea
-              value={displayedGeneratedManualText}
-              onChange={(e) =>
-                setForm((current) => ({
-                  ...current,
-                  manualText: e.target.value,
-                  manualTextDirty: true,
-                }))
-              }
-              className={cn(fieldInputClass, "min-h-[220px] py-2 leading-relaxed")}
-            />
-            <p className="text-[11px] leading-relaxed text-muted-foreground">
-              {tx(
-                "Если изменить текст, PDF будет создан именно из этой версии.",
-                "Wenn der Text bearbeitet wird, entsteht das PDF genau aus dieser Version.",
-              )}
-            </p>
-          </div>
+          ) : null}
         </>
       ) : null}
     </PatientSheetScaffold>

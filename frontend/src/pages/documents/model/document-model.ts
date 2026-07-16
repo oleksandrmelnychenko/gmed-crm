@@ -16,6 +16,8 @@ import { formatUnknownValue, type Lang, type Translations } from "@/lib/i18n";
 import {
   DOCUMENT_BINDING_FIELDS,
   buildBindingsPayload,
+  documentBindingFieldLabel,
+  isFixedLegalDocumentTemplate,
 } from "./document-bindings";
 import { localizeTextBlock } from "./text-block-labels";
 
@@ -653,7 +655,9 @@ export function buildGeneratedDocumentManualTextDraft(input: {
   const bindingLines = bindingFields
     .map((field) => {
       const value = form.bindings[field.key]?.trim();
-      return value ? `${field.label}: ${value}` : "";
+      return value
+        ? `${documentBindingFieldLabel(field, input.lang)}: ${value}`
+        : "";
     })
     .filter(Boolean);
   if (bindingLines.length > 0) {
@@ -755,7 +759,8 @@ export function buildGenerateDocumentPayload(input: {
   fallbackDate?: string | Date | null;
 }): Record<string, unknown> {
   const { form, template } = input;
-  const manualText = form.manualTextDirty
+  const fixedLegalTemplate = isFixedLegalDocumentTemplate(template.id);
+  const manualText = !fixedLegalTemplate && form.manualTextDirty
     ? (input.displayedManualText ?? form.manualText).trim()
     : "";
   return {
@@ -768,9 +773,12 @@ export function buildGenerateDocumentPayload(input: {
     visibility: form.visibility,
     language: form.language || null,
     replace_document_id: form.replaceDocumentId || null,
-    title_override: form.titleOverride.trim() || null,
-    introduction: form.introduction.trim() || null,
-    closing_note: form.closingNote.trim() || null,
+    title_override:
+      fixedLegalTemplate ? null : form.titleOverride.trim() || null,
+    introduction:
+      fixedLegalTemplate ? null : form.introduction.trim() || null,
+    closing_note:
+      fixedLegalTemplate ? null : form.closingNote.trim() || null,
     klinik: form.klinik.trim() || null,
     ursprung: form.ursprung.trim() || null,
     document_direction: form.documentDirection,
@@ -791,7 +799,7 @@ export function buildGenerateDocumentPayload(input: {
     payment_method: form.paymentMethod || null,
     notes: form.notes.trim() || null,
     manual_text: manualText || null,
-    text_block_keys: form.textBlockKeys,
+    text_block_keys: fixedLegalTemplate ? [] : form.textBlockKeys,
     bindings: buildBindingsPayload(template.id, form.bindings),
   };
 }

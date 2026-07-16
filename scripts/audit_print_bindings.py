@@ -19,6 +19,17 @@ FRONTEND_PATH = (
 LEAD_WIZARD_PATH = (
     ROOT / "frontend" / "src" / "pages" / "leads" / "ui" / "lead-wizard.tsx"
 )
+DOCUMENTS_PAGE_PATH = ROOT / "frontend" / "src" / "pages" / "documents" / "page.tsx"
+PATIENT_DOCUMENT_FORM_PATH = (
+    ROOT
+    / "frontend"
+    / "src"
+    / "pages"
+    / "patients"
+    / "ui"
+    / "sheets"
+    / "patient-document-generate-dialog.tsx"
+)
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NS = {"w": WORD_NS}
 YELLOW_VALUES = {"yellow", "darkYellow"}
@@ -75,6 +86,12 @@ def main() -> int:
     backend = BACKEND_PATH.read_text(encoding="utf-8")
     frontend = FRONTEND_PATH.read_text(encoding="utf-8")
     lead_wizard = LEAD_WIZARD_PATH.read_text(encoding="utf-8")
+    generation_forms = "\n".join(
+        (
+            DOCUMENTS_PAGE_PATH.read_text(encoding="utf-8"),
+            PATIENT_DOCUMENT_FORM_PATH.read_text(encoding="utf-8"),
+        )
+    )
     manifest_files = {entry.get("file") for entry in entries}
     actual_files = {path.name for path in PRINT_DIR.glob("*.docx")}
     for name in sorted(actual_files - manifest_files):
@@ -179,6 +196,14 @@ def main() -> int:
         for heading in entry.get("wizard_heading_tokens", []):
             if heading not in lead_wizard:
                 errors.append(f"{name}: lead wizard heading is missing: {heading}")
+        for key in entry.get("manual_binding_keys", []):
+            if not contains_token(backend, key):
+                errors.append(f"{name}: backend PDF binding key is missing: {key}")
+            if not contains_token(frontend, key):
+                errors.append(f"{name}: frontend PDF binding key is missing: {key}")
+        for token in entry.get("frontend_form_tokens", []):
+            if token not in generation_forms:
+                errors.append(f"{name}: generation form token is missing: {token}")
         for token in entry.get("runtime_tokens", []):
             if not contains_token(backend, token):
                 errors.append(f"{name}: backend PDF builder is missing: {token}")
