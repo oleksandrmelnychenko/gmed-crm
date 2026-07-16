@@ -14737,25 +14737,25 @@ fn agency_privacy_email(agency: &AgencyContractSettings) -> Option<&str> {
 
 fn build_adult_confidentiality_release_pdf(
     party: &DocPartyBlock,
-    agency: &AgencyContractSettings,
+    _agency: &AgencyContractSettings,
     bindings: &DocumentBindingOverrides,
     document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
+    const AGENCY_LABEL: &str = "GMED - Agentur für Patientenbetreuung";
+    const AGENCY_PERSON: &str = "Heorhii Hudiiev";
+
     let (document, regular, bold) = new_admin_pdf()?;
     let mut layout = TreatmentPlanPdfLayout::new_legal(
-        vec![
-            "GMED - Agentur für Patientenbetreuung".to_string(),
-            "Heorhii Hudiiev".to_string(),
-        ],
+        vec![AGENCY_LABEL.to_string(), AGENCY_PERSON.to_string()],
         regular,
         bold,
     );
     layout.legal_header_line = format!("Dokument-Nr.: {document_reference}");
-    let agency_identity = agency_legal_identity(agency);
+    let agency_identity = format!("{AGENCY_LABEL} / {AGENCY_PERSON}");
 
     // Agency letterhead block (fixed for this document, top of page).
     layout.text_block(
-        "GMED - Agentur für Patientenbetreuung",
+        AGENCY_LABEL,
         11.0,
         true,
         0.0,
@@ -14764,7 +14764,7 @@ fn build_adult_confidentiality_release_pdf(
         0.5,
     );
     layout.text_block(
-        "Heorhii Hudiiev",
+        AGENCY_PERSON,
         11.0,
         false,
         0.0,
@@ -20432,7 +20432,10 @@ mod tests {
         assert!(release_text.contains("Anlage 2"));
         assert!(release_text.contains("den von ihm beauftragten Mitarbeitenden"));
         assert!(!release_text.contains("Maria Beispiel, Vertrauenskontakt"));
-        assert!(release_text.contains("Max Verantwortlich"));
+        assert!(!release_text.contains("Max Verantwortlich"));
+        assert!(release_text.contains(
+            "GMED - Agentur für Patientenbetreuung / Heorhii Hudiiev"
+        ));
         assert!(release_text.contains("Seite: 1"));
         assert!(!release_text.contains('?'));
 
