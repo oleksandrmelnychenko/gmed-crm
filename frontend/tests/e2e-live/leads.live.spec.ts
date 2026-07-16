@@ -178,6 +178,10 @@ test.describe("lead live workflows", () => {
     await expect(
       wizard.getByRole("heading", { name: "Kostenvoranschlag" }),
     ).toBeVisible();
+    const orderPositionsTable = wizard.getByRole("table", { name: "Auftragspositionen" });
+    await expect(orderPositionsTable).toBeVisible();
+    await expect(orderPositionsTable.getByRole("columnheader", { name: "Leistung" })).toBeVisible();
+    await expect(orderPositionsTable.getByRole("columnheader", { name: "Gesamt" })).toBeVisible();
     await expect(wizard.getByText("Initial cardiology coordination")).toBeVisible();
 
     await page.screenshot({
@@ -199,6 +203,9 @@ test.describe("lead live workflows", () => {
     await expect(
       wizard.getByRole("heading", { name: "Schweigepflichtsentbindung" }),
     ).toBeVisible();
+    await wizard.getByRole("button", { name: /Vertrag & Angebot/i }).click();
+    await expect(wizard.getByRole("table", { name: "Auftragspositionen" })).toBeVisible();
+    await expect(wizard.getByLabel("Auftragssummen")).toBeVisible();
 
     const mobileBox = await wizard.boundingBox();
     expect(mobileBox).not.toBeNull();

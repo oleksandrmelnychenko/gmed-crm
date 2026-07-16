@@ -1940,6 +1940,10 @@ export function LeadWizard({
   );
   const quote = orderQuotes[0] ?? null;
   const acceptedQuote = orderQuotes.find((item) => item.status === "accepted") ?? null;
+  const agencyServiceById = useMemo(
+    () => new Map(agencyServices.map((service) => [service.id, service])),
+    [agencyServices],
+  );
   const wizardDocuments = useMemo(() => {
     const grouped: Record<WizardDocumentKind, DocumentItem[]> = {
       identity: [],
@@ -2842,7 +2846,7 @@ ${serviceCommentLines.join("\n")}`
   }
 
   function addAgencyService(serviceId: string) {
-    const service = agencyServices.find((item) => item.id === serviceId);
+    const service = agencyServiceById.get(serviceId);
     if (!service) return;
     setLines((current) => {
       if (current.some((line) => line.agencyServiceId === service.id)) return current;
@@ -2885,9 +2889,9 @@ ${serviceCommentLines.join("\n")}`
   }
 
   function serviceDocumentDescription(line: ServiceLine) {
-    const catalogService = agencyServices.find(
-      (service) => service.id === line.agencyServiceId,
-    );
+    const catalogService = line.agencyServiceId
+      ? agencyServiceById.get(line.agencyServiceId)
+      : undefined;
     return catalogService?.service_name.trim() || line.description.trim();
   }
 
@@ -3928,7 +3932,7 @@ ${serviceCommentLines.join("\n")}`
                 />
               ) : null}
               <div className="space-y-3">
-                <span className="text-sm font-medium text-foreground">{tx("Услуги", "Leistungen")}</span>
+                <span className="text-sm font-medium text-foreground">{tx("Позиции заказа", "Auftragspositionen")}</span>
                 <NativeComboboxSelect
                   aria-label={tx("Выбрать услугу из каталога", "Leistung aus dem Katalog auswählen")}
                   name="agency_service"
@@ -3949,35 +3953,122 @@ ${serviceCommentLines.join("\n")}`
                 </NativeComboboxSelect>
                 {lines.length === 0 ? (
                   <p className="text-xs text-muted-foreground">{tx("Услуги не выбраны", "Keine Leistungen ausgewählt")}</p>
-                ) : null}
-                {lines.map((line) => {
-                  const catalogService = agencyServices.find((service) => service.id === line.agencyServiceId);
-                  return (
-                    <div key={line.id} className="grid gap-3 rounded-md border border-border px-3 py-3 sm:grid-cols-[minmax(0,1fr)_90px_110px_80px_auto] sm:items-center">
-                      <div className="min-w-0">
-                        <div className="break-words text-sm font-medium text-foreground">{line.description}</div>
-                        {catalogService?.unit_label ? <div className="mt-0.5 text-xs text-muted-foreground">{catalogService.unit_label}</div> : null}
-                      </div>
-                      <Field label={tx("Количество", "Menge")}>
-                        <Input name={`service_quantity_${line.id}`} autoComplete="off" inputMode="decimal" aria-label={tx("Количество", "Menge")} value={line.quantity} onChange={(event) => updateLine(line.id, { quantity: event.target.value })} />
-                      </Field>
-                      <div className="font-mono text-sm tabular-nums text-foreground sm:text-right">
-                        <div className="font-sans text-[11px] uppercase text-muted-foreground">{tx("Цена за единицу", "Einzelpreis")}</div>
-                        {formatMoneyValue(money(line.price), lang)} {catalogService?.currency || "EUR"}
-                      </div>
-                      <div className="font-mono text-sm tabular-nums text-foreground sm:text-right">
-                        <div className="font-sans text-[11px] uppercase text-muted-foreground">{tx("НДС", "MwSt.")}</div>
-                        {formatMoneyValue(money(line.vat), lang)}%
-                      </div>
-                      <Button type="button" variant="ghost" size="icon-sm" title={tx("Удалить услугу", "Leistung entfernen")} aria-label={tx("Удалить услугу", "Leistung entfernen")} onClick={() => setLines((current) => current.filter((item) => item.id !== line.id))}><X className="size-3.5" /></Button>
+                ) : (
+                  <div className="overflow-hidden rounded-md border border-border">
+                    <div className="overflow-x-auto">
+                      <table
+                        aria-label={tx("Позиции заказа", "Auftragspositionen")}
+                        className="w-full min-w-[760px] border-collapse text-sm"
+                      >
+                      <caption className="sr-only">
+                        {tx("Позиции заказа", "Auftragspositionen")}
+                      </caption>
+                      <thead className="bg-muted/60 text-[11px] uppercase tracking-wide text-muted-foreground">
+                        <tr>
+                          <th scope="col" className="px-3 py-2 text-left font-medium">
+                            {tx("Услуга", "Leistung")}
+                          </th>
+                          <th scope="col" className="w-28 px-3 py-2 text-right font-medium">
+                            {tx("Количество", "Menge")}
+                          </th>
+                          <th scope="col" className="w-36 px-3 py-2 text-right font-medium">
+                            {tx("Цена за единицу", "Einzelpreis")}
+                          </th>
+                          <th scope="col" className="w-24 px-3 py-2 text-right font-medium">
+                            {tx("НДС", "MwSt.")}
+                          </th>
+                          <th scope="col" className="w-36 px-3 py-2 text-right font-medium">
+                            {tx("Сумма", "Gesamt")}
+                          </th>
+                          <th scope="col" className="w-14 px-2 py-2">
+                            <span className="sr-only">{tx("Действия", "Aktionen")}</span>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border bg-card">
+                        {lines.map((line) => {
+                          const catalogService = line.agencyServiceId
+                            ? agencyServiceById.get(line.agencyServiceId)
+                            : undefined;
+                          const currency = catalogService?.currency || "EUR";
+                          const lineTotal = money(line.quantity) * money(line.price);
+                          return (
+                            <tr key={line.id} className="align-middle hover:bg-muted/30">
+                              <th scope="row" className="min-w-60 px-3 py-2.5 text-left font-normal">
+                                <div className="break-words font-medium text-foreground">{line.description}</div>
+                                {catalogService?.unit_label ? (
+                                  <div className="mt-0.5 text-xs text-muted-foreground">{catalogService.unit_label}</div>
+                                ) : null}
+                              </th>
+                              <td className="px-3 py-2">
+                                <Input
+                                  name={`service_quantity_${line.id}`}
+                                  autoComplete="off"
+                                  inputMode="decimal"
+                                  aria-label={`${tx("Количество", "Menge")}: ${line.description}`}
+                                  className="h-8 text-right font-mono tabular-nums"
+                                  value={line.quantity}
+                                  onChange={(event) => updateLine(line.id, { quantity: event.target.value })}
+                                />
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-2 text-right font-mono tabular-nums text-foreground">
+                                {formatMoneyValue(money(line.price), lang)} {currency}
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-2 text-right font-mono tabular-nums text-foreground">
+                                {formatMoneyValue(money(line.vat), lang)}%
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-2 text-right font-mono font-medium tabular-nums text-foreground">
+                                {formatMoneyValue(lineTotal, lang)} {currency}
+                              </td>
+                              <td className="px-2 py-2 text-center">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  title={tx("Удалить услугу", "Leistung entfernen")}
+                                  aria-label={`${tx("Удалить услугу", "Leistung entfernen")}: ${line.description}`}
+                                  onClick={() => setLines((current) => current.filter((item) => item.id !== line.id))}
+                                >
+                                  <X className="size-3.5" />
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      </table>
                     </div>
-                  );
-                })}
-                <div className="flex flex-wrap justify-end gap-x-6 gap-y-2 text-sm text-muted-foreground">
-                  <span>{tx("Нетто", "Netto")}: <span className="font-mono tabular-nums">{formatMoneyValue(estimate.net, lang)} EUR</span></span>
-                  <span>{tx("НДС", "MwSt.")}: <span className="font-mono tabular-nums">{formatMoneyValue(estimate.vat, lang)} EUR</span></span>
-                  <span className="font-semibold text-foreground">{tx("Итого", "Gesamt")}: <span className="font-mono tabular-nums">{formatMoneyValue(estimate.gross, lang)} EUR</span></span>
-                </div>
+                    <dl
+                      aria-label={tx("Итоги заказа", "Auftragssummen")}
+                      className="grid grid-cols-3 divide-x divide-border border-t border-border bg-muted/30"
+                    >
+                      <div className="min-w-0 px-2 py-2.5 text-right sm:px-3">
+                        <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          {tx("Нетто", "Netto")}
+                        </dt>
+                        <dd className="mt-0.5 whitespace-nowrap font-mono text-xs tabular-nums text-foreground sm:text-sm">
+                          {formatMoneyValue(estimate.net, lang)} EUR
+                        </dd>
+                      </div>
+                      <div className="min-w-0 px-2 py-2.5 text-right sm:px-3">
+                        <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          {tx("НДС", "MwSt.")}
+                        </dt>
+                        <dd className="mt-0.5 whitespace-nowrap font-mono text-xs tabular-nums text-foreground sm:text-sm">
+                          {formatMoneyValue(estimate.vat, lang)} EUR
+                        </dd>
+                      </div>
+                      <div className="min-w-0 px-2 py-2.5 text-right sm:px-3">
+                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-foreground">
+                          {tx("Итого", "Gesamt")}
+                        </dt>
+                        <dd className="mt-0.5 whitespace-nowrap font-mono text-xs font-semibold tabular-nums text-foreground sm:text-sm">
+                          {formatMoneyValue(estimate.gross, lang)} EUR
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
+                )}
               </div>
               <div id={ORDER_DOCUMENT_ID} tabIndex={-1} className="space-y-3 border-y border-border py-4 focus:outline-none">
                 <div className="flex flex-wrap items-center justify-between gap-3">
