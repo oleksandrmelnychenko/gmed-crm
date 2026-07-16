@@ -3025,8 +3025,16 @@ ${serviceCommentLines.join("\n")}`
   );
   return (
     <>
-      <Dialog open={open} dirty={autosaveIsDirty} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(88vh,52rem)] sm:w-[min(96vw,84rem)] sm:max-w-[84rem]">
+      <Dialog
+        open={open}
+        modal={!documentPreview}
+        dirty={autosaveIsDirty}
+        onOpenChange={onOpenChange}
+      >
+      <DialogContent
+        showOverlay={!documentPreview}
+        className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(88vh,52rem)] sm:w-[min(96vw,84rem)] sm:max-w-[84rem]"
+      >
         <DialogTitle className="sr-only">{tx("Оформление обращения", "Lead-Aufnahme")}</DialogTitle>
         <header className="flex min-h-16 items-center justify-between gap-4 border-b border-border px-4 py-3 pr-14 sm:px-5 sm:pr-14">
           <div className="min-w-0">
@@ -4451,7 +4459,10 @@ ${serviceCommentLines.join("\n")}`
           if (!nextOpen) replaceDocumentPreview(null);
         }}
       >
-        <DialogContent className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(88vh,52rem)] sm:w-[min(96vw,84rem)] sm:max-w-[84rem]">
+        <DialogContent
+          overlayClassName="supports-backdrop-filter:backdrop-blur-none"
+          className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 duration-0 data-closed:animate-none data-open:animate-none sm:h-[min(88vh,52rem)] sm:w-[min(96vw,84rem)] sm:max-w-[84rem]"
+        >
           <DialogHeader className="border-b border-border px-4 py-3 pr-14 sm:px-5 sm:pr-14">
             <div className="flex min-w-0 items-center justify-between gap-3">
               <div className="min-w-0">

@@ -5247,7 +5247,10 @@ function StaffDocumentsPage({
           }
         }}
       >
-        <DialogContent className="flex h-[86vh] w-[94vw] max-w-none sm:w-[70vw] sm:max-w-[1500px] flex-col overflow-hidden rounded-xl p-0">
+        <DialogContent
+          overlayClassName="supports-backdrop-filter:backdrop-blur-none"
+          className="flex h-[86vh] w-[94vw] max-w-none flex-col overflow-hidden rounded-xl p-0 duration-0 data-closed:animate-none data-open:animate-none sm:w-[70vw] sm:max-w-[1500px]"
+        >
           <DialogHeader className="border-b border-border/70 px-5 py-4">
             <div className="flex min-w-0 items-start justify-between gap-4 pr-10">
               <div className="min-w-0">

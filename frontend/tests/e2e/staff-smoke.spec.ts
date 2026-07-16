@@ -2963,6 +2963,7 @@ test.describe("lead onboarding wizard", () => {
     const preview = page.getByRole("dialog", { name: "medical-report.pdf" });
     await expect(preview).toBeVisible();
     await expect(preview.locator("iframe")).toHaveAttribute("src", /^blob:/);
+    await expect(page.locator('[data-slot="dialog-overlay"]:visible')).toHaveCount(1);
     await preview.getByRole("button", { name: "Schließen" }).click();
 
     const downloadPromise = page.waitForEvent("download");

@@ -219,9 +219,13 @@ function DialogContent({
   onChangeCapture,
   onClickCapture,
   onInputCapture,
+  overlayClassName,
+  showOverlay = true,
   showCloseButton = true,
   ...props
 }: DialogPrimitive.Popup.Props & {
+  overlayClassName?: string
+  showOverlay?: boolean
   showCloseButton?: boolean
 }) {
   const { t } = useLang()
@@ -269,7 +273,7 @@ function DialogContent({
 
   return (
     <DialogPortal>
-      <DialogOverlay />
+      {showOverlay ? <DialogOverlay className={overlayClassName} /> : null}
       <DialogPrimitive.Popup
         ref={contentRef}
         data-slot="dialog-content"
