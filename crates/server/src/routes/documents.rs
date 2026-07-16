@@ -14744,7 +14744,7 @@ fn build_adult_confidentiality_release_pdf(
     let (document, regular, bold) = new_admin_pdf()?;
     let mut layout = TreatmentPlanPdfLayout::new_legal(
         vec![
-            "c/o GMED · GMED - Agentur für Patientenbetreuung".to_string(),
+            "GMED - Agentur für Patientenbetreuung".to_string(),
             "Heorhii Hudiiev".to_string(),
         ],
         regular,
@@ -14754,15 +14754,6 @@ fn build_adult_confidentiality_release_pdf(
     let agency_identity = agency_legal_identity(agency);
 
     // Agency letterhead block (fixed for this document, top of page).
-    layout.text_block(
-        "c/o GMED",
-        11.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        0.5,
-    );
     layout.text_block(
         "GMED - Agentur für Patientenbetreuung",
         11.0,
@@ -20435,7 +20426,7 @@ mod tests {
         assert!(release_text.contains("Schweigepflichtentbindung"));
         assert!(release_text.contains("203 StGB"));
         assert!(release_text.contains("Dokument-Nr.: SE-20260716-UNITTEST0001"));
-        assert!(release_text.contains("c/o GMED"));
+        assert!(!release_text.contains("c/o GMED"));
         assert!(release_text.contains("GMED - Agentur für Patientenbetreuung"));
         assert!(release_text.contains("Heorhii Hudiiev"));
         assert!(release_text.contains("Anlage 2"));
