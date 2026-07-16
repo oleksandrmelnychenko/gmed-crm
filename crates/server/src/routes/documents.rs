@@ -14577,15 +14577,6 @@ fn adult_legal_footer_lines() -> Vec<String> {
 
 fn adult_legal_document_header(layout: &mut TreatmentPlanPdfLayout, annex: &str, title: &str) {
     layout.text_block(
-        ADULT_LEGAL_AGENCY_PERSON,
-        11.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        2.0,
-    );
-    layout.text_block(
         annex,
         11.0,
         true,
@@ -14746,16 +14737,7 @@ fn build_adult_confidentiality_release_pdf(
     layout.legal_header_line = format!("Dokument-Nr.: {document_reference}");
     let agency_identity = adult_legal_agency_identity();
 
-    // Responsible person and annex marker above the document title.
-    layout.text_block(
-        ADULT_LEGAL_AGENCY_PERSON,
-        11.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        2.0,
-    );
+    // Annex marker above the document title.
     layout.text_block(
         "Anlage 2",
         11.0,
@@ -20395,6 +20377,7 @@ mod tests {
         assert!(release_text.contains("GMED - Agentur für Patientenbetreuung"));
         assert!(release_text.contains("Heorhii Hudiiev"));
         assert!(release_text.contains("Anlage 2"));
+        assert!(!release_text.contains("Heorhii Hudiiev Anlage 2"));
         assert_eq!(
             release_text
                 .matches("GMED - Agentur für Patientenbetreuung")
@@ -20433,6 +20416,7 @@ mod tests {
         );
         assert!(!privacy_text.contains("c/o GMED"));
         assert!(privacy_text.contains("GMED - Agentur für Patientenbetreuung / Heorhii Hudiiev"));
+        assert!(!privacy_text.contains("Heorhii Hudiiev Anlage 1"));
         assert!(privacy_text.contains("anna@example.test"));
         assert!(privacy_text.contains("datenschutz@example.test"));
         assert!(privacy_text.contains("TEST-CRM"));
