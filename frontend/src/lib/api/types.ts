@@ -167,6 +167,7 @@ export interface LeadDetail extends Lead {
   trusted_contact_relation: string | null;
   trusted_contact_birth_date: string | null;
   trusted_contact_address: string | null;
+  trusted_contacts: LeadTrustedContact[];
 
   requested_specialties: string[];
   wizard_state: Record<string, unknown> | null;
@@ -191,6 +192,16 @@ export interface LeadDetail extends Lead {
   lifecycle: LeadLifecycle;
 
   attachments: LeadAttachment[];
+}
+
+export interface LeadTrustedContact {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  relation: string | null;
+  birth_date: string | null;
+  address: string | null;
 }
 
 export interface StatusCount {

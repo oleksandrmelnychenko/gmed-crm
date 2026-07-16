@@ -1254,7 +1254,7 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
                 insurance_covers_germany, insurance_provider, insurance_number, insurance_type,
                 trusted_contact_name, trusted_contact_phone, trusted_contact_email,
                 trusted_contact_relation,
-                trusted_contact_birth_date, trusted_contact_address,
+                trusted_contact_birth_date, trusted_contact_address, trusted_contacts,
                 source, flow, services, needs_interpreter, location, preferred_location,
                 visit_timing, selected_program, message, notes,
                 date_of_birth, legal_sex, street_address, city, zip_code,
@@ -1269,7 +1269,12 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
                 'yes', 'Global Shield', 'POL-4242', 'foreign',
                 'Olena Onboarding', '+380 44 555 0101', 'olena@example.test',
                 'Sister', DATE '1985-02-03',
-                'Khreshchatyk 1, Kyiv', 'website_questionnaire', 'medical',
+                'Khreshchatyk 1, Kyiv',
+                '[
+                    {"id":"00000000-0000-0000-0000-000000000101","name":"Olena Onboarding","phone":"+380 44 555 0101","email":"olena@example.test","relation":"Sister","birth_date":"1985-02-03","address":"Khreshchatyk 1, Kyiv"},
+                    {"id":"00000000-0000-0000-0000-000000000102","name":"Petro Onboarding","phone":"+380 44 555 0102","email":"petro@example.test","relation":"Brother","birth_date":"1987-04-05","address":"Volodymyrska 2, Kyiv"}
+                ]'::jsonb,
+                'website_questionnaire', 'medical',
                 ARRAY['medical_treatment', 'interpreter_support']::text[], true,
                 'outside_eu', 'berlin', 'within_4_weeks', 'orthopedics',
                 'Please coordinate an interpreter for every appointment',
@@ -1491,6 +1496,15 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     assert_eq!(
         patient.13["trusted_contact"]["address"],
         "Khreshchatyk 1, Kyiv"
+    );
+    assert_eq!(patient.13["trusted_contacts"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        patient.13["trusted_contacts"][0]["name"],
+        "Olena Onboarding"
+    );
+    assert_eq!(
+        patient.13["trusted_contacts"][1]["name"],
+        "Petro Onboarding"
     );
     assert!(patient.13.get("raw_payload").is_none());
     assert_eq!(patient.14["dsgvo_signed"], true);
@@ -1985,6 +1999,8 @@ async fn wizard_lead_fields_round_trip_through_update() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
     let lead_id = created["id"].as_str().unwrap().to_string();
+    let primary_trusted_contact_id = Uuid::new_v4();
+    let secondary_trusted_contact_id = Uuid::new_v4();
 
     // Edit wizard fields (Steps 1-3 + resume state).
     let (status, _) = json_request(
@@ -2006,12 +2022,26 @@ async fn wizard_lead_fields_round_trip_through_update() {
             "insurance_provider": "Test Versicherung",
             "insurance_number": "POL-123",
             "insurance_type": "private",
-            "trusted_contact_name": "Alex Wizard",
-            "trusted_contact_phone": "+49 30 123456",
-            "trusted_contact_email": "alex.wizard@example.test",
-            "trusted_contact_relation": "Partner",
-            "trusted_contact_birth_date": "1989-02-03",
-            "trusted_contact_address": "Nebenstr. 2, Berlin",
+            "trusted_contacts": [
+                {
+                    "id": primary_trusted_contact_id,
+                    "name": "Alex Wizard",
+                    "phone": "+49 30 123456",
+                    "email": "alex.wizard@example.test",
+                    "relation": "Partner",
+                    "birth_date": "1989-02-03",
+                    "address": "Nebenstr. 2, Berlin"
+                },
+                {
+                    "id": secondary_trusted_contact_id,
+                    "name": "Maria Wizard",
+                    "phone": "+49 30 654321",
+                    "email": "maria.wizard@example.test",
+                    "relation": "Sister",
+                    "birth_date": "1992-04-05",
+                    "address": "Seitenstr. 4, Berlin"
+                }
+            ],
             "requested_specialties": ["orthopedics", "surgery"],
             "wizard_state": { "step": 3, "completed": ["identity", "eligibility"] }
         })),
@@ -2041,6 +2071,18 @@ async fn wizard_lead_fields_round_trip_through_update() {
     assert_eq!(lead["trusted_contact_relation"], "Partner");
     assert_eq!(lead["trusted_contact_birth_date"], "1989-02-03");
     assert_eq!(lead["trusted_contact_address"], "Nebenstr. 2, Berlin");
+    assert_eq!(lead["trusted_contacts"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        lead["trusted_contacts"][0]["id"],
+        primary_trusted_contact_id.to_string()
+    );
+    assert_eq!(lead["trusted_contacts"][0]["name"], "Alex Wizard");
+    assert_eq!(
+        lead["trusted_contacts"][1]["id"],
+        secondary_trusted_contact_id.to_string()
+    );
+    assert_eq!(lead["trusted_contacts"][1]["name"], "Maria Wizard");
+    assert_eq!(lead["trusted_contacts"][1]["birth_date"], "1992-04-05");
     assert_eq!(
         lead["requested_specialties"],
         json!(["orthopedics", "surgery"])
@@ -2054,7 +2096,7 @@ async fn wizard_lead_fields_round_trip_through_update() {
         &pm,
         Some(json!({
             "insurance_covers_germany": "",
-            "trusted_contact_birth_date": ""
+            "trusted_contacts": []
         })),
     )
     .await;
@@ -2064,7 +2106,19 @@ async fn wizard_lead_fields_round_trip_through_update() {
         json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(cleared_lead["insurance_covers_germany"].is_null());
+    assert!(cleared_lead["trusted_contact_name"].is_null());
     assert!(cleared_lead["trusted_contact_birth_date"].is_null());
+    assert_eq!(cleared_lead["trusted_contacts"], json!([]));
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({ "trusted_contacts": [{ "name": "" }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 
     // A non-array requested_specialties is rejected.
     let (status, _) = json_request(

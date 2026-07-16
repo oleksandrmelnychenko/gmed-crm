@@ -11162,8 +11162,43 @@ async fn generate_document(
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned);
 
-    let bindings = body.bindings.clone().unwrap_or_default();
-    let generated_bindings_snapshot = body.bindings.as_ref().and_then(generated_binding_snapshot);
+    let mut bindings = body.bindings.clone().unwrap_or_default();
+    if template.id == "privacy_consents"
+        && bindings
+            .extra_release_recipients
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+    {
+        let stored_contacts = if let Some(lead_uuid) = lead_id {
+            sqlx::query_scalar::<_, Value>("SELECT trusted_contacts FROM leads WHERE id = $1")
+                .bind(lead_uuid)
+                .fetch_optional(&state.db)
+                .await
+        } else if let Some(patient_uuid) = patient_id {
+            sqlx::query_scalar::<_, Value>(
+                "SELECT COALESCE(intake_profile -> 'trusted_contacts', '[]'::jsonb) FROM patients WHERE id = $1",
+            )
+            .bind(patient_uuid)
+            .fetch_optional(&state.db)
+            .await
+        } else {
+            Ok(None)
+        };
+        match stored_contacts {
+            Ok(Some(contacts)) => {
+                bindings.extra_release_recipients = trusted_contact_recipients_binding(&contacts);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(error = %error, ?patient_id, ?lead_id, "load trusted contacts for generated document");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load trusted contacts",
+                );
+            }
+        }
+    }
+    let generated_bindings_snapshot = generated_binding_snapshot(&bindings);
     let manual_text = match normalize_generated_manual_text(body.manual_text.as_deref()) {
         Ok(value) => value,
         Err(resp) => return resp,
@@ -12860,6 +12895,47 @@ fn generated_binding_snapshot(bindings: &DocumentBindingOverrides) -> Option<Val
     serde_json::to_value(bindings)
         .ok()
         .and_then(compact_generated_binding_value)
+}
+
+fn trusted_contact_recipients_binding(contacts: &Value) -> Option<String> {
+    let lines = contacts
+        .as_array()?
+        .iter()
+        .filter_map(|contact| {
+            let contact = contact.as_object()?;
+            let value = |key: &str| {
+                contact
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+            };
+            let name = value("name")?;
+            let mut parts = vec![name.to_string()];
+            if let Some(birth_date) = value("birth_date") {
+                let formatted = NaiveDate::parse_from_str(birth_date, "%Y-%m-%d")
+                    .ok()
+                    .map(|date| fmt_de_date(Some(date)))
+                    .unwrap_or_else(|| birth_date.to_string());
+                parts.push(format!("geb. am {formatted}"));
+            }
+            if let Some(relation) = value("relation") {
+                parts.push(format!("Beziehung: {relation}"));
+            }
+            if let Some(address) = value("address") {
+                parts.push(format!("Adresse: {address}"));
+            }
+            if let Some(email) = value("email") {
+                parts.push(format!("E-Mail: {email}"));
+            }
+            if let Some(phone) = value("phone") {
+                parts.push(format!("Tel.: {phone}"));
+            }
+            Some(parts.join(", "))
+        })
+        .collect::<Vec<_>>();
+
+    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 fn generated_manual_text_paragraphs(value: &str) -> Vec<String> {
@@ -20135,7 +20211,7 @@ mod tests {
         build_adult_privacy_consents_pdf, build_manual_generated_text_pdf,
         build_patient_sticker_pdf, compute_line_item_totals, cost_coverage_money_cell,
         cost_estimate_price_text, generated_binding_snapshot, generated_compliance_document_number,
-        pdf_text_font_handles,
+        pdf_text_font_handles, trusted_contact_recipients_binding,
     };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
     use chrono::{NaiveDate, TimeZone, Utc};
@@ -20365,6 +20441,28 @@ mod tests {
         assert_eq!(totals.0, "400,00 EUR");
         assert_eq!(totals.1, "76,00 EUR");
         assert_eq!(totals.2, "476,00 EUR");
+    }
+
+    #[test]
+    fn trusted_contacts_are_bound_as_separate_document_lines() {
+        let binding = trusted_contact_recipients_binding(&json!([
+            {
+                "name": "Alex Beispiel",
+                "birth_date": "1989-02-03",
+                "email": "alex@example.test",
+                "phone": "+49 30 123"
+            },
+            {
+                "name": "Maria Beispiel",
+                "relation": "Schwester",
+                "address": "Hauptstr. 2, Berlin"
+            }
+        ]))
+        .unwrap();
+
+        assert_eq!(binding.lines().count(), 2);
+        assert!(binding.contains("Alex Beispiel, geb. am 03.02.1989"));
+        assert!(binding.contains("Maria Beispiel, Beziehung: Schwester"));
     }
 
     #[test]

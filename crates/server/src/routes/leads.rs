@@ -10,6 +10,7 @@ use chrono::NaiveDate;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::Row;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::audit;
@@ -148,6 +149,17 @@ struct FailedLeadResolutionRequest {
 }
 
 #[derive(Deserialize)]
+struct TrustedContactRequest {
+    id: Option<Uuid>,
+    name: String,
+    email: Option<String>,
+    phone: Option<String>,
+    relation: Option<String>,
+    birth_date: Option<String>,
+    address: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct UpdateLeadRequest {
     email: Option<String>,
     phone: Option<String>,
@@ -186,8 +198,58 @@ struct UpdateLeadRequest {
     trusted_contact_relation: Option<String>,
     trusted_contact_birth_date: Option<String>,
     trusted_contact_address: Option<String>,
+    trusted_contacts: Option<Vec<TrustedContactRequest>>,
     requested_specialties: Option<serde_json::Value>,
     wizard_state: Option<serde_json::Value>,
+}
+
+fn normalized_contact_text(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn normalize_trusted_contacts(contacts: &[TrustedContactRequest]) -> Result<Value, &'static str> {
+    if contacts.len() > 50 {
+        return Err("Too many trusted contacts");
+    }
+
+    let mut ids = HashSet::with_capacity(contacts.len());
+    let mut normalized = Vec::with_capacity(contacts.len());
+    for contact in contacts {
+        let name = contact.name.trim();
+        if name.is_empty() {
+            return Err("Trusted contact name cannot be empty");
+        }
+
+        let id = contact.id.unwrap_or_else(Uuid::new_v4);
+        if !ids.insert(id) {
+            return Err("Trusted contact ids must be unique");
+        }
+
+        let birth_date = match normalized_contact_text(contact.birth_date.as_deref()) {
+            Some(value) => Some(
+                NaiveDate::parse_from_str(&value, "%Y-%m-%d")
+                    .map_err(|_| "Invalid trusted contact birth_date (YYYY-MM-DD)")?
+                    .format("%Y-%m-%d")
+                    .to_string(),
+            ),
+            None => None,
+        };
+
+        normalized.push(json!({
+            "id": id,
+            "name": name,
+            "email": normalized_contact_text(contact.email.as_deref()),
+            "phone": normalized_contact_text(contact.phone.as_deref()),
+            "relation": normalized_contact_text(contact.relation.as_deref()),
+            "birth_date": birth_date,
+            "address": normalized_contact_text(contact.address.as_deref()),
+        }));
+    }
+
+    Ok(Value::Array(normalized))
 }
 
 #[derive(Deserialize)]
@@ -1190,7 +1252,7 @@ async fn get_lead(
                   insurance_provider, insurance_number, insurance_type,
                   trusted_contact_name, trusted_contact_phone, trusted_contact_email,
                   trusted_contact_relation,
-                  trusted_contact_birth_date, trusted_contact_address,
+                  trusted_contact_birth_date, trusted_contact_address, trusted_contacts,
                   preferred_location, visit_timing, message,
                   consent_automated_contact, consent_healthcare,
                   consent_opt_out, consent_privacy_practices,
@@ -1399,6 +1461,38 @@ async fn get_lead(
         "trusted_contact_address".into(),
         s_opt(&row, "trusted_contact_address"),
     );
+    let stored_trusted_contacts = row
+        .try_get::<Value, _>("trusted_contacts")
+        .unwrap_or_else(|_| json!([]));
+    let trusted_contacts = if stored_trusted_contacts
+        .as_array()
+        .is_some_and(|contacts| !contacts.is_empty())
+    {
+        stored_trusted_contacts
+    } else {
+        let legacy_name = row
+            .try_get::<Option<String>, _>("trusted_contact_name")
+            .ok()
+            .flatten()
+            .and_then(|value| normalized_contact_text(Some(&value)));
+        match legacy_name {
+            Some(name) => json!([{
+                "id": lead_id,
+                "name": name,
+                "email": row.try_get::<Option<String>, _>("trusted_contact_email").ok().flatten(),
+                "phone": row.try_get::<Option<String>, _>("trusted_contact_phone").ok().flatten(),
+                "relation": row.try_get::<Option<String>, _>("trusted_contact_relation").ok().flatten(),
+                "birth_date": row
+                    .try_get::<Option<NaiveDate>, _>("trusted_contact_birth_date")
+                    .ok()
+                    .flatten()
+                    .map(|date| date.format("%Y-%m-%d").to_string()),
+                "address": row.try_get::<Option<String>, _>("trusted_contact_address").ok().flatten(),
+            }]),
+            None => json!([]),
+        }
+    };
+    obj.insert("trusted_contacts".into(), trusted_contacts);
     obj.insert(
         "preferred_location".into(),
         s_opt(&row, "preferred_location"),
@@ -1617,6 +1711,13 @@ async fn update_lead(
         }
         _ => None,
     };
+    let trusted_contacts = match body.trusted_contacts.as_deref() {
+        Some(contacts) => match normalize_trusted_contacts(contacts) {
+            Ok(value) => Some(value),
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        },
+        None => None,
+    };
 
     let insurance_type = body
         .insurance_type
@@ -1731,6 +1832,7 @@ async fn update_lead(
         && body.trusted_contact_relation.is_none()
         && body.trusted_contact_birth_date.is_none()
         && body.trusted_contact_address.is_none()
+        && body.trusted_contacts.is_none()
         && body.requested_specialties.is_none()
         && body.wizard_state.is_none()
     {
@@ -1768,20 +1870,37 @@ async fn update_lead(
                insurance_provider = COALESCE($28, insurance_provider),
                insurance_number = COALESCE($29, insurance_number),
                insurance_type = COALESCE($30, insurance_type),
-               trusted_contact_name = COALESCE($31, trusted_contact_name),
-               trusted_contact_phone = COALESCE($32, trusted_contact_phone),
-               trusted_contact_relation = COALESCE($33, trusted_contact_relation),
+               trusted_contact_name = CASE
+                   WHEN $41::jsonb IS NOT NULL THEN NULLIF($41::jsonb #>> '{0,name}', '')
+                   ELSE COALESCE($31, trusted_contact_name)
+               END,
+               trusted_contact_phone = CASE
+                   WHEN $41::jsonb IS NOT NULL THEN NULLIF($41::jsonb #>> '{0,phone}', '')
+                   ELSE COALESCE($32, trusted_contact_phone)
+               END,
+               trusted_contact_relation = CASE
+                   WHEN $41::jsonb IS NOT NULL THEN NULLIF($41::jsonb #>> '{0,relation}', '')
+                   ELSE COALESCE($33, trusted_contact_relation)
+               END,
                trusted_contact_birth_date = CASE
+                   WHEN $41::jsonb IS NOT NULL THEN NULLIF($41::jsonb #>> '{0,birth_date}', '')::date
                    WHEN $34 THEN $35
                    ELSE trusted_contact_birth_date
                END,
-               trusted_contact_address = COALESCE($36, trusted_contact_address),
-               trusted_contact_email = COALESCE($37, trusted_contact_email),
+               trusted_contact_address = CASE
+                   WHEN $41::jsonb IS NOT NULL THEN NULLIF($41::jsonb #>> '{0,address}', '')
+                   ELSE COALESCE($36, trusted_contact_address)
+               END,
+               trusted_contact_email = CASE
+                   WHEN $41::jsonb IS NOT NULL THEN NULLIF($41::jsonb #>> '{0,email}', '')
+                   ELSE COALESCE($37, trusted_contact_email)
+               END,
                has_insurance = COALESCE($38, has_insurance),
                insurance_covers_germany = CASE
                    WHEN $39 THEN $40
                    ELSE insurance_covers_germany
-               END
+               END,
+               trusted_contacts = COALESCE($41::jsonb, trusted_contacts)
            WHERE id = $1"#,
     )
     .bind(lead_id)
@@ -1828,6 +1947,7 @@ async fn update_lead(
     .bind(body.has_insurance)
     .bind(insurance_covers_germany_supplied)
     .bind(insurance_covers_germany.as_deref())
+    .bind(trusted_contacts.as_ref().map(Value::to_string))
     .execute(&state.db)
     .await
     {
@@ -1848,6 +1968,7 @@ async fn update_lead(
                     "date_of_birth": body.date_of_birth,
                     "legal_sex": body.legal_sex,
                     "contact_updated": body.email.is_some() || body.phone.is_some(),
+                    "trusted_contacts_count": body.trusted_contacts.as_ref().map(Vec::len),
                     "consent_healthcare": body.consent_healthcare,
                     "consent_privacy_practices": body.consent_privacy_practices,
                 }),
@@ -1862,6 +1983,7 @@ async fn update_lead(
                     "date_of_birth": body.date_of_birth,
                     "legal_sex": body.legal_sex,
                     "contact_updated": body.email.is_some() || body.phone.is_some(),
+                    "trusted_contacts_count": body.trusted_contacts.as_ref().map(Vec::len),
                     "consent_healthcare": body.consent_healthcare,
                     "consent_privacy_practices": body.consent_privacy_practices,
                 }),
@@ -2990,7 +3112,7 @@ async fn convert_lead(
                   insurance_provider, insurance_number, insurance_type,
                   trusted_contact_name, trusted_contact_phone, trusted_contact_email,
                   trusted_contact_relation,
-                  trusted_contact_birth_date, trusted_contact_address,
+                  trusted_contact_birth_date, trusted_contact_address, trusted_contacts,
                   preferred_location, visit_timing, message,
                   date_of_birth, legal_sex, qualification_status, converted_patient_id,
                   failed_outcome_status, street_address, city, zip_code, notes,
@@ -3159,6 +3281,27 @@ async fn convert_lead(
         .flatten()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+    let stored_trusted_contacts = lead
+        .try_get::<Value, _>("trusted_contacts")
+        .unwrap_or_else(|_| json!([]));
+    let trusted_contacts = if stored_trusted_contacts
+        .as_array()
+        .is_some_and(|contacts| !contacts.is_empty())
+    {
+        stored_trusted_contacts
+    } else if let Some(name) = trusted_contact_name.as_ref() {
+        json!([{
+            "id": lead_id,
+            "name": name,
+            "phone": trusted_contact_phone,
+            "email": trusted_contact_email,
+            "relation": trusted_contact_relation,
+            "birth_date": trusted_contact_birth_date.map(|value| value.to_string()),
+            "address": trusted_contact_address,
+        }])
+    } else {
+        json!([])
+    };
     let street_address: Option<String> = lead.try_get("street_address").ok().flatten();
     let city: Option<String> = lead.try_get("city").ok().flatten();
     let zip_code: Option<String> = lead.try_get("zip_code").ok().flatten();
@@ -3198,7 +3341,8 @@ async fn convert_lead(
             "relation": trusted_contact_relation.clone(),
             "birth_date": trusted_contact_birth_date.map(|value| value.to_string()),
             "address": trusted_contact_address.clone(),
-        }
+        },
+        "trusted_contacts": trusted_contacts,
     });
     let contacts = lead_patient_contacts(
         email.as_deref(),
@@ -4317,6 +4461,7 @@ async fn anonymize_lead_pii(
                trusted_contact_relation = NULL,
                trusted_contact_birth_date = NULL,
                trusted_contact_address = NULL,
+               trusted_contacts = '[]'::jsonb,
                preferred_location = NULL,
                visit_timing = NULL,
                message = NULL,

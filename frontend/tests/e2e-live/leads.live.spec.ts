@@ -117,6 +117,35 @@ test.describe("lead live workflows", () => {
       scenario.credentials.pm.email,
       scenario.credentials.password,
     );
+    const trustedContactsResponse = await request.post(
+      `${api.backendUrl}/api/v1/leads/${scenario.leads.ready.id}/update`,
+      {
+        headers: api.headers,
+        data: {
+          trusted_contacts: [
+            {
+              id: "00000000-0000-0000-0000-000000000201",
+              name: "Alex Beispiel",
+              email: "alex@example.test",
+              phone: "+49 30 200001",
+              relation: "Partner",
+              birth_date: "1989-02-03",
+              address: "Hauptstr. 2, Berlin",
+            },
+            {
+              id: "00000000-0000-0000-0000-000000000202",
+              name: "Maria Beispiel",
+              email: "maria@example.test",
+              phone: "+49 30 200002",
+              relation: "Schwester",
+              birth_date: "1992-04-05",
+              address: "Nebenstr. 4, Berlin",
+            },
+          ],
+        },
+      },
+    );
+    expect(trustedContactsResponse.ok()).toBe(true);
     const documentsResponse = await request.get(
       `${api.backendUrl}/api/v1/documents?lead_id=${scenario.leads.ready.id}`,
       { headers: api.headers },
@@ -148,6 +177,27 @@ test.describe("lead live workflows", () => {
     await expect(
       wizard.getByText("Vertrauenskontakt / zusätzlicher Empfänger", { exact: true }),
     ).toBeVisible();
+    const trustedContacts = wizard.getByRole("list", { name: "Vertrauenskontakte" });
+    await expect(trustedContacts.getByText("Alex Beispiel", { exact: true })).toBeVisible();
+    await expect(trustedContacts.getByText("Maria Beispiel", { exact: true })).toBeVisible();
+
+    await wizard.getByRole("button", { name: "Kontakt hinzufügen" }).click();
+    const contactSheet = page.getByRole("dialog", { name: "Vertrauenskontakt hinzufügen" });
+    await expect(contactSheet).toBeVisible();
+    await contactSheet.getByLabel("Vor- und Nachname").fill("Petra Beispiel");
+    await contactSheet.getByLabel("E-Mail").fill("petra@example.test");
+    await contactSheet.getByLabel("Telefon").fill("+49 30 200003");
+    const contactsSaved = page.waitForResponse(async (response) => {
+      if (
+        response.request().method() !== "POST"
+        || !response.url().includes(`/api/v1/leads/${scenario.leads.ready.id}/update`)
+      ) return false;
+      const payload = response.request().postDataJSON() as { trusted_contacts?: unknown[] };
+      return payload.trusted_contacts?.length === 3;
+    });
+    await contactSheet.getByRole("button", { name: "Hinzufügen" }).click();
+    expect((await contactsSaved).ok()).toBe(true);
+    await expect(trustedContacts.getByText("Petra Beispiel", { exact: true })).toBeVisible();
     await expect(
       wizard.getByRole("heading", { name: "Einverständniserklärung zur Datenübermittlung" }),
     ).toBeVisible();

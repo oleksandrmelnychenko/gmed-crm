@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type FormEvent,
   type ReactNode,
 } from "react";
 import {
@@ -17,6 +18,7 @@ import {
   FileCheck2,
   FileText,
   LoaderCircle,
+  Pencil,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -39,6 +41,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { selectClass, StatusBadge, textareaClass } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import type { LeadDetail } from "@/lib/api/types";
@@ -138,6 +141,16 @@ type LeadWizardProps = {
   onOrderCreated?: (orderId: string) => void;
 };
 
+type TrustedContactDraft = {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  relation: string;
+  birthDate: string;
+  address: string;
+};
+
 type Draft = {
   firstName: string;
   middleName: string;
@@ -159,12 +172,7 @@ type Draft = {
   insuranceType: string;
   insuranceProvider: string;
   insuranceNumber: string;
-  trustedContactName: string;
-  trustedContactPhone: string;
-  trustedContactEmail: string;
-  trustedContactRelation: string;
-  trustedContactBirthDate: string;
-  trustedContactAddress: string;
+  trustedContacts: TrustedContactDraft[];
   concern: string;
   anamnese: string;
   narrative: ClinicalNarrative | null;
@@ -362,6 +370,54 @@ function questionnaireText(lead: LeadDetail, ...keys: string[]) {
   return "";
 }
 
+function emptyTrustedContact(): TrustedContactDraft {
+  return {
+    id: crypto.randomUUID(),
+    name: "",
+    phone: "",
+    email: "",
+    relation: "",
+    birthDate: "",
+    address: "",
+  };
+}
+
+function trustedContactsFromLead(lead: LeadDetail): TrustedContactDraft[] {
+  const storedContacts = Array.isArray(lead.trusted_contacts)
+    ? lead.trusted_contacts.flatMap((contact) => {
+        const name = contact.name?.trim();
+        if (!name) return [];
+        return [{
+          id: contact.id || crypto.randomUUID(),
+          name,
+          phone: contact.phone ?? "",
+          email: contact.email ?? "",
+          relation: contact.relation ?? "",
+          birthDate: contact.birth_date ?? "",
+          address: contact.address ?? "",
+        }];
+      })
+    : [];
+  if (storedContacts.length > 0) return storedContacts;
+
+  const legacyName = lead.trusted_contact_name
+    ?? questionnaireText(lead, "emergencyContactName", "trustedContactName");
+  if (!legacyName.trim()) return [];
+  return [{
+    id: crypto.randomUUID(),
+    name: legacyName.trim(),
+    phone: lead.trusted_contact_phone
+      ?? questionnaireText(lead, "emergencyContactPhone", "trustedContactPhone"),
+    email: lead.trusted_contact_email
+      ?? questionnaireText(lead, "emergencyContactEmail", "trustedContactEmail"),
+    relation: lead.trusted_contact_relation
+      ?? questionnaireText(lead, "emergencyContactRelation", "trustedContactRelation"),
+    birthDate: lead.trusted_contact_birth_date ?? "",
+    address: lead.trusted_contact_address
+      ?? questionnaireText(lead, "emergencyContactAddress", "trustedContactAddress"),
+  }];
+}
+
 function storedCommercialDraftFromLead(lead: LeadDetail): StoredCommercialDraft | null {
   const stored = asRecord(lead.wizard_state?.["commercial_draft"]);
   if (!stored) return null;
@@ -413,12 +469,15 @@ function autosavePayload(
     insurance_type: draft.insuranceType || undefined,
     insurance_provider: draft.insuranceProvider.trim(),
     insurance_number: draft.insuranceNumber.trim(),
-    trusted_contact_name: draft.trustedContactName.trim(),
-    trusted_contact_phone: draft.trustedContactPhone.trim(),
-    trusted_contact_email: draft.trustedContactEmail.trim(),
-    trusted_contact_relation: draft.trustedContactRelation.trim(),
-    trusted_contact_birth_date: draft.trustedContactBirthDate || undefined,
-    trusted_contact_address: draft.trustedContactAddress.trim(),
+    trusted_contacts: draft.trustedContacts.map((contact) => ({
+      id: contact.id,
+      name: contact.name.trim(),
+      phone: contact.phone.trim() || null,
+      email: contact.email.trim() || null,
+      relation: contact.relation.trim() || null,
+      birth_date: contact.birthDate || null,
+      address: contact.address.trim() || null,
+    })),
     street_address: draft.street.trim(),
     city: draft.city.trim(),
     state: draft.state.trim(),
@@ -732,12 +791,7 @@ function draftFromLead(lead: LeadDetail): Draft {
     insuranceType: lead.insurance_type ?? "",
     insuranceProvider: lead.insurance_provider ?? "",
     insuranceNumber: lead.insurance_number ?? "",
-    trustedContactName: lead.trusted_contact_name ?? questionnaireText(lead, "emergencyContactName", "trustedContactName"),
-    trustedContactPhone: lead.trusted_contact_phone ?? questionnaireText(lead, "emergencyContactPhone", "trustedContactPhone"),
-    trustedContactEmail: lead.trusted_contact_email ?? questionnaireText(lead, "emergencyContactEmail", "trustedContactEmail"),
-    trustedContactRelation: lead.trusted_contact_relation ?? questionnaireText(lead, "emergencyContactRelation", "trustedContactRelation"),
-    trustedContactBirthDate: lead.trusted_contact_birth_date ?? "",
-    trustedContactAddress: lead.trusted_contact_address ?? questionnaireText(lead, "emergencyContactAddress", "trustedContactAddress"),
+    trustedContacts: trustedContactsFromLead(lead),
     concern: lead.primary_concern_text ?? "",
     anamnese: clinical.narrative?.anamnese_aktuelle ?? lead.additional_concerns ?? "",
     narrative: clinical.narrative,
@@ -783,12 +837,7 @@ function blankDraft(): Draft {
     insuranceType: "",
     insuranceProvider: "",
     insuranceNumber: "",
-    trustedContactName: "",
-    trustedContactPhone: "",
-    trustedContactEmail: "",
-    trustedContactRelation: "",
-    trustedContactBirthDate: "",
-    trustedContactAddress: "",
+    trustedContacts: [],
     concern: "",
     anamnese: "",
     narrative: null,
@@ -1473,6 +1522,8 @@ export function LeadWizard({
   const [deleteDocument, setDeleteDocument] = useState<DocumentItem | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
   const [deleteError, setDeleteError] = useState("");
+  const [trustedContactEditor, setTrustedContactEditor] = useState<TrustedContactDraft | null>(null);
+  const [trustedContactEditorError, setTrustedContactEditorError] = useState("");
   const [documentPreview, setDocumentPreview] = useState<WizardDocumentPreview | null>(null);
   const [touchedMasterFields, setTouchedMasterFields] = useState<Set<MasterFieldKey>>(
     () => new Set(),
@@ -1905,6 +1956,8 @@ export function LeadWizard({
     setDeleteDocument(null);
     setDeleteReason("");
     setDeleteError("");
+    setTrustedContactEditor(null);
+    setTrustedContactEditorError("");
     replaceDocumentPreview(null);
     setTouchedMasterFields(new Set());
     setMasterValidationAttempted(false);
@@ -2224,6 +2277,72 @@ export function LeadWizard({
     setDraft((current) => current ? { ...current, [key]: value } : current);
   };
 
+  const openNewTrustedContact = () => {
+    setTrustedContactEditorError("");
+    setTrustedContactEditor(emptyTrustedContact());
+  };
+
+  const openTrustedContact = (contact: TrustedContactDraft) => {
+    setTrustedContactEditorError("");
+    setTrustedContactEditor({ ...contact });
+  };
+
+  const closeTrustedContactEditor = () => {
+    setTrustedContactEditor(null);
+    setTrustedContactEditorError("");
+  };
+
+  const patchTrustedContactEditor = <K extends keyof TrustedContactDraft>(
+    key: K,
+    value: TrustedContactDraft[K],
+  ) => {
+    if (key === "name" && trustedContactEditorError) setTrustedContactEditorError("");
+    setTrustedContactEditor((current) => current ? { ...current, [key]: value } : current);
+  };
+
+  const saveTrustedContact = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!trustedContactEditor) return;
+    const name = trustedContactEditor.name.trim();
+    if (!name) {
+      setTrustedContactEditorError(tx("Укажите имя контактного лица", "Name der Kontaktperson angeben"));
+      return;
+    }
+
+    const normalizedContact: TrustedContactDraft = {
+      ...trustedContactEditor,
+      name,
+      phone: trustedContactEditor.phone.trim(),
+      email: trustedContactEditor.email.trim(),
+      relation: trustedContactEditor.relation.trim(),
+      address: trustedContactEditor.address.trim(),
+    };
+    setError("");
+    clearServerValidation();
+    setDraft((current) => {
+      if (!current) return current;
+      const exists = current.trustedContacts.some((contact) => contact.id === normalizedContact.id);
+      return {
+        ...current,
+        trustedContacts: exists
+          ? current.trustedContacts.map((contact) => (
+              contact.id === normalizedContact.id ? normalizedContact : contact
+            ))
+          : [...current.trustedContacts, normalizedContact],
+      };
+    });
+    closeTrustedContactEditor();
+  };
+
+  const removeTrustedContact = (contactId: string) => {
+    setError("");
+    clearServerValidation();
+    setDraft((current) => current ? {
+      ...current,
+      trustedContacts: current.trustedContacts.filter((contact) => contact.id !== contactId),
+    } : current);
+  };
+
   const toggleServiceNeed = (value: string, checked: boolean) => {
     setError("");
     clearServerValidation();
@@ -2469,16 +2588,16 @@ export function LeadWizard({
     }
   }
 
-  function trustedContactRecipient() {
-    if (!draft?.trustedContactName.trim()) return "";
-    return [
-      draft.trustedContactName.trim(),
-      draft.trustedContactBirthDate
-        ? `${tx("дата рождения", "geb. am")} ${germanDocumentDate(draft.trustedContactBirthDate)}`
-        : "",
-      draft.trustedContactEmail.trim(),
-      draft.trustedContactPhone.trim(),
-    ].filter(Boolean).join(", ");
+  function trustedContactRecipients() {
+    if (!draft) return "";
+    return draft.trustedContacts.map((contact) => [
+      contact.name.trim(),
+      contact.birthDate ? `geb. am ${germanDocumentDate(contact.birthDate)}` : "",
+      contact.relation.trim() ? `Beziehung: ${contact.relation.trim()}` : "",
+      contact.address.trim() ? `Adresse: ${contact.address.trim()}` : "",
+      contact.email.trim() ? `E-Mail: ${contact.email.trim()}` : "",
+      contact.phone.trim() ? `Tel.: ${contact.phone.trim()}` : "",
+    ].filter(Boolean).join(", ")).filter(Boolean).join("\n");
   }
 
   async function generateLeadComplianceDocument(
@@ -2500,7 +2619,7 @@ export function LeadWizard({
         status: "active",
         bindings: templateId === "privacy_consents"
           ? {
-              extra_release_recipients: trustedContactRecipient(),
+              extra_release_recipients: trustedContactRecipients(),
               consent_privacy: draft.privacyConsent,
               consent_healthcare: draft.healthcareConsent,
               consent_provider_release: draft.healthcareConsent,
@@ -2900,6 +3019,10 @@ ${serviceCommentLines.join("\n")}`
   const autosaveIsDirty = autosaveStatus === "dirty"
     || autosaveStatus === "saving"
     || autosaveStatus === "error";
+  const editingTrustedContact = Boolean(
+    trustedContactEditor
+    && draft?.trustedContacts.some((contact) => contact.id === trustedContactEditor.id),
+  );
   return (
     <>
       <Dialog open={open} dirty={autosaveIsDirty} onOpenChange={onOpenChange}>
@@ -3658,36 +3781,78 @@ ${serviceCommentLines.join("\n")}`
                   <ToggleRow id={PRIVACY_CONSENT_ID} checked={draft.privacyConsent} disabled={isBusy} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} />
                   <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={draft.healthcareConsent} disabled={isBusy} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} />
                 </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="md:col-span-2">
-                    <span className="text-xs font-semibold uppercase text-muted-foreground">
-                      {tx("Доверенное лицо / дополнительный получатель", "Vertrauenskontakt / zusätzlicher Empfänger")}
-                    </span>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {tx(
-                        "Имя, дата рождения, e-mail и телефон будут подставлены в согласие на передачу данных.",
-                        "Name, Geburtsdatum, E-Mail und Telefon werden in die Datenübermittlungserklärung übernommen.",
-                      )}
-                    </p>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-semibold uppercase text-muted-foreground">
+                          {tx("Доверенное лицо / дополнительный получатель", "Vertrauenskontakt / zusätzlicher Empfänger")}
+                        </span>
+                        <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground">
+                          {draft.trustedContacts.length}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {tx(
+                          "Все контакты будут отдельными строками подставлены в согласие на передачу данных.",
+                          "Alle Kontakte werden als separate Einträge in die Datenübermittlungserklärung übernommen.",
+                        )}
+                      </p>
+                    </div>
+                    <Button type="button" variant="outline" size="sm" onClick={openNewTrustedContact}>
+                      <Plus aria-hidden="true" className="size-3.5" />
+                      {tx("Добавить контакт", "Kontakt hinzufügen")}
+                    </Button>
                   </div>
-                  <Field label={tx("Имя и фамилия", "Vor- und Nachname")}>
-                    <Input value={draft.trustedContactName} onChange={(event) => patch("trustedContactName", event.target.value)} />
-                  </Field>
-                  <Field label="E-Mail">
-                    <Input type="email" value={draft.trustedContactEmail} onChange={(event) => patch("trustedContactEmail", event.target.value)} />
-                  </Field>
-                  <Field label={tx("Телефон", "Telefon")}>
-                    <Input type="tel" value={draft.trustedContactPhone} onChange={(event) => patch("trustedContactPhone", event.target.value)} />
-                  </Field>
-                  <Field label={tx("Кем приходится клиенту", "Beziehung zur Person")}>
-                    <Input value={draft.trustedContactRelation} onChange={(event) => patch("trustedContactRelation", event.target.value)} />
-                  </Field>
-                  <Field label={tx("Дата рождения", "Geburtsdatum")}>
-                    <Input type="date" value={draft.trustedContactBirthDate} onChange={(event) => patch("trustedContactBirthDate", event.target.value)} />
-                  </Field>
-                  <Field label={tx("Адрес", "Adresse")}>
-                    <Input value={draft.trustedContactAddress} onChange={(event) => patch("trustedContactAddress", event.target.value)} />
-                  </Field>
+                  {draft.trustedContacts.length === 0 ? (
+                    <div className="rounded-md border border-dashed border-border px-4 py-5 text-center text-xs text-muted-foreground">
+                      {tx("Доверенные контакты пока не добавлены", "Noch keine Vertrauenskontakte hinzugefügt")}
+                    </div>
+                  ) : (
+                    <ul aria-label={tx("Доверенные контакты", "Vertrauenskontakte")} className="divide-y divide-border rounded-md border border-border">
+                      {draft.trustedContacts.map((contact) => (
+                        <li key={contact.id} className="flex items-start gap-3 px-3 py-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                              <span className="break-words text-sm font-medium text-foreground">{contact.name}</span>
+                              {contact.relation ? (
+                                <span className="text-xs text-muted-foreground">{contact.relation}</span>
+                              ) : null}
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                              {contact.birthDate ? <span>{germanDocumentDate(contact.birthDate)}</span> : null}
+                              {contact.email ? <span className="break-all">{contact.email}</span> : null}
+                              {contact.phone ? <span>{contact.phone}</span> : null}
+                              {contact.address ? <span className="break-words">{contact.address}</span> : null}
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              title={tx("Редактировать контакт", "Kontakt bearbeiten")}
+                              aria-label={`${tx("Редактировать контакт", "Kontakt bearbeiten")}: ${contact.name}`}
+                              onClick={() => openTrustedContact(contact)}
+                            >
+                              <Pencil aria-hidden="true" className="size-3.5" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="text-destructive hover:text-destructive"
+                              title={tx("Удалить контакт", "Kontakt entfernen")}
+                              aria-label={`${tx("Удалить контакт", "Kontakt entfernen")}: ${contact.name}`}
+                              onClick={() => removeTrustedContact(contact.id)}
+                            >
+                              <Trash2 aria-hidden="true" className="size-3.5" />
+                            </Button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
                 <WizardDocumentRows
                   documents={wizardDocuments.privacy_consents}
@@ -4189,6 +4354,94 @@ ${serviceCommentLines.join("\n")}`
 
       </DialogContent>
       </Dialog>
+      <Sheet
+        open={Boolean(trustedContactEditor)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) closeTrustedContactEditor();
+        }}
+      >
+        <SheetContent
+          side="right"
+          className="w-full max-w-none gap-0 border-l border-border p-0 sm:max-w-lg"
+        >
+          {trustedContactEditor ? (
+            <form className="flex min-h-0 flex-1 flex-col" onSubmit={saveTrustedContact}>
+              <SheetHeader className="shrink-0 border-b border-border px-5 py-4 pr-14">
+                <SheetTitle>
+                  {editingTrustedContact
+                    ? tx("Редактировать доверенный контакт", "Vertrauenskontakt bearbeiten")
+                    : tx("Добавить доверенный контакт", "Vertrauenskontakt hinzufügen")}
+                </SheetTitle>
+              </SheetHeader>
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
+                <p className="text-xs leading-5 text-muted-foreground">
+                  {tx(
+                    "Контакт будет сохранён в лиде и отдельной строкой добавлен в согласие на передачу данных.",
+                    "Der Kontakt wird im Lead gespeichert und als eigener Eintrag in die Datenübermittlungserklärung übernommen.",
+                  )}
+                </p>
+                <Field
+                  required
+                  label={tx("Имя и фамилия", "Vor- und Nachname")}
+                  error={trustedContactEditorError || undefined}
+                  errorId="trusted-contact-name-error"
+                >
+                  <Input
+                    autoFocus
+                    required
+                    value={trustedContactEditor.name}
+                    aria-invalid={Boolean(trustedContactEditorError)}
+                    aria-describedby={trustedContactEditorError ? "trusted-contact-name-error" : undefined}
+                    onChange={(event) => patchTrustedContactEditor("name", event.target.value)}
+                  />
+                </Field>
+                <Field label="E-Mail">
+                  <Input
+                    type="email"
+                    value={trustedContactEditor.email}
+                    onChange={(event) => patchTrustedContactEditor("email", event.target.value)}
+                  />
+                </Field>
+                <Field label={tx("Телефон", "Telefon")}>
+                  <Input
+                    type="tel"
+                    value={trustedContactEditor.phone}
+                    onChange={(event) => patchTrustedContactEditor("phone", event.target.value)}
+                  />
+                </Field>
+                <Field label={tx("Кем приходится клиенту", "Beziehung zur Person")}>
+                  <Input
+                    value={trustedContactEditor.relation}
+                    onChange={(event) => patchTrustedContactEditor("relation", event.target.value)}
+                  />
+                </Field>
+                <Field label={tx("Дата рождения", "Geburtsdatum")}>
+                  <Input
+                    type="date"
+                    max={new Date().toISOString().slice(0, 10)}
+                    value={trustedContactEditor.birthDate}
+                    onChange={(event) => patchTrustedContactEditor("birthDate", event.target.value)}
+                  />
+                </Field>
+                <Field label={tx("Адрес", "Adresse")}>
+                  <Input
+                    value={trustedContactEditor.address}
+                    onChange={(event) => patchTrustedContactEditor("address", event.target.value)}
+                  />
+                </Field>
+              </div>
+              <div className="flex shrink-0 justify-end gap-2 border-t border-border px-5 py-3">
+                <Button type="button" variant="outline" onClick={closeTrustedContactEditor}>
+                  {tx("Отмена", "Abbrechen")}
+                </Button>
+                <Button type="submit">
+                  {editingTrustedContact ? tx("Сохранить", "Speichern") : tx("Добавить", "Hinzufügen")}
+                </Button>
+              </div>
+            </form>
+          ) : null}
+        </SheetContent>
+      </Sheet>
       <Dialog
         open={Boolean(documentPreview)}
         onOpenChange={(nextOpen) => {
