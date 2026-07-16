@@ -3758,10 +3758,6 @@ impl TreatmentPlanPdfLayout {
         self.y_mm = PDF_PAGE_HEIGHT_MM - PDF_TOP_MARGIN_MM;
     }
 
-    fn page_break(&mut self) {
-        self.finish_page();
-    }
-
     fn ensure_space(&mut self, needed_mm: f32) {
         if self.y_mm - needed_mm < PDF_BOTTOM_MARGIN_MM + PDF_FOOTER_GAP_MM {
             self.finish_page();
@@ -14568,12 +14564,27 @@ fn adult_consent_subject_line(party: &DocPartyBlock) -> String {
     )
 }
 
-fn adult_legal_document_header(
-    layout: &mut TreatmentPlanPdfLayout,
-    annex: &str,
-    title: &str,
-    document_reference: &str,
-) {
+const ADULT_LEGAL_AGENCY_LABEL: &str = "GMED - Agentur für Patientenbetreuung";
+const ADULT_LEGAL_AGENCY_PERSON: &str = "Heorhii Hudiiev";
+
+fn adult_legal_agency_identity() -> String {
+    format!("{ADULT_LEGAL_AGENCY_LABEL} / {ADULT_LEGAL_AGENCY_PERSON}")
+}
+
+fn adult_legal_footer_lines() -> Vec<String> {
+    vec![adult_legal_agency_identity()]
+}
+
+fn adult_legal_document_header(layout: &mut TreatmentPlanPdfLayout, annex: &str, title: &str) {
+    layout.text_block(
+        ADULT_LEGAL_AGENCY_PERSON,
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        2.0,
+    );
     layout.text_block(
         annex,
         11.0,
@@ -14589,15 +14600,6 @@ fn adult_legal_document_header(
         true,
         0.0,
         TreatmentPlanPdfColor::Primary,
-        0.0,
-        1.5,
-    );
-    layout.text_block(
-        &format!("Dokument-Nr.: {document_reference}"),
-        9.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Muted,
         0.0,
         4.0,
     );
@@ -14694,10 +14696,9 @@ fn adult_legal_signature_line(
     layout.y_mm -= 14.0;
 }
 
-fn adult_legal_checkbox(layout: &mut TreatmentPlanPdfLayout, checked: bool, text: &str) {
-    let marker = if checked { "[x]" } else { "[ ]" };
+fn adult_legal_checkbox(layout: &mut TreatmentPlanPdfLayout, text: &str) {
     layout.text_block(
-        &format!("{marker}  {text}"),
+        &format!("[ ]  {text}"),
         10.5,
         false,
         4.0,
@@ -14707,10 +14708,9 @@ fn adult_legal_checkbox(layout: &mut TreatmentPlanPdfLayout, checked: bool, text
     );
 }
 
-fn adult_legal_channel(layout: &mut TreatmentPlanPdfLayout, checked: bool, label: &str) {
-    let marker = if checked { "[x]" } else { "[ ]" };
+fn adult_legal_channel(layout: &mut TreatmentPlanPdfLayout, label: &str) {
     layout.text_block(
-        &format!("{marker}  {label}"),
+        &format!("[ ]  {label}"),
         10.5,
         false,
         12.0,
@@ -14741,30 +14741,14 @@ fn build_adult_confidentiality_release_pdf(
     bindings: &DocumentBindingOverrides,
     document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
-    const AGENCY_LABEL: &str = "GMED - Agentur für Patientenbetreuung";
-    const AGENCY_PERSON: &str = "Heorhii Hudiiev";
-
     let (document, regular, bold) = new_admin_pdf()?;
-    let mut layout = TreatmentPlanPdfLayout::new_legal(
-        vec![AGENCY_LABEL.to_string(), AGENCY_PERSON.to_string()],
-        regular,
-        bold,
-    );
+    let mut layout = TreatmentPlanPdfLayout::new_legal(adult_legal_footer_lines(), regular, bold);
     layout.legal_header_line = format!("Dokument-Nr.: {document_reference}");
-    let agency_identity = format!("{AGENCY_LABEL} / {AGENCY_PERSON}");
+    let agency_identity = adult_legal_agency_identity();
 
-    // Agency letterhead block (fixed for this document, top of page).
+    // Responsible person and annex marker above the document title.
     layout.text_block(
-        AGENCY_LABEL,
-        11.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        0.5,
-    );
-    layout.text_block(
-        AGENCY_PERSON,
+        ADULT_LEGAL_AGENCY_PERSON,
         11.0,
         false,
         0.0,
@@ -14772,7 +14756,6 @@ fn build_adult_confidentiality_release_pdf(
         0.0,
         2.0,
     );
-    // Header: annex, then the document number above the title.
     layout.text_block(
         "Anlage 2",
         11.0,
@@ -14821,7 +14804,7 @@ fn render_adult_privacy_information(
     layout: &mut TreatmentPlanPdfLayout,
     agency: &AgencyContractSettings,
 ) {
-    let agency_identity = agency_legal_identity(agency);
+    let agency_identity = adult_legal_agency_identity();
     let privacy_contact = agency_privacy_email(agency)
         .map(|value| format!("Per E-mail erreichen Sie den Datenschutzkontakt unter {value}."))
         .unwrap_or_else(|| {
@@ -14996,24 +14979,14 @@ fn build_adult_privacy_consents_pdf(
     document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let mut layout =
-        TreatmentPlanPdfLayout::new_legal(cost_estimate_footer_lines(agency), regular, bold);
-    let agency_identity = agency_legal_identity(agency);
+    let mut layout = TreatmentPlanPdfLayout::new_legal(adult_legal_footer_lines(), regular, bold);
+    layout.legal_header_line = format!("Dokument-Nr.: {document_reference}");
+    let agency_identity = adult_legal_agency_identity();
     let data_system_name = if agency.data_system_name.trim().is_empty() {
         "CRM-System"
     } else {
         agency.data_system_name.trim()
     };
-    let healthcare = bindings.consent_healthcare.unwrap_or(false);
-    let provider_release = bindings.consent_provider_release.unwrap_or(healthcare);
-    let privacy = bindings.consent_privacy.unwrap_or(false);
-    let email = bindings.consent_email.unwrap_or(false);
-    let threema = bindings.consent_threema.unwrap_or(false);
-    let whatsapp = bindings
-        .consent_whatsapp
-        .or(bindings.consent_messenger)
-        .unwrap_or(false);
-    let telegram = bindings.consent_telegram.unwrap_or(false);
     let recipients = bindings
         .extra_release_recipients
         .as_deref()
@@ -15024,34 +14997,29 @@ fn build_adult_privacy_consents_pdf(
         &mut layout,
         "Anlage 1",
         "Einverständniserklärung zur Datenübermittlung",
-        document_reference,
     );
     adult_legal_identity_block(&mut layout, party, true);
     fc_body(&mut layout, "bin damit einverstanden (bitte ankreuzen):");
     adult_legal_checkbox(
         &mut layout,
-        healthcare,
         &format!(
             "dass {agency_identity} und von der verantwortlichen Person beauftragte Mitarbeitende meine personenbezogenen und medizinischen Daten, Personalausweis- und Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Rezepte, Kostenvoranschläge, Rechnungen, Quittungen, Behandlungs- und Leistungsverträge sowie Arzt- und Krankenhausberichte einholen, bearbeiten, speichern und erforderlichenfalls an behandelnde Ärzte, Krankenhäuser, Labore, andere medizinische Einrichtungen, Dolmetscher, Übersetzer, Gutachter oder Kostenträger übermitteln;"
         ),
     );
     adult_legal_checkbox(
         &mut layout,
-        provider_release,
         &format!(
             "dass alle meine behandelnden Ärzte und medizinischen Einrichtungen meine Behandlungsunterlagen und medizinischen Informationen an {agency_identity} übermitteln dürfen;"
         ),
     );
     adult_legal_checkbox(
         &mut layout,
-        privacy,
         &format!(
             "dass meine erforderlichen personenbezogenen und medizinischen Unterlagen im {data_system_name} gespeichert und verarbeitet werden;"
         ),
     );
     adult_legal_checkbox(
         &mut layout,
-        recipients.is_some(),
         "dass meine personenbezogenen und medizinischen Daten an folgende Personen oder Institutionen übermittelt werden:",
     );
     if let Some(recipients) = recipients {
@@ -15079,14 +15047,12 @@ fn build_adult_privacy_consents_pdf(
     }
     adult_legal_checkbox(
         &mut layout,
-        email || threema || whatsapp || telegram,
         "dass meine personenbezogenen und medizinischen Daten sowie erforderliche Unterlagen über folgende Kommunikationsmedien eingeholt und/oder übermittelt werden:",
     );
-    adult_legal_channel(&mut layout, email, "E-mail");
-    adult_legal_channel(&mut layout, threema, "Threema-Messenger");
-    adult_legal_channel(&mut layout, whatsapp, "WhatsApp-Messenger");
-    adult_legal_channel(&mut layout, telegram, "Telegram-Messenger");
-    layout.page_break();
+    adult_legal_channel(&mut layout, "E-mail");
+    adult_legal_channel(&mut layout, "Threema-Messenger");
+    adult_legal_channel(&mut layout, "WhatsApp-Messenger");
+    adult_legal_channel(&mut layout, "Telegram-Messenger");
     fc_body(
         &mut layout,
         "Ich bin mir der möglichen Risiken bei der Übermittlung sensibler Daten per E-mail, WhatsApp-, Telegram- oder Threema-Messenger bewusst.",
@@ -15114,7 +15080,6 @@ fn build_adult_privacy_consents_pdf(
     );
     adult_legal_signature_line(&mut layout, party, bindings);
 
-    layout.page_break();
     render_adult_privacy_information(&mut layout, agency);
 
     Ok(finalize_admin_pdf(document, layout))
@@ -20430,12 +20395,16 @@ mod tests {
         assert!(release_text.contains("GMED - Agentur für Patientenbetreuung"));
         assert!(release_text.contains("Heorhii Hudiiev"));
         assert!(release_text.contains("Anlage 2"));
+        assert_eq!(
+            release_text
+                .matches("GMED - Agentur für Patientenbetreuung")
+                .count(),
+            2
+        );
         assert!(release_text.contains("den von ihm beauftragten Mitarbeitenden"));
         assert!(!release_text.contains("Maria Beispiel, Vertrauenskontakt"));
         assert!(!release_text.contains("Max Verantwortlich"));
-        assert!(release_text.contains(
-            "GMED - Agentur für Patientenbetreuung / Heorhii Hudiiev"
-        ));
+        assert!(release_text.contains("GMED - Agentur für Patientenbetreuung / Heorhii Hudiiev"));
         assert!(release_text.contains("Seite: 1"));
         assert!(!release_text.contains('?'));
 
@@ -20454,16 +20423,25 @@ mod tests {
         assert!(privacy_text.contains("Einverständniserklärung zur Datenübermittlung"));
         assert!(privacy_text.contains("Informationsblatt zum Datenschutz"));
         assert!(privacy_text.contains("EW-20260716-UNITTEST0001"));
+        let privacy_page_count = privacy_text.matches("Seite:").count();
+        assert!(privacy_page_count >= 2);
+        assert_eq!(
+            privacy_text
+                .matches("Dokument-Nr.: EW-20260716-UNITTEST0001")
+                .count(),
+            privacy_page_count
+        );
+        assert!(!privacy_text.contains("c/o GMED"));
+        assert!(privacy_text.contains("GMED - Agentur für Patientenbetreuung / Heorhii Hudiiev"));
         assert!(privacy_text.contains("anna@example.test"));
         assert!(privacy_text.contains("datenschutz@example.test"));
         assert!(privacy_text.contains("TEST-CRM"));
         assert!(privacy_text.contains("Maria Beispiel, Vertrauenskontakt"));
-        assert!(privacy_text.contains("[x]"));
+        assert!(!privacy_text.contains("[x]"));
         assert!(privacy_text.contains("[ ]"));
-        assert!(privacy_text.contains("[x] Threema-Messenger"));
+        assert!(privacy_text.contains("[ ] Threema-Messenger"));
         assert!(privacy_text.contains("[ ] WhatsApp-Messenger"));
-        assert!(privacy_text.contains("[x] Telegram-Messenger"));
-        assert_eq!(privacy_text.matches("Seite:").count(), 5);
+        assert!(privacy_text.contains("[ ] Telegram-Messenger"));
         assert!(!privacy_text.contains('?'));
     }
 
