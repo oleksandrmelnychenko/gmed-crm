@@ -3635,6 +3635,7 @@ struct TreatmentPlanPdfLayout {
     y_mm: f32,
     footer_text: String,
     legal_footer_lines: Vec<String>,
+    legal_header_line: String,
     page_style: PdfPageStyle,
     regular_font: PdfFontHandle,
     bold_font: PdfFontHandle,
@@ -3649,6 +3650,7 @@ impl TreatmentPlanPdfLayout {
             y_mm: PDF_PAGE_HEIGHT_MM - PDF_TOP_MARGIN_MM,
             footer_text,
             legal_footer_lines: Vec::new(),
+            legal_header_line: String::new(),
             page_style: PdfPageStyle::Standard,
             regular_font,
             bold_font,
@@ -3667,6 +3669,7 @@ impl TreatmentPlanPdfLayout {
             y_mm: PDF_PAGE_HEIGHT_MM - PDF_TOP_MARGIN_MM,
             footer_text: String::new(),
             legal_footer_lines: footer_lines,
+            legal_header_line: String::new(),
             page_style: PdfPageStyle::Legal,
             regular_font,
             bold_font,
@@ -3701,6 +3704,18 @@ impl TreatmentPlanPdfLayout {
                 0.35,
                 accent,
             );
+
+            if !self.legal_header_line.is_empty() {
+                append_pdf_text_line(
+                    &mut self.page_ops,
+                    &self.legal_header_line,
+                    PDF_LEFT_MARGIN_MM,
+                    288.0,
+                    7.0,
+                    &self.regular_font,
+                    TreatmentPlanPdfColor::Muted,
+                );
+            }
 
             for (index, line) in self.legal_footer_lines.iter().take(2).enumerate() {
                 append_pdf_text_line(
@@ -6415,7 +6430,7 @@ fn build_framework_contract_pdf(
     fc_body(
         &mut layout,
         &format!(
-            "Daher entbinde ich alle meine behandelnden Ärzte und medizinischen Einrichtungen von ihrer Schweigepflicht gegenüber {agency_identity} und von der verantwortlichen Person beauftragten Mitarbeitenden."
+            "Daher entbinde ich alle meine behandelnden Ärzte und medizinischen Einrichtungen von ihrer Schweigepflicht gegenüber {agency_identity} und den von der Agentur beauftragten Mitarbeitenden."
         ),
     );
     fc_body(
@@ -14727,15 +14742,63 @@ fn build_adult_confidentiality_release_pdf(
     document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let mut layout =
-        TreatmentPlanPdfLayout::new_legal(cost_estimate_footer_lines(agency), regular, bold);
+    let mut layout = TreatmentPlanPdfLayout::new_legal(
+        vec![
+            "c/o GMED · GMED - Agentur für Patientenbetreuung".to_string(),
+            "Heorhii Hudiiev".to_string(),
+        ],
+        regular,
+        bold,
+    );
+    layout.legal_header_line = format!("Dokument-Nr.: {document_reference}");
     let agency_identity = agency_legal_identity(agency);
 
-    adult_legal_document_header(
-        &mut layout,
+    // Agency letterhead block (fixed for this document, top of page).
+    layout.text_block(
+        "c/o GMED",
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        0.5,
+    );
+    layout.text_block(
+        "GMED - Agentur für Patientenbetreuung",
+        11.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        0.5,
+    );
+    layout.text_block(
+        "Heorhii Hudiiev",
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        2.0,
+    );
+    // Header: annex, then the document number above the title.
+    layout.text_block(
         "Anlage 2",
+        11.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.5,
+    );
+    layout.text_block(
         "Schweigepflichtentbindung",
-        document_reference,
+        16.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Primary,
+        0.0,
+        4.0,
     );
     adult_legal_identity_block(&mut layout, party, false);
     fc_body(
@@ -14745,7 +14808,7 @@ fn build_adult_confidentiality_release_pdf(
     fc_body(
         &mut layout,
         &format!(
-            "Daher entbinde ich alle meine behandelnden Ärzte und medizinischen Einrichtungen von ihrer Schweigepflicht gegenüber {agency_identity} und von der verantwortlichen Person beauftragten Mitarbeitenden."
+            "Daher entbinde ich alle meine behandelnden Ärzte und medizinischen Einrichtungen von ihrer Schweigepflicht gegenüber {agency_identity} und den von ihm beauftragten Mitarbeitenden."
         ),
     );
 
@@ -20371,9 +20434,14 @@ mod tests {
             .join(" ");
         assert!(release_text.contains("Schweigepflichtentbindung"));
         assert!(release_text.contains("203 StGB"));
-        assert!(release_text.contains("SE-20260716-UNITTEST0001"));
+        assert!(release_text.contains("Dokument-Nr.: SE-20260716-UNITTEST0001"));
+        assert!(release_text.contains("c/o GMED"));
+        assert!(release_text.contains("GMED - Agentur für Patientenbetreuung"));
+        assert!(release_text.contains("Heorhii Hudiiev"));
+        assert!(release_text.contains("Anlage 2"));
+        assert!(release_text.contains("den von ihm beauftragten Mitarbeitenden"));
         assert!(!release_text.contains("Maria Beispiel, Vertrauenskontakt"));
-        assert!(release_text.contains("Test Agentur für Patientenbetreuung"));
+        assert!(release_text.contains("Max Verantwortlich"));
         assert!(release_text.contains("Seite: 1"));
         assert!(!release_text.contains('?'));
 

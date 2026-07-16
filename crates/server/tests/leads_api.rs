@@ -1291,6 +1291,12 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
         json!({
             "discovery_source": "customer_referral",
             "referrer": "Dr. Referral",
+            "program_date_from": "2026-09-01",
+            "program_date_to": "2026-09-30",
+            "service_comments": {
+                "medical_treatment": "Orthopedic assessment and treatment plan",
+                "interpreter_support": "Ukrainian interpreter for every appointment"
+            },
             "clinical_draft": {
                 "narrative": {
                     "anamnese_aktuelle": "Belastungsabhängige Knieschmerzen",
@@ -1491,6 +1497,17 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
         "Please coordinate an interpreter for every appointment"
     );
     assert_eq!(patient.13["discovery_source"], "customer_referral");
+    assert_eq!(patient.13["lead_type"], "questionnaire");
+    assert_eq!(patient.13["primary_concern_text"], "Chronic knee pain");
+    assert_eq!(patient.13["requested_specialties"][0], "orthopedics");
+    assert_eq!(patient.13["email_consent"], true);
+    assert_eq!(patient.13["whatsapp_consent"], false);
+    assert_eq!(patient.13["program_date_from"], "2026-09-01");
+    assert_eq!(patient.13["program_date_to"], "2026-09-30");
+    assert_eq!(
+        patient.13["service_comments"]["interpreter_support"],
+        "Ukrainian interpreter for every appointment"
+    );
     assert_eq!(patient.13["trusted_contact"]["birth_date"], "1985-02-03");
     assert_eq!(patient.13["trusted_contact"]["email"], "olena@example.test");
     assert_eq!(
@@ -1513,6 +1530,41 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     assert_eq!(patient.14["document_pack_complete"], true);
     assert_eq!(patient.14["compliance_completed"], true);
     assert_eq!(patient.14["contract_status"], "signed");
+
+    let (source_lead_id, lead_snapshot, patient_notes): (Option<Uuid>, Value, Option<String>) =
+        sqlx::query_as("SELECT source_lead_id, lead_snapshot, notes FROM patients WHERE id = $1")
+            .bind(patient_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(source_lead_id, Some(lead_id));
+    assert_eq!(lead_snapshot["id"], lead_id.to_string());
+    assert_eq!(lead_snapshot["whatsapp_number"], "+49 (151) 123-45-678");
+    assert_eq!(lead_snapshot["primary_concern_text"], "Chronic knee pain");
+    assert_eq!(
+        lead_snapshot["wizard_state"]["service_comments"]["medical_treatment"],
+        "Orthopedic assessment and treatment plan"
+    );
+    assert_eq!(
+        patient_notes.as_deref(),
+        Some("Manager service note from the lead")
+    );
+
+    let (patient_status, patient_detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(patient_status, StatusCode::OK, "{patient_detail}");
+    assert_eq!(patient_detail["source_lead_id"], lead_id.to_string());
+    assert_eq!(patient_detail["lead_snapshot"]["id"], lead_id.to_string());
+    assert_eq!(
+        patient_detail["intake_profile"]["service_comments"]["medical_treatment"],
+        "Orthopedic assessment and treatment plan"
+    );
 
     let contacts: Vec<(String, String, String, bool, Option<String>)> = sqlx::query_as(
         r#"SELECT contact_kind, contact_type, value, is_primary, notes
@@ -1594,6 +1646,26 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     .await
     .unwrap();
     assert_eq!(moved_document_count, artifacts.document_ids.len() as i64);
+
+    let (documents_status, patient_documents) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/documents"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(documents_status, StatusCode::OK, "{patient_documents}");
+    let patient_document_ids = patient_documents
+        .as_array()
+        .expect("patient documents")
+        .iter()
+        .filter_map(|document| document["id"].as_str().map(str::to_string))
+        .collect::<Vec<_>>();
+    assert!(patient_document_ids.contains(&source_attachment_id.to_string()));
+    for document_id in &artifacts.document_ids {
+        assert!(patient_document_ids.contains(&document_id.to_string()));
+    }
 
     let (contract_patient_id, contract_lead_id): (Option<Uuid>, Option<Uuid>) =
         sqlx::query_as("SELECT patient_id, lead_id FROM framework_contracts WHERE id = $1")

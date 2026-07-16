@@ -707,8 +707,17 @@ export interface PatientsPortalTranslations {
   patient_profile_address: string;
   patient_profile_emergency_contact: string;
   patient_profile_intake_data: string;
+  patient_profile_intake_lead_type: string;
+  patient_profile_intake_lead_id: string;
+  patient_profile_intake_open_lead: string;
   patient_profile_intake_source: string;
   patient_profile_intake_services: string;
+  patient_profile_intake_service_requested: string;
+  patient_profile_intake_primary_concern: string;
+  patient_profile_intake_additional_concerns: string;
+  patient_profile_intake_specialties: string;
+  patient_profile_intake_program_period: string;
+  patient_profile_intake_internal_notes: string;
   patient_profile_intake_location: string;
   patient_profile_intake_interpreter: string;
   patient_profile_intake_message: string;
@@ -722,6 +731,8 @@ export interface PatientsPortalTranslations {
   patient_profile_intake_current_treatment: string;
   patient_profile_intake_travel_risk: string;
   patient_profile_intake_membership: string;
+  patient_profile_contact_consent_granted: string;
+  patient_profile_contact_consent_declined: string;
   patient_profile_discovery_customer_referral: string;
   patient_profile_discovery_online: string;
   patient_profile_discovery_employee_referral: string;
@@ -1583,8 +1594,17 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   patient_profile_address: "Адрес",
   patient_profile_emergency_contact: "Доверенный контакт",
   patient_profile_intake_data: "Данные первичного обращения",
+  patient_profile_intake_lead_type: "Тип обращения",
+  patient_profile_intake_lead_id: "Исходный лид",
+  patient_profile_intake_open_lead: "Открыть исходный лид",
   patient_profile_intake_source: "Источник и форма",
   patient_profile_intake_services: "Запрошенные услуги",
+  patient_profile_intake_service_requested: "Запрошено",
+  patient_profile_intake_primary_concern: "Причина обращения",
+  patient_profile_intake_additional_concerns: "Дополнительная информация",
+  patient_profile_intake_specialties: "Специализации",
+  patient_profile_intake_program_period: "Период программы",
+  patient_profile_intake_internal_notes: "Внутренний комментарий",
   patient_profile_intake_location: "Локация и срок",
   patient_profile_intake_interpreter: "Переводчик",
   patient_profile_intake_message: "Сообщение клиента",
@@ -1598,6 +1618,8 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   patient_profile_intake_current_treatment: "Сейчас проходит лечение",
   patient_profile_intake_travel_risk: "Риск для поездки по состоянию здоровья",
   patient_profile_intake_membership: "Интерес к программе сопровождения",
+  patient_profile_contact_consent_granted: "Согласие на контакт получено",
+  patient_profile_contact_consent_declined: "Согласие на контакт не получено",
   patient_profile_discovery_customer_referral: "Рекомендация клиента",
   patient_profile_discovery_online: "Онлайн",
   patient_profile_discovery_employee_referral: "Рекомендация сотрудника",
@@ -2451,8 +2473,17 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   patient_profile_address: "Adresse",
   patient_profile_emergency_contact: "Vertrauenskontakt",
   patient_profile_intake_data: "Angaben aus der Erstanfrage",
+  patient_profile_intake_lead_type: "Anfragetyp",
+  patient_profile_intake_lead_id: "Ursprünglicher Lead",
+  patient_profile_intake_open_lead: "Ursprünglichen Lead öffnen",
   patient_profile_intake_source: "Quelle und Formular",
   patient_profile_intake_services: "Gewünschte Leistungen",
+  patient_profile_intake_service_requested: "Angefragt",
+  patient_profile_intake_primary_concern: "Anliegen",
+  patient_profile_intake_additional_concerns: "Zusätzliche Angaben",
+  patient_profile_intake_specialties: "Fachrichtungen",
+  patient_profile_intake_program_period: "Programmzeitraum",
+  patient_profile_intake_internal_notes: "Interner Kommentar",
   patient_profile_intake_location: "Ort und Zeitraum",
   patient_profile_intake_interpreter: "Dolmetscher",
   patient_profile_intake_message: "Kundennachricht",
@@ -2466,6 +2497,8 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   patient_profile_intake_current_treatment: "Derzeit in Behandlung",
   patient_profile_intake_travel_risk: "Gesundheitsrisiko für die Reise",
   patient_profile_intake_membership: "Interesse am Betreuungsprogramm",
+  patient_profile_contact_consent_granted: "Kontakteinwilligung erteilt",
+  patient_profile_contact_consent_declined: "Kontakteinwilligung nicht erteilt",
   patient_profile_discovery_customer_referral: "Empfehlung eines Kunden",
   patient_profile_discovery_online: "Online",
   patient_profile_discovery_employee_referral: "Empfehlung eines Mitarbeiters",

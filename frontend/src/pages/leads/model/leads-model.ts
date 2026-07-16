@@ -622,7 +622,7 @@ export function leadIntakeTypeFromLead(
 
   if (
     ["visitor_facade", "website_wizard", "wizard", "questionnaire", "oprosnik"].includes(intakeSource) ||
-    ["website_wizard", "visitor_facade", "questionnaire", "oprosnik"].includes(source)
+    ["website_wizard", "website_questionnaire", "visitor_facade", "questionnaire", "oprosnik"].includes(source)
   ) {
     return "questionnaire";
   }
@@ -667,7 +667,7 @@ export function leadTypeFromLead(
   }
   if (
     ["visitor_facade", "website_wizard", "wizard", "questionnaire", "oprosnik"].includes(intakeSource) ||
-    ["website_wizard", "visitor_facade"].includes(source)
+    ["website_wizard", "website_questionnaire", "visitor_facade"].includes(source)
   ) {
     return "questionnaire";
   }

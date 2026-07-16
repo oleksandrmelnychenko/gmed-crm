@@ -1203,7 +1203,8 @@ async fn get_patient(
                   insurance_provider, insurance_number, insurance_type,
                   emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
                   passport_number, passport_expiry,
-                  intake_profile, legal_status, clinical_warnings, notes, is_active, created_at, updated_at
+                  intake_profile, source_lead_id, lead_snapshot,
+                  legal_status, clinical_warnings, notes, is_active, created_at, updated_at
            FROM patients WHERE id = $1"#,
     )
     .bind(patient_uuid)
@@ -1374,6 +1375,8 @@ async fn get_patient(
                     passport_number: r.try_get("passport_number").unwrap_or_default(),
                     passport_expiry: r.try_get("passport_expiry").unwrap_or_default(),
                     intake_profile: r.try_get("intake_profile").unwrap_or_else(|_| json!({})),
+                    source_lead_id: r.try_get("source_lead_id").unwrap_or_default(),
+                    lead_snapshot: r.try_get("lead_snapshot").unwrap_or_else(|_| json!({})),
                     legal_status: r.try_get("legal_status").map_err(|_| {
                         err(
                             StatusCode::INTERNAL_SERVER_ERROR,
@@ -6381,6 +6384,8 @@ struct PatientDetailInput {
     passport_number: Option<String>,
     passport_expiry: Option<chrono::NaiveDate>,
     intake_profile: serde_json::Value,
+    source_lead_id: Option<Uuid>,
+    lead_snapshot: serde_json::Value,
     legal_status: serde_json::Value,
     clinical_warnings: Option<String>,
     notes: Option<String>,
@@ -6522,6 +6527,14 @@ fn build_patient_detail_json(
                 patient.emergency_contact_relation,
             );
             map.insert("intake_profile".to_string(), patient.intake_profile);
+            map.insert(
+                "source_lead_id".to_string(),
+                patient
+                    .source_lead_id
+                    .map(|value| Value::String(value.to_string()))
+                    .unwrap_or(Value::Null),
+            );
+            map.insert("lead_snapshot".to_string(), patient.lead_snapshot);
             map.insert("legal_status".to_string(), patient.legal_status);
             insert_optional_string(map, "notes", patient.notes);
             insert_insurance_fields(

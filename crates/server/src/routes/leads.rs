@@ -323,7 +323,7 @@ async fn list_leads(
                     OR lower(replace(COALESCE(source, ''), ' ', '_')) IN ('website_contact_form', 'contact_form')
                     OR lower(COALESCE(flow, '')) = 'contact' THEN 'form'
                   WHEN lower(replace(COALESCE(intake_source, ''), '-', '_')) IN ('visitor_facade', 'website_wizard', 'wizard', 'questionnaire', 'oprosnik')
-                    OR lower(replace(COALESCE(source, ''), ' ', '_')) IN ('website_wizard', 'visitor_facade') THEN 'questionnaire'
+                    OR lower(replace(COALESCE(source, ''), ' ', '_')) IN ('website_wizard', 'website_questionnaire', 'visitor_facade') THEN 'questionnaire'
                   ELSE 'console'
                 END = $7)
              AND ($8::text IS NULL OR flow = $8)
@@ -469,10 +469,12 @@ fn lead_type_from_origin(
             value,
             "visitor_facade" | "website_wizard" | "wizard" | "questionnaire" | "oprosnik"
         )
-    }) || source
-        .as_deref()
-        .is_some_and(|value| matches!(value, "website_wizard" | "visitor_facade"))
-    {
+    }) || source.as_deref().is_some_and(|value| {
+        matches!(
+            value,
+            "website_wizard" | "website_questionnaire" | "visitor_facade"
+        )
+    }) {
         return "questionnaire";
     }
 
@@ -3116,7 +3118,7 @@ async fn convert_lead(
                   preferred_location, visit_timing, message,
                   date_of_birth, legal_sex, qualification_status, converted_patient_id,
                   failed_outcome_status, street_address, city, zip_code, notes,
-                  wizard_state
+                  wizard_state, to_jsonb(leads) AS lead_snapshot
            FROM leads WHERE id = $1
            FOR UPDATE"#,
     )
@@ -3307,15 +3309,37 @@ async fn convert_lead(
     let zip_code: Option<String> = lead.try_get("zip_code").ok().flatten();
     let lead_notes: Option<String> = lead.try_get("notes").ok().flatten();
     let wizard_state: Value = lead.try_get("wizard_state").unwrap_or_else(|_| json!({}));
+    let lead_snapshot: Value = lead.try_get("lead_snapshot").unwrap_or_else(|_| json!({}));
+    let snapshot_value = |key: &str| lead_snapshot.get(key).cloned().unwrap_or(Value::Null);
+    let source: Option<String> = lead.try_get("source").ok().flatten();
+    let intake_source: Option<String> = lead.try_get("intake_source").ok().flatten();
+    let flow: Option<String> = lead.try_get("flow").ok().flatten();
+    let lead_type = lead_type_from_origin(
+        false,
+        intake_source.as_deref(),
+        source.as_deref(),
+        flow.as_deref(),
+    );
     let intake_profile = json!({
-        "source": lead.try_get::<Option<String>, _>("source").unwrap_or_default(),
-        "intake_source": lead.try_get::<Option<String>, _>("intake_source").unwrap_or_default(),
-        "flow": lead.try_get::<Option<String>, _>("flow").unwrap_or_default(),
+        "lead_type": lead_type,
+        "source": source,
+        "intake_source": intake_source,
+        "flow": flow,
         "locale": locale,
+        "primary_language": primary_language,
+        "country": snapshot_value("country"),
+        "state": snapshot_value("state"),
         "submitted_at": lead
             .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("submitted_at")
             .unwrap_or_default()
             .map(|value| value.to_rfc3339()),
+        "email": email.clone(),
+        "email_consent": email_consent,
+        "phone": phone.clone(),
+        "phones": phones.clone(),
+        "primary_phone_type": snapshot_value("primary_phone_type"),
+        "whatsapp_number": whatsapp_number.clone(),
+        "whatsapp_consent": whatsapp_consent,
         "needs_interpreter": lead.try_get::<Option<bool>, _>("needs_interpreter").unwrap_or_default(),
         "location": lead.try_get::<Option<String>, _>("location").unwrap_or_default(),
         "location_detailed": lead.try_get::<Option<String>, _>("location_detailed").unwrap_or_default(),
@@ -3330,8 +3354,20 @@ async fn convert_lead(
         "currently_in_treatment": lead.try_get::<Option<bool>, _>("currently_in_treatment").unwrap_or_default(),
         "has_health_risk_for_travel": lead.try_get::<Option<bool>, _>("has_health_risk_for_travel").unwrap_or_default(),
         "services": lead.try_get::<Vec<String>, _>("services").unwrap_or_default(),
+        "service_comments": wizard_state.get("service_comments").cloned().unwrap_or_else(|| json!({})),
+        "primary_concern_text": snapshot_value("primary_concern_text"),
+        "additional_concerns": snapshot_value("additional_concerns"),
+        "requested_specialties": snapshot_value("requested_specialties"),
+        "program_date_from": wizard_state.get("program_date_from").cloned().unwrap_or(Value::Null),
+        "program_date_to": wizard_state.get("program_date_to").cloned().unwrap_or(Value::Null),
+        "notes": lead_notes.clone(),
+        "has_insurance": has_insurance,
         "insurance_covers_germany": lead.try_get::<Option<String>, _>("insurance_covers_germany").unwrap_or_default(),
         "message": lead.try_get::<Option<String>, _>("message").unwrap_or_default(),
+        "consent_automated_contact": snapshot_value("consent_automated_contact"),
+        "consent_healthcare": snapshot_value("consent_healthcare"),
+        "consent_opt_out": snapshot_value("consent_opt_out"),
+        "consent_privacy_practices": snapshot_value("consent_privacy_practices"),
         "discovery_source": wizard_state.get("discovery_source").cloned().unwrap_or(Value::Null),
         "referrer": wizard_state.get("referrer").cloned().unwrap_or(Value::Null),
         "trusted_contact": {
@@ -3363,9 +3399,10 @@ async fn convert_lead(
                                  languages, address_street, address_city, address_zip,
                                  address_country, insurance_provider, insurance_number,
                                  insurance_type, emergency_contact_name, emergency_contact_phone,
-                                 emergency_contact_relation, intake_profile, legal_status, created_by)
+                                 emergency_contact_relation, intake_profile, legal_status, notes,
+                                 source_lead_id, lead_snapshot, created_by)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                   $15, $16, $17, $18, $19, $20, $21, $22, $23)
+                   $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
            RETURNING id"#,
     )
     .bind(&pid)
@@ -3398,6 +3435,9 @@ async fn convert_lead(
         "contract_status": "signed",
         "notes": null,
     }))
+    .bind(lead_notes.as_deref())
+    .bind(lead_id)
+    .bind(lead_snapshot)
     .bind(auth.user_id)
     .fetch_one(&mut *tx)
     .await

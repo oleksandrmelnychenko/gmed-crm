@@ -4362,75 +4362,78 @@ ${serviceCommentLines.join("\n")}`
       >
         <SheetContent
           side="right"
-          className="w-full max-w-none gap-0 border-l border-border p-0 sm:max-w-lg"
+          className="w-full max-w-none gap-0 border-l border-border p-0 sm:max-w-2xl"
         >
           {trustedContactEditor ? (
             <form className="flex min-h-0 flex-1 flex-col" onSubmit={saveTrustedContact}>
-              <SheetHeader className="shrink-0 border-b border-border px-5 py-4 pr-14">
+              <SheetHeader className="shrink-0 border-b border-border px-6 py-5 pr-14 sm:px-7">
                 <SheetTitle>
                   {editingTrustedContact
                     ? tx("Редактировать доверенный контакт", "Vertrauenskontakt bearbeiten")
                     : tx("Добавить доверенный контакт", "Vertrauenskontakt hinzufügen")}
                 </SheetTitle>
               </SheetHeader>
-              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
+              <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-6 sm:px-7 sm:py-7">
                 <p className="text-xs leading-5 text-muted-foreground">
                   {tx(
                     "Контакт будет сохранён в лиде и отдельной строкой добавлен в согласие на передачу данных.",
                     "Der Kontakt wird im Lead gespeichert und als eigener Eintrag in die Datenübermittlungserklärung übernommen.",
                   )}
                 </p>
-                <Field
-                  required
-                  label={tx("Имя и фамилия", "Vor- und Nachname")}
-                  error={trustedContactEditorError || undefined}
-                  errorId="trusted-contact-name-error"
-                >
-                  <Input
-                    autoFocus
+                <div className="grid gap-x-5 gap-y-6 sm:grid-cols-2">
+                  <Field
                     required
-                    value={trustedContactEditor.name}
-                    aria-invalid={Boolean(trustedContactEditorError)}
-                    aria-describedby={trustedContactEditorError ? "trusted-contact-name-error" : undefined}
-                    onChange={(event) => patchTrustedContactEditor("name", event.target.value)}
-                  />
-                </Field>
-                <Field label="E-Mail">
-                  <Input
-                    type="email"
-                    value={trustedContactEditor.email}
-                    onChange={(event) => patchTrustedContactEditor("email", event.target.value)}
-                  />
-                </Field>
-                <Field label={tx("Телефон", "Telefon")}>
-                  <Input
-                    type="tel"
-                    value={trustedContactEditor.phone}
-                    onChange={(event) => patchTrustedContactEditor("phone", event.target.value)}
-                  />
-                </Field>
-                <Field label={tx("Кем приходится клиенту", "Beziehung zur Person")}>
-                  <Input
-                    value={trustedContactEditor.relation}
-                    onChange={(event) => patchTrustedContactEditor("relation", event.target.value)}
-                  />
-                </Field>
-                <Field label={tx("Дата рождения", "Geburtsdatum")}>
-                  <Input
-                    type="date"
-                    max={new Date().toISOString().slice(0, 10)}
-                    value={trustedContactEditor.birthDate}
-                    onChange={(event) => patchTrustedContactEditor("birthDate", event.target.value)}
-                  />
-                </Field>
-                <Field label={tx("Адрес", "Adresse")}>
-                  <Input
-                    value={trustedContactEditor.address}
-                    onChange={(event) => patchTrustedContactEditor("address", event.target.value)}
-                  />
-                </Field>
+                    className="sm:col-span-2"
+                    label={tx("Имя и фамилия", "Vor- und Nachname")}
+                    error={trustedContactEditorError || undefined}
+                    errorId="trusted-contact-name-error"
+                  >
+                    <Input
+                      autoFocus
+                      required
+                      value={trustedContactEditor.name}
+                      aria-invalid={Boolean(trustedContactEditorError)}
+                      aria-describedby={trustedContactEditorError ? "trusted-contact-name-error" : undefined}
+                      onChange={(event) => patchTrustedContactEditor("name", event.target.value)}
+                    />
+                  </Field>
+                  <Field label="E-Mail">
+                    <Input
+                      type="email"
+                      value={trustedContactEditor.email}
+                      onChange={(event) => patchTrustedContactEditor("email", event.target.value)}
+                    />
+                  </Field>
+                  <Field label={tx("Телефон", "Telefon")}>
+                    <Input
+                      type="tel"
+                      value={trustedContactEditor.phone}
+                      onChange={(event) => patchTrustedContactEditor("phone", event.target.value)}
+                    />
+                  </Field>
+                  <Field label={tx("Кем приходится клиенту", "Beziehung zur Person")}>
+                    <Input
+                      value={trustedContactEditor.relation}
+                      onChange={(event) => patchTrustedContactEditor("relation", event.target.value)}
+                    />
+                  </Field>
+                  <Field label={tx("Дата рождения", "Geburtsdatum")}>
+                    <Input
+                      type="date"
+                      max={new Date().toISOString().slice(0, 10)}
+                      value={trustedContactEditor.birthDate}
+                      onChange={(event) => patchTrustedContactEditor("birthDate", event.target.value)}
+                    />
+                  </Field>
+                  <Field className="sm:col-span-2" label={tx("Адрес", "Adresse")}>
+                    <Input
+                      value={trustedContactEditor.address}
+                      onChange={(event) => patchTrustedContactEditor("address", event.target.value)}
+                    />
+                  </Field>
+                </div>
               </div>
-              <div className="flex shrink-0 justify-end gap-2 border-t border-border px-5 py-3">
+              <div className="flex shrink-0 justify-end gap-3 border-t border-border px-6 py-4 sm:px-7">
                 <Button type="button" variant="outline" onClick={closeTrustedContactEditor}>
                   {tx("Отмена", "Abbrechen")}
                 </Button>
