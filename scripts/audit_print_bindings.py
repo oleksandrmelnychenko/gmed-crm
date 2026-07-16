@@ -16,6 +16,9 @@ BACKEND_PATH = ROOT / "crates" / "server" / "src" / "routes" / "documents.rs"
 FRONTEND_PATH = (
     ROOT / "frontend" / "src" / "pages" / "documents" / "model" / "document-bindings.ts"
 )
+LEAD_WIZARD_PATH = (
+    ROOT / "frontend" / "src" / "pages" / "leads" / "ui" / "lead-wizard.tsx"
+)
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NS = {"w": WORD_NS}
 YELLOW_VALUES = {"yellow", "darkYellow"}
@@ -71,6 +74,7 @@ def main() -> int:
 
     backend = BACKEND_PATH.read_text(encoding="utf-8")
     frontend = FRONTEND_PATH.read_text(encoding="utf-8")
+    lead_wizard = LEAD_WIZARD_PATH.read_text(encoding="utf-8")
     manifest_files = {entry.get("file") for entry in entries}
     actual_files = {path.name for path in PRINT_DIR.glob("*.docx")}
     for name in sorted(actual_files - manifest_files):
@@ -126,6 +130,59 @@ def main() -> int:
             if not contains_token(backend, token):
                 errors.append(f"{name}: runtime token is missing: {token}")
 
+    pdf_entries = manifest.get("pdf_references")
+    if not isinstance(pdf_entries, list) or not pdf_entries:
+        errors.append("Print binding manifest contains no PDF references")
+        pdf_entries = []
+
+    pdf_manifest_files = {entry.get("file") for entry in pdf_entries}
+    actual_pdf_files = {path.name for path in PRINT_DIR.glob("*.pdf")}
+    for name in sorted(actual_pdf_files - pdf_manifest_files):
+        errors.append(f"PDF is not registered in manifest: {name}")
+    for name in sorted(pdf_manifest_files - actual_pdf_files):
+        errors.append(f"Manifest PDF is missing: {name}")
+
+    for entry in pdf_entries:
+        name = entry.get("file")
+        template_id = entry.get("template_id")
+        wizard_kind = entry.get("wizard_kind")
+        if not all(isinstance(value, str) for value in (name, template_id, wizard_kind)):
+            errors.append(f"Invalid PDF manifest entry: {entry!r}")
+            continue
+
+        path = PRINT_DIR / name
+        if not path.is_file():
+            continue
+        data = path.read_bytes()
+        if not data.startswith(b"%PDF-"):
+            errors.append(f"{name}: invalid PDF header")
+        digest = hashlib.sha256(data).hexdigest()
+        if digest != entry.get("sha256"):
+            errors.append(f"{name}: PDF fingerprint changed ({digest})")
+        page_count = len(re.findall(rb"/Type\s*/Page\b", data))
+        if page_count != entry.get("page_count"):
+            errors.append(
+                f"{name}: PDF page count changed ({page_count} != {entry.get('page_count')})"
+            )
+
+        if f'id: "{template_id}"' not in backend:
+            errors.append(f"{name}: backend template is missing: {template_id}")
+        if f'{template_id}: [' not in frontend and f'{template_id}: ' not in frontend:
+            errors.append(f"{name}: frontend binding schema is missing: {template_id}")
+        if f'"{wizard_kind}"' not in lead_wizard:
+            errors.append(f"{name}: lead wizard kind is missing: {wizard_kind}")
+        if f'generateLeadComplianceDocument("{template_id}")' not in lead_wizard:
+            errors.append(f"{name}: lead wizard generation action is missing: {template_id}")
+        if f"wizardDocuments.{wizard_kind}" not in lead_wizard:
+            errors.append(f"{name}: lead wizard document list is missing: {wizard_kind}")
+
+        for heading in entry.get("wizard_heading_tokens", []):
+            if heading not in lead_wizard:
+                errors.append(f"{name}: lead wizard heading is missing: {heading}")
+        for token in entry.get("runtime_tokens", []):
+            if not contains_token(backend, token):
+                errors.append(f"{name}: backend PDF builder is missing: {token}")
+
     for forbidden in ("Heorhii Hudiiev", "Salesforce"):
         if forbidden in backend:
             errors.append(f"Hard-coded legal/document identity remains in backend: {forbidden}")
@@ -138,7 +195,8 @@ def main() -> int:
 
     print(
         f"Print binding audit passed: {len(entries)} DOCX references, "
-        f"{total_highlights} grouped yellow bindings, all mapped."
+        f"{len(pdf_entries)} PDF references, {total_highlights} grouped yellow bindings, "
+        "all mapped."
     )
     return 0
 

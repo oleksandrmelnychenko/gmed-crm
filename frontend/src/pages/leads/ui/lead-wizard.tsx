@@ -1016,7 +1016,7 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Requested specialty is missing": tx("Выберите хотя бы одну специализацию", "Mindestens eine Fachrichtung auswählen"),
     "Identity document is not verified": tx("Подтвердите документ, удостоверяющий личность", "Ausweisdokument bestätigen"),
     "Signed DSGVO document is missing": tx("Создайте и подтвердите документ согласий", "Einwilligungsdokument erstellen und bestätigen"),
-    "Signed confidentiality release is missing": tx("Создайте и подтвердите освобождение от врачебной тайны", "Schweigepflichtsentbindung erstellen und bestätigen"),
+    "Signed confidentiality release is missing": tx("Создайте и подтвердите освобождение от медицинской тайны", "Schweigepflichtsentbindung erstellen und bestätigen"),
     "Anamnesis intake is incomplete": tx("Заполните и сохраните анамнез", "Anamnese ausfüllen und abschließen"),
     "Framework contract is not signed": tx("Подпишите рамочный договор", "Rahmenvertrag unterzeichnen"),
     "Framework contract document is missing": tx("Создайте документ рамочного договора", "Rahmenvertragsdokument erstellen"),
@@ -3611,7 +3611,7 @@ ${serviceCommentLines.join("\n")}`
               <div id={CONFIDENTIALITY_RELEASE_ID} tabIndex={-1} className="space-y-4 border-y border-border py-4 focus:outline-none">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <h3 className="text-sm font-semibold text-foreground">
-                    {tx("Освобождение от врачебной тайны", "Schweigepflichtsentbindung")}
+                    {tx("Освобождение от медицинской тайны", "Schweigepflichtsentbindung")}
                   </h3>
                   <Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("confidentiality_release")}>
                     {busy === "generate-confidentiality_release" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
@@ -3620,7 +3620,7 @@ ${serviceCommentLines.join("\n")}`
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {tx(
-                    "Отдельное освобождение всех лечащих врачей и медицинских учреждений от врачебной тайны.",
+                    "Отдельное освобождение всех лечащих врачей и медицинских учреждений от медицинской тайны.",
                     "Separate Entbindung aller behandelnden Ärzte und medizinischen Einrichtungen von der Schweigepflicht.",
                   )}
                 </p>
@@ -3642,7 +3642,7 @@ ${serviceCommentLines.join("\n")}`
               <div id={PRIVACY_DOCUMENT_ID} tabIndex={-1} className="space-y-4 border-b border-border pb-4 focus:outline-none">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <h3 className="text-sm font-semibold text-foreground">
-                    {tx("Согласие на использование и передачу данных", "Einverständniserklärung zur Datenübermittlung")}
+                    {tx("Согласие на использование и передачу персональных и медицинских данных", "Einverständniserklärung zur Datenübermittlung")}
                   </h3>
                   <Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_consents")}>
                     {busy === "generate-privacy_consents" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}

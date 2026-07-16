@@ -12277,14 +12277,7 @@ async fn generate_document(
             };
             let preview = admin_preview_html(
                 "Schweigepflichtsentbindung",
-                &[
-                    patient_party.name.clone(),
-                    generated_doc_id.clone(),
-                    bindings
-                        .extra_release_recipients
-                        .clone()
-                        .unwrap_or_default(),
-                ],
+                &[patient_party.name.clone(), generated_doc_id.clone()],
             );
             let pdf_bytes = match build_adult_confidentiality_release_pdf(
                 &patient_party,
@@ -14648,19 +14641,6 @@ fn build_adult_confidentiality_release_pdf(
             "Daher entbinde ich alle meine behandelnden Ärzte und medizinischen Einrichtungen von ihrer Schweigepflicht gegenüber {agency_identity} und von der verantwortlichen Person beauftragten Mitarbeitenden."
         ),
     );
-
-    if let Some(recipients) = bindings
-        .extra_release_recipients
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        fc_subhead(&mut layout, "Zusätzlicher Vertrauenskontakt");
-        fc_body(
-            &mut layout,
-            &format!("Die Schweigepflichtentbindung gilt außerdem gegenüber: {recipients}."),
-        );
-    }
 
     layout.text_block(
         "Mir ist bekannt, dass ich diese Erklärung über die Entbindung von der Schweigepflicht jederzeit mit Wirkung für die Zukunft widerrufen kann.",
@@ -20276,7 +20256,7 @@ mod tests {
         assert!(release_text.contains("Schweigepflichtentbindung"));
         assert!(release_text.contains("203 StGB"));
         assert!(release_text.contains("SE-20260716-UNITTEST0001"));
-        assert!(release_text.contains("Maria Beispiel, Vertrauenskontakt"));
+        assert!(!release_text.contains("Maria Beispiel, Vertrauenskontakt"));
         assert!(release_text.contains("Test Agentur für Patientenbetreuung"));
         assert!(release_text.contains("Seite: 1"));
         assert!(!release_text.contains('?'));
@@ -20299,6 +20279,7 @@ mod tests {
         assert!(privacy_text.contains("anna@example.test"));
         assert!(privacy_text.contains("datenschutz@example.test"));
         assert!(privacy_text.contains("TEST-CRM"));
+        assert!(privacy_text.contains("Maria Beispiel, Vertrauenskontakt"));
         assert!(privacy_text.contains("[x]"));
         assert!(privacy_text.contains("[ ]"));
         assert!(privacy_text.matches("Seite:").count() >= 4);

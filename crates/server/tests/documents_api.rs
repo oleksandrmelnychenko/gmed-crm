@@ -4783,11 +4783,12 @@ async fn onboarding_documents_generate_for_a_lead_with_matching_human_numbers() 
             "confidentiality_release" => {
                 assert!(pdf_text.contains("Schweigepflichtentbindung"));
                 assert!(pdf_text.contains("203 StGB"));
-                assert!(pdf_text.contains("Maria Beispiel, Vertrauenskontakt"));
+                assert!(!pdf_text.contains("Maria Beispiel, Vertrauenskontakt"));
             }
             "privacy_consents" => {
                 assert!(pdf_text.contains("Einverständniserklärung zur Datenübermittlung"));
                 assert!(pdf_text.contains("Informationsblatt zum Datenschutz"));
+                assert!(pdf_text.contains("Maria Beispiel, Vertrauenskontakt"));
                 assert!(pdf_text.contains("[x]"));
                 assert!(pdf_text.contains("[ ]"));
             }

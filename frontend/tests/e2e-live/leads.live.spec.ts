@@ -145,9 +145,11 @@ test.describe("lead live workflows", () => {
     await expect(
       wizard.getByRole("heading", { name: "Schweigepflichtsentbindung" }),
     ).toBeVisible();
-    await expect(wizard.getByText("Vertrauenskontakt", { exact: true })).toBeVisible();
     await expect(
-      wizard.getByRole("heading", { name: "Einwilligungen" }),
+      wizard.getByText("Vertrauenskontakt / zusätzlicher Empfänger", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      wizard.getByRole("heading", { name: "Einverständniserklärung zur Datenübermittlung" }),
     ).toBeVisible();
     await expect(
       wizard.getByRole("heading", { name: "Ausweisdokument" }),

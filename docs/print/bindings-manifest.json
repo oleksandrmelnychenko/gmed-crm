@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "documents": [
     {
       "file": "1. Einzelauftrag vom 11.11.25- M. Musterman Kopie.docx",
@@ -74,6 +74,37 @@
       "highlight_sha256": "4c5afa2f10c3805a8e3b1b0289a61dc659a733828e3af84d8692cf1560631171",
       "manual_binding_keys": ["passport_number", "passport_valid_until", "period_from", "examination_weeks", "clinics", "recipient_block", "contact_phones", "continuation_statement", "sign_place", "sign_date"],
       "runtime_tokens": ["GeneratedAppointmentConfirmationContext", "load_generated_appointment_scope", "doc_id", "clinics", "first_examination", "examination_weeks", "continuation_statement"]
+    }
+  ],
+  "pdf_references": [
+    {
+      "file": "ADMIN-DSGVO-Einversta\u0308ndniserkla\u0308rung zur Datenu\u0308bermittlung - \u0421\u043e\u0433\u043b\u0430\u0441\u0438\u0435 \u043d\u0430 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043d\u0438\u0435 \u0438 \u043f\u0435\u0440\u0435\u0434\u0430\u0447\u0443 \u043f\u0435\u0440\u0441\u043e\u043d\u0430\u043b\u044c\u043d\u044b\u0445 \u0438 \u043c\u0435\u0434\u0438\u0446\u0438\u043d\u0441\u043a\u0438\u0445 \u0434\u0430\u043d\u043d\u044b\u0445.pdf",
+      "template_id": "privacy_consents",
+      "wizard_kind": "privacy_consents",
+      "page_count": 5,
+      "sha256": "64bd0311061c87e2bad00688db91104e3e2f05cb2a24c62ce4f52df52657630c",
+      "wizard_heading_tokens": [
+        "\u0421\u043e\u0433\u043b\u0430\u0441\u0438\u0435 \u043d\u0430 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043d\u0438\u0435 \u0438 \u043f\u0435\u0440\u0435\u0434\u0430\u0447\u0443 \u043f\u0435\u0440\u0441\u043e\u043d\u0430\u043b\u044c\u043d\u044b\u0445 \u0438 \u043c\u0435\u0434\u0438\u0446\u0438\u043d\u0441\u043a\u0438\u0445 \u0434\u0430\u043d\u043d\u044b\u0445",
+        "Einverst\u00e4ndniserkl\u00e4rung zur Daten\u00fcbermittlung"
+      ],
+      "runtime_tokens": [
+        "build_adult_privacy_consents_pdf",
+        "render_adult_privacy_information"
+      ]
+    },
+    {
+      "file": "ADMIN-Schweigepflichtsentbindung - \u041e\u0441\u0432\u043e\u0431\u043e\u0436\u0434\u0435\u043d\u0438\u0435 \u043e\u0442 \u043c\u0435\u0434\u0438\u0446\u0438\u043d\u0441\u043a\u043e\u0438\u0306 \u0442\u0430\u0438\u0306\u043d\u044b.pdf",
+      "template_id": "confidentiality_release",
+      "wizard_kind": "confidentiality_release",
+      "page_count": 1,
+      "sha256": "fc2bac0b5120b4118a16e9518b1c8fb9163d0808cf26afa90dff5dff7e2ceb2b",
+      "wizard_heading_tokens": [
+        "\u041e\u0441\u0432\u043e\u0431\u043e\u0436\u0434\u0435\u043d\u0438\u0435 \u043e\u0442 \u043c\u0435\u0434\u0438\u0446\u0438\u043d\u0441\u043a\u043e\u0439 \u0442\u0430\u0439\u043d\u044b",
+        "Schweigepflichtsentbindung"
+      ],
+      "runtime_tokens": [
+        "build_adult_confidentiality_release_pdf"
+      ]
     }
   ]
 }
