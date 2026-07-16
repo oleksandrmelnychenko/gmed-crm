@@ -4515,15 +4515,15 @@ ${serviceCommentLines.join("\n")}`
           setDeleteError("");
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="min-w-0 max-w-md overflow-hidden">
           <DialogHeader>
             <DialogTitle>{tx("Удалить файл?", "Datei löschen?")}</DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="min-w-0 break-all [overflow-wrap:anywhere]">
               {deleteDocument?.original_filename || deleteDocument?.auto_name}
             </DialogDescription>
           </DialogHeader>
           <form
-            className="space-y-4"
+            className="min-w-0 space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
               void deleteWizardDocument();
