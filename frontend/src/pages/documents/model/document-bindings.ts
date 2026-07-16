@@ -155,14 +155,14 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
   patient_sticker_compact: PATIENT_STICKER_BINDING_FIELDS,
   patient_sticker_standard: PATIENT_STICKER_BINDING_FIELDS,
   patient_sticker_sheet: PATIENT_STICKER_BINDING_FIELDS,
-  confidentiality_release: [
+  confidentiality_release: [],
+  privacy_consents: [
     {
       key: "extra_release_recipients",
-      label: "Vertrauenskontakt / zusätzliche Entbindung gegenüber",
+      label: "Vertrauenskontakt / zusätzlicher Empfänger",
       kind: "textarea",
     },
   ],
-  privacy_consents: [],
   consent_data_release_child: [
     { key: "child_name", label: "Kind (Name)", kind: "text" },
     { key: "child_birth_date", label: "Kind (geb. am)", kind: "date" },

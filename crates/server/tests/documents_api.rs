@@ -4775,7 +4775,24 @@ async fn onboarding_documents_generate_for_a_lead_with_matching_human_numbers() 
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        assert!(extract_pdf_text(&bytes).contains(document_number));
+        let pdf_text = extract_pdf_text(&bytes);
+        assert!(pdf_text.contains(document_number));
+        assert!(pdf_text.contains("Anna Beispiel"));
+        assert!(!pdf_text.contains('?'));
+        match template_id {
+            "confidentiality_release" => {
+                assert!(pdf_text.contains("Schweigepflichtentbindung"));
+                assert!(pdf_text.contains("203 StGB"));
+                assert!(pdf_text.contains("Maria Beispiel, Vertrauenskontakt"));
+            }
+            "privacy_consents" => {
+                assert!(pdf_text.contains("Einverständniserklärung zur Datenübermittlung"));
+                assert!(pdf_text.contains("Informationsblatt zum Datenschutz"));
+                assert!(pdf_text.contains("[x]"));
+                assert!(pdf_text.contains("[ ]"));
+            }
+            _ => unreachable!(),
+        }
 
         let (status, signed) = json_request(
             &app,

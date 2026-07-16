@@ -1252,7 +1252,8 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
                 phone, phones, whatsapp_number, whatsapp_consent,
                 country, primary_language, locale, has_insurance,
                 insurance_covers_germany, insurance_provider, insurance_number, insurance_type,
-                trusted_contact_name, trusted_contact_phone, trusted_contact_relation,
+                trusted_contact_name, trusted_contact_phone, trusted_contact_email,
+                trusted_contact_relation,
                 trusted_contact_birth_date, trusted_contact_address,
                 source, flow, services, needs_interpreter, location, preferred_location,
                 visit_timing, selected_program, message, notes,
@@ -1266,7 +1267,8 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
                 '[{"number":"+4915112345678","type":"mobile"},{"number":"+49 30 4444","type":"work"}]'::jsonb,
                 '+49 (151) 123-45-678', false, 'UA', 'broken@example.com', 'uk-UA', true,
                 'yes', 'Global Shield', 'POL-4242', 'foreign',
-                'Olena Onboarding', '+380 44 555 0101', 'Sister', DATE '1985-02-03',
+                'Olena Onboarding', '+380 44 555 0101', 'olena@example.test',
+                'Sister', DATE '1985-02-03',
                 'Khreshchatyk 1, Kyiv', 'website_questionnaire', 'medical',
                 ARRAY['medical_treatment', 'interpreter_support']::text[], true,
                 'outside_eu', 'berlin', 'within_4_weeks', 'orthopedics',
@@ -1485,6 +1487,7 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     );
     assert_eq!(patient.13["discovery_source"], "customer_referral");
     assert_eq!(patient.13["trusted_contact"]["birth_date"], "1985-02-03");
+    assert_eq!(patient.13["trusted_contact"]["email"], "olena@example.test");
     assert_eq!(
         patient.13["trusted_contact"]["address"],
         "Khreshchatyk 1, Kyiv"
@@ -2005,6 +2008,7 @@ async fn wizard_lead_fields_round_trip_through_update() {
             "insurance_type": "private",
             "trusted_contact_name": "Alex Wizard",
             "trusted_contact_phone": "+49 30 123456",
+            "trusted_contact_email": "alex.wizard@example.test",
             "trusted_contact_relation": "Partner",
             "trusted_contact_birth_date": "1989-02-03",
             "trusted_contact_address": "Nebenstr. 2, Berlin",
@@ -2033,6 +2037,7 @@ async fn wizard_lead_fields_round_trip_through_update() {
     assert_eq!(lead["insurance_type"], "private");
     assert_eq!(lead["trusted_contact_name"], "Alex Wizard");
     assert_eq!(lead["trusted_contact_phone"], "+49 30 123456");
+    assert_eq!(lead["trusted_contact_email"], "alex.wizard@example.test");
     assert_eq!(lead["trusted_contact_relation"], "Partner");
     assert_eq!(lead["trusted_contact_birth_date"], "1989-02-03");
     assert_eq!(lead["trusted_contact_address"], "Nebenstr. 2, Berlin");

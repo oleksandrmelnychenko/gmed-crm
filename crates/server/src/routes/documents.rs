@@ -15,7 +15,8 @@ use axum::{
 };
 use chrono::{Datelike, NaiveDate, NaiveTime, Weekday};
 use printpdf::{
-    BuiltinFont, Color, Mm, Op, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point, Pt, Rgb,
+    BuiltinFont, Color, Mm, Op, PaintMode, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point,
+    Pt, Rect, Rgb, WindingOrder,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -970,7 +971,7 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     DocumentTemplateDefinition {
         id: "confidentiality_release",
         label: "Schweigepflichtsentbindung",
-        description: "Schweigepflichtsentbindung für volljährige Patientinnen und Patienten mit optionalem Vertrauenskontakt.",
+        description: "Schweigepflichtsentbindung für volljährige Patientinnen und Patienten.",
         art: "confidentiality_release",
         category: "consent",
         default_auto_name: "Schweigepflichtsentbindung",
@@ -984,11 +985,11 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     },
     DocumentTemplateDefinition {
         id: "privacy_consents",
-        label: "Einwilligungserklärung",
-        description: "Einwilligungen zur Verarbeitung und Übermittlung personenbezogener und medizinischer Daten.",
+        label: "Einverständniserklärung zur Datenübermittlung",
+        description: "Einverständnis zur Verarbeitung und Übermittlung personenbezogener und medizinischer Daten mit Datenschutzinformation.",
         art: "privacy_consents",
         category: "consent",
-        default_auto_name: "Einwilligungserklärung",
+        default_auto_name: "Einverständniserklärung zur Datenübermittlung",
         default_status: "draft",
         default_visibility: "patient_visible",
         mime_type: "application/pdf",
@@ -3587,12 +3588,46 @@ fn pdf_text_font_handles() -> (PdfFontHandle, PdfFontHandle) {
     )
 }
 
+fn pdf_mm_to_pt(value: f32) -> Pt {
+    Pt(value * 2.834_646)
+}
+
+fn append_pdf_filled_rect(
+    ops: &mut Vec<Op>,
+    x_mm: f32,
+    y_mm: f32,
+    width_mm: f32,
+    height_mm: f32,
+    color: Color,
+) {
+    let rect = Rect {
+        x: pdf_mm_to_pt(x_mm),
+        y: pdf_mm_to_pt(y_mm),
+        width: pdf_mm_to_pt(width_mm),
+        height: pdf_mm_to_pt(height_mm),
+        mode: Some(PaintMode::Fill),
+        winding_order: Some(WindingOrder::NonZero),
+    };
+    ops.push(Op::SetFillColor { col: color });
+    ops.push(Op::DrawPolygon {
+        polygon: rect.to_polygon(),
+    });
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PdfPageStyle {
+    Standard,
+    Legal,
+}
+
 struct TreatmentPlanPdfLayout {
     pages: Vec<PdfPage>,
     page_ops: Vec<Op>,
     page_number: usize,
     y_mm: f32,
     footer_text: String,
+    legal_footer_lines: Vec<String>,
+    page_style: PdfPageStyle,
     regular_font: PdfFontHandle,
     bold_font: PdfFontHandle,
 }
@@ -3605,6 +3640,26 @@ impl TreatmentPlanPdfLayout {
             page_number: 1,
             y_mm: PDF_PAGE_HEIGHT_MM - PDF_TOP_MARGIN_MM,
             footer_text,
+            legal_footer_lines: Vec::new(),
+            page_style: PdfPageStyle::Standard,
+            regular_font,
+            bold_font,
+        }
+    }
+
+    fn new_legal(
+        footer_lines: Vec<String>,
+        regular_font: PdfFontHandle,
+        bold_font: PdfFontHandle,
+    ) -> Self {
+        Self {
+            pages: Vec::new(),
+            page_ops: Vec::new(),
+            page_number: 1,
+            y_mm: PDF_PAGE_HEIGHT_MM - PDF_TOP_MARGIN_MM,
+            footer_text: String::new(),
+            legal_footer_lines: footer_lines,
+            page_style: PdfPageStyle::Legal,
             regular_font,
             bold_font,
         }
@@ -3619,15 +3674,57 @@ impl TreatmentPlanPdfLayout {
             return;
         }
 
-        append_pdf_text_line(
-            &mut self.page_ops,
-            &format!("{} · Page {}", self.footer_text, self.page_number),
-            PDF_LEFT_MARGIN_MM,
-            PDF_BOTTOM_MARGIN_MM,
-            8.0,
-            &self.regular_font,
-            TreatmentPlanPdfColor::Muted,
-        );
+        if self.page_style == PdfPageStyle::Legal {
+            let accent = Color::Rgb(Rgb::new(0.0, 0.55, 0.76, None));
+            append_pdf_filled_rect(&mut self.page_ops, 5.0, 5.0, 4.0, 287.0, accent.clone());
+            append_pdf_filled_rect(
+                &mut self.page_ops,
+                PDF_LEFT_MARGIN_MM,
+                285.0,
+                PDF_CONTENT_WIDTH_MM,
+                0.35,
+                accent.clone(),
+            );
+            append_pdf_filled_rect(
+                &mut self.page_ops,
+                PDF_LEFT_MARGIN_MM,
+                15.0,
+                PDF_CONTENT_WIDTH_MM,
+                0.35,
+                accent,
+            );
+
+            for (index, line) in self.legal_footer_lines.iter().take(2).enumerate() {
+                append_pdf_text_line(
+                    &mut self.page_ops,
+                    line,
+                    PDF_LEFT_MARGIN_MM,
+                    11.0 - index as f32 * 3.5,
+                    6.5,
+                    &self.regular_font,
+                    TreatmentPlanPdfColor::Primary,
+                );
+            }
+            append_pdf_text_line(
+                &mut self.page_ops,
+                &format!("Seite: {}", self.page_number),
+                176.0,
+                7.5,
+                7.0,
+                &self.regular_font,
+                TreatmentPlanPdfColor::Primary,
+            );
+        } else {
+            append_pdf_text_line(
+                &mut self.page_ops,
+                &format!("{} · Page {}", self.footer_text, self.page_number),
+                PDF_LEFT_MARGIN_MM,
+                PDF_BOTTOM_MARGIN_MM,
+                8.0,
+                &self.regular_font,
+                TreatmentPlanPdfColor::Muted,
+            );
+        }
 
         self.pages.push(PdfPage::new(
             Mm(PDF_PAGE_WIDTH_MM),
@@ -3636,6 +3733,10 @@ impl TreatmentPlanPdfLayout {
         ));
         self.page_number += 1;
         self.y_mm = PDF_PAGE_HEIGHT_MM - PDF_TOP_MARGIN_MM;
+    }
+
+    fn page_break(&mut self) {
+        self.finish_page();
     }
 
     fn ensure_space(&mut self, needed_mm: f32) {
@@ -5409,8 +5510,12 @@ fn fc_bullet(layout: &mut TreatmentPlanPdfLayout, text: &str) {
 
 /// A check-box style consent line (used in Anlage 1).
 fn fc_checkbox(layout: &mut TreatmentPlanPdfLayout, text: &str) {
+    fc_checkbox_value(layout, false, text);
+}
+
+fn fc_checkbox_value(layout: &mut TreatmentPlanPdfLayout, checked: bool, text: &str) {
     layout.text_block(
-        &format!("☐  {text}"),
+        &format!("[{}]  {text}", if checked { "x" } else { " " }),
         11.0,
         false,
         4.0,
@@ -6228,10 +6333,10 @@ fn build_framework_contract_pdf(
         "dass meine personenbezogenen und medizinischen Daten, Personalausweiskopien, Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Kostenvoranschläge, Rechnungen und Quittungen, Behandlungsverträge, Leistungsverträge, Arzt- und Krankenhausberichte über meine abgeschlossene oder noch andauernde Behandlung per folgende Kommunikationsmedien eingeholt und/oder übermittelt werden:",
     );
     for medium in [
-        "☐  E-mail",
-        "☐  Threema-Messenger",
-        "☐  WhatsApp-Messenger",
-        "☐  Telegram-Messenger",
+        "[ ]  E-mail",
+        "[ ]  Threema-Messenger",
+        "[ ]  WhatsApp-Messenger",
+        "[ ]  Telegram-Messenger",
     ] {
         layout.text_block(
             medium,
@@ -12170,12 +12275,6 @@ async fn generate_document(
                 Ok(value) => value,
                 Err(resp) => return resp,
             };
-            let text = build_adult_confidentiality_release_text(
-                &patient_party,
-                &agency,
-                bindings.extra_release_recipients.as_deref(),
-                &generated_doc_id,
-            );
             let preview = admin_preview_html(
                 "Schweigepflichtsentbindung",
                 &[
@@ -12187,10 +12286,11 @@ async fn generate_document(
                         .unwrap_or_default(),
                 ],
             );
-            let pdf_bytes = match build_manual_generated_text_pdf(
-                &auto_name,
-                "Schweigepflichtsentbindung",
-                &text,
+            let pdf_bytes = match build_adult_confidentiality_release_pdf(
+                &patient_party,
+                &agency,
+                &bindings,
+                &generated_doc_id,
             ) {
                 Ok(bytes) => bytes,
                 Err(message) => {
@@ -12210,30 +12310,27 @@ async fn generate_document(
                 Ok(value) => value,
                 Err(resp) => return resp,
             };
-            let text = build_adult_privacy_consents_text(
+            let preview = admin_preview_html(
+                "Einverständniserklärung zur Datenübermittlung",
+                &[patient_party.name.clone(), generated_doc_id.clone()],
+            );
+            let pdf_bytes = match build_adult_privacy_consents_pdf(
                 &patient_party,
                 &agency,
                 &bindings,
                 &generated_doc_id,
-            );
-            let preview = admin_preview_html(
-                "Einwilligungserklärung",
-                &[patient_party.name.clone(), generated_doc_id.clone()],
-            );
-            let pdf_bytes =
-                match build_manual_generated_text_pdf(&auto_name, "Einwilligungserklärung", &text)
-                {
-                    Ok(bytes) => bytes,
-                    Err(message) => {
-                        tracing::error!(
-                            template_id = template.id,
-                            ?patient_id,
-                            ?lead_id,
-                            "build privacy consents PDF"
-                        );
-                        return err(StatusCode::INTERNAL_SERVER_ERROR, message);
-                    }
-                };
+            ) {
+                Ok(bytes) => bytes,
+                Err(message) => {
+                    tracing::error!(
+                        template_id = template.id,
+                        ?patient_id,
+                        ?lead_id,
+                        "build privacy consents PDF"
+                    );
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, message);
+                }
+            };
             (preview, pdf_bytes)
         }
         "consent_data_release_child" | "consent_data_release_single" => {
@@ -13817,7 +13914,7 @@ fn cost_estimate_legal_notice() -> &'static str {
 
 /// Two-line institutional footer block for the cost estimate, mirroring the
 /// reference .docx footer:
-///   "Agentur für Patientenbetreuung | HEORHII HUDIIEV | <address>"
+///   "Agentur für Patientenbetreuung | <responsible person> | <address>"
 ///   "Tel.: <phone> | E-mail: <email>"
 /// Built from `context.agency` (name/care_of, address, phone, email). Empty
 /// fields are simply omitted so the block stays clean.
@@ -14356,39 +14453,524 @@ fn adult_consent_subject_line(party: &DocPartyBlock) -> String {
     )
 }
 
-fn build_adult_confidentiality_release_text(
-    party: &DocPartyBlock,
-    agency: &AgencyContractSettings,
-    extra_recipients: Option<&str>,
+fn adult_legal_document_header(
+    layout: &mut TreatmentPlanPdfLayout,
+    annex: &str,
+    title: &str,
     document_reference: &str,
-) -> String {
-    let agency_person = fc_agency_person(agency);
-    let address = consent_value_or_blank(party.address_line().as_deref());
-    let recipients = consent_value_or_blank(extra_recipients);
-    format!(
-        "Dokument-Nr.: {document_reference}\n\nGültig bis: bis auf Widerruf\n\nIch, {subject}\nAdresse: {address}\n\nentbinde alle nach § 203 StGB schweigepflichtigen Personen, insbesondere Ärztinnen und Ärzte, Angehörige anderer Heilberufe sowie Mitarbeitende von Krankenhäusern, Privatpraxen, Laboren und anderen medizinischen Einrichtungen, von ihrer Schweigepflicht gegenüber {agency_person} und den von ihm beauftragten Mitarbeitenden.\n\nEbenso entbinde ich {agency_person} und beauftragte Mitarbeitende von der Schweigepflicht gegenüber behandelnden Ärztinnen und Ärzten, medizinischen Einrichtungen, Dolmetschern, Übersetzern, Gutachtern und Kostenträgern, soweit dies für die Koordination meiner Behandlung und der vereinbarten Leistungen erforderlich ist.\n\nZusätzlich gilt die Schweigepflichtsentbindung gegenüber folgendem Vertrauenskontakt beziehungsweise folgenden Personen oder Institutionen:\n{recipients}\n\nDie Schweigepflichtsentbindung ist freiwillig und kann jederzeit mit Wirkung für die Zukunft schriftlich widerrufen werden.\n\nOrt, Datum: __________________________   Unterschrift: __________________________________________",
-        subject = adult_consent_subject_line(party),
-    )
+) {
+    layout.text_block(
+        annex,
+        11.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.0,
+    );
+    layout.text_block(
+        title,
+        16.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Primary,
+        0.0,
+        1.5,
+    );
+    layout.text_block(
+        &format!("Dokument-Nr.: {document_reference}"),
+        9.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Muted,
+        0.0,
+        4.0,
+    );
 }
 
-fn build_adult_privacy_consents_text(
+fn adult_legal_identity_block(
+    layout: &mut TreatmentPlanPdfLayout,
+    party: &DocPartyBlock,
+    include_contacts: bool,
+) {
+    layout.text_block(
+        &format!("Ich, {},", adult_consent_subject_line(party)),
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.0,
+    );
+    layout.text_block(
+        &format!(
+            "Adresse: {}",
+            consent_value_or_blank(party.address_line().as_deref())
+        ),
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.0,
+    );
+    if include_contacts {
+        let phone = consent_value_or_blank(party.phone.as_deref());
+        let email = consent_value_or_blank(party.email.as_deref());
+        layout.text_block(
+            &format!("Telefonnummer: {phone}.   E-mail: {email}"),
+            11.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            2.0,
+        );
+    }
+}
+
+fn adult_legal_signature_line(
+    layout: &mut TreatmentPlanPdfLayout,
+    party: &DocPartyBlock,
+    bindings: &DocumentBindingOverrides,
+) {
+    let place = bindings
+        .party_sign_place
+        .as_deref()
+        .or(bindings.sign_place.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("____________________");
+    let date = bindings
+        .party_sign_date
+        .or(bindings.sign_date)
+        .map(|value| value.format("%d.%m.%Y").to_string())
+        .unwrap_or_else(|| "______________".to_string());
+    layout.spacer(5.0);
+    layout.ensure_space(14.0);
+    let signature_y = layout.y_mm;
+    append_pdf_text_line(
+        &mut layout.page_ops,
+        &format!("Ort, Datum: {place}, {date}"),
+        PDF_LEFT_MARGIN_MM,
+        signature_y,
+        10.0,
+        &layout.regular_font,
+        TreatmentPlanPdfColor::Body,
+    );
+    append_pdf_text_line(
+        &mut layout.page_ops,
+        "Unterschrift: ____________________",
+        122.0,
+        signature_y,
+        10.0,
+        &layout.regular_font,
+        TreatmentPlanPdfColor::Body,
+    );
+    append_pdf_text_line(
+        &mut layout.page_ops,
+        party.name.trim(),
+        147.0,
+        signature_y - 6.0,
+        9.0,
+        &layout.bold_font,
+        TreatmentPlanPdfColor::Body,
+    );
+    layout.y_mm -= 14.0;
+}
+
+fn adult_legal_checkbox(layout: &mut TreatmentPlanPdfLayout, checked: bool, text: &str) {
+    let marker = if checked { "[x]" } else { "[ ]" };
+    layout.text_block(
+        &format!("{marker}  {text}"),
+        10.5,
+        false,
+        4.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.5,
+    );
+}
+
+fn adult_legal_channel(layout: &mut TreatmentPlanPdfLayout, checked: bool, label: &str) {
+    let marker = if checked { "[x]" } else { "[ ]" };
+    layout.text_block(
+        &format!("{marker}  {label}"),
+        10.5,
+        false,
+        12.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        0.8,
+    );
+}
+
+fn agency_privacy_email(agency: &AgencyContractSettings) -> Option<&str> {
+    agency
+        .privacy_email
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            agency
+                .email
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
+}
+
+fn build_adult_confidentiality_release_pdf(
     party: &DocPartyBlock,
     agency: &AgencyContractSettings,
     bindings: &DocumentBindingOverrides,
     document_reference: &str,
-) -> String {
+) -> Result<Vec<u8>, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let mut layout =
+        TreatmentPlanPdfLayout::new_legal(cost_estimate_footer_lines(agency), regular, bold);
     let agency_identity = agency_legal_identity(agency);
-    let data_system_name = agency.data_system_name.trim();
-    let address = consent_value_or_blank(party.address_line().as_deref());
-    let checked = |value: Option<bool>| if value.unwrap_or(false) { "[x]" } else { "[ ]" };
-    format!(
-        "Dokument-Nr.: {document_reference}\n\nGültig bis: bis auf Widerruf\n\nIch, {subject}\nAdresse: {address}\n\nwillige ein, dass {agency_identity} und beauftragte Mitarbeitende meine personenbezogenen und medizinischen Daten, Ausweiskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche Dokumentation, Verträge, Kostenvoranschläge und Rechnungen einholen, bearbeiten, speichern und an die für meine Betreuung erforderlichen medizinischen und nichtmedizinischen Leistungserbringer übermitteln dürfen.\n\n{privacy} Datenschutzhinweise erhalten und zur Kenntnis genommen.\n{healthcare} Verarbeitung personenbezogener Gesundheitsdaten.\n{email} Kommunikation und Übermittlung von Unterlagen per E-Mail.\n{messenger} Kommunikation und Übermittlung von Unterlagen per WhatsApp oder einem vergleichbaren Messenger.\n\nDie Speicherung und Verarbeitung erfolgt im {data_system_name}. Mir ist bekannt, dass elektronische Kommunikationswege besondere Vertraulichkeitsrisiken haben können.\n\nDie Einwilligungen sind freiwillig und können jederzeit mit Wirkung für die Zukunft widerrufen werden. Die Rechtmäßigkeit der bis zum Widerruf erfolgten Verarbeitung bleibt unberührt. Die Rechte auf Auskunft, Berichtigung, Löschung und Einschränkung der Verarbeitung nach der DSGVO bleiben bestehen.\n\nOrt, Datum: __________________________   Unterschrift: __________________________________________",
-        subject = adult_consent_subject_line(party),
-        privacy = checked(bindings.consent_privacy),
-        healthcare = checked(bindings.consent_healthcare),
-        email = checked(bindings.consent_email),
-        messenger = checked(bindings.consent_messenger),
-    )
+
+    adult_legal_document_header(
+        &mut layout,
+        "Anlage 2",
+        "Schweigepflichtentbindung",
+        document_reference,
+    );
+    adult_legal_identity_block(&mut layout, party, false);
+    fc_body(
+        &mut layout,
+        "bin mir bewusst, dass ärztliche und medizinische Dokumentation, Arztberichte, Rezepte, Kostenvoranschläge, Rechnungen und Quittungen Informationen im Sinne von § 203 StGB enthalten können, die insbesondere Rückschlüsse auf meine Diagnosen, medizinischen Untersuchungen, medizinischen Zustände sowie geplante, abgeschlossene oder noch andauernde Behandlungen zulassen oder solche Informationen enthalten können.",
+    );
+    fc_body(
+        &mut layout,
+        &format!(
+            "Daher entbinde ich alle meine behandelnden Ärzte und medizinischen Einrichtungen von ihrer Schweigepflicht gegenüber {agency_identity} und von der verantwortlichen Person beauftragten Mitarbeitenden."
+        ),
+    );
+
+    if let Some(recipients) = bindings
+        .extra_release_recipients
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        fc_subhead(&mut layout, "Zusätzlicher Vertrauenskontakt");
+        fc_body(
+            &mut layout,
+            &format!("Die Schweigepflichtentbindung gilt außerdem gegenüber: {recipients}."),
+        );
+    }
+
+    layout.text_block(
+        "Mir ist bekannt, dass ich diese Erklärung über die Entbindung von der Schweigepflicht jederzeit mit Wirkung für die Zukunft widerrufen kann.",
+        11.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        1.0,
+        1.0,
+    );
+    adult_legal_signature_line(&mut layout, party, bindings);
+
+    Ok(finalize_admin_pdf(document, layout))
+}
+
+fn render_adult_privacy_information(
+    layout: &mut TreatmentPlanPdfLayout,
+    agency: &AgencyContractSettings,
+) {
+    let agency_identity = agency_legal_identity(agency);
+    let privacy_contact = agency_privacy_email(agency)
+        .map(|value| format!("Per E-mail erreichen Sie den Datenschutzkontakt unter {value}."))
+        .unwrap_or_else(|| {
+            "Den Datenschutzkontakt erreichen Sie über die oben genannten Kontaktdaten der Agentur."
+                .to_string()
+        });
+    let privacy_email = agency_privacy_email(agency);
+
+    layout.text_block(
+        "Anlage 3",
+        11.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.0,
+    );
+    layout.text_block(
+        "Informationsblatt zum Datenschutz",
+        16.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Primary,
+        0.0,
+        3.0,
+    );
+    fc_body(
+        layout,
+        &format!(
+            "Im Rahmen der Vermittlung von Gesundheitsdienstleistungen werden personenbezogene Daten sowohl des Auftraggebers als auch durch den vorliegenden Vertrag begünstigter Dritter durch {} - Agentur für Patientenbetreuung - verarbeitet. Dabei werden die Anforderungen der Datenschutzgesetze (insbesondere DS-GVO und BDSG) umgesetzt. Hierzu werden technische und organisatorische Maßnahmen eingesetzt, um Ihre Daten zu schützen. Dieses Informationsblatt beschreibt die Verarbeitung personenbezogener Daten im Rahmen der allgemeinen geschäftlichen Tätigkeit und in der Vermittlungstätigkeit sowie die Rechte der durch die Verarbeitung betroffenen Personen.",
+            agency.name
+        ),
+    );
+    fc_subhead(layout, "Name des Verantwortlichen");
+    fc_body(
+        layout,
+        &format!("Verantwortlich für die Verarbeitung Ihrer Daten ist {agency_identity}."),
+    );
+    fc_subhead(layout, "Kontaktdaten des Datenschutzbeauftragten");
+    fc_body(
+        layout,
+        "Postalisch können Sie unseren Datenschutzbeauftragten unter der oben genannten Adresse erreichen (Vertraulich, zu Händen des Datenschutzbeauftragten).",
+    );
+    fc_body(layout, &privacy_contact);
+    fc_subhead(
+        layout,
+        "Kategorien der verarbeiteten personenbezogenen Daten",
+    );
+    fc_body(
+        layout,
+        "Personenbezogene Daten im Sinne dieses Schreibens sind alle Informationen, welche sich direkt oder indirekt auf eine Einzelperson beziehen (Art. 4 Nr. 1 DS-GVO).",
+    );
+    fc_body(
+        layout,
+        "Im Rahmen unserer allgemeinen Geschäftstätigkeit und bei den Vermittlungsmaßnahmen verarbeiten wir üblicherweise folgende Daten:",
+    );
+    fc_bullet(
+        layout,
+        "Persönliche Daten: Name, Kontaktdaten (E-mail, Handynummer, Anschrift, Geburtsdatum)",
+    );
+    fc_bullet(
+        layout,
+        "Gesundheitsdaten und behandlungsspezifische Daten: Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Rezepte",
+    );
+    fc_bullet(layout, "Zahlungsdaten: IBAN, BIC");
+    fc_subhead(
+        layout,
+        "Zweckbestimmung und Rechtsgründe der Datenerhebung, -verarbeitung oder -nutzung",
+    );
+    fc_body(
+        layout,
+        "Wir verarbeiten personenbezogene Daten einerseits im Rahmen unserer allgemeinen Geschäftstätigkeit, andererseits im Rahmen der Vermittlungs- und Koordinationstätigkeit sowie im Kontakt zu den vermittelten Ärzten, Therapeuten und sonstigen Dritten, die an der vermittelten medizinischen Behandlung und Betreuung beteiligt sind.",
+    );
+    fc_subhead(
+        layout,
+        "Erfüllung vertraglicher Pflichten (Art. 6 Abs. 1 S. 1 lit. b DS-GVO)",
+    );
+    fc_body(
+        layout,
+        "Wir verarbeiten personenbezogene Daten zur Durchführung oder Anbahnung von Verträgen, deren Vertragspartei der Betroffene ist. Art und Umfang der Verarbeitung ergeben sich in diesem Falle aus dem jeweiligen Vertrag.",
+    );
+    fc_subhead(
+        layout,
+        "Wahrung berechtigter Interessen (Art. 6 Abs. 1 S. 1 lit. f DS-GVO)",
+    );
+    fc_body(
+        layout,
+        "Wir verarbeiten im Rahmen unseres allgemeinen Geschäftsbetriebes und unserer Vermittlungs- und Koordinationstätigkeit personenbezogene Daten auf Grundlage einer Interessenabwägung, sofern schutzwürdige entgegenstehende Interessen der betroffenen Person nicht überwiegen.",
+    );
+    fc_body(
+        layout,
+        "Die zu Grunde liegenden berechtigten Interessen sind dabei insbesondere die Aufrechterhaltung des Geschäftsbetriebes sowie die Erbringung der vertraglich vereinbarten Leistung gegenüber unseren Auftraggebern. Dabei verarbeiten wir die personenbezogenen Daten nur soweit, wie dies für die Erbringung unserer Leistung erforderlich ist.",
+    );
+    fc_subhead(
+        layout,
+        "Übersenden interessanter Informationen und Werbung (Art. 6 Abs. 1 S. 1 lit. f DS-GVO)",
+    );
+    let marketing_contact = privacy_email
+        .map(|email| {
+            format!(
+                "Wir informieren unsere Auftraggeber gerne per E-mail oder Post über interessante Veranstaltungen, Ereignisse oder Neuigkeiten. Sollte dies von Ihnen nicht gewünscht sein, können Sie dieser Verwendung jederzeit widersprechen. Sie können den Widerspruch per E-mail an {email}, per Post oder an Ihren Ansprechpartner senden."
+            )
+        })
+        .unwrap_or_else(|| {
+            "Wir informieren unsere Auftraggeber gerne per E-mail oder Post über interessante Veranstaltungen, Ereignisse oder Neuigkeiten. Sollte dies von Ihnen nicht gewünscht sein, können Sie dieser Verwendung jederzeit per Post oder gegenüber Ihrem Ansprechpartner widersprechen."
+                .to_string()
+        });
+    fc_body(layout, &marketing_contact);
+    fc_body(
+        layout,
+        "Selbstverständlich können Sie Ihren Widerspruch zur Zusendung dieser Informationen auch bereits als Anlage an den Rahmenvertrag sowie Einzelauftrag erklären.",
+    );
+    fc_body(
+        layout,
+        "Sofern keine der vorgenannten Rechtsgrundlagen vorliegt, holen wir für die Durchführung einer Verarbeitung eine Einwilligung des Betroffenen ein, den wir über die geplante Verarbeitung umfassend informieren.",
+    );
+    fc_subhead(
+        layout,
+        "Empfänger oder Kategorien von Empfängern, denen Ihre Daten mitgeteilt werden können",
+    );
+    fc_subhead(layout, "Technische Dienstleistungen");
+    fc_body(
+        layout,
+        "Für einzelne technische Aufgaben nehmen wir die Unterstützung von Spezialisten in Anspruch. Dabei kann nicht ausgeschlossen werden, dass Daten im Rahmen von Wartungs- und Reparaturarbeiten sowie Dienstleistungen zur Sicherstellung der Richtigkeit, Sicherheit und Verfügbarkeit von Daten auch an Subunternehmer weitergegeben werden. Durch vertragliche Regelungen und sorgfältige Auswahl stellen wir sicher, dass unsere Sicherheitsstandards auch bei den Dienstleistern umgesetzt werden.",
+    );
+    fc_subhead(layout, "Dauer der Datenspeicherung");
+    fc_body(
+        layout,
+        "Wir speichern personenbezogene Daten so lange, wie wir sie für die Durchführung der jeweiligen Aufgabe benötigen. Soweit die Daten gesetzlichen Aufbewahrungspflichten unterliegen, speichern wir sie für die Dauer der Aufbewahrungsfrist. Darüber hinaus speichern wir personenbezogene Daten, wenn ein weiteres berechtigtes Interesse nach Art. 6 Abs. 1 S. 1 lit. f DS-GVO vorliegt.",
+    );
+    fc_body(
+        layout,
+        "Soweit personenbezogene Daten mehreren Aufbewahrungsfristen unterliegen, ist die jeweils längste Frist maßgeblich.",
+    );
+    fc_subhead(layout, "Betroffenenrechte");
+    let rights_contact = privacy_email
+        .map(|email| {
+            format!(
+                "Bei Fragen, Beschwerden und Anregungen zum Datenschutz dürfen Sie sich jederzeit an den Datenschutzbeauftragten unter {email} wenden."
+            )
+        })
+        .unwrap_or_else(|| {
+            "Bei Fragen, Beschwerden und Anregungen zum Datenschutz dürfen Sie sich jederzeit über die Kontaktdaten der Agentur an den Datenschutzbeauftragten wenden."
+                .to_string()
+        });
+    fc_body(layout, &rights_contact);
+    fc_body(
+        layout,
+        "Allen Betroffenen stehen von Gesetzes wegen Auskunftsrechte zu, etwa zum Zweck der Verarbeitung, zu Empfängern der Daten und geltenden Speicherfristen. Daneben bestehen Rechte auf Berichtigung unrichtiger Daten, Löschung, Einschränkung der Verarbeitung und Datenübertragbarkeit sowie Widerspruch.",
+    );
+    fc_body(
+        layout,
+        "Erteilte Einwilligungen können jederzeit mit Wirkung für die Zukunft widerrufen werden, wobei der Widerruf ebenso einfach zu erklären ist wie die Einwilligung.",
+    );
+    let complaint_contact = privacy_email
+        .map(|email| {
+            format!(
+                "Bevor Sie von Ihrem Beschwerderecht bei einer Datenschutzaufsichtsbehörde Gebrauch machen, möchten wir Sie bitten, zunächst noch einmal auf uns zuzukommen, beispielsweise über {email} oder durch Anschreiben an Ihren Ansprechpartner."
+            )
+        })
+        .unwrap_or_else(|| {
+            "Bevor Sie von Ihrem Beschwerderecht bei einer Datenschutzaufsichtsbehörde Gebrauch machen, möchten wir Sie bitten, zunächst noch einmal über die Kontaktdaten der Agentur auf uns zuzukommen."
+                .to_string()
+        });
+    fc_body(layout, &complaint_contact);
+}
+
+fn build_adult_privacy_consents_pdf(
+    party: &DocPartyBlock,
+    agency: &AgencyContractSettings,
+    bindings: &DocumentBindingOverrides,
+    document_reference: &str,
+) -> Result<Vec<u8>, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let mut layout =
+        TreatmentPlanPdfLayout::new_legal(cost_estimate_footer_lines(agency), regular, bold);
+    let agency_identity = agency_legal_identity(agency);
+    let data_system_name = if agency.data_system_name.trim().is_empty() {
+        "CRM-System"
+    } else {
+        agency.data_system_name.trim()
+    };
+    let healthcare = bindings.consent_healthcare.unwrap_or(false);
+    let privacy = bindings.consent_privacy.unwrap_or(false);
+    let email = bindings.consent_email.unwrap_or(false);
+    let messenger = bindings.consent_messenger.unwrap_or(false);
+    let recipients = bindings
+        .extra_release_recipients
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    adult_legal_document_header(
+        &mut layout,
+        "Anlage 1",
+        "Einverständniserklärung zur Datenübermittlung",
+        document_reference,
+    );
+    adult_legal_identity_block(&mut layout, party, true);
+    fc_body(&mut layout, "bin damit einverstanden (bitte ankreuzen):");
+    adult_legal_checkbox(
+        &mut layout,
+        healthcare,
+        &format!(
+            "dass {agency_identity} und von der verantwortlichen Person beauftragte Mitarbeitende meine personenbezogenen und medizinischen Daten, Personalausweis- und Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Rezepte, Kostenvoranschläge, Rechnungen, Quittungen, Behandlungs- und Leistungsverträge sowie Arzt- und Krankenhausberichte einholen, bearbeiten, speichern und erforderlichenfalls an behandelnde Ärzte, Krankenhäuser, Labore, andere medizinische Einrichtungen, Dolmetscher, Übersetzer, Gutachter oder Kostenträger übermitteln;"
+        ),
+    );
+    adult_legal_checkbox(
+        &mut layout,
+        healthcare,
+        &format!(
+            "dass alle meine behandelnden Ärzte und medizinischen Einrichtungen meine Behandlungsunterlagen und medizinischen Informationen an {agency_identity} übermitteln dürfen;"
+        ),
+    );
+    adult_legal_checkbox(
+        &mut layout,
+        privacy,
+        &format!(
+            "dass meine erforderlichen personenbezogenen und medizinischen Unterlagen im {data_system_name} gespeichert und verarbeitet werden;"
+        ),
+    );
+    adult_legal_checkbox(
+        &mut layout,
+        recipients.is_some(),
+        "dass meine personenbezogenen und medizinischen Daten an folgende Personen oder Institutionen übermittelt werden:",
+    );
+    if let Some(recipients) = recipients {
+        for line in recipients.lines().filter(|line| !line.trim().is_empty()) {
+            layout.text_block(
+                line.trim(),
+                10.5,
+                false,
+                12.0,
+                TreatmentPlanPdfColor::Body,
+                0.0,
+                0.8,
+            );
+        }
+    } else {
+        layout.text_block(
+            consent_blank_long(),
+            10.5,
+            false,
+            12.0,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            0.8,
+        );
+    }
+    adult_legal_checkbox(
+        &mut layout,
+        email || messenger,
+        "dass meine personenbezogenen und medizinischen Daten sowie erforderliche Unterlagen über folgende Kommunikationsmedien eingeholt und/oder übermittelt werden:",
+    );
+    adult_legal_channel(&mut layout, email, "E-mail");
+    adult_legal_channel(&mut layout, false, "Threema-Messenger");
+    adult_legal_channel(&mut layout, messenger, "WhatsApp-Messenger");
+    adult_legal_channel(&mut layout, false, "Telegram-Messenger");
+    layout.page_break();
+    fc_body(
+        &mut layout,
+        "Ich bin mir der möglichen Risiken bei der Übermittlung sensibler Daten per E-mail, WhatsApp-, Telegram- oder Threema-Messenger bewusst.",
+    );
+    if let Some(processor_notice) = agency
+        .data_processor_notice
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        fc_body(&mut layout, "Mir ist bekannt:");
+        fc_body(&mut layout, processor_notice);
+    }
+    fc_body(
+        &mut layout,
+        "Die Einwilligung in die Verarbeitung meiner Daten ist freiwillig und kann jederzeit ohne Angabe von Gründen schriftlich mit Wirkung für die Zukunft widerrufen werden. Der Widerruf berührt die Rechtmäßigkeit der bisherigen Verarbeitung nicht.",
+    );
+    fc_body(
+        &mut layout,
+        "Die Verarbeitung von personenbezogenen und Gesundheitsdaten bleibt bis zum Zeitpunkt des Widerrufs oder solange gesetzliche Aufbewahrungsfristen bestehen rechtmäßig.",
+    );
+    fc_body(
+        &mut layout,
+        "Die Aufklärung gemäß EU-Datenschutz-Grundverordnung (DS-GVO) ist erfolgt. Ich wurde darüber aufgeklärt, dass ich ein Recht auf Auskunft, Berichtigung, Löschung oder Einschränkung der Verarbeitung meiner personenbezogenen Daten habe und diese Rechte jederzeit geltend machen kann.",
+    );
+    adult_legal_signature_line(&mut layout, party, bindings);
+
+    layout.page_break();
+    render_adult_privacy_information(&mut layout, agency);
+
+    Ok(finalize_admin_pdf(document, layout))
 }
 
 fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'static str> {
@@ -19531,10 +20113,12 @@ async fn list_document_categories(
 #[cfg(test)]
 mod tests {
     use super::{
-        DocumentBindingOverrides, GeneratedContractLineItem, GeneratedPatientStickerContext,
-        ServiceLineInput, build_manual_generated_text_pdf, build_patient_sticker_pdf,
-        compute_line_item_totals, cost_coverage_money_cell, cost_estimate_price_text,
-        generated_binding_snapshot, generated_compliance_document_number, pdf_text_font_handles,
+        AgencyContractSettings, DocPartyBlock, DocumentBindingOverrides, GeneratedContractLineItem,
+        GeneratedPatientStickerContext, ServiceLineInput, build_adult_confidentiality_release_pdf,
+        build_adult_privacy_consents_pdf, build_manual_generated_text_pdf,
+        build_patient_sticker_pdf, compute_line_item_totals, cost_coverage_money_cell,
+        cost_estimate_price_text, generated_binding_snapshot, generated_compliance_document_number,
+        pdf_text_font_handles,
     };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
     use chrono::{NaiveDate, TimeZone, Utc};
@@ -19634,6 +20218,91 @@ mod tests {
         let extracted_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
         assert!(extracted_text.contains("Sehr geehrte Damen und Herren"));
         assert!(extracted_text.contains("Individueller Text für den Patienten"));
+    }
+
+    #[test]
+    fn adult_legal_documents_follow_reference_structure_and_bind_dynamic_data() {
+        let party = DocPartyBlock {
+            name: "Anna Beispiel".to_string(),
+            first_name: Some("Anna".to_string()),
+            last_name: Some("Beispiel".to_string()),
+            birth_date: NaiveDate::from_ymd_opt(1988, 4, 12),
+            street: Some("Musterstr. 1".to_string()),
+            zip: Some("10115".to_string()),
+            city: Some("Berlin".to_string()),
+            country: Some("Deutschland".to_string()),
+            email: Some("anna@example.test".to_string()),
+            phone: Some("+49 30 123456".to_string()),
+            ..Default::default()
+        };
+        let agency = AgencyContractSettings {
+            name: "Test Agentur für Patientenbetreuung".to_string(),
+            care_of: Some("Max Verantwortlich".to_string()),
+            principal_birth_date: NaiveDate::from_ymd_opt(1975, 6, 3),
+            address: Some("Agenturstr. 2, 50667 Köln".to_string()),
+            phone: Some("+49 221 987654".to_string()),
+            email: Some("kontakt@example.test".to_string()),
+            privacy_email: Some("datenschutz@example.test".to_string()),
+            sign_place: "Köln".to_string(),
+            data_system_name: "TEST-CRM".to_string(),
+            data_processor_notice: Some(
+                "Ein beauftragter Auftragsverarbeiter kann technisch beteiligt sein.".to_string(),
+            ),
+            ..Default::default()
+        };
+        let bindings = DocumentBindingOverrides {
+            party_sign_place: Some("Berlin".to_string()),
+            party_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
+            extra_release_recipients: Some("Maria Beispiel, Vertrauenskontakt".to_string()),
+            consent_privacy: Some(true),
+            consent_healthcare: Some(true),
+            consent_email: Some(true),
+            consent_messenger: Some(false),
+            ..Default::default()
+        };
+
+        let release = build_adult_confidentiality_release_pdf(
+            &party,
+            &agency,
+            &bindings,
+            "SE-20260716-UNITTEST0001",
+        )
+        .unwrap();
+        let release_text = pdf_extract::extract_text_from_mem(&release)
+            .unwrap()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(release_text.contains("Schweigepflichtentbindung"));
+        assert!(release_text.contains("203 StGB"));
+        assert!(release_text.contains("SE-20260716-UNITTEST0001"));
+        assert!(release_text.contains("Maria Beispiel, Vertrauenskontakt"));
+        assert!(release_text.contains("Test Agentur für Patientenbetreuung"));
+        assert!(release_text.contains("Seite: 1"));
+        assert!(!release_text.contains('?'));
+
+        let privacy = build_adult_privacy_consents_pdf(
+            &party,
+            &agency,
+            &bindings,
+            "EW-20260716-UNITTEST0001",
+        )
+        .unwrap();
+        let privacy_text = pdf_extract::extract_text_from_mem(&privacy)
+            .unwrap()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(privacy_text.contains("Einverständniserklärung zur Datenübermittlung"));
+        assert!(privacy_text.contains("Informationsblatt zum Datenschutz"));
+        assert!(privacy_text.contains("EW-20260716-UNITTEST0001"));
+        assert!(privacy_text.contains("anna@example.test"));
+        assert!(privacy_text.contains("datenschutz@example.test"));
+        assert!(privacy_text.contains("TEST-CRM"));
+        assert!(privacy_text.contains("[x]"));
+        assert!(privacy_text.contains("[ ]"));
+        assert!(privacy_text.matches("Seite:").count() >= 4);
+        assert!(!privacy_text.contains('?'));
     }
 
     #[test]

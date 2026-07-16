@@ -163,6 +163,7 @@ export interface LeadDetail extends Lead {
 
   trusted_contact_name: string | null;
   trusted_contact_phone: string | null;
+  trusted_contact_email: string | null;
   trusted_contact_relation: string | null;
   trusted_contact_birth_date: string | null;
   trusted_contact_address: string | null;

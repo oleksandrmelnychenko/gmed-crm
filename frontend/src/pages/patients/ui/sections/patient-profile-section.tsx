@@ -407,6 +407,7 @@ function usePatientProfileTabContent({
 
   const intakeProfile = intakeProfileRecord(detail.intake_profile);
   const trustedContactProfile = intakeProfileRecord(intakeProfile["trusted_contact"]);
+  const trustedContactEmail = intakeProfileString(trustedContactProfile, "email");
   const trustedContactBirthDate = intakeProfileString(trustedContactProfile, "birth_date");
   const trustedContactAddress = intakeProfileString(trustedContactProfile, "address");
   const intakeSource = intakeProfileString(intakeProfile, "source");
@@ -563,6 +564,9 @@ function usePatientProfileTabContent({
           <ProfileSummaryLine label={t.patients_emergency_name} value={fieldValue(detail.emergency_contact_name, t.common_not_set)} />
           <ProfileSummaryLine label={t.patients_emergency_phone} value={fieldValue(detail.emergency_contact_phone, t.common_not_set)} />
           <ProfileSummaryLine label={t.patients_emergency_relation} value={fieldValue(detail.emergency_contact_relation, t.common_not_set)} />
+          {trustedContactEmail ? (
+            <ProfileSummaryLine label={t.patient_profile_editor_email} value={trustedContactEmail} />
+          ) : null}
           {trustedContactBirthDate ? (
             <ProfileSummaryLine label={t.patients_birth_date} value={formatDate(trustedContactBirthDate)} />
           ) : null}

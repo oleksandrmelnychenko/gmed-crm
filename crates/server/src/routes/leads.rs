@@ -182,6 +182,7 @@ struct UpdateLeadRequest {
     insurance_type: Option<String>,
     trusted_contact_name: Option<String>,
     trusted_contact_phone: Option<String>,
+    trusted_contact_email: Option<String>,
     trusted_contact_relation: Option<String>,
     trusted_contact_birth_date: Option<String>,
     trusted_contact_address: Option<String>,
@@ -1187,7 +1188,8 @@ async fn get_lead(
                   primary_concern_text, additional_concerns,
                   services, has_insurance, insurance_covers_germany,
                   insurance_provider, insurance_number, insurance_type,
-                  trusted_contact_name, trusted_contact_phone, trusted_contact_relation,
+                  trusted_contact_name, trusted_contact_phone, trusted_contact_email,
+                  trusted_contact_relation,
                   trusted_contact_birth_date, trusted_contact_address,
                   preferred_location, visit_timing, message,
                   consent_automated_contact, consent_healthcare,
@@ -1376,6 +1378,10 @@ async fn get_lead(
     obj.insert(
         "trusted_contact_phone".into(),
         s_opt(&row, "trusted_contact_phone"),
+    );
+    obj.insert(
+        "trusted_contact_email".into(),
+        s_opt(&row, "trusted_contact_email"),
     );
     obj.insert(
         "trusted_contact_relation".into(),
@@ -1721,6 +1727,7 @@ async fn update_lead(
         && body.insurance_type.is_none()
         && body.trusted_contact_name.is_none()
         && body.trusted_contact_phone.is_none()
+        && body.trusted_contact_email.is_none()
         && body.trusted_contact_relation.is_none()
         && body.trusted_contact_birth_date.is_none()
         && body.trusted_contact_address.is_none()
@@ -1769,9 +1776,10 @@ async fn update_lead(
                    ELSE trusted_contact_birth_date
                END,
                trusted_contact_address = COALESCE($36, trusted_contact_address),
-               has_insurance = COALESCE($37, has_insurance),
+               trusted_contact_email = COALESCE($37, trusted_contact_email),
+               has_insurance = COALESCE($38, has_insurance),
                insurance_covers_germany = CASE
-                   WHEN $38 THEN $39
+                   WHEN $39 THEN $40
                    ELSE insurance_covers_germany
                END
            WHERE id = $1"#,
@@ -1816,6 +1824,7 @@ async fn update_lead(
     .bind(trusted_contact_birth_date_supplied)
     .bind(trusted_contact_birth_date)
     .bind(body.trusted_contact_address.as_deref().map(str::trim))
+    .bind(body.trusted_contact_email.as_deref().map(str::trim))
     .bind(body.has_insurance)
     .bind(insurance_covers_germany_supplied)
     .bind(insurance_covers_germany.as_deref())
@@ -2979,7 +2988,8 @@ async fn convert_lead(
                   has_travel_documents, currently_in_treatment, has_health_risk_for_travel,
                   services, has_insurance, insurance_covers_germany,
                   insurance_provider, insurance_number, insurance_type,
-                  trusted_contact_name, trusted_contact_phone, trusted_contact_relation,
+                  trusted_contact_name, trusted_contact_phone, trusted_contact_email,
+                  trusted_contact_relation,
                   trusted_contact_birth_date, trusted_contact_address,
                   preferred_location, visit_timing, message,
                   date_of_birth, legal_sex, qualification_status, converted_patient_id,
@@ -3129,6 +3139,12 @@ async fn convert_lead(
         .flatten()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+    let trusted_contact_email: Option<String> = lead
+        .try_get::<Option<String>, _>("trusted_contact_email")
+        .ok()
+        .flatten()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
     let trusted_contact_relation: Option<String> = lead
         .try_get::<Option<String>, _>("trusted_contact_relation")
         .ok()
@@ -3178,6 +3194,7 @@ async fn convert_lead(
         "trusted_contact": {
             "name": trusted_contact_name.clone(),
             "phone": trusted_contact_phone.clone(),
+            "email": trusted_contact_email.clone(),
             "relation": trusted_contact_relation.clone(),
             "birth_date": trusted_contact_birth_date.map(|value| value.to_string()),
             "address": trusted_contact_address.clone(),
@@ -4296,6 +4313,7 @@ async fn anonymize_lead_pii(
                insurance_type = NULL,
                trusted_contact_name = NULL,
                trusted_contact_phone = NULL,
+               trusted_contact_email = NULL,
                trusted_contact_relation = NULL,
                trusted_contact_birth_date = NULL,
                trusted_contact_address = NULL,

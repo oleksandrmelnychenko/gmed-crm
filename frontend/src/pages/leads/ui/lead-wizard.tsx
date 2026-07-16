@@ -161,6 +161,7 @@ type Draft = {
   insuranceNumber: string;
   trustedContactName: string;
   trustedContactPhone: string;
+  trustedContactEmail: string;
   trustedContactRelation: string;
   trustedContactBirthDate: string;
   trustedContactAddress: string;
@@ -342,6 +343,11 @@ function inputString(value: unknown, fallback = "") {
     : fallback;
 }
 
+function germanDocumentDate(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : value.trim();
+}
+
 function questionnairePayload(lead: LeadDetail) {
   const raw = asRecord(lead.raw_payload);
   return asRecord(raw?.["payload"]);
@@ -409,6 +415,7 @@ function autosavePayload(
     insurance_number: draft.insuranceNumber.trim(),
     trusted_contact_name: draft.trustedContactName.trim(),
     trusted_contact_phone: draft.trustedContactPhone.trim(),
+    trusted_contact_email: draft.trustedContactEmail.trim(),
     trusted_contact_relation: draft.trustedContactRelation.trim(),
     trusted_contact_birth_date: draft.trustedContactBirthDate || undefined,
     trusted_contact_address: draft.trustedContactAddress.trim(),
@@ -727,6 +734,7 @@ function draftFromLead(lead: LeadDetail): Draft {
     insuranceNumber: lead.insurance_number ?? "",
     trustedContactName: lead.trusted_contact_name ?? questionnaireText(lead, "emergencyContactName", "trustedContactName"),
     trustedContactPhone: lead.trusted_contact_phone ?? questionnaireText(lead, "emergencyContactPhone", "trustedContactPhone"),
+    trustedContactEmail: lead.trusted_contact_email ?? questionnaireText(lead, "emergencyContactEmail", "trustedContactEmail"),
     trustedContactRelation: lead.trusted_contact_relation ?? questionnaireText(lead, "emergencyContactRelation", "trustedContactRelation"),
     trustedContactBirthDate: lead.trusted_contact_birth_date ?? "",
     trustedContactAddress: lead.trusted_contact_address ?? questionnaireText(lead, "emergencyContactAddress", "trustedContactAddress"),
@@ -777,6 +785,7 @@ function blankDraft(): Draft {
     insuranceNumber: "",
     trustedContactName: "",
     trustedContactPhone: "",
+    trustedContactEmail: "",
     trustedContactRelation: "",
     trustedContactBirthDate: "",
     trustedContactAddress: "",
@@ -2458,18 +2467,14 @@ export function LeadWizard({
 
   function trustedContactRecipient() {
     if (!draft?.trustedContactName.trim()) return "";
-    const identity = [
+    return [
       draft.trustedContactName.trim(),
       draft.trustedContactBirthDate
-        ? `${tx("дата рождения", "geb. am")} ${draft.trustedContactBirthDate}`
+        ? `${tx("дата рождения", "geb. am")} ${germanDocumentDate(draft.trustedContactBirthDate)}`
         : "",
-    ].filter(Boolean).join(", ");
-    return [
-      identity,
-      draft.trustedContactRelation.trim(),
-      draft.trustedContactAddress.trim(),
+      draft.trustedContactEmail.trim(),
       draft.trustedContactPhone.trim(),
-    ].filter(Boolean).join(" · ");
+    ].filter(Boolean).join(", ");
   }
 
   async function generateLeadComplianceDocument(
@@ -2489,16 +2494,15 @@ export function LeadWizard({
         document_variant: "original",
         access_category: "patient",
         status: "active",
-        bindings: templateId === "confidentiality_release"
+        bindings: templateId === "privacy_consents"
           ? {
               extra_release_recipients: trustedContactRecipient(),
-            }
-          : {
               consent_privacy: draft.privacyConsent,
               consent_healthcare: draft.healthcareConsent,
               consent_email: Boolean(lead.email_consent),
               consent_messenger: Boolean(lead.whatsapp_consent),
-            },
+            }
+          : {},
       });
       const nextDocuments = await fetchDocuments(`/documents?lead_id=${encodeURIComponent(leadId)}`);
       setDocuments(nextDocuments);
@@ -3614,28 +3618,12 @@ ${serviceCommentLines.join("\n")}`
                     {wizardDocuments.confidentiality_release.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
                   </Button>
                 </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="border-t border-border pt-3 md:col-span-2">
-                    <span className="text-xs font-semibold uppercase text-muted-foreground">
-                      {tx("Доверенный контакт", "Vertrauenskontakt")}
-                    </span>
-                  </div>
-                  <Field label={tx("Имя и фамилия", "Vor- und Nachname")}>
-                    <Input value={draft.trustedContactName} onChange={(event) => patch("trustedContactName", event.target.value)} />
-                  </Field>
-                  <Field label={tx("Телефон", "Telefon")}>
-                    <Input type="tel" value={draft.trustedContactPhone} onChange={(event) => patch("trustedContactPhone", event.target.value)} />
-                  </Field>
-                  <Field label={tx("Кем приходится клиенту", "Beziehung zur Person")}>
-                    <Input value={draft.trustedContactRelation} onChange={(event) => patch("trustedContactRelation", event.target.value)} />
-                  </Field>
-                  <Field label={tx("Дата рождения", "Geburtsdatum")}>
-                    <Input type="date" value={draft.trustedContactBirthDate} onChange={(event) => patch("trustedContactBirthDate", event.target.value)} />
-                  </Field>
-                  <Field label={tx("Адрес", "Adresse")} className="md:col-span-2">
-                    <Input value={draft.trustedContactAddress} onChange={(event) => patch("trustedContactAddress", event.target.value)} />
-                  </Field>
-                </div>
+                <p className="text-xs text-muted-foreground">
+                  {tx(
+                    "Отдельное освобождение всех лечащих врачей и медицинских учреждений от врачебной тайны.",
+                    "Separate Entbindung aller behandelnden Ärzte und medizinischen Einrichtungen von der Schweigepflicht.",
+                  )}
+                </p>
                 <WizardDocumentRows
                   documents={wizardDocuments.confidentiality_release}
                   complianceKind="confidentiality_release"
@@ -3654,7 +3642,7 @@ ${serviceCommentLines.join("\n")}`
               <div id={PRIVACY_DOCUMENT_ID} tabIndex={-1} className="space-y-4 border-b border-border pb-4 focus:outline-none">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <h3 className="text-sm font-semibold text-foreground">
-                    {tx("Согласия", "Einwilligungen")}
+                    {tx("Согласие на использование и передачу данных", "Einverständniserklärung zur Datenübermittlung")}
                   </h3>
                   <Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_consents")}>
                     {busy === "generate-privacy_consents" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
@@ -3664,6 +3652,37 @@ ${serviceCommentLines.join("\n")}`
                 <div className="border-y border-border">
                   <ToggleRow id={PRIVACY_CONSENT_ID} checked={draft.privacyConsent} disabled={isBusy} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} />
                   <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={draft.healthcareConsent} disabled={isBusy} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} />
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="md:col-span-2">
+                    <span className="text-xs font-semibold uppercase text-muted-foreground">
+                      {tx("Доверенное лицо / дополнительный получатель", "Vertrauenskontakt / zusätzlicher Empfänger")}
+                    </span>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {tx(
+                        "Имя, дата рождения, e-mail и телефон будут подставлены в согласие на передачу данных.",
+                        "Name, Geburtsdatum, E-Mail und Telefon werden in die Datenübermittlungserklärung übernommen.",
+                      )}
+                    </p>
+                  </div>
+                  <Field label={tx("Имя и фамилия", "Vor- und Nachname")}>
+                    <Input value={draft.trustedContactName} onChange={(event) => patch("trustedContactName", event.target.value)} />
+                  </Field>
+                  <Field label="E-Mail">
+                    <Input type="email" value={draft.trustedContactEmail} onChange={(event) => patch("trustedContactEmail", event.target.value)} />
+                  </Field>
+                  <Field label={tx("Телефон", "Telefon")}>
+                    <Input type="tel" value={draft.trustedContactPhone} onChange={(event) => patch("trustedContactPhone", event.target.value)} />
+                  </Field>
+                  <Field label={tx("Кем приходится клиенту", "Beziehung zur Person")}>
+                    <Input value={draft.trustedContactRelation} onChange={(event) => patch("trustedContactRelation", event.target.value)} />
+                  </Field>
+                  <Field label={tx("Дата рождения", "Geburtsdatum")}>
+                    <Input type="date" value={draft.trustedContactBirthDate} onChange={(event) => patch("trustedContactBirthDate", event.target.value)} />
+                  </Field>
+                  <Field label={tx("Адрес", "Adresse")}>
+                    <Input value={draft.trustedContactAddress} onChange={(event) => patch("trustedContactAddress", event.target.value)} />
+                  </Field>
                 </div>
                 <WizardDocumentRows
                   documents={wizardDocuments.privacy_consents}
