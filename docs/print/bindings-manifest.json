@@ -76,6 +76,23 @@
       "runtime_tokens": ["GeneratedAppointmentConfirmationContext", "load_generated_appointment_scope", "doc_id", "clinics", "first_examination", "examination_weeks", "continuation_statement"]
     }
   ],
+  "generated_templates": [
+    {
+      "template_id": "privacy_information",
+      "wizard_kind": "privacy_information",
+      "requires_binding_schema": false,
+      "wizard_heading_tokens": [
+        "Informationsblatt zum Datenschutz"
+      ],
+      "frontend_form_tokens": [
+        "isFixedLegalDocumentTemplate"
+      ],
+      "runtime_tokens": [
+        "build_adult_privacy_information_pdf",
+        "render_adult_privacy_information"
+      ]
+    }
+  ],
   "pdf_references": [
     {
       "file": "ADMIN-DSGVO-Einversta\u0308ndniserkla\u0308rung zur Datenu\u0308bermittlung - \u0421\u043e\u0433\u043b\u0430\u0441\u0438\u0435 \u043d\u0430 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043d\u0438\u0435 \u0438 \u043f\u0435\u0440\u0435\u0434\u0430\u0447\u0443 \u043f\u0435\u0440\u0441\u043e\u043d\u0430\u043b\u044c\u043d\u044b\u0445 \u0438 \u043c\u0435\u0434\u0438\u0446\u0438\u043d\u0441\u043a\u0438\u0445 \u0434\u0430\u043d\u043d\u044b\u0445.pdf",
@@ -105,8 +122,7 @@
         "isFixedLegalDocumentTemplate"
       ],
       "runtime_tokens": [
-        "build_adult_privacy_consents_pdf",
-        "render_adult_privacy_information"
+        "build_adult_privacy_consents_pdf"
       ]
     },
     {

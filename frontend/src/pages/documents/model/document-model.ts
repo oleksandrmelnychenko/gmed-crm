@@ -161,6 +161,7 @@ const DOCUMENT_ART_LABELS: Record<string, string> = {
   framework_contract: "Rahmendienstleistungsvertrag",
   medication_summary: "Medikamentenübersicht",
   patient_sticker: "Patientenetikett",
+  privacy_information: "Informationsblatt zum Datenschutz",
   privacy_consents: "Einverständniserklärung zur Datenübermittlung",
   single_order: "Einzelauftrag",
   treatment_plan: "Behandlungsplan",

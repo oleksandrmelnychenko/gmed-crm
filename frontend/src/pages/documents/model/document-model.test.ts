@@ -78,6 +78,14 @@ describe("buildStandardDocumentName", () => {
         documentDate: "2026-06-04",
       }),
     ).toBe("VERTRAG-Einzelauftrag vom 04.06.2026");
+
+    expect(
+      buildStandardDocumentName({
+        category: "consent",
+        art: "privacy_information",
+        documentDate: "2026-06-04",
+      }),
+    ).toBe("ADMIN-Informationsblatt zum Datenschutz vom 04.06.2026");
   });
 
   it("keeps finance documents in the finance prefix even with German labels", () => {
@@ -252,33 +260,36 @@ describe("buildGenerateDocumentPayload", () => {
     ).toBe("Form fallback text");
   });
 
-  it("never sends free-form overrides for fixed legal templates", () => {
-    const payload = buildGenerateDocumentPayload({
-      template: template({
-        id: "privacy_consents",
-        art: "privacy_consents",
-        category: "consent",
-      }),
-      form: generateForm({
-        templateId: "privacy_consents",
-        titleOverride: "Changed title",
-        introduction: "Changed introduction",
-        closingNote: "Changed closing note",
-        manualText: "Arbitrary replacement",
-        manualTextDirty: true,
-      }),
-      patients,
-      displayedManualText: "Arbitrary replacement",
-    });
+  it.each(["privacy_consents", "privacy_information"])(
+    "never sends free-form overrides for the fixed legal template %s",
+    (templateId) => {
+      const payload = buildGenerateDocumentPayload({
+        template: template({
+          id: templateId,
+          art: templateId,
+          category: "consent",
+        }),
+        form: generateForm({
+          templateId,
+          titleOverride: "Changed title",
+          introduction: "Changed introduction",
+          closingNote: "Changed closing note",
+          manualText: "Arbitrary replacement",
+          manualTextDirty: true,
+        }),
+        patients,
+        displayedManualText: "Arbitrary replacement",
+      });
 
-    expect(payload).toMatchObject({
-      title_override: null,
-      introduction: null,
-      closing_note: null,
-      manual_text: null,
-      text_block_keys: [],
-    });
-  });
+      expect(payload).toMatchObject({
+        title_override: null,
+        introduction: null,
+        closing_note: null,
+        manual_text: null,
+        text_block_keys: [],
+      });
+    },
+  );
 
   it("resolves generated finance templates to financial access", () => {
     const payload = buildGenerateDocumentPayload({

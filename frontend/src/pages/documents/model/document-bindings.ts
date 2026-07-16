@@ -1,5 +1,8 @@
+import { countryNameForGermanDocument } from "@/components/ui/country-select";
+
 export type BindingFieldKind =
   | "text"
+  | "country"
   | "date"
   | "number"
   | "textarea"
@@ -15,6 +18,7 @@ export type DocumentBindingForm = Record<string, string>;
 
 const FIXED_LEGAL_TEMPLATE_IDS = new Set([
   "confidentiality_release",
+  "privacy_information",
   "privacy_consents",
 ]);
 
@@ -39,7 +43,7 @@ const PATIENT_PARTY_BINDING_FIELDS: BindingFieldDef[] = [
   { key: "party_street", label: "Patient Straße", kind: "text" },
   { key: "party_zip", label: "Patient PLZ", kind: "text" },
   { key: "party_city", label: "Patient Ort", kind: "text" },
-  { key: "party_country", label: "Patient Land", kind: "text" },
+  { key: "party_country", label: "Patient Land", kind: "country" },
   { key: "party_email", label: "Patient E-Mail", kind: "text" },
   { key: "party_phone", label: "Patient Telefon", kind: "text" },
 ];
@@ -118,7 +122,7 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     { key: "payer_street", label: "Kostenübernehmer Straße", kind: "text" },
     { key: "payer_zip", label: "Kostenübernehmer PLZ", kind: "text" },
     { key: "payer_city", label: "Kostenübernehmer Ort", kind: "text" },
-    { key: "payer_country", label: "Kostenübernehmer Land", kind: "text" },
+    { key: "payer_country", label: "Kostenübernehmer Land", kind: "country" },
     { key: "payer_email", label: "Kostenübernehmer E-Mail", kind: "text" },
     { key: "bank_holder", label: "Kontoinhaber", kind: "text" },
     { key: "bank_name", label: "Bank", kind: "text" },
@@ -206,8 +210,8 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     },
     {
       key: "consent_privacy",
-      label: "Speicherung und Verarbeitung im GMED-CRM-System",
-      labelRu: "Хранение и обработка данных в GMED-CRM",
+      label: "Speicherung und Verarbeitung im GMED-EDV-System",
+      labelRu: "Хранение и обработка данных в GMED-EDV-System",
       kind: "boolean",
     },
     {
@@ -343,6 +347,10 @@ export function buildBindingsPayload(
     if (field?.kind === "number") {
       const parsed = Number(trimmed);
       if (Number.isInteger(parsed) && parsed >= 1) out[key] = parsed;
+      continue;
+    }
+    if (field?.kind === "country") {
+      out[key] = countryNameForGermanDocument(trimmed);
       continue;
     }
     out[key] = trimmed;

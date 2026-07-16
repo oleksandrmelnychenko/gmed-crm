@@ -203,7 +203,11 @@ type ServiceLine = {
 };
 
 type AutosaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
-type WizardDocumentKind = "identity" | "confidentiality_release" | "privacy_consents";
+type WizardDocumentKind =
+  | "identity"
+  | "confidentiality_release"
+  | "privacy_information"
+  | "privacy_consents";
 type CommercialDocumentKind = "framework_contract" | "single_order" | "cost_estimate";
 
 type AutosaveSnapshot = {
@@ -978,17 +982,20 @@ function lineFromOrderLeistung(item: Leistung): ServiceLine {
 }
 
 function wizardDocumentKind(item: DocumentItem): WizardDocumentKind | null {
+  const templateId = item.generated_template_id?.trim().toLowerCase();
+  if (templateId === "privacy_information") return "privacy_information";
+
   const complianceKind = item.compliance_kind?.trim().toLowerCase();
   if (complianceKind === "identity" || complianceKind === "confidentiality_release") {
     return complianceKind;
   }
   if (complianceKind === "dsgvo") return "privacy_consents";
 
-  if (item.generated_template_id === "confidentiality_release") return "confidentiality_release";
+  if (templateId === "confidentiality_release") return "confidentiality_release";
   if (
-    item.generated_template_id === "privacy_consents"
-    || item.generated_template_id === "consent_data_release_child"
-    || item.generated_template_id === "consent_data_release_single"
+    templateId === "privacy_consents"
+    || templateId === "consent_data_release_child"
+    || templateId === "consent_data_release_single"
   ) {
     return "privacy_consents";
   }
@@ -2001,6 +2008,7 @@ export function LeadWizard({
     const grouped: Record<WizardDocumentKind, DocumentItem[]> = {
       identity: [],
       confidentiality_release: [],
+      privacy_information: [],
       privacy_consents: [],
     };
     documents.forEach((item) => {
@@ -2601,7 +2609,10 @@ export function LeadWizard({
   }
 
   async function generateLeadComplianceDocument(
-    templateId: "confidentiality_release" | "privacy_consents",
+    templateId:
+      | "confidentiality_release"
+      | "privacy_information"
+      | "privacy_consents",
   ) {
     if (!leadId || !draft || !lead) return;
     setBusy(`generate-${templateId}`);
@@ -3873,6 +3884,29 @@ ${serviceCommentLines.join("\n")}`
                   onOpen={(document) => void openOrDownloadDocument(document)}
                   onDownload={(document) => void downloadDocument(document)}
                   onSign={(document, kind) => void signDocument(document.id, kind)}
+                  onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                />
+              </div>
+
+              <div className="space-y-4 border-b border-border pb-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {tx("Информационный лист о защите персональных данных", "Informationsblatt zum Datenschutz")}
+                  </h3>
+                  <Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_information")}>
+                    {busy === "generate-privacy_information" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
+                    {wizardDocuments.privacy_information.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
+                  </Button>
+                </div>
+                <WizardDocumentRows
+                  documents={wizardDocuments.privacy_information}
+                  emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
+                  lang={lang}
+                  busy={busy}
+                  disabled={isBusy}
+                  tx={tx}
+                  onOpen={(document) => void openOrDownloadDocument(document)}
+                  onDownload={(document) => void downloadDocument(document)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                 />
               </div>

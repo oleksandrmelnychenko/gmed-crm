@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api";
@@ -363,7 +364,25 @@ export function PatientDocumentGenerateDialog({
                         <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
                           {documentBindingFieldLabel(field, lang)}
                         </span>
-                        {field.kind === "textarea" ? (
+                        {field.kind === "country" ? (
+                          <CountrySelect
+                            value={form.bindings[field.key] ?? null}
+                            onChange={(value) =>
+                              setForm((current) => ({
+                                ...current,
+                                manualText: "",
+                                manualTextDirty: false,
+                                bindings: {
+                                  ...current.bindings,
+                                  [field.key]: value ?? "",
+                                },
+                              }))
+                            }
+                            lang="de"
+                            className={fieldInputClass}
+                            aria-label={documentBindingFieldLabel(field, lang)}
+                          />
+                        ) : field.kind === "textarea" ? (
                           <textarea
                             value={form.bindings[field.key] ?? ""}
                             onChange={(e) =>

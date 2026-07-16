@@ -1,4 +1,5 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { CountrySelect } from "@/components/ui/country-select";
 import {
   cloneElement,
   isValidElement,
@@ -3744,6 +3745,21 @@ function StaffDocumentsPage({
                               {documentBindingFieldLabel(field, lang)}
                             </span>
                           </label>
+                        ) : field.kind === "country" ? (
+                          <Field
+                            key={field.key}
+                            label={documentBindingFieldLabel(field, lang)}
+                          >
+                            <CountrySelect
+                              value={generateForm.bindings[field.key] ?? null}
+                              onChange={(value) =>
+                                updateBindingField(field.key, value ?? "")
+                              }
+                              lang="de"
+                              className={selectClassName}
+                              aria-label={documentBindingFieldLabel(field, lang)}
+                            />
+                          </Field>
                         ) : field.kind === "textarea" ? (
                           <div key={field.key} className="md:col-span-2">
                             <Field label={documentBindingFieldLabel(field, lang)}>

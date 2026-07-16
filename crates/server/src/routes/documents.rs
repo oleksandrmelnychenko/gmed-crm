@@ -492,6 +492,294 @@ struct DocPartyBlock {
     phone: Option<String>,
 }
 
+fn german_iso_country_name(code: &str) -> Option<&'static str> {
+    match code {
+        "AD" => Some("Andorra"),
+        "AE" => Some("Vereinigte Arabische Emirate"),
+        "AF" => Some("Afghanistan"),
+        "AG" => Some("Antigua und Barbuda"),
+        "AI" => Some("Anguilla"),
+        "AL" => Some("Albanien"),
+        "AM" => Some("Armenien"),
+        "AO" => Some("Angola"),
+        "AQ" => Some("Antarktis"),
+        "AR" => Some("Argentinien"),
+        "AS" => Some("Amerikanisch-Samoa"),
+        "AT" => Some("Österreich"),
+        "AU" => Some("Australien"),
+        "AW" => Some("Aruba"),
+        "AX" => Some("Ålandinseln"),
+        "AZ" => Some("Aserbaidschan"),
+        "BA" => Some("Bosnien und Herzegowina"),
+        "BB" => Some("Barbados"),
+        "BD" => Some("Bangladesch"),
+        "BE" => Some("Belgien"),
+        "BF" => Some("Burkina Faso"),
+        "BG" => Some("Bulgarien"),
+        "BH" => Some("Bahrain"),
+        "BI" => Some("Burundi"),
+        "BJ" => Some("Benin"),
+        "BL" => Some("St. Barthélemy"),
+        "BM" => Some("Bermuda"),
+        "BN" => Some("Brunei Darussalam"),
+        "BO" => Some("Bolivien"),
+        "BQ" => Some("Karibische Niederlande"),
+        "BR" => Some("Brasilien"),
+        "BS" => Some("Bahamas"),
+        "BT" => Some("Bhutan"),
+        "BV" => Some("Bouvetinsel"),
+        "BW" => Some("Botsuana"),
+        "BY" => Some("Belarus"),
+        "BZ" => Some("Belize"),
+        "CA" => Some("Kanada"),
+        "CC" => Some("Kokosinseln"),
+        "CD" => Some("Kongo-Kinshasa"),
+        "CF" => Some("Zentralafrikanische Republik"),
+        "CG" => Some("Kongo-Brazzaville"),
+        "CH" => Some("Schweiz"),
+        "CI" => Some("Côte d’Ivoire"),
+        "CK" => Some("Cookinseln"),
+        "CL" => Some("Chile"),
+        "CM" => Some("Kamerun"),
+        "CN" => Some("China"),
+        "CO" => Some("Kolumbien"),
+        "CR" => Some("Costa Rica"),
+        "CU" => Some("Kuba"),
+        "CV" => Some("Cabo Verde"),
+        "CW" => Some("Curaçao"),
+        "CX" => Some("Weihnachtsinsel"),
+        "CY" => Some("Zypern"),
+        "CZ" => Some("Tschechien"),
+        "DE" => Some("Deutschland"),
+        "DJ" => Some("Dschibuti"),
+        "DK" => Some("Dänemark"),
+        "DM" => Some("Dominica"),
+        "DO" => Some("Dominikanische Republik"),
+        "DZ" => Some("Algerien"),
+        "EC" => Some("Ecuador"),
+        "EE" => Some("Estland"),
+        "EG" => Some("Ägypten"),
+        "EH" => Some("Westsahara"),
+        "ER" => Some("Eritrea"),
+        "ES" => Some("Spanien"),
+        "ET" => Some("Äthiopien"),
+        "FI" => Some("Finnland"),
+        "FJ" => Some("Fidschi"),
+        "FK" => Some("Falklandinseln"),
+        "FM" => Some("Mikronesien"),
+        "FO" => Some("Färöer"),
+        "FR" => Some("Frankreich"),
+        "GA" => Some("Gabun"),
+        "GB" => Some("Vereinigtes Königreich"),
+        "GD" => Some("Grenada"),
+        "GE" => Some("Georgien"),
+        "GF" => Some("Französisch-Guayana"),
+        "GG" => Some("Guernsey"),
+        "GH" => Some("Ghana"),
+        "GI" => Some("Gibraltar"),
+        "GL" => Some("Grönland"),
+        "GM" => Some("Gambia"),
+        "GN" => Some("Guinea"),
+        "GP" => Some("Guadeloupe"),
+        "GQ" => Some("Äquatorialguinea"),
+        "GR" => Some("Griechenland"),
+        "GS" => Some("Südgeorgien und die Südlichen Sandwichinseln"),
+        "GT" => Some("Guatemala"),
+        "GU" => Some("Guam"),
+        "GW" => Some("Guinea-Bissau"),
+        "GY" => Some("Guyana"),
+        "HK" => Some("Sonderverwaltungsregion Hongkong"),
+        "HM" => Some("Heard und McDonaldinseln"),
+        "HN" => Some("Honduras"),
+        "HR" => Some("Kroatien"),
+        "HT" => Some("Haiti"),
+        "HU" => Some("Ungarn"),
+        "ID" => Some("Indonesien"),
+        "IE" => Some("Irland"),
+        "IL" => Some("Israel"),
+        "IM" => Some("Isle of Man"),
+        "IN" => Some("Indien"),
+        "IO" => Some("Britisches Territorium im Indischen Ozean"),
+        "IQ" => Some("Irak"),
+        "IR" => Some("Iran"),
+        "IS" => Some("Island"),
+        "IT" => Some("Italien"),
+        "JE" => Some("Jersey"),
+        "JM" => Some("Jamaika"),
+        "JO" => Some("Jordanien"),
+        "JP" => Some("Japan"),
+        "KE" => Some("Kenia"),
+        "KG" => Some("Kirgisistan"),
+        "KH" => Some("Kambodscha"),
+        "KI" => Some("Kiribati"),
+        "KM" => Some("Komoren"),
+        "KN" => Some("St. Kitts und Nevis"),
+        "KP" => Some("Nordkorea"),
+        "KR" => Some("Südkorea"),
+        "KW" => Some("Kuwait"),
+        "KY" => Some("Kaimaninseln"),
+        "KZ" => Some("Kasachstan"),
+        "LA" => Some("Laos"),
+        "LB" => Some("Libanon"),
+        "LC" => Some("St. Lucia"),
+        "LI" => Some("Liechtenstein"),
+        "LK" => Some("Sri Lanka"),
+        "LR" => Some("Liberia"),
+        "LS" => Some("Lesotho"),
+        "LT" => Some("Litauen"),
+        "LU" => Some("Luxemburg"),
+        "LV" => Some("Lettland"),
+        "LY" => Some("Libyen"),
+        "MA" => Some("Marokko"),
+        "MC" => Some("Monaco"),
+        "MD" => Some("Republik Moldau"),
+        "ME" => Some("Montenegro"),
+        "MF" => Some("St. Martin"),
+        "MG" => Some("Madagaskar"),
+        "MH" => Some("Marshallinseln"),
+        "MK" => Some("Nordmazedonien"),
+        "ML" => Some("Mali"),
+        "MM" => Some("Myanmar"),
+        "MN" => Some("Mongolei"),
+        "MO" => Some("Sonderverwaltungsregion Macau"),
+        "MP" => Some("Nördliche Marianen"),
+        "MQ" => Some("Martinique"),
+        "MR" => Some("Mauretanien"),
+        "MS" => Some("Montserrat"),
+        "MT" => Some("Malta"),
+        "MU" => Some("Mauritius"),
+        "MV" => Some("Malediven"),
+        "MW" => Some("Malawi"),
+        "MX" => Some("Mexiko"),
+        "MY" => Some("Malaysia"),
+        "MZ" => Some("Mosambik"),
+        "NA" => Some("Namibia"),
+        "NC" => Some("Neukaledonien"),
+        "NE" => Some("Niger"),
+        "NF" => Some("Norfolkinsel"),
+        "NG" => Some("Nigeria"),
+        "NI" => Some("Nicaragua"),
+        "NL" => Some("Niederlande"),
+        "NO" => Some("Norwegen"),
+        "NP" => Some("Nepal"),
+        "NR" => Some("Nauru"),
+        "NU" => Some("Niue"),
+        "NZ" => Some("Neuseeland"),
+        "OM" => Some("Oman"),
+        "PA" => Some("Panama"),
+        "PE" => Some("Peru"),
+        "PF" => Some("Französisch-Polynesien"),
+        "PG" => Some("Papua-Neuguinea"),
+        "PH" => Some("Philippinen"),
+        "PK" => Some("Pakistan"),
+        "PL" => Some("Polen"),
+        "PM" => Some("St. Pierre und Miquelon"),
+        "PN" => Some("Pitcairninseln"),
+        "PR" => Some("Puerto Rico"),
+        "PS" => Some("Palästinensische Autonomiegebiete"),
+        "PT" => Some("Portugal"),
+        "PW" => Some("Palau"),
+        "PY" => Some("Paraguay"),
+        "QA" => Some("Katar"),
+        "RE" => Some("Réunion"),
+        "RO" => Some("Rumänien"),
+        "RS" => Some("Serbien"),
+        "RU" => Some("Russland"),
+        "RW" => Some("Ruanda"),
+        "SA" => Some("Saudi-Arabien"),
+        "SB" => Some("Salomonen"),
+        "SC" => Some("Seychellen"),
+        "SD" => Some("Sudan"),
+        "SE" => Some("Schweden"),
+        "SG" => Some("Singapur"),
+        "SH" => Some("St. Helena"),
+        "SI" => Some("Slowenien"),
+        "SJ" => Some("Spitzbergen und Jan Mayen"),
+        "SK" => Some("Slowakei"),
+        "SL" => Some("Sierra Leone"),
+        "SM" => Some("San Marino"),
+        "SN" => Some("Senegal"),
+        "SO" => Some("Somalia"),
+        "SR" => Some("Suriname"),
+        "SS" => Some("Südsudan"),
+        "ST" => Some("São Tomé und Príncipe"),
+        "SV" => Some("El Salvador"),
+        "SX" => Some("Sint Maarten"),
+        "SY" => Some("Syrien"),
+        "SZ" => Some("Eswatini"),
+        "TC" => Some("Turks- und Caicosinseln"),
+        "TD" => Some("Tschad"),
+        "TF" => Some("Französische Süd- und Antarktisgebiete"),
+        "TG" => Some("Togo"),
+        "TH" => Some("Thailand"),
+        "TJ" => Some("Tadschikistan"),
+        "TK" => Some("Tokelau"),
+        "TL" => Some("Timor-Leste"),
+        "TM" => Some("Turkmenistan"),
+        "TN" => Some("Tunesien"),
+        "TO" => Some("Tonga"),
+        "TR" => Some("Türkei"),
+        "TT" => Some("Trinidad und Tobago"),
+        "TV" => Some("Tuvalu"),
+        "TW" => Some("Taiwan"),
+        "TZ" => Some("Tansania"),
+        "UA" => Some("Ukraine"),
+        "UG" => Some("Uganda"),
+        "UM" => Some("Amerikanische Überseeinseln"),
+        "US" => Some("Vereinigte Staaten"),
+        "UY" => Some("Uruguay"),
+        "UZ" => Some("Usbekistan"),
+        "VA" => Some("Vatikanstadt"),
+        "VC" => Some("St. Vincent und die Grenadinen"),
+        "VE" => Some("Venezuela"),
+        "VG" => Some("Britische Jungferninseln"),
+        "VI" => Some("Amerikanische Jungferninseln"),
+        "VN" => Some("Vietnam"),
+        "VU" => Some("Vanuatu"),
+        "WF" => Some("Wallis und Futuna"),
+        "WS" => Some("Samoa"),
+        "YE" => Some("Jemen"),
+        "YT" => Some("Mayotte"),
+        "ZA" => Some("Südafrika"),
+        "ZM" => Some("Sambia"),
+        "ZW" => Some("Simbabwe"),
+        _ => None,
+    }
+}
+
+fn german_document_country(value: &str) -> String {
+    let value = value.trim();
+    let normalized = value.to_ascii_uppercase();
+    if let Some(german) = german_iso_country_name(&normalized) {
+        return german.to_string();
+    }
+    let german = match normalized.as_str() {
+        "DE" | "DEU" | "GERMANY" | "DEUTSCHLAND" => "Deutschland",
+        "UA" | "UKR" | "UKRAINE" => "Ukraine",
+        "AT" | "AUT" | "AUSTRIA" => "Österreich",
+        "CH" | "CHE" | "SWITZERLAND" => "Schweiz",
+        "PL" | "POL" | "POLAND" => "Polen",
+        "CZ" | "CZE" | "CZECH REPUBLIC" | "CZECHIA" => "Tschechien",
+        "DK" | "DNK" | "DENMARK" => "Dänemark",
+        "LV" | "LVA" | "LATVIA" => "Lettland",
+        "GR" | "GRC" | "GREECE" => "Griechenland",
+        "TR" | "TUR" | "TURKEY" => "Türkei",
+        "AE" | "ARE" | "UAE" | "UNITED ARAB EMIRATES" => "Vereinigte Arabische Emirate",
+        "SA" | "SAU" | "SAUDI ARABIA" => "Saudi-Arabien",
+        "EG" | "EGY" | "EGYPT" => "Ägypten",
+        "NG" | "NGA" | "NIGERIA" => "Nigeria",
+        "GH" | "GHA" | "GHANA" => "Ghana",
+        "BR" | "BRA" | "BRAZIL" => "Brasilien",
+        "CN" | "CHN" | "CHINA" => "China",
+        "RU" | "RUS" | "RUSSIA" => "Russland",
+        "PK" | "PAK" | "PAKISTAN" => "Pakistan",
+        "GB" | "GBR" | "UK" | "UNITED KINGDOM" => "Vereinigtes Königreich",
+        "US" | "USA" | "UNITED STATES" | "UNITED STATES OF AMERICA" => "Vereinigte Staaten",
+        _ => value,
+    };
+    german.to_string()
+}
+
 #[allow(dead_code)]
 impl DocPartyBlock {
     fn address_line(&self) -> Option<String> {
@@ -518,15 +806,12 @@ impl DocPartyBlock {
             .country
             .as_deref()
             .map(str::trim)
-            .filter(|v| !v.is_empty());
-        let parts: Vec<String> = [
-            street.map(ToOwned::to_owned),
-            city,
-            country.map(ToOwned::to_owned),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
+            .filter(|v| !v.is_empty())
+            .map(german_document_country);
+        let parts: Vec<String> = [street.map(ToOwned::to_owned), city, country]
+            .into_iter()
+            .flatten()
+            .collect();
         if parts.is_empty() {
             None
         } else {
@@ -671,6 +956,7 @@ struct GeneratedCostEstimateContext {
     title_override: Option<String>,
     patient: DocPartyBlock,
     patient_pid: String,
+    quote_number: Option<String>,
     estimate_date: Option<NaiveDate>,
     line_items: Vec<GeneratedContractLineItem>,
     total_range: Option<String>,
@@ -986,10 +1272,25 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     DocumentTemplateDefinition {
         id: "privacy_consents",
         label: "Einverständniserklärung zur Datenübermittlung",
-        description: "Einverständnis zur Verarbeitung und Übermittlung personenbezogener und medizinischer Daten mit Datenschutzinformation.",
+        description: "Einverständnis zur Verarbeitung und Übermittlung personenbezogener und medizinischer Daten.",
         art: "privacy_consents",
         category: "consent",
         default_auto_name: "Einverständniserklärung zur Datenübermittlung",
+        default_status: "draft",
+        default_visibility: "patient_visible",
+        mime_type: "application/pdf",
+        file_extension: "pdf",
+        is_medical: false,
+        languages: &["de"],
+        text_block_keys: &[],
+    },
+    DocumentTemplateDefinition {
+        id: "privacy_information",
+        label: "Informationsblatt zum Datenschutz",
+        description: "Rechtlich festes Informationsblatt zur Verarbeitung personenbezogener Daten und zu Betroffenenrechten.",
+        art: "privacy_information",
+        category: "consent",
+        default_auto_name: "Informationsblatt zum Datenschutz",
         default_status: "draft",
         default_visibility: "patient_visible",
         mime_type: "application/pdf",
@@ -1210,6 +1511,34 @@ struct MarkDocumentSignedRequest {
     signed_at: Option<String>,
 }
 
+fn document_satisfies_compliance_kind(
+    compliance_kind: &str,
+    generated_template_id: Option<&str>,
+    art: &str,
+) -> bool {
+    let document_kind = generated_template_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| art.trim());
+    let matches_document_kind =
+        |allowed: &[&str]| allowed.iter().any(|candidate| document_kind == *candidate);
+
+    match compliance_kind {
+        "dsgvo" => matches_document_kind(&[
+            "consent",
+            "privacy_consents",
+            "consent_data_release",
+            "consent_data_release_child",
+            "consent_data_release_single",
+        ]),
+        "confidentiality_release" => matches_document_kind(&["confidentiality_release"]),
+        "identity" => matches_document_kind(&["identity"]),
+        "framework_contract" => matches_document_kind(&["framework_contract"]),
+        "other" => true,
+        _ => false,
+    }
+}
+
 /// Record a document as the signed evidence for a compliance requirement, and
 /// atomically flip the matching flag on the linked patient's `legal_status`
 /// (#13). Replaces the previous two-step dance of "upload a scan" + "separately
@@ -1251,10 +1580,15 @@ async fn mark_document_signed(
         _ => chrono::Utc::now(),
     };
 
-    let document = match sqlx::query("SELECT patient_id, lead_id FROM documents WHERE id = $1")
-        .bind(document_id)
-        .fetch_optional(&state.db)
-        .await
+    let document = match sqlx::query(
+        r#"SELECT patient_id, lead_id, generated_template_id, art, status,
+                  file_deleted_at IS NOT NULL AS file_deleted
+           FROM documents
+           WHERE id = $1"#,
+    )
+    .bind(document_id)
+    .fetch_optional(&state.db)
+    .await
     {
         Ok(Some(row)) => row,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
@@ -1265,6 +1599,25 @@ async fn mark_document_signed(
     };
     let patient_id: Option<Uuid> = document.try_get("patient_id").ok().flatten();
     let lead_id: Option<Uuid> = document.try_get("lead_id").ok().flatten();
+    let generated_template_id = document
+        .try_get::<Option<String>, _>("generated_template_id")
+        .ok()
+        .flatten();
+    let document_art = document.try_get::<String, _>("art").unwrap_or_default();
+    let document_status = document.try_get::<String, _>("status").unwrap_or_default();
+    let file_deleted = document.try_get::<bool, _>("file_deleted").unwrap_or(false);
+    if file_deleted {
+        return err(
+            StatusCode::GONE,
+            "Deleted documents cannot be marked as signed evidence",
+        );
+    }
+    if document_status == "archived" {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Archived documents cannot be marked as signed evidence",
+        );
+    }
     if let Some(patient_id) = patient_id
         && access::requires_patient_assignment(auth.role)
     {
@@ -1287,6 +1640,13 @@ async fn mark_document_signed(
             }
             Err(resp) => return resp,
         }
+    }
+
+    if !document_satisfies_compliance_kind(kind, generated_template_id.as_deref(), &document_art) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Document type does not satisfy the selected compliance requirement",
+        );
     }
 
     let mut tx = match state.db.begin().await {
@@ -2664,7 +3024,24 @@ fn document_template_by_id(template_id: &str) -> Option<DocumentTemplateDefiniti
 }
 
 fn is_fixed_legal_document_template(template_id: &str) -> bool {
-    matches!(template_id, "confidentiality_release" | "privacy_consents")
+    matches!(
+        template_id,
+        "confidentiality_release" | "privacy_consents" | "privacy_information"
+    )
+}
+
+fn is_lead_allowed_document_template(template_id: &str) -> bool {
+    matches!(
+        template_id,
+        "framework_contract"
+            | "single_order"
+            | "cost_estimate"
+            | "confidentiality_release"
+            | "privacy_consents"
+            | "privacy_information"
+            | "consent_data_release_child"
+            | "consent_data_release_single"
+    )
 }
 
 fn generated_template_id_from_source(value: Option<&str>) -> Option<String> {
@@ -3861,6 +4238,7 @@ fn default_generated_document_name(
         ("cost_coverage_declaration", _) => "Kostenübernahmeerklärung",
         ("cost_estimate", "en") => "Cost estimate",
         ("cost_estimate", _) => "Kostenschätzung",
+        ("privacy_information", _) => "Informationsblatt zum Datenschutz",
         ("appointment_confirmation", "en") => "Appointment confirmation",
         ("appointment_confirmation", _) => "Terminbestätigung",
         ("consent_data_release_child" | "consent_data_release_single", "en") => {
@@ -3894,6 +4272,7 @@ fn generated_compliance_document_number(
     let prefix = match template_id {
         "confidentiality_release" => "SE",
         "privacy_consents" | "consent_data_release_child" | "consent_data_release_single" => "EW",
+        "privacy_information" => "DS",
         _ => return None,
     };
     let simple = document_id.simple().to_string();
@@ -5527,23 +5906,6 @@ fn fc_bullet(layout: &mut TreatmentPlanPdfLayout, text: &str) {
     );
 }
 
-/// A check-box style consent line (used in Anlage 1).
-fn fc_checkbox(layout: &mut TreatmentPlanPdfLayout, text: &str) {
-    fc_checkbox_value(layout, false, text);
-}
-
-fn fc_checkbox_value(layout: &mut TreatmentPlanPdfLayout, checked: bool, text: &str) {
-    layout.text_block(
-        &format!("[{}]  {text}", if checked { "x" } else { " " }),
-        11.0,
-        false,
-        4.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        1.5,
-    );
-}
-
 /// A blank handwritten fill-in run of underscores (never a placeholder string).
 fn fc_underscores(len: usize) -> String {
     "_".repeat(len)
@@ -5576,7 +5938,7 @@ fn fc_agency_person(agency: &AgencyContractSettings) -> String {
 }
 
 fn agency_legal_identity(agency: &AgencyContractSettings) -> String {
-    let mut parts = vec![fc_agency_person(agency)];
+    let mut parts = vec![adult_legal_agency_identity()];
     if let Some(birth_date) = agency.principal_birth_date {
         parts.push(format!("geb. am {}", birth_date.format("%d.%m.%Y")));
     }
@@ -5604,180 +5966,20 @@ fn fc_body_tight(layout: &mut TreatmentPlanPdfLayout, text: &str) {
     );
 }
 
-/// "Ich, <name> geb. am <date>, / Adresse: <address> / Telefonnummer: <phone>. Email: <email>"
-/// — the personal-identity preamble shared by Anlage 1 and Anlage 2. Dynamic values are
-/// rendered inline; missing values fall back to underscore fill-ins.
-fn fc_patient_identity_block(
-    layout: &mut TreatmentPlanPdfLayout,
-    context: &GeneratedFrameworkContractContext,
-) {
-    let name = if context.patient_name.trim().is_empty() {
-        fc_underscores(40)
-    } else {
-        context.patient_name.trim().to_string()
-    };
-    let birth = context
-        .birth_date
-        .map(|value| value.format("%d.%m.%Y").to_string())
-        .unwrap_or_else(|| fc_underscores(18));
-    layout.text_block(
-        &format!("Ich, {name} geb. am {birth},"),
-        11.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        1.0,
-    );
-    let address = context
-        .patient_address
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| fc_underscores(60));
-    layout.text_block(
-        &format!("Adresse: {address}"),
-        11.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        1.0,
-    );
-    let phone = context
-        .patient_phone
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| fc_underscores(24));
-    let email = context
-        .patient_email
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| fc_underscores(28));
-    layout.text_block(
-        &format!("Telefonnummer: {phone}.   Email: {email}"),
-        11.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        2.0,
-    );
-}
-
-/// "Ort, Datum: <place>, <date>   Unterschrift: ____ / <patient name>" — the consent
-/// signature footer shared by Anlage 1 and Anlage 2.
-fn fc_consent_signature_line(
-    layout: &mut TreatmentPlanPdfLayout,
-    context: &GeneratedFrameworkContractContext,
-) {
-    let place = context
-        .party_sign_place
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| fc_underscores(20));
-    let date = context
-        .party_sign_date
-        .map(|value| value.format("%d.%m.%Y").to_string())
-        .unwrap_or_else(|| fc_underscores(14));
-    layout.text_block(
-        &format!(
-            "Ort, Datum: {place}, {date}                  Unterschrift: {}",
-            fc_underscores(20)
-        ),
-        11.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        4.0,
-        0.5,
-    );
-    let name = if context.patient_name.trim().is_empty() {
-        fc_underscores(20)
-    } else {
-        context.patient_name.trim().to_string()
-    };
-    layout.text_block(
-        &name,
-        11.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        1.0,
-    );
-}
-
 fn build_framework_contract_pdf(
     context: &GeneratedFrameworkContractContext,
+    fallback_document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-
-    // Footer mirrors the reference letterhead (agency contact), not an internal timestamp.
-    let agency_person = fc_agency_person(&context.agency);
-    let agency_identity = agency_legal_identity(&context.agency);
-    let data_system_name = context.agency.data_system_name.trim();
-    let mut footer_parts: Vec<String> = vec!["Agentur für Patientenbetreuung".to_string()];
-    if !agency_person.trim().is_empty() {
-        footer_parts.push(agency_person.clone());
-    }
-    if let Some(address) = context
-        .agency
-        .address
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        footer_parts.push(address.to_string());
-    }
-    let mut footer = footer_parts.join(" | ");
-    let mut contact_parts: Vec<String> = Vec::new();
-    if let Some(phone) = context
-        .agency
-        .phone
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        contact_parts.push(format!("Tel.: {phone}"));
-    }
-    if let Some(email) = context
-        .agency
-        .email
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        contact_parts.push(format!("E-mail: {email}"));
-    }
-    if !contact_parts.is_empty() {
-        footer.push_str(" — ");
-        footer.push_str(&contact_parts.join(" | "));
-    }
-    let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
+    let document_reference = legal_document_reference(
+        Some(context.contract_number.as_str()),
+        fallback_document_reference,
+    );
+    let mut layout = legal_document_pdf_layout(document_reference, regular, bold);
+    let agency_display = adult_legal_agency_identity();
+    let agency_person = ADULT_LEGAL_AGENCY_PERSON.to_string();
 
     let effective_date_str = fmt_de_date(context.effective_date);
-
-    // --- Running header (date + Auftraggeber) ---------------------------------
-    layout.text_block(
-        &format!(
-            "Rahmendienstleistungsvertrag vom {} / {} / 8 Seiten",
-            effective_date_str, context.patient_name
-        ),
-        9.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Muted,
-        0.0,
-        3.0,
-    );
 
     // --- Title ----------------------------------------------------------------
     layout.text_block(
@@ -5843,10 +6045,7 @@ fn build_framework_contract_pdf(
 
     fc_body(&mut layout, "und");
     layout.text_block(
-        &format!(
-            "{} – Agentur für Patientenbetreuung",
-            agency_person.to_uppercase()
-        ),
+        &agency_display,
         11.0,
         true,
         0.0,
@@ -5924,9 +6123,10 @@ fn build_framework_contract_pdf(
         &mut layout,
         "Für das Zustandekommen eines Einzelauftrags ist die Annahme des Auftrags durch den Auftragnehmer erforderlich. Der Auftragnehmer behält sich vor, einen Einzelauftrag auch ohne Benennung des Grundes abzulehnen.",
     );
+    layout.ensure_space(26.0);
     fc_body(
         &mut layout,
-        "Die Erteilung und Annahme eines Einzelauftrags kann schriftlich unter Einbeziehung dieses Rahmendienstleistungsvertrags erfolgen. Eine entsprechende Vorlage ist als Anlage 4 diesem Rahmendienstleistungsvertrag beigefügt.",
+        "Die Erteilung und Annahme eines Einzelauftrags kann schriftlich unter Einbeziehung dieses Rahmendienstleistungsvertrags erfolgen. Die entsprechende Vorlage für Anlage 4 wird separat als eigenes Dokument generiert und diesem Rahmendienstleistungsvertrag zugeordnet.",
     );
     fc_body(
         &mut layout,
@@ -6254,624 +6454,6 @@ fn build_framework_contract_pdf(
 
     // --- Signature blocks (both parties) --------------------------------------
     layout.spacer(4.0);
-    admin_signature_block(
-        &mut layout,
-        context.agency_sign_place.as_deref(),
-        context.agency_sign_date,
-        &agency_person,
-        "Auftragnehmer",
-    );
-    admin_signature_block(
-        &mut layout,
-        context.party_sign_place.as_deref(),
-        context.party_sign_date,
-        &context.patient_name,
-        "Auftraggeber",
-    );
-
-    // ======================================================================
-    // Anlage 1 — Einverständniserklärung zur Datenübermittlung
-    // ======================================================================
-    layout.spacer(6.0);
-    layout.text_block(
-        "Anlage 1",
-        15.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        1.0,
-    );
-    layout.text_block(
-        "Einverständniserklärung zur Datenübermittlung",
-        13.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        3.0,
-    );
-    fc_patient_identity_block(&mut layout, context);
-    fc_body(&mut layout, "bin damit einverstanden, (bitte ankreuzen)");
-    fc_checkbox(
-        &mut layout,
-        &format!(
-            "dass {agency_identity} und von der verantwortlichen Person beauftragte Mitarbeitende meine personenbezogenen und medizinischen Daten, Personalausweiskopien, Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Rezepte, Kostenvoranschläge, Rechnungen, Quittungen, Behandlungsverträge, Leistungsverträge, Arzt- und Krankenhausberichte über meine abgeschlossene oder noch andauernde Behandlung einholen, bearbeiten, speichern und erforderlichenfalls an behandelnde Ärzte, Krankenhäuser, Labore oder andere medizinische Einrichtungen, Dolmetscher, Übersetzer, Gutachter oder Kostenträger übermitteln;"
-        ),
-    );
-    fc_checkbox(
-        &mut layout,
-        &format!(
-            "dass alle meine behandelnden Ärzte und medizinischen Einrichtungen meine Behandlungsunterlagen und medizinischen Informationen an {agency_identity} übermitteln dürfen;"
-        ),
-    );
-    fc_checkbox(
-        &mut layout,
-        &format!(
-            "dass meine notwendigen Personalausweiskopien, Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Rechnungen und Quittungen, Arzt- und Krankenhausberichte über meine abgeschlossene oder noch andauernde Behandlung im {data_system_name} gespeichert und verarbeitet werden;"
-        ),
-    );
-    fc_checkbox(
-        &mut layout,
-        "dass meine personenbezogenen und medizinischen Daten, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Rezepte, Kostenvoranschläge, Rechnungen, Quittungen, Behandlungsverträge, Leistungsverträge, Arzt- und Krankenhausberichte und Informationen über meine abgeschlossene oder noch andauernde Behandlung an folgende Personen oder Institutionen übermittelt werden:",
-    );
-    match context
-        .extra_release_recipients
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        Some(recipients) => {
-            for line in recipients.lines().filter(|l| !l.trim().is_empty()) {
-                layout.text_block(
-                    line.trim(),
-                    11.0,
-                    false,
-                    12.0,
-                    TreatmentPlanPdfColor::Body,
-                    0.0,
-                    1.0,
-                );
-            }
-        }
-        None => {
-            layout.text_block(
-                &fc_underscores(70),
-                11.0,
-                false,
-                12.0,
-                TreatmentPlanPdfColor::Body,
-                0.0,
-                1.0,
-            );
-        }
-    }
-    layout.spacer(1.5);
-    fc_checkbox(
-        &mut layout,
-        "dass meine personenbezogenen und medizinischen Daten, Personalausweiskopien, Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Kostenvoranschläge, Rechnungen und Quittungen, Behandlungsverträge, Leistungsverträge, Arzt- und Krankenhausberichte über meine abgeschlossene oder noch andauernde Behandlung per folgende Kommunikationsmedien eingeholt und/oder übermittelt werden:",
-    );
-    for medium in [
-        "[ ]  E-mail",
-        "[ ]  Threema-Messenger",
-        "[ ]  WhatsApp-Messenger",
-        "[ ]  Telegram-Messenger",
-    ] {
-        layout.text_block(
-            medium,
-            11.0,
-            false,
-            12.0,
-            TreatmentPlanPdfColor::Body,
-            0.0,
-            1.0,
-        );
-    }
-    layout.spacer(1.5);
-    fc_body(
-        &mut layout,
-        "Ich bin mir der möglichen Risiken bei der Übermittlung sensibler Daten per E-mail, WhatsApp-, Telegram- oder Threema-Messenger bewusst.",
-    );
-    if let Some(processor_notice) = context
-        .agency
-        .data_processor_notice
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        fc_body(&mut layout, "Mir ist bekannt,");
-        fc_body(&mut layout, processor_notice);
-    }
-    fc_body(
-        &mut layout,
-        "Die Einwilligung in die Verarbeitung meiner Daten ist freiwillig und kann jederzeit ohne Angaben von Gründen schriftlich widerrufen werden, was keine Auswirkungen auf die Rechtmäßigkeit der bisherigen Verarbeitung hat.",
-    );
-    fc_body(
-        &mut layout,
-        "Die Verarbeitung von personenbezogenen und Gesundheitsdaten bleibt bis zum Zeitpunkt des Widerrufs oder solange gesetzliche Aufbewahrungsfristen bestehen, rechtmäßig.",
-    );
-    fc_body(
-        &mut layout,
-        "Die Aufklärung gemäß EU-Datenschutz-Grundverordnung (DS-GVO) ist erfolgt. Ich wurde darüber aufgeklärt, dass ich gemäß der DS-GVO ein Recht auf Auskunft, Berichtigung, Löschung oder Einschränkung der Verarbeitung meiner personenbezogenen Daten habe. Diese Rechte kann ich ebenfalls jederzeit geltend machen.",
-    );
-    fc_consent_signature_line(&mut layout, context);
-
-    // ======================================================================
-    // Anlage 2 — Schweigepflichtentbindung
-    // ======================================================================
-    layout.spacer(6.0);
-    layout.text_block(
-        "Anlage 2",
-        15.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        1.0,
-    );
-    layout.text_block(
-        "Schweigepflichtentbindung",
-        13.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        3.0,
-    );
-    fc_patient_identity_block(&mut layout, context);
-    fc_body(
-        &mut layout,
-        "bin mir bewusst, dass ärztliche und medizinische Dokumentation, Arztberichte, Rezepte Kostenvoranschläge, Rechnungen und Quittungen Informationen im Sinne von § 203 StGB enthalten können, die insbesondere Rückschlüsse auf meine Diagnosen, medizinischen Untersuchungen, medizinischen Zustände sowie geplante, abgeschlossene oder noch andauernde Behandlungen zulassen oder solche Informationen enthalten können.",
-    );
-    fc_body(
-        &mut layout,
-        &format!(
-            "Daher entbinde ich alle meine behandelnden Ärzte und medizinischen Einrichtungen von ihrer Schweigepflicht gegenüber {agency_identity} und den von der Agentur beauftragten Mitarbeitenden."
-        ),
-    );
-    fc_body(
-        &mut layout,
-        "Mir ist bekannt, dass ich diese Erklärung über die Entbindung von der Schweigepflicht jederzeit mit Wirkung für die Zukunft widerrufen kann.",
-    );
-    fc_consent_signature_line(&mut layout, context);
-
-    // ======================================================================
-    // Anlage 3 — Informationsblatt zum Datenschutz
-    // ======================================================================
-    layout.spacer(6.0);
-    layout.text_block(
-        "Anlage 3",
-        15.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        1.0,
-    );
-    layout.text_block(
-        "Informationsblatt zum Datenschutz",
-        13.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        3.0,
-    );
-    fc_body(
-        &mut layout,
-        &format!(
-            "Im Rahmen der Vermittlung von Gesundheitsdienstleistungen werden personenbezogene Daten sowohl des Auftraggebers als auch durch den vorliegenden Vertrag begünstigter Dritter durch {} – Agentur für Patientenbetreuung – verarbeitet. Dabei werden die Anforderungen der Datenschutzgesetze (insbesondere DS-GVO und BDSG) umgesetzt. Hierzu werden technische und organisatorische Maßnahmen eingesetzt, um Ihre Daten zu schützen. Dieses Informationsblatt beschreibt die Verarbeitung personenbezogener Daten im Rahmen der allgemeinen geschäftlichen Tätigkeit und in der Vermittlungstätigkeit sowie die Rechte der durch die Verarbeitung betroffenen Personen.",
-            context.agency.name
-        ),
-    );
-    fc_subhead(&mut layout, "Name des Verantwortlichen");
-    fc_body(
-        &mut layout,
-        &format!("Verantwortlich für die Verarbeitung Ihrer Daten ist {agency_identity}."),
-    );
-    fc_subhead(&mut layout, "Kontaktdaten des Datenschutzbeauftragten");
-    fc_body(
-        &mut layout,
-        "Postalisch können Sie unseren Datenschutzbeauftragten unter der oben genannten Adresse erreichen („Vertraulich, zu Händen des Datenschutzbeauftragten“).",
-    );
-    let privacy_contact = context
-        .agency
-        .privacy_email
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| format!("Per E-Mail erreichen Sie den Datenschutzkontakt unter {value}."))
-        .unwrap_or_else(|| {
-            "Den Datenschutzkontakt erreichen Sie über die oben genannten Kontaktdaten der Agentur."
-                .to_string()
-        });
-    fc_body(&mut layout, &privacy_contact);
-    fc_subhead(
-        &mut layout,
-        "Kategorien der verarbeiteten personenbezogenen Daten",
-    );
-    fc_body(
-        &mut layout,
-        "„Personenbezogene Daten“ im Sinne dieses Schreibens sind alle Informationen, welche sich, direkt oder indirekt, auf eine Einzelperson beziehen (Art. 4 Nr. 1 DS-GVO).",
-    );
-    fc_body(
-        &mut layout,
-        "Im Rahmen unserer allgemeinen Geschäftstätigkeit und bei den Vermittlungsmaßnahmen verarbeiten wir üblicherweise folgende Daten:",
-    );
-    fc_bullet(
-        &mut layout,
-        "Persönliche Daten: Name, Kontaktdaten (E-Mail, Handynummer, Anschrift, Geburtsdatum)",
-    );
-    fc_bullet(
-        &mut layout,
-        "Gesundheitsdaten und behandlungsspezifische Daten: Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Rezepte",
-    );
-    fc_bullet(&mut layout, "Zahlungsdaten: IBAN, BIC");
-    fc_subhead(
-        &mut layout,
-        "Zweckbestimmung und Rechtsgründe der Datenerhebung, -verarbeitung oder -nutzung",
-    );
-    fc_body(
-        &mut layout,
-        "Wir verarbeiten personenbezogene Daten einerseits im Rahmen unserer allgemeinen Geschäftstätigkeit, andererseits im Rahmen der Vermittlungs- und Koordinationstätigkeit, sowie im Kontakt zu den vermittelten Ärzten, Therapeuten und sonstigen Dritten, die an der vermittelten medizinischen Behandlung und Betreuung beteiligt sind.",
-    );
-    fc_subhead(
-        &mut layout,
-        "Erfüllung vertraglicher Pflichten (Art. 6 Abs. 1 S. 1 lit. b DS-GVO)",
-    );
-    fc_body(
-        &mut layout,
-        "Wir verarbeiten personenbezogene Daten zur Durchführung oder Anbahnung von Verträgen, deren Vertragspartei der Betroffene ist. Art und Umfang der Verarbeitung ergeben sich in diesem Falle aus dem jeweiligen Vertrag.",
-    );
-    fc_subhead(
-        &mut layout,
-        "Wahrung berechtigter Interessen (Art. 6 Abs. 1 S. 1 lit. f DS-GVO)",
-    );
-    fc_body(
-        &mut layout,
-        "Wir verarbeiten im Rahmen unseres allgemeinen Geschäftsbetriebes und unserer Vermittlungs- und Koordinationstätigkeit personenbezogene Daten auf Grundlage einer Interessenabwägung, sofern schutzwürdige entgegenstehende Interessen der betroffenen Person nicht überwiegen.",
-    );
-    fc_body(
-        &mut layout,
-        "Die zu Grunde liegenden berechtigten Interessen sind dabei insbesondere die Aufrechterhaltung des Geschäftsbetriebes sowie die Erbringung der vertraglich vereinbarten Leistung gegenüber unseren Auftraggebern, die unsere Leistungen in Anspruch nehmen. Dabei verarbeiten wir die personenbezogenen Daten nur soweit, wie dies für die Erbringung unserer Leistung erforderlich ist.",
-    );
-    fc_subhead(
-        &mut layout,
-        "Übersenden interessanter Informationen und Werbung (Art. 6 Abs. 1 S. 1 lit. f DS-GVO)",
-    );
-    fc_body(
-        &mut layout,
-        "Wir informieren unsere Auftraggeber gerne per E-Mail oder Post über aus unserer Sicht interessante Veranstaltungen, Ereignisse oder Neuigkeiten. Wir möchten Ihre Kontaktdaten auch für diesen Zweck verwenden. Sollte dies von Ihnen nicht gewünscht sein, können sie dieser Verwendung jederzeit widersprechen. Sie können diesen Widerspruch per E-Mail oder Post an Ihren Ansprechpartner senden, oder sich an unseren Datenschutzbeauftragten unter datenschutz@gmed-health.com wenden.",
-    );
-    fc_body(
-        &mut layout,
-        "Selbstverständlich können Sie Ihren Widerspruch zur Zusendung dieser Informationen auch bereits als Anlage an den Rahmenvertrag sowie Einzelauftrag erklären.",
-    );
-    fc_body(
-        &mut layout,
-        "Sofern keine der Rechtsgrundlagen nach a. bis c. vorliegt, holen wir für die Durchführung einer Verarbeitung eine Einwilligung des Betroffenen ein, den wir über die geplante Verarbeitung umfassend informieren.",
-    );
-    fc_subhead(
-        &mut layout,
-        "Empfänger oder Kategorien von Empfängern, denen Ihre Daten mitgeteilt werden können",
-    );
-    fc_subhead(&mut layout, "Technische Dienstleistungen");
-    fc_body(
-        &mut layout,
-        "Für einzelne technische Aufgaben sind wir gezwungen, die Unterstützung von Spezialisten in Anspruch zu nehmen, sodass nicht ausgeschlossen werden kann, dass Ihre Daten im Rahmen von Wartungs- und Reparaturarbeiten, sowie Dienstleistungen zur Sicherstellung der Richtigkeit, Sicherheit und Verfügbarkeit von Daten, auch an Subunternehmer weitergegeben werden. Hierbei sorgen wir stets durch entsprechende vertragliche Regelungen und sorgfältige Auswahl der Dienstleister dafür, dass unsere hohen Sicherheitsstandards auch bei den Dienstleistern umgesetzt sind.",
-    );
-    fc_subhead(&mut layout, "Dauer der Datenspeicherung");
-    fc_body(
-        &mut layout,
-        "Wir speichern personenbezogene Daten so lange, wie wir sie für die Durchführung der jeweiligen Aufgabe benötigen. Soweit die Daten gesetzlichen Aufbewahrungspflichten unterliegen, speichern wir sie für die Dauer der Aufbewahrungsfrist. Darüber hinaus speichern wir personenbezogene Daten auch dann, wenn ein weiteres berechtigtes Interesse nach Art. 6 Abs. 1 S. 1 lit. f DS-GVO vorliegt.",
-    );
-    fc_body(
-        &mut layout,
-        "Soweit personenbezogene Daten mehreren Aufbewahrungsfristen unterliegen, ist die jeweils längste Frist maßgeblich.",
-    );
-    fc_subhead(&mut layout, "Betroffenenrechte");
-    fc_body(
-        &mut layout,
-        "Bei Fragen, Beschwerden und Anregungen zum Datenschutz dürfen Sie sich gerne jederzeit an den Datenschutzbeauftragten wenden. Sie erreichen ihn unter der E-Mail-Adresse datenschutz@gmed-health.com.",
-    );
-    fc_body(
-        &mut layout,
-        "Allen Betroffenen stehen von Gesetzes wegen Auskunftsrechte (z.B. zum Zweck der Verarbeitung, Empfängern der Daten, geltende Speicherfristen) zu. Daneben bestehen Rechte auf Berichtigung unrichtiger Daten, Löschung, Einschränkung der Verarbeitung und Datenübertragbarkeit, sowie Widerspruch (z.B. bei einer Verwendung für Marketingzwecke, oder bei überwiegenden entgegenstehenden Interessen).",
-    );
-    fc_body(
-        &mut layout,
-        "Erteilte Einwilligungen können jederzeit mit Wirkung für die Zukunft widerrufen werden, wobei der Widerruf ebenso einfach zu erklären ist wie die Einwilligung.",
-    );
-    fc_body(
-        &mut layout,
-        "Bevor Sie von Ihrem Beschwerderecht bei einer Datenschutzaufsichtsbehörde Gebrauch machen, möchten wir Sie bitten, zunächst noch einmal auf uns zuzukommen (beispielsweise über datenschutz@gmed-health.com oder durch Anschreiben an Ihren Ansprechpartner).",
-    );
-
-    // ======================================================================
-    // Anlage 4 — Vorlage Einzelauftrag / Vergütungsvereinbarung
-    // ======================================================================
-    layout.spacer(6.0);
-    layout.text_block(
-        "Anlage 4: Vorlage Einzelauftrag",
-        15.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        2.0,
-    );
-    let order_ordinal = context.order_sequence.max(1);
-    layout.text_block(
-        &format!(
-            "{}. EINZELAUFTRAG ZUM RAHMENDIENSTLEISTUNGSVERTRAG VOM {}",
-            order_ordinal, effective_date_str
-        ),
-        14.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        3.0,
-    );
-
-    fc_body(&mut layout, "zwischen");
-    layout.text_block(
-        &fc_patient_salutation_name(context),
-        11.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        0.5,
-    );
-    if let Some(address) = context
-        .patient_address
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        fc_body_tight(&mut layout, address);
-    }
-    if let Some(email) = context
-        .patient_email
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        fc_body_tight(&mut layout, &format!("Email: {email}"));
-    }
-    layout.text_block(
-        "– nachfolgend „Auftraggeber“ genannt –",
-        11.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Muted,
-        0.5,
-        2.0,
-    );
-    fc_body(&mut layout, "und");
-    layout.text_block(
-        &format!(
-            "{} – Agentur für Patientenbetreuung",
-            agency_person.to_uppercase()
-        ),
-        11.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        0.5,
-    );
-    if let Some(address) = context
-        .agency
-        .address
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        fc_body_tight(&mut layout, address);
-    }
-    layout.text_block(
-        "– nachfolgend „Auftragnehmer“ genannt –",
-        11.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Muted,
-        0.5,
-        3.0,
-    );
-
-    fc_paragraph_heading(&mut layout, "Präambel");
-    fc_body(
-        &mut layout,
-        &format!(
-            "Zwischen dem Auftraggeber und Auftragnehmer wurde am {} ein Rahmendienstleistungsvertrag (im Folgenden „Rahmendienstleistungsvertrag“ genannt) geschlossen.",
-            effective_date_str
-        ),
-    );
-    fc_body(
-        &mut layout,
-        "Die in diesem Rahmendienstleistungsvertrag vereinbarten Beratungs- und Dienstleistungen werden auf Basis von Einzelaufträgen durch den Auftragnehmer erbracht. Vor diesem Hintergrund vereinbaren die Vertragspartner folgenden Einzelauftrag:",
-    );
-
-    fc_paragraph_heading(&mut layout, "Leistungsumfang");
-    fc_body(
-        &mut layout,
-        "Im Zuge der vorliegenden Beauftragung sind durch den Auftragnehmer folgende Leistungen zu erbringen:",
-    );
-    if context.line_items.is_empty() {
-        for _ in 0..3 {
-            layout.text_block(
-                &format!("{};", fc_underscores(40)),
-                11.0,
-                false,
-                8.0,
-                TreatmentPlanPdfColor::Body,
-                0.0,
-                1.0,
-            );
-        }
-    } else {
-        for item in &context.line_items {
-            layout.text_block(
-                &format!("•  {}", item.description),
-                11.0,
-                false,
-                8.0,
-                TreatmentPlanPdfColor::Body,
-                0.0,
-                1.0,
-            );
-        }
-    }
-
-    fc_paragraph_heading(&mut layout, "Vergütungsvereinbarung");
-    fc_body(
-        &mut layout,
-        "Für diese Auftragserfüllung wird folgende Vergütung vereinbart:",
-    );
-    // Column header for the Leistungen / Honorar / Anmerkung layout.
-    layout.text_block(
-        "Leistungen   |   Honorar   |   Anmerkung",
-        11.0,
-        true,
-        4.0,
-        TreatmentPlanPdfColor::Primary,
-        1.0,
-        1.5,
-    );
-    if context.line_items.is_empty() {
-        layout.text_block(
-            &format!(
-                "{}   |   {}   |   {}",
-                fc_underscores(18),
-                fc_underscores(12),
-                fc_underscores(18)
-            ),
-            11.0,
-            false,
-            4.0,
-            TreatmentPlanPdfColor::Body,
-            0.0,
-            1.0,
-        );
-    } else {
-        for item in &context.line_items {
-            let honorar = if item.unit_price.trim().is_empty() {
-                fc_underscores(12)
-            } else {
-                fmt_money_de(&item.unit_price)
-            };
-            let anmerkung = item
-                .notes
-                .as_deref()
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(ToOwned::to_owned)
-                .unwrap_or_default();
-            let description = if item.description.trim().is_empty() {
-                fc_underscores(18)
-            } else {
-                item.description.trim().to_string()
-            };
-            layout.text_block(
-                &format!("{description}   |   {honorar}   |   {anmerkung}"),
-                11.0,
-                false,
-                4.0,
-                TreatmentPlanPdfColor::Body,
-                0.0,
-                1.0,
-            );
-        }
-    }
-
-    layout.spacer(1.5);
-    if let Some(net) = context
-        .quote_total_net
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        layout.text_block(
-            &format!("Nettowert: {net}"),
-            11.0,
-            false,
-            4.0,
-            TreatmentPlanPdfColor::Body,
-            0.0,
-            1.0,
-        );
-    }
-    if let Some(vat) = context
-        .quote_total_vat
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        layout.text_block(
-            &format!("MWSt.: {vat}"),
-            11.0,
-            false,
-            4.0,
-            TreatmentPlanPdfColor::Body,
-            0.0,
-            1.0,
-        );
-    }
-    if let Some(gross) = context
-        .quote_total_gross
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        layout.text_block(
-            &format!("Gesamtsumme: {gross}"),
-            11.0,
-            true,
-            4.0,
-            TreatmentPlanPdfColor::Body,
-            0.0,
-            1.0,
-        );
-    }
-
-    fc_paragraph_heading(&mut layout, "Fortgeltung");
-    fc_body(
-        &mut layout,
-        &format!(
-            "Im Übrigen gelten die Regelungen des Rahmendienstleistungsvertrag mit allen enthaltenden Regelungen und Bestandteilen, die Vergütungsvereinbarung vom {}, sowie das Informationsblatt zum Datenschutz, unverändert fort.",
-            effective_date_str
-        ),
-    );
-
-    fc_paragraph_heading(&mut layout, "Anwendbares Recht");
-    fc_body(
-        &mut layout,
-        "Auf diesen Vertrag ist ausschließlich das deutsche Recht anzuwenden.",
-    );
-    fc_paragraph_heading(&mut layout, "Erfüllungsort");
-    fc_body(
-        &mut layout,
-        "Erfüllungsort für sämtliche Leistungen ist München.",
-    );
-    fc_paragraph_heading(&mut layout, "Gerichtstand");
-    fc_body(
-        &mut layout,
-        "Ausschließlicher Gerichtstand für alle, sich aus dem Vertragsverhältnis ergebenden Streitigkeiten, ist München, Deutschland.",
-    );
-    fc_paragraph_heading(&mut layout, "Änderungen und Ergänzungen");
-    fc_body(
-        &mut layout,
-        "Änderungen und Ergänzungen dieses Vertrags bedürfen der Schriftform. Schriftform im Rahmen des Vertrags bedeutet, schriftlich gem. §126 BGB und Textform gem. §126 b BGB, sofern in dieser Vereinbarung nichts Abweichendes geregelt ist.",
-    );
-    fc_paragraph_heading(&mut layout, "Salvatorische Klausel");
-    fc_body(
-        &mut layout,
-        "Sollten einzelne Bestimmungen dieses Vertrages ganz oder teilweise unwirksam sein oder werden, so wird hierdurch die Wirksamkeit der übrigen Bestimmungen nicht berührt. Anstelle der unwirksamen Bestimmung gilt diejenige wirksame Bestimmung als vereinbart, die dem Sinn und Zweck der unwirksamen Bestimmung am nächsten kommt.",
-    );
-
-    layout.spacer(3.0);
     admin_signature_block(
         &mut layout,
         context.agency_sign_place.as_deref(),
@@ -10934,18 +10516,7 @@ async fn generate_document(
         return resp;
     }
 
-    if lead_id.is_some()
-        && !matches!(
-            template.id,
-            "framework_contract"
-                | "single_order"
-                | "cost_estimate"
-                | "confidentiality_release"
-                | "privacy_consents"
-                | "consent_data_release_child"
-                | "consent_data_release_single"
-        )
-    {
+    if lead_id.is_some() && !is_lead_allowed_document_template(template.id) {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "This template is only available after patient conversion",
@@ -11811,7 +11382,7 @@ async fn generate_document(
             };
 
             let preview_html = build_framework_contract_html(&context);
-            let pdf_bytes = match build_framework_contract_pdf(&context) {
+            let pdf_bytes = match build_framework_contract_pdf(&context, &generated_doc_id) {
                 Ok(bytes) => bytes,
                 Err(message) => {
                     tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build generated framework contract PDF");
@@ -12024,19 +11595,30 @@ async fn generate_document(
             } else {
                 compute_line_item_totals(&line_items)
             };
-            let quote_number = bindings
-                .quote_number
-                .clone()
-                .or_else(|| quote.as_ref().and_then(|value| value.quote_number.clone()));
+            let quote_number = quote
+                .as_ref()
+                .and_then(|value| value.quote_number.clone())
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| {
+                    bindings
+                        .quote_number
+                        .clone()
+                        .filter(|value| !value.trim().is_empty())
+                });
             let payer = if payer.name.trim().is_empty() {
                 None
             } else {
                 Some(payer)
             };
-            let resolved_order_number = bindings
-                .order_number
+            let resolved_order_number = order_number
                 .clone()
-                .or_else(|| order_number.clone())
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| {
+                    bindings
+                        .order_number
+                        .clone()
+                        .filter(|value| !value.trim().is_empty())
+                })
                 .unwrap_or_default();
             let context = GeneratedSingleOrderContext {
                 language: language.to_string(),
@@ -12102,7 +11684,7 @@ async fn generate_document(
                 }),
                 &party_block_lines(&context.party),
             );
-            let pdf_bytes = match build_single_order_pdf(&context) {
+            let pdf_bytes = match build_single_order_pdf(&context, &generated_doc_id) {
                 Ok(bytes) => bytes,
                 Err(message) => {
                     tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build single order PDF");
@@ -12160,10 +11742,15 @@ async fn generate_document(
             } else {
                 compute_line_item_totals(&line_items)
             };
-            let resolved_order_number = bindings
-                .order_number
+            let resolved_order_number = order_number
                 .clone()
-                .or_else(|| order_number.clone())
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| {
+                    bindings
+                        .order_number
+                        .clone()
+                        .filter(|value| !value.trim().is_empty())
+                })
                 .unwrap_or_default();
             let context = GeneratedCostCoverageContext {
                 language: language.to_string(),
@@ -12178,10 +11765,16 @@ async fn generate_document(
                     .unwrap_or(order_metadata.order_sequence),
                 order_date: bindings.order_date.or(order_metadata.order_date),
                 contract_date: bindings.contract_date.or(order_metadata.contract_date),
-                quote_number: bindings
-                    .quote_number
-                    .clone()
-                    .or_else(|| quote.as_ref().and_then(|q| q.quote_number.clone())),
+                quote_number: quote
+                    .as_ref()
+                    .and_then(|value| value.quote_number.clone())
+                    .filter(|value| !value.trim().is_empty())
+                    .or_else(|| {
+                        bindings
+                            .quote_number
+                            .clone()
+                            .filter(|value| !value.trim().is_empty())
+                    }),
                 line_items,
                 total_net: if uses_quote_lines {
                     quote.as_ref().and_then(|q| q.total_net.clone())
@@ -12255,6 +11848,16 @@ async fn generate_document(
                 title_override: title_override.clone(),
                 patient: patient_party.clone(),
                 patient_pid: patient_pid.clone(),
+                quote_number: quote
+                    .as_ref()
+                    .and_then(|value| value.quote_number.clone())
+                    .filter(|value| !value.trim().is_empty())
+                    .or_else(|| {
+                        bindings
+                            .quote_number
+                            .clone()
+                            .filter(|value| !value.trim().is_empty())
+                    }),
                 estimate_date: bindings
                     .sign_date
                     .or(bindings.order_date)
@@ -12269,7 +11872,7 @@ async fn generate_document(
                 admin_doc_label(&context.language, "cost_estimate_title"),
                 &cost_estimate_summary_lines(&context),
             );
-            let pdf_bytes = match build_cost_estimate_pdf(&context) {
+            let pdf_bytes = match build_cost_estimate_pdf(&context, &generated_doc_id) {
                 Ok(bytes) => bytes,
                 Err(message) => {
                     tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build cost estimate PDF");
@@ -12397,6 +12000,29 @@ async fn generate_document(
                         ?patient_id,
                         ?lead_id,
                         "build privacy consents PDF"
+                    );
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, message);
+                }
+            };
+            (preview, pdf_bytes)
+        }
+        "privacy_information" => {
+            let agency = match load_agency_contract_settings(&state).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+            let preview = admin_preview_html(
+                "Informationsblatt zum Datenschutz",
+                std::slice::from_ref(&generated_doc_id),
+            );
+            let pdf_bytes = match build_adult_privacy_information_pdf(&agency, &generated_doc_id) {
+                Ok(bytes) => bytes,
+                Err(message) => {
+                    tracing::error!(
+                        template_id = template.id,
+                        ?patient_id,
+                        ?lead_id,
+                        "build privacy information PDF"
                     );
                     return err(StatusCode::INTERNAL_SERVER_ERROR, message);
                 }
@@ -12786,7 +12412,7 @@ async fn load_agency_contract_settings(
         data_system_name: values
             .get("agency_data_system_name")
             .cloned()
-            .unwrap_or_else(|| "GMED-CRM-System".to_string()),
+            .unwrap_or_else(|| "GMED-EDV-System".to_string()),
         data_processor_notice: values.get("agency_data_processor_notice").cloned(),
         bank_holder: values.get("agency_bank_holder").cloned(),
         bank_name: values.get("agency_bank_name").cloned(),
@@ -12845,6 +12471,35 @@ fn agency_block_lines(agency: &AgencyContractSettings) -> Vec<String> {
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty())
+    {
+        lines.push(format!("Tel.: {phone}"));
+    }
+    lines
+}
+
+fn legal_agency_block_lines(agency: &AgencyContractSettings) -> Vec<String> {
+    let mut lines = vec![adult_legal_agency_identity()];
+    if let Some(address) = agency
+        .address
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        lines.push(address.to_string());
+    }
+    if let Some(email) = agency
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        lines.push(format!("Email: {email}"));
+    }
+    if let Some(phone) = agency
+        .phone
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
     {
         lines.push(format!("Tel.: {phone}"));
     }
@@ -13102,14 +12757,16 @@ fn single_order_party_lines(party: &DocPartyBlock) -> Vec<String> {
     lines
 }
 
-fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u8>, &'static str> {
+fn build_single_order_pdf(
+    context: &GeneratedSingleOrderContext,
+    fallback_document_reference: &str,
+) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let footer = format!(
-        "{} · {}",
-        context.auto_name,
-        context.generated_at.format("%d.%m.%Y %H:%M UTC")
+    let document_reference = legal_document_reference(
+        Some(context.order_number.as_str()),
+        fallback_document_reference,
     );
-    let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
+    let mut layout = legal_document_pdf_layout(document_reference, regular, bold);
 
     let title = context.title_override.clone().unwrap_or_else(|| {
         format!(
@@ -13152,7 +12809,7 @@ fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u
         2.0,
     );
     admin_block(&mut layout, "und", 0.0, 1.0);
-    for line in agency_block_lines(&context.agency) {
+    for line in legal_agency_block_lines(&context.agency) {
         admin_block(&mut layout, &line, 0.0, 0.5);
     }
     admin_block(
@@ -13389,7 +13046,7 @@ fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u
         &mut layout,
         context.agency_sign_place.as_deref(),
         context.agency_sign_date,
-        &context.agency.name,
+        ADULT_LEGAL_AGENCY_PERSON,
         "Auftragnehmer",
     );
     admin_signature_block(
@@ -13404,7 +13061,6 @@ fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u
     // it in the same generated PDF avoids silently dropping the highlighted
     // service, total and bank binding sockets from the reference document.
     if context.payer.is_none() && !context.line_items.is_empty() {
-        layout.spacer(8.0);
         admin_heading(
             &mut layout,
             &format!(
@@ -13529,7 +13185,7 @@ fn build_single_order_pdf(context: &GeneratedSingleOrderContext) -> Result<Vec<u
             &mut layout,
             context.agency_sign_place.as_deref(),
             context.agency_sign_date,
-            &context.agency.name,
+            ADULT_LEGAL_AGENCY_PERSON,
             "Auftragnehmer",
         );
         admin_signature_block(
@@ -14023,70 +13679,14 @@ fn cost_estimate_legal_notice() -> &'static str {
      aufgrund künftiger Entwicklungen überholt sein, ohne dass das Dokument geändert wurde."
 }
 
-/// Two-line institutional footer block for the cost estimate, mirroring the
-/// reference .docx footer:
-///   "Agentur für Patientenbetreuung | <responsible person> | <address>"
-///   "Tel.: <phone> | E-mail: <email>"
-/// Built from `context.agency` (name/care_of, address, phone, email). Empty
-/// fields are simply omitted so the block stays clean.
-fn cost_estimate_footer_lines(agency: &AgencyContractSettings) -> Vec<String> {
-    let care_of = agency
-        .care_of
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty());
-    let address = agency
-        .address
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty());
-    let phone = agency
-        .phone
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty());
-    let email = agency
-        .email
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty());
-
-    let mut contact_parts: Vec<String> = vec![agency.name.trim().to_string()];
-    if let Some(care_of) = care_of {
-        contact_parts.push(care_of.to_uppercase());
-    }
-    if let Some(address) = address {
-        contact_parts.push(address.to_string());
-    }
-
-    let mut lines = vec![contact_parts.join(" | ")];
-
-    let mut contact_line_parts: Vec<String> = Vec::new();
-    if let Some(phone) = phone {
-        contact_line_parts.push(format!("Tel.: {phone}"));
-    }
-    if let Some(email) = email {
-        contact_line_parts.push(format!("E-mail: {email}"));
-    }
-    if !contact_line_parts.is_empty() {
-        lines.push(contact_line_parts.join(" | "));
-    }
-
-    lines
-}
-
 fn build_cost_estimate_pdf(
     context: &GeneratedCostEstimateContext,
+    fallback_document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-
-    // Footer: render the agency institutional contact block (matching the
-    // reference footer) instead of the "{auto_name} · timestamp" metadata.
-    let footer_lines = cost_estimate_footer_lines(&context.agency);
-    // The per-page footer renders a single line (with " · Page N" appended), so
-    // collapse the institutional block into one line for it.
-    let page_footer = footer_lines.join(" · ");
-    let mut layout = TreatmentPlanPdfLayout::new(page_footer, regular, bold);
+    let document_reference =
+        legal_document_reference(context.quote_number.as_deref(), fallback_document_reference);
+    let mut layout = legal_document_pdf_layout(document_reference, regular, bold);
 
     let title = context
         .title_override
@@ -14197,20 +13797,6 @@ fn build_cost_estimate_pdf(
     );
 
     admin_block(&mut layout, cost_estimate_legal_notice(), 2.0, 3.0);
-
-    // Institutional footer block rendered in the document body, matching the
-    // reference .docx footer (two lines, from context.agency).
-    for line in &footer_lines {
-        layout.text_block(
-            line,
-            9.0,
-            false,
-            0.0,
-            TreatmentPlanPdfColor::Muted,
-            0.0,
-            0.3,
-        );
-    }
 
     let _ = &context.patient_pid;
 
@@ -14568,11 +14154,28 @@ const ADULT_LEGAL_AGENCY_LABEL: &str = "GMED - Agentur für Patientenbetreuung";
 const ADULT_LEGAL_AGENCY_PERSON: &str = "Heorhii Hudiiev";
 
 fn adult_legal_agency_identity() -> String {
-    format!("{ADULT_LEGAL_AGENCY_LABEL} / {ADULT_LEGAL_AGENCY_PERSON}")
+    format!("{ADULT_LEGAL_AGENCY_LABEL} {ADULT_LEGAL_AGENCY_PERSON}")
 }
 
 fn adult_legal_footer_lines() -> Vec<String> {
     vec![adult_legal_agency_identity()]
+}
+
+fn legal_document_reference<'a>(business_number: Option<&'a str>, fallback: &'a str) -> &'a str {
+    business_number
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback)
+}
+
+fn legal_document_pdf_layout(
+    document_reference: &str,
+    regular: PdfFontHandle,
+    bold: PdfFontHandle,
+) -> TreatmentPlanPdfLayout {
+    let mut layout = TreatmentPlanPdfLayout::new_legal(adult_legal_footer_lines(), regular, bold);
+    layout.legal_header_line = format!("Dokument-Nr.: {document_reference}");
+    layout
 }
 
 fn adult_legal_document_header(layout: &mut TreatmentPlanPdfLayout, annex: &str, title: &str) {
@@ -14733,20 +14336,9 @@ fn build_adult_confidentiality_release_pdf(
     document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let mut layout = TreatmentPlanPdfLayout::new_legal(adult_legal_footer_lines(), regular, bold);
-    layout.legal_header_line = format!("Dokument-Nr.: {document_reference}");
+    let mut layout = legal_document_pdf_layout(document_reference, regular, bold);
     let agency_identity = adult_legal_agency_identity();
 
-    // Annex marker above the document title.
-    layout.text_block(
-        "Anlage 2",
-        11.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        1.5,
-    );
     layout.text_block(
         "Schweigepflichtentbindung",
         16.0,
@@ -14816,8 +14408,7 @@ fn render_adult_privacy_information(
     fc_body(
         layout,
         &format!(
-            "Im Rahmen der Vermittlung von Gesundheitsdienstleistungen werden personenbezogene Daten sowohl des Auftraggebers als auch durch den vorliegenden Vertrag begünstigter Dritter durch {} - Agentur für Patientenbetreuung - verarbeitet. Dabei werden die Anforderungen der Datenschutzgesetze (insbesondere DS-GVO und BDSG) umgesetzt. Hierzu werden technische und organisatorische Maßnahmen eingesetzt, um Ihre Daten zu schützen. Dieses Informationsblatt beschreibt die Verarbeitung personenbezogener Daten im Rahmen der allgemeinen geschäftlichen Tätigkeit und in der Vermittlungstätigkeit sowie die Rechte der durch die Verarbeitung betroffenen Personen.",
-            agency.name
+            "Im Rahmen der Vermittlung von Gesundheitsdienstleistungen werden personenbezogene Daten sowohl des Auftraggebers als auch durch den vorliegenden Vertrag begünstigter Dritter durch {agency_identity} verarbeitet. Dabei werden die Anforderungen der Datenschutzgesetze (insbesondere DS-GVO und BDSG) umgesetzt. Hierzu werden technische und organisatorische Maßnahmen eingesetzt, um Ihre Daten zu schützen. Dieses Informationsblatt beschreibt die Verarbeitung personenbezogener Daten im Rahmen der allgemeinen geschäftlichen Tätigkeit und in der Vermittlungstätigkeit sowie die Rechte der durch die Verarbeitung betroffenen Personen."
         ),
     );
     fc_subhead(layout, "Name des Verantwortlichen");
@@ -14954,6 +14545,16 @@ fn render_adult_privacy_information(
     fc_body(layout, &complaint_contact);
 }
 
+fn build_adult_privacy_information_pdf(
+    agency: &AgencyContractSettings,
+    document_reference: &str,
+) -> Result<Vec<u8>, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let mut layout = legal_document_pdf_layout(document_reference, regular, bold);
+    render_adult_privacy_information(&mut layout, agency);
+    Ok(finalize_admin_pdf(document, layout))
+}
+
 fn build_adult_privacy_consents_pdf(
     party: &DocPartyBlock,
     agency: &AgencyContractSettings,
@@ -14961,11 +14562,10 @@ fn build_adult_privacy_consents_pdf(
     document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let mut layout = TreatmentPlanPdfLayout::new_legal(adult_legal_footer_lines(), regular, bold);
-    layout.legal_header_line = format!("Dokument-Nr.: {document_reference}");
+    let mut layout = legal_document_pdf_layout(document_reference, regular, bold);
     let agency_identity = adult_legal_agency_identity();
     let data_system_name = if agency.data_system_name.trim().is_empty() {
-        "CRM-System"
+        "GMED-EDV-System"
     } else {
         agency.data_system_name.trim()
     };
@@ -15062,8 +14662,6 @@ fn build_adult_privacy_consents_pdf(
     );
     adult_legal_signature_line(&mut layout, party, bindings);
 
-    render_adult_privacy_information(&mut layout, agency);
-
     Ok(finalize_admin_pdf(document, layout))
 }
 
@@ -15077,7 +14675,11 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'sta
     let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
     let agency_person = fc_agency_person(&context.agency);
     let agency_identity = agency_legal_identity(&context.agency);
-    let data_system_name = context.agency.data_system_name.trim();
+    let data_system_name = if context.agency.data_system_name.trim().is_empty() {
+        "GMED-EDV-System"
+    } else {
+        context.agency.data_system_name.trim()
+    };
 
     // Grammar tokens differ between the sole-guardian and the two-guardian (child) variants.
     let we = if context.sole_guardian { "Ich" } else { "Wir" };
@@ -15764,7 +15366,7 @@ async fn load_generated_appointment_scope(
                 .try_get::<Option<String>, _>("address_country")
                 .ok()
                 .flatten()
-                .map(|value| value.trim().to_string())
+                .map(|value| german_document_country(&value))
                 .filter(|value| !value.is_empty());
             let zip_city = match (zip, city) {
                 (Some(zip), Some(city)) => Some(format!("{zip} {city}")),
@@ -20208,17 +19810,83 @@ async fn list_document_categories(
 mod tests {
     use super::{
         AgencyContractSettings, DocPartyBlock, DocumentBindingOverrides, GeneratedContractLineItem,
-        GeneratedPatientStickerContext, ServiceLineInput, build_adult_confidentiality_release_pdf,
-        build_adult_privacy_consents_pdf, build_manual_generated_text_pdf,
-        build_patient_sticker_pdf, compute_line_item_totals, cost_coverage_money_cell,
-        cost_estimate_price_text, generated_binding_snapshot, generated_compliance_document_number,
-        pdf_text_font_handles, trusted_contact_recipients_binding,
+        GeneratedCostEstimateContext, GeneratedFrameworkContractContext,
+        GeneratedPatientStickerContext, GeneratedSingleOrderContext, ServiceLineInput,
+        build_adult_confidentiality_release_pdf, build_adult_privacy_consents_pdf,
+        build_adult_privacy_information_pdf, build_cost_estimate_pdf, build_framework_contract_pdf,
+        build_manual_generated_text_pdf, build_patient_sticker_pdf, build_single_order_pdf,
+        compute_line_item_totals, cost_coverage_money_cell, cost_estimate_price_text,
+        document_satisfies_compliance_kind, document_template_by_id, generated_binding_snapshot,
+        generated_compliance_document_number, german_document_country,
+        is_fixed_legal_document_template, is_lead_allowed_document_template,
+        legal_document_reference, pdf_text_font_handles, trusted_contact_recipients_binding,
     };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
     use chrono::{NaiveDate, TimeZone, Utc};
     use printpdf::{BuiltinFont, PdfFontHandle};
     use serde_json::json;
     use uuid::Uuid;
+
+    const LEGAL_IDENTITY: &str = "GMED - Agentur für Patientenbetreuung Heorhii Hudiiev";
+
+    fn legal_test_agency() -> AgencyContractSettings {
+        AgencyContractSettings {
+            name: "Test Agentur".to_string(),
+            care_of: Some("c/o Alte Identität".to_string()),
+            principal_birth_date: NaiveDate::from_ymd_opt(1975, 6, 3),
+            address: Some("Agenturstr. 2, 50667 Köln".to_string()),
+            phone: Some("+49 221 987654".to_string()),
+            email: Some("kontakt@example.test".to_string()),
+            privacy_email: Some("datenschutz@example.test".to_string()),
+            sign_place: "Köln".to_string(),
+            data_system_name: "GMED-EDV-System".to_string(),
+            data_processor_notice: Some(
+                "Ein beauftragter Auftragsverarbeiter kann technisch beteiligt sein.".to_string(),
+            ),
+            ..Default::default()
+        }
+    }
+
+    fn legal_test_party(country: &str) -> DocPartyBlock {
+        DocPartyBlock {
+            name: "Anna Beispiel".to_string(),
+            salutation: Some("Frau".to_string()),
+            first_name: Some("Anna".to_string()),
+            last_name: Some("Beispiel".to_string()),
+            birth_date: NaiveDate::from_ymd_opt(1988, 4, 12),
+            street: Some("Musterstr. 1".to_string()),
+            zip: Some("10115".to_string()),
+            city: Some("Berlin".to_string()),
+            country: Some(country.to_string()),
+            email: Some("anna@example.test".to_string()),
+            phone: Some("+49 30 123456".to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn normalized_pdf_text(bytes: &[u8]) -> String {
+        pdf_extract::extract_text_from_mem(bytes)
+            .unwrap()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn assert_legal_pdf_chrome(bytes: &[u8], document_reference: &str) -> String {
+        let text = normalized_pdf_text(bytes);
+        let page_count = text.matches("Seite:").count();
+        assert!(page_count > 0);
+        assert_eq!(
+            text.matches(&format!("Dokument-Nr.: {document_reference}"))
+                .count(),
+            page_count
+        );
+        assert!(text.matches(LEGAL_IDENTITY).count() >= page_count);
+        assert!(!text.contains("Patientenbetreuung /"));
+        assert!(!text.to_ascii_lowercase().contains("c/o"));
+        assert!(!text.contains("UTC"));
+        text
+    }
 
     #[test]
     fn compliance_document_numbers_encode_type_date_and_stable_id() {
@@ -20239,9 +19907,87 @@ mod tests {
                 .as_deref(),
             Some("EW-20260713-0123456789AB")
         );
-        assert!(
-            generated_compliance_document_number("framework_contract", document_id, generated_at)
-                .is_none()
+        assert_eq!(
+            generated_compliance_document_number("privacy_information", document_id, generated_at,)
+                .as_deref(),
+            Some("DS-20260713-0123456789AB")
+        );
+        for template_id in ["framework_contract", "single_order", "cost_estimate"] {
+            assert!(
+                generated_compliance_document_number(template_id, document_id, generated_at)
+                    .is_none()
+            );
+        }
+        assert_eq!(
+            legal_document_reference(Some(" FC-2026-17 "), "DOC-FALLBACK"),
+            "FC-2026-17"
+        );
+        assert_eq!(
+            legal_document_reference(Some(" "), "DOC-FALLBACK"),
+            "DOC-FALLBACK"
+        );
+    }
+
+    #[test]
+    fn privacy_information_template_is_fixed_legal_but_not_consent_evidence() {
+        let template = document_template_by_id("privacy_information").unwrap();
+        assert_eq!(template.art, "privacy_information");
+        assert_eq!(template.label, "Informationsblatt zum Datenschutz");
+        assert_eq!(
+            template.default_auto_name,
+            "Informationsblatt zum Datenschutz"
+        );
+        assert_eq!(template.default_visibility, "patient_visible");
+        assert!(is_fixed_legal_document_template(template.id));
+        assert!(is_lead_allowed_document_template(template.id));
+
+        assert!(!document_satisfies_compliance_kind(
+            "dsgvo",
+            Some("privacy_information"),
+            "privacy_information"
+        ));
+        assert!(!document_satisfies_compliance_kind(
+            "dsgvo",
+            Some("privacy_information"),
+            "consent"
+        ));
+        assert!(document_satisfies_compliance_kind("dsgvo", None, "consent"));
+        assert!(document_satisfies_compliance_kind(
+            "dsgvo",
+            Some("privacy_consents"),
+            "privacy_consents"
+        ));
+        assert!(document_satisfies_compliance_kind(
+            "dsgvo",
+            Some("consent_data_release_child"),
+            "consent_data_release"
+        ));
+        assert!(document_satisfies_compliance_kind(
+            "confidentiality_release",
+            Some("confidentiality_release"),
+            "confidentiality_release"
+        ));
+        assert!(!document_satisfies_compliance_kind(
+            "confidentiality_release",
+            Some("privacy_consents"),
+            "privacy_consents"
+        ));
+    }
+
+    #[test]
+    fn german_document_addresses_translate_known_countries_and_keep_free_text() {
+        assert_eq!(german_document_country("DE"), "Deutschland");
+        assert_eq!(german_document_country("Germany"), "Deutschland");
+        assert_eq!(german_document_country("Austria"), "Österreich");
+        assert_eq!(german_document_country("FR"), "Frankreich");
+        assert_eq!(german_document_country("NL"), "Niederlande");
+        assert_eq!(german_document_country("ES"), "Spanien");
+        assert_eq!(german_document_country("IT"), "Italien");
+        assert_eq!(german_document_country("US"), "Vereinigte Staaten");
+        assert_eq!(german_document_country("Freitextland"), "Freitextland");
+        assert_eq!(
+            legal_test_party("Germany").address_line().as_deref(),
+            Some("Musterstr. 1 | 10115 Berlin | Deutschland")
         );
     }
 
@@ -20316,34 +20062,8 @@ mod tests {
 
     #[test]
     fn adult_legal_documents_follow_reference_structure_and_bind_dynamic_data() {
-        let party = DocPartyBlock {
-            name: "Anna Beispiel".to_string(),
-            first_name: Some("Anna".to_string()),
-            last_name: Some("Beispiel".to_string()),
-            birth_date: NaiveDate::from_ymd_opt(1988, 4, 12),
-            street: Some("Musterstr. 1".to_string()),
-            zip: Some("10115".to_string()),
-            city: Some("Berlin".to_string()),
-            country: Some("Deutschland".to_string()),
-            email: Some("anna@example.test".to_string()),
-            phone: Some("+49 30 123456".to_string()),
-            ..Default::default()
-        };
-        let agency = AgencyContractSettings {
-            name: "Test Agentur für Patientenbetreuung".to_string(),
-            care_of: Some("Max Verantwortlich".to_string()),
-            principal_birth_date: NaiveDate::from_ymd_opt(1975, 6, 3),
-            address: Some("Agenturstr. 2, 50667 Köln".to_string()),
-            phone: Some("+49 221 987654".to_string()),
-            email: Some("kontakt@example.test".to_string()),
-            privacy_email: Some("datenschutz@example.test".to_string()),
-            sign_place: "Köln".to_string(),
-            data_system_name: "TEST-CRM".to_string(),
-            data_processor_notice: Some(
-                "Ein beauftragter Auftragsverarbeiter kann technisch beteiligt sein.".to_string(),
-            ),
-            ..Default::default()
-        };
+        let party = legal_test_party("Germany");
+        let agency = legal_test_agency();
         let bindings = DocumentBindingOverrides {
             party_sign_place: Some("Berlin".to_string()),
             party_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
@@ -20365,68 +20085,221 @@ mod tests {
             "SE-20260716-UNITTEST0001",
         )
         .unwrap();
-        let release_text = pdf_extract::extract_text_from_mem(&release)
-            .unwrap()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+        let release_text = assert_legal_pdf_chrome(&release, "SE-20260716-UNITTEST0001");
         assert!(release_text.contains("Schweigepflichtentbindung"));
         assert!(release_text.contains("203 StGB"));
-        assert!(release_text.contains("Dokument-Nr.: SE-20260716-UNITTEST0001"));
-        assert!(!release_text.contains("c/o GMED"));
-        assert!(release_text.contains("GMED - Agentur für Patientenbetreuung"));
-        assert!(release_text.contains("Heorhii Hudiiev"));
-        assert!(release_text.contains("Anlage 2"));
-        assert!(!release_text.contains("Heorhii Hudiiev Anlage 2"));
-        assert_eq!(
-            release_text
-                .matches("GMED - Agentur für Patientenbetreuung")
-                .count(),
-            2
-        );
+        assert!(!release_text.contains("Anlage 2"));
+        assert!(release_text.contains("Deutschland"));
         assert!(release_text.contains("den von ihm beauftragten Mitarbeitenden"));
         assert!(!release_text.contains("Maria Beispiel, Vertrauenskontakt"));
-        assert!(!release_text.contains("Max Verantwortlich"));
-        assert!(release_text.contains("GMED - Agentur für Patientenbetreuung / Heorhii Hudiiev"));
-        assert!(release_text.contains("Seite: 1"));
         assert!(!release_text.contains('?'));
 
-        let privacy = build_adult_privacy_consents_pdf(
+        let consent = build_adult_privacy_consents_pdf(
             &party,
             &agency,
             &bindings,
             "EW-20260716-UNITTEST0001",
         )
         .unwrap();
-        let privacy_text = pdf_extract::extract_text_from_mem(&privacy)
-            .unwrap()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        assert!(privacy_text.contains("Einverständniserklärung zur Datenübermittlung"));
-        assert!(privacy_text.contains("Informationsblatt zum Datenschutz"));
-        assert!(privacy_text.contains("EW-20260716-UNITTEST0001"));
-        let privacy_page_count = privacy_text.matches("Seite:").count();
-        assert!(privacy_page_count >= 2);
-        assert_eq!(
-            privacy_text
-                .matches("Dokument-Nr.: EW-20260716-UNITTEST0001")
-                .count(),
-            privacy_page_count
+        let consent_text = assert_legal_pdf_chrome(&consent, "EW-20260716-UNITTEST0001");
+        assert!(consent_text.contains("Anlage 1"));
+        assert!(consent_text.contains("Einverständniserklärung zur Datenübermittlung"));
+        assert!(!consent_text.contains("Anlage 3"));
+        assert!(!consent_text.contains("Informationsblatt zum Datenschutz"));
+        assert!(!consent_text.contains("Kategorien der verarbeiteten personenbezogenen Daten"));
+        assert!(!consent_text.contains("datenschutz@example.test"));
+        assert!(consent_text.contains("Deutschland"));
+        assert!(consent_text.contains("anna@example.test"));
+        assert!(consent_text.contains("GMED-EDV-System"));
+        assert!(consent_text.contains("Maria Beispiel, Vertrauenskontakt"));
+        assert!(!consent_text.contains("[x]"));
+        assert!(consent_text.contains("[ ]"));
+        assert!(consent_text.contains("[ ] Threema-Messenger"));
+        assert!(consent_text.contains("[ ] WhatsApp-Messenger"));
+        assert!(consent_text.contains("[ ] Telegram-Messenger"));
+        assert!(!consent_text.contains('?'));
+
+        let privacy_information =
+            build_adult_privacy_information_pdf(&agency, "DS-20260716-UNITTEST0001").unwrap();
+        let privacy_information_text =
+            assert_legal_pdf_chrome(&privacy_information, "DS-20260716-UNITTEST0001");
+        assert!(privacy_information_text.contains("Anlage 3"));
+        assert!(privacy_information_text.contains("Informationsblatt zum Datenschutz"));
+        assert!(
+            privacy_information_text
+                .contains("Kategorien der verarbeiteten personenbezogenen Daten")
         );
-        assert!(!privacy_text.contains("c/o GMED"));
-        assert!(privacy_text.contains("GMED - Agentur für Patientenbetreuung / Heorhii Hudiiev"));
-        assert!(!privacy_text.contains("Heorhii Hudiiev Anlage 1"));
-        assert!(privacy_text.contains("anna@example.test"));
-        assert!(privacy_text.contains("datenschutz@example.test"));
-        assert!(privacy_text.contains("TEST-CRM"));
-        assert!(privacy_text.contains("Maria Beispiel, Vertrauenskontakt"));
-        assert!(!privacy_text.contains("[x]"));
-        assert!(privacy_text.contains("[ ]"));
-        assert!(privacy_text.contains("[ ] Threema-Messenger"));
-        assert!(privacy_text.contains("[ ] WhatsApp-Messenger"));
-        assert!(privacy_text.contains("[ ] Telegram-Messenger"));
-        assert!(!privacy_text.contains('?'));
+        assert!(privacy_information_text.contains("Betroffenenrechte"));
+        assert!(privacy_information_text.contains("datenschutz@example.test"));
+        assert!(!privacy_information_text.contains("Anna Beispiel"));
+        assert!(!privacy_information_text.contains('?'));
+    }
+
+    #[test]
+    fn framework_contract_pdf_keeps_main_contract_and_annex_index_only() {
+        let party = legal_test_party("Germany");
+        let context = GeneratedFrameworkContractContext {
+            patient_pid: "PT-LEGAL-1".to_string(),
+            patient_name: party.name.clone(),
+            patient_title: party.title.clone(),
+            birth_date: party.birth_date,
+            patient_address: party.address_line(),
+            patient_email: party.email.clone(),
+            patient_phone: party.phone.clone(),
+            patient_salutation: party.salutation.clone(),
+            language: "de".to_string(),
+            auto_name: "Rahmenvertrag".to_string(),
+            title_override: None,
+            introduction: None,
+            closing_note: None,
+            agency: legal_test_agency(),
+            party_sign_place: Some("Berlin".to_string()),
+            party_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
+            agency_sign_place: Some("Köln".to_string()),
+            agency_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
+            effective_date: NaiveDate::from_ymd_opt(2026, 7, 1),
+            cost_threshold: Some("500".to_string()),
+            order_sequence: 1,
+            extra_release_recipients: None,
+            contract_number: "RV-2026-0042".to_string(),
+            contract_status: "draft".to_string(),
+            valid_from: NaiveDate::from_ymd_opt(2026, 7, 1),
+            valid_to: None,
+            signed_at: None,
+            order_number: None,
+            quote_number: None,
+            quote_valid_until: None,
+            quote_total_net: None,
+            quote_total_vat: None,
+            quote_total_gross: None,
+            quote_notes: None,
+            conditions: Vec::new(),
+            line_items: Vec::new(),
+            text_blocks: Vec::new(),
+            generated_at: Utc.with_ymd_and_hms(2026, 7, 16, 9, 30, 0).unwrap(),
+        };
+
+        let bytes = build_framework_contract_pdf(&context, "DOC-FRAMEWORK-FALLBACK").unwrap();
+        let text = assert_legal_pdf_chrome(&bytes, "RV-2026-0042");
+
+        assert!(!text.contains("DOC-FRAMEWORK-FALLBACK"));
+        assert!(text.contains("Deutschland"));
+        for heading in [
+            "§ 1 Vertragsgegenstand",
+            "§ 2 Vergütung",
+            "§ 3 Vertraulichkeit",
+            "§ 4 Gewährleistung & Haftung",
+            "§ 5 Nutzung von Online-Diensten und Telemedien",
+            "§ 6 Vertragslaufzeit & Kündigung",
+            "§ 7 Sprache & anwendbares Recht",
+            "§ 8 Erfüllungsort",
+            "§ 9 Änderungen & Ergänzungen",
+            "§ 10 Salvatorische Klausel",
+            "§ 11 Bestandteile des Vertrages und Rangfolge",
+        ] {
+            assert!(
+                text.contains(heading),
+                "missing framework heading: {heading}"
+            );
+        }
+        for annex in [
+            "Anlage 1: Einverständnis zur Datenübermittlung",
+            "Anlage 2: Schweigepflichtentbindung",
+            "Anlage 3: Informationsblatt zum Datenschutz",
+            "Anlage 4: Vorlage: Einzelauftrag",
+        ] {
+            assert!(text.contains(annex), "missing annex index entry: {annex}");
+        }
+        assert!(text.contains(
+            "Die entsprechende Vorlage für Anlage 4 wird separat als eigenes Dokument generiert"
+        ));
+        assert!(!text.contains("beigefügt"));
+        for annex_body_marker in [
+            "bitte ankreuzen",
+            "Daher entbinde ich alle meine behandelnden Ärzte",
+            "Kategorien der verarbeiteten personenbezogenen Daten",
+            "EINZELAUFTRAG ZUM RAHMENDIENSTLEISTUNGSVERTRAG",
+        ] {
+            assert!(
+                !text.contains(annex_body_marker),
+                "embedded annex body marker: {annex_body_marker}"
+            );
+        }
+    }
+
+    #[test]
+    fn single_order_pdf_uses_order_number_and_shared_legal_chrome() {
+        let context = GeneratedSingleOrderContext {
+            language: "de".to_string(),
+            auto_name: "Einzelauftrag".to_string(),
+            title_override: None,
+            patient_pid: "PT-LEGAL-2".to_string(),
+            party: legal_test_party("Germany"),
+            agency: legal_test_agency(),
+            order_number: "EA-2026-0017".to_string(),
+            order_sequence: 2,
+            order_date: NaiveDate::from_ymd_opt(2026, 7, 16),
+            contract_date: NaiveDate::from_ymd_opt(2026, 7, 1),
+            specialties: Some("Kardiologie".to_string()),
+            examination_purpose: Some("kardiologischen Untersuchung".to_string()),
+            treatment_purpose: Some("kardiologische Behandlung".to_string()),
+            order_components: Some("Keine weiteren Anlagen".to_string()),
+            period_from: NaiveDate::from_ymd_opt(2026, 8, 3),
+            period_to: NaiveDate::from_ymd_opt(2026, 8, 7),
+            payer: None,
+            quote_number: None,
+            line_items: Vec::new(),
+            total_net: None,
+            total_vat: None,
+            total_gross: None,
+            party_sign_place: Some("Berlin".to_string()),
+            party_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
+            agency_sign_place: Some("Köln".to_string()),
+            agency_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
+            generated_at: Utc.with_ymd_and_hms(2026, 7, 16, 10, 0, 0).unwrap(),
+        };
+
+        let bytes = build_single_order_pdf(&context, "DOC-ORDER-FALLBACK").unwrap();
+        let text = assert_legal_pdf_chrome(&bytes, "EA-2026-0017");
+
+        assert!(!text.contains("DOC-ORDER-FALLBACK"));
+        assert!(text.contains("Auftragsnummer: EA-2026-0017"));
+        assert!(text.contains("Deutschland"));
+        assert!(text.contains("§ 1 Leistungsumfang"));
+        assert!(text.contains("§ 9 Bestandteile des Einzelauftrages und Rangfolge"));
+    }
+
+    #[test]
+    fn cost_estimate_pdf_uses_quote_number_and_shared_legal_chrome() {
+        let context = GeneratedCostEstimateContext {
+            language: "de".to_string(),
+            auto_name: "Kostenschätzung".to_string(),
+            title_override: None,
+            patient: legal_test_party("Germany"),
+            patient_pid: "PT-LEGAL-3".to_string(),
+            quote_number: Some("KV-2026-0099".to_string()),
+            estimate_date: NaiveDate::from_ymd_opt(2026, 7, 16),
+            line_items: vec![GeneratedContractLineItem {
+                description: "Kardiologische Untersuchung".to_string(),
+                quantity: "1".to_string(),
+                unit_price: "100,00 - 1000,00 EUR".to_string(),
+                line_gross: "100,00 - 1000,00 EUR".to_string(),
+                vat_rate: None,
+                notes: None,
+            }],
+            total_range: Some("100,00 - 1000,00 EUR".to_string()),
+            agency: legal_test_agency(),
+            generated_at: Utc.with_ymd_and_hms(2026, 7, 16, 10, 30, 0).unwrap(),
+        };
+
+        let bytes = build_cost_estimate_pdf(&context, "DOC-COST-FALLBACK").unwrap();
+        let text = assert_legal_pdf_chrome(&bytes, "KV-2026-0099");
+
+        assert!(!text.contains("DOC-COST-FALLBACK"));
+        assert!(text.contains("Unverbindliche voraussichtliche Kostenschätzung"));
+        assert!(text.contains("Patient: Frau Anna Beispiel"));
+        assert!(text.contains("Kardiologische Untersuchung"));
+        assert!(text.contains("100,00 - 1000,00 EUR"));
     }
 
     #[test]

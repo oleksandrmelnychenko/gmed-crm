@@ -4691,16 +4691,20 @@ async fn document_templates_can_generate_framework_contract_pdf_document() {
     assert!(bytes.len() > 1000);
     let pdf_text = extract_pdf_text(&bytes);
     assert!(pdf_text.contains("Informationsblatt zum Datenschutz"));
-    assert!(pdf_text.contains("Beschwerderecht"));
-    assert!(pdf_text.contains("Datenschutzkontakt"));
+    assert!(!pdf_text.contains("Beschwerderecht"));
+    assert!(!pdf_text.contains("Datenschutzkontakt"));
     assert!(!pdf_text.contains("Salesforce"));
-    assert!(!pdf_text.contains("Heorhii Hudiiev"));
+    assert!(pdf_text.contains("Heorhii Hudiiev"));
+    assert!(pdf_text.contains(&format!("Dokument-Nr.: FC-{tag}")));
+    assert!(pdf_text.contains("§ 11 Bestandteile des Vertrages und Rangfolge"));
     assert!(pdf_text.contains("Override Str. 9 | 80331 Muenchen | Deutschland"));
     assert!(pdf_text.contains("override.patient@example.test"));
     assert!(pdf_text.contains("+49 89 123456"));
-    assert!(pdf_text.contains("4. EINZELAUFTRAG"));
+    assert!(!pdf_text.contains("4. EINZELAUFTRAG"));
     assert!(pdf_text.contains("2.500,00 EUR"));
-    assert!(pdf_text.contains("Klinik Datenschutzstelle"));
+    assert!(!pdf_text.contains("Klinik Datenschutzstelle"));
+    assert!(!pdf_text.contains("Patientenbetreuung /"));
+    assert!(!pdf_text.to_ascii_lowercase().contains("c/o"));
     assert!(!pdf_text.contains("(E-Mail-Adresse"));
 }
 
@@ -4802,6 +4806,8 @@ async fn onboarding_documents_generate_for_a_lead_with_matching_human_numbers() 
         let pdf_text = extract_pdf_text(&bytes);
         assert!(pdf_text.contains(document_number));
         assert!(pdf_text.contains("Anna Beispiel"));
+        assert!(!pdf_text.contains("Patientenbetreuung /"));
+        assert!(!pdf_text.to_ascii_lowercase().contains("c/o"));
         assert!(!pdf_text.contains('?'));
         match template_id {
             "confidentiality_release" => {
@@ -4811,13 +4817,14 @@ async fn onboarding_documents_generate_for_a_lead_with_matching_human_numbers() 
             }
             "privacy_consents" => {
                 assert!(pdf_text.contains("Einverständniserklärung zur Datenübermittlung"));
-                assert!(pdf_text.contains("Informationsblatt zum Datenschutz"));
+                assert!(!pdf_text.contains("Informationsblatt zum Datenschutz"));
                 assert!(pdf_text.contains("Maria Beispiel, Vertrauenskontakt"));
-                assert!(pdf_text.contains("[x]"));
+                assert!(pdf_text.contains("GMED-EDV-System"));
+                assert!(!pdf_text.contains("[x]"));
                 assert!(pdf_text.contains("[ ]"));
-                assert!(pdf_text.contains("[x] Threema-Messenger"));
+                assert!(pdf_text.contains("[ ] Threema-Messenger"));
                 assert!(pdf_text.contains("[ ] WhatsApp-Messenger"));
-                assert!(pdf_text.contains("[x] Telegram-Messenger"));
+                assert!(pdf_text.contains("[ ] Telegram-Messenger"));
             }
             _ => unreachable!(),
         }
@@ -4843,6 +4850,60 @@ async fn onboarding_documents_generate_for_a_lead_with_matching_human_numbers() 
         assert_eq!(row.1.as_deref(), Some(compliance_kind));
         assert!(row.2);
     }
+
+    let (status, generated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "privacy_information",
+            "lead_id": lead_id,
+            "language": "de",
+            "status": "active"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let privacy_information_id = Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap();
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{privacy_information_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let document_number = detail["document_number"].as_str().unwrap();
+    assert!(document_number.starts_with("DS-"), "{detail}");
+    assert_eq!(detail["generated_template_id"], "privacy_information");
+
+    let (status, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{privacy_information_id}/download"),
+        &admin_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let pdf_text = extract_pdf_text(&bytes);
+    assert!(pdf_text.contains(document_number));
+    assert!(pdf_text.contains("Informationsblatt zum Datenschutz"));
+    assert!(!pdf_text.contains("Einverständniserklärung zur Datenübermittlung"));
+    assert!(!pdf_text.contains("Patientenbetreuung /"));
+    assert!(!pdf_text.to_ascii_lowercase().contains("c/o"));
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{privacy_information_id}/mark-signed"),
+        &admin_bearer,
+        Some(json!({ "compliance_kind": "dsgvo" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
 
     let (status, body) = json_request(
         &app,
@@ -5871,6 +5932,36 @@ async fn mark_document_signed_records_evidence_and_satisfies_compliance() {
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    sqlx::query("UPDATE documents SET status = 'archived' WHERE id = $1")
+        .bind(doc_uuid)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/mark-signed"),
+        &admin_bearer,
+        Some(json!({ "compliance_kind": "dsgvo" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    sqlx::query("UPDATE documents SET file_deleted_at = now() WHERE id = $1")
+        .bind(doc_uuid)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/mark-signed"),
+        &admin_bearer,
+        Some(json!({ "compliance_kind": "dsgvo" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::GONE);
 }
 
 #[tokio::test]

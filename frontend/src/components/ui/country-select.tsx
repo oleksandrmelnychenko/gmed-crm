@@ -35,6 +35,46 @@ export const COUNTRY_CODES: readonly string[] = [
   "VN", "VU", "WF", "WS", "YE", "YT", "ZA", "ZM", "ZW",
 ];
 
+const COUNTRY_CODE_SET = new Set(COUNTRY_CODES);
+let countryCodeByLocalizedName: Map<string, string> | null = null;
+
+function countryNameKey(value: string) {
+  return value.trim().toLocaleLowerCase();
+}
+
+function countryCodeFromStoredValue(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) return "";
+
+  const upper = trimmed.toUpperCase();
+  if (COUNTRY_CODE_SET.has(upper)) return upper;
+
+  if (!countryCodeByLocalizedName) {
+    countryCodeByLocalizedName = new Map<string, string>();
+    for (const locale of ["de", "en", "ru"]) {
+      try {
+        const display = new Intl.DisplayNames([locale], { type: "region" });
+        for (const code of COUNTRY_CODES) {
+          const label = display.of(code);
+          if (label) countryCodeByLocalizedName.set(countryNameKey(label), code);
+        }
+      } catch {
+        // Keep unknown stored values as-is when localized region names are unavailable.
+      }
+    }
+  }
+
+  return countryCodeByLocalizedName.get(countryNameKey(trimmed)) ?? trimmed;
+}
+
+export function countryNameForGermanDocument(value: string | null | undefined) {
+  const normalized = countryCodeFromStoredValue(value);
+  if (!normalized) return "";
+
+  const code = normalized.toUpperCase();
+  return COUNTRY_CODE_SET.has(code) ? countryLabel(code, "de") : normalized;
+}
+
 /** Localized human-readable country name for an ISO alpha-2 code. */
 export function countryLabel(code: string | null | undefined, lang: string): string {
   if (!code) {
@@ -64,21 +104,22 @@ export function CountrySelect({
   "aria-label"?: string;
   includeEmpty?: boolean;
 }) {
+  const selectedValue = countryCodeFromStoredValue(value);
   const options = useMemo(() => {
     const collator = new Intl.Collator(lang === "de" ? "de" : "ru");
     const knownOptions = COUNTRY_CODES.map((code) => ({ code, label: countryLabel(code, lang) })).sort(
       (a, b) => collator.compare(a.label, b.label),
     );
-    const currentValue = value?.trim();
-    if (currentValue && !COUNTRY_CODES.includes(currentValue.toUpperCase())) {
+    const currentValue = selectedValue.trim();
+    if (currentValue && !COUNTRY_CODE_SET.has(currentValue.toUpperCase())) {
       return [{ code: currentValue, label: currentValue }, ...knownOptions];
     }
     return knownOptions;
-  }, [lang, value]);
+  }, [lang, selectedValue]);
 
   return (
     <NativeComboboxSelect
-      value={value ?? ""}
+      value={selectedValue}
       aria-label={ariaLabel}
       className={className}
       onChange={(event) => onChange(event.target.value || null)}

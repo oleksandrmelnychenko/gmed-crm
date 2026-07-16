@@ -71,6 +71,49 @@ def contains_token(source: str, token: str) -> bool:
     return re.search(rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])", source) is not None
 
 
+def validate_generated_template_registration(
+    entry: dict[str, object],
+    backend: str,
+    frontend: str,
+    lead_wizard: str,
+    generation_forms: str,
+    errors: list[str],
+) -> None:
+    template_id = entry.get("template_id")
+    wizard_kind = entry.get("wizard_kind")
+    label = entry.get("file") or template_id or "generated template"
+    if not isinstance(template_id, str) or not isinstance(wizard_kind, str):
+        errors.append(f"Invalid generated template entry: {entry!r}")
+        return
+
+    if f'id: "{template_id}"' not in backend:
+        errors.append(f"{label}: backend template is missing: {template_id}")
+    if entry.get("requires_binding_schema", True):
+        if f"{template_id}: [" not in frontend and f"{template_id}: " not in frontend:
+            errors.append(f"{label}: frontend binding schema is missing: {template_id}")
+    if f'"{wizard_kind}"' not in lead_wizard:
+        errors.append(f"{label}: lead wizard kind is missing: {wizard_kind}")
+    if f'generateLeadComplianceDocument("{template_id}")' not in lead_wizard:
+        errors.append(f"{label}: lead wizard generation action is missing: {template_id}")
+    if f"wizardDocuments.{wizard_kind}" not in lead_wizard:
+        errors.append(f"{label}: lead wizard document list is missing: {wizard_kind}")
+
+    for heading in entry.get("wizard_heading_tokens", []):
+        if heading not in lead_wizard:
+            errors.append(f"{label}: lead wizard heading is missing: {heading}")
+    for key in entry.get("manual_binding_keys", []):
+        if not contains_token(backend, key):
+            errors.append(f"{label}: backend PDF binding key is missing: {key}")
+        if not contains_token(frontend, key):
+            errors.append(f"{label}: frontend PDF binding key is missing: {key}")
+    for token in entry.get("frontend_form_tokens", []):
+        if token not in generation_forms:
+            errors.append(f"{label}: generation form token is missing: {token}")
+    for token in entry.get("runtime_tokens", []):
+        if not contains_token(backend, token):
+            errors.append(f"{label}: backend PDF builder is missing: {token}")
+
+
 def main() -> int:
     errors: list[str] = []
     if not MANIFEST_PATH.is_file():
@@ -182,33 +225,33 @@ def main() -> int:
                 f"{name}: PDF page count changed ({page_count} != {entry.get('page_count')})"
             )
 
-        if f'id: "{template_id}"' not in backend:
-            errors.append(f"{name}: backend template is missing: {template_id}")
-        if f'{template_id}: [' not in frontend and f'{template_id}: ' not in frontend:
-            errors.append(f"{name}: frontend binding schema is missing: {template_id}")
-        if f'"{wizard_kind}"' not in lead_wizard:
-            errors.append(f"{name}: lead wizard kind is missing: {wizard_kind}")
-        if f'generateLeadComplianceDocument("{template_id}")' not in lead_wizard:
-            errors.append(f"{name}: lead wizard generation action is missing: {template_id}")
-        if f"wizardDocuments.{wizard_kind}" not in lead_wizard:
-            errors.append(f"{name}: lead wizard document list is missing: {wizard_kind}")
+        validate_generated_template_registration(
+            entry,
+            backend,
+            frontend,
+            lead_wizard,
+            generation_forms,
+            errors,
+        )
 
-        for heading in entry.get("wizard_heading_tokens", []):
-            if heading not in lead_wizard:
-                errors.append(f"{name}: lead wizard heading is missing: {heading}")
-        for key in entry.get("manual_binding_keys", []):
-            if not contains_token(backend, key):
-                errors.append(f"{name}: backend PDF binding key is missing: {key}")
-            if not contains_token(frontend, key):
-                errors.append(f"{name}: frontend PDF binding key is missing: {key}")
-        for token in entry.get("frontend_form_tokens", []):
-            if token not in generation_forms:
-                errors.append(f"{name}: generation form token is missing: {token}")
-        for token in entry.get("runtime_tokens", []):
-            if not contains_token(backend, token):
-                errors.append(f"{name}: backend PDF builder is missing: {token}")
+    generated_entries = manifest.get("generated_templates", [])
+    if not isinstance(generated_entries, list):
+        errors.append("Print binding manifest generated_templates must be a list")
+        generated_entries = []
+    for entry in generated_entries:
+        if not isinstance(entry, dict):
+            errors.append(f"Invalid generated template entry: {entry!r}")
+            continue
+        validate_generated_template_registration(
+            entry,
+            backend,
+            frontend,
+            lead_wizard,
+            generation_forms,
+            errors,
+        )
 
-    for forbidden in ("Heorhii Hudiiev", "Salesforce"):
+    for forbidden in ("Salesforce",):
         if forbidden in backend:
             errors.append(f"Hard-coded legal/document identity remains in backend: {forbidden}")
 

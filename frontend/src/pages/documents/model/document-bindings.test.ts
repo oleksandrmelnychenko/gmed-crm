@@ -187,8 +187,51 @@ describe("document template binding payloads", () => {
 
   it("keeps fixed legal templates on the protected renderer", () => {
     expect(isFixedLegalDocumentTemplate("confidentiality_release")).toBe(true);
+    expect(isFixedLegalDocumentTemplate("privacy_information")).toBe(true);
     expect(isFixedLegalDocumentTemplate("privacy_consents")).toBe(true);
     expect(isFixedLegalDocumentTemplate("cost_estimate")).toBe(false);
+  });
+
+  it("uses country selectors for patient and payer country bindings", () => {
+    expect(
+      DOCUMENT_BINDING_FIELDS.framework_contract.find(
+        (field) => field.key === "party_country",
+      ),
+    ).toMatchObject({ kind: "country" });
+    expect(
+      DOCUMENT_BINDING_FIELDS.cost_coverage_declaration.find(
+        (field) => field.key === "payer_country",
+      ),
+    ).toMatchObject({ kind: "country" });
+  });
+
+  it("submits selected ISO countries in German and preserves legacy free text", () => {
+    expect(
+      hydrateDocumentBindings(
+        "single_order",
+        { party_country: "Germany" },
+        null,
+      ),
+    ).toMatchObject({ party_country: "Germany" });
+    expect(
+      buildBindingsPayload("single_order", {
+        party_country: "Germany",
+      }),
+    ).toMatchObject({ party_country: "Deutschland" });
+    expect(
+      buildBindingsPayload("cost_coverage_declaration", {
+        payer_country: " FR ",
+        payer_name: " Justus Geldgeber ",
+      }),
+    ).toMatchObject({
+      payer_country: "Frankreich",
+      payer_name: "Justus Geldgeber",
+    });
+    expect(
+      buildBindingsPayload("single_order", {
+        party_country: "Legacy free-text country",
+      }),
+    ).toMatchObject({ party_country: "Legacy free-text country" });
   });
 
   it("exposes code fields for every patient sticker template", () => {
