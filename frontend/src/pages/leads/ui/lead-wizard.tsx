@@ -2646,16 +2646,20 @@ export function LeadWizard({
         document_variant: "original",
         access_category: "patient",
         status: "active",
-        bindings: templateId === "privacy_consents"
-          ? {
-              extra_release_recipients: trustedContactRecipients(),
-              consent_privacy: draft.privacyConsent,
-              consent_healthcare: draft.healthcareConsent,
-              consent_provider_release: draft.healthcareConsent,
-              consent_email: Boolean(lead.email_consent),
-              consent_whatsapp: Boolean(lead.whatsapp_consent),
-            }
-          : {},
+        bindings: {
+          party_city: draft.city.trim() || undefined,
+          party_sign_place: draft.city.trim() || undefined,
+          ...(templateId === "privacy_consents"
+            ? {
+                extra_release_recipients: trustedContactRecipients(),
+                consent_privacy: draft.privacyConsent,
+                consent_healthcare: draft.healthcareConsent,
+                consent_provider_release: draft.healthcareConsent,
+                consent_email: Boolean(lead.email_consent),
+                consent_whatsapp: Boolean(lead.whatsapp_consent),
+              }
+            : {}),
+        },
       });
       const nextDocuments = await fetchDocuments(`/documents?lead_id=${encodeURIComponent(leadId)}`);
       setDocuments(nextDocuments);
@@ -2913,6 +2917,8 @@ ${serviceCommentLines.join("\n")}`
         bindings: {
           contract_date: draft.contractEffectiveDate || undefined,
           cost_threshold: draft.costThreshold.trim() || undefined,
+          party_city: draft.city.trim() || undefined,
+          party_sign_place: draft.city.trim() || undefined,
           specialties: draft.specialties.map((value) => specialtyDocumentLabel(value)).join(", "),
           period_from: draft.programDateFrom || undefined,
           period_to: draft.programDateTo || undefined,

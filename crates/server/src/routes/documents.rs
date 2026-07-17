@@ -12787,6 +12787,15 @@ fn build_single_order_pdf(
         )
     });
     layout.text_block(
+        "Anlage 4",
+        11.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.0,
+    );
+    layout.text_block(
         &title,
         18.0,
         true,
@@ -14410,15 +14419,7 @@ fn build_adult_confidentiality_release_pdf(
     let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
     let agency_identity = adult_legal_agency_identity();
 
-    layout.text_block(
-        "Schweigepflichtentbindung",
-        16.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Primary,
-        0.0,
-        4.0,
-    );
+    adult_legal_document_header(&mut layout, "Anlage 2", "Schweigepflichtentbindung");
     adult_legal_identity_block(&mut layout, party, false);
     fc_body(
         &mut layout,
@@ -14458,24 +14459,7 @@ fn render_adult_privacy_information(
         });
     let privacy_email = agency_privacy_email(agency);
 
-    layout.text_block(
-        "Anlage 3",
-        11.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        1.0,
-    );
-    layout.text_block(
-        "Informationsblatt zum Datenschutz",
-        16.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Primary,
-        0.0,
-        3.0,
-    );
+    adult_legal_document_header(layout, "Anlage 3", "Informationsblatt zum Datenschutz");
     fc_body(
         layout,
         &format!(
@@ -20176,7 +20160,10 @@ mod tests {
         let release_text = assert_legal_pdf_chrome(&release, "SE-20260716-UNITTEST0001");
         assert!(release_text.contains("Schweigepflichtentbindung"));
         assert!(release_text.contains("203 StGB"));
-        assert!(!release_text.contains("Anlage 2"));
+        assert!(release_text.contains("Anlage 2"));
+        assert!(!release_text.contains("Anlage 1"));
+        assert!(!release_text.contains("Anlage 3"));
+        assert!(!release_text.contains("Anlage 4"));
         assert!(release_text.contains("Deutschland"));
         assert!(release_text.contains("den von ihm beauftragten Mitarbeitenden"));
         assert!(!release_text.contains("Maria Beispiel, Vertrauenskontakt"));
@@ -20243,7 +20230,7 @@ mod tests {
             introduction: None,
             closing_note: None,
             agency,
-            party_sign_place: Some("Berlin".to_string()),
+            party_sign_place: Some("Potsdam".to_string()),
             party_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             agency_sign_place: Some("Köln".to_string()),
             agency_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
@@ -20278,7 +20265,7 @@ mod tests {
         assert!(text.contains(LEGAL_ADDRESS_CITY));
         assert!(text.contains("500,00 EUR der Gesamtsumme"));
         assert!(text.contains("Der Vertrag tritt zum 01.07.2026"));
-        assert!(text.contains("Berlin, den 16.07.2026"));
+        assert!(text.contains("Potsdam, den 16.07.2026"));
         assert!(!text.contains("nachfolgend „Auftraggeber“ genannt"));
         assert!(!text.contains("nachfolgend „Auftragnehmer“ genannt"));
         assert!(!text.contains("gemeinsam „Vertragsparteien“ genannt"));
@@ -20361,8 +20348,10 @@ mod tests {
         let text = assert_legal_pdf_chrome(&bytes, "EA-2026-0017");
 
         assert!(!text.contains("DOC-ORDER-FALLBACK"));
+        assert!(text.contains("Anlage 4"));
         assert!(text.contains("Auftragsnummer: EA-2026-0017"));
         assert!(text.contains("Deutschland"));
+        assert!(text.contains("Berlin, den 16.07.2026"));
         assert!(text.contains("§ 1 Leistungsumfang"));
         assert!(text.contains("§ 9 Bestandteile des Einzelauftrages und Rangfolge"));
     }
