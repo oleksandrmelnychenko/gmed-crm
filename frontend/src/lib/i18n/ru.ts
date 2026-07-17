@@ -618,6 +618,7 @@ export const ru = {
   settings_agency_address: "Адрес агентства",
   settings_agency_phone: "Телефон агентства",
   settings_agency_email: "Электронная почта агентства",
+  settings_agency_website: "Сайт агентства",
   settings_agency_privacy_email: "Электронная почта по вопросам защиты данных",
   settings_agency_sign_place: "Место подписания агентством по умолчанию",
   settings_agency_data_system_name: "Название системы GMED-EDV",

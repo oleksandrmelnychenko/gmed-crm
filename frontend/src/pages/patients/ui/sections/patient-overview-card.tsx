@@ -67,6 +67,21 @@ function intakeScheme(item: ClinicalMedication): string {
   return slots.map((slot) => (slot && slot.trim() ? slot.trim() : "0")).join("-");
 }
 
+function localDateKey(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function medicationHasEndedForProfile(
+  item: Pick<ClinicalMedication, "einnahme_bis">,
+  today = localDateKey(),
+): boolean {
+  const endDate = item.einnahme_bis?.trim().slice(0, 10);
+  return Boolean(endDate && endDate < today);
+}
+
 /** Allergies/CAVE free text → one item per line or comma. */
 function splitList(value: string | null): string[] {
   if (!value) return [];
@@ -330,6 +345,9 @@ export function PatientOverviewCard({
   const doctorSpecializationLabel = (value: string) => specializationLabelForValue(value, [], lang);
   const age = computeAge(birthDate);
   const showDemographics = Boolean(birthDate || gender || phone || email);
+  const profileMedications = medications.filter((item) => !medicationHasEndedForProfile(item));
+  const regularMedications = profileMedications.filter((item) => item.category !== "besondere");
+  const specialTimeMedications = profileMedications.filter((item) => item.category === "besondere");
   // Completed ("erfolg") recommendations drop off the overview list.
   const activeRecommendations = recommendations.filter((rec) => rec.lifecycle_status !== "erfolg");
 
@@ -388,9 +406,61 @@ export function PatientOverviewCard({
     tx("Дозировка", "Dosis"),
     tx("Форма", "Form"),
     tx("Приём", "Einnahme"),
+    tx("Приём до", "Einnahme bis"),
     tx("Заметка", "Hinweis"),
     tx("Показание", "Grund"),
   ];
+
+  const renderMedicationTable = (items: ClinicalMedication[], label: string) => (
+    <div className="overflow-x-auto rounded-md border border-border bg-card">
+      <table aria-label={label} className="w-full min-w-[820px] border-collapse text-left text-xs">
+        <thead className="border-b border-border bg-muted/40 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+          <tr>
+            {medColumns.map((column) => (
+              <th key={column} scope="col" className="px-2.5 py-2 font-semibold">
+                {column}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border/60">
+          {items.map((item, index) => (
+            <tr
+              key={item.id ?? index}
+              className={cn(
+                "align-top transition-colors hover:bg-muted/30",
+                item.on_hold && "bg-amber-50/70",
+              )}
+            >
+              <td className="px-2.5 py-2 text-foreground">{item.wirkstoff || "—"}</td>
+              <td className="px-2.5 py-2 font-medium text-foreground">
+                {item.handelsname || tx("Без названия", "Ohne Namen")}
+              </td>
+              <td className="whitespace-nowrap px-2.5 py-2 font-mono tabular-nums text-foreground">
+                {item.staerke || ""}
+              </td>
+              <td className="px-2.5 py-2 text-foreground">{item.form || ""}</td>
+              <td className="whitespace-nowrap px-2.5 py-2 font-mono tabular-nums text-foreground">
+                {intakeScheme(item) || "—"}
+              </td>
+              <td className="whitespace-nowrap px-2.5 py-2 font-mono tabular-nums text-foreground">
+                {item.on_hold ? (
+                  <span className="font-sans text-amber-700">
+                    {tx("На паузе", "Pausiert")}
+                    {item.hold_from ? ` ${tx("с", "ab")} ${item.hold_from}` : ""}
+                  </span>
+                ) : (
+                  item.einnahme_bis || "—"
+                )}
+              </td>
+              <td className="px-2.5 py-2 text-muted-foreground">{item.hinweis || ""}</td>
+              <td className="px-2.5 py-2 text-foreground">{item.grund || ""}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 
   return (
     <section className="space-y-2.5 rounded-2xl border border-border/70 bg-card p-3 shadow-sm">
@@ -477,41 +547,29 @@ export function PatientOverviewCard({
           </div>
 
           <div>
-            <ColumnTitle count={medications.length || undefined}>
+            <ColumnTitle count={regularMedications.length || undefined}>
               {tx("Назначенные препараты", "Verordnete Medikamente")}
             </ColumnTitle>
-            {medications.length === 0 ? (
+            {regularMedications.length === 0 ? (
               dash
             ) : (
-              <div className="overflow-x-auto rounded-xl border border-border bg-card">
-                <table className="w-full min-w-[720px] border-collapse text-left text-xs">
-                  <thead className="border-b border-border bg-muted/40 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-                    <tr>
-                      {medColumns.map((column) => (
-                        <th key={column} scope="col" className="px-2.5 py-2 font-semibold">
-                          {column}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/60">
-                    {medications.map((item, index) => (
-                      <tr key={item.id ?? index} className="align-top transition-colors hover:bg-muted/30">
-                        <td className="px-2.5 py-2 text-foreground">{item.wirkstoff || "—"}</td>
-                        <td className="px-2.5 py-2 font-medium text-foreground">
-                          {item.handelsname || tx("Без названия", "Ohne Namen")}
-                        </td>
-                        <td className="whitespace-nowrap px-2.5 py-2 font-mono tabular-nums text-foreground">{item.staerke || ""}</td>
-                        <td className="px-2.5 py-2 text-foreground">{item.form || ""}</td>
-                        <td className="whitespace-nowrap px-2.5 py-2 font-mono tabular-nums text-foreground">{intakeScheme(item) || "—"}</td>
-                        <td className="px-2.5 py-2 text-muted-foreground">{item.hinweis || ""}</td>
-                        <td className="px-2.5 py-2 text-foreground">{item.grund || ""}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              renderMedicationTable(
+                regularMedications,
+                tx("Назначенные препараты", "Verordnete Medikamente"),
+              )
             )}
+          </div>
+
+          <div>
+            <ColumnTitle count={specialTimeMedications.length || undefined}>
+              {tx("В особое время", "Zu besonderen Zeiten")}
+            </ColumnTitle>
+            {specialTimeMedications.length === 0
+              ? dash
+              : renderMedicationTable(
+                  specialTimeMedications,
+                  tx("Препараты для приёма в особое время", "Medikamente zu besonderen Zeiten"),
+                )}
           </div>
         </div>
 

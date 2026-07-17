@@ -125,6 +125,8 @@ export type ClinicalMedication = ClinicalAttribution & {
   /** Free-text notes shown when the "Sonstige Vermerke" checkbox is on. */
   sonstige_vermerke: string | null;
   on_hold: boolean;
+  /** Date from which the patient stopped taking the medication (YYYY-MM-DD). */
+  hold_from?: string | null;
   hold_until: string | null;
   hold_note: string | null;
 };
@@ -155,6 +157,8 @@ export type ClinicalNarrative = {
   anamnese_vegetative: string | null;
   anamnese_sozial: string | null;
   beurteilung: string | null;
+  /** Clinical date and time of this anamnesis version (RFC 3339). */
+  anamnese_at?: string | null;
   /** Whether this is the active version for the patient. */
   is_active: boolean;
   /** Read-only timestamps returned by the server. */
@@ -323,6 +327,7 @@ export function savePatientNarrative(patientId: string, narrative: ClinicalNarra
     anamnese_vegetative: narrative.anamnese_vegetative,
     anamnese_sozial: narrative.anamnese_sozial,
     beurteilung: narrative.beurteilung,
+    anamnese_at: narrative.anamnese_at ?? null,
     is_active: narrative.is_active,
   });
 }
@@ -355,6 +360,7 @@ export function blankNarrative(): ClinicalNarrative {
     anamnese_vegetative: null,
     anamnese_sozial: null,
     beurteilung: null,
+    anamnese_at: new Date().toISOString(),
     is_active: true,
   };
 }

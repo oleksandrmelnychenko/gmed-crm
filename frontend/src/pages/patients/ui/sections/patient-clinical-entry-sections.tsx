@@ -36,7 +36,10 @@ type Bilingual = (ru: string, de: string) => string;
 type SectionTone = "neutral" | "danger" | "warning";
 type IndexedItem<T> = { item: T; index: number };
 type SectionGroup = { key: string; label: string };
-type HoldDraft = Pick<ClinicalMedication, "on_hold" | "hold_until" | "hold_note">;
+type HoldDraft = Pick<
+  ClinicalMedication,
+  "on_hold" | "hold_from" | "hold_until" | "hold_note"
+>;
 type HoldEditor = {
   index: number;
   medication: ClinicalMedication;
@@ -49,6 +52,28 @@ const inputClass =
 
 function blankToNull(value: string): string | null {
   return value === "" ? null : value;
+}
+
+function localToday(): string {
+  const now = new Date();
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+function medicationHasEnded(item: ClinicalMedication): boolean {
+  const endDate = item.einnahme_bis?.slice(0, 10);
+  return Boolean(endDate && /^\d{4}-\d{2}-\d{2}$/.test(endDate) && endDate < localToday());
+}
+
+function medicationDateRangeValid(item: ClinicalMedication): boolean {
+  const intakeStart = item.einnahme_von?.slice(0, 10);
+  const intakeEnd = item.einnahme_bis?.slice(0, 10);
+  const holdStart = item.hold_from?.slice(0, 10);
+  const holdEnd = item.hold_until?.slice(0, 10);
+  return !(
+    (intakeStart && intakeEnd && intakeEnd < intakeStart)
+    || (holdStart && holdEnd && holdEnd < holdStart)
+  );
 }
 
 function trimDraftStrings<T>(draft: T): T {
@@ -101,6 +126,7 @@ function blankMedication(): ClinicalMedication {
     abgabebeschraenkung: false,
     sonstige_vermerke: null,
     on_hold: false,
+    hold_from: null,
     hold_until: null,
     hold_note: null,
   };
@@ -646,14 +672,38 @@ export function PatientMedicationTable({
               ) : null}
               {section.rows.map(({ item, index }) => {
                 const attribution = attributionLabel(item);
+                const ended = medicationHasEnded(item);
                 return (
-                  <tr key={item.id ?? index} className={cn("transition-colors", item.on_hold ? "bg-amber-50/70" : "hover:bg-muted/30")}>
+                  <tr
+                    key={item.id ?? index}
+                    className={cn(
+                      "transition-colors",
+                      ended
+                        ? "bg-rose-50/70"
+                        : item.on_hold
+                          ? "bg-amber-50/70"
+                          : "hover:bg-muted/30",
+                    )}
+                  >
                     <td className={cn(bodyCell, "whitespace-pre-line")}>{item.wirkstoff || "—"}</td>
                     <td className={cn(bodyCell, "font-medium")}>
                       {item.handelsname || tx("Без названия", "Ohne Namen")}
+                      {item.einnahme_bis ? (
+                        <span className={cn(
+                          "mt-0.5 block text-[10px] font-semibold uppercase tracking-wide",
+                          ended ? "text-rose-700" : "text-emerald-700",
+                        )}>
+                          {ended
+                            ? tx("Приём завершён", "Einnahme beendet")
+                            : tx("Приём до", "Einnahme bis")}{" "}
+                          {item.einnahme_bis.slice(0, 10)}
+                        </span>
+                      ) : null}
                       {item.on_hold ? (
                         <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-wide text-amber-700">
-                          {tx("На холд", "Auf Hold")}{item.hold_until ? ` ${tx("до", "bis")} ${item.hold_until}` : ""}
+                          {tx("На холд", "Auf Hold")}
+                          {item.hold_from ? ` ${tx("с", "seit")} ${item.hold_from}` : ""}
+                          {item.hold_until ? ` ${tx("до", "bis")} ${item.hold_until}` : ""}
                         </span>
                       ) : null}
                       {item.on_hold && item.hold_note ? <span className="mt-0.5 block break-words text-[10px] text-amber-800">{item.hold_note}</span> : null}
@@ -702,6 +752,11 @@ function MedicationHoldDialog({
     onSubmit();
   }
   const draft = editor?.draft;
+  const holdRangeValid = Boolean(
+    editor
+    && draft
+    && medicationDateRangeValid({ ...editor.medication, ...draft }),
+  );
   return (
     <Dialog allowImplicitDismissal open={Boolean(editor)} onOpenChange={(nextOpen) => {
       if (!nextOpen && !busy) onClose();
@@ -719,25 +774,37 @@ function MedicationHoldDialog({
                 checked={draft.on_hold}
                 onChange={(checked) => onChange({
                   on_hold: checked,
+                  hold_from: checked ? (draft.hold_from ?? localToday()) : null,
                   hold_until: checked ? draft.hold_until : null,
                   hold_note: checked ? draft.hold_note : null,
                 })}
               />
               {draft.on_hold ? (
                 <div className="grid gap-3">
+                  <Field label={tx("Не принимает с", "Pausiert seit")}>
+                    <Input type="date" value={draft.hold_from ?? ""} onChange={(event) => onChange({ hold_from: event.target.value || null })} className={inputClass} />
+                  </Field>
                   <Field label={tx("До какого числа", "Bis wann")}>
-                    <Input type="date" value={draft.hold_until ?? ""} onChange={(event) => onChange({ hold_until: event.target.value || null })} className={inputClass} />
+                    <Input type="date" min={draft.hold_from ?? undefined} value={draft.hold_until ?? ""} onChange={(event) => onChange({ hold_until: event.target.value || null })} className={inputClass} />
                   </Field>
                   <Field label={tx("Заметка", "Notiz")}>
                     <textarea value={draft.hold_note ?? ""} onChange={(event) => onChange({ hold_note: blankToNull(event.target.value) })} className={cn(inputClass, "h-24 resize-y py-2")} />
                   </Field>
+                  {!holdRangeValid ? (
+                    <p role="alert" className="text-xs text-destructive">
+                      {tx(
+                        "Дата окончания холда не может быть раньше даты начала.",
+                        "Das Hold-Ende darf nicht vor dem Beginn liegen.",
+                      )}
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
             </div>
           ) : null}
           <DialogFooter>
             <Button type="button" size="sm" variant="outline" className="h-8 rounded-lg" disabled={busy} onClick={onClose}>{tx("Отмена", "Abbrechen")}</Button>
-            <Button type="submit" size="sm" className="h-8 rounded-lg" disabled={busy || !draft}>
+            <Button type="submit" size="sm" className="h-8 rounded-lg" disabled={busy || !draft || !holdRangeValid}>
               {draft?.on_hold ? tx("Сохранить холд", "Hold speichern") : tx("Снять холд", "Hold entfernen")}
             </Button>
           </DialogFooter>
@@ -771,6 +838,7 @@ export function PatientMedicationSection({
         ? trimDraftStrings({
             ...item,
             on_hold: holdEditor.draft.on_hold,
+            hold_from: holdEditor.draft.on_hold ? holdEditor.draft.hold_from : null,
             hold_until: holdEditor.draft.on_hold ? holdEditor.draft.hold_until : null,
             hold_note: holdEditor.draft.on_hold ? holdEditor.draft.hold_note : null,
           })
@@ -793,7 +861,14 @@ export function PatientMedicationSection({
         title={tx("Медикаменты", "Medikation")}
         items={items}
         blank={blankMedication}
-        isValid={(medication) => Boolean(medication.wirkstoff?.trim() && medication.einnahmeform && medication.form)}
+        isValid={(medication) =>
+          Boolean(
+            medication.wirkstoff?.trim()
+            && medication.einnahmeform
+            && medication.form
+            && medicationDateRangeValid(medication),
+          )
+        }
         canManage={canManage}
         tx={tx}
         groups={[
@@ -826,6 +901,7 @@ export function PatientMedicationSection({
                     medications: indexed.map((entry) => entry.item),
                     draft: {
                       on_hold: Boolean(item.on_hold),
+                      hold_from: item.hold_from ?? null,
                       hold_until: item.hold_until ?? null,
                       hold_note: item.hold_note ?? null,
                     },
@@ -900,8 +976,16 @@ export function PatientMedicationSection({
             <div className="grid gap-2 md:grid-cols-3">
               <Field label={tx("Дата назначения", "Verordnet am")}><Input type="date" value={draft.verordnet_am ?? ""} onChange={(event) => set({ verordnet_am: blankToNull(event.target.value) })} className={inputClass} /></Field>
               <Field label={tx("Приём с", "Einnahme von")}><Input type="date" value={draft.einnahme_von ?? ""} onChange={(event) => set({ einnahme_von: blankToNull(event.target.value) })} className={inputClass} /></Field>
-              <Field label={tx("Приём до", "Einnahme bis")}><Input type="date" value={draft.einnahme_bis ?? ""} onChange={(event) => set({ einnahme_bis: blankToNull(event.target.value) })} className={inputClass} /></Field>
+              <Field label={tx("Приём до", "Einnahme bis")}><Input type="date" min={draft.einnahme_von ?? undefined} aria-invalid={!medicationDateRangeValid(draft)} value={draft.einnahme_bis ?? ""} onChange={(event) => set({ einnahme_bis: blankToNull(event.target.value) })} className={cn(inputClass, !medicationDateRangeValid(draft) && "border-destructive")} /></Field>
             </div>
+            {!medicationDateRangeValid(draft) ? (
+              <p role="alert" className="text-xs text-destructive">
+                {tx(
+                  "Дата окончания не может быть раньше даты начала.",
+                  "Das Enddatum darf nicht vor dem Startdatum liegen.",
+                )}
+              </p>
+            ) : null}
             <fieldset className="rounded-lg border border-border/60 p-2">
               <legend className="px-1 text-[11px] font-medium text-muted-foreground">{tx("Правовой статус", "Rechtlicher Status")}</legend>
               <div className="grid gap-1.5 sm:grid-cols-3">

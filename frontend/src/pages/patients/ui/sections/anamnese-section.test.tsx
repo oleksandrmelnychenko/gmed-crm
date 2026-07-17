@@ -13,6 +13,7 @@ function narrative(overrides: Partial<ClinicalNarrative> = {}): ClinicalNarrativ
     anamnese_vegetative: null,
     anamnese_sozial: null,
     beurteilung: "Stabil.",
+    anamnese_at: "2026-06-30T17:45:00Z",
     is_active: true,
     created_at: "2025-06-30T10:00:00Z",
     updated_at: "2026-06-30T18:18:13Z",
@@ -27,6 +28,7 @@ describe("AnamneseSection", () => {
     expect(copyNarrativeVersion(source)).toEqual({
       ...source,
       id: null,
+      anamnese_at: expect.any(String),
       is_active: true,
       created_at: null,
       updated_at: null,
@@ -45,10 +47,10 @@ describe("AnamneseSection", () => {
       />,
     );
 
-    expect(html).toContain("Последнее обновление");
     expect(html).toContain("Активная версия");
     expect(html).toContain("Копировать");
     expect(html).toContain("Удалить анамнез");
     expect(html).toContain("Актуальный анамнез");
+    expect(html).toContain("Дата и время анамнеза");
   });
 });

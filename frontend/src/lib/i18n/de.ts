@@ -618,6 +618,7 @@ export const de = {
   settings_agency_address: "Agenturadresse",
   settings_agency_phone: "Agenturtelefon",
   settings_agency_email: "Agentur-E-Mail",
+  settings_agency_website: "Agenturwebsite",
   settings_agency_privacy_email: "Datenschutzkontakt-E-Mail",
   settings_agency_sign_place: "Standard-Unterzeichnungsort der Agentur",
   settings_agency_data_system_name: "Name des GMED-EDV-Systems",

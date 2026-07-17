@@ -552,6 +552,7 @@ export function clinicalNarrativePayload(
     anamnese_vegetative: existing?.anamnese_vegetative ?? null,
     anamnese_sozial: existing?.anamnese_sozial ?? null,
     beurteilung: existing?.beurteilung ?? null,
+    anamnese_at: existing?.anamnese_at ?? new Date().toISOString(),
     is_active: true,
   };
 }
@@ -592,6 +593,7 @@ export function clinicalMedicationPayload(
     abgabebeschraenkung: false,
     sonstige_vermerke: null,
     on_hold: false,
+    hold_from: null,
     hold_until: null,
     hold_note: null,
   };

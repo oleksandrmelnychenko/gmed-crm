@@ -884,6 +884,7 @@ struct AgencyContractSettings {
     address: Option<String>,
     phone: Option<String>,
     email: Option<String>,
+    website: Option<String>,
     privacy_email: Option<String>,
     sign_place: String,
     data_system_name: String,
@@ -3942,6 +3943,21 @@ fn wrap_text_to_width(text: &str, font_size_pt: f32, available_width_mm: f32) ->
     lines
 }
 
+fn truncate_text_to_width(text: &str, font_size_pt: f32, available_width_mm: f32) -> String {
+    let normalized = text.trim();
+    let average_char_width_mm = pt_to_mm(font_size_pt) * 0.54;
+    let max_chars = ((available_width_mm / average_char_width_mm).floor() as usize).max(18);
+    if normalized.chars().count() <= max_chars {
+        return normalized.to_string();
+    }
+
+    let visible_chars = max_chars.saturating_sub(3);
+    format!(
+        "{}...",
+        normalized.chars().take(visible_chars).collect::<String>()
+    )
+}
+
 fn append_pdf_text_line(
     ops: &mut Vec<Op>,
     text: &str,
@@ -4094,26 +4110,18 @@ impl TreatmentPlanPdfLayout {
                 );
             }
 
-            for (index, line) in self.legal_footer_lines.iter().take(2).enumerate() {
+            for (index, line) in self.legal_footer_lines.iter().take(3).enumerate() {
+                let line = truncate_text_to_width(line, 5.8, 145.0);
                 append_pdf_text_line(
                     &mut self.page_ops,
-                    line,
+                    &line,
                     PDF_LEFT_MARGIN_MM,
-                    11.0 - index as f32 * 3.5,
-                    6.5,
+                    12.0 - index as f32 * 3.0,
+                    5.8,
                     &self.regular_font,
                     TreatmentPlanPdfColor::Primary,
                 );
             }
-            append_pdf_text_line(
-                &mut self.page_ops,
-                &format!("Seite: {}", self.page_number),
-                176.0,
-                7.5,
-                7.0,
-                &self.regular_font,
-                TreatmentPlanPdfColor::Primary,
-            );
         } else {
             append_pdf_text_line(
                 &mut self.page_ops,
@@ -4198,6 +4206,21 @@ impl TreatmentPlanPdfLayout {
 
     fn finish(mut self) -> Vec<PdfPage> {
         self.finish_page();
+        if self.page_style == PdfPageStyle::Legal {
+            let total_pages = self.pages.len();
+            let regular_font = self.regular_font.clone();
+            for (index, page) in self.pages.iter_mut().enumerate() {
+                append_pdf_text_line(
+                    &mut page.ops,
+                    &format!("Seite: {}/{}", index + 1, total_pages),
+                    176.0,
+                    6.0,
+                    7.0,
+                    &regular_font,
+                    TreatmentPlanPdfColor::Primary,
+                );
+            }
+        }
         self.pages
     }
 }
@@ -5975,7 +5998,7 @@ fn build_framework_contract_pdf(
         Some(context.contract_number.as_str()),
         fallback_document_reference,
     );
-    let mut layout = legal_document_pdf_layout(document_reference, regular, bold);
+    let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
     let agency_display = adult_legal_agency_identity();
     let agency_person = ADULT_LEGAL_AGENCY_PERSON.to_string();
 
@@ -6053,14 +6076,12 @@ fn build_framework_contract_pdf(
         0.0,
         0.5,
     );
-    if let Some(address) = context
-        .agency
-        .address
-        .as_deref()
+    for address_line in agency_document_address(&context.agency)
+        .lines()
         .map(str::trim)
-        .filter(|v| !v.is_empty())
+        .filter(|line| !line.is_empty())
     {
-        fc_body_tight(&mut layout, address);
+        fc_body_tight(&mut layout, address_line);
     }
     if let Some(email) = context
         .agency
@@ -12361,6 +12382,7 @@ async fn load_agency_contract_settings(
            FROM system_settings
            WHERE key IN (
                'agency_name', 'agency_care_of', 'agency_address', 'agency_phone', 'agency_email',
+               'agency_website',
                'agency_principal_birth_date', 'agency_privacy_email',
                'agency_sign_place', 'agency_data_system_name', 'agency_data_processor_notice',
                'agency_bank_holder', 'agency_bank_name', 'agency_bank_swift', 'agency_bank_iban'
@@ -12398,13 +12420,27 @@ async fn load_agency_contract_settings(
         principal_birth_date: values
             .get("agency_principal_birth_date")
             .and_then(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()),
-        address: values.get("agency_address").cloned(),
-        phone: values.get("agency_phone").cloned(),
-        email: values.get("agency_email").cloned(),
+        address: values
+            .get("agency_address")
+            .cloned()
+            .or_else(|| Some(DEFAULT_AGENCY_ADDRESS.to_string())),
+        phone: values
+            .get("agency_phone")
+            .cloned()
+            .or_else(|| Some(DEFAULT_AGENCY_PHONE.to_string())),
+        email: values
+            .get("agency_email")
+            .cloned()
+            .or_else(|| Some(DEFAULT_AGENCY_EMAIL.to_string())),
+        website: values
+            .get("agency_website")
+            .cloned()
+            .or_else(|| Some(DEFAULT_AGENCY_WEBSITE.to_string())),
         privacy_email: values
             .get("agency_privacy_email")
             .cloned()
-            .or_else(|| values.get("agency_email").cloned()),
+            .or_else(|| values.get("agency_email").cloned())
+            .or_else(|| Some(DEFAULT_AGENCY_EMAIL.to_string())),
         sign_place: values
             .get("agency_sign_place")
             .cloned()
@@ -12766,7 +12802,7 @@ fn build_single_order_pdf(
         Some(context.order_number.as_str()),
         fallback_document_reference,
     );
-    let mut layout = legal_document_pdf_layout(document_reference, regular, bold);
+    let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
 
     let title = context.title_override.clone().unwrap_or_else(|| {
         format!(
@@ -13686,7 +13722,7 @@ fn build_cost_estimate_pdf(
     let (document, regular, bold) = new_admin_pdf()?;
     let document_reference =
         legal_document_reference(context.quote_number.as_deref(), fallback_document_reference);
-    let mut layout = legal_document_pdf_layout(document_reference, regular, bold);
+    let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
 
     let title = context
         .title_override
@@ -14152,13 +14188,73 @@ fn adult_consent_subject_line(party: &DocPartyBlock) -> String {
 
 const ADULT_LEGAL_AGENCY_LABEL: &str = "GMED - Agentur für Patientenbetreuung";
 const ADULT_LEGAL_AGENCY_PERSON: &str = "Heorhii Hudiiev";
+const DEFAULT_AGENCY_ADDRESS: &str = "Albert-Schweitzer-Straße 56\n81735 München";
+const DEFAULT_AGENCY_PHONE: &str = "+49 176 22570962";
+const DEFAULT_AGENCY_EMAIL: &str = "office@gmed-health.com";
+const DEFAULT_AGENCY_WEBSITE: &str = "gmed-health.com";
 
 fn adult_legal_agency_identity() -> String {
     format!("{ADULT_LEGAL_AGENCY_LABEL} {ADULT_LEGAL_AGENCY_PERSON}")
 }
 
-fn adult_legal_footer_lines() -> Vec<String> {
-    vec![adult_legal_agency_identity()]
+fn agency_document_address(agency: &AgencyContractSettings) -> &str {
+    agency
+        .address
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_AGENCY_ADDRESS)
+}
+
+fn agency_document_phone(agency: &AgencyContractSettings) -> &str {
+    agency
+        .phone
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_AGENCY_PHONE)
+}
+
+fn agency_document_email(agency: &AgencyContractSettings) -> &str {
+    agency
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_AGENCY_EMAIL)
+}
+
+fn agency_document_website(agency: &AgencyContractSettings) -> &str {
+    agency
+        .website
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_AGENCY_WEBSITE)
+}
+
+fn footer_website_display(value: &str) -> &str {
+    value
+        .strip_prefix("https://")
+        .or_else(|| value.strip_prefix("http://"))
+        .unwrap_or(value)
+        .trim_end_matches('/')
+}
+
+fn adult_legal_footer_lines(agency: &AgencyContractSettings) -> Vec<String> {
+    let address = agency_document_address(agency)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let contacts = format!(
+        "Tel.: {} · E-Mail: {} · Web: {}",
+        agency_document_phone(agency),
+        agency_document_email(agency),
+        footer_website_display(agency_document_website(agency))
+    );
+    vec![adult_legal_agency_identity(), address, contacts]
 }
 
 fn legal_document_reference<'a>(business_number: Option<&'a str>, fallback: &'a str) -> &'a str {
@@ -14170,10 +14266,12 @@ fn legal_document_reference<'a>(business_number: Option<&'a str>, fallback: &'a 
 
 fn legal_document_pdf_layout(
     document_reference: &str,
+    agency: &AgencyContractSettings,
     regular: PdfFontHandle,
     bold: PdfFontHandle,
 ) -> TreatmentPlanPdfLayout {
-    let mut layout = TreatmentPlanPdfLayout::new_legal(adult_legal_footer_lines(), regular, bold);
+    let mut layout =
+        TreatmentPlanPdfLayout::new_legal(adult_legal_footer_lines(agency), regular, bold);
     layout.legal_header_line = format!("Dokument-Nr.: {document_reference}");
     layout
 }
@@ -14331,12 +14429,12 @@ fn agency_privacy_email(agency: &AgencyContractSettings) -> Option<&str> {
 
 fn build_adult_confidentiality_release_pdf(
     party: &DocPartyBlock,
-    _agency: &AgencyContractSettings,
+    agency: &AgencyContractSettings,
     bindings: &DocumentBindingOverrides,
     document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let mut layout = legal_document_pdf_layout(document_reference, regular, bold);
+    let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
     let agency_identity = adult_legal_agency_identity();
 
     layout.text_block(
@@ -14550,7 +14648,7 @@ fn build_adult_privacy_information_pdf(
     document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let mut layout = legal_document_pdf_layout(document_reference, regular, bold);
+    let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
     render_adult_privacy_information(&mut layout, agency);
     Ok(finalize_admin_pdf(document, layout))
 }
@@ -14562,7 +14660,7 @@ fn build_adult_privacy_consents_pdf(
     document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let mut layout = legal_document_pdf_layout(document_reference, regular, bold);
+    let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
     let agency_identity = adult_legal_agency_identity();
     let data_system_name = if agency.data_system_name.trim().is_empty() {
         "GMED-EDV-System"
@@ -19828,15 +19926,21 @@ mod tests {
     use uuid::Uuid;
 
     const LEGAL_IDENTITY: &str = "GMED - Agentur für Patientenbetreuung Heorhii Hudiiev";
+    const LEGAL_ADDRESS_STREET: &str = "Albert-Schweitzer-Straße 56";
+    const LEGAL_ADDRESS_CITY: &str = "81735 München";
+    const LEGAL_PHONE: &str = "+49 176 22570962";
+    const LEGAL_EMAIL: &str = "office@gmed-health.com";
+    const LEGAL_WEBSITE: &str = "gmed-health.com";
 
     fn legal_test_agency() -> AgencyContractSettings {
         AgencyContractSettings {
             name: "Test Agentur".to_string(),
             care_of: Some("c/o Alte Identität".to_string()),
             principal_birth_date: NaiveDate::from_ymd_opt(1975, 6, 3),
-            address: Some("Agenturstr. 2, 50667 Köln".to_string()),
-            phone: Some("+49 221 987654".to_string()),
-            email: Some("kontakt@example.test".to_string()),
+            address: Some(format!("{LEGAL_ADDRESS_STREET}\n{LEGAL_ADDRESS_CITY}")),
+            phone: Some(LEGAL_PHONE.to_string()),
+            email: Some(LEGAL_EMAIL.to_string()),
+            website: Some(LEGAL_WEBSITE.to_string()),
             privacy_email: Some("datenschutz@example.test".to_string()),
             sign_place: "Köln".to_string(),
             data_system_name: "GMED-EDV-System".to_string(),
@@ -19881,7 +19985,18 @@ mod tests {
                 .count(),
             page_count
         );
+        for page_number in 1..=page_count {
+            assert!(
+                text.contains(&format!("Seite: {page_number}/{page_count}")),
+                "missing total-aware legal page number {page_number}/{page_count}"
+            );
+        }
         assert!(text.matches(LEGAL_IDENTITY).count() >= page_count);
+        assert!(text.matches(LEGAL_ADDRESS_STREET).count() >= page_count);
+        assert!(text.matches(LEGAL_ADDRESS_CITY).count() >= page_count);
+        assert!(text.matches(LEGAL_PHONE).count() >= page_count);
+        assert!(text.matches(LEGAL_EMAIL).count() >= page_count);
+        assert!(text.matches(LEGAL_WEBSITE).count() >= page_count);
         assert!(!text.contains("Patientenbetreuung /"));
         assert!(!text.to_ascii_lowercase().contains("c/o"));
         assert!(!text.contains("UTC"));
@@ -20138,6 +20253,8 @@ mod tests {
     #[test]
     fn framework_contract_pdf_keeps_main_contract_and_annex_index_only() {
         let party = legal_test_party("Germany");
+        let mut agency = legal_test_agency();
+        agency.address = None;
         let context = GeneratedFrameworkContractContext {
             patient_pid: "PT-LEGAL-1".to_string(),
             patient_name: party.name.clone(),
@@ -20152,7 +20269,7 @@ mod tests {
             title_override: None,
             introduction: None,
             closing_note: None,
-            agency: legal_test_agency(),
+            agency,
             party_sign_place: Some("Berlin".to_string()),
             party_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             agency_sign_place: Some("Köln".to_string()),
@@ -20184,6 +20301,11 @@ mod tests {
 
         assert!(!text.contains("DOC-FRAMEWORK-FALLBACK"));
         assert!(text.contains("Deutschland"));
+        assert!(text.contains(LEGAL_ADDRESS_STREET));
+        assert!(text.contains(LEGAL_ADDRESS_CITY));
+        assert!(text.contains("500,00 EUR der Gesamtsumme"));
+        assert!(text.contains("Der Vertrag tritt zum 01.07.2026"));
+        assert!(text.contains("Berlin, den 16.07.2026"));
         for heading in [
             "§ 1 Vertragsgegenstand",
             "§ 2 Vergütung",

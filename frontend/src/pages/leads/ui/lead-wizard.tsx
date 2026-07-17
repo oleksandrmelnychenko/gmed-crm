@@ -188,6 +188,8 @@ type Draft = {
   specialties: string[];
   programDateFrom: string;
   programDateTo: string;
+  contractEffectiveDate: string;
+  costThreshold: string;
   privacyConsent: boolean;
   healthcareConsent: boolean;
 };
@@ -287,6 +289,8 @@ const HEALTHCARE_CONSENT_ID = "lead-wizard-healthcare-consent";
 const CONFIDENTIALITY_RELEASE_ID = "lead-wizard-confidentiality-release";
 const PRIVACY_DOCUMENT_ID = "lead-wizard-privacy-document";
 const FRAMEWORK_DOCUMENT_ID = "lead-wizard-framework-document";
+const CONTRACT_EFFECTIVE_DATE_ID = "lead-wizard-contract-effective-date";
+const COST_THRESHOLD_ID = "lead-wizard-cost-threshold";
 const ORDER_DOCUMENT_ID = "lead-wizard-order-document";
 const COST_ESTIMATE_DOCUMENT_ID = "lead-wizard-cost-estimate-document";
 
@@ -504,6 +508,8 @@ function autosavePayload(
       referrer: draft.referrer,
       program_date_from: draft.programDateFrom,
       program_date_to: draft.programDateTo,
+      contract_effective_date: draft.contractEffectiveDate,
+      cost_threshold: draft.costThreshold,
       service_comments: draft.serviceNeeds.reduce<Record<string, string>>((comments, value) => {
         const comment = draft.serviceComments[value];
         if (comment?.trim()) comments[value] = comment;
@@ -641,6 +647,9 @@ function clinicalRowsFromLead(lead: LeadDetail) {
           ? nullableString(narrativeRow, "anamnese_sozial")
           : null,
         beurteilung: narrativeRow ? nullableString(narrativeRow, "beurteilung") : null,
+        anamnese_at: narrativeRow
+          ? nullableString(narrativeRow, "anamnese_at", "anamneseAt")
+          : null,
         is_active: narrativeRow?.is_active !== false,
         created_at: narrativeRow ? nullableString(narrativeRow, "created_at") : null,
         updated_at: narrativeRow ? nullableString(narrativeRow, "updated_at") : null,
@@ -737,6 +746,7 @@ function clinicalRowsFromLead(lead: LeadDetail) {
         abgabebeschraenkung: firstBoolean(row, "abgabebeschraenkung", "dispensingRestricted"),
         sonstige_vermerke: nullableString(row, "sonstige_vermerke", "otherNotes"),
         on_hold: firstBoolean(row, "on_hold", "onHold"),
+        hold_from: nullableString(row, "hold_from", "holdFrom"),
         hold_until: nullableString(row, "hold_until", "holdUntil"),
         hold_note: nullableString(row, "hold_note", "holdNote"),
       };
@@ -814,6 +824,8 @@ function draftFromLead(lead: LeadDetail): Draft {
     specialties: lead.requested_specialties ?? [],
     programDateFrom: inputString(lead.wizard_state?.["program_date_from"]),
     programDateTo: inputString(lead.wizard_state?.["program_date_to"]),
+    contractEffectiveDate: inputString(lead.wizard_state?.["contract_effective_date"]),
+    costThreshold: inputString(lead.wizard_state?.["cost_threshold"]),
     privacyConsent: lead.consent_privacy_practices,
     healthcareConsent: lead.consent_healthcare,
   };
@@ -857,6 +869,8 @@ function blankDraft(): Draft {
     specialties: [],
     programDateFrom: "",
     programDateTo: "",
+    contractEffectiveDate: "",
+    costThreshold: "",
     privacyConsent: false,
     healthcareConsent: false,
   };
@@ -1699,6 +1713,8 @@ export function LeadWizard({
         ...storedLeadDraft,
         programDateFrom: storedLeadDraft.programDateFrom || nextOrder?.date_from || "",
         programDateTo: storedLeadDraft.programDateTo || nextOrder?.date_to || "",
+        contractEffectiveDate:
+          storedLeadDraft.contractEffectiveDate || nextContracts[0]?.valid_from || "",
       };
       const caseAnamnese = nextCaseDetail?.aktuelle_anamnese?.trim() || "";
       const nextDraft: Draft = nextCaseDetail && !hasStoredClinicalDraft(nextLead) ? {
@@ -1713,6 +1729,7 @@ export function LeadWizard({
               anamnese_vegetative: leadDraft.narrative?.anamnese_vegetative ?? null,
               anamnese_sozial: leadDraft.narrative?.anamnese_sozial ?? null,
               beurteilung: leadDraft.narrative?.beurteilung ?? null,
+              anamnese_at: leadDraft.narrative?.anamnese_at ?? new Date().toISOString(),
               is_active: true,
             }
           : leadDraft.narrative,
@@ -1782,6 +1799,7 @@ export function LeadWizard({
                 abgabebeschraenkung: existing?.abgabebeschraenkung ?? false,
                 sonstige_vermerke: existing?.sonstige_vermerke ?? null,
                 on_hold: existing?.on_hold ?? false,
+                hold_from: existing?.hold_from ?? null,
                 hold_until: existing?.hold_until ?? null,
                 hold_note: existing?.hold_note ?? null,
               };
@@ -2701,8 +2719,17 @@ ${serviceCommentLines.join("\n")}`
       contractId = (await createContract({
         lead_id: leadId,
         status: "sent",
+        valid_from: draft.contractEffectiveDate || undefined,
         client_reference: "lead-onboarding:" + leadId + ":framework",
       })).id;
+    } else if (
+      draft.contractEffectiveDate
+      && draft.contractEffectiveDate !== contract?.valid_from
+    ) {
+      await updateContractStatus(contractId, {
+        status: contract?.status || "sent",
+        valid_from: draft.contractEffectiveDate,
+      });
     }
     let orderId = order?.id;
     const needsDescription = commercialNeedsDescription();
@@ -2884,6 +2911,8 @@ ${serviceCommentLines.join("\n")}`
         access_category: templateId === "cost_estimate" ? "financial" : "patient",
         status: "active",
         bindings: {
+          contract_date: draft.contractEffectiveDate || undefined,
+          cost_threshold: draft.costThreshold.trim() || undefined,
           specialties: draft.specialties.map((value) => specialtyDocumentLabel(value)).join(", "),
           period_from: draft.programDateFrom || undefined,
           period_to: draft.programDateTo || undefined,
@@ -4112,6 +4141,38 @@ ${serviceCommentLines.join("\n")}`
                       {tx("Подтвердить подпись", "Unterschrift bestätigen")}
                     </Button>
                   </div>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label={tx("Начало действия договора", "Vertragsbeginn")}>
+                    <Input
+                      id={CONTRACT_EFFECTIVE_DATE_ID}
+                      name="contract_effective_date"
+                      type="date"
+                      value={draft.contractEffectiveDate}
+                      onChange={(event) => patch("contractEffectiveDate", event.target.value)}
+                    />
+                  </Field>
+                  <Field
+                    label={tx(
+                      "Граница согласования превышения бюджета",
+                      "Mehrkosten-Freigabegrenze",
+                    )}
+                  >
+                    <div className="relative">
+                      <Input
+                        id={COST_THRESHOLD_ID}
+                        name="cost_threshold"
+                        inputMode="decimal"
+                        className="pr-12 font-mono tabular-nums"
+                        placeholder="500,00"
+                        value={draft.costThreshold}
+                        onChange={(event) => patch("costThreshold", event.target.value)}
+                      />
+                      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center font-mono text-xs text-muted-foreground">
+                        EUR
+                      </span>
+                    </div>
+                  </Field>
                 </div>
                 <WizardDocumentRows
                   documents={commercialDocuments.framework_contract}

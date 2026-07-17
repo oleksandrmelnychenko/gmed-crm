@@ -36,6 +36,10 @@ pub fn router() -> Router<AppState> {
             "/patients/{patient_id}/vitals/{measurement_id}/update",
             post(update_patient_vital_measurement),
         )
+        .route(
+            "/patients/{patient_id}/vitals/{measurement_id}/delete",
+            post(delete_patient_vital_measurement),
+        )
         .route("/patients/{patient_id}/clinical", get(get_patient_clinical))
         .route("/doctors", get(list_all_doctors))
         .route(
@@ -90,6 +94,14 @@ pub fn router() -> Router<AppState> {
         .route(
             "/patients/{patient_id}/risk-scores",
             get(list_patient_risk_scores).post(create_patient_risk_score),
+        )
+        .route(
+            "/patients/{patient_id}/risk-scores/{risk_score_id}/update",
+            post(update_patient_risk_score),
+        )
+        .route(
+            "/patients/{patient_id}/risk-scores/{risk_score_id}/delete",
+            post(delete_patient_risk_score),
         )
         .route("/patients/{patient_id}/recheck", get(get_patient_recheck))
         .route("/patients/{patient_id}/assignments", get(list_assignments))
@@ -2687,6 +2699,84 @@ async fn update_patient_vital_measurement(
     .into_response()
 }
 
+async fn delete_patient_vital_measurement(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((patient_uuid, measurement_uuid)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(_) => {
+            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete patient vitals",
+            );
+        }
+    }
+
+    let deleted = match sqlx::query(
+        r#"DELETE FROM patient_vital_measurements
+           WHERE id = $1 AND patient_id = $2
+           RETURNING measured_at"#,
+    )
+    .bind(measurement_uuid)
+    .bind(patient_uuid)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, measurement_id = %measurement_uuid, "Failed to delete patient vitals");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete patient vitals",
+            );
+        }
+    };
+
+    let Some(deleted) = deleted else {
+        return err(StatusCode::NOT_FOUND, "Vital measurement not found");
+    };
+    let measured_at = deleted
+        .get::<chrono::DateTime<chrono::Utc>, _>("measured_at")
+        .to_rfc3339();
+
+    state.audit_sender.try_send(audit::domain_event(
+        "delete_patient_vitals",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({
+            "measurement_id": measurement_uuid,
+            "measured_at": measured_at,
+        }),
+    ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.clinical_updated",
+        patient_uuid,
+        json!({
+            "section": "vitals",
+            "action": "delete",
+            "measurement_id": measurement_uuid,
+        }),
+    )
+    .await;
+
+    Json(json!({
+        "id": measurement_uuid,
+        "ok": true,
+    }))
+    .into_response()
+}
+
 async fn list_patient_card_entries(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -3221,6 +3311,44 @@ async fn list_patient_risk_scores(
     })))
 }
 
+struct ValidatedPatientRiskScore {
+    computed_at: chrono::DateTime<chrono::Utc>,
+    score_type: String,
+    score_value: f64,
+    scale_max: Option<f64>,
+    interpretation: Option<String>,
+    source: Option<String>,
+    inputs: Option<Value>,
+}
+
+#[allow(clippy::result_large_err)]
+fn validate_patient_risk_score_request(
+    body: CreatePatientRiskScoreRequest,
+) -> Result<ValidatedPatientRiskScore, axum::response::Response> {
+    let computed_at = parse_vital_measurement_timestamp(&body.computed_at)?;
+    let score_type = validate_patient_risk_score_type(&body.score_type)?;
+    let score_value = validate_nonnegative_float("score_value", body.score_value)?;
+    let scale_max = validate_optional_positive_float("scale_max", body.scale_max)?;
+    if let Some(max) = scale_max
+        && score_value > max
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "score_value cannot exceed scale_max",
+        ));
+    }
+
+    Ok(ValidatedPatientRiskScore {
+        computed_at,
+        score_type,
+        score_value,
+        scale_max,
+        interpretation: normalize_optional_text(body.interpretation, "interpretation", 500)?,
+        source: normalize_optional_text(body.source, "source", 120)?,
+        inputs: normalize_optional_json_object(body.inputs, "inputs")?,
+    })
+}
+
 async fn create_patient_risk_score(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -3243,39 +3371,15 @@ async fn create_patient_risk_score(
         }
     }
 
-    let computed_at = match parse_vital_measurement_timestamp(&body.computed_at) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let score_type = match validate_patient_risk_score_type(&body.score_type) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let score_value = match validate_nonnegative_float("score_value", body.score_value) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let scale_max = match validate_optional_positive_float("scale_max", body.scale_max) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    if let Some(max) = scale_max
-        && score_value > max
-    {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "score_value cannot exceed scale_max",
-        );
-    }
-    let interpretation = match normalize_optional_text(body.interpretation, "interpretation", 500) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let source = match normalize_optional_text(body.source, "source", 120) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let inputs = match normalize_optional_json_object(body.inputs, "inputs") {
+    let ValidatedPatientRiskScore {
+        computed_at,
+        score_type,
+        score_value,
+        scale_max,
+        interpretation,
+        source,
+        inputs,
+    } = match validate_patient_risk_score_request(body) {
         Ok(value) => value,
         Err(response) => return response,
     };
@@ -3333,15 +3437,209 @@ async fn create_patient_risk_score(
     .into_response()
 }
 
+async fn update_patient_risk_score(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((patient_uuid, risk_score_uuid)): Path<(Uuid, Uuid)>,
+    Json(body): Json<CreatePatientRiskScoreRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(_) => {
+            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update patient risk score",
+            );
+        }
+    }
+
+    let ValidatedPatientRiskScore {
+        computed_at,
+        score_type,
+        score_value,
+        scale_max,
+        interpretation,
+        source,
+        inputs,
+    } = match validate_patient_risk_score_request(body) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
+    let updated = match sqlx::query(
+        r#"UPDATE patient_risk_scores
+           SET computed_at = $1,
+               score_type = $2,
+               score_value = $3,
+               scale_max = $4,
+               interpretation = $5,
+               source = $6,
+               inputs = $7
+           WHERE id = $8 AND patient_id = $9"#,
+    )
+    .bind(computed_at)
+    .bind(score_type.as_str())
+    .bind(score_value)
+    .bind(scale_max)
+    .bind(interpretation.clone())
+    .bind(source.clone())
+    .bind(inputs.as_ref().map(|value| SqlxJson(value.clone())))
+    .bind(risk_score_uuid)
+    .bind(patient_uuid)
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) => result,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, risk_score_id = %risk_score_uuid, "Failed to update patient risk score");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update patient risk score",
+            );
+        }
+    };
+
+    if updated.rows_affected() == 0 {
+        return err(StatusCode::NOT_FOUND, "Risk score not found");
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "update_patient_risk_score",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({
+            "risk_score_id": risk_score_uuid,
+            "computed_at": computed_at.to_rfc3339(),
+            "score_type": score_type,
+            "score_value": score_value,
+            "scale_max": scale_max,
+            "source": source,
+            "has_inputs": inputs.is_some(),
+        }),
+    ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.clinical_updated",
+        patient_uuid,
+        json!({
+            "section": "risk_scores",
+            "action": "update",
+            "risk_score_id": risk_score_uuid,
+        }),
+    )
+    .await;
+
+    Json(json!({
+        "id": risk_score_uuid,
+        "ok": true,
+    }))
+    .into_response()
+}
+
+async fn delete_patient_risk_score(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((patient_uuid, risk_score_uuid)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(_) => {
+            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete patient risk score",
+            );
+        }
+    }
+
+    let deleted = match sqlx::query(
+        r#"DELETE FROM patient_risk_scores
+           WHERE id = $1 AND patient_id = $2
+           RETURNING computed_at, score_type, score_value"#,
+    )
+    .bind(risk_score_uuid)
+    .bind(patient_uuid)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, risk_score_id = %risk_score_uuid, "Failed to delete patient risk score");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete patient risk score",
+            );
+        }
+    };
+
+    let Some(deleted) = deleted else {
+        return err(StatusCode::NOT_FOUND, "Risk score not found");
+    };
+
+    state.audit_sender.try_send(audit::domain_event(
+        "delete_patient_risk_score",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({
+            "risk_score_id": risk_score_uuid,
+            "computed_at": deleted
+                .get::<chrono::DateTime<chrono::Utc>, _>("computed_at")
+                .to_rfc3339(),
+            "score_type": deleted.get::<String, _>("score_type"),
+            "score_value": deleted.get::<f64, _>("score_value"),
+        }),
+    ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.clinical_updated",
+        patient_uuid,
+        json!({
+            "section": "risk_scores",
+            "action": "delete",
+            "risk_score_id": risk_score_uuid,
+        }),
+    )
+    .await;
+
+    Json(json!({
+        "id": risk_score_uuid,
+        "ok": true,
+    }))
+    .into_response()
+}
+
 #[allow(clippy::result_large_err)]
 fn parse_vital_measurement_timestamp(
     value: &str,
+) -> Result<chrono::DateTime<chrono::Utc>, axum::response::Response> {
+    parse_clinical_timestamp(value, "measured_at")
+}
+
+#[allow(clippy::result_large_err)]
+fn parse_clinical_timestamp(
+    value: &str,
+    field_name: &str,
 ) -> Result<chrono::DateTime<chrono::Utc>, axum::response::Response> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "measured_at required",
+            &format!("{field_name} required"),
         ));
     }
 
@@ -3351,10 +3649,18 @@ fn parse_vital_measurement_timestamp(
             chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M")
                 .map(|value| value.and_utc())
         })
+        .or_else(|_| {
+            chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S")
+                .map(|value| value.and_utc())
+        })
+        .or_else(|_| {
+            chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S%.f")
+                .map(|value| value.and_utc())
+        })
         .map_err(|_| {
             err(
                 StatusCode::UNPROCESSABLE_ENTITY,
-                "Invalid measured_at format",
+                &format!("Invalid {field_name} format"),
             )
         })
 }
@@ -7196,6 +7502,8 @@ struct PatientMedicationInput {
     #[serde(default)]
     on_hold: Option<bool>,
     #[serde(default)]
+    hold_from: Option<String>,
+    #[serde(default)]
     hold_until: Option<String>,
     #[serde(default)]
     hold_note: Option<String>,
@@ -7266,20 +7574,19 @@ fn clinical_parse_date(
 ) -> Result<Option<chrono::NaiveDate>, axum::response::Response> {
     match clinical_opt_text(value) {
         None => Ok(None),
-        Some(raw) => chrono::NaiveDate::parse_from_str(&raw, "%Y-%m-%d")
-            .map(Some)
-            .map_err(|_| {
-                err(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    &format!("{field_name} must be YYYY-MM-DD"),
-                )
-            }),
+        Some(raw) => match chrono::NaiveDate::parse_from_str(&raw, "%Y-%m-%d") {
+            Ok(parsed) if parsed.format("%Y-%m-%d").to_string() == raw => Ok(Some(parsed)),
+            _ => Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                &format!("{field_name} must be YYYY-MM-DD"),
+            )),
+        },
     }
 }
 
 /// Serialize one `patient_clinical_narrative` version row to API JSON. The row
 /// must have been selected with: id, the 5 anamnese/beurteilung text fields,
-/// is_active, created_at and updated_at. `untersuchungsbefund` and legacy
+/// anamnese_at, is_active, created_at and updated_at. `untersuchungsbefund` and legacy
 /// `verlauf` are no longer part of the contract (columns are kept in the DB but
 /// unused).
 fn narrative_version_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
@@ -7290,6 +7597,7 @@ fn narrative_version_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "anamnese_vegetative": row.get::<Option<String>, _>("anamnese_vegetative"),
         "anamnese_sozial": row.get::<Option<String>, _>("anamnese_sozial"),
         "beurteilung": row.get::<Option<String>, _>("beurteilung"),
+        "anamnese_at": row.get::<chrono::DateTime<chrono::Utc>, _>("anamnese_at").to_rfc3339(),
         "is_active": row.get::<bool, _>("is_active"),
         "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
         "updated_at": row.get::<chrono::DateTime<chrono::Utc>, _>("updated_at").to_rfc3339(),
@@ -7517,7 +7825,7 @@ async fn get_patient_clinical(
                   m.einnahmeform, m.verordnet_am, m.einnahme_von, m.einnahme_bis, m.status,
                   m.apothekenpflichtig, m.rezeptpflichtig, m.btm, m.aut_idem_sperre,
                   m.abgabebeschraenkung, m.sonstige_vermerke,
-                  m.on_hold, m.hold_until, m.hold_note,
+                  m.on_hold, m.hold_from, m.hold_until, m.hold_note,
                   m.provider_id, p.name AS provider_name,
                   m.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
            FROM patient_medications m
@@ -7618,6 +7926,7 @@ async fn get_patient_clinical(
                 "abgabebeschraenkung": row.get::<bool, _>("abgabebeschraenkung"),
                 "sonstige_vermerke": row.get::<Option<String>, _>("sonstige_vermerke"),
                 "on_hold": row.get::<bool, _>("on_hold"),
+                "hold_from": row.get::<Option<String>, _>("hold_from"),
                 "hold_until": row.get::<Option<String>, _>("hold_until"),
                 "hold_note": row.get::<Option<String>, _>("hold_note"),
                 "provider_id": row.get::<Option<Uuid>, _>("provider_id"),
@@ -7749,7 +8058,7 @@ async fn get_patient_clinical(
     // The active version of the patient's Anamnese (one row per patient is active).
     let narrative_row = sqlx::query(
         r#"SELECT id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
-                  beurteilung, is_active, created_at, updated_at
+                  beurteilung, anamnese_at, is_active, created_at, updated_at
            FROM patient_clinical_narrative
            WHERE patient_id = $1 AND is_active
            ORDER BY updated_at DESC
@@ -8048,6 +8357,8 @@ async fn save_patient_medications(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     let mut saved = 0i32;
+    let mut on_hold_count = 0i32;
+    let mut scheduled_end_count = 0i32;
     for item in body.items {
         let wirkstoff = clinical_opt_text(item.wirkstoff)
             .expect("medication active ingredient validated before transaction");
@@ -8056,14 +8367,56 @@ async fn save_patient_medications(
             .unwrap_or_else(|| "dauer".to_string());
         let status = clinical_one_of(item.status, &["aktiv", "pausiert", "abgesetzt", "geplant"])
             .unwrap_or_else(|| "aktiv".to_string());
+        let verordnet_am = match clinical_parse_date(item.verordnet_am, "verordnet_am") {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+        let einnahme_von = match clinical_parse_date(item.einnahme_von, "einnahme_von") {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+        let einnahme_bis = match clinical_parse_date(item.einnahme_bis, "einnahme_bis") {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+        let hold_from = match clinical_parse_date(item.hold_from, "hold_from") {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+        let hold_until = match clinical_parse_date(item.hold_until, "hold_until") {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+        if let (Some(from), Some(until)) = (einnahme_von.as_ref(), einnahme_bis.as_ref())
+            && until < from
+        {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "einnahme_bis must be on or after einnahme_von",
+            );
+        }
+        if let (Some(from), Some(until)) = (hold_from.as_ref(), hold_until.as_ref())
+            && until < from
+        {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "hold_until must be on or after hold_from",
+            );
+        }
+        let verordnet_am = verordnet_am.map(|value| value.to_string());
+        let einnahme_von = einnahme_von.map(|value| value.to_string());
+        let einnahme_bis = einnahme_bis.map(|value| value.to_string());
+        let hold_from = hold_from.map(|value| value.to_string());
+        let hold_until = hold_until.map(|value| value.to_string());
+        let on_hold = item.on_hold.unwrap_or(false);
         let (provider_id, doctor_id) =
             match clinical_resolve_attribution(&state, item.provider_id, item.doctor_id).await {
                 Ok(pair) => pair,
                 Err(resp) => return resp,
             };
         if let Err(e) = sqlx::query(
-            "INSERT INTO patient_medications (patient_id, provider_id, doctor_id, category, wirkstoff, handelsname, staerke, form, dose_morgens, dose_mittags, dose_abends, dose_nachts, einheit, hinweis, grund, einnahmeform, verordnet_am, einnahme_von, einnahme_bis, status, apothekenpflichtig, rezeptpflichtig, btm, aut_idem_sperre, abgabebeschraenkung, sonstige_vermerke, on_hold, hold_until, hold_note, sort_order)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)",
+            "INSERT INTO patient_medications (patient_id, provider_id, doctor_id, category, wirkstoff, handelsname, staerke, form, dose_morgens, dose_mittags, dose_abends, dose_nachts, einheit, hinweis, grund, einnahmeform, verordnet_am, einnahme_von, einnahme_bis, status, apothekenpflichtig, rezeptpflichtig, btm, aut_idem_sperre, abgabebeschraenkung, sonstige_vermerke, on_hold, hold_from, hold_until, hold_note, sort_order)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)",
         )
         .bind(patient_uuid)
         .bind(provider_id)
@@ -8081,9 +8434,9 @@ async fn save_patient_medications(
         .bind(clinical_opt_text(item.hinweis))
         .bind(clinical_opt_text(item.grund))
         .bind(clinical_opt_text(item.einnahmeform))
-        .bind(clinical_opt_text(item.verordnet_am))
-        .bind(clinical_opt_text(item.einnahme_von))
-        .bind(clinical_opt_text(item.einnahme_bis))
+        .bind(verordnet_am)
+        .bind(einnahme_von)
+        .bind(einnahme_bis.as_deref())
         .bind(&status)
         .bind(item.apothekenpflichtig.unwrap_or(false))
         .bind(item.rezeptpflichtig.unwrap_or(false))
@@ -8091,8 +8444,9 @@ async fn save_patient_medications(
         .bind(item.aut_idem_sperre.unwrap_or(false))
         .bind(item.abgabebeschraenkung.unwrap_or(false))
         .bind(clinical_opt_text(item.sonstige_vermerke))
-        .bind(item.on_hold.unwrap_or(false))
-        .bind(clinical_opt_text(item.hold_until))
+        .bind(on_hold)
+        .bind(hold_from)
+        .bind(hold_until)
         .bind(clinical_opt_text(item.hold_note))
         .bind(saved)
         .execute(&mut *tx)
@@ -8100,6 +8454,12 @@ async fn save_patient_medications(
         {
             tracing::error!(error = %e, patient_id = %patient_uuid, "insert patient medication");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        if on_hold {
+            on_hold_count += 1;
+        }
+        if einnahme_bis.is_some() {
+            scheduled_end_count += 1;
         }
         saved += 1;
     }
@@ -8112,7 +8472,11 @@ async fn save_patient_medications(
         Some(auth.user_id),
         "patient",
         Some(patient_uuid),
-        json!({ "count": saved }),
+        json!({
+            "count": saved,
+            "on_hold_count": on_hold_count,
+            "scheduled_end_count": scheduled_end_count,
+        }),
     ));
     crate::realtime::publish_patient_event(
         &state,
@@ -8240,6 +8604,8 @@ struct PatientNarrativeInput {
     anamnese_sozial: Option<String>,
     #[serde(default)]
     beurteilung: Option<String>,
+    #[serde(default)]
+    anamnese_at: Option<String>,
     /// Whether this version becomes the patient's active version. Defaults true.
     #[serde(default)]
     is_active: Option<bool>,
@@ -8264,7 +8630,20 @@ async fn save_patient_narrative(
         Ok(v) => v,
         Err(resp) => return resp,
     };
+    let is_update = target_id.is_some();
     let want_active = body.is_active.unwrap_or(true);
+    let anamnese_at = match body
+        .anamnese_at
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => match parse_clinical_timestamp(value, "anamnese_at") {
+            Ok(value) => value,
+            Err(response) => return response,
+        },
+        None => chrono::Utc::now(),
+    };
     let aktuelle = clinical_opt_text(body.anamnese_aktuelle);
     let vorgeschichte = clinical_opt_text(body.anamnese_vorgeschichte);
     let vegetative = clinical_opt_text(body.anamnese_vegetative);
@@ -8314,15 +8693,17 @@ async fn save_patient_narrative(
                        anamnese_vegetative = $3,
                        anamnese_sozial = $4,
                        beurteilung = $5,
-                       is_active = $6,
+                       anamnese_at = $6,
+                       is_active = $7,
                        updated_at = now()
-                   WHERE id = $7 AND patient_id = $8"#,
+                   WHERE id = $8 AND patient_id = $9"#,
             )
             .bind(&aktuelle)
             .bind(&vorgeschichte)
             .bind(&vegetative)
             .bind(&sozial)
             .bind(&beurteilung)
+            .bind(anamnese_at)
             .bind(want_active)
             .bind(id)
             .bind(patient_uuid)
@@ -8345,8 +8726,8 @@ async fn save_patient_narrative(
             if let Err(e) = sqlx::query(
                 r#"INSERT INTO patient_clinical_narrative
                        (id, patient_id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative,
-                        anamnese_sozial, beurteilung, is_active)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"#,
+                        anamnese_sozial, beurteilung, anamnese_at, is_active)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#,
             )
             .bind(new_id)
             .bind(patient_uuid)
@@ -8355,6 +8736,7 @@ async fn save_patient_narrative(
             .bind(&vegetative)
             .bind(&sozial)
             .bind(&beurteilung)
+            .bind(anamnese_at)
             .bind(want_active)
             .execute(&mut *tx)
             .await
@@ -8370,7 +8752,7 @@ async fn save_patient_narrative(
     // consistent with what was committed.
     let saved_row = match sqlx::query(
         r#"SELECT id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
-                  beurteilung, is_active, created_at, updated_at
+                  beurteilung, anamnese_at, is_active, created_at, updated_at
            FROM patient_clinical_narrative
            WHERE id = $1"#,
     )
@@ -8396,7 +8778,12 @@ async fn save_patient_narrative(
         Some(auth.user_id),
         "patient",
         Some(patient_uuid),
-        json!({}),
+        json!({
+            "narrative_id": saved_id,
+            "anamnese_at": anamnese_at.to_rfc3339(),
+            "is_active": want_active,
+            "operation": if is_update { "update" } else { "create" },
+        }),
     ));
     crate::realtime::publish_patient_event(
         &state,
@@ -8425,10 +8812,10 @@ async fn list_patient_narrative_history(
 
     let rows = match sqlx::query(
         r#"SELECT id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
-                  beurteilung, is_active, created_at, updated_at
+                  beurteilung, anamnese_at, is_active, created_at, updated_at
            FROM patient_clinical_narrative
            WHERE patient_id = $1
-           ORDER BY updated_at DESC"#,
+           ORDER BY anamnese_at DESC, updated_at DESC"#,
     )
     .bind(patient_uuid)
     .fetch_all(&state.db)
@@ -8477,7 +8864,7 @@ async fn delete_patient_narrative(
     }
 
     let deleted = match sqlx::query(
-        "DELETE FROM patient_clinical_narrative WHERE id = $1 AND patient_id = $2 RETURNING id",
+        "DELETE FROM patient_clinical_narrative WHERE id = $1 AND patient_id = $2 RETURNING id, anamnese_at",
     )
     .bind(narrative_uuid)
     .bind(patient_uuid)
@@ -8490,13 +8877,16 @@ async fn delete_patient_narrative(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    if deleted.is_none() {
+    let Some(deleted) = deleted else {
         return err(StatusCode::NOT_FOUND, "Version not found");
-    }
+    };
+    let deleted_anamnese_at = deleted
+        .get::<chrono::DateTime<chrono::Utc>, _>("anamnese_at")
+        .to_rfc3339();
 
     let active_row = match sqlx::query(
         r#"SELECT id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
-                  beurteilung, is_active, created_at, updated_at
+                  beurteilung, anamnese_at, is_active, created_at, updated_at
            FROM patient_clinical_narrative
            WHERE patient_id = $1 AND is_active = true
            ORDER BY updated_at DESC
@@ -8523,11 +8913,11 @@ async fn delete_patient_narrative(
                    SELECT id
                    FROM patient_clinical_narrative
                    WHERE patient_id = $1
-                   ORDER BY updated_at DESC, created_at DESC
+                   ORDER BY anamnese_at DESC, updated_at DESC, created_at DESC
                    LIMIT 1
                )
                RETURNING id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
-                         beurteilung, is_active, created_at, updated_at"#,
+                         beurteilung, anamnese_at, is_active, created_at, updated_at"#,
         )
         .bind(patient_uuid)
         .fetch_optional(&mut *tx)
@@ -8553,7 +8943,10 @@ async fn delete_patient_narrative(
         Some(auth.user_id),
         "patient",
         Some(patient_uuid),
-        json!({ "narrative_id": narrative_uuid.to_string() }),
+        json!({
+            "narrative_id": narrative_uuid,
+            "anamnese_at": deleted_anamnese_at,
+        }),
     ));
     crate::realtime::publish_patient_event(
         &state,

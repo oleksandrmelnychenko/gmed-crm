@@ -111,6 +111,7 @@ pub async fn update_setting(
         "agency_address" => validate_string_setting(value, 500, true, "Agency address")?,
         "agency_phone" => validate_string_setting(value, 64, true, "Agency phone")?,
         "agency_email" => validate_email_setting(value)?,
+        "agency_website" => validate_optional_website_setting(value)?,
         "agency_principal_birth_date" => validate_optional_date_setting(value)?,
         "agency_privacy_email" => validate_email_setting(value)?,
         "agency_sign_place" => {
@@ -248,6 +249,47 @@ fn validate_email_setting(value: &str) -> Result<Value, UpdateError> {
     Ok(Value::String(trimmed.to_string()))
 }
 
+fn validate_optional_website_setting(value: &str) -> Result<Value, UpdateError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(Value::String(String::new()));
+    }
+    if trimmed.chars().count() > 300 || trimmed.chars().any(char::is_whitespace) {
+        return Err(UpdateError::InvalidValue(
+            "Agency website must be a valid URL up to 300 characters".into(),
+        ));
+    }
+    if trimmed.contains("://")
+        && !trimmed.starts_with("http://")
+        && !trimmed.starts_with("https://")
+    {
+        return Err(UpdateError::InvalidValue(
+            "Agency website must be a valid HTTP(S) URL".into(),
+        ));
+    }
+
+    let candidate = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        trimmed.to_string()
+    } else {
+        format!("https://{trimmed}")
+    };
+    let uri = candidate.parse::<http::Uri>().map_err(|_| {
+        UpdateError::InvalidValue("Agency website must be a valid HTTP(S) URL".into())
+    })?;
+    let scheme_is_supported = matches!(uri.scheme_str(), Some("http" | "https"));
+    let host_is_present = uri
+        .authority()
+        .map(|authority| !authority.host().trim().is_empty())
+        .unwrap_or(false);
+    if !scheme_is_supported || !host_is_present {
+        return Err(UpdateError::InvalidValue(
+            "Agency website must be a valid HTTP(S) URL".into(),
+        ));
+    }
+
+    Ok(Value::String(trimmed.to_string()))
+}
+
 fn validate_optional_date_setting(value: &str) -> Result<Value, UpdateError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -359,4 +401,38 @@ fn validate_required_patient_documents_setting(value: &str) -> Result<Value, Upd
     }
 
     Ok(Value::Array(normalized))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{UpdateError, validate_optional_website_setting};
+    use serde_json::Value;
+
+    #[test]
+    fn agency_website_accepts_optional_http_urls_and_rejects_invalid_values() {
+        assert_eq!(
+            validate_optional_website_setting("").unwrap(),
+            Value::String(String::new())
+        );
+        assert_eq!(
+            validate_optional_website_setting("gmed-health.com").unwrap(),
+            Value::String("gmed-health.com".to_string())
+        );
+        assert_eq!(
+            validate_optional_website_setting("https://gmed-health.com/kontakt").unwrap(),
+            Value::String("https://gmed-health.com/kontakt".to_string())
+        );
+
+        let overlong_url = format!("https://{}.com", "a".repeat(300));
+        for invalid in [
+            "ftp://gmed-health.com",
+            "https://gmed health.com",
+            overlong_url.as_str(),
+        ] {
+            assert!(matches!(
+                validate_optional_website_setting(invalid),
+                Err(UpdateError::InvalidValue(_))
+            ));
+        }
+    }
 }

@@ -43,6 +43,7 @@ function blankVersion(): ClinicalNarrative {
     anamnese_vegetative: null,
     anamnese_sozial: null,
     beurteilung: null,
+    anamnese_at: new Date().toISOString(),
     is_active: true,
     created_at: null,
     updated_at: null,
@@ -53,6 +54,7 @@ export function copyNarrativeVersion(version: ClinicalNarrative): ClinicalNarrat
   return {
     ...version,
     id: null,
+    anamnese_at: new Date().toISOString(),
     is_active: true,
     created_at: null,
     updated_at: null,
@@ -85,7 +87,25 @@ function formatTimestamp(value: string | null | undefined): string {
 }
 
 function versionDate(version: ClinicalNarrative): string {
-  return formatTimestamp(version.updated_at ?? version.created_at) || "—";
+  return formatTimestamp(version.anamnese_at ?? version.updated_at ?? version.created_at) || "—";
+}
+
+function toLocalDateTimeInput(value: string | null | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.slice(0, 16);
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return [
+    date.getFullYear(),
+    "-",
+    pad(date.getMonth() + 1),
+    "-",
+    pad(date.getDate()),
+    "T",
+    pad(date.getHours()),
+    ":",
+    pad(date.getMinutes()),
+  ].join("");
 }
 
 export function AnamneseSection({
@@ -166,9 +186,14 @@ export function AnamneseSection({
 
   async function submit() {
     if (!editing) return;
+    const anamneseAt = new Date(editing.anamnese_at ?? "");
+    if (Number.isNaN(anamneseAt.getTime())) return;
     setBusy(true);
     try {
-      await onSave(editing);
+      await onSave({
+        ...editing,
+        anamnese_at: anamneseAt.toISOString(),
+      });
       setEditing(null);
     } catch (error) {
       toast.error(
@@ -207,6 +232,7 @@ export function AnamneseSection({
   const currentMissing = Boolean(
     editing && requireCurrent && !editing.anamnese_aktuelle?.trim(),
   );
+  const anamnesisTimeMissing = Boolean(editing && !editing.anamnese_at);
 
   return (
     <section className="rounded-xl border border-border/70 bg-card">
@@ -283,7 +309,7 @@ export function AnamneseSection({
             <div className="grid gap-2.5 rounded-lg border border-border/50 bg-background px-3 py-2.5 md:grid-cols-2">
               <div className="min-w-0">
                 <p className="text-[11px] font-medium text-muted-foreground">
-                  {tx("Последнее обновление", "Letzte Aktualisierung")}
+                  {tx("Дата и время анамнеза", "Zeitpunkt der Anamnese")}
                 </p>
                 <p className="mt-1">
                   <span className={datePillClass}>
@@ -348,7 +374,7 @@ export function AnamneseSection({
                       <div className="grid min-w-0 flex-1 gap-2 md:grid-cols-[10rem_minmax(0,1fr)]">
                         <div className="min-w-0">
                           <p className="text-[10px] font-medium uppercase text-muted-foreground">
-                            {tx("Последнее обновление", "Letzte Aktualisierung")}
+                            {tx("Дата и время анамнеза", "Zeitpunkt der Anamnese")}
                           </p>
                           <p className="mt-1">
                             <span className={datePillClass}>
@@ -451,7 +477,7 @@ export function AnamneseSection({
               type="button"
               size="sm"
               className="h-8 rounded-lg"
-              disabled={busy || !editing || currentMissing}
+              disabled={busy || !editing || currentMissing || anamnesisTimeMissing}
               onClick={() => void submit()}
             >
               {tx("Сохранить", "Speichern")}
@@ -461,6 +487,26 @@ export function AnamneseSection({
       >
         {editing ? (
           <div className="space-y-3">
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
+                {tx("Дата и время анамнеза", "Zeitpunkt der Anamnese")}
+                <span aria-hidden="true" className="ml-0.5 text-destructive">*</span>
+              </span>
+              <input
+                type="datetime-local"
+                required
+                aria-invalid={anamnesisTimeMissing}
+                value={toLocalDateTimeInput(editing.anamnese_at)}
+                onChange={(event) =>
+                  setEditing((current) =>
+                    current
+                      ? { ...current, anamnese_at: event.target.value || null }
+                      : current,
+                  )
+                }
+                className={cn(inputClass, anamnesisTimeMissing && "border-destructive")}
+              />
+            </label>
             <div className="grid gap-3 md:grid-cols-2">
               {fields.map((field) => (
                 <label key={field.key} className="block">

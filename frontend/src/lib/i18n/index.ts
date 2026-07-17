@@ -521,6 +521,7 @@ export interface Translations
   settings_agency_address: string;
   settings_agency_phone: string;
   settings_agency_email: string;
+  settings_agency_website: string;
   settings_agency_privacy_email: string;
   settings_agency_sign_place: string;
   settings_agency_data_system_name: string;

@@ -14,6 +14,7 @@ import { toast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api";
 import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import type { PatientRiskScore } from "@/pages/patients/model/detail-resource-types";
 import { FormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
@@ -85,6 +86,7 @@ type FormState = {
   scaleMax: string;
   interpretation: string;
   source: string;
+  inputsJson: string;
 };
 
 function blankForm(): FormState {
@@ -95,6 +97,22 @@ function blankForm(): FormState {
     scaleMax: "",
     interpretation: "",
     source: "",
+    inputsJson: "",
+  };
+}
+
+function formFromScore(score: PatientRiskScore | null | undefined): FormState {
+  if (!score) return blankForm();
+  return {
+    computedAt: toLocalDateTimeInput(new Date(score.computed_at)),
+    scoreType: SCORE_TYPE_OPTIONS.includes(score.score_type as ScoreType)
+      ? score.score_type as ScoreType
+      : "other",
+    scoreValue: String(score.score_value),
+    scaleMax: score.scale_max == null ? "" : String(score.scale_max),
+    interpretation: score.interpretation ?? "",
+    source: score.source ?? "",
+    inputsJson: score.inputs ? JSON.stringify(score.inputs, null, 2) : "",
   };
 }
 
@@ -102,23 +120,25 @@ const riskScoreTextareaClassName = cn(textareaClass, "min-h-[96px]");
 
 export function PatientRiskScoreSheet({
   patientId,
+  initialScore,
   open,
   onOpenChange,
   onSaved,
 }: {
   patientId: string;
+  initialScore?: PatientRiskScore | null;
   open: boolean;
   onOpenChange: (value: boolean) => void;
   onSaved: () => void;
 }) {
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   const [form, setForm] = useState<FormState>(blankForm);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!open) setForm(blankForm());
-  }, [open]);
+    setForm(open ? formFromScore(initialScore) : blankForm());
+  }, [initialScore, open]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -137,10 +157,30 @@ export function PatientRiskScoreSheet({
       toast.error(l("patients_score_value_exceeds_scale_max"));
       return;
     }
+    let inputs: Record<string, unknown> | null = null;
+    if (form.inputsJson.trim()) {
+      try {
+        const parsed: unknown = JSON.parse(form.inputsJson);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new Error("not an object");
+        }
+        inputs = parsed as Record<string, unknown>;
+      } catch {
+        toast.error(
+          lang === "de"
+            ? "Eingaben müssen ein gültiges JSON-Objekt sein."
+            : "Входные данные должны быть корректным JSON-объектом.",
+        );
+        return;
+      }
+    }
 
     setBusy(true);
     try {
-      await apiFetch(`/patients/${patientId}/risk-scores`, {
+      const endpoint = initialScore?.id
+        ? `/patients/${patientId}/risk-scores/${initialScore.id}/update`
+        : `/patients/${patientId}/risk-scores`;
+      await apiFetch(endpoint, {
         method: "POST",
         body: JSON.stringify({
           computed_at: computedAt.toISOString(),
@@ -149,6 +189,7 @@ export function PatientRiskScoreSheet({
           scale_max: scaleMax,
           interpretation: form.interpretation.trim() || null,
           source: form.source.trim() || null,
+          inputs,
         }),
       });
       toast.success(l("patients_risk_score_saved"));
@@ -167,7 +208,11 @@ export function PatientRiskScoreSheet({
       onOpenChange={onOpenChange}
       maxWidthClassName="sm:max-w-[540px]"
       onSubmit={handleSubmit}
-      title={l("patients_add_risk_score")}
+      title={
+        initialScore?.id
+          ? (lang === "de" ? "Risikoscore bearbeiten" : "Редактировать риск-скор")
+          : l("patients_add_risk_score")
+      }
       bodyClassName="space-y-4 px-5 py-4"
       footer={
         <>
@@ -271,6 +316,21 @@ export function PatientRiskScoreSheet({
             onChange={(event) =>
               setForm((current) => ({ ...current, interpretation: event.target.value }))
             }
+          />
+        </FormField>
+        <FormField
+          label={lang === "de" ? "Eingaben (JSON)" : "Входные данные (JSON)"}
+          htmlFor="patient-risk-score-inputs"
+        >
+          <textarea
+            id="patient-risk-score-inputs"
+            className={riskScoreTextareaClassName}
+            value={form.inputsJson}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, inputsJson: event.target.value }))
+            }
+            spellCheck={false}
+            placeholder={'{\n  "age": 68\n}'}
           />
         </FormField>
       </FormSection>

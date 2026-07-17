@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CountBadge, EmptyCell } from "@/components/ui-shell";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import {
   Dialog,
   DialogContent,
@@ -150,6 +151,31 @@ function dateOnly(value: string | null | undefined): string | null {
   return value ? value.slice(0, 10) : null;
 }
 
+function localToday(): string {
+  const now = new Date();
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+export function medicationHasEnded(
+  medication: Pick<ClinicalMedication, "einnahme_bis">,
+  today = localToday(),
+): boolean {
+  const endDate = dateOnly(medication.einnahme_bis);
+  return Boolean(endDate && /^\d{4}-\d{2}-\d{2}$/.test(endDate) && endDate < today);
+}
+
+function medicationDateRangeValid(medication: ClinicalMedication): boolean {
+  const intakeStart = dateOnly(medication.einnahme_von);
+  const intakeEnd = dateOnly(medication.einnahme_bis);
+  const holdStart = dateOnly(medication.hold_from);
+  const holdEnd = dateOnly(medication.hold_until);
+  return !(
+    (intakeStart && intakeEnd && intakeEnd < intakeStart)
+    || (holdStart && holdEnd && holdEnd < holdStart)
+  );
+}
+
 export function clinicalMedicalProviderRows(providers: ProviderSummary[]): ProviderSummary[] {
   return providers.filter((provider) => provider.provider_type === "medical");
 }
@@ -157,7 +183,10 @@ export function clinicalMedicalProviderRows(providers: ProviderSummary[]): Provi
 type ClinicalSectionGroup = { key: string; label: string };
 type ClinicalSectionTone = "neutral" | "danger" | "warning";
 type IndexedClinicalItem<T> = { item: T; index: number };
-type MedicationHoldDraft = Pick<ClinicalMedication, "on_hold" | "hold_until" | "hold_note">;
+type MedicationHoldDraft = Pick<
+  ClinicalMedication,
+  "on_hold" | "hold_from" | "hold_until" | "hold_note"
+>;
 type MedicationHoldEditor = {
   index: number;
   medication: ClinicalMedication;
@@ -209,6 +238,7 @@ function blankMedication(): ClinicalMedication {
     abgabebeschraenkung: false,
     sonstige_vermerke: null,
     on_hold: false,
+    hold_from: null,
     hold_until: null,
     hold_note: null,
   };
@@ -501,17 +531,39 @@ export function PatientMedicationTable({
               ) : null}
               {section.rows.map(({ item, index }) => {
                 const attribution = attributionLabel(item);
+                const ended = medicationHasEnded(item);
                 return (
                   <tr
                     key={item.id ?? index}
-                    className={cn("transition-colors", item.on_hold ? "bg-amber-50/70" : "hover:bg-muted/30")}
+                    className={cn(
+                      "transition-colors",
+                      ended
+                        ? "bg-rose-50/70"
+                        : item.on_hold
+                          ? "bg-amber-50/70"
+                          : "hover:bg-muted/30",
+                    )}
                   >
                     <td className={cn(bodyCell, "whitespace-pre-line")}>{item.wirkstoff || "—"}</td>
                     <td className={cn(bodyCell, "font-medium")}>
                       {item.handelsname || tx("Без названия", "Ohne Namen")}
+                      {item.einnahme_bis ? (
+                        <span
+                          className={cn(
+                            "mt-0.5 block text-[10px] font-semibold uppercase tracking-wide",
+                            ended ? "text-rose-700" : "text-emerald-700",
+                          )}
+                        >
+                          {ended
+                            ? tx("Приём завершён", "Einnahme beendet")
+                            : tx("Приём до", "Einnahme bis")}{" "}
+                          {dateOnly(item.einnahme_bis)}
+                        </span>
+                      ) : null}
                       {item.on_hold ? (
                         <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-wide text-amber-700">
                           {tx("На холд", "Auf Hold")}
+                          {item.hold_from ? ` ${tx("с", "seit")} ${item.hold_from}` : ""}
                           {item.hold_until ? ` ${tx("до", "bis")} ${item.hold_until}` : ""}
                         </span>
                       ) : null}
@@ -918,6 +970,11 @@ function MedicationHoldDialog({
   const draft = editor?.draft;
   const medicationName =
     editor?.medication.handelsname?.trim() || editor?.medication.wirkstoff?.trim();
+  const holdRangeValid = Boolean(
+    editor
+    && draft
+    && medicationDateRangeValid({ ...editor.medication, ...draft }),
+  );
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -949,6 +1006,7 @@ function MedicationHoldDialog({
                 onChange={(checked) =>
                   onChange({
                     on_hold: checked,
+                    hold_from: checked ? (draft.hold_from ?? localToday()) : null,
                     hold_until: checked ? draft.hold_until : null,
                     hold_note: checked ? draft.hold_note : null,
                   })
@@ -957,9 +1015,18 @@ function MedicationHoldDialog({
 
               {draft.on_hold ? (
                 <div className="grid gap-3">
+                  <Field label={tx("Не принимает с", "Pausiert seit")}>
+                    <Input
+                      type="date"
+                      value={draft.hold_from ?? ""}
+                      onChange={(event) => onChange({ hold_from: event.target.value || null })}
+                      className={inputClass}
+                    />
+                  </Field>
                   <Field label={tx("До какого числа", "Bis wann")}>
                     <Input
                       type="date"
+                      min={draft.hold_from ?? undefined}
                       value={draft.hold_until ?? ""}
                       onChange={(event) => onChange({ hold_until: event.target.value || null })}
                       className={inputClass}
@@ -973,6 +1040,14 @@ function MedicationHoldDialog({
                       placeholder={tx("Причина паузы", "Grund der Pause")}
                     />
                   </Field>
+                  {!holdRangeValid ? (
+                    <p role="alert" className="text-xs text-destructive">
+                      {tx(
+                        "Дата окончания холда не может быть раньше даты начала.",
+                        "Das Hold-Ende darf nicht vor dem Beginn liegen.",
+                      )}
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -989,7 +1064,12 @@ function MedicationHoldDialog({
             >
               {tx("Отмена", "Abbrechen")}
             </Button>
-            <Button type="submit" size="sm" className="h-8 rounded-lg" disabled={busy || !draft}>
+            <Button
+              type="submit"
+              size="sm"
+              className="h-8 rounded-lg"
+              disabled={busy || !draft || !holdRangeValid}
+            >
               {draft?.on_hold ? tx("Сохранить холд", "Hold speichern") : tx("Снять холд", "Hold entfernen")}
             </Button>
           </DialogFooter>
@@ -1553,6 +1633,10 @@ export function PatientClinicalTab({
   const [vitalsSheetOpen, setVitalsSheetOpen] = useState(false);
   const [vitalsEditor, setVitalsEditor] = useState<PatientVitalMeasurement | null>(null);
   const [riskScoreSheetOpen, setRiskScoreSheetOpen] = useState(false);
+  const [riskScoreEditor, setRiskScoreEditor] = useState<PatientRiskScore | null>(null);
+  const [vitalDeleteTarget, setVitalDeleteTarget] = useState<PatientVitalMeasurement | null>(null);
+  const [riskScoreDeleteTarget, setRiskScoreDeleteTarget] = useState<PatientRiskScore | null>(null);
+  const [clinicalDeleteBusy, setClinicalDeleteBusy] = useState(false);
   const [medicationHoldEditor, setMedicationHoldEditor] = useState<MedicationHoldEditor | null>(null);
   const [medicationHoldBusy, setMedicationHoldBusy] = useState(false);
 
@@ -1639,6 +1723,7 @@ export function PatientClinicalTab({
       medication,
       draft: {
         on_hold: Boolean(medication.on_hold),
+        hold_from: medication.hold_from ?? null,
         hold_until: medication.hold_until ?? null,
         hold_note: medication.hold_note ?? null,
       },
@@ -1667,6 +1752,7 @@ export function PatientClinicalTab({
         ? trimDraftStrings({
             ...item,
             on_hold: draft.on_hold,
+            hold_from: draft.on_hold ? draft.hold_from : null,
             hold_until: draft.on_hold ? draft.hold_until : null,
             hold_note: draft.on_hold ? draft.hold_note : null,
           })
@@ -1695,6 +1781,48 @@ export function PatientClinicalTab({
     apiFetch<{ items: PatientRiskScore[] }>(`/patients/${patientId}/risk-scores`)
       .then((res) => setRiskScores(Array.isArray(res?.items) ? res.items : []))
       .catch(() => setVersion((current) => current + 1));
+  }
+
+  async function deleteVitalMeasurement() {
+    if (!vitalDeleteTarget) return;
+    setClinicalDeleteBusy(true);
+    try {
+      await apiFetch(
+        `/patients/${patientId}/vitals/${vitalDeleteTarget.id}/delete`,
+        { method: "POST" },
+      );
+      setVitalDeleteTarget(null);
+      reloadVitals();
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : tx("Не удалось удалить показатель", "Vitalwert konnte nicht gelöscht werden"),
+      );
+    } finally {
+      setClinicalDeleteBusy(false);
+    }
+  }
+
+  async function deleteRiskScore() {
+    if (!riskScoreDeleteTarget) return;
+    setClinicalDeleteBusy(true);
+    try {
+      await apiFetch(
+        `/patients/${patientId}/risk-scores/${riskScoreDeleteTarget.id}/delete`,
+        { method: "POST" },
+      );
+      setRiskScoreDeleteTarget(null);
+      reloadRiskScores();
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : tx("Не удалось удалить риск-скор", "Risikoscore konnte nicht gelöscht werden"),
+      );
+    } finally {
+      setClinicalDeleteBusy(false);
+    }
   }
 
   if (loading) {
@@ -2041,7 +2169,14 @@ export function PatientClinicalTab({
         title={tx("Медикаменты", "Medikation")}
         items={medications}
         blank={blankMedication}
-        isValid={(m) => Boolean(m.wirkstoff?.trim() && m.einnahmeform && m.form)}
+        isValid={(m) =>
+          Boolean(
+            m.wirkstoff?.trim()
+            && m.einnahmeform
+            && m.form
+            && medicationDateRangeValid(m),
+          )
+        }
         canManage={canManage}
         tx={tx}
         groups={[
@@ -2255,12 +2390,25 @@ export function PatientClinicalTab({
               <Field label={tx("Приём до", "Einnahme bis")}>
                 <Input
                   type="date"
+                  min={draft.einnahme_von ?? undefined}
+                  aria-invalid={!medicationDateRangeValid(draft)}
                   value={draft.einnahme_bis ?? ""}
                   onChange={(e) => set({ einnahme_bis: blankToNull(e.target.value) })}
-                  className={inputClass}
+                  className={cn(
+                    inputClass,
+                    !medicationDateRangeValid(draft) && "border-destructive",
+                  )}
                 />
               </Field>
             </div>
+            {!medicationDateRangeValid(draft) ? (
+              <p role="alert" className="text-xs text-destructive">
+                {tx(
+                  "Дата окончания не может быть раньше даты начала.",
+                  "Das Enddatum darf nicht vor dem Startdatum liegen.",
+                )}
+              </p>
+            ) : null}
             <fieldset className="rounded-lg border border-border/60 p-2">
               <legend className="px-1 text-[11px] font-medium text-muted-foreground">
                 {tx("Правовой статус", "Rechtlicher Status")}
@@ -2548,20 +2696,33 @@ export function PatientClinicalTab({
                         )}
                       </div>
                       {canManage ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="size-7 shrink-0 rounded-md p-0"
-                          aria-label={tx("Редактировать", "Bearbeiten")}
-                          title={tx("Редактировать", "Bearbeiten")}
-                          onClick={() => {
-                            setVitalsEditor(item);
-                            setVitalsSheetOpen(true);
-                          }}
-                        >
-                          <Pencil className="size-3.5" />
-                        </Button>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="size-7 rounded-md p-0"
+                            aria-label={tx("Редактировать", "Bearbeiten")}
+                            title={tx("Редактировать", "Bearbeiten")}
+                            onClick={() => {
+                              setVitalsEditor(item);
+                              setVitalsSheetOpen(true);
+                            }}
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="size-7 rounded-md p-0 text-destructive"
+                            aria-label={tx("Удалить показатель", "Vitalwert löschen")}
+                            title={tx("Удалить показатель", "Vitalwert löschen")}
+                            onClick={() => setVitalDeleteTarget(item)}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </div>
                       ) : null}
                     </div>
                   </div>
@@ -2584,7 +2745,14 @@ export function PatientClinicalTab({
             </CountBadge>
           </div>
           {canManage ? (
-            <Button size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => setRiskScoreSheetOpen(true)}>
+            <Button
+              size="sm"
+              className="h-8 rounded-lg gap-1.5"
+              onClick={() => {
+                setRiskScoreEditor(null);
+                setRiskScoreSheetOpen(true);
+              }}
+            >
               <Plus className="size-3.5" />
               {tx("Добавить", "Hinzufügen")}
             </Button>
@@ -2655,13 +2823,44 @@ export function PatientClinicalTab({
                       ) : null}
                     </div>
 
-                    <div className="shrink-0 sm:text-right">
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        {tx("Оценка риска", "Risikowert")}
-                      </span>
-                      <p className="mt-1 text-base font-semibold leading-none text-foreground">
-                        {riskValue}
-                      </p>
+                    <div className="flex shrink-0 items-start gap-2 sm:justify-end">
+                      <div className="sm:text-right">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          {tx("Оценка риска", "Risikowert")}
+                        </span>
+                        <p className="mt-1 text-base font-semibold leading-none text-foreground">
+                          {riskValue}
+                        </p>
+                      </div>
+                      {canManage ? (
+                        <div className="flex items-center gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="size-7 rounded-md p-0"
+                            aria-label={tx("Редактировать", "Bearbeiten")}
+                            title={tx("Редактировать", "Bearbeiten")}
+                            onClick={() => {
+                              setRiskScoreEditor(score);
+                              setRiskScoreSheetOpen(true);
+                            }}
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="size-7 rounded-md p-0 text-destructive"
+                            aria-label={tx("Удалить риск-скор", "Risikoscore löschen")}
+                            title={tx("Удалить риск-скор", "Risikoscore löschen")}
+                            onClick={() => setRiskScoreDeleteTarget(score)}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
                   </article>
                 );
@@ -2691,12 +2890,58 @@ export function PatientClinicalTab({
         <Suspense fallback={null}>
           <LazyPatientRiskScoreSheet
             patientId={patientId}
+            initialScore={riskScoreEditor}
             open={riskScoreSheetOpen}
-            onOpenChange={setRiskScoreSheetOpen}
+            onOpenChange={(open) => {
+              setRiskScoreSheetOpen(open);
+              if (!open) setRiskScoreEditor(null);
+            }}
             onSaved={reloadRiskScores}
           />
         </Suspense>
       ) : null}
+
+      <DirtyDismissConfirmDialog
+        open={Boolean(vitalDeleteTarget)}
+        title={tx("Удалить показатель?", "Vitalwert löschen?")}
+        message={tx(
+          "Запись будет удалена из истории показателей пациента.",
+          "Der Eintrag wird aus dem Vitalwerte-Verlauf des Patienten gelöscht.",
+        )}
+        cancelLabel={tx("Отмена", "Abbrechen")}
+        confirmLabel={
+          clinicalDeleteBusy
+            ? tx("Удаление…", "Löschen…")
+            : tx("Удалить", "Löschen")
+        }
+        onCancel={() => {
+          if (!clinicalDeleteBusy) setVitalDeleteTarget(null);
+        }}
+        onConfirm={() => {
+          if (!clinicalDeleteBusy) void deleteVitalMeasurement();
+        }}
+      />
+
+      <DirtyDismissConfirmDialog
+        open={Boolean(riskScoreDeleteTarget)}
+        title={tx("Удалить риск-скор?", "Risikoscore löschen?")}
+        message={tx(
+          "Оценка риска и её входные данные будут удалены.",
+          "Der Risikoscore und seine Eingabedaten werden gelöscht.",
+        )}
+        cancelLabel={tx("Отмена", "Abbrechen")}
+        confirmLabel={
+          clinicalDeleteBusy
+            ? tx("Удаление…", "Löschen…")
+            : tx("Удалить", "Löschen")
+        }
+        onCancel={() => {
+          if (!clinicalDeleteBusy) setRiskScoreDeleteTarget(null);
+        }}
+        onConfirm={() => {
+          if (!clinicalDeleteBusy) void deleteRiskScore();
+        }}
+      />
 
       {/* ---- Recommendations (Empfehlungen) — admin CRUD ---- */}
       <PatientRecommendationsSection

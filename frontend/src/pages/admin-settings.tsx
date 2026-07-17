@@ -99,6 +99,7 @@ type SettingFieldMeta = {
   labelKey: string;
   inputType: "number" | "text" | "email" | "date" | "textarea";
   min?: number;
+  maxLength?: number;
   rows?: number;
 };
 
@@ -136,6 +137,12 @@ const AGENCY_SETTING_FIELDS: SettingFieldMeta[] = [
   { key: "agency_address", labelKey: "settings_agency_address", inputType: "textarea", rows: 3 },
   { key: "agency_phone", labelKey: "settings_agency_phone", inputType: "text" },
   { key: "agency_email", labelKey: "settings_agency_email", inputType: "email" },
+  {
+    key: "agency_website",
+    labelKey: "settings_agency_website",
+    inputType: "text",
+    maxLength: 300,
+  },
   { key: "agency_privacy_email", labelKey: "settings_agency_privacy_email", inputType: "email" },
   { key: "agency_sign_place", labelKey: "settings_agency_sign_place", inputType: "text" },
   { key: "agency_data_system_name", labelKey: "settings_agency_data_system_name", inputType: "text" },
@@ -1071,6 +1078,7 @@ function useAdminSettingsPageContent() {
                                 id={`setting-${field.key}`}
                                 type={field.inputType}
                                 min={field.min}
+                                maxLength={field.maxLength}
                                 value={editValues[field.key] ?? ""}
                                 onChange={(event) => updateEditValue(field.key, event.target.value)}
                                 className={inputClassName}

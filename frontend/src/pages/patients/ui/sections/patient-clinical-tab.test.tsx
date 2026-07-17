@@ -17,9 +17,14 @@ import {
   attributionLabel,
   clinicalSpecializationLabel,
   clinicalMedicalProviderRows,
+  medicationHasEnded,
   mergeVerlaufDoctorAttribution,
 } from "./patient-clinical-tab";
-import { PatientRecommendationOverviewItem, deriveDoctors } from "./patient-overview-card";
+import {
+  PatientRecommendationOverviewItem,
+  deriveDoctors,
+  medicationHasEndedForProfile,
+} from "./patient-overview-card";
 
 function provider(overrides: Partial<ProviderSummary> = {}): ProviderSummary {
   return {
@@ -231,6 +236,15 @@ describe("PatientMedicationTable", () => {
 
     expect(html).toContain("Auf Hold bis 2026-07-15");
     expect(html).toContain("Patient pausiert wegen Nebenwirkungen");
+  });
+
+  it("treats only medication courses before today as completed", () => {
+    expect(medicationHasEnded({ einnahme_bis: "2026-07-16" }, "2026-07-17")).toBe(true);
+    expect(medicationHasEnded({ einnahme_bis: "2026-07-17" }, "2026-07-17")).toBe(false);
+    expect(
+      medicationHasEndedForProfile({ einnahme_bis: "2026-07-16" }, "2026-07-17"),
+    ).toBe(true);
+    expect(medicationHasEndedForProfile({ einnahme_bis: null }, "2026-07-17")).toBe(false);
   });
 });
 

@@ -2276,6 +2276,38 @@ async fn qualify_lead(
     }
 }
 
+fn parse_lead_clinical_timestamp(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    chrono::DateTime::parse_from_rfc3339(trimmed)
+        .map(|value| value.with_timezone(&chrono::Utc))
+        .or_else(|_| {
+            chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M")
+                .map(|value| value.and_utc())
+        })
+        .or_else(|_| {
+            chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S")
+                .map(|value| value.and_utc())
+        })
+        .or_else(|_| {
+            chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S%.f")
+                .map(|value| value.and_utc())
+        })
+        .ok()
+}
+
+fn lead_narrative_timestamp(wizard_state: &Value) -> chrono::DateTime<chrono::Utc> {
+    wizard_state
+        .pointer("/clinical_draft/narrative/anamnese_at")
+        .or_else(|| wizard_state.pointer("/clinical_draft/narrative/anamneseAt"))
+        .and_then(Value::as_str)
+        .and_then(parse_lead_clinical_timestamp)
+        .unwrap_or_else(chrono::Utc::now)
+}
+
 async fn transfer_lead_clinical_profile(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     lead_id: Uuid,
@@ -2283,11 +2315,12 @@ async fn transfer_lead_clinical_profile(
     wizard_state: &Value,
 ) -> Result<(), sqlx::Error> {
     let wizard_state_json = wizard_state.to_string();
+    let anamnese_at = lead_narrative_timestamp(wizard_state);
 
     sqlx::query(
         r#"INSERT INTO patient_clinical_narrative
                   (patient_id, anamnese_aktuelle, anamnese_vorgeschichte,
-                   anamnese_vegetative, anamnese_sozial, beurteilung, is_active)
+                   anamnese_vegetative, anamnese_sozial, beurteilung, anamnese_at, is_active)
            SELECT $2,
                   COALESCE(
                       NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_aktuelle}'), ''),
@@ -2298,6 +2331,7 @@ async fn transfer_lead_clinical_profile(
                   NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_vegetative}'), ''),
                   NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_sozial}'), ''),
                   NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,beurteilung}'), ''),
+                  $4,
                   true
            FROM leads lead
            LEFT JOIN LATERAL (
@@ -2323,6 +2357,7 @@ async fn transfer_lead_clinical_profile(
     .bind(lead_id)
     .bind(patient_id)
     .bind(&wizard_state_json)
+    .bind(anamnese_at)
     .execute(&mut **tx)
     .await?;
 
@@ -2540,7 +2575,7 @@ async fn transfer_lead_clinical_profile(
                    dose_nachts, verordnet_am, einnahme_von, einnahme_bis,
                    status, apothekenpflichtig, rezeptpflichtig, btm,
                    aut_idem_sperre, abgabebeschraenkung,
-                   sonstige_vermerke, on_hold, hold_until, hold_note, sort_order)
+                   sonstige_vermerke, on_hold, hold_from, hold_until, hold_note, sort_order)
            SELECT $1,
                   COALESCE(
                       provider.id,
@@ -2594,6 +2629,7 @@ async fn transfer_lead_clinical_profile(
                       NULLIF(btrim(concat_ws(E'\n', draft.value->>'note', draft.value->>'otherNotes')), '')
                   ),
                   COALESCE(draft.value->>'on_hold', draft.value->>'onHold', 'false') = 'true',
+                  NULLIF(btrim(COALESCE(draft.value->>'hold_from', draft.value->>'holdFrom')), ''),
                   NULLIF(btrim(COALESCE(draft.value->>'hold_until', draft.value->>'holdUntil')), ''),
                   NULLIF(btrim(COALESCE(draft.value->>'hold_note', draft.value->>'holdNote')), ''),
                   (draft.ordinality - 1)::int
