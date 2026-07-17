@@ -3027,7 +3027,12 @@ fn document_template_by_id(template_id: &str) -> Option<DocumentTemplateDefiniti
 fn is_fixed_legal_document_template(template_id: &str) -> bool {
     matches!(
         template_id,
-        "confidentiality_release" | "privacy_consents" | "privacy_information"
+        "framework_contract"
+            | "single_order"
+            | "cost_estimate"
+            | "confidentiality_release"
+            | "privacy_consents"
+            | "privacy_information"
     )
 }
 
@@ -20043,6 +20048,23 @@ mod tests {
             "confidentiality_release",
             Some("privacy_consents"),
             "privacy_consents"
+        ));
+    }
+
+    #[test]
+    fn canonical_lead_documents_keep_the_designed_pdf_renderer() {
+        for template_id in [
+            "framework_contract",
+            "single_order",
+            "cost_estimate",
+            "confidentiality_release",
+            "privacy_consents",
+            "privacy_information",
+        ] {
+            assert!(is_fixed_legal_document_template(template_id));
+        }
+        assert!(!is_fixed_legal_document_template(
+            "appointment_confirmation"
         ));
     }
 

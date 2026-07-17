@@ -924,26 +924,43 @@ async fn ensure_order_access(
     if auth.role == Role::Ceo {
         return Ok(());
     }
-    let row = sqlx::query("SELECT patient_id FROM orders WHERE id = $1")
-        .bind(order_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|error| {
-            tracing::error!(error = %error, order_id = %order_id, "load order access");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to validate order access",
-            )
-        })?;
+    let row = sqlx::query(
+        r#"SELECT COALESCE(o.patient_id, l.converted_patient_id) AS patient_id,
+                  o.source_lead_id
+           FROM orders o
+           LEFT JOIN leads l ON l.id = o.source_lead_id
+           WHERE o.id = $1"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, order_id = %order_id, "load order access");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate order access",
+        )
+    })?;
     let Some(row) = row else {
         return Err(err(StatusCode::NOT_FOUND, "Order not found"));
     };
-    let patient_id = row.try_get::<Uuid, _>("patient_id").map_err(|_| {
+    let patient_id = row.try_get::<Option<Uuid>, _>("patient_id").map_err(|_| {
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to decode order access",
         )
     })?;
+    let Some(patient_id) = patient_id else {
+        return if row
+            .try_get::<Option<Uuid>, _>("source_lead_id")
+            .unwrap_or_default()
+            .is_some()
+        {
+            Ok(())
+        } else {
+            Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
+        };
+    };
     let assigned = access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
         .await
         .map_err(|error| {

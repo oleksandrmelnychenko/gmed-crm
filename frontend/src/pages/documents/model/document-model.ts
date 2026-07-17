@@ -17,7 +17,7 @@ import {
   DOCUMENT_BINDING_FIELDS,
   buildBindingsPayload,
   documentBindingFieldLabel,
-  isFixedLegalDocumentTemplate,
+  isDesignedAgencyDocumentTemplate,
 } from "./document-bindings";
 import { localizeTextBlock } from "./text-block-labels";
 
@@ -760,8 +760,8 @@ export function buildGenerateDocumentPayload(input: {
   fallbackDate?: string | Date | null;
 }): Record<string, unknown> {
   const { form, template } = input;
-  const fixedLegalTemplate = isFixedLegalDocumentTemplate(template.id);
-  const manualText = !fixedLegalTemplate && form.manualTextDirty
+  const designedAgencyTemplate = isDesignedAgencyDocumentTemplate(template.id);
+  const manualText = !designedAgencyTemplate && form.manualTextDirty
     ? (input.displayedManualText ?? form.manualText).trim()
     : "";
   return {
@@ -775,11 +775,11 @@ export function buildGenerateDocumentPayload(input: {
     language: form.language || null,
     replace_document_id: form.replaceDocumentId || null,
     title_override:
-      fixedLegalTemplate ? null : form.titleOverride.trim() || null,
+      designedAgencyTemplate ? null : form.titleOverride.trim() || null,
     introduction:
-      fixedLegalTemplate ? null : form.introduction.trim() || null,
+      designedAgencyTemplate ? null : form.introduction.trim() || null,
     closing_note:
-      fixedLegalTemplate ? null : form.closingNote.trim() || null,
+      designedAgencyTemplate ? null : form.closingNote.trim() || null,
     klinik: form.klinik.trim() || null,
     ursprung: form.ursprung.trim() || null,
     document_direction: form.documentDirection,
@@ -800,7 +800,7 @@ export function buildGenerateDocumentPayload(input: {
     payment_method: form.paymentMethod || null,
     notes: form.notes.trim() || null,
     manual_text: manualText || null,
-    text_block_keys: fixedLegalTemplate ? [] : form.textBlockKeys,
+    text_block_keys: designedAgencyTemplate ? [] : form.textBlockKeys,
     bindings: buildBindingsPayload(template.id, form.bindings),
   };
 }

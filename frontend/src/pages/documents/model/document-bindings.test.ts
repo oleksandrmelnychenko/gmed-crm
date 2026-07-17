@@ -4,7 +4,10 @@ import {
   DOCUMENT_BINDING_FIELDS,
   buildBindingsPayload,
   hydrateDocumentBindings,
+  isDesignedAgencyDocumentTemplate,
   isFixedLegalDocumentTemplate,
+  keepPatientPartyBindings,
+  patientPartyBindingDefaults,
   prefillDocumentBindingsFromText,
 } from "./document-bindings";
 
@@ -190,6 +193,69 @@ describe("document template binding payloads", () => {
     expect(isFixedLegalDocumentTemplate("privacy_information")).toBe(true);
     expect(isFixedLegalDocumentTemplate("privacy_consents")).toBe(true);
     expect(isFixedLegalDocumentTemplate("cost_estimate")).toBe(false);
+  });
+
+  it("keeps every canonical lead document on the designed PDF renderer", () => {
+    for (const templateId of [
+      "framework_contract",
+      "single_order",
+      "cost_estimate",
+      "confidentiality_release",
+      "privacy_information",
+      "privacy_consents",
+    ]) {
+      expect(isDesignedAgencyDocumentTemplate(templateId)).toBe(true);
+    }
+    expect(isDesignedAgencyDocumentTemplate("appointment_confirmation")).toBe(false);
+  });
+
+  it("prefills visible party fields from the selected patient", () => {
+    expect(
+      patientPartyBindingDefaults({
+        address_street: "Musterallee 11",
+        address_zip: "81735",
+        address_city: "München",
+        address_country: "",
+        residence_country: "Germany",
+        nationality: "Ukraine",
+        email: "patient@example.test",
+        phone_primary: "+49 89 123",
+        intake_profile: {
+          trusted_contacts: [
+            {
+              name: "Alex Beispiel",
+              birth_date: "1989-02-03",
+              relation: "Bruder",
+              phone: "+49 30 123",
+            },
+          ],
+        },
+      }),
+    ).toEqual({
+      party_street: "Musterallee 11",
+      party_zip: "81735",
+      party_city: "München",
+      party_country: "Germany",
+      party_email: "patient@example.test",
+      party_phone: "+49 89 123",
+      party_sign_place: "München",
+      extra_release_recipients:
+        "Alex Beispiel, geb. am 03.02.1989, Beziehung: Bruder, Tel.: +49 30 123",
+    });
+  });
+
+  it("keeps patient defaults while dropping fields from the previous template", () => {
+    expect(
+      keepPatientPartyBindings({
+        party_city: "München",
+        party_email: "patient@example.test",
+        order_number: "A-1",
+        estimate_total: "1.000,00 EUR",
+      }),
+    ).toEqual({
+      party_city: "München",
+      party_email: "patient@example.test",
+    });
   });
 
   it("uses country selectors for patient and payer country bindings", () => {

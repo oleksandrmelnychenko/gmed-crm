@@ -260,8 +260,15 @@ describe("buildGenerateDocumentPayload", () => {
     ).toBe("Form fallback text");
   });
 
-  it.each(["privacy_consents", "privacy_information"])(
-    "never sends free-form overrides for the fixed legal template %s",
+  it.each([
+    "framework_contract",
+    "single_order",
+    "cost_estimate",
+    "confidentiality_release",
+    "privacy_consents",
+    "privacy_information",
+  ])(
+    "never sends free-form overrides for the designed agency template %s",
     (templateId) => {
       const payload = buildGenerateDocumentPayload({
         template: template({

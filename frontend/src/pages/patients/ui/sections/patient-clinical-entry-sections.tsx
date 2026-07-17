@@ -699,21 +699,30 @@ export function PatientMedicationTable({
                           {item.einnahme_bis.slice(0, 10)}
                         </span>
                       ) : null}
-                      {item.on_hold ? (
-                        <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-wide text-amber-700">
-                          {tx("На холд", "Auf Hold")}
-                          {item.hold_from ? ` ${tx("с", "seit")} ${item.hold_from}` : ""}
-                          {item.hold_until ? ` ${tx("до", "bis")} ${item.hold_until}` : ""}
-                        </span>
-                      ) : null}
-                      {item.on_hold && item.hold_note ? <span className="mt-0.5 block break-words text-[10px] text-amber-800">{item.hold_note}</span> : null}
                     </td>
                     <td className={cn(bodyCell, "whitespace-pre-line font-mono")}>{item.staerke || ""}</td>
                     <td className={cn(bodyCell, "whitespace-pre-line")}>{darreichungsformLabel(item.form)}</td>
-                    <td className={bodyDoseCell}>{dose(item.dose_morgens)}</td>
-                    <td className={bodyDoseCell}>{dose(item.dose_mittags)}</td>
-                    <td className={bodyDoseCell}>{dose(item.dose_abends)}</td>
-                    <td className={bodyDoseCell}>{dose(item.dose_nachts)}</td>
+                    {item.on_hold ? (
+                      <td colSpan={4} className="px-2.5 py-2 align-top text-left text-amber-800">
+                        <span className="block text-[11px] font-semibold">
+                          {tx("На холд", "Auf Hold")}
+                          {item.hold_from ? ` ${tx("с", "seit")} ${item.hold_from.slice(0, 10)}` : ""}
+                          {item.hold_until ? ` ${tx("до", "bis")} ${item.hold_until.slice(0, 10)}` : ""}
+                        </span>
+                        {item.hold_note ? (
+                          <span className="mt-0.5 block break-words text-[10px] font-normal">
+                            {item.hold_note}
+                          </span>
+                        ) : null}
+                      </td>
+                    ) : (
+                      <>
+                        <td className={bodyDoseCell}>{dose(item.dose_morgens)}</td>
+                        <td className={bodyDoseCell}>{dose(item.dose_mittags)}</td>
+                        <td className={bodyDoseCell}>{dose(item.dose_abends)}</td>
+                        <td className={bodyDoseCell}>{dose(item.dose_nachts)}</td>
+                      </>
+                    )}
                     <td className={cn(bodyCell, "whitespace-nowrap")}>{item.einheit || ""}</td>
                     <td className={bodyCell}>
                       {item.hinweis ? <span className="whitespace-pre-line break-words">{item.hinweis}</span> : null}

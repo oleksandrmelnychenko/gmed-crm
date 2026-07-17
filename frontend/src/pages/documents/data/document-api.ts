@@ -37,6 +37,21 @@ export type PatientDocumentContext = {
   orders: OrderOption[];
   appointments: AppointmentOption[];
   frameworkContracts: FrameworkContractOption[] | null;
+  profile: PatientDocumentProfile | null;
+};
+
+export type PatientDocumentProfile = {
+  address_city?: string | null;
+  address_country?: string | null;
+  address_street?: string | null;
+  address_zip?: string | null;
+  email?: string | null;
+  intake_profile?: {
+    trusted_contacts?: unknown;
+  } | null;
+  nationality?: string | null;
+  phone_primary?: string | null;
+  residence_country?: string | null;
 };
 
 export type DocumentDetailBundle = {
@@ -218,7 +233,7 @@ export async function fetchDocumentDetailBundle(
 export async function fetchPatientDocumentContext(
   patientId: string,
 ): Promise<PatientDocumentContext> {
-  const [orders, appointments, frameworkContracts] = await Promise.all([
+  const [orders, appointments, frameworkContracts, profile] = await Promise.all([
     apiFetch<OrderOption[]>(`/orders?patient_id=${patientId}`).catch(() => []),
     apiFetch<AppointmentOption[]>(`/appointments?patient_id=${patientId}`).catch(
       () => [],
@@ -226,8 +241,9 @@ export async function fetchPatientDocumentContext(
     apiFetch<FrameworkContractOption[]>(
       `/patients/${patientId}/framework-contracts`,
     ).catch(() => null),
+    apiFetch<PatientDocumentProfile>(`/patients/${patientId}`).catch(() => null),
   ]);
-  return { orders, appointments, frameworkContracts };
+  return { orders, appointments, frameworkContracts, profile };
 }
 
 export function uploadDocument(formData: FormData) {

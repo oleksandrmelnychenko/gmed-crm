@@ -2424,13 +2424,18 @@ async fn get_order(
     }
 
     let order = match sqlx::query(
-        r#"SELECT o.id, o.order_number, o.patient_id, o.source_lead_id,
+        r#"SELECT o.id, o.order_number,
+                  COALESCE(o.patient_id, l.converted_patient_id) AS patient_id,
+                  o.source_lead_id, o.contract_id,
                   o.phase, o.status, o.needs_description, o.signed_patient,
                   o.signed_agency, o.total_estimated, o.total_actual,
                   o.created_at, o.updated_at,
-                  p.first_name, p.last_name, p.patient_id AS p_pid
+                  COALESCE(p.first_name, l.first_name) AS subject_first_name,
+                  COALESCE(p.last_name, l.last_name) AS subject_last_name,
+                  p.patient_id AS p_pid
            FROM orders o
-           LEFT JOIN patients p ON p.id = o.patient_id
+           LEFT JOIN leads l ON l.id = o.source_lead_id
+           LEFT JOIN patients p ON p.id = COALESCE(o.patient_id, l.converted_patient_id)
            WHERE o.id = $1"#,
     )
     .bind(order_id)
@@ -2455,6 +2460,9 @@ async fn get_order(
     let source_lead_id = order
         .try_get::<Option<Uuid>, _>("source_lead_id")
         .unwrap_or_default();
+    let contract_id = order
+        .try_get::<Option<Uuid>, _>("contract_id")
+        .unwrap_or_default();
     let phase = order.try_get::<String, _>("phase").unwrap_or_default();
     let status = order.try_get::<String, _>("status").unwrap_or_default();
     let needs_description = order
@@ -2476,10 +2484,10 @@ async fn get_order(
         .unwrap_or(created_at);
     let patient_name = [
         order
-            .try_get::<Option<String>, _>("first_name")
+            .try_get::<Option<String>, _>("subject_first_name")
             .unwrap_or_default(),
         order
-            .try_get::<Option<String>, _>("last_name")
+            .try_get::<Option<String>, _>("subject_last_name")
             .unwrap_or_default(),
     ]
     .into_iter()
@@ -2514,7 +2522,7 @@ async fn get_order(
             }
         };
 
-    let leistungen = sqlx::query(
+    let leistungen = match sqlx::query(
         r#"SELECT ol.id, ol.description, ol.quantity, ol.unit_price, ol.currency, ol.vat_rate,
                   ol.is_cost_passthrough, ol.status, ol.delivered_at, ol.approved_at, ol.notes,
                   ol.provider_id, ol.doctor_id, ol.source_interpreter_report_id,
@@ -2547,7 +2555,16 @@ async fn get_order(
     .bind(order_id)
     .fetch_all(&state.db)
     .await
-    .unwrap_or_default();
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "load order services");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load order services",
+            );
+        }
+    };
 
     let mut leist_json = Vec::new();
     for l in leistungen {
@@ -2582,7 +2599,7 @@ async fn get_order(
         }));
     }
 
-    let external_invoice_rows = sqlx::query(
+    let external_invoice_rows = match sqlx::query(
         r#"SELECT ei.id, ei.provider_id, ei.external_invoice_number, ei.invoice_date,
                   ei.due_date, ei.amount_net, ei.amount_vat, ei.amount_gross, ei.currency,
                   ei.status, ei.received_at, ei.paid_at, ei.notes, ei.created_at, ei.updated_at,
@@ -2607,7 +2624,16 @@ async fn get_order(
     .bind(order_id)
     .fetch_all(&state.db)
     .await
-    .unwrap_or_default();
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "load order external invoices");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load order external invoices",
+            );
+        }
+    };
 
     let mut external_invoices_json = Vec::new();
     for row in external_invoice_rows {
@@ -2669,7 +2695,9 @@ async fn get_order(
     Json(serde_json::json!({
         "id": order_db_id, "order_number": order_number,
         "patient_id": patient_id,
+        "lead_id": source_lead_id,
         "source_lead_id": source_lead_id,
+        "contract_id": contract_id,
         "patient_name": patient_name,
         "patient_pid": patient_pid,
         "phase": phase, "status": status,
@@ -2949,9 +2977,11 @@ async fn update_phase(
     }
 
     let order_context = match sqlx::query(
-        r#"SELECT patient_id, phase, created_at
-           FROM orders
-           WHERE id = $1"#,
+        r#"SELECT COALESCE(o.patient_id, l.converted_patient_id) AS patient_id,
+                  o.phase, o.created_at
+           FROM orders o
+           LEFT JOIN leads l ON l.id = o.source_lead_id
+           WHERE o.id = $1"#,
     )
     .bind(order_id)
     .fetch_optional(&state.db)
@@ -2965,7 +2995,15 @@ async fn update_phase(
         }
     };
 
-    let patient_id: Uuid = order_context.try_get("patient_id").unwrap_or_default();
+    let patient_id = order_context
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default();
+    let Some(patient_id) = patient_id else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Order must be linked to a patient before changing its lifecycle phase",
+        );
+    };
     let current_phase: String = order_context.try_get("phase").unwrap_or_default();
     let created_at: chrono::DateTime<chrono::Utc> = order_context
         .try_get("created_at")
@@ -3141,22 +3179,10 @@ async fn update_process_gates(
         );
     }
 
-    let patient_id = match sqlx::query_scalar::<_, Uuid>(
-        "SELECT patient_id FROM orders WHERE id = $1",
-    )
-    .bind(order_id)
-    .fetch_optional(&state.db)
-    .await
-    {
+    let patient_id = match ensure_order_access(&state, &auth, order_id, "Order not found").await {
         Ok(Some(value)) => value,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
-        Err(e) => {
-            tracing::error!(error = %e, order_id = %order_id, "load process gate patient context");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to update order process gates",
-            );
-        }
+        Ok(None) => return err(StatusCode::UNPROCESSABLE_ENTITY, "patient_required"),
+        Err(resp) => return resp,
     };
 
     match sqlx::query(
@@ -3307,22 +3333,10 @@ async fn update_debt_management(
         }
     }
 
-    let patient_id = match sqlx::query_scalar::<_, Uuid>(
-        "SELECT patient_id FROM orders WHERE id = $1",
-    )
-    .bind(order_id)
-    .fetch_optional(&state.db)
-    .await
-    {
+    let patient_id = match ensure_order_access(&state, &auth, order_id, "Order not found").await {
         Ok(Some(value)) => value,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
-        Err(e) => {
-            tracing::error!(error = %e, order_id = %order_id, "load debt-management patient context");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to update debt-management state",
-            );
-        }
+        Ok(None) => return err(StatusCode::UNPROCESSABLE_ENTITY, "patient_required"),
+        Err(resp) => return resp,
     };
 
     if let Err(resp) =
@@ -4179,20 +4193,10 @@ async fn create_external_invoice(
         .map(str::trim)
         .filter(|value| !value.is_empty());
 
-    let patient_id: Uuid = match sqlx::query_scalar("SELECT patient_id FROM orders WHERE id = $1")
-        .bind(order_id)
-        .fetch_optional(&state.db)
-        .await
-    {
+    let patient_id = match ensure_order_access(&state, &auth, order_id, "Order not found").await {
         Ok(Some(value)) => value,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
-        Err(error) => {
-            tracing::error!(error = %error, order_id = %order_id, "load order patient");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to create external invoice",
-            );
-        }
+        Ok(None) => return err(StatusCode::UNPROCESSABLE_ENTITY, "patient_required"),
+        Err(resp) => return resp,
     };
 
     match sqlx::query(
@@ -5475,7 +5479,7 @@ async fn order_group_payload(
             serde_json::json!({
                 "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
                 "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
-                "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_else(|_| Uuid::nil()),
+                "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
                 "status": row.try_get::<String, _>("status").unwrap_or_default(),
                 "total_estimated": row
                     .try_get::<Option<rust_decimal::Decimal>, _>("total_estimated")
@@ -5490,7 +5494,7 @@ async fn order_group_payload(
         "head": {
             "id": head.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
             "order_number": head.try_get::<String, _>("order_number").unwrap_or_default(),
-            "patient_id": head.try_get::<Uuid, _>("patient_id").unwrap_or_else(|_| Uuid::nil()),
+            "patient_id": head.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
             "order_role": head.try_get::<String, _>("order_role").unwrap_or_default(),
             "status": head.try_get::<String, _>("status").unwrap_or_default(),
             "total_estimated": head
@@ -5932,6 +5936,9 @@ async fn set_order_payer(
         };
 
     if let Some(relation_id) = body.payer_patient_relation_id {
+        let Some(order_patient_id) = order_patient_id else {
+            return err(StatusCode::UNPROCESSABLE_ENTITY, "patient_required");
+        };
         let relation_matches = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM patient_relations WHERE id = $1 AND patient_id = $2)",
         )
@@ -6048,7 +6055,13 @@ async fn can_access_order(
     }
 
     let Some(patient_id) = patient_id else {
-        let row = sqlx::query("SELECT patient_id, source_lead_id FROM orders WHERE id = $1")
+        let row = sqlx::query(
+            r#"SELECT COALESCE(o.patient_id, l.converted_patient_id) AS patient_id,
+                      o.source_lead_id
+               FROM orders o
+               LEFT JOIN leads l ON l.id = o.source_lead_id
+               WHERE o.id = $1"#,
+        )
             .bind(order_id)
             .fetch_optional(&state.db)
             .await
@@ -6098,18 +6111,26 @@ async fn ensure_order_access(
     auth: &AuthUser,
     order_id: Uuid,
     not_found_message: &str,
-) -> Result<Uuid, axum::response::Response> {
-    let patient_id = sqlx::query_scalar::<_, Uuid>("SELECT patient_id FROM orders WHERE id = $1")
-        .bind(order_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, order_id = %order_id, "Failed to load order access context");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate order access")
-        })?
-        .ok_or_else(|| err(StatusCode::NOT_FOUND, not_found_message))?;
+) -> Result<Option<Uuid>, axum::response::Response> {
+    let patient_id = sqlx::query_scalar::<_, Option<Uuid>>(
+        r#"SELECT COALESCE(o.patient_id, l.converted_patient_id)
+           FROM orders o
+           LEFT JOIN leads l ON l.id = o.source_lead_id
+           WHERE o.id = $1"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, order_id = %order_id, "Failed to load order access context");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate order access",
+        )
+    })?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, not_found_message))?;
 
-    match can_access_order(state, auth, order_id, Some(patient_id)).await? {
+    match can_access_order(state, auth, order_id, patient_id).await? {
         true => Ok(patient_id),
         false => Err(err(StatusCode::FORBIDDEN, "Insufficient permissions")),
     }

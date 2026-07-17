@@ -385,8 +385,14 @@ async fn lead_order_and_service_are_idempotent_without_creating_patient() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "response: {order_detail}");
+    assert_eq!(order_detail["lead_id"], lead_id.to_string());
     assert_eq!(order_detail["source_lead_id"], lead_id.to_string());
+    assert_eq!(order_detail["contract_id"], contract_id);
     assert!(order_detail["patient_id"].is_null());
+    assert_eq!(
+        order_detail["patient_name"],
+        format!("Lead {tag} Onboarding")
+    );
     assert_eq!(
         order_detail["leistungen"]
             .as_array()
@@ -397,6 +403,67 @@ async fn lead_order_and_service_are_idempotent_without_creating_patient() {
     assert_eq!(
         order_detail["leistungen"][0]["description"],
         "Organisation der Behandlung"
+    );
+
+    let (status, workflow) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/workflow-checklist"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {workflow}");
+    assert_eq!(workflow["blocked_reason"], "patient_required");
+    assert_eq!(workflow["open_count"], 0);
+    assert_eq!(workflow["items"], json!([]));
+
+    let (status, group) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/group"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {group}");
+    assert!(group["head"]["patient_id"].is_null());
+    assert_eq!(group["covered_patient_ids"], json!([]));
+
+    let (status, amendments) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/amendments"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {amendments}");
+    assert_eq!(amendments, json!([]));
+
+    let (status, service_groups) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/service-groups"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {service_groups}");
+    assert_eq!(service_groups, json!([]));
+
+    let (status, phase_error) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/phase"),
+        &pm_bearer,
+        Some(json!({ "phase": "planning" })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "response: {phase_error}"
     );
 
     let (status, quote) = json_request(

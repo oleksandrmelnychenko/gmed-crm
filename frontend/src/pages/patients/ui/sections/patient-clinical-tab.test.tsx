@@ -215,7 +215,7 @@ describe("PatientMedicationTable", () => {
     expect(html).toContain("Bearb.");
   });
 
-  it("renders medication hold state with until date and note", () => {
+  it("renders medication hold state across the four dose columns", () => {
     const html = renderToStaticMarkup(
       <PatientMedicationTable
         canManage
@@ -223,7 +223,7 @@ describe("PatientMedicationTable", () => {
           {
             item: medication({
               on_hold: true,
-              hold_until: "2026-07-15",
+              hold_from: "2026-07-16",
               hold_note: "Patient pausiert wegen Nebenwirkungen",
             }),
             index: 0,
@@ -234,7 +234,8 @@ describe("PatientMedicationTable", () => {
       />,
     );
 
-    expect(html).toContain("Auf Hold bis 2026-07-15");
+    expect(html).toContain('colSpan="4"');
+    expect(html).toContain("Auf Hold seit 2026-07-16");
     expect(html).toContain("Patient pausiert wegen Nebenwirkungen");
   });
 

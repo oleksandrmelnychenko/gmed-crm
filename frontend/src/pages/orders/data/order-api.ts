@@ -242,9 +242,11 @@ export async function fetchOrderWorkspace(
       () => null,
     ),
   ]);
-  const assignments = await apiFetch<PatientAssignmentOption[]>(
-    `/patients/${detail.patient_id}/assignments`,
-  ).catch(() => []);
+  const assignments = detail.patient_id
+    ? await apiFetch<PatientAssignmentOption[]>(
+        `/patients/${detail.patient_id}/assignments`,
+      ).catch(() => [])
+    : [];
 
   return { detail, documents, workflow, assignments };
 }
@@ -340,7 +342,7 @@ export function completeWorkflowChecklistItem(orderId: string, itemId: string) {
 export type OrderGroupHead = {
   id: string;
   order_number: string;
-  patient_id: string;
+  patient_id: string | null;
   order_role: string;
   status: string;
   total_estimated: string | null;
@@ -356,7 +358,7 @@ export type OrderGroupHead = {
 export type OrderGroupSub = {
   id: string;
   order_number: string;
-  patient_id: string;
+  patient_id: string | null;
   status: string;
   total_estimated: string | null;
 };
@@ -376,7 +378,7 @@ export function normalizeOrderGroup(value: unknown): OrderGroup {
     head: {
       id: stringValue(head.id),
       order_number: stringValue(head.order_number),
-      patient_id: stringValue(head.patient_id),
+      patient_id: nullableStringValue(head.patient_id),
       order_role: stringValue(head.order_role, "standalone"),
       status: stringValue(head.status),
       total_estimated: nullableStringValue(head.total_estimated),
@@ -393,7 +395,7 @@ export function normalizeOrderGroup(value: unknown): OrderGroup {
       return {
         id: stringValue(sub.id),
         order_number: stringValue(sub.order_number),
-        patient_id: stringValue(sub.patient_id),
+        patient_id: nullableStringValue(sub.patient_id),
         status: stringValue(sub.status),
         total_estimated: nullableStringValue(sub.total_estimated),
       };

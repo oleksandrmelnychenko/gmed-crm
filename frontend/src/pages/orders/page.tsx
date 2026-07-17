@@ -2571,6 +2571,97 @@ function useOrdersPageContent() {
     filters.providerId !== "" ||
     filters.providerTaxonomyNodeId !== "" ||
     filters.doctorId !== "";
+  const detailPatientId = orderDetail?.patient_id || null;
+  const detailLeadId =
+    orderDetail?.lead_id || orderDetail?.source_lead_id || null;
+  const detailLeadLabel = lang === "de" ? "Lead" : "Лид";
+  const detailSubjectLabel = detailPatientId
+    ? t.orders_patient
+    : detailLeadId
+      ? detailLeadLabel
+      : t.orders_patient;
+  const detailSubjectName =
+    orderDetail?.patient_name?.trim() || tx.common_not_set;
+  const detailSubjectReference = detailPatientId
+    ? orderDetail?.patient_pid?.trim() || ""
+    : detailLeadId
+      ? detailLeadLabel
+      : "";
+  const detailLeadHref = detailLeadId
+    ? `/leads?lead=${encodeURIComponent(detailLeadId)}`
+    : "";
+  const detailSubjectHref = detailPatientId
+    ? `/patients/${detailPatientId}?tab=orders`
+    : detailLeadHref;
+  const detailPatientQuery = detailPatientId
+    ? `&patient=${encodeURIComponent(detailPatientId)}`
+    : "";
+  const detailOrderHref = orderDetail
+    ? `order=${encodeURIComponent(orderDetail.id)}`
+    : "";
+  const detailAppointmentsHref = orderDetail
+    ? `/appointments?${detailOrderHref}${detailPatientQuery}`
+    : "";
+  const detailDocumentsHref = orderDetail
+    ? `/documents?${detailOrderHref}${detailPatientQuery}`
+    : "";
+  const detailContractsHref = orderDetail
+    ? `/contracts?${detailOrderHref}${detailPatientQuery}&tab=quotes`
+    : "";
+  const detailInvoicesHref = orderDetail
+    ? `/invoices?${detailOrderHref}${detailPatientQuery}`
+    : "";
+  const detailProvidersHref = detailPatientId
+    ? `/providers?patient=${encodeURIComponent(detailPatientId)}`
+    : "/providers";
+  const detailRequiresPatient = Boolean(
+    orderDetail && !detailPatientId && detailLeadId,
+  );
+  const workflowPatientRequired =
+    workflowChecklist?.blocked_reason === "patient_required" ||
+    detailRequiresPatient;
+  const detailOverviewLinks = orderDetail
+    ? [
+        ...(detailSubjectHref
+          ? [{
+              label: detailSubjectLabel,
+              description: detailSubjectReference
+                ? `${detailSubjectName} (${detailSubjectReference})`
+                : detailSubjectName,
+              href: detailSubjectHref,
+            }]
+          : []),
+        ...(detailPatientId
+          ? [
+              {
+                label: l("orders_falle"),
+                description: l("orders_fallkontext_dieses_patienten_offnen"),
+                href: `/patients/${detailPatientId}?tab=cases`,
+              },
+              {
+                label: l("orders_termine"),
+                description: l("orders_termine_dieses_patienten_anzeigen"),
+                href: detailAppointmentsHref,
+              },
+            ]
+          : []),
+        {
+          label: l("orders_vertrage"),
+          description: l("orders_angebote_und_vertrage_dieses_auftrags_offnen"),
+          href: detailContractsHref,
+        },
+        {
+          label: l("orders_rechnungen"),
+          description: l("orders_rechnungen_dieses_auftrags_anzeigen"),
+          href: detailInvoicesHref,
+        },
+        {
+          label: l("orders_dokumente"),
+          description: l("orders_dokumente_dieses_auftrags_anzeigen"),
+          href: detailDocumentsHref,
+        },
+      ]
+    : [];
 
   return (
     <div className={cn("space-y-6", isOrderRouteDetail && "min-h-0")}>
@@ -2999,7 +3090,7 @@ function useOrdersPageContent() {
           <AdminSheetScaffold
             title={
               orderDetail
-                ? `${orderDetail.order_number} / ${orderDetail.patient_name}`
+                ? `${orderDetail.order_number} / ${detailSubjectName}`
                 : tx.orders_title
             }
             description={l("orders_vollstandige_operative_sicht_auf_den_aktuellen_auftrag_i")}
@@ -3047,16 +3138,16 @@ function useOrdersPageContent() {
                           </StatusBadge>
                         </div>
                         <h3 className="mt-2 min-w-0 max-w-full break-words text-lg font-semibold leading-snug text-foreground">
-                          {orderDetail.patient_name}
+                          {detailSubjectName}
                         </h3>
                         <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                          {[orderDetail.order_number, orderDetail.patient_pid]
+                          {[orderDetail.order_number, detailSubjectReference]
                             .filter(Boolean)
                             .join(" - ")}
                         </p>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <Badge variant="outline" className="rounded-full">
-                            {formatMoney(orderDetail.total_actual)}
+                            {formatMoney(orderDetail.total_estimated)}
                           </Badge>
                           <Badge variant="outline" className="rounded-full">
                             {leistungMetrics.total} {tx.providers_services}
@@ -3073,16 +3164,19 @@ function useOrdersPageContent() {
                             variant="outline"
                             size="sm"
                             className="justify-center rounded-lg"
-                            onClick={() =>
-                              window.open(
-                                `/patients/${orderDetail.patient_id}?tab=orders`,
-                                "_blank",
-                                "noopener,noreferrer",
-                              )
-                            }
+                            disabled={!detailSubjectHref}
+                            onClick={() => {
+                              if (detailSubjectHref) {
+                                window.open(
+                                  detailSubjectHref,
+                                  "_blank",
+                                  "noopener,noreferrer",
+                                );
+                              }
+                            }}
                           >
                             <UserRound className="size-3.5" />
-                            {t.orders_patient}
+                            {detailSubjectLabel}
                           </Button>
                           <Button
                             type="button"
@@ -3091,7 +3185,7 @@ function useOrdersPageContent() {
                             className="justify-center rounded-lg"
                             onClick={() =>
                               window.open(
-                                `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                detailDocumentsHref,
                                 "_blank",
                                 "noopener,noreferrer",
                               )
@@ -3127,8 +3221,12 @@ function useOrdersPageContent() {
                       <div className="mt-5 space-y-5">
                         <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
                           <OrderSummaryLine
-                            label={t.orders_patient}
-                            value={`${orderDetail.patient_name} (${orderDetail.patient_pid})`}
+                            label={detailSubjectLabel}
+                            value={
+                              detailSubjectReference
+                                ? `${detailSubjectName} (${detailSubjectReference})`
+                                : detailSubjectName
+                            }
                           />
                           <OrderSummaryLine
                             label={t.orders_phase}
@@ -3196,38 +3294,7 @@ function useOrdersPageContent() {
                       </div>
 
                       <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(185px,1fr))] gap-3">
-                        {[
-                          {
-                            label: l("orders_patient"),
-                            description: `${orderDetail.patient_name} (${orderDetail.patient_pid})`,
-                            href: `/patients/${orderDetail.patient_id}?tab=orders`,
-                          },
-                          {
-                            label: l("orders_falle"),
-                            description: l("orders_fallkontext_dieses_patienten_offnen"),
-                            href: `/patients/${orderDetail.patient_id}?tab=cases`,
-                          },
-                          {
-                            label: l("orders_termine"),
-                            description: l("orders_termine_dieses_patienten_anzeigen"),
-                            href: `/appointments?patient=${orderDetail.patient_id}`,
-                          },
-                          {
-                            label: l("orders_vertrage"),
-                            description: l("orders_angebote_und_vertrage_dieses_auftrags_offnen"),
-                            href: `/contracts?order=${orderDetail.id}&patient=${orderDetail.patient_id}&tab=quotes`,
-                          },
-                          {
-                            label: l("orders_rechnungen"),
-                            description: l("orders_rechnungen_dieses_auftrags_anzeigen"),
-                            href: `/invoices?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
-                          },
-                          {
-                            label: l("orders_dokumente"),
-                            description: l("orders_dokumente_dieses_auftrags_anzeigen"),
-                            href: `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
-                          },
-                        ].map((link) => (
+                        {detailOverviewLinks.map((link) => (
                           <button
                             key={link.href}
                             type="button"
@@ -3342,7 +3409,21 @@ function useOrdersPageContent() {
                         </div>
                       ) : null}
 
-                      <div className="grid gap-4">
+                      {detailRequiresPatient ? (
+                        <EmptyState
+                          title={
+                            lang === "de"
+                              ? "Patient wurde noch nicht angelegt"
+                              : "Пациент ещё не создан"
+                          }
+                          description={
+                            lang === "de"
+                              ? "Patientenbezogene Prozessfreigaben werden nach der Konvertierung des Leads verfügbar."
+                              : "Процессные статусы пациента станут доступны после конвертации лида."
+                          }
+                        />
+                      ) : (
+                        <div className="grid gap-4">
                         {canManageDebt ? (
                           <div className="rounded-2xl border border-border p-4">
                             <div className="text-sm font-semibold text-foreground">
@@ -3603,7 +3684,8 @@ function useOrdersPageContent() {
                             </div>
                           </div>
                         ) : null}
-                      </div>
+                        </div>
+                      )}
                     </div>
                   </section>
                 ) : null}
@@ -3896,17 +3978,17 @@ function useOrdersPageContent() {
                                 {
                                   label: l("orders_medizinische_und_nicht_medizinische_termine"),
                                   description: l("orders_slots_und_nicht_medizinische_leistungen_bestatigen"),
-                                  href: `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                  href: detailAppointmentsHref,
                                 },
                                 {
                                   label: l("orders_vorbereitungsunterlagen"),
                                   description: l("orders_unterlagen_vor_der_durchfuhrung_prufen"),
-                                  href: `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                  href: detailDocumentsHref,
                                 },
                                 {
                                   label: l("orders_dolmetscher_zuweisung_und_briefing"),
                                   description: l("orders_zuweisung_und_briefingstatus_prufen"),
-                                  href: `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                  href: detailAppointmentsHref,
                                 },
                               ].map((link) => (
                                 <button
@@ -4275,17 +4357,17 @@ function useOrdersPageContent() {
                                 {
                                   label: l("orders_termine"),
                                   description: l("orders_durchfuhrungstermine_und_status_prufen"),
-                                  href: `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                  href: detailAppointmentsHref,
                                 },
                                 {
                                   label: l("orders_dokumente"),
                                   description: l("orders_ausfuhrungsdokumente_und_nachweise_offnen"),
-                                  href: `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                  href: detailDocumentsHref,
                                 },
                                 {
                                   label: l("orders_provider"),
                                   description: l("orders_provider_kontext_dieses_patienten_prufen"),
-                                  href: `/providers?patient=${orderDetail.patient_id}`,
+                                  href: detailProvidersHref,
                                 },
                               ].map((link) => (
                                 <button
@@ -4655,19 +4737,25 @@ function useOrdersPageContent() {
                                 {
                                   label: l("orders_termine"),
                                   description: l("orders_follow_up_termine_und_erinnerungen_prufen"),
-                                  href: `/appointments?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                  href: detailAppointmentsHref,
                                 },
                                 {
                                   label: l("orders_dokumente"),
                                   description: l("orders_ergebnisse_und_ubergabedokumente_offnen"),
-                                  href: `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
+                                  href: detailDocumentsHref,
                                 },
                                 {
-                                  label: l("orders_patientenprofil"),
-                                  description: l("orders_patientenprofil_im_neuen_tab_offnen"),
-                                  href: `/patients/${orderDetail.patient_id}`,
+                                  label: detailPatientId
+                                    ? l("orders_patientenprofil")
+                                    : detailLeadLabel,
+                                  description: detailPatientId
+                                    ? l("orders_patientenprofil_im_neuen_tab_offnen")
+                                    : lang === "de"
+                                      ? "Ursprünglichen Lead öffnen"
+                                      : "Открыть исходный лид",
+                                  href: detailSubjectHref,
                                 },
-                              ].map((link) => (
+                              ].filter((link) => Boolean(link.href)).map((link) => (
                                 <button
                                   key={link.label}
                                   type="button"
@@ -4710,6 +4798,7 @@ function useOrdersPageContent() {
                         </h2>
                       </div>
                       {permissions.canManagePhase &&
+                      !detailRequiresPatient &&
                       orderDetail.lifecycle?.next_stage ? (
                         <Button
                           variant="outline"
@@ -4725,6 +4814,20 @@ function useOrdersPageContent() {
                     </div>
 
                     <div className="mt-5 space-y-5">
+                      {detailRequiresPatient ? (
+                        <EmptyState
+                          title={
+                            lang === "de"
+                              ? "Patient wurde noch nicht angelegt"
+                              : "Пациент ещё не создан"
+                          }
+                          description={
+                            lang === "de"
+                              ? "Schließen Sie zuerst die Konvertierung des ursprünglichen Leads ab. Danach kann die Auftragsphase geändert werden."
+                              : "Сначала завершите конвертацию исходного лида. После этого фазу заказа можно будет изменять."
+                          }
+                        />
+                      ) : null}
                       <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
                         <OrderSummaryLine
                           label={l("orders_aktuelle_phase")}
@@ -4747,6 +4850,7 @@ function useOrdersPageContent() {
                         <OrderSummaryLine
                           label={l("orders_ubergabe")}
                           value={
+                            detailRequiresPatient ||
                             nextLifecycleTransition?.blocked
                               ? l("orders_blockiert_2")
                               : orderDetail.lifecycle?.next_stage
@@ -4769,7 +4873,9 @@ function useOrdersPageContent() {
                           const isCurrent = orderDetail.phase === phase;
                           const isNext = orderDetail.lifecycle?.next_stage === phase;
                           const disabled =
-                            !permissions.canManagePhase || (!isCurrent && !isNext);
+                            detailRequiresPatient ||
+                            !permissions.canManagePhase ||
+                            (!isCurrent && !isNext);
                           const selected = phaseDraft === phase;
                           return (
                             <button
@@ -4827,7 +4933,7 @@ function useOrdersPageContent() {
                             {l("orders_nur_die_aktuelle_oder_nachste_phase_kann_gespeichert_wer")}
                           </p>
                         </div>
-                        {permissions.canManagePhase ? (
+                        {permissions.canManagePhase && !detailRequiresPatient ? (
                           <Button
                             className="h-9 rounded-lg"
                             onClick={() => void handleSavePhase()}
@@ -4946,7 +5052,7 @@ function useOrdersPageContent() {
                             {workflowMetrics.total} {l("orders_punkte")}
                           </Badge>
                         ) : null}
-                        {permissions.canManagePhase ? (
+                        {permissions.canManagePhase && !workflowPatientRequired ? (
                           <Button
                             type="button"
                             className="rounded-xl"
@@ -4993,8 +5099,20 @@ function useOrdersPageContent() {
 
                       {workflowChecklistGroups.length === 0 ? (
                         <EmptyState
-                          title={l("orders_noch_keine_workflow_punkte")}
-                          description={l("orders_checklistenpunkte_werden_aus_der_auftragsphase_erzeugt_u")}
+                          title={
+                            workflowPatientRequired
+                              ? lang === "de"
+                                ? "Patient wurde noch nicht angelegt"
+                                : "Пациент ещё не создан"
+                              : l("orders_noch_keine_workflow_punkte")
+                          }
+                          description={
+                            workflowPatientRequired
+                              ? lang === "de"
+                                ? "Öffnen Sie den ursprünglichen Lead und schließen Sie die Konvertierung ab. Danach wird die Checkliste automatisch erstellt."
+                                : "Откройте исходный лид и завершите конвертацию. После этого чеклист заказа будет создан автоматически."
+                              : l("orders_checklistenpunkte_werden_aus_der_auftragsphase_erzeugt_u")
+                          }
                         />
                       ) : (
                         <>
@@ -5385,9 +5503,7 @@ function useOrdersPageContent() {
                                   type="button"
                                   className="min-w-0 max-w-full break-words text-right font-semibold text-sky-700 hover:text-sky-800"
                                   onClick={() =>
-                                    staffGo(
-                                      `/documents?order=${orderDetail.id}&patient=${orderDetail.patient_id}`,
-                                    )
+                                    staffGo(detailDocumentsHref)
                                   }
                                 >
                                   {leistung.external_document_auto_name ||
@@ -5590,7 +5706,8 @@ function useOrdersPageContent() {
                     <SectionCard
                       title={t.orders_external_invoices_title}
                       action={
-                        permissions.canManageExternalInvoices ? (
+                        permissions.canManageExternalInvoices &&
+                        !detailRequiresPatient ? (
                           <Button
                             type="button"
                             className="h-8 rounded-lg px-3"
@@ -5625,8 +5742,20 @@ function useOrdersPageContent() {
                     <SectionCard title={l("orders_rechnungen")}>
                       {(orderDetail.external_invoices ?? []).length === 0 ? (
                         <EmptyState
-                          title={t.orders_external_invoices_empty_title}
-                          description={t.orders_external_invoices_empty_description}
+                          title={
+                            detailRequiresPatient
+                              ? lang === "de"
+                                ? "Patient wurde noch nicht angelegt"
+                                : "Пациент ещё не создан"
+                              : t.orders_external_invoices_empty_title
+                          }
+                          description={
+                            detailRequiresPatient
+                              ? lang === "de"
+                                ? "Externe Rechnungen können nach der Konvertierung des Leads erfasst werden."
+                                : "Внешние счета можно добавлять после конвертации лида."
+                              : t.orders_external_invoices_empty_description
+                          }
                         />
                       ) : (
                         <div className="space-y-3">

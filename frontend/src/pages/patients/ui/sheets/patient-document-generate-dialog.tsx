@@ -2,17 +2,20 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { generateDocument } from "@/pages/documents/data/document-api";
+import {
+  fetchPatientDocumentContext,
+  generateDocument,
+  type PatientDocumentProfile,
+} from "@/pages/documents/data/document-api";
 import {
   DOCUMENT_BINDING_FIELDS,
-  documentBindingFieldLabel,
-  isFixedLegalDocumentTemplate,
+  isDesignedAgencyDocumentTemplate,
+  patientPartyBindingDefaults,
 } from "@/pages/documents/model/document-bindings";
 import {
   buildGeneratedDocumentManualTextDraft,
@@ -26,10 +29,14 @@ import {
 } from "@/pages/documents/model/document-model";
 import type {
   DocumentTemplate,
+  FrameworkContractOption,
   GenerateFormState,
+  OrderOption,
+  AppointmentOption,
   PatientOption,
   TemplateCatalogResponse,
 } from "@/pages/documents/model/types";
+import { DocumentTemplateBindingFields } from "@/pages/documents/ui/document-template-binding-fields";
 
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
@@ -62,6 +69,13 @@ export function PatientDocumentGenerateDialog({
   const [form, setForm] = useState<GenerateFormState>(() =>
     emptyGenerateForm(patientId ?? ""),
   );
+  const [orders, setOrders] = useState<OrderOption[]>([]);
+  const [appointments, setAppointments] = useState<AppointmentOption[]>([]);
+  const [frameworkContracts, setFrameworkContracts] = useState<
+    FrameworkContractOption[] | null
+  >(null);
+  const [patientProfile, setPatientProfile] =
+    useState<PatientDocumentProfile | null>(null);
   const [busy, setBusy] = useState(false);
   const patientOptions = useMemo(
     () => (patient && patient.id === patientId ? [patient] : []),
@@ -102,10 +116,52 @@ export function PatientDocumentGenerateDialog({
     };
   }, [open, templatesLoaded, reloadKey, lang]);
 
+  useEffect(() => {
+    if (!open || !patientId) {
+      setOrders([]);
+      setAppointments([]);
+      setFrameworkContracts(null);
+      setPatientProfile(null);
+      return;
+    }
+    let active = true;
+    void fetchPatientDocumentContext(patientId).then((context) => {
+      if (!active) return;
+      setOrders(context.orders);
+      setAppointments(context.appointments);
+      setFrameworkContracts(context.frameworkContracts);
+      setPatientProfile(context.profile);
+      setForm((current) => ({
+        ...current,
+        bindings: {
+          ...patientPartyBindingDefaults(context.profile),
+          ...current.bindings,
+        },
+      }));
+    });
+    return () => {
+      active = false;
+    };
+  }, [open, patientId]);
+
   const selectedTemplate = templates.find((t) => t.id === form.templateId) ?? null;
   const bindingFields = selectedTemplate ? DOCUMENT_BINDING_FIELDS[selectedTemplate.id] ?? [] : [];
-  const fixedLegalTemplate = Boolean(
-    selectedTemplate && isFixedLegalDocumentTemplate(selectedTemplate.id),
+  const designedAgencyTemplate = Boolean(
+    selectedTemplate &&
+      isDesignedAgencyDocumentTemplate(selectedTemplate.id),
+  );
+  const selectedTemplateIsCompliance = Boolean(
+    selectedTemplate &&
+      [
+        "confidentiality_release",
+        "privacy_information",
+        "privacy_consents",
+      ].includes(selectedTemplate.id),
+  );
+  const frameworkContractMissing = Boolean(
+    selectedTemplate?.id === "framework_contract" &&
+      frameworkContracts !== null &&
+      frameworkContracts.length === 0,
   );
   const patientLabel = patientOptions[0] ? patientOptionLabel(patientOptions[0]) : "";
   const patientAddressee = patientDocumentAddresseeLabel(
@@ -165,6 +221,7 @@ export function PatientDocumentGenerateDialog({
         nextForm.accessCategory,
       ),
       addresseePerson: patientAddressee,
+      bindings: patientPartyBindingDefaults(patientProfile),
     };
     setForm({
       ...formWithTemplate,
@@ -226,7 +283,16 @@ export function PatientDocumentGenerateDialog({
           <Button type="button" variant="ghost" className="h-9 rounded-lg" onClick={() => onOpenChange(false)}>
             {tx("Отмена", "Abbrechen")}
           </Button>
-          <Button type="submit" className="h-9 rounded-lg" disabled={busy || !selectedTemplate || !patientId}>
+          <Button
+            type="submit"
+            className="h-9 rounded-lg"
+            disabled={
+              busy ||
+              !selectedTemplate ||
+              !patientId ||
+              frameworkContractMissing
+            }
+          >
             {busy ? tx("Создаётся…", "Wird erstellt…") : tx("Сгенерировать", "Erstellen")}
           </Button>
         </div>
@@ -318,119 +384,104 @@ export function PatientDocumentGenerateDialog({
             </label>
           </div>
 
-          {bindingFields.length > 0 ? (
-            <div className="space-y-3 rounded-lg border border-border/60 p-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                {selectedTemplate.id === "privacy_consents"
-                  ? tx("Согласия и подпись", "Einwilligungen und Unterschrift")
-                  : selectedTemplate.id === "confidentiality_release"
-                    ? tx("Подпись", "Unterschrift")
-                    : tx("Поля шаблона", "Vorlagenfelder")}
-              </p>
-              <div className="grid gap-3 md:grid-cols-2">
-                {bindingFields.map((field) => (
-                  <label
-                    key={field.key}
-                    className={cn(
-                      "block",
-                      field.kind === "boolean" &&
-                        "flex min-h-11 items-start gap-3 rounded-lg border border-border/70 px-3 py-2.5 md:col-span-2",
-                    )}
-                  >
-                    {field.kind === "boolean" ? (
-                      <>
-                        <input
-                          type="checkbox"
-                          checked={form.bindings[field.key] === "true"}
-                          onChange={(e) =>
-                            setForm((current) => ({
-                              ...current,
-                              manualText: "",
-                              manualTextDirty: false,
-                              bindings: {
-                                ...current.bindings,
-                                [field.key]: String(e.target.checked),
-                              },
-                            }))
+          {!selectedTemplateIsCompliance ? (
+            <div className="grid gap-3 border-y border-border py-4 md:grid-cols-2">
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
+                  {tx("Заказ", "Auftrag")}
+                </span>
+                <NativeComboboxSelect
+                  value={form.orderId}
+                  className={fieldInputClass}
+                  onChange={(event) => {
+                    const orderId = event.target.value;
+                    setForm((current) => ({
+                      ...current,
+                      orderId,
+                      bindings: orderId
+                        ? {
+                            ...current.bindings,
+                            service_lines_text: "",
+                            estimate_total: "",
                           }
-                          className="mt-0.5 size-4 shrink-0 accent-[var(--brand)]"
-                        />
-                        <span className="min-w-0 text-sm leading-5 text-foreground">
-                          {documentBindingFieldLabel(field, lang)}
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
-                          {documentBindingFieldLabel(field, lang)}
-                        </span>
-                        {field.kind === "country" ? (
-                          <CountrySelect
-                            value={form.bindings[field.key] ?? null}
-                            onChange={(value) =>
-                              setForm((current) => ({
-                                ...current,
-                                manualText: "",
-                                manualTextDirty: false,
-                                bindings: {
-                                  ...current.bindings,
-                                  [field.key]: value ?? "",
-                                },
-                              }))
-                            }
-                            lang="de"
-                            className={fieldInputClass}
-                            aria-label={documentBindingFieldLabel(field, lang)}
-                          />
-                        ) : field.kind === "textarea" ? (
-                          <textarea
-                            value={form.bindings[field.key] ?? ""}
-                            onChange={(e) =>
-                              setForm((current) => ({
-                                ...current,
-                                manualText: "",
-                                manualTextDirty: false,
-                                bindings: {
-                                  ...current.bindings,
-                                  [field.key]: e.target.value,
-                                },
-                              }))
-                            }
-                            className={cn(fieldInputClass, "h-20 py-2")}
-                          />
-                        ) : (
-                          <Input
-                            type={
-                              field.kind === "date"
-                                ? "date"
-                                : field.kind === "number"
-                                  ? "number"
-                                  : "text"
-                            }
-                            value={form.bindings[field.key] ?? ""}
-                            onChange={(e) =>
-                              setForm((current) => ({
-                                ...current,
-                                manualText: "",
-                                manualTextDirty: false,
-                                bindings: {
-                                  ...current.bindings,
-                                  [field.key]: e.target.value,
-                                },
-                              }))
-                            }
-                            className={fieldInputClass}
-                          />
-                        )}
-                      </>
-                    )}
-                  </label>
-                ))}
-              </div>
+                        : current.bindings,
+                    }));
+                  }}
+                >
+                  <option value="">
+                    {tx("Без привязки к заказу", "Ohne Auftragsbezug")}
+                  </option>
+                  {orders.map((order) => (
+                    <option key={order.id} value={order.id}>
+                      {order.order_number}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
+                  {tx("Термин", "Termin")}
+                </span>
+                <NativeComboboxSelect
+                  value={form.appointmentId}
+                  className={fieldInputClass}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      appointmentId: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="">
+                    {tx("Без привязки к термину", "Ohne Terminbezug")}
+                  </option>
+                  {appointments.map((appointment) => (
+                    <option key={appointment.id} value={appointment.id}>
+                      {appointment.title} · {appointment.date}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </label>
+              {frameworkContractMissing ? (
+                <p className="text-xs text-destructive md:col-span-2">
+                  {tx(
+                    "Сначала создайте рамочный договор для пациента.",
+                    "Erstellen Sie zuerst einen Rahmenvertrag für den Patienten.",
+                  )}
+                </p>
+              ) : null}
             </div>
           ) : null}
 
-          {!fixedLegalTemplate ? (
+          {bindingFields.length > 0 ? (
+            <div className="rounded-lg border border-border/60 p-4">
+              <DocumentTemplateBindingFields
+                fields={bindingFields}
+                bindings={form.bindings}
+                lang={lang}
+                templateId={selectedTemplate.id}
+                useOrderServices={Boolean(
+                  form.orderId &&
+                    ["single_order", "cost_estimate"].includes(
+                      selectedTemplate.id,
+                    ),
+                )}
+                onChange={(key, value) =>
+                  setForm((current) => ({
+                    ...current,
+                    manualText: "",
+                    manualTextDirty: false,
+                    bindings: {
+                      ...current.bindings,
+                      [key]: value,
+                    },
+                  }))
+                }
+              />
+            </div>
+          ) : null}
+
+          {!designedAgencyTemplate ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-[11px] font-medium text-muted-foreground">

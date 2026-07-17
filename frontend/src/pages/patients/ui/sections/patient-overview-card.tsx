@@ -4,6 +4,7 @@ import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
 
+import { darreichungsformLabel } from "../../data/medication-options";
 import {
   fetchPatientClinical,
   fetchPatientRecommendations,
@@ -58,13 +59,6 @@ function certaintyPrefix(certainty: ClinicalDiagnosis["certainty"]): string {
   if (certainty === "verdacht") return "V.a. ";
   if (certainty === "zustand_nach") return "Z.n. ";
   return "";
-}
-
-/** Compact M-Mi-A-N intake scheme, e.g. "1-0-1-0". Empty when no dose is set. */
-function intakeScheme(item: ClinicalMedication): string {
-  const slots = [item.dose_morgens, item.dose_mittags, item.dose_abends, item.dose_nachts];
-  if (slots.every((slot) => !slot || !slot.trim())) return "";
-  return slots.map((slot) => (slot && slot.trim() ? slot.trim() : "0")).join("-");
 }
 
 function localDateKey(date = new Date()): string {
@@ -400,63 +394,100 @@ export function PatientOverviewCard({
     );
   };
 
-  const medColumns = [
-    tx("Вещество", "Wirkstoff"),
-    tx("Торговое название", "Handelsname"),
-    tx("Дозировка", "Dosis"),
-    tx("Форма", "Form"),
-    tx("Приём", "Einnahme"),
-    tx("Приём до", "Einnahme bis"),
-    tx("Заметка", "Hinweis"),
-    tx("Показание", "Grund"),
-  ];
+  const medicationHeadCell =
+    "px-2.5 py-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
+  const medicationHeadDoseCell =
+    "px-1.5 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
+  const medicationBodyCell = "break-words px-2.5 py-2 align-top text-foreground";
+  const medicationBodyDoseCell =
+    "px-1.5 py-2 text-center align-top font-mono tabular-nums text-foreground";
+  const medicationDose = (value: string | null) => value?.trim() ?? "";
 
-  const renderMedicationTable = (items: ClinicalMedication[], label: string) => (
-    <div className="overflow-x-auto rounded-md border border-border bg-card">
-      <table aria-label={label} className="w-full min-w-[820px] border-collapse text-left text-xs">
-        <thead className="border-b border-border bg-muted/40 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+  const renderMedicationRows = (items: ClinicalMedication[]) =>
+    items.map((item, index) => (
+      <tr
+        key={item.id ?? index}
+        className={cn(
+          "align-top transition-colors hover:bg-muted/30",
+          item.on_hold && "bg-amber-50/70",
+        )}
+      >
+        <td className={cn(medicationBodyCell, "whitespace-pre-line")}>{item.wirkstoff || "—"}</td>
+        <td className={cn(medicationBodyCell, "font-medium")}>
+          {item.handelsname || tx("Без названия", "Ohne Namen")}
+          {item.einnahme_bis ? (
+            <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+              {tx("Приём до", "Einnahme bis")} {item.einnahme_bis.slice(0, 10)}
+            </span>
+          ) : null}
+        </td>
+        <td className={cn(medicationBodyCell, "whitespace-pre-line font-mono")}>
+          {item.staerke || ""}
+        </td>
+        <td className={cn(medicationBodyCell, "whitespace-pre-line")}>
+          {darreichungsformLabel(item.form)}
+        </td>
+        {item.on_hold ? (
+          <td colSpan={4} className="px-2.5 py-2 align-top text-left text-amber-800">
+            <span className="block text-[11px] font-semibold">
+              {tx("На холд", "Auf Hold")}
+              {item.hold_from ? ` ${tx("с", "seit")} ${item.hold_from.slice(0, 10)}` : ""}
+              {item.hold_until ? ` ${tx("до", "bis")} ${item.hold_until.slice(0, 10)}` : ""}
+            </span>
+            {item.hold_note ? (
+              <span className="mt-0.5 block break-words text-[10px] font-normal">
+                {item.hold_note}
+              </span>
+            ) : null}
+          </td>
+        ) : (
+          <>
+            <td className={medicationBodyDoseCell}>{medicationDose(item.dose_morgens)}</td>
+            <td className={medicationBodyDoseCell}>{medicationDose(item.dose_mittags)}</td>
+            <td className={medicationBodyDoseCell}>{medicationDose(item.dose_abends)}</td>
+            <td className={medicationBodyDoseCell}>{medicationDose(item.dose_nachts)}</td>
+          </>
+        )}
+        <td className={cn(medicationBodyCell, "whitespace-nowrap")}>{item.einheit || ""}</td>
+        <td className={medicationBodyCell}>{item.hinweis || ""}</td>
+        <td className={medicationBodyCell}>{item.grund || ""}</td>
+      </tr>
+    ));
+
+  const renderMedicationTable = () => (
+    <div className="overflow-x-auto rounded-xl border border-border bg-card">
+      <table
+        aria-label={tx("Медикаменты", "Medikation")}
+        className="w-full min-w-[1080px] border-collapse text-left text-xs"
+      >
+        <thead className="border-b border-border bg-muted/40">
           <tr>
-            {medColumns.map((column) => (
-              <th key={column} scope="col" className="px-2.5 py-2 font-semibold">
-                {column}
-              </th>
-            ))}
+            <th scope="col" className={medicationHeadCell}>{tx("Действующее вещество", "Wirkstoff")}</th>
+            <th scope="col" className={medicationHeadCell}>{tx("Торговое название", "Handelsname")}</th>
+            <th scope="col" className={medicationHeadCell}>{tx("Дозировка", "Stärke")}</th>
+            <th scope="col" className={medicationHeadCell}>{tx("Форма", "Form")}</th>
+            <th scope="col" className={medicationHeadDoseCell}>{tx("Утро", "Morgens")}</th>
+            <th scope="col" className={medicationHeadDoseCell}>{tx("День", "Mittags")}</th>
+            <th scope="col" className={medicationHeadDoseCell}>{tx("Вечер", "Abends")}</th>
+            <th scope="col" className={medicationHeadDoseCell}>{tx("Ночь", "Zur Nacht")}</th>
+            <th scope="col" className={medicationHeadCell}>{tx("Ед.", "Einheit")}</th>
+            <th scope="col" className={medicationHeadCell}>{tx("Указания", "Hinweise")}</th>
+            <th scope="col" className={medicationHeadCell}>{tx("Показание", "Grund")}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border/60">
-          {items.map((item, index) => (
-            <tr
-              key={item.id ?? index}
-              className={cn(
-                "align-top transition-colors hover:bg-muted/30",
-                item.on_hold && "bg-amber-50/70",
-              )}
-            >
-              <td className="px-2.5 py-2 text-foreground">{item.wirkstoff || "—"}</td>
-              <td className="px-2.5 py-2 font-medium text-foreground">
-                {item.handelsname || tx("Без названия", "Ohne Namen")}
+          {renderMedicationRows(regularMedications)}
+          {specialTimeMedications.length > 0 ? (
+            <tr>
+              <td
+                colSpan={11}
+                className="bg-muted/40 px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+              >
+                {tx("В особое время", "Zu besonderen Zeiten")}
               </td>
-              <td className="whitespace-nowrap px-2.5 py-2 font-mono tabular-nums text-foreground">
-                {item.staerke || ""}
-              </td>
-              <td className="px-2.5 py-2 text-foreground">{item.form || ""}</td>
-              <td className="whitespace-nowrap px-2.5 py-2 font-mono tabular-nums text-foreground">
-                {intakeScheme(item) || "—"}
-              </td>
-              <td className="whitespace-nowrap px-2.5 py-2 font-mono tabular-nums text-foreground">
-                {item.on_hold ? (
-                  <span className="font-sans text-amber-700">
-                    {tx("На паузе", "Pausiert")}
-                    {item.hold_from ? ` ${tx("с", "ab")} ${item.hold_from}` : ""}
-                  </span>
-                ) : (
-                  item.einnahme_bis || "—"
-                )}
-              </td>
-              <td className="px-2.5 py-2 text-muted-foreground">{item.hinweis || ""}</td>
-              <td className="px-2.5 py-2 text-foreground">{item.grund || ""}</td>
             </tr>
-          ))}
+          ) : null}
+          {renderMedicationRows(specialTimeMedications)}
         </tbody>
       </table>
     </div>
@@ -547,29 +578,14 @@ export function PatientOverviewCard({
           </div>
 
           <div>
-            <ColumnTitle count={regularMedications.length || undefined}>
+            <ColumnTitle count={profileMedications.length || undefined}>
               {tx("Назначенные препараты", "Verordnete Medikamente")}
             </ColumnTitle>
-            {regularMedications.length === 0 ? (
+            {profileMedications.length === 0 ? (
               dash
             ) : (
-              renderMedicationTable(
-                regularMedications,
-                tx("Назначенные препараты", "Verordnete Medikamente"),
-              )
+              renderMedicationTable()
             )}
-          </div>
-
-          <div>
-            <ColumnTitle count={specialTimeMedications.length || undefined}>
-              {tx("В особое время", "Zu besonderen Zeiten")}
-            </ColumnTitle>
-            {specialTimeMedications.length === 0
-              ? dash
-              : renderMedicationTable(
-                  specialTimeMedications,
-                  tx("Препараты для приёма в особое время", "Medikamente zu besonderen Zeiten"),
-                )}
           </div>
         </div>
 

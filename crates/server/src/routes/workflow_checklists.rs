@@ -350,6 +350,37 @@ async fn list_order_workflow_checklist(
     if let Err(resp) = require_workflow_view_role(&auth) {
         return resp;
     }
+    let patient_id = match sqlx::query_scalar::<_, Option<Uuid>>(
+        r#"SELECT COALESCE(o.patient_id, l.converted_patient_id)
+           FROM orders o
+           LEFT JOIN leads l ON l.id = o.source_lead_id
+           WHERE o.id = $1"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(patient_id)) => patient_id,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "Failed to load order workflow subject");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load workflow context",
+            );
+        }
+    };
+    if patient_id.is_none() {
+        return Json(json!({
+            "scope_type": WorkflowScope::Order.as_str(),
+            "scope_id": order_id,
+            "open_count": 0,
+            "completed_count": 0,
+            "blocked_reason": "patient_required",
+            "items": [],
+        }))
+        .into_response();
+    }
     let context = match load_order_scope_context(&state, order_id).await {
         Ok(context) => context,
         Err(resp) => return resp,
@@ -482,28 +513,43 @@ async fn load_order_scope_context(
     state: &AppState,
     order_id: Uuid,
 ) -> Result<ScopeContext, axum::response::Response> {
-    let row = sqlx::query("SELECT patient_id, created_by, phase FROM orders WHERE id = $1")
-        .bind(order_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, order_id = %order_id, "Failed to load order workflow context");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to load workflow context",
-            )
-        })?;
+    let row = sqlx::query(
+        r#"SELECT COALESCE(o.patient_id, l.converted_patient_id) AS patient_id,
+                  o.created_by, o.phase
+           FROM orders o
+           LEFT JOIN leads l ON l.id = o.source_lead_id
+           WHERE o.id = $1"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, order_id = %order_id, "Failed to load order workflow context");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load workflow context",
+        )
+    })?;
     let Some(row) = row else {
         return Err(err(StatusCode::NOT_FOUND, "Order not found"));
     };
-
-    Ok(ScopeContext {
-        patient_id: row.try_get("patient_id").map_err(|_| {
+    let patient_id = row
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .map_err(|_| {
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to decode workflow context",
             )
-        })?,
+        })?
+        .ok_or_else(|| {
+            err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Order must be linked to a patient before using its workflow checklist",
+            )
+        })?;
+
+    Ok(ScopeContext {
+        patient_id,
         order_id: Some(order_id),
         created_by: row.try_get("created_by").map_err(|_| {
             err(

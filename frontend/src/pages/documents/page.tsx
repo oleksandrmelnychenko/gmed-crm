@@ -1,5 +1,4 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { CountrySelect } from "@/components/ui/country-select";
 import {
   cloneElement,
   isValidElement,
@@ -36,6 +35,7 @@ import {
   Trash2,
   Undo2,
   UserRound,
+  X,
 } from "lucide-react";
 
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -44,9 +44,11 @@ import { DocumentsGrid } from "@/components/documents-grid";
 import { localizeDocumentCode } from "@/lib/required-document-labels";
 import {
   DOCUMENT_BINDING_FIELDS,
-  documentBindingFieldLabel,
   hydrateDocumentBindings,
+  isDesignedAgencyDocumentTemplate,
   isFixedLegalDocumentTemplate,
+  keepPatientPartyBindings,
+  patientPartyBindingDefaults,
 } from "@/pages/documents/model/document-bindings";
 import { localizeTextBlock } from "@/pages/documents/model/text-block-labels";
 import {
@@ -183,6 +185,7 @@ import type {
   UploadFormState,
 } from "./model/types";
 import { MarkComplianceSignedControl } from "./ui/mark-compliance-signed-control";
+import { DocumentTemplateBindingFields } from "./ui/document-template-binding-fields";
 
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
@@ -971,6 +974,8 @@ function StaffDocumentsPage({
       lang === "ru" ? "Согласия и подпись" : "Einwilligungen und Unterschrift",
     legalSignature:
       lang === "ru" ? "Подпись" : "Unterschrift",
+    documentForm:
+      lang === "ru" ? "Форма документа" : "Dokumentformular",
     finalGeneratedTextHint:
       lang === "ru"
         ? "Текст ниже собран из текущих данных формы. Если его изменить, PDF будет создан именно из этого текста."
@@ -1312,6 +1317,9 @@ function StaffDocumentsPage({
   );
   const selectedTemplateIsFixedLegal = Boolean(
     selectedTemplate && isFixedLegalDocumentTemplate(selectedTemplate.id),
+  );
+  const selectedTemplateUsesDesignedRenderer = Boolean(
+    selectedTemplate && isDesignedAgencyDocumentTemplate(selectedTemplate.id),
   );
   const selectedTemplateBindingFields = selectedTemplate
     ? (DOCUMENT_BINDING_FIELDS[selectedTemplate.id] ?? [])
@@ -1713,11 +1721,23 @@ function StaffDocumentsPage({
         orders: orderRows,
         appointments: appointmentRows,
         frameworkContracts,
+        profile,
       } = await fetchPatientDocumentContext(generateForm.patientId);
       if (!active) return;
       setGenerateOrders(orderRows);
       setGenerateAppointments(appointmentRows);
       setGenerateFrameworkContracts(frameworkContracts);
+      setGenerateForm((current) =>
+        current.patientId === generateForm.patientId
+          ? {
+              ...current,
+              bindings: {
+                ...patientPartyBindingDefaults(profile),
+                ...current.bindings,
+              },
+            }
+          : current,
+      );
     }
     void loadGenerateContext();
     return () => {
@@ -2026,7 +2046,10 @@ function StaffDocumentsPage({
         ),
         manualText: "",
         manualTextDirty: false,
-        bindings: template.id === current.templateId ? current.bindings : {},
+        bindings:
+          template.id === current.templateId
+            ? current.bindings
+            : keepPatientPartyBindings(current.bindings),
       };
     });
   }
@@ -2148,7 +2171,23 @@ function StaffDocumentsPage({
         ),
       );
       refresh();
-      if (response.id) openDocument(response.id);
+      if (response.id) {
+        openDocument(response.id);
+        try {
+          const preview = await createDocumentPreviewObjectUrl(response.id);
+          replaceDocumentPreview({
+            ...preview,
+            id: response.id,
+            title:
+              response.original_filename ||
+              response.auto_name ||
+              selectedTemplate.label,
+          });
+        } catch {
+          // The generated document remains selected even when inline preview is
+          // unavailable, so the operator can retry from the document details.
+        }
+      }
     } catch (nextError) {
       setGenerateError(
         formatGenerateDocumentError(nextError, l) || t.documents_failed_generate,
@@ -3192,29 +3231,41 @@ function StaffDocumentsPage({
         </>
       ) : null}
 
-      <Sheet open={templateOpen} onOpenChange={setTemplateOpen}>
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[880px]">
+      <Dialog
+        open={templateOpen}
+        dirty={false}
+        disablePointerDismissal
+        onOpenChange={(nextOpen, eventDetails) => {
+          if (nextOpen || eventDetails.reason === "escape-key") {
+            setTemplateOpen(nextOpen);
+          }
+        }}
+      >
+        <DialogContent
+          className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(88vh,52rem)] sm:w-[min(96vw,84rem)] sm:max-w-[84rem]"
+          showCloseButton={false}
+        >
           <form
             onSubmit={handleGenerateDocument}
-            className="flex flex-1 min-h-0 flex-col"
+            className="flex min-h-0 flex-1 flex-col"
           >
-            <AdminSheetScaffold
-              title={t.documents_generate_title}
-              footer={(
-                <SheetFormFooter
-                  cancelLabel={t.common_cancel}
-                  submitLabel={t.documents_generate_document}
-                  submittingLabel={t.documents_generating}
-                  submitting={generateBusy}
-                  submitDisabled={
-                    templates.length === 0 ||
-                    generateBlockedByMissingFrameworkContract
-                  }
-                  onCancel={() => setTemplateOpen(false)}
-                />
-              )}
-            >
-              <div className="space-y-4 rounded-xl">
+            <DialogHeader className="relative shrink-0 border-b border-border px-5 py-4 pr-12">
+              <DialogTitle>{t.documents_generate_title}</DialogTitle>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="absolute right-3 top-3"
+                disabled={generateBusy}
+                title={t.common_close}
+                aria-label={t.common_close}
+                onClick={() => setTemplateOpen(false)}
+              >
+                <X className="size-4" />
+              </Button>
+            </DialogHeader>
+            <div className="min-h-0 flex-1 overflow-y-auto bg-muted/20 p-4 md:p-5">
+              <div className="mx-auto max-w-[1080px] space-y-4">
                 {generateError ? (
                   <Banner tone="error">{generateError}</Banner>
                 ) : null}
@@ -3222,9 +3273,9 @@ function StaffDocumentsPage({
                 <DocumentSheetSection title={t.documents_section_template}>
                   <div className="space-y-4">
                     {selectedTemplate ? (
-                      <div className="rounded-xl border border-sky-200 bg-sky-50/80 px-4 py-3 text-sm text-sky-900">
+                      <div className="border-y border-border bg-muted/30 px-4 py-3 text-sm text-foreground">
                         <p className="font-semibold">{selectedTemplate.label}</p>
-                        <p className="mt-1 text-sky-800/80">
+                        <p className="mt-1 text-muted-foreground">
                           {selectedTemplate.description}
                         </p>
                       </div>
@@ -3344,6 +3395,7 @@ function StaffDocumentsPage({
                       orderId: "",
                       appointmentId: "",
                       replaceDocumentId: "",
+                      bindings: {},
                       language: resolveTemplateLanguage(
                         patientId,
                         selectedTemplate,
@@ -3366,12 +3418,20 @@ function StaffDocumentsPage({
               <Field label={t.orders_title}>
                 <NativeComboboxSelect
                   value={generateForm.orderId}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const orderId = event.target.value;
                     setGenerateForm((current) => ({
                       ...current,
-                      orderId: event.target.value,
-                    }))
-                  }
+                      orderId,
+                      bindings: orderId
+                        ? {
+                            ...current.bindings,
+                            service_lines_text: "",
+                            estimate_total: "",
+                          }
+                        : current.bindings,
+                    }));
+                  }}
                   className={selectClassName}
                   disabled={!generateForm.patientId}
                 >
@@ -3413,6 +3473,8 @@ function StaffDocumentsPage({
 
                 <DocumentSheetSection title={t.documents_section_parameters}>
                   <div className="grid gap-4 md:grid-cols-2">
+              {!selectedTemplateUsesDesignedRenderer ? (
+                <>
               <Field label={t.users_status}>
                 <NativeComboboxSelect
                   value={generateForm.status}
@@ -3449,7 +3511,9 @@ function StaffDocumentsPage({
                   ))}
                 </NativeComboboxSelect>
               </Field>
-              {selectedTemplateIsFixedLegal ? (
+                </>
+              ) : null}
+              {selectedTemplateUsesDesignedRenderer ? (
                 <Field label={metaText.documentDate}>
                   <Input
                     type="date"
@@ -3464,7 +3528,7 @@ function StaffDocumentsPage({
                   />
                 </Field>
               ) : null}
-              {!selectedTemplateIsFixedLegal ? (
+              {!selectedTemplateUsesDesignedRenderer ? (
                 <>
               <Field label={metaText.documentTitle}>
                 <Input
@@ -3716,91 +3780,28 @@ function StaffDocumentsPage({
                         ? metaText.legalConsents
                         : selectedTemplate?.id === "confidentiality_release"
                           ? metaText.legalSignature
-                          : t.documents_section_bindings
+                          : selectedTemplateUsesDesignedRenderer
+                            ? metaText.documentForm
+                            : t.documents_section_bindings
                     }
                   >
-                    <div className="grid gap-4 md:grid-cols-2">
-                      {selectedTemplateBindingFields.map((field) =>
-                        field.kind === "boolean" ? (
-                          <label
-                            htmlFor={`generate-binding-${field.key}`}
-                            key={field.key}
-                            className="flex min-h-11 items-start gap-3 rounded-lg border border-border/70 bg-background px-3 py-2.5 text-sm text-foreground md:col-span-2"
-                          >
-                            <input
-                              id={`generate-binding-${field.key}`}
-                              type="checkbox"
-                              checked={
-                                generateForm.bindings[field.key] === "true"
-                              }
-                              onChange={(event) =>
-                                updateBindingField(
-                                  field.key,
-                                  String(event.target.checked),
-                                )
-                              }
-                              className={cn(checkboxClass, "mt-0.5 shrink-0")}
-                            />
-                            <span className="min-w-0 leading-5">
-                              {documentBindingFieldLabel(field, lang)}
-                            </span>
-                          </label>
-                        ) : field.kind === "country" ? (
-                          <Field
-                            key={field.key}
-                            label={documentBindingFieldLabel(field, lang)}
-                          >
-                            <CountrySelect
-                              value={generateForm.bindings[field.key] ?? null}
-                              onChange={(value) =>
-                                updateBindingField(field.key, value ?? "")
-                              }
-                              lang="de"
-                              className={selectClassName}
-                              aria-label={documentBindingFieldLabel(field, lang)}
-                            />
-                          </Field>
-                        ) : field.kind === "textarea" ? (
-                          <div key={field.key} className="md:col-span-2">
-                            <Field label={documentBindingFieldLabel(field, lang)}>
-                              <textarea
-                                value={generateForm.bindings[field.key] ?? ""}
-                                onChange={(event) =>
-                                  updateBindingField(field.key, event.target.value)
-                                }
-                                className={textareaClassName}
-                                rows={3}
-                              />
-                            </Field>
-                          </div>
-                        ) : (
-                          <Field
-                            key={field.key}
-                            label={documentBindingFieldLabel(field, lang)}
-                          >
-                            <Input
-                              type={
-                                field.kind === "date"
-                                  ? "date"
-                                  : field.kind === "number"
-                                    ? "number"
-                                    : "text"
-                              }
-                              min={field.kind === "number" ? 1 : undefined}
-                              step={field.kind === "number" ? 1 : undefined}
-                              value={generateForm.bindings[field.key] ?? ""}
-                              onChange={(event) =>
-                                updateBindingField(field.key, event.target.value)
-                              }
-                              className={shellInputClassName}
-                            />
-                          </Field>
+                    <DocumentTemplateBindingFields
+                      fields={selectedTemplateBindingFields}
+                      bindings={generateForm.bindings}
+                      lang={lang}
+                      templateId={selectedTemplate?.id ?? ""}
+                      useOrderServices={Boolean(
+                        generateForm.orderId &&
+                        ["single_order", "cost_estimate"].includes(
+                          selectedTemplate?.id ?? "",
                         ),
                       )}
-                    </div>
+                      onChange={updateBindingField}
+                    />
                   </DocumentSheetSection>
                 ) : null}
-                {availableTemplateBlocks.length > 0 ? (
+                {availableTemplateBlocks.length > 0 &&
+                !selectedTemplateUsesDesignedRenderer ? (
                   <DocumentSheetSection title={t.documents_text_blocks}>
                     <div className="space-y-4">
                       <p className="text-xs text-muted-foreground">
@@ -3851,7 +3852,7 @@ function StaffDocumentsPage({
                   </DocumentSheetSection>
                 ) : null}
 
-                {selectedTemplateIsFixedLegal ? (
+                {selectedTemplateUsesDesignedRenderer ? (
                   <DocumentSheetSection title={t.documents_section_additional}>
                     <Field label={t.documents_internal_note}>
                       <textarea
@@ -3948,10 +3949,37 @@ function StaffDocumentsPage({
                 </DocumentSheetSection>
                 )}
               </div>
-            </AdminSheetScaffold>
+            </div>
+            <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border bg-background px-5 py-4 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={generateBusy}
+                onClick={() => setTemplateOpen(false)}
+              >
+                {t.common_cancel}
+              </Button>
+              <Button
+                type="submit"
+                disabled={
+                  generateBusy ||
+                  templates.length === 0 ||
+                  generateBlockedByMissingFrameworkContract
+                }
+              >
+                {generateBusy ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <FileText className="size-4" />
+                )}
+                {generateBusy
+                  ? t.documents_generating
+                  : t.documents_generate_document}
+              </Button>
+            </div>
           </form>
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
 
       <Sheet open={uploadOpen} onOpenChange={setUploadOpen}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[760px]">
@@ -7566,7 +7594,7 @@ function DocumentSheetSection({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-border bg-card p-6">
+    <section className="rounded-lg border border-border bg-card p-5">
       <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
       <div className="mt-5">{children}</div>
     </section>

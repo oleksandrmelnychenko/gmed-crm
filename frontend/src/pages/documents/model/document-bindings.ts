@@ -16,14 +16,117 @@ export type BindingFieldDef = {
 
 export type DocumentBindingForm = Record<string, string>;
 
+export type PatientPartyBindingSource = {
+  address_city?: string | null;
+  address_country?: string | null;
+  address_street?: string | null;
+  address_zip?: string | null;
+  email?: string | null;
+  intake_profile?: {
+    trusted_contacts?: unknown;
+  } | null;
+  nationality?: string | null;
+  phone_primary?: string | null;
+  residence_country?: string | null;
+};
+
+function trustedContactBinding(value: unknown) {
+  if (!Array.isArray(value)) return "";
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return "";
+      const contact = entry as Record<string, unknown>;
+      const text = (key: string) =>
+        typeof contact[key] === "string" ? contact[key].trim() : "";
+      const name = text("name");
+      if (!name) return "";
+      const birthDate = text("birth_date");
+      const birthMatch = birthDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      const parts = [
+        name,
+        birthDate
+          ? `geb. am ${
+              birthMatch
+                ? `${birthMatch[3]}.${birthMatch[2]}.${birthMatch[1]}`
+                : birthDate
+            }`
+          : "",
+        text("relation") ? `Beziehung: ${text("relation")}` : "",
+        text("address") ? `Adresse: ${text("address")}` : "",
+        text("email") ? `E-Mail: ${text("email")}` : "",
+        text("phone") ? `Tel.: ${text("phone")}` : "",
+      ].filter(Boolean);
+      return parts.join(", ");
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function patientPartyBindingDefaults(
+  patient: PatientPartyBindingSource | null | undefined,
+): DocumentBindingForm {
+  if (!patient) return {};
+  const values: DocumentBindingForm = {
+    party_street: patient.address_street?.trim() ?? "",
+    party_zip: patient.address_zip?.trim() ?? "",
+    party_city: patient.address_city?.trim() ?? "",
+    party_country:
+      patient.address_country?.trim() ||
+      patient.residence_country?.trim() ||
+      patient.nationality?.trim() ||
+      "",
+    party_email: patient.email?.trim() ?? "",
+    party_phone: patient.phone_primary?.trim() ?? "",
+    party_sign_place: patient.address_city?.trim() ?? "",
+    extra_release_recipients: trustedContactBinding(
+      patient.intake_profile?.trusted_contacts,
+    ),
+  };
+  return Object.fromEntries(
+    Object.entries(values).filter(([, value]) => value),
+  );
+}
+
+const PATIENT_PARTY_BINDING_KEYS = new Set([
+  "party_street",
+  "party_zip",
+  "party_city",
+  "party_country",
+  "party_email",
+  "party_phone",
+  "party_sign_place",
+  "extra_release_recipients",
+]);
+
+export function keepPatientPartyBindings(
+  bindings: DocumentBindingForm,
+): DocumentBindingForm {
+  return Object.fromEntries(
+    Object.entries(bindings).filter(([key]) =>
+      PATIENT_PARTY_BINDING_KEYS.has(key),
+    ),
+  );
+}
+
 const FIXED_LEGAL_TEMPLATE_IDS = new Set([
   "confidentiality_release",
   "privacy_information",
   "privacy_consents",
 ]);
 
+const DESIGNED_AGENCY_TEMPLATE_IDS = new Set([
+  ...FIXED_LEGAL_TEMPLATE_IDS,
+  "framework_contract",
+  "single_order",
+  "cost_estimate",
+]);
+
 export function isFixedLegalDocumentTemplate(templateId: string) {
   return FIXED_LEGAL_TEMPLATE_IDS.has(templateId);
+}
+
+export function isDesignedAgencyDocumentTemplate(templateId: string) {
+  return DESIGNED_AGENCY_TEMPLATE_IDS.has(templateId);
 }
 
 export function documentBindingFieldLabel(
@@ -40,72 +143,75 @@ const PATIENT_STICKER_BINDING_FIELDS: BindingFieldDef[] = [
 ];
 
 const PATIENT_PARTY_BINDING_FIELDS: BindingFieldDef[] = [
-  { key: "party_street", label: "Patient Straße", kind: "text" },
-  { key: "party_zip", label: "Patient PLZ", kind: "text" },
-  { key: "party_city", label: "Patient Ort", kind: "text" },
-  { key: "party_country", label: "Patient Land", kind: "country" },
-  { key: "party_email", label: "Patient E-Mail", kind: "text" },
-  { key: "party_phone", label: "Patient Telefon", kind: "text" },
+  { key: "party_street", label: "Patient Straße", labelRu: "Улица пациента", kind: "text" },
+  { key: "party_zip", label: "Patient PLZ", labelRu: "Индекс пациента", kind: "text" },
+  { key: "party_city", label: "Patient Ort", labelRu: "Город пациента", kind: "text" },
+  { key: "party_country", label: "Patient Land", labelRu: "Страна пациента", kind: "country" },
+  { key: "party_email", label: "Patient E-Mail", labelRu: "E-mail пациента", kind: "text" },
+  { key: "party_phone", label: "Patient Telefon", labelRu: "Телефон пациента", kind: "text" },
 ];
 
 const PARTY_SIGNATURE_BINDING_FIELDS: BindingFieldDef[] = [
-  { key: "party_sign_place", label: "Auftraggeber Unterzeichnungsort", kind: "text" },
-  { key: "party_sign_date", label: "Auftraggeber Unterzeichnungsdatum", kind: "date" },
+  { key: "party_sign_place", label: "Auftraggeber Unterzeichnungsort", labelRu: "Место подписи клиента", kind: "text" },
+  { key: "party_sign_date", label: "Auftraggeber Unterzeichnungsdatum", labelRu: "Дата подписи клиента", kind: "date" },
 ];
 
 const AGENCY_SIGNATURE_BINDING_FIELDS: BindingFieldDef[] = [
-  { key: "agency_sign_place", label: "Auftragnehmer Unterzeichnungsort", kind: "text" },
-  { key: "agency_sign_date", label: "Auftragnehmer Unterzeichnungsdatum", kind: "date" },
+  { key: "agency_sign_place", label: "Auftragnehmer Unterzeichnungsort", labelRu: "Место подписи агентства", kind: "text" },
+  { key: "agency_sign_date", label: "Auftragnehmer Unterzeichnungsdatum", labelRu: "Дата подписи агентства", kind: "date" },
 ];
 
 const PAYER_SIGNATURE_BINDING_FIELDS: BindingFieldDef[] = [
-  { key: "payer_sign_place", label: "Kostenübernehmer Unterzeichnungsort", kind: "text" },
-  { key: "payer_sign_date", label: "Kostenübernehmer Unterzeichnungsdatum", kind: "date" },
+  { key: "payer_sign_place", label: "Kostenübernehmer Unterzeichnungsort", labelRu: "Место подписи плательщика", kind: "text" },
+  { key: "payer_sign_date", label: "Kostenübernehmer Unterzeichnungsdatum", labelRu: "Дата подписи плательщика", kind: "date" },
 ];
 
 // Manual "binding socket" fields per generated template id. Field keys match
 // the backend `bindings` field names; `*_text` keys are parsed into arrays.
 export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
   framework_contract: [
-    { key: "contract_date", label: "Rahmenvertrag vom / Inkrafttreten", kind: "date" },
+    { key: "contract_date", label: "Rahmenvertrag vom / Inkrafttreten", labelRu: "Дата начала действия договора", kind: "date" },
     ...PATIENT_PARTY_BINDING_FIELDS,
-    { key: "order_sequence", label: "Laufende Nr. des Einzelauftrags", kind: "number" },
-    { key: "cost_threshold", label: "Mehrkosten-Freigabegrenze", kind: "text" },
+    { key: "order_sequence", label: "Laufende Nr. des Einzelauftrags", labelRu: "Порядковый номер отдельного заказа", kind: "number" },
+    { key: "cost_threshold", label: "Mehrkosten-Freigabegrenze", labelRu: "Граница согласования превышения бюджета", kind: "text" },
     {
       key: "extra_release_recipients",
       label: "Zusätzliche Datenempfänger / Entbindung",
+      labelRu: "Дополнительные получатели данных",
       kind: "textarea",
     },
     ...PARTY_SIGNATURE_BINDING_FIELDS,
     ...AGENCY_SIGNATURE_BINDING_FIELDS,
   ],
   single_order: [
-    { key: "order_sequence", label: "Laufende Nr. des Einzelauftrags", kind: "number" },
-    { key: "order_number", label: "Auftragsnummer", kind: "text" },
-    { key: "order_date", label: "Einzelauftrag vom", kind: "date" },
-    { key: "contract_date", label: "Rahmenvertrag vom", kind: "date" },
+    { key: "order_sequence", label: "Laufende Nr. des Einzelauftrags", labelRu: "Порядковый номер отдельного заказа", kind: "number" },
+    { key: "order_number", label: "Auftragsnummer", labelRu: "Номер заказа", kind: "text" },
+    { key: "order_date", label: "Einzelauftrag vom", labelRu: "Дата отдельного заказа", kind: "date" },
+    { key: "contract_date", label: "Rahmenvertrag vom", labelRu: "Дата рамочного договора", kind: "date" },
     ...PATIENT_PARTY_BINDING_FIELDS,
-    { key: "specialties", label: "Fachbereiche", kind: "text" },
-    { key: "examination_purpose", label: "Untersuchungszweck", kind: "text" },
-    { key: "treatment_purpose", label: "Behandlungszweck", kind: "text" },
-    { key: "period_from", label: "Zeitraum von", kind: "date" },
-    { key: "period_to", label: "Zeitraum bis", kind: "date" },
-    { key: "payer_salutation", label: "Kostenübernehmer Anrede", kind: "text" },
-    { key: "payer_name", label: "Kostenübernehmer (Name)", kind: "text" },
-    { key: "payer_birth_date", label: "Kostenübernehmer (geb. am)", kind: "date" },
+    { key: "specialties", label: "Fachbereiche", labelRu: "Специализации", kind: "text" },
+    { key: "examination_purpose", label: "Untersuchungszweck", labelRu: "Цель обследования", kind: "text" },
+    { key: "treatment_purpose", label: "Behandlungszweck", labelRu: "Цель лечения", kind: "text" },
+    { key: "period_from", label: "Zeitraum von", labelRu: "Период с", kind: "date" },
+    { key: "period_to", label: "Zeitraum bis", labelRu: "Период до", kind: "date" },
+    { key: "payer_salutation", label: "Kostenübernehmer Anrede", labelRu: "Обращение к плательщику", kind: "text" },
+    { key: "payer_name", label: "Kostenübernehmer (Name)", labelRu: "Имя плательщика", kind: "text" },
+    { key: "payer_birth_date", label: "Kostenübernehmer (geb. am)", labelRu: "Дата рождения плательщика", kind: "date" },
     {
       key: "order_components",
       label: "Bestandteile / Rangfolge",
+      labelRu: "Состав и порядок документов",
       kind: "textarea",
     },
-    { key: "quote_number", label: "Kostenvoranschlag-Nr.", kind: "text" },
+    { key: "quote_number", label: "Kostenvoranschlag-Nr.", labelRu: "Номер сметы", kind: "text" },
     {
       key: "service_lines_text",
       label: "Leistungen (Beschreibung | Honorar | Menge | Summe | Anmerkung)",
+      labelRu: "Услуги заказа",
       kind: "textarea",
     },
-    { key: "bank_holder", label: "Kontoinhaber", kind: "text" },
-    { key: "bank_name", label: "Bank", kind: "text" },
+    { key: "bank_holder", label: "Kontoinhaber", labelRu: "Владелец счёта", kind: "text" },
+    { key: "bank_name", label: "Bank", labelRu: "Банк", kind: "text" },
     { key: "bank_swift", label: "SWIFT/BIC", kind: "text" },
     { key: "bank_iban", label: "IBAN", kind: "text" },
     ...PARTY_SIGNATURE_BINDING_FIELDS,
@@ -137,13 +243,14 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     ...AGENCY_SIGNATURE_BINDING_FIELDS,
   ],
   cost_estimate: [
-    { key: "order_date", label: "Datum", kind: "date" },
+    { key: "order_date", label: "Datum", labelRu: "Дата сметы", kind: "date" },
     {
       key: "service_lines_text",
       label: "Leistungen (eine pro Zeile: Beschreibung | Preis/Spanne)",
+      labelRu: "Услуги и диапазоны стоимости",
       kind: "textarea",
     },
-    { key: "estimate_total", label: "Gesamt (Spanne)", kind: "text" },
+    { key: "estimate_total", label: "Gesamt (Spanne)", labelRu: "Итого / диапазон", kind: "text" },
   ],
   appointment_confirmation: [
     { key: "passport_number", label: "Reisepass-Nr.", kind: "text" },

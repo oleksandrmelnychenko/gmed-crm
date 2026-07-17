@@ -88,8 +88,10 @@ export type OrderDetail = {
   order_number: string;
   patient_id: string | null;
   lead_id?: string | null;
+  source_lead_id?: string | null;
+  contract_id?: string | null;
   patient_name: string;
-  patient_pid: string;
+  patient_pid: string | null;
   phase: OrderPhase | string;
   status: OrderStatus | string;
   needs_description: string | null;
@@ -308,6 +310,7 @@ export type WorkflowChecklistResponse = {
   scope_id: string;
   open_count: number;
   completed_count: number;
+  blocked_reason?: string | null;
   items: WorkflowChecklistItem[];
 };
 
