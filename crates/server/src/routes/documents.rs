@@ -6056,15 +6056,6 @@ fn build_framework_contract_pdf(
     {
         fc_body_tight(&mut layout, &format!("Tel.: {phone}"));
     }
-    layout.text_block(
-        "– nachfolgend „Auftraggeber“ genannt –",
-        11.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Muted,
-        0.5,
-        2.0,
-    );
 
     fc_body(&mut layout, "und");
     layout.text_block(
@@ -6092,24 +6083,6 @@ fn build_framework_contract_pdf(
     {
         fc_body_tight(&mut layout, &format!("Email: {email}"));
     }
-    layout.text_block(
-        "– nachfolgend „Auftragnehmer“ genannt –",
-        11.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Muted,
-        0.5,
-        0.5,
-    );
-    layout.text_block(
-        "– nachfolgend „Auftraggeber“ und „Auftragnehmer“ gemeinsam „Vertragsparteien“ genannt –",
-        11.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Muted,
-        0.5,
-        3.0,
-    );
 
     // --- Präambel -------------------------------------------------------------
     fc_paragraph_heading(&mut layout, "Präambel");
@@ -20306,6 +20279,9 @@ mod tests {
         assert!(text.contains("500,00 EUR der Gesamtsumme"));
         assert!(text.contains("Der Vertrag tritt zum 01.07.2026"));
         assert!(text.contains("Berlin, den 16.07.2026"));
+        assert!(!text.contains("nachfolgend „Auftraggeber“ genannt"));
+        assert!(!text.contains("nachfolgend „Auftragnehmer“ genannt"));
+        assert!(!text.contains("gemeinsam „Vertragsparteien“ genannt"));
         for heading in [
             "§ 1 Vertragsgegenstand",
             "§ 2 Vergütung",
