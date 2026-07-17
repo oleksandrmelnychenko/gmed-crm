@@ -26,7 +26,12 @@ import {
   appointmentTextareaControlClassName,
   appointmentToggleCardClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
-import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
+import {
+  hasPairedAppointmentTimes,
+  hasValidAppointmentTimeRange,
+  serializeAppointmentTimes,
+  shiftLocalDateTime,
+} from "@/pages/appointments/model/date-time";
 import { formatAppointmentSlotLabel as slotLabel } from "@/pages/appointments/model/runtime-formatters";
 import { buildConflictQuery } from "@/pages/appointments/model/query-builders";
 import {
@@ -372,6 +377,15 @@ function useAppointmentFollowUpVisitSectionContent({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!hasPairedAppointmentTimes(form.timeStart, form.timeEnd)) {
+      dispatchSectionState({ error: t.appointments_time_pair_error });
+      return;
+    }
+    if (!hasValidAppointmentTimeRange(form.timeStart, form.timeEnd)) {
+      dispatchSectionState({ error: t.appointments_time_range_error });
+      return;
+    }
+    const times = serializeAppointmentTimes(form.timeStart, form.timeEnd);
     dispatchSectionState({
       busy: true,
       error: "",
@@ -398,8 +412,8 @@ function useAppointmentFollowUpVisitSectionContent({
           ),
           title: form.title.trim(),
           date: form.date,
-          time_start: form.timeStart || null,
-          time_end: form.timeEnd || null,
+          time_start: times.timeStart,
+          time_end: times.timeEnd,
           location: form.location.trim() || null,
           category: form.category.trim() || null,
           notes: form.notes.trim() || null,
@@ -501,7 +515,11 @@ function useAppointmentFollowUpVisitSectionContent({
           <Field label={t.appointments_time}>
             <Input
               type="time"
-              value={form.timeStart}
+            value={form.timeStart}
+            aria-invalid={
+              !hasPairedAppointmentTimes(form.timeStart, form.timeEnd) ||
+              !hasValidAppointmentTimeRange(form.timeStart, form.timeEnd)
+            }
               onChange={(event) =>
                 setForm((current) => ({
                   ...current,
@@ -514,7 +532,11 @@ function useAppointmentFollowUpVisitSectionContent({
           <Field label={t.appointments_time}>
             <Input
               type="time"
-              value={form.timeEnd}
+            value={form.timeEnd}
+            aria-invalid={
+              !hasPairedAppointmentTimes(form.timeStart, form.timeEnd) ||
+              !hasValidAppointmentTimeRange(form.timeStart, form.timeEnd)
+            }
               onChange={(event) =>
                 setForm((current) => ({
                   ...current,

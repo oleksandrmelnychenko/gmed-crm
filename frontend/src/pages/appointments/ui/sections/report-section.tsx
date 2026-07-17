@@ -26,6 +26,7 @@ import {
   appointmentPreviewInfoCardClassName,
   appointmentTextareaControlClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
+import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import {
   blankReportForm,
 } from "@/pages/appointments/model/form-factories";
@@ -37,6 +38,7 @@ import {
 import {
   formatAppointmentDateTimeLabel as formatDateTimeLabel,
 } from "@/pages/appointments/model/runtime-formatters";
+import { parseValidInterpreterReportHours } from "@/pages/appointments/model/report-validation";
 import type {
   AppointmentDetail,
   ReportFormState,
@@ -76,6 +78,7 @@ type ReportSectionState = {
   rejectReason: string;
   busyAction: string;
   editorOpen: boolean;
+  formError: string;
 };
 
 type ReportSectionPatch =
@@ -88,6 +91,7 @@ function createReportSectionState(): ReportSectionState {
     rejectReason: "",
     busyAction: "",
     editorOpen: false,
+    formError: "",
   };
 }
 
@@ -116,7 +120,7 @@ function useAppointmentReportSectionContent({
     undefined,
     createReportSectionState,
   );
-  const { form, rejectReason, busyAction, editorOpen } = reportState;
+  const { form, rejectReason, busyAction, editorOpen, formError } = reportState;
   const {
     canSubmitInterpreterReport,
     canResubmitRejectedReport,
@@ -137,30 +141,39 @@ function useAppointmentReportSectionContent({
       rejectReason: "",
       busyAction: "",
       editorOpen: false,
+      formError: "",
     });
   }, [detail.id, detailReport]);
 
   async function handleReportSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const hours = parseValidInterpreterReportHours(form.hours);
+    if (hours === null) {
+      dispatchReportState({ formError: t.appointments_report_hours_validation });
+      return;
+    }
+
     dispatchReportState({ busyAction: "report-submit" });
     try {
       await apiFetch<{ id: string }>(`/appointments/${detail.id}/report`, {
         method: "POST",
         body: JSON.stringify({
-          hours: Number(form.hours),
+          hours,
           report_text: form.reportText.trim() || null,
         }),
       });
       dispatchReportState({
         form: blankReportForm(),
         editorOpen: false,
+        formError: "",
       });
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error
-          ? error.message
-          : appointmentText("appointments_failed_to_submit_report"),
+        appointmentActionErrorMessage(
+          error,
+          appointmentText("appointments_failed_to_submit_report"),
+        ),
       );
     } finally {
       dispatchReportState({ busyAction: "" });
@@ -177,9 +190,10 @@ function useAppointmentReportSectionContent({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error
-          ? error.message
-          : appointmentText("appointments_failed_to_approve_report"),
+        appointmentActionErrorMessage(
+          error,
+          appointmentText("appointments_failed_to_approve_report"),
+        ),
       );
     } finally {
       dispatchReportState({ busyAction: "" });
@@ -200,9 +214,10 @@ function useAppointmentReportSectionContent({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error
-          ? error.message
-          : appointmentText("appointments_failed_to_reject_report"),
+        appointmentActionErrorMessage(
+          error,
+          appointmentText("appointments_failed_to_reject_report"),
+        ),
       );
     } finally {
       dispatchReportState({ busyAction: "" });
@@ -379,6 +394,7 @@ function useAppointmentReportSectionContent({
           onSubmit={
             canSubmitInterpreterReport ? handleReportSubmit : (event) => event.preventDefault()
           }
+          footerError={formError || undefined}
           footer={
             <>
               <Button
@@ -424,7 +440,10 @@ function useAppointmentReportSectionContent({
                   type="submit"
                   size="sm"
                   className="h-8 gap-1.5 rounded-lg"
-                  disabled={busyAction === "report-submit" || !form.hours}
+                  disabled={
+                    busyAction === "report-submit" ||
+                    parseValidInterpreterReportHours(form.hours) === null
+                  }
                 >
                   {busyAction === "report-submit" ? (
                     <LoaderCircle className="size-3.5 animate-spin" />
@@ -448,7 +467,8 @@ function useAppointmentReportSectionContent({
               <Field label={t.appointments_time}>
                 <Input
                   type="number"
-                  min="0"
+                  min="0.25"
+                  max="24"
                   step="0.25"
                   value={form.hours}
                   onChange={(event) =>
@@ -457,6 +477,7 @@ function useAppointmentReportSectionContent({
                         ...current.form,
                         hours: event.target.value,
                       },
+                      formError: "",
                     }))
                   }
                   className={appointmentFilterControlClassName}

@@ -87,6 +87,7 @@ export function useAppointmentSchedulerActions({
       try {
         const result = await updateAppointmentSchedule({
           appointmentId: source.id,
+          appointmentType: source.type,
           providerId: source.provider_id,
           doctorId: source.doctor_id,
           ownerUserId: source.owner_user_id,
@@ -96,6 +97,8 @@ export function useAppointmentSchedulerActions({
           timeStart: nextTimeStart || null,
           timeEnd: nextTimeEnd || null,
           location: source.location,
+          skipMedicalProviderBinding:
+            source.type === "medical" && !source.provider_id,
         });
         onNotice(buildScheduleNotice(result.conflicts, localWarnings));
         onRefreshAppointments();
@@ -130,16 +133,15 @@ export function useAppointmentSchedulerActions({
       setActionBusy(statusActionKey(appointmentId, status, recurrenceScope));
       try {
         await updateAppointmentStatus(appointmentId, status, recurrenceScope);
+        onRefreshAppointments();
         if (selectedId === appointmentId) {
           onRefreshDetail();
-        } else {
-          onRefreshAppointments();
         }
       } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : appointmentText("appointments_failed_to_change_status");
+        const message = formatScheduleConflictError(
+          error,
+          appointmentText("appointments_failed_to_change_status"),
+        );
         if (selectedId === appointmentId) {
           onDetailError(message);
         } else {

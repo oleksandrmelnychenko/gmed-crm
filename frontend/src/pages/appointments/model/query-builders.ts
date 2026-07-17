@@ -1,4 +1,5 @@
 import type { FiltersState, LinkedDocumentItem } from "./types";
+import { normalizeAppointmentTimePair } from "./date-time";
 
 export function buildAppointmentsQuery(filters: FiltersState): string {
   const params = new URLSearchParams();
@@ -30,9 +31,12 @@ export function buildConflictQuery(
   doctorId = "",
 ): string {
   const params = new URLSearchParams({ patient_id: patientId, date });
+  const times = normalizeAppointmentTimePair(timeStart, timeEnd);
   if (appointmentId) params.set("appointment_id", appointmentId);
-  if (timeStart) params.set("time_start", timeStart);
-  if (timeEnd) params.set("time_end", timeEnd);
+  if (times.timeStart && times.timeEnd) {
+    params.set("time_start", times.timeStart);
+    params.set("time_end", times.timeEnd);
+  }
   if (interpreterId) params.set("interpreter_id", interpreterId);
   if (doctorId) params.set("doctor_id", doctorId);
   return `/appointments/meta/conflicts?${params.toString()}`;

@@ -421,8 +421,15 @@ export interface Translations
   appointments_scope_following_hint: string;
   appointments_repeat_this: string;
   appointments_repeat_hint: string;
+  appointments_time_pair_error: string;
+  appointments_time_range_error: string;
   appointments_repeat_interval_error: string;
   appointments_repeat_require_end_error: string;
+  appointments_repeat_end_mode: string;
+  appointments_repeat_end_count: string;
+  appointments_repeat_end_until: string;
+  appointments_attention_load_error: string;
+  appointments_report_hours_validation: string;
   appointments_active_series_path: string;
   appointments_current_occurrence: string;
   appointments_open_checklist: string;

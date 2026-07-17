@@ -12,6 +12,8 @@ const messages = {
   titleRequired: "Title: required",
   dateRequired: "Date: required",
   medicalProviderRequired: "Medical appointments require a provider",
+  timePairError: "Provide both times or neither",
+  timeRangeError: "End must be after start",
   repeatIntervalError: "Repeat interval is invalid",
   repeatRequireEndError: "Repeat needs count or end",
 } satisfies CreateAppointmentValidationMessages;
@@ -64,6 +66,35 @@ describe("validateCreateAppointmentForm", () => {
       "Repeat needs count or end",
     );
   });
+
+  it("rejects one-sided and non-increasing appointment times", () => {
+    const validBase = {
+      ...blankAppointmentForm(),
+      patientId: "patient-1",
+      title: "Consultation",
+      date: "2026-06-30",
+      appointmentType: "non_medical",
+    } as const;
+
+    expect(
+      validateCreateAppointmentForm(
+        { ...validBase, timeStart: "09:00", timeEnd: "" },
+        messages,
+      ).error,
+    ).toBe("Provide both times or neither");
+    expect(
+      validateCreateAppointmentForm(
+        { ...validBase, timeStart: "10:00", timeEnd: "10:00" },
+        messages,
+      ).error,
+    ).toBe("End must be after start");
+    expect(
+      validateCreateAppointmentForm(
+        { ...validBase, timeStart: "10:00", timeEnd: "09:00" },
+        messages,
+      ).error,
+    ).toBe("End must be after start");
+  });
 });
 
 describe("buildCreateAppointmentPayload", () => {
@@ -111,7 +142,7 @@ describe("buildCreateAppointmentPayload", () => {
     );
   });
 
-  it("prefers repeat count over repeat-until when both recurrence endings are filled", () => {
+  it("uses only the explicitly selected count recurrence ending", () => {
     const payload = buildCreateAppointmentPayload(
       {
         ...blankAppointmentForm(),
@@ -123,6 +154,7 @@ describe("buildCreateAppointmentPayload", () => {
         repeatEnabled: true,
         repeatFrequency: "monthly",
         repeatInterval: "1",
+        repeatEndMode: "count",
         repeatCount: "2",
         repeatUntil: "2026-06-09",
       },
@@ -140,7 +172,7 @@ describe("buildCreateAppointmentPayload", () => {
     );
   });
 
-  it("uses repeat-until when repeat count is empty", () => {
+  it("uses only the explicitly selected until recurrence ending", () => {
     const payload = buildCreateAppointmentPayload(
       {
         ...blankAppointmentForm(),
@@ -152,6 +184,7 @@ describe("buildCreateAppointmentPayload", () => {
         repeatEnabled: true,
         repeatFrequency: "weekly",
         repeatInterval: "1",
+        repeatEndMode: "until",
         repeatCount: "",
         repeatUntil: "2026-06-30",
       },
@@ -182,5 +215,20 @@ describe("buildCreateAppointmentPayload", () => {
 
     expect(payload.skip_medical_provider_binding).toBe(true);
     expect(payload.provider_id).toBeNull();
+  });
+
+  it("preserves a one-sided time so backend validation cannot be bypassed", () => {
+    const payload = buildCreateAppointmentPayload({
+      ...blankAppointmentForm(),
+      patientId: "patient-1",
+      appointmentType: "non_medical",
+      title: "All-day fallback",
+      date: "2026-06-30",
+      timeStart: "09:00",
+      timeEnd: "",
+    });
+
+    expect(payload.time_start).toBe("09:00");
+    expect(payload.time_end).toBeNull();
   });
 });

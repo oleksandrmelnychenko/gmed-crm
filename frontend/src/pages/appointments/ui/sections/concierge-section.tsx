@@ -23,6 +23,7 @@ import {
   appointmentWhiteSelectControlClassName,
   appointmentWhiteTextareaControlClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
+import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import {
   blankConciergeServiceForm,
 } from "@/pages/appointments/model/form-factories";
@@ -233,7 +234,7 @@ function useAppointmentConciergeSectionContent({
       })
       .catch((error) => {
         if (cancelled) return;
-        onError(error instanceof Error ? error.message : tr.common_failed_load);
+        onError(appointmentActionErrorMessage(error, tr.common_failed_load));
       });
 
     return () => {
@@ -288,7 +289,7 @@ function useAppointmentConciergeSectionContent({
       setForm(buildCreateForm());
       onRefresh();
     } catch (error) {
-      onError(error instanceof Error ? error.message : tr.common_failed_create);
+      onError(appointmentActionErrorMessage(error, tr.common_failed_create));
     } finally {
       setSubmitBusy(false);
     }
@@ -334,7 +335,7 @@ function useAppointmentConciergeSectionContent({
       });
       onRefresh();
     } catch (error) {
-      onError(error instanceof Error ? error.message : tr.common_failed_update);
+      onError(appointmentActionErrorMessage(error, tr.common_failed_update));
     } finally {
       setActionBusy("");
     }

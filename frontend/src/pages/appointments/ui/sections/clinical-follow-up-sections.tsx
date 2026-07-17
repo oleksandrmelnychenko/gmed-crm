@@ -32,6 +32,7 @@ import {
   appointmentTextareaControlClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
+import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import {
   blankFindingsFollowUpForm,
   blankIncomingDataForm,
@@ -317,9 +318,10 @@ function useAppointmentIncomingDataSectionContent({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error
-          ? error.message
-          : appointmentText("appointments_failed_to_complete_item"),
+        appointmentActionErrorMessage(
+          error,
+          appointmentText("appointments_failed_to_complete_item"),
+        ),
       );
     } finally {
       setActionBusy("");
@@ -457,7 +459,7 @@ function useAppointmentIncomingDataSectionContent({
       setComposerOpen(false);
       onRefresh();
     } catch (error) {
-      onError(error instanceof Error ? error.message : tr.common_failed_create);
+      onError(appointmentActionErrorMessage(error, tr.common_failed_create));
     } finally {
       setSubmitBusy(false);
     }
@@ -998,9 +1000,10 @@ function useAppointmentFindingsSectionContent({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error
-          ? error.message
-          : appointmentText("appointments_failed_to_complete_item"),
+        appointmentActionErrorMessage(
+          error,
+          appointmentText("appointments_failed_to_complete_item"),
+        ),
       );
     } finally {
       setActionBusy("");
@@ -1139,7 +1142,7 @@ function useAppointmentFindingsSectionContent({
       setComposerOpen(false);
       onRefresh();
     } catch (error) {
-      onError(error instanceof Error ? error.message : tr.common_failed_create);
+      onError(appointmentActionErrorMessage(error, tr.common_failed_create));
     } finally {
       setSubmitBusy(false);
     }

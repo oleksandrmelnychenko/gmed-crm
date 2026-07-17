@@ -34,6 +34,7 @@ import {
 } from "@/pages/appointments/model/constants";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import { useDebouncedValue } from "@/pages/appointments/data/use-debounced-value";
+import { hasValidAppointmentTimeRange } from "@/pages/appointments/model/date-time";
 import {
   appointmentText,
   appointmentTypeLabel,
@@ -413,6 +414,8 @@ function useCreateAppointmentSheetContent({
         titleRequired: `${t.appointments_title_col}: ${t.cf_required}`,
         dateRequired: `${t.appointments_date}: ${t.cf_required}`,
         medicalProviderRequired: appointmentText("appointments_medical_provider_required"),
+        timePairError: t.appointments_time_pair_error,
+        timeRangeError: t.appointments_time_range_error,
         repeatIntervalError: t.appointments_repeat_interval_error,
         repeatRequireEndError: t.appointments_repeat_require_end_error,
       });
@@ -594,10 +597,16 @@ function useCreateAppointmentSheetContent({
                       className={createSheetInputClassName}
                     />
                   </Field>
-                  <Field compact label={t.appointments_time}>
+                  <Field compact label={appointmentText("appointments_start")}>
                     <Input
                       type="time"
                       value={form.timeStart}
+                      aria-invalid={
+                        !hasValidAppointmentTimeRange(
+                          form.timeStart,
+                          form.timeEnd,
+                        )
+                      }
                       onChange={(event) =>
                         setForm((current) => ({
                           ...current,
@@ -607,10 +616,16 @@ function useCreateAppointmentSheetContent({
                       className={createSheetInputClassName}
                     />
                   </Field>
-                  <Field compact label={t.appointments_time}>
+                  <Field compact label={appointmentText("appointments_end")}>
                     <Input
                       type="time"
                       value={form.timeEnd}
+                      aria-invalid={
+                        !hasValidAppointmentTimeRange(
+                          form.timeStart,
+                          form.timeEnd,
+                        )
+                      }
                       onChange={(event) =>
                         setForm((current) => ({
                           ...current,
@@ -637,7 +652,9 @@ function useCreateAppointmentSheetContent({
                           repeatEnabled: event.target.checked,
                           repeatInterval: current.repeatInterval || "1",
                           repeatCount:
-                            event.target.checked && !current.repeatCount
+                            event.target.checked &&
+                            current.repeatEndMode === "count" &&
+                            !current.repeatCount
                               ? "4"
                               : current.repeatCount,
                         }))
@@ -691,38 +708,74 @@ function useCreateAppointmentSheetContent({
                       </Field>
                       <Field
                         compact
-                        label={appointmentText("appointments_total_occurrences")}
+                        label={t.appointments_repeat_end_mode}
                       >
-                        <Input
-                          type="number"
-                          min="2"
-                          step="1"
-                          value={form.repeatCount}
+                        <NativeComboboxSelect
+                          value={form.repeatEndMode}
                           onChange={(event) =>
                             setForm((current) => ({
                               ...current,
-                              repeatCount: event.target.value,
+                              repeatEndMode: event.target
+                                .value as AppointmentFormState["repeatEndMode"],
+                              repeatCount:
+                                event.target.value === "count"
+                                  ? current.repeatCount || "4"
+                                  : "",
+                              repeatUntil:
+                                event.target.value === "until"
+                                  ? current.repeatUntil
+                                  : "",
                             }))
                           }
-                          className={createSheetInputClassName}
-                        />
+                          className={createSheetSelectClassName}
+                        >
+                          <option value="count">
+                            {t.appointments_repeat_end_count}
+                          </option>
+                          <option value="until">
+                            {t.appointments_repeat_end_until}
+                          </option>
+                        </NativeComboboxSelect>
                       </Field>
-                      <Field
-                        compact
-                        label={appointmentText("appointments_repeat_until")}
-                      >
-                        <Input
-                          type="date"
-                          value={form.repeatUntil}
-                          onChange={(event) =>
-                            setForm((current) => ({
-                              ...current,
-                              repeatUntil: event.target.value,
-                            }))
-                          }
-                          className={createSheetInputClassName}
-                        />
-                      </Field>
+                      {form.repeatEndMode === "count" ? (
+                        <Field
+                          compact
+                          label={appointmentText("appointments_total_occurrences")}
+                        >
+                          <Input
+                            type="number"
+                            min="2"
+                            step="1"
+                            value={form.repeatCount}
+                            onChange={(event) =>
+                              setForm((current) => ({
+                                ...current,
+                                repeatCount: event.target.value,
+                                repeatUntil: "",
+                              }))
+                            }
+                            className={createSheetInputClassName}
+                          />
+                        </Field>
+                      ) : (
+                        <Field
+                          compact
+                          label={appointmentText("appointments_repeat_until")}
+                        >
+                          <Input
+                            type="date"
+                            value={form.repeatUntil}
+                            onChange={(event) =>
+                              setForm((current) => ({
+                                ...current,
+                                repeatCount: "",
+                                repeatUntil: event.target.value,
+                              }))
+                            }
+                            className={createSheetInputClassName}
+                          />
+                        </Field>
+                      )}
                     </div>
                   ) : null}
                 </div>

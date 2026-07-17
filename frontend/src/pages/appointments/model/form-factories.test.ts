@@ -56,7 +56,8 @@ describe("appointment form factories", () => {
       recurrence_series_id: "series-1",
       recurrence_frequency: "weekly",
       recurrence_interval: 2,
-      recurrence_count: 5,
+      recurrence_end_mode: "count",
+      recurrence_count: 3,
       recurrence_until: "2026-08-30",
       recurrence_index: 1,
       recurrence_series_size: 5,
@@ -82,8 +83,15 @@ describe("appointment form factories", () => {
     expect(form.repeatEnabled).toBe(true);
     expect(form.repeatFrequency).toBe("weekly");
     expect(form.repeatInterval).toBe("2");
+    expect(form.repeatEndMode).toBe("count");
     expect(form.repeatCount).toBe("5");
-    expect(form.repeatUntil).toBe("2026-08-30");
+    expect(form.repeatUntil).toBe("");
+    expect(
+      buildEditAppointmentForm({
+        ...detail,
+        recurrence_end_mode: undefined,
+      }).repeatEndMode,
+    ).toBe("count");
   });
 
   it("restores saved recurrence values when single-scope edits should not update the series rule", () => {
@@ -114,7 +122,8 @@ describe("appointment form factories", () => {
       recurrence_series_id: "series-1",
       recurrence_frequency: "weekly",
       recurrence_interval: 2,
-      recurrence_count: 5,
+      recurrence_end_mode: "count",
+      recurrence_count: 3,
       recurrence_until: "2026-08-30",
       recurrence_index: 1,
       recurrence_series_size: 5,
@@ -146,7 +155,8 @@ describe("appointment form factories", () => {
 
     expect(restored.repeatFrequency).toBe("weekly");
     expect(restored.repeatInterval).toBe("2");
+    expect(restored.repeatEndMode).toBe("count");
     expect(restored.repeatCount).toBe("5");
-    expect(restored.repeatUntil).toBe("2026-08-30");
+    expect(restored.repeatUntil).toBe("");
   });
 });

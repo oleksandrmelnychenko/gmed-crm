@@ -1,5 +1,7 @@
 import { apiFetch } from "@/lib/api";
+import { serializeAppointmentTimes } from "@/pages/appointments/model/date-time";
 import type {
+  AppointmentKind,
   AppointmentRequestItem,
   AppointmentRequestStatus,
   AppointmentRecurringActionScope,
@@ -9,6 +11,7 @@ import type {
 
 type UpdateAppointmentScheduleInput = {
   appointmentId: string;
+  appointmentType: AppointmentKind;
   providerId: string | null;
   doctorId: string | null;
   ownerUserId: string | null;
@@ -18,6 +21,7 @@ type UpdateAppointmentScheduleInput = {
   timeStart: string | null;
   timeEnd: string | null;
   location: string | null;
+  skipMedicalProviderBinding: boolean;
 };
 
 type UpdateAppointmentScheduleResult = {
@@ -38,6 +42,7 @@ export type ConvertAppointmentRequestInput = {
   location: string | null;
   category: string | null;
   notes: string | null;
+  skipMedicalProviderBinding: boolean;
 };
 
 export function assignLinkedPatient(
@@ -52,6 +57,7 @@ export function assignLinkedPatient(
 
 export function updateAppointmentSchedule({
   appointmentId,
+  appointmentType,
   providerId,
   doctorId,
   ownerUserId,
@@ -61,7 +67,9 @@ export function updateAppointmentSchedule({
   timeStart,
   timeEnd,
   location,
+  skipMedicalProviderBinding,
 }: UpdateAppointmentScheduleInput) {
+  const times = serializeAppointmentTimes(timeStart, timeEnd);
   return apiFetch<UpdateAppointmentScheduleResult>(
     `/appointments/${appointmentId}/update`,
     {
@@ -73,9 +81,13 @@ export function updateAppointmentSchedule({
         interpreter_id: interpreterId,
         title,
         date,
-        time_start: timeStart,
-        time_end: timeEnd,
+        time_start: times.timeStart,
+        time_end: times.timeEnd,
         location,
+        skip_medical_provider_binding:
+          appointmentType === "medical" &&
+          !providerId &&
+          skipMedicalProviderBinding,
       }),
     },
   );
@@ -116,6 +128,7 @@ export function convertAppointmentRequest(
   requestId: string,
   input: ConvertAppointmentRequestInput,
 ) {
+  const times = serializeAppointmentTimes(input.timeStart, input.timeEnd);
   return apiFetch<{
     ok: boolean;
     request_id: string;
@@ -131,11 +144,12 @@ export function convertAppointmentRequest(
       order_id: input.orderId,
       title: input.title.trim(),
       date: input.date,
-      time_start: input.timeStart,
-      time_end: input.timeEnd,
+      time_start: times.timeStart,
+      time_end: times.timeEnd,
       location: input.location?.trim() || null,
       category: input.category?.trim() || null,
       notes: input.notes?.trim() || null,
+      skip_medical_provider_binding: input.skipMedicalProviderBinding,
     }),
   });
 }

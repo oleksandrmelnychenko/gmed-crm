@@ -1,6 +1,7 @@
 import {
   CalendarClock,
   CalendarDays,
+  ClipboardList,
   Clock3,
   MapPin,
   UsersRound,
@@ -70,6 +71,8 @@ type InterpreterMobileAgendaProps = {
   activeOperationalScope: OperationalScope;
   onApplyOperationalScope: (scope: OperationalScope) => void;
   onResetQuickScopes: () => void;
+  queueLabel?: string;
+  onOpenQueue?: () => void;
   sections: MobileAgendaSection[];
   emptyText: string;
   onOpenDetail: (id: string) => void;
@@ -246,6 +249,8 @@ export function InterpreterMobileAgenda({
   activeOperationalScope,
   onApplyOperationalScope,
   onResetQuickScopes,
+  queueLabel,
+  onOpenQueue,
   sections,
   emptyText,
   onOpenDetail,
@@ -309,6 +314,18 @@ export function InterpreterMobileAgenda({
                   </QuickScopeButton>
                 ))
               : null}
+            {queueLabel && onOpenQueue ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="rounded-full px-3"
+                onClick={onOpenQueue}
+              >
+                <ClipboardList className="size-3.5" />
+                {queueLabel}
+              </Button>
+            ) : null}
             <Button
               variant="ghost"
               size="sm"

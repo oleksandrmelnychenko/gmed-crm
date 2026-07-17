@@ -253,7 +253,7 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
     );
   }
 
-  if (detailError) {
+  if (detailError && !detail) {
     return <Banner tone="error" withIcon>{detailError}</Banner>;
   }
 
@@ -300,6 +300,9 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
 
   return (
     <div className="space-y-6">
+      {detailError ? (
+        <Banner tone="error" withIcon>{detailError}</Banner>
+      ) : null}
       {appointmentsNotice ? (
         <Banner tone="warning" withIcon>{appointmentsNotice}</Banner>
       ) : null}

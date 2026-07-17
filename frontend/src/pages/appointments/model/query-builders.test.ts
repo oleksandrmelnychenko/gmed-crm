@@ -23,4 +23,21 @@ describe("buildConflictQuery", () => {
     expect(url.searchParams.get("interpreter_id")).toBe("interpreter-1");
     expect(url.searchParams.get("doctor_id")).toBe("doctor-1");
   });
+
+  it("omits both time parameters when only one time is provided", () => {
+    const url = new URL(
+      buildConflictQuery(
+        "patient-1",
+        "",
+        "2026-06-18",
+        "09:00",
+        "",
+        "",
+      ),
+      "http://localhost",
+    );
+
+    expect(url.searchParams.has("time_start")).toBe(false);
+    expect(url.searchParams.has("time_end")).toBe(false);
+  });
 });

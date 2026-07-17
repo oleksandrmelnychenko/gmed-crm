@@ -37,6 +37,7 @@ import {
 import {
   currentDateInput,
   endOfWeekInput,
+  initialCalendarVisibleRange,
   readStoredCalendarDate,
   readStoredCalendarView,
   startOfWeekInput,
@@ -53,6 +54,8 @@ import {
 import {
   buildAppointmentsQuery,
 } from "@/pages/appointments/model/query-builders";
+import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
+import { formatScheduleConflictError } from "@/pages/appointments/model/schedule-warnings";
 import { isAppointmentTaskAssignableRole } from "@/pages/appointments/model/staff-roles";
 import { toCalendarEvent } from "@/pages/appointments/model/calendar-events";
 import { renderStaticCalendarEventContent } from "@/pages/appointments/model/calendar-event-content";
@@ -233,6 +236,8 @@ type StaffAppointmentsPageState = {
   filters: FiltersState;
   operationalScope: OperationalScope;
   requestActionBusy: string;
+  visibleDateFrom: string;
+  visibleDateTo: string;
 };
 
 type StaffAppointmentsPagePatch =
@@ -276,19 +281,31 @@ function useStaffAppointmentsPageContent() {
   const permissions = appointmentPermissions(user?.role);
   const patientSheetPermissions = linkedPatientPermissions(user?.role);
   const canReviewAppointmentRequests =
-    user?.role === "ceo" || user?.role === "patient_manager";
+    user?.role === "ceo" ||
+    user?.role === "patient_manager" ||
+    user?.role === "it_admin";
   const isMobile = useIsMobile();
   const calendarRef = useRef<FullCalendar | null>(null);
   const [pageState, dispatchPageState] = useReducer(
     staffAppointmentsPageReducer,
     undefined,
-    (): StaffAppointmentsPageState => ({
-      calendarView: readStoredCalendarView(),
-      calendarDate: readStoredCalendarDate(),
-      filters: DEFAULT_FILTERS,
-      operationalScope: "all",
-      requestActionBusy: "",
-    }),
+    (): StaffAppointmentsPageState => {
+      const calendarView = readStoredCalendarView();
+      const calendarDate = readStoredCalendarDate();
+      const visibleRange = initialCalendarVisibleRange(
+        calendarView,
+        calendarDate,
+      );
+      return {
+        calendarView,
+        calendarDate,
+        filters: DEFAULT_FILTERS,
+        operationalScope: "all",
+        requestActionBusy: "",
+        visibleDateFrom: visibleRange.dateFrom,
+        visibleDateTo: visibleRange.dateTo,
+      };
+    },
   );
   const {
     calendarView,
@@ -296,6 +313,8 @@ function useStaffAppointmentsPageContent() {
     filters,
     operationalScope,
     requestActionBusy,
+    visibleDateFrom,
+    visibleDateTo,
   } = pageState;
   const setPageField = <K extends keyof StaffAppointmentsPageState>(
     field: K,
@@ -311,6 +330,15 @@ function useStaffAppointmentsPageContent() {
     setPageField("operationalScope", value);
   const setRequestActionBusy = (value: SetStateAction<string>) =>
     setPageField("requestActionBusy", value);
+  const setVisibleDateRange = useCallback(
+    (range: { dateFrom: string; dateTo: string }) => {
+      dispatchPageState({
+        visibleDateFrom: range.dateFrom,
+        visibleDateTo: range.dateTo,
+      });
+    },
+    [],
+  );
   const [queueScheduleDraft, setQueueScheduleDraft] =
     useState<QueueScheduleDraft | null>(null);
   const deferredSearch = useDeferredValue(filters.search);
@@ -474,8 +502,21 @@ function useStaffAppointmentsPageContent() {
   const weekStart = startOfWeekInput(todayDate);
   const weekEnd = endOfWeekInput(todayDate);
   const appointmentsQuery = useMemo(
-    () =>
-      buildAppointmentsQuery({
+    () => {
+      const hasExplicitDateFilter = Boolean(
+        filters.dateFrom || filters.dateTo,
+      );
+      const queryDateFrom = hasExplicitDateFilter
+        ? filters.dateFrom
+        : isMobile
+          ? ""
+          : visibleDateFrom;
+      const queryDateTo = hasExplicitDateFilter
+        ? filters.dateTo
+        : isMobile
+          ? ""
+          : visibleDateTo;
+      return buildAppointmentsQuery({
         search: deferredSearch,
         appointmentType: filters.appointmentType,
         carePathKind: filters.carePathKind,
@@ -486,9 +527,10 @@ function useStaffAppointmentsPageContent() {
         doctorId: filters.doctorId,
         ownerUserId: filters.ownerUserId,
         interpreterId: filters.interpreterId,
-        dateFrom: filters.dateFrom,
-        dateTo: filters.dateTo,
-      }),
+        dateFrom: queryDateFrom,
+        dateTo: queryDateTo,
+      });
+    },
     [
       deferredSearch,
       filters.appointmentType,
@@ -502,6 +544,9 @@ function useStaffAppointmentsPageContent() {
       filters.interpreterId,
       filters.dateFrom,
       filters.dateTo,
+      isMobile,
+      visibleDateFrom,
+      visibleDateTo,
     ],
   );
   const attentionQuery = useMemo(
@@ -519,12 +564,14 @@ function useStaffAppointmentsPageContent() {
     attentionItems,
     appointmentsLoading,
     appointmentsError,
+    appointmentsAuxiliaryError,
     setAppointmentsError,
   } = useAppointmentsSchedulerData({
     appointmentsQuery,
     attentionQuery,
     appointmentsVersion,
     failedLoadMessage: tr.common_failed_load,
+    attentionFailedMessage: t.appointments_attention_load_error,
   });
   const {
     appointmentRequests,
@@ -585,7 +632,8 @@ function useStaffAppointmentsPageContent() {
     [providers],
   );
   const canShowConciergeSection =
-    permissions.canViewConciergeServices && detail?.type === "non_medical";
+    permissions.canViewConciergeServices &&
+    (detail?.type === "non_medical" || detailServices.length > 0);
   const scopeOptions = operationalScopeOptions(user?.role, tr);
   const activeOperationalScope = scopeOptions.some(
     (option) => option.id === operationalScope,
@@ -1260,7 +1308,7 @@ function useStaffAppointmentsPageContent() {
         refreshAppointments();
       } catch (error) {
         setAppointmentRequestsError(
-          error instanceof Error ? error.message : tr.common_failed_save,
+          appointmentActionErrorMessage(error, tr.common_failed_save),
         );
       } finally {
         setRequestActionBusy((current) => (current === busyKey ? "" : current));
@@ -1295,6 +1343,7 @@ function useStaffAppointmentsPageContent() {
     setOperationalScope,
     setCalendarView,
     setCalendarDate,
+    onVisibleDateRangeChange: setVisibleDateRange,
     syncQuery,
     onRefreshAppointments: refreshAppointments,
     onOpenCreateSeed: openCreateSeedSheet,
@@ -1375,7 +1424,7 @@ function useStaffAppointmentsPageContent() {
         openDetailSheet(result.appointment_id);
       } catch (error) {
         setAppointmentRequestsError(
-          error instanceof Error ? error.message : tr.common_failed_save,
+          formatScheduleConflictError(error, tr.common_failed_save),
         );
         throw error;
       } finally {
@@ -1591,6 +1640,7 @@ function useStaffAppointmentsPageContent() {
           totalAppointments={scopedAppointments.length}
           appointmentsError={appointmentsError}
           appointmentsNotice={appointmentsNotice}
+          appointmentsAuxiliaryError={appointmentsAuxiliaryError}
           metadataError={metadataError}
         />
 
@@ -1627,6 +1677,14 @@ function useStaffAppointmentsPageContent() {
             activeOperationalScope,
             onApplyOperationalScope: applyOperationalScope,
             onResetQuickScopes: resetQuickScopes,
+            queueLabel: canReviewAppointmentRequests
+              ? appointmentRequests.length > 0
+                ? `${appointmentText("appointments_queue")} (${appointmentRequests.length})`
+                : appointmentText("appointments_queue")
+              : undefined,
+            onOpenQueue: canReviewAppointmentRequests
+              ? openQueueModal
+              : undefined,
             sections: mobileAgendaSections,
             emptyText: appointmentText("appointments_no_appointments_in_the_current_mobile_scope"),
             onOpenDetail: openDetailSheet,
@@ -1681,6 +1739,9 @@ function useStaffAppointmentsPageContent() {
             currentUserId: user?.id,
             staff,
             interpreters,
+            providers,
+            taxonomyNodes,
+            providersError,
             openDetailSheet,
             operationalScope: activeOperationalScope,
             userRole: user?.role,

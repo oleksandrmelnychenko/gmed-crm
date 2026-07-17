@@ -47,6 +47,7 @@ import {
   appointmentTextareaControlClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
+import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import {
   blankChecklistForm,
   blankReminderForm,
@@ -679,10 +680,12 @@ function AppointmentInterpreterSection({
         if (cancelled) return;
         dispatchInterpreterState({
           type: "suggestions-error",
-          message:
-            error instanceof Error
-              ? error.message
-              : appointmentText("appointments_failed_to_load_interpreter_suggestions"),
+          message: appointmentActionErrorMessage(
+            error,
+            appointmentText(
+              "appointments_failed_to_load_interpreter_suggestions",
+            ),
+          ),
         });
       });
 
@@ -709,10 +712,10 @@ function AppointmentInterpreterSection({
         if (cancelled) return;
         dispatchInterpreterState({
           type: "history-error",
-          message:
-            error instanceof Error
-              ? error.message
-              : appointmentText("appointments_error_load_interpreter_history"),
+          message: appointmentActionErrorMessage(
+            error,
+            appointmentText("appointments_error_load_interpreter_history"),
+          ),
         });
       });
 
@@ -738,9 +741,10 @@ function AppointmentInterpreterSection({
       dispatchInterpreterState({ type: "interpreter-context-bump" });
     } catch (error) {
       onError(
-        error instanceof Error
-          ? error.message
-          : appointmentText("appointments_error_save_interpreter_preference"),
+        appointmentActionErrorMessage(
+          error,
+          appointmentText("appointments_error_save_interpreter_preference"),
+        ),
       );
     } finally {
       dispatchInterpreterState({
@@ -769,9 +773,10 @@ function AppointmentInterpreterSection({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error
-          ? error.message
-          : appointmentText("appointments_failed_to_assign_interpreter"),
+        appointmentActionErrorMessage(
+          error,
+          appointmentText("appointments_failed_to_assign_interpreter"),
+        ),
       );
     } finally {
       dispatchInterpreterState({ type: "patch", value: { busyAction: "" } });
@@ -794,9 +799,10 @@ function AppointmentInterpreterSection({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error
-          ? error.message
-          : appointmentText("appointments_failed_to_submit_response"),
+        appointmentActionErrorMessage(
+          error,
+          appointmentText("appointments_failed_to_submit_response"),
+        ),
       );
     } finally {
       dispatchInterpreterState({ type: "patch", value: { busyAction: "" } });
@@ -1125,9 +1131,10 @@ function AppointmentChecklistSection({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error
-          ? error.message
-          : appointmentText("appointments_failed_to_add_checklist_item"),
+        appointmentActionErrorMessage(
+          error,
+          appointmentText("appointments_failed_to_add_checklist_item"),
+        ),
       );
     } finally {
       setSubmitBusy(false);
@@ -1144,9 +1151,10 @@ function AppointmentChecklistSection({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error
-          ? error.message
-          : appointmentText("appointments_failed_to_complete_item"),
+        appointmentActionErrorMessage(
+          error,
+          appointmentText("appointments_failed_to_complete_item"),
+        ),
       );
     } finally {
       setCompletingId("");
@@ -1382,9 +1390,10 @@ function AppointmentRemindersSection({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error
-          ? error.message
-          : appointmentText("appointments_failed_to_add_reminder"),
+        appointmentActionErrorMessage(
+          error,
+          appointmentText("appointments_failed_to_add_reminder"),
+        ),
       );
     } finally {
       setSubmitBusy(false);
@@ -1401,9 +1410,10 @@ function AppointmentRemindersSection({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error
-          ? error.message
-          : appointmentText("appointments_failed_to_complete_reminder"),
+        appointmentActionErrorMessage(
+          error,
+          appointmentText("appointments_failed_to_complete_reminder"),
+        ),
       );
     } finally {
       setCompletingId("");
@@ -1794,7 +1804,7 @@ function AppointmentCompletionSectionContent({
       setCompletionSheetOpen(false);
       onRefresh();
     } catch (error) {
-      onError(error instanceof Error ? error.message : tr.common_failed_update);
+      onError(appointmentActionErrorMessage(error, tr.common_failed_update));
     } finally {
       setBusyAction("");
     }
@@ -1852,15 +1862,13 @@ function AppointmentCompletionSectionContent({
     } catch (error) {
       if (completed) {
         onError(
-          error instanceof Error
-            ? appointmentText("appointments_follow_up_scheduling_failed_notice", {
-                message: error.message,
-              })
-            : tr.common_error,
+          appointmentText("appointments_follow_up_scheduling_failed_notice", {
+            message: appointmentActionErrorMessage(error, tr.common_error),
+          }),
         );
         onRefresh();
       } else {
-        onError(error instanceof Error ? error.message : tr.common_failed_update);
+        onError(appointmentActionErrorMessage(error, tr.common_failed_update));
       }
     } finally {
       setBusyAction("");
@@ -2073,9 +2081,10 @@ function AppointmentStatusToggleControl({
     } catch (error) {
       setOptimisticStatus({ appointmentId: detail.id, status: previousStatus });
       onError(
-        error instanceof Error
-          ? error.message
-          : appointmentText("appointments_failed_to_change_status"),
+        appointmentActionErrorMessage(
+          error,
+          appointmentText("appointments_failed_to_change_status"),
+        ),
       );
     } finally {
       setBusyAction("");
@@ -2307,9 +2316,10 @@ function AppointmentTasksSectionContent({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error
-          ? error.message
-          : appointmentText("appointments_failed_to_create_task"),
+        appointmentActionErrorMessage(
+          error,
+          appointmentText("appointments_failed_to_create_task"),
+        ),
       );
     } finally {
       setSubmitBusy(false);
@@ -2326,9 +2336,10 @@ function AppointmentTasksSectionContent({
       onRefresh();
     } catch (error) {
       onError(
-        error instanceof Error
-          ? error.message
-          : appointmentText("appointments_failed_to_update_task"),
+        appointmentActionErrorMessage(
+          error,
+          appointmentText("appointments_failed_to_update_task"),
+        ),
       );
     } finally {
       setActionBusy("");

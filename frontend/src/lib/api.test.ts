@@ -152,6 +152,102 @@ describe("API request deduplication and cache", () => {
     expect(cached.version).toBe(1);
     expect(afterMutation.version).toBe(2);
   });
+
+  it("does not let a pre-mutation GET repopulate cache after it resolves last", async () => {
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage("token-a");
+    let resolveOldGet!: (response: Response) => void;
+    let resolveNewGet!: (response: Response) => void;
+    let getCount = 0;
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ ok: true }), { status: 200 }),
+        );
+      }
+
+      getCount += 1;
+      return new Promise<Response>((resolve) => {
+        if (getCount === 1) resolveOldGet = resolve;
+        else resolveNewGet = resolve;
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { apiFetch } = await loadApiModule();
+    const oldGet = apiFetch<{ version: number }>("/meta", {
+      cacheTtlMs: 30_000,
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    await apiFetch("/meta/update", {
+      method: "POST",
+      body: JSON.stringify({ ok: true }),
+    });
+    const newGet = apiFetch<{ version: number }>("/meta", {
+      cacheTtlMs: 30_000,
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+
+    resolveNewGet(
+      new Response(JSON.stringify({ version: 2 }), { status: 200 }),
+    );
+    await expect(newGet).resolves.toEqual({ version: 2 });
+    resolveOldGet(
+      new Response(JSON.stringify({ version: 1 }), { status: 200 }),
+    );
+    await expect(oldGet).resolves.toEqual({ version: 1 });
+
+    await expect(
+      apiFetch<{ version: number }>("/meta", { cacheTtlMs: 30_000 }),
+    ).resolves.toEqual({ version: 2 });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps a newer in-flight GET registered when the invalidated GET settles", async () => {
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage("token-a");
+    let resolveOldGet!: (response: Response) => void;
+    let resolveNewGet!: (response: Response) => void;
+    let getCount = 0;
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ ok: true }), { status: 200 }),
+        );
+      }
+
+      getCount += 1;
+      return new Promise<Response>((resolve) => {
+        if (getCount === 1) resolveOldGet = resolve;
+        else resolveNewGet = resolve;
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { apiFetch } = await loadApiModule();
+    const oldGet = apiFetch<{ version: number }>("/meta");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await apiFetch("/meta/update", { method: "POST" });
+    const newGet = apiFetch<{ version: number }>("/meta");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+
+    resolveOldGet(
+      new Response(JSON.stringify({ version: 1 }), { status: 200 }),
+    );
+    await oldGet;
+    const joinedNewGet = apiFetch<{ version: number }>("/meta");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    resolveNewGet(
+      new Response(JSON.stringify({ version: 2 }), { status: 200 }),
+    );
+    await expect(Promise.all([newGet, joinedNewGet])).resolves.toEqual([
+      { version: 2 },
+      { version: 2 },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
 });
 
 describe("API auth session refresh", () => {

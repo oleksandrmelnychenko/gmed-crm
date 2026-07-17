@@ -56,21 +56,21 @@ export async function fetchAppointmentDetailResourceGroup(
         group,
         value: await apiFetch<TaskEntry[]>(
           `/tasks?appointment_id=${appointmentId}`,
-        ).catch(() => []),
+        ),
       };
     case "services":
       return {
         group,
         value: await apiFetch<ConciergeServiceEntry[]>(
           `/concierge-services?appointment_id=${appointmentId}`,
-        ).catch(() => []),
+        ),
       };
     case "communications":
       return {
         group,
         value: await apiFetch<AppointmentCommunicationEntry[]>(
           `/appointments/${appointmentId}/communications`,
-        ).catch(() => []),
+        ),
       };
     default: {
       const exhaustiveGroup: never = group;

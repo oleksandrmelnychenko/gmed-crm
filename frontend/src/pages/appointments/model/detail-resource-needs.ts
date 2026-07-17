@@ -21,6 +21,16 @@ export const APPOINTMENT_DETAIL_RESOURCE_GROUPS: AppointmentDetailResourceGroup[
     "communications",
   ];
 
+type AppointmentDetailResourcePermissions = Pick<
+  AppointmentPermissions,
+  | "canManageChecklist"
+  | "canViewCommunications"
+  | "canViewConciergeServices"
+  | "canViewReminders"
+  | "canViewReport"
+  | "canViewTasks"
+>;
+
 const DESKTOP_TAB_RESOURCE_GROUPS: Record<
   AppointmentWorkspaceTab,
   AppointmentDetailResourceGroup[]
@@ -36,7 +46,7 @@ const DESKTOP_TAB_RESOURCE_GROUPS: Record<
 
 const DETAIL_RESOURCE_GROUP_PERMISSIONS: Record<
   AppointmentDetailResourceGroup,
-  (permissions: AppointmentPermissions) => boolean
+  (permissions: AppointmentDetailResourcePermissions) => boolean
 > = {
   checklist: (permissions) => permissions.canManageChecklist,
   reminders: (permissions) => permissions.canViewReminders,
@@ -49,7 +59,7 @@ const DETAIL_RESOURCE_GROUP_PERMISSIONS: Record<
 export function getRequiredAppointmentDetailResourceGroups(
   detailTab: AppointmentWorkspaceTab,
   isMobile: boolean,
-  permissions: AppointmentPermissions,
+  permissions: AppointmentDetailResourcePermissions,
 ) {
   const groups = isMobile
     ? APPOINTMENT_DETAIL_RESOURCE_GROUPS

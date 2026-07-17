@@ -500,10 +500,21 @@ export const de = {
   appointments_repeat_this: "Diesen Termin wiederholen",
   appointments_repeat_hint:
     "Eine wiederkehrende Serie basierend auf dem aktuellen Datum und Zeitfenster erstellen.",
+  appointments_time_pair_error:
+    "Start- und Endzeit müssen gemeinsam angegeben oder beide leer gelassen werden.",
+  appointments_time_range_error:
+    "Die Endzeit muss nach der Startzeit liegen.",
   appointments_repeat_interval_error:
     "Das Wiederholungsintervall muss eine positive Zahl sein.",
   appointments_repeat_require_end_error:
     "Gib entweder die Gesamtanzahl der Termine oder ein Wiederholen-bis-Datum an.",
+  appointments_repeat_end_mode: "Serienende",
+  appointments_repeat_end_count: "Nach Anzahl",
+  appointments_repeat_end_until: "Bis Datum",
+  appointments_attention_load_error:
+    "Die Aufmerksamkeitsdaten konnten nicht geladen werden. Der Kalender bleibt verfügbar.",
+  appointments_report_hours_validation:
+    "Die Stunden müssen zwischen 0,25 und 24 liegen und in Viertelstunden angegeben werden.",
   appointments_active_series_path: "Aktiver Serienpfad",
   appointments_current_occurrence: "Aktuell",
   appointments_open_checklist: "offene Checkliste",

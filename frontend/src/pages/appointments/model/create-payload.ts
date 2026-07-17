@@ -1,4 +1,9 @@
 import { normalizeCarePathKindForAppointmentType } from "./labels";
+import {
+  hasPairedAppointmentTimes,
+  hasValidAppointmentTimeRange,
+  serializeAppointmentTimes,
+} from "./date-time";
 import type { AppointmentFormState } from "./types";
 import { parsePositiveIntegerInput } from "./workflow-helpers";
 
@@ -7,6 +12,8 @@ export type CreateAppointmentValidationMessages = {
   titleRequired: string;
   dateRequired: string;
   medicalProviderRequired: string;
+  timePairError: string;
+  timeRangeError: string;
   repeatIntervalError: string;
   repeatRequireEndError: string;
 };
@@ -27,6 +34,12 @@ export function validateCreateAppointmentForm(
   if (!form.date) {
     return { error: messages.dateRequired, repeatCount, repeatInterval };
   }
+  if (!hasPairedAppointmentTimes(form.timeStart, form.timeEnd)) {
+    return { error: messages.timePairError, repeatCount, repeatInterval };
+  }
+  if (!hasValidAppointmentTimeRange(form.timeStart, form.timeEnd)) {
+    return { error: messages.timeRangeError, repeatCount, repeatInterval };
+  }
   if (
     form.appointmentType === "medical" &&
     !form.providerId &&
@@ -38,7 +51,10 @@ export function validateCreateAppointmentForm(
     if (!repeatInterval) {
       return { error: messages.repeatIntervalError, repeatCount, repeatInterval };
     }
-    if (!repeatCount && !form.repeatUntil) {
+    if (
+      (form.repeatEndMode === "count" && !repeatCount) ||
+      (form.repeatEndMode === "until" && !form.repeatUntil)
+    ) {
       return { error: messages.repeatRequireEndError, repeatCount, repeatInterval };
     }
   }
@@ -51,9 +67,16 @@ export function buildCreateAppointmentPayload(
   repeatInterval = parsePositiveIntegerInput(form.repeatInterval),
   repeatCount = parsePositiveIntegerInput(form.repeatCount),
 ) {
+  const times = serializeAppointmentTimes(form.timeStart, form.timeEnd);
   const recurrenceUntil =
-    form.repeatEnabled && !repeatCount && form.repeatUntil
+    form.repeatEnabled &&
+    form.repeatEndMode === "until" &&
+    form.repeatUntil
       ? form.repeatUntil
+      : null;
+  const recurrenceCount =
+    form.repeatEnabled && form.repeatEndMode === "count"
+      ? repeatCount
       : null;
 
   return {
@@ -73,14 +96,14 @@ export function buildCreateAppointmentPayload(
     ),
     title: form.title.trim(),
     date: form.date,
-    time_start: form.timeStart || null,
-    time_end: form.timeEnd || null,
+    time_start: times.timeStart,
+    time_end: times.timeEnd,
     location: form.location.trim() || null,
     category: form.category.trim() || null,
     notes: form.notes.trim() || null,
     recurrence_frequency: form.repeatEnabled ? form.repeatFrequency : null,
     recurrence_interval: form.repeatEnabled ? repeatInterval : null,
-    recurrence_count: form.repeatEnabled ? repeatCount : null,
+    recurrence_count: recurrenceCount,
     recurrence_until: recurrenceUntil,
   };
 }

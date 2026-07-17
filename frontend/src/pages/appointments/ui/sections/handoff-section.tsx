@@ -18,6 +18,7 @@ import {
   appointmentSoftSplitRowClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
+import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import { formatAppointmentSlotLabel as slotLabel } from "@/pages/appointments/model/runtime-formatters";
 import {
   appointmentText,
@@ -112,7 +113,7 @@ function AppointmentHandoffSectionContent({
       });
       onRefresh();
     } catch (error) {
-      onError(error instanceof Error ? error.message : tr.common_failed_create);
+      onError(appointmentActionErrorMessage(error, tr.common_failed_create));
     } finally {
       setFollowUpBusy(false);
     }

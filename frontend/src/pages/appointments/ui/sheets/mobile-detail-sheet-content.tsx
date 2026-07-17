@@ -218,12 +218,15 @@ function useAppointmentMobileDetailSheetContentContent({
               <LoaderCircle className="mr-2 size-4 animate-spin" />
               {appointmentText("appointments_loading_appointment")}
             </div>
-          ) : detailError ? (
+          ) : detailError && !detail ? (
             <div className="pt-5">
               <Banner tone="error" withIcon>{detailError}</Banner>
             </div>
           ) : detail ? (
             <div className="space-y-6 pt-5">
+              {detailError ? (
+                <Banner tone="error" withIcon>{detailError}</Banner>
+              ) : null}
               <MemoizedAppointmentOverviewSection
                 detail={detail}
                 canEdit={permissions.canEditSchedule}

@@ -145,7 +145,7 @@ export function appointmentPermissions(
         canViewReminders: true,
         canManageReminders: true,
         canRespondToAssignment: false,
-        canSubmitReport: true,
+        canSubmitReport: false,
         canViewReport: true,
         canApproveReport: true,
         canRejectReport: true,

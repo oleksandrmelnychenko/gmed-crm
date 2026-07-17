@@ -55,8 +55,9 @@ test.describe("appointments recurring flows", () => {
         recurrence_series_id: seriesId,
         recurrence_frequency: "weekly",
         recurrence_interval: 1,
+        recurrence_end_mode: "count",
         recurrence_count: 3,
-        recurrence_until: null,
+        recurrence_until: "2026-04-27",
         recurrence_index: index,
         recurrence_series_size: 3,
         is_blocked: false,
@@ -373,8 +374,11 @@ test.describe("appointments recurring flows", () => {
         recurrence_series_id: seriesId,
         recurrence_frequency: "weekly",
         recurrence_interval: recurrenceInterval,
+        recurrence_end_mode: "count",
         recurrence_count: recurrenceCount,
-        recurrence_until: null,
+        recurrence_until: `2026-04-${
+          14 + (recurrenceCount - 1) * recurrenceInterval
+        }`,
         recurrence_index: index,
         recurrence_series_size: recurrenceCount,
         is_blocked: false,
@@ -601,6 +605,9 @@ test.describe("appointments recurring flows", () => {
     const scopeSelect = page.getByRole("combobox", {
       name: /Terminänderung anwenden auf|Применить смену расписания к/i,
     });
+    await expect(scopeSelect).toContainText(
+      /Nur dieser Termin|Только этот приём/i,
+    );
     await chooseComboboxOption(page, scopeSelect, /Ganze Serie|Вся серия/i);
     await page.getByLabel(/Wiederholen alle|Повторять каждые/i).fill("2");
     await page.getByLabel(/Anzahl Termine|Всего повторов/i).fill("4");

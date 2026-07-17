@@ -60,6 +60,31 @@ function mergeOpenRequests(
     );
 }
 
+export function settleAppointmentRequestQueueResults(
+  requestedResult: PromiseSettledResult<AppointmentRequestItem[]>,
+  approvedResult: PromiseSettledResult<AppointmentRequestItem[]>,
+  currentRows: AppointmentRequestItem[],
+  failedLoadMessage: string,
+) {
+  const requested =
+    requestedResult.status === "fulfilled"
+      ? requestedResult.value
+      : currentRows.filter((item) => item.status === "requested");
+  const approved =
+    approvedResult.status === "fulfilled"
+      ? approvedResult.value
+      : currentRows.filter((item) => item.status === "approved");
+  const failed =
+    requestedResult.status === "rejected" ||
+    approvedResult.status === "rejected";
+
+  return {
+    appointmentRequests: mergeOpenRequests(requested, approved),
+    appointmentRequestsError: failed ? failedLoadMessage : "",
+    appointmentRequestsLoading: false,
+  };
+}
+
 export function useAppointmentRequestsQueue({
   enabled,
   appointmentsVersion,
@@ -103,29 +128,23 @@ export function useAppointmentRequestsQueue({
         appointmentRequestsLoading: true,
         appointmentRequestsError: "",
       });
-      try {
-        const [requested, approved] = await Promise.all([
-          apiFetch<AppointmentRequestItem[]>(
-            "/appointments/requests?status=requested",
-          ),
-          apiFetch<AppointmentRequestItem[]>(
-            "/appointments/requests?status=approved",
-          ),
-        ]);
-        if (!active) return;
-        dispatchQueueState({
-          appointmentRequests: mergeOpenRequests(requested, approved),
-          appointmentRequestsLoading: false,
-        });
-      } catch (error) {
-        if (!active) return;
-        dispatchQueueState({
-          appointmentRequests: [],
-          appointmentRequestsError:
-            error instanceof Error ? error.message : failedLoadMessage,
-          appointmentRequestsLoading: false,
-        });
-      }
+      const [requestedResult, approvedResult] = await Promise.allSettled([
+        apiFetch<AppointmentRequestItem[]>(
+          "/appointments/requests?status=requested",
+        ),
+        apiFetch<AppointmentRequestItem[]>(
+          "/appointments/requests?status=approved",
+        ),
+      ]);
+      if (!active) return;
+      dispatchQueueState((current) =>
+        settleAppointmentRequestQueueResults(
+          requestedResult,
+          approvedResult,
+          current.appointmentRequests,
+          failedLoadMessage,
+        ),
+      );
     }
 
     void loadRequests();

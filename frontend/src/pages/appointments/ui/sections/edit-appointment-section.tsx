@@ -19,6 +19,7 @@ import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm
 import { isInternalOverlayInteractionEvent } from "@/components/ui/dismissal-guard";
 import {
   Banner,
+  checkboxClass,
   textareaClass,
   tokens,
 } from "@/components/ui-shell";
@@ -28,7 +29,6 @@ import {
   appointmentSelectControlClassName,
   appointmentSlateInputClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
-import { updateAppointmentStatus } from "@/pages/appointments/data/appointment-mutations";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import { useDebouncedValue } from "@/pages/appointments/data/use-debounced-value";
 import { buildConflictQuery } from "@/pages/appointments/model/query-builders";
@@ -43,7 +43,9 @@ import {
 import {
   buildEditAppointmentUpdatePayload,
   defaultEditAppointmentRecurrenceScope,
+  validateEditAppointmentForm,
 } from "@/pages/appointments/model/edit-payload";
+import { hasValidAppointmentTimeRange } from "@/pages/appointments/model/date-time";
 import {
   appointmentText,
   appointmentTypeLabel,
@@ -83,7 +85,6 @@ import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-
 import {
   CARE_PATH_KIND_OPTIONS,
   CHECKLIST_PHASES,
-  STATUS_OPTIONS,
   TYPE_OPTIONS,
 } from "@/pages/appointments/model/constants";
 import {
@@ -142,7 +143,7 @@ function createEditAppointmentSectionState(
 ): EditAppointmentSectionState {
   return {
     form: buildEditAppointmentForm(detail),
-    recurrenceScope: defaultEditAppointmentRecurrenceScope(detail),
+    recurrenceScope: defaultEditAppointmentRecurrenceScope(),
     doctors: [],
     conflicts: null,
     error: "",
@@ -242,12 +243,6 @@ function EditOverviewLine({
   );
 }
 
-function withEllipsis(value: string | null | undefined) {
-  const normalized = String(value ?? "").trim();
-  if (!normalized) return "";
-  return /[.…]$/u.test(normalized) ? normalized : `${normalized}…`;
-}
-
 function defaultProviderTaxonomyNodeId(provider: ProviderSummary | null | undefined) {
   return (
     provider?.taxonomy_node_id?.trim() ||
@@ -340,7 +335,7 @@ function useEditAppointmentSectionContentContent({
       type: "patch",
       value: {
         form: buildEditAppointmentForm(detail),
-        recurrenceScope: defaultEditAppointmentRecurrenceScope(detail),
+        recurrenceScope: defaultEditAppointmentRecurrenceScope(),
         conflicts: null,
         error: "",
         busy: false,
@@ -591,28 +586,33 @@ function useEditAppointmentSectionContentContent({
     setBusy(true);
     setError("");
     try {
-      const {
-        applyRecurrenceRule,
-        payload: updatePayload,
-        repeatCount,
-        repeatInterval,
-      } = buildEditAppointmentUpdatePayload({
+      const validation = validateEditAppointmentForm(
+        detail,
+        form,
+        recurrenceScope,
+        {
+          titleRequired: `${t.appointments_title_col}: ${t.cf_required}`,
+          dateRequired: `${t.appointments_date}: ${t.cf_required}`,
+          medicalProviderRequired: appointmentText(
+            "appointments_medical_provider_required",
+          ),
+          timePairError: t.appointments_time_pair_error,
+          timeRangeError: t.appointments_time_range_error,
+          repeatIntervalError: t.appointments_repeat_interval_error,
+          repeatRequireEndError: t.appointments_repeat_require_end_error,
+        },
+      );
+      if (validation.error) {
+        setError(validation.error);
+        return;
+      }
+      const { payload: updatePayload } = buildEditAppointmentUpdatePayload({
         detail,
         form,
         recurrenceScope,
         canEditAppointmentType,
         canManageChecklist,
       });
-      if (applyRecurrenceRule) {
-        if (!repeatInterval) {
-          setError(t.appointments_repeat_interval_error);
-          return;
-        }
-        if (!repeatCount && !form.repeatUntil) {
-          setError(t.appointments_repeat_require_end_error);
-          return;
-        }
-      }
 
       const result = await apiFetch<{
         ok: boolean;
@@ -621,13 +621,6 @@ function useEditAppointmentSectionContentContent({
         method: "POST",
         body: JSON.stringify(updatePayload),
       });
-      if (canManageStatus && form.status !== detail.status) {
-        await updateAppointmentStatus(
-          detail.id,
-          form.status,
-          detail.recurrence_frequency ? recurrenceScope : "single",
-        );
-      }
       closeSheet(false);
       onSaved(buildScheduleNotice(result.conflicts, localWarnings));
     } catch (submitError) {
@@ -653,7 +646,7 @@ function useEditAppointmentSectionContentContent({
       type: "patch",
       value: {
         form: buildEditAppointmentForm(detail),
-        recurrenceScope: defaultEditAppointmentRecurrenceScope(detail),
+        recurrenceScope: defaultEditAppointmentRecurrenceScope(),
         conflicts: null,
         error: "",
         busy: false,
@@ -916,6 +909,8 @@ function useEditAppointmentSectionContentContent({
         <Field compact required label={t.appointments_title_col}>
           <Input
             value={form.title}
+            required
+            aria-invalid={!form.title.trim()}
             onChange={(event) =>
               setFormFromUser((current) => ({
                 ...current,
@@ -936,6 +931,10 @@ function useEditAppointmentSectionContentContent({
                 providerTaxonomyNodeId: "",
                 providerId: appointmentType === "internal" ? "" : current.providerId,
                 doctorId: appointmentType === "internal" ? "" : current.doctorId,
+                skipMedicalProviderBinding:
+                  appointmentType === "medical"
+                    ? current.skipMedicalProviderBinding
+                    : false,
                 carePathKind: normalizeCarePathKindForAppointmentType(
                   appointmentType,
                   current.carePathKind,
@@ -980,6 +979,8 @@ function useEditAppointmentSectionContentContent({
             <Input
               type="date"
               value={form.date}
+              required
+              aria-invalid={!form.date}
               onChange={(event) =>
                 setFormFromUser((current) => ({
                   ...current,
@@ -989,10 +990,13 @@ function useEditAppointmentSectionContentContent({
               className={inputClassName}
             />
           </Field>
-          <Field compact label={t.appointments_time}>
+          <Field compact label={appointmentText("appointments_start")}>
             <Input
               type="time"
               value={form.timeStart}
+              aria-invalid={
+                !hasValidAppointmentTimeRange(form.timeStart, form.timeEnd)
+              }
               onChange={(event) =>
                 setFormFromUser((current) => ({
                   ...current,
@@ -1002,10 +1006,13 @@ function useEditAppointmentSectionContentContent({
               className={inputClassName}
             />
           </Field>
-          <Field compact label={t.appointments_time}>
+          <Field compact label={appointmentText("appointments_end")}>
             <Input
               type="time"
               value={form.timeEnd}
+              aria-invalid={
+                !hasValidAppointmentTimeRange(form.timeStart, form.timeEnd)
+              }
               onChange={(event) =>
                 setFormFromUser((current) => ({
                   ...current,
@@ -1019,26 +1026,7 @@ function useEditAppointmentSectionContentContent({
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
         {editSheetSectionTitle(appointmentText("appointments_status_and_responsibilities"))}
-        <div className="grid gap-4 md:grid-cols-2">
-          <Field compact label={appointmentText("appointments_status")}>
-            <NativeComboboxSelect
-              value={form.status}
-              onChange={(event) =>
-                setFormFromUser((current) => ({
-                  ...current,
-                  status: event.target.value as AppointmentFormState["status"],
-                }))
-              }
-              className={selectClassName}
-              disabled={!canManageStatus}
-            >
-              {STATUS_OPTIONS.map((status) => (
-                <option key={status} value={status}>
-                  {statusLabel(status)}
-                </option>
-              ))}
-            </NativeComboboxSelect>
-          </Field>
+        <div className="grid gap-4">
           <Field compact label={t.orders_phase}>
             <NativeComboboxSelect
               value={form.checklistPhase}
@@ -1101,6 +1089,9 @@ function useEditAppointmentSectionContentContent({
                   ...current,
                   providerId,
                   doctorId: "",
+                  skipMedicalProviderBinding: providerId
+                    ? false
+                    : current.skipMedicalProviderBinding,
                 }))
               }
               disabled={form.appointmentType === "internal"}
@@ -1132,6 +1123,41 @@ function useEditAppointmentSectionContentContent({
             ) : null}
           </Field>
         </div>
+        {form.appointmentType === "medical" ? (
+          <div className="space-y-2">
+            <label className="flex items-start gap-3 rounded-lg border border-border/60 bg-card px-3 py-2 text-sm text-foreground">
+              <input
+                type="checkbox"
+                checked={form.skipMedicalProviderBinding}
+                onChange={(event) =>
+                  setFormFromUser((current) => ({
+                    ...current,
+                    skipMedicalProviderBinding: event.target.checked,
+                  }))
+                }
+                disabled={Boolean(form.providerId)}
+                className={`${checkboxClass} mt-0.5`}
+              />
+              <span>
+                <span className="block font-medium text-foreground">
+                  {appointmentText("appointments_medical_provider_opt_out")}
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  {appointmentText(
+                    "appointments_medical_provider_opt_out_hint",
+                  )}
+                </span>
+              </span>
+            </label>
+            {!form.providerId && !form.skipMedicalProviderBinding ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {appointmentText(
+                  "appointments_medical_provider_required_hint",
+                )}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         </section>
         <section className="space-y-3 rounded-xl border border-border/50 bg-card/40 p-3.5">
         {editSheetSectionTitle(appointmentText("appointments_coordination_and_notes"))}
@@ -1285,42 +1311,73 @@ function useEditAppointmentSectionContentContent({
               </Field>
               <Field
                 compact
-                label={appointmentText("appointments_total_occurrences")}
+                label={t.appointments_repeat_end_mode}
               >
-                <Input
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={form.repeatCount}
+                <NativeComboboxSelect
+                  value={form.repeatEndMode}
                   onChange={(event) =>
                     setFormFromUser((current) => ({
                       ...current,
-                      repeatCount: event.target.value,
+                      repeatEndMode: event.target
+                        .value as AppointmentFormState["repeatEndMode"],
+                      repeatCount:
+                        event.target.value === "count"
+                          ? current.repeatCount ||
+                            String(detail.recurrence_series_size)
+                          : "",
+                      repeatUntil:
+                        event.target.value === "until"
+                          ? current.repeatUntil
+                          : "",
                     }))
                   }
-                  className={inputClassName}
-                  placeholder={withEllipsis(
-                    appointmentText("appointments_optional_when_repeat_until_is_set"),
-                  )}
+                  className={selectClassName}
                   disabled={recurrenceScope === "single"}
-                />
+                >
+                  <option value="count">{t.appointments_repeat_end_count}</option>
+                  <option value="until">{t.appointments_repeat_end_until}</option>
+                </NativeComboboxSelect>
               </Field>
-              <Field
-                compact
-                label={appointmentText("appointments_repeat_until")}
-              >
-                <Input
-                  type="date"
-                  value={form.repeatUntil}
-                  onChange={(event) =>
-                    setFormFromUser((current) => ({
-                      ...current,
-                      repeatUntil: event.target.value,
-                    }))
-                  }
-                  className={inputClassName}
-                  disabled={recurrenceScope === "single"}
-                />
-              </Field>
+              {form.repeatEndMode === "count" ? (
+                <Field
+                  compact
+                  label={appointmentText("appointments_total_occurrences")}
+                >
+                  <Input
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={form.repeatCount}
+                    onChange={(event) =>
+                      setFormFromUser((current) => ({
+                        ...current,
+                        repeatCount: event.target.value,
+                        repeatUntil: "",
+                      }))
+                    }
+                    className={inputClassName}
+                    disabled={recurrenceScope === "single"}
+                  />
+                </Field>
+              ) : (
+                <Field
+                  compact
+                  label={appointmentText("appointments_repeat_until")}
+                >
+                  <Input
+                    type="date"
+                    value={form.repeatUntil}
+                    onChange={(event) =>
+                      setFormFromUser((current) => ({
+                        ...current,
+                        repeatCount: "",
+                        repeatUntil: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                    disabled={recurrenceScope === "single"}
+                  />
+                </Field>
+              )}
             </div>
             <p className="text-xs text-muted-foreground">
               {t.appointments_edit_recurrence_rule_guidance}

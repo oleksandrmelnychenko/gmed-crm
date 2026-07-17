@@ -29,6 +29,7 @@ import {
   appointmentWhiteInputClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
+import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import {
   formatAppointmentDateTimeLabel as formatDateTimeLabel,
   formatAppointmentSlotLabel as slotLabel,
@@ -345,7 +346,7 @@ function useAppointmentExternalHandoffSectionContent({
       );
       onRefresh();
     } catch (error) {
-      onError(error instanceof Error ? error.message : tr.common_failed_create);
+      onError(appointmentActionErrorMessage(error, tr.common_failed_create));
     } finally {
       setSubmitBusy(false);
     }
@@ -366,7 +367,7 @@ function useAppointmentExternalHandoffSectionContent({
       );
       onRefresh();
     } catch (error) {
-      onError(error instanceof Error ? error.message : tr.common_failed_update);
+      onError(appointmentActionErrorMessage(error, tr.common_failed_update));
     } finally {
       setActionBusy("");
     }

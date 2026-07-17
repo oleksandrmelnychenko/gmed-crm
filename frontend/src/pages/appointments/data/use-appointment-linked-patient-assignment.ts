@@ -6,6 +6,7 @@ import {
 } from "react";
 
 import { assignLinkedPatient } from "@/pages/appointments/data/appointment-mutations";
+import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 
 type UseAppointmentLinkedPatientAssignmentOptions = {
   linkedPatientDetailId: string | null;
@@ -95,8 +96,10 @@ export function useAppointmentLinkedPatientAssignment({
       onAssigned();
     } catch (error) {
       dispatchAssignmentState({
-        linkedPatientAssignmentError:
-          error instanceof Error ? error.message : failedAssignMessage,
+        linkedPatientAssignmentError: appointmentActionErrorMessage(
+          error,
+          failedAssignMessage,
+        ),
       });
     } finally {
       dispatchAssignmentState({ linkedPatientAssignmentBusy: false });

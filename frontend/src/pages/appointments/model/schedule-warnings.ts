@@ -1,3 +1,4 @@
+import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import { appointmentText } from "@/pages/appointments/model/labels";
 import { formatAppointmentSlotLabel } from "@/pages/appointments/model/runtime-formatters";
 import type {
@@ -17,26 +18,18 @@ type ScheduleWarningPayload = {
   doctorId?: string | null;
 };
 
-function addHourToTime(value: string) {
-  const [hours, minutes] = value.split(":").map(Number);
-  const total = (hours * 60 + minutes + 60) % (24 * 60);
-  const nextHours = Math.floor(total / 60)
-    .toString()
-    .padStart(2, "0");
-  const nextMinutes = (total % 60).toString().padStart(2, "0");
-  return `${nextHours}:${nextMinutes}`;
-}
-
 function slotWindow(
   date: string,
   timeStart: string | null,
   timeEnd: string | null,
 ) {
   if (!date) return null;
+  if (Boolean(timeStart) !== Boolean(timeEnd)) return null;
   const start = new Date(`${date}T${timeStart || "00:00"}:00`);
-  const end = new Date(
-    `${date}T${timeEnd || (timeStart ? addHourToTime(timeStart) : "23:59")}:00`,
-  );
+  const end = new Date(`${date}T${timeEnd || "00:00"}:00`);
+  if (!timeEnd) {
+    end.setDate(end.getDate() + 1);
+  }
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
   return {
     startMs: start.getTime(),
@@ -265,6 +258,14 @@ function formatConflictDetail(item: ScopedConflictItem) {
 }
 
 export function formatScheduleConflictError(error: unknown, fallback: string) {
+  if (
+    isRecord(error) &&
+    isRecord(error.body) &&
+    error.body.retryable === true
+  ) {
+    return appointmentText("appointments_schedule_retry");
+  }
+
   const conflicts = conflictSummaryFromError(error);
   if (conflicts) {
     const details = scopedConflictItems(conflicts)
@@ -295,5 +296,5 @@ export function formatScheduleConflictError(error: unknown, fallback: string) {
     }
     return appointmentText("appointments_schedule_conflict_generic");
   }
-  return message || fallback;
+  return appointmentActionErrorMessage(error, fallback);
 }

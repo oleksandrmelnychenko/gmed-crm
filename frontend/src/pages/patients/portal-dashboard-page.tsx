@@ -44,6 +44,7 @@ import {
   recommendationStatusTone,
   recommendationTypeLabel,
 } from "@/pages/patients/model/portal-shared";
+import { isUpcomingPortalAppointment } from "@/pages/appointments/model/portal-appointment-visibility";
 import type {
   PortalAppointmentItem,
   PortalConciergeServiceItem,
@@ -284,7 +285,7 @@ function usePatientDashboardPageContent() {
 
   const releasedDocuments = documents.length;
   const upcomingAppointments = useMemo(
-    () => appointments.filter((item) => item.date >= new Date().toISOString().slice(0, 10)).length,
+    () => appointments.filter((item) => isUpcomingPortalAppointment(item)).length,
     [appointments],
   );
   const pendingConfirmations = useMemo(

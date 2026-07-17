@@ -500,10 +500,21 @@ export const ru = {
   appointments_repeat_this: "Повторять этот приём",
   appointments_repeat_hint:
     "Создать повторяющуюся серию на основе текущей даты и временного слота.",
+  appointments_time_pair_error:
+    "Укажите время начала и окончания вместе либо оставьте оба поля пустыми.",
+  appointments_time_range_error:
+    "Время окончания должно быть позже времени начала.",
   appointments_repeat_interval_error:
     "Интервал повтора должен быть положительным числом.",
   appointments_repeat_require_end_error:
     "Укажите либо общее количество повторов, либо дату окончания повторения.",
+  appointments_repeat_end_mode: "Окончание серии",
+  appointments_repeat_end_count: "По количеству",
+  appointments_repeat_end_until: "До даты",
+  appointments_attention_load_error:
+    "Не удалось загрузить данные внимания. Календарь остаётся доступным.",
+  appointments_report_hours_validation:
+    "Укажите от 0,25 до 24 часов с шагом 15 минут.",
   appointments_active_series_path: "Активный путь серии",
   appointments_current_occurrence: "Текущий",
   appointments_open_checklist: "открытый чеклист",

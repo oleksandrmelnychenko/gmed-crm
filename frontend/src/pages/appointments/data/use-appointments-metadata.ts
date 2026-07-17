@@ -26,6 +26,7 @@ export function buildAppointmentsMetadataState({
   patientResult,
   providerResult,
   taxonomyRows,
+  taxonomyError = "",
   interpreterResult,
   staffResult,
 }: {
@@ -33,12 +34,14 @@ export function buildAppointmentsMetadataState({
   patientResult: AppointmentsMetadataLoadResult<PatientSummary>;
   providerResult: AppointmentsMetadataLoadResult<ProviderSummary>;
   taxonomyRows: ProviderTaxonomyNode[];
+  taxonomyError?: string;
   interpreterResult: AppointmentsMetadataLoadResult<InterpreterOption>;
   staffResult: AppointmentsMetadataLoadResult<StaffOption>;
 }) {
   const metadataError =
-    patientResult.error &&
-    interpreterResult.error &&
+    patientResult.error ||
+    taxonomyError ||
+    interpreterResult.error ||
     staffResult.error
       ? failedLoadMessage
       : "";
@@ -51,7 +54,7 @@ export function buildAppointmentsMetadataState({
     staff: staffResult.rows,
     metadataLoading: false,
     metadataError,
-    providersError: providerResult.error,
+    providersError: providerResult.error || taxonomyError,
   };
 }
 
@@ -97,7 +100,12 @@ export function useAppointmentsMetadata({
             rows: [] as ProviderSummary[],
             error: failedLoadMessage,
           })),
-        fetchProviderTaxonomy().then((taxonomy) => taxonomy.nodes).catch(() => []),
+        fetchProviderTaxonomy()
+          .then((taxonomy) => ({ rows: taxonomy.nodes, error: "" }))
+          .catch(() => ({
+            rows: [] as ProviderTaxonomyNode[],
+            error: failedLoadMessage,
+          })),
         apiFetch<InterpreterOption[]>("/appointments/meta/interpreters", {
           cacheTtlMs: APPOINTMENT_METADATA_CACHE_TTL_MS,
         })
@@ -118,7 +126,13 @@ export function useAppointmentsMetadata({
 
       if (!active) return;
       void metadataRequest.then(
-        ([patientResult, providerResult, taxonomyRows, interpreterResult, staffResult]) => {
+        ([
+          patientResult,
+          providerResult,
+          taxonomyResult,
+          interpreterResult,
+          staffResult,
+        ]) => {
           if (!active) return;
 
           setMetadataState(
@@ -126,7 +140,8 @@ export function useAppointmentsMetadata({
               failedLoadMessage,
               patientResult,
               providerResult,
-              taxonomyRows,
+              taxonomyRows: taxonomyResult.rows,
+              taxonomyError: taxonomyResult.error,
               interpreterResult,
               staffResult,
             }),

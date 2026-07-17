@@ -210,13 +210,18 @@ function RecurringSeriesDetails({
               </span>
               <span className="size-1 rounded-full bg-muted-foreground/35" />
               <span>{recurrenceFrequencyLabel(recurrenceFrequency)}</span>
-              {detail.recurrence_until || detail.recurrence_count ? (
+              {detail.recurrence_until ||
+              detail.recurrence_count ||
+              detail.recurrence_series_size ? (
                 <>
                   <span className="size-1 rounded-full bg-muted-foreground/35" />
                   <span>
-                    {detail.recurrence_until
+                    {detail.recurrence_end_mode === "until"
                       ? `${t.appointments_until} ${detail.recurrence_until}`
-                      : `${t.appointments_total_planned_occurrences}: ${detail.recurrence_count}`}
+                      : `${t.appointments_total_planned_occurrences}: ${
+                          detail.recurrence_series_size ||
+                          detail.recurrence_count
+                        }`}
                   </span>
                 </>
               ) : null}

@@ -50,6 +50,7 @@ import {
   portalOrderPhaseLabel as sharedPortalOrderPhaseLabel,
   portalStatusLabel,
 } from "@/pages/patients/model/portal-shared";
+import { isUpcomingPortalAppointment } from "@/pages/appointments/model/portal-appointment-visibility";
 import type {
   PortalAppointmentItem,
   PortalAppointmentRequestItem,
@@ -250,7 +251,7 @@ function usePatientAppointmentsPageContent() {
   }, [t.portal_appointments_failed_to_load_appointment_workspace, version]);
 
   const upcomingAppointments = useMemo(
-    () => appointments.filter((item) => item.date >= new Date().toISOString().slice(0, 10)),
+    () => appointments.filter((item) => isUpcomingPortalAppointment(item)),
     [appointments],
   );
   const openRequests = useMemo(

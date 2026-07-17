@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer } from "react";
 
 import { apiFetch } from "@/lib/api";
+import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import {
   type PatientAssignment as PatientSheetAssignment,
   type PatientDetail as PatientSheetDetail,
@@ -121,8 +122,10 @@ export function useAppointmentLinkedPatient({
           linkedPatientDetail: null,
           linkedPatientAssignments: [],
           linkedPatientAssignableStaff: [],
-          linkedPatientDetailError:
-            error instanceof Error ? error.message : failedLoadMessage,
+          linkedPatientDetailError: appointmentActionErrorMessage(
+            error,
+            failedLoadMessage,
+          ),
           linkedPatientDetailLoading: false,
         });
       }

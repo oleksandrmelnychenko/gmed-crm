@@ -375,7 +375,14 @@ type JsonCacheEntry = {
 };
 
 const jsonCache = new Map<string, JsonCacheEntry>();
-const inFlightJsonGets = new Map<string, Promise<unknown>>();
+type InFlightJsonGet = {
+  generation: number;
+  request: Promise<unknown>;
+  token: symbol;
+};
+
+const inFlightJsonGets = new Map<string, InFlightJsonGet>();
+let jsonCacheGeneration = 0;
 
 function requestMethod(init: RequestInit) {
   return (init.method ?? "GET").toUpperCase();
@@ -436,8 +443,11 @@ function readFreshJsonCache(key: string) {
 }
 
 export function clearApiCache(pathPrefix?: string) {
+  jsonCacheGeneration += 1;
+
   if (!pathPrefix) {
     jsonCache.clear();
+    inFlightJsonGets.clear();
     return;
   }
 
@@ -445,6 +455,11 @@ export function clearApiCache(pathPrefix?: string) {
   for (const key of jsonCache.keys()) {
     if (key.startsWith(urlPrefix)) {
       jsonCache.delete(key);
+    }
+  }
+  for (const key of inFlightJsonGets.keys()) {
+    if (key.startsWith(urlPrefix)) {
+      inFlightJsonGets.delete(key);
     }
   }
 }
@@ -523,12 +538,13 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
 
     if (!skipDedupe) {
       const inFlight = inFlightJsonGets.get(cacheKey);
-      if (inFlight) {
-        return cloneJsonPayload(await inFlight) as T;
+      if (inFlight?.generation === jsonCacheGeneration) {
+        return cloneJsonPayload(await inFlight.request) as T;
       }
     }
   }
 
+  const requestGeneration = jsonCacheGeneration;
   const request = (async () => {
     let res = await fetchWithRateLimitRetry(url, { ...requestInit, headers }, timeoutMs);
 
@@ -549,7 +565,7 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
     }
 
     const payload = await readApiJsonResponse<T>(res);
-    if (canCacheGet) {
+    if (canCacheGet && requestGeneration === jsonCacheGeneration) {
       rememberJsonCache(cacheKey, payload, cacheTtlMs);
     } else if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
       clearApiCache();
@@ -561,11 +577,19 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
     return request;
   }
 
-  inFlightJsonGets.set(cacheKey, request);
+  const requestToken = Symbol(cacheKey);
+  inFlightJsonGets.set(cacheKey, {
+    generation: requestGeneration,
+    request,
+    token: requestToken,
+  });
   try {
     return await request;
   } finally {
-    inFlightJsonGets.delete(cacheKey);
+    const current = inFlightJsonGets.get(cacheKey);
+    if (current?.token === requestToken) {
+      inFlightJsonGets.delete(cacheKey);
+    }
   }
 }
 

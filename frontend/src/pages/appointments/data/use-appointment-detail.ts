@@ -8,7 +8,10 @@ import {
 } from "react";
 
 import { apiFetch } from "@/lib/api";
-import { fetchAppointmentDetailResourceGroup } from "@/pages/appointments/data/detail-resource-groups";
+import {
+  fetchAppointmentDetailResourceGroup,
+  type AppointmentDetailResourcePayload,
+} from "@/pages/appointments/data/detail-resource-groups";
 import {
   APPOINTMENT_DETAIL_RESOURCE_GROUPS,
   getRequiredAppointmentDetailResourceGroups,
@@ -29,7 +32,7 @@ import type {
   TaskEntry,
 } from "@/pages/appointments/model/types";
 
-function createDetailResourceKeyState() {
+export function createDetailResourceKeyState() {
   return APPOINTMENT_DETAIL_RESOURCE_GROUPS.reduce<
     Record<AppointmentDetailResourceGroup, string>
   >(
@@ -48,6 +51,31 @@ function createDetailResourceKeyState() {
   );
 }
 
+export function selectUnattemptedAppointmentDetailResourceGroups(
+  missingGroups: AppointmentDetailResourceGroup[],
+  attemptedKeys: Record<AppointmentDetailResourceGroup, string>,
+  currentKey: string,
+) {
+  return missingGroups.filter(
+    (group) => attemptedKeys[group] !== currentKey,
+  );
+}
+
+export function areAppointmentDetailResourceGroupsSettled(
+  requiredGroups: AppointmentDetailResourceGroup[],
+  loadedKeys: Record<AppointmentDetailResourceGroup, string>,
+  attemptedKeys: Record<AppointmentDetailResourceGroup, string>,
+  loadingKeys: Record<AppointmentDetailResourceGroup, string>,
+  currentKey: string,
+) {
+  return requiredGroups.every(
+    (group) =>
+      loadedKeys[group] === currentKey ||
+      (attemptedKeys[group] === currentKey &&
+        loadingKeys[group] !== currentKey),
+  );
+}
+
 type UseAppointmentDetailOptions = {
   detailOpen: boolean;
   selectedId: string;
@@ -63,6 +91,8 @@ type AppointmentDetailState = {
   detail: AppointmentDetail | null;
   detailAssignments: PatientAssignment[];
   detailResourceKeys: Record<AppointmentDetailResourceGroup, string>;
+  detailResourceAttemptedKeys: Record<AppointmentDetailResourceGroup, string>;
+  detailResourceLoadingKeys: Record<AppointmentDetailResourceGroup, string>;
   detailChecklist: ChecklistItem[];
   detailReminders: ReminderEntry[];
   detailReport: ReportSummary | null;
@@ -82,6 +112,8 @@ function createAppointmentDetailState(): AppointmentDetailState {
     detail: null,
     detailAssignments: [],
     detailResourceKeys: createDetailResourceKeyState(),
+    detailResourceAttemptedKeys: createDetailResourceKeyState(),
+    detailResourceLoadingKeys: createDetailResourceKeyState(),
     detailChecklist: [],
     detailReminders: [],
     detailReport: null,
@@ -99,6 +131,52 @@ function appointmentDetailReducer(
     ...state,
     ...(typeof patch === "function" ? patch(state) : patch),
   };
+}
+
+export function settleAppointmentDetailResourceResults(
+  pendingGroups: AppointmentDetailResourceGroup[],
+  results: PromiseSettledResult<AppointmentDetailResourcePayload>[],
+) {
+  const loadedGroups: AppointmentDetailResourceGroup[] = [];
+  const detailPatch: Partial<AppointmentDetailState> = {};
+  let firstErrorMessage = "";
+
+  for (const [index, result] of results.entries()) {
+    const group = pendingGroups[index];
+    if (result.status === "fulfilled") {
+      const resource = result.value;
+      loadedGroups.push(group);
+      switch (resource.group) {
+        case "checklist":
+          detailPatch.detailChecklist = resource.value;
+          break;
+        case "reminders":
+          detailPatch.detailReminders = resource.value;
+          break;
+        case "report":
+          detailPatch.detailReport = resource.value;
+          break;
+        case "tasks":
+          detailPatch.detailTasks = resource.value;
+          break;
+        case "services":
+          detailPatch.detailServices = resource.value;
+          break;
+        case "communications":
+          detailPatch.detailCommunications = resource.value;
+          break;
+      }
+      continue;
+    }
+
+    if (!firstErrorMessage) {
+      firstErrorMessage = appointmentText(
+        "appointments_failed_to_load_extended_appointment_data",
+      );
+    }
+  }
+
+  return { detailPatch, firstErrorMessage, loadedGroups };
 }
 
 export function useAppointmentDetail({
@@ -120,6 +198,8 @@ export function useAppointmentDetail({
     detail,
     detailAssignments,
     detailResourceKeys,
+    detailResourceAttemptedKeys,
+    detailResourceLoadingKeys,
     detailChecklist,
     detailReminders,
     detailReport,
@@ -128,6 +208,7 @@ export function useAppointmentDetail({
     detailCommunications,
   } = detailState;
   const detailResourceRequestKeysRef = useRef(createDetailResourceKeyState());
+  const detailResourceRequestGenerationRef = useRef(0);
   const setDetailError = useCallback(
     (nextValue: SetStateAction<string>) => {
       dispatchDetailState((current) => ({
@@ -141,10 +222,38 @@ export function useAppointmentDetail({
   );
 
   const currentDetailResourceKey = selectedId ? `${selectedId}:${detailVersion}` : "";
-  const requiredDetailResourceGroups = getRequiredAppointmentDetailResourceGroups(
-    detailTab,
-    isMobile,
-    permissions,
+  const {
+    canManageChecklist,
+    canViewCommunications,
+    canViewConciergeServices,
+    canViewReminders,
+    canViewReport,
+    canViewTasks,
+  } = permissions;
+  const requiredDetailResourceGroups = useMemo(
+    () =>
+      getRequiredAppointmentDetailResourceGroups(
+        detailTab,
+        isMobile,
+        {
+          canManageChecklist,
+          canViewCommunications,
+          canViewConciergeServices,
+          canViewReminders,
+          canViewReport,
+          canViewTasks,
+        },
+      ),
+    [
+      canManageChecklist,
+      canViewCommunications,
+      canViewConciergeServices,
+      canViewReminders,
+      canViewReport,
+      canViewTasks,
+      detailTab,
+      isMobile,
+    ],
   );
   const missingDetailResourceGroups = useMemo(
     () =>
@@ -156,9 +265,20 @@ export function useAppointmentDetail({
   const requiresExtendedDetailResources =
     detailOpen && Boolean(selectedId) && requiredDetailResourceGroups.length > 0;
   const detailExtendedLoading =
-    requiresExtendedDetailResources && missingDetailResourceGroups.length > 0;
+    requiresExtendedDetailResources &&
+    requiredDetailResourceGroups.some(
+      (group) =>
+        detailResourceLoadingKeys[group] === currentDetailResourceKey,
+    );
   const detailExtendedResourcesReady =
-    !requiresExtendedDetailResources || missingDetailResourceGroups.length === 0;
+    !requiresExtendedDetailResources ||
+    areAppointmentDetailResourceGroupsSettled(
+      requiredDetailResourceGroups,
+      detailResourceKeys,
+      detailResourceAttemptedKeys,
+      detailResourceLoadingKeys,
+      currentDetailResourceKey,
+    );
   const detailDefaultAssigneeId = useMemo(
     () =>
       detail ? resolveFollowUpDefaultAssignee(detail, detailAssignments) : "",
@@ -171,6 +291,15 @@ export function useAppointmentDetail({
   }, []);
 
   useEffect(() => {
+    detailResourceRequestGenerationRef.current += 1;
+    detailResourceRequestKeysRef.current = createDetailResourceKeyState();
+    return () => {
+      detailResourceRequestGenerationRef.current += 1;
+      detailResourceRequestKeysRef.current = createDetailResourceKeyState();
+    };
+  }, [detailOpen, detailVersion, selectedId]);
+
+  useEffect(() => {
     if (!selectedId || !detailOpen) return;
     let active = true;
 
@@ -179,18 +308,27 @@ export function useAppointmentDetail({
       dispatchDetailState({
         detailLoading: true,
         detailResourceKeys: createDetailResourceKeyState(),
+        detailResourceAttemptedKeys: createDetailResourceKeyState(),
+        detailResourceLoadingKeys: createDetailResourceKeyState(),
         detailError: "",
       });
       try {
         const appointmentDetail = await apiFetch<AppointmentDetail>(
           `/appointments/${selectedId}`,
         );
-        const assignments =
-          appointmentDetail.is_blocked || !permissions.canViewNotes
-            ? []
-            : await apiFetch<PatientAssignment[]>(
-                `/patients/${appointmentDetail.patient_id}/assignments`,
-              ).catch(() => []);
+        let assignments: PatientAssignment[] = [];
+        let assignmentsError = "";
+        if (!appointmentDetail.is_blocked && permissions.canViewNotes) {
+          try {
+            assignments = await apiFetch<PatientAssignment[]>(
+              `/patients/${appointmentDetail.patient_id}/assignments`,
+            );
+          } catch {
+            assignmentsError = appointmentText(
+              "appointments_failed_to_load_extended_appointment_data",
+            );
+          }
+        }
 
         if (!active) return;
         dispatchDetailState({
@@ -202,9 +340,10 @@ export function useAppointmentDetail({
           detailTasks: [],
           detailServices: [],
           detailCommunications: [],
+          detailError: assignmentsError,
           detailLoading: false,
         });
-      } catch (error) {
+      } catch {
         if (!active) return;
         dispatchDetailState({
           detail: null,
@@ -215,10 +354,9 @@ export function useAppointmentDetail({
           detailTasks: [],
           detailServices: [],
           detailCommunications: [],
-          detailError:
-            error instanceof Error
-              ? error.message
-              : appointmentText("appointments_failed_to_load_appointment"),
+          detailError: appointmentText(
+            "appointments_failed_to_load_appointment",
+          ),
           detailLoading: false,
         });
       }
@@ -247,20 +385,35 @@ export function useAppointmentDetail({
       return;
     }
 
-    const pendingGroups = missingDetailResourceGroups.filter(
-      (group) =>
-        detailResourceRequestKeysRef.current[group] !== currentDetailResourceKey,
+    const pendingGroups = selectUnattemptedAppointmentDetailResourceGroups(
+      missingDetailResourceGroups,
+      detailResourceRequestKeysRef.current,
+      currentDetailResourceKey,
     );
     if (pendingGroups.length === 0) {
       return;
     }
 
-    let active = true;
-
     function loadExtendedDetailResources() {
+      const requestGeneration =
+        detailResourceRequestGenerationRef.current;
       for (const group of pendingGroups) {
         detailResourceRequestKeysRef.current[group] = currentDetailResourceKey;
       }
+      dispatchDetailState((current) => {
+        const nextAttemptedKeys = {
+          ...current.detailResourceAttemptedKeys,
+        };
+        const nextLoadingKeys = { ...current.detailResourceLoadingKeys };
+        for (const group of pendingGroups) {
+          nextAttemptedKeys[group] = currentDetailResourceKey;
+          nextLoadingKeys[group] = currentDetailResourceKey;
+        }
+        return {
+          detailResourceAttemptedKeys: nextAttemptedKeys,
+          detailResourceLoadingKeys: nextLoadingKeys,
+        };
+      });
 
       const detailResourceRequest = Promise.allSettled(
         pendingGroups.map((group) =>
@@ -268,88 +421,47 @@ export function useAppointmentDetail({
         ),
       );
 
-      if (!active) {
-        return;
-      }
-
       void detailResourceRequest.then((results) => {
-        if (!active) {
+        if (
+          requestGeneration !==
+          detailResourceRequestGenerationRef.current
+        ) {
+          return;
+        }
+        const requestStillCurrent = pendingGroups.some(
+          (group) =>
+            detailResourceRequestKeysRef.current[group] ===
+            currentDetailResourceKey,
+        );
+        if (!requestStillCurrent) {
           return;
         }
 
-        const loadedGroups: AppointmentDetailResourceGroup[] = [];
-      const detailPatch: Partial<AppointmentDetailState> = {};
-      let firstErrorMessage = "";
+        const { detailPatch, firstErrorMessage, loadedGroups } =
+          settleAppointmentDetailResourceResults(pendingGroups, results);
 
-      for (const [index, result] of results.entries()) {
-        const group = pendingGroups[index];
-        if (result.status === "fulfilled") {
-          const resource = result.value;
-          loadedGroups.push(group);
-          switch (resource.group) {
-            case "checklist":
-              detailPatch.detailChecklist = resource.value;
-              break;
-            case "reminders":
-              detailPatch.detailReminders = resource.value;
-              break;
-            case "report":
-              detailPatch.detailReport = resource.value;
-              break;
-            case "tasks":
-              detailPatch.detailTasks = resource.value;
-              break;
-            case "services":
-              detailPatch.detailServices = resource.value;
-              break;
-            case "communications":
-              detailPatch.detailCommunications = resource.value;
-              break;
-          }
-          continue;
-        }
-
-        if (!firstErrorMessage) {
-          firstErrorMessage =
-            result.reason instanceof Error
-              ? result.reason.message
-              : appointmentText("appointments_failed_to_load_extended_appointment_data");
-        }
-
-        switch (group) {
-          case "checklist":
-            detailPatch.detailChecklist = [];
-            break;
-          case "reminders":
-            detailPatch.detailReminders = [];
-            break;
-          case "report":
-            detailPatch.detailReport = null;
-            break;
-          case "tasks":
-            detailPatch.detailTasks = [];
-            break;
-          case "services":
-            detailPatch.detailServices = [];
-            break;
-          case "communications":
-            detailPatch.detailCommunications = [];
-            break;
-        }
-      }
-
-      for (const group of pendingGroups) {
-        detailResourceRequestKeysRef.current[group] = "";
-      }
         if (
-          pendingGroups.length > 0 ||
+          loadedGroups.length > 0 ||
           firstErrorMessage ||
           Object.keys(detailPatch).length > 0
         ) {
           dispatchDetailState((current) => {
-            if (pendingGroups.length > 0) {
+            const detailResourceLoadingKeys = {
+              ...current.detailResourceLoadingKeys,
+            };
+            for (const group of pendingGroups) {
+              if (
+                detailResourceLoadingKeys[group] ===
+                currentDetailResourceKey
+              ) {
+                detailResourceLoadingKeys[group] = "";
+              }
+            }
+            detailPatch.detailResourceLoadingKeys =
+              detailResourceLoadingKeys;
+            if (loadedGroups.length > 0) {
               const detailResourceKeys = { ...current.detailResourceKeys };
-              for (const group of pendingGroups) {
+              for (const group of loadedGroups) {
                 detailResourceKeys[group] = currentDetailResourceKey;
               }
               detailPatch.detailResourceKeys = detailResourceKeys;
@@ -364,14 +476,6 @@ export function useAppointmentDetail({
     }
 
     loadExtendedDetailResources();
-    return () => {
-      active = false;
-      for (const group of pendingGroups) {
-        if (detailResourceRequestKeysRef.current[group] === currentDetailResourceKey) {
-          detailResourceRequestKeysRef.current[group] = "";
-        }
-      }
-    };
   }, [
     currentDetailResourceKey,
     detail,

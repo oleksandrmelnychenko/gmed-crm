@@ -86,6 +86,8 @@ export type InterpreterResponse =
 
 export type AppointmentRecurrenceFrequency = "daily" | "weekly" | "monthly";
 
+export type AppointmentRecurrenceEndMode = "count" | "until";
+
 export type AppointmentRecurringActionScope =
   | "single"
   | "following"
@@ -118,6 +120,7 @@ export type AppointmentListItem = {
   recurrence_series_id: string | null;
   recurrence_frequency: AppointmentRecurrenceFrequency | null;
   recurrence_interval: number | null;
+  recurrence_end_mode?: AppointmentRecurrenceEndMode | null;
   recurrence_count: number | null;
   recurrence_until: string | null;
   recurrence_index: number;
@@ -561,6 +564,7 @@ export type AppointmentFormState = {
   repeatEnabled: boolean;
   repeatFrequency: AppointmentRecurrenceFrequency;
   repeatInterval: string;
+  repeatEndMode: AppointmentRecurrenceEndMode;
   repeatCount: string;
   repeatUntil: string;
 };

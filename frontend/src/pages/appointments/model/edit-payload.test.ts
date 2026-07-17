@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildEditAppointmentUpdatePayload,
   defaultEditAppointmentRecurrenceScope,
+  validateEditAppointmentForm,
 } from "./edit-payload";
+import { buildEditAppointmentForm } from "./form-factories";
 import type { AppointmentDetail, AppointmentFormState } from "./types";
 
 const detail = {
@@ -33,7 +35,8 @@ const detail = {
   recurrence_series_id: "series-1",
   recurrence_frequency: "weekly",
   recurrence_interval: 2,
-  recurrence_count: 5,
+  recurrence_end_mode: "count",
+  recurrence_count: 3,
   recurrence_until: "2026-08-30",
   recurrence_index: 1,
   recurrence_series_size: 5,
@@ -74,20 +77,24 @@ const form = {
   repeatEnabled: true,
   repeatFrequency: "weekly",
   repeatInterval: "2",
+  repeatEndMode: "count",
   repeatCount: "7",
   repeatUntil: "2026-09-01",
 } satisfies AppointmentFormState;
 
+const validationMessages = {
+  titleRequired: "Title is required",
+  dateRequired: "Date is required",
+  medicalProviderRequired: "Provider or opt-out required",
+  timePairError: "Provide both times or neither",
+  timeRangeError: "End must be after start",
+  repeatIntervalError: "Repeat interval is invalid",
+  repeatRequireEndError: "Choose one recurrence ending",
+};
+
 describe("buildEditAppointmentUpdatePayload", () => {
-  it("defaults recurring appointment edits to the whole series scope", () => {
-    expect(defaultEditAppointmentRecurrenceScope(detail)).toBe("series");
-    expect(
-      defaultEditAppointmentRecurrenceScope({
-        ...detail,
-        recurrence_frequency: null,
-        recurrence_series_id: null,
-      }),
-    ).toBe("single");
+  it("defaults every recurring appointment edit to one occurrence", () => {
+    expect(defaultEditAppointmentRecurrenceScope()).toBe("single");
   });
 
   it("preserves category, notes and recurrence edits for series saves", () => {
@@ -107,6 +114,7 @@ describe("buildEditAppointmentUpdatePayload", () => {
         checklist_phase: "preparation",
         date: "2026-07-01",
         notes: "Keep this note after changing the date",
+        skip_medical_provider_binding: false,
         recurrence_count: 7,
         recurrence_frequency: "weekly",
         recurrence_interval: 2,
@@ -148,6 +156,7 @@ describe("buildEditAppointmentUpdatePayload", () => {
       detail,
       form: {
         ...form,
+        repeatEndMode: "until",
         repeatCount: "",
         repeatUntil: "2026-09-01",
       },
@@ -188,5 +197,157 @@ describe("buildEditAppointmentUpdatePayload", () => {
     expect(result.payload).not.toHaveProperty("recurrence_frequency");
     expect(result.payload).not.toHaveProperty("appointment_type");
     expect(result.payload).not.toHaveProperty("checklist_phase");
+  });
+
+  it("does not resend recurrence rules for notes-only series edits", () => {
+    const result = buildEditAppointmentUpdatePayload({
+      detail,
+      form: {
+        ...buildEditAppointmentForm(detail),
+        notes: "Updated note only",
+      },
+      recurrenceScope: "series",
+      canEditAppointmentType: false,
+      canManageChecklist: false,
+    });
+
+    expect(result.applyRecurrenceRule).toBe(false);
+    expect(result.payload.notes).toBe("Updated note only");
+    expect(result.payload.recurrence_scope).toBe("series");
+    expect(result.payload).not.toHaveProperty("recurrence_frequency");
+    expect(result.payload).not.toHaveProperty("recurrence_count");
+    expect(result.payload).not.toHaveProperty("recurrence_until");
+  });
+
+  it("uses total series size as the unchanged count after terminal entries", () => {
+    const hydrated = buildEditAppointmentForm(detail);
+    expect(hydrated.repeatCount).toBe("5");
+
+    const result = buildEditAppointmentUpdatePayload({
+      detail,
+      form: hydrated,
+      recurrenceScope: "series",
+      canEditAppointmentType: false,
+      canManageChecklist: false,
+    });
+
+    expect(result.applyRecurrenceRule).toBe(false);
+    expect(result.payload).not.toHaveProperty("recurrence_count");
+  });
+
+  it("sends explicit provider opt-out for an unbound medical edit", () => {
+    const result = buildEditAppointmentUpdatePayload({
+      detail,
+      form: {
+        ...buildEditAppointmentForm(detail),
+        providerId: "",
+        doctorId: "",
+        skipMedicalProviderBinding: true,
+      },
+      recurrenceScope: "single",
+      canEditAppointmentType: true,
+      canManageChecklist: false,
+    });
+
+    expect(result.payload.provider_id).toBeNull();
+    expect(result.payload.doctor_id).toBeNull();
+    expect(result.payload.skip_medical_provider_binding).toBe(true);
+  });
+
+  it("preserves one-sided times for backend validation if UI validation is bypassed", () => {
+    const result = buildEditAppointmentUpdatePayload({
+      detail,
+      form: {
+        ...buildEditAppointmentForm(detail),
+        timeStart: "09:00",
+        timeEnd: "",
+      },
+      recurrenceScope: "single",
+      canEditAppointmentType: false,
+      canManageChecklist: false,
+    });
+
+    expect(result.payload.time_start).toBe("09:00");
+    expect(result.payload.time_end).toBeNull();
+  });
+});
+
+describe("validateEditAppointmentForm", () => {
+  it("rejects missing title and date before sending an update", () => {
+    expect(
+      validateEditAppointmentForm(
+        detail,
+        { ...form, title: " " },
+        "single",
+        validationMessages,
+      ).error,
+    ).toBe("Title is required");
+    expect(
+      validateEditAppointmentForm(
+        detail,
+        { ...form, date: "" },
+        "single",
+        validationMessages,
+      ).error,
+    ).toBe("Date is required");
+  });
+
+  it("rejects one-sided and non-increasing appointment times", () => {
+    expect(
+      validateEditAppointmentForm(
+        detail,
+        { ...form, timeStart: "09:00", timeEnd: "" },
+        "single",
+        validationMessages,
+      ).error,
+    ).toBe("Provide both times or neither");
+    expect(
+      validateEditAppointmentForm(
+        detail,
+        { ...form, timeStart: "10:00", timeEnd: "10:00" },
+        "single",
+        validationMessages,
+      ).error,
+    ).toBe("End must be after start");
+    expect(
+      validateEditAppointmentForm(
+        detail,
+        { ...form, timeStart: "10:00", timeEnd: "09:00" },
+        "single",
+        validationMessages,
+      ).error,
+    ).toBe("End must be after start");
+  });
+
+  it("requires a provider or explicit opt-out for medical edits", () => {
+    expect(
+      validateEditAppointmentForm(
+        detail,
+        {
+          ...form,
+          providerId: "",
+          doctorId: "",
+          skipMedicalProviderBinding: false,
+        },
+        "single",
+        validationMessages,
+      ).error,
+    ).toBe("Provider or opt-out required");
+  });
+
+  it("validates only the selected recurrence end mode", () => {
+    expect(
+      validateEditAppointmentForm(
+        detail,
+        {
+          ...form,
+          repeatEndMode: "until",
+          repeatCount: "7",
+          repeatUntil: "",
+        },
+        "series",
+        validationMessages,
+      ).error,
+    ).toBe("Choose one recurrence ending");
   });
 });

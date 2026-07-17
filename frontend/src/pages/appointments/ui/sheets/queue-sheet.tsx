@@ -14,12 +14,14 @@ import { Input } from "@/components/ui/input";
 import {
   EmptyCell,
   ListItem,
+  checkboxClass,
   inputClass,
   selectClass,
   textareaClass,
 } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import {
   defaultAppointmentOwnerUserId,
   statusActionKey,
@@ -35,10 +37,15 @@ import {
   appointmentText,
   appointmentTypeLabel,
   carePathKindLabel,
+  doctorLabel,
   staffLabel,
   statusLabel,
 } from "@/pages/appointments/model/labels";
-import { currentDateInput } from "@/pages/appointments/model/date-time";
+import {
+  currentDateInput,
+  hasPairedAppointmentTimes,
+  hasValidAppointmentTimeRange,
+} from "@/pages/appointments/model/date-time";
 import type {
   AppointmentAttentionItem,
   AppointmentListItem,
@@ -46,10 +53,14 @@ import type {
   AppointmentRequestStatus,
   AppointmentRecurringActionScope,
   AppointmentStatus,
+  DoctorOption,
   InterpreterOption,
   OperationalScope,
+  ProviderSummary,
   StaffOption,
 } from "@/pages/appointments/model/types";
+import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
+import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
 import {
   appointmentStatusBadgeClassName,
 } from "@/pages/appointments/appearance/status-appearance";
@@ -69,6 +80,9 @@ export type QueueSheetProps = {
   currentUserId?: string;
   staff: StaffOption[];
   interpreters: InterpreterOption[];
+  providers: ProviderSummary[];
+  taxonomyNodes: ProviderTaxonomyNode[];
+  providersError?: string;
   openDetailSheet: (appointmentId: string) => void;
   operationalScope: OperationalScope;
   userRole?: string;
@@ -106,6 +120,7 @@ type ConvertAppointmentRequestInput = {
   location: string | null;
   category: string | null;
   notes: string | null;
+  skipMedicalProviderBinding: boolean;
 };
 
 export type RequestScheduleFormState = {
@@ -115,6 +130,10 @@ export type RequestScheduleFormState = {
   timeEnd: string;
   ownerUserId: string;
   interpreterId: string;
+  providerId: string;
+  providerTaxonomyNodeId: string;
+  doctorId: string;
+  skipMedicalProviderBinding: boolean;
   location: string;
   notes: string;
 };
@@ -150,6 +169,12 @@ function buildScheduleForm(
     timeEnd: "",
     ownerUserId: defaultAppointmentOwnerUserId(currentUserId, currentUserRole),
     interpreterId: "",
+    providerId: item.requested_provider_id ?? "",
+    providerTaxonomyNodeId: "",
+    doctorId: item.requested_provider_id
+      ? item.requested_doctor_id ?? ""
+      : "",
+    skipMedicalProviderBinding: false,
     location: item.location ?? "",
     notes: [item.reason, item.notes].filter(Boolean).join("\n\n"),
   };
@@ -213,6 +238,9 @@ function useQueueSheetContent({
   currentUserId,
   staff,
   interpreters,
+  providers,
+  taxonomyNodes,
+  providersError = "",
   openDetailSheet,
   operationalScope,
   userRole,
@@ -226,7 +254,7 @@ function useQueueSheetContent({
   onReviewRequest,
   onConvertRequest,
 }: QueueSheetProps) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const hasAppointmentRequests = appointmentRequests.length > 0;
   const hasAppointments = items.length > 0;
@@ -236,6 +264,10 @@ function useQueueSheetContent({
   const [scheduleForm, setScheduleForm] =
     useState<RequestScheduleFormState | null>(scheduleDraft?.form ?? null);
   const [scheduleError, setScheduleError] = useState(scheduleDraft?.error ?? "");
+  const [doctorOptions, setDoctorOptions] = useState<{
+    providerId: string;
+    rows: DoctorOption[];
+  }>({ providerId: "", rows: [] });
   const activeScheduleRequestExists = activeScheduleRequestId
     ? appointmentRequests.some((item) => item.id === activeScheduleRequestId)
     : true;
@@ -249,6 +281,9 @@ function useQueueSheetContent({
     : "";
   const visibleScheduleForm = isScheduleRequestCurrent ? scheduleForm : null;
   const visibleScheduleError = isScheduleRequestCurrent ? scheduleError : "";
+  const visibleProviderId = visibleScheduleForm?.providerId ?? "";
+  const doctors =
+    doctorOptions.providerId === visibleProviderId ? doctorOptions.rows : [];
   const ownerOptions = useMemo(() => {
     const filtered = filterAppointmentOwnerOptions(staff, userRole, currentUserId);
     const ownerUserId = visibleScheduleForm?.ownerUserId;
@@ -278,6 +313,26 @@ function useQueueSheetContent({
 
     return filtered;
   }, [currentUserId, staff, userRole, visibleScheduleForm?.ownerUserId]);
+
+  useEffect(() => {
+    if (!visibleProviderId) return;
+
+    let active = true;
+    void getProviderDoctors(visibleProviderId)
+      .then((rows) => {
+        if (active) {
+          setDoctorOptions({ providerId: visibleProviderId, rows });
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setDoctorOptions({ providerId: visibleProviderId, rows: [] });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [visibleProviderId]);
 
   useEffect(() => {
     if (visibleScheduleRequestId && visibleScheduleForm) {
@@ -327,11 +382,27 @@ function useQueueSheetContent({
       setScheduleError(appointmentText("appointments_date_is_required"));
       return;
     }
+    if (!hasPairedAppointmentTimes(scheduleForm.timeStart, scheduleForm.timeEnd)) {
+      setScheduleError(t.appointments_time_pair_error);
+      return;
+    }
+    if (!hasValidAppointmentTimeRange(scheduleForm.timeStart, scheduleForm.timeEnd)) {
+      setScheduleError(t.appointments_time_range_error);
+      return;
+    }
+    if (
+      item.appointment_type === "medical" &&
+      !scheduleForm.providerId &&
+      !scheduleForm.skipMedicalProviderBinding
+    ) {
+      setScheduleError(appointmentText("appointments_medical_provider_required"));
+      return;
+    }
     setScheduleError("");
     try {
       await onConvertRequest(item.id, {
-        providerId: item.requested_provider_id,
-        doctorId: item.requested_doctor_id,
+        providerId: scheduleForm.providerId || null,
+        doctorId: scheduleForm.doctorId || null,
         ownerUserId: scheduleForm.ownerUserId || null,
         interpreterId: scheduleForm.interpreterId || null,
         orderId: item.order_id,
@@ -342,6 +413,10 @@ function useQueueSheetContent({
         location: scheduleForm.location || null,
         category: null,
         notes: scheduleForm.notes || null,
+        skipMedicalProviderBinding:
+          item.appointment_type === "medical" &&
+          !scheduleForm.providerId &&
+          scheduleForm.skipMedicalProviderBinding,
       });
       resetScheduleForm();
     } catch {
@@ -354,7 +429,7 @@ function useQueueSheetContent({
       open={open}
       onOpenChange={handleOpenChange}
       title={t.appointments_title}
-      maxWidthClassName="sm:max-w-[640px]"
+      maxWidthClassName="sm:max-w-[760px]"
     >
       {appointmentsLoading || metadataLoading ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -501,6 +576,12 @@ function useQueueSheetContent({
                             <Input
                               type="time"
                               value={visibleScheduleForm.timeStart}
+                              aria-invalid={
+                                !hasValidAppointmentTimeRange(
+                                  visibleScheduleForm.timeStart,
+                                  visibleScheduleForm.timeEnd,
+                                )
+                              }
                               onChange={(event) =>
                                 setScheduleForm((current) =>
                                   current
@@ -518,6 +599,12 @@ function useQueueSheetContent({
                             <Input
                               type="time"
                               value={visibleScheduleForm.timeEnd}
+                              aria-invalid={
+                                !hasValidAppointmentTimeRange(
+                                  visibleScheduleForm.timeStart,
+                                  visibleScheduleForm.timeEnd,
+                                )
+                              }
                               onChange={(event) =>
                                 setScheduleForm((current) =>
                                   current
@@ -529,6 +616,127 @@ function useQueueSheetContent({
                             />
                           </label>
                         </div>
+                        {item.appointment_type === "medical" ? (
+                          <div className="space-y-3 md:col-span-2">
+                            {providersError ? (
+                              <p className="text-xs font-medium text-rose-700">
+                                {providersError}
+                              </p>
+                            ) : null}
+                            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(180px,0.55fr)]">
+                              <ProviderSelectWithTaxonomyFilter
+                                value={visibleScheduleForm.providerId}
+                                providers={providers}
+                                taxonomyNodes={taxonomyNodes}
+                                providerType="medical"
+                                taxonomyValue={
+                                  visibleScheduleForm.providerTaxonomyNodeId
+                                }
+                                providerPlaceholder={t.common_not_set}
+                                taxonomyPlaceholder={
+                                  t.appointments_provider_category
+                                }
+                                taxonomyAllLabel={t.providers_all}
+                                noProvidersLabel={t.providers_none_in_category}
+                                restrictTaxonomyToAvailable
+                                showInsuranceFilter
+                                insuranceLabel={t.patients_insurance_provider}
+                                insurancePlaceholder={t.providers_all}
+                                taxonomyLabel={t.appointments_provider_category}
+                                providerSelectLabel={t.common_provider}
+                                taxonomySelectClassName={selectClass}
+                                providerSelectClassName={selectClass}
+                                providerLabel={(provider) => provider.name}
+                                onTaxonomyChange={(providerTaxonomyNodeId) =>
+                                  setScheduleForm((current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          providerTaxonomyNodeId,
+                                        }
+                                      : current,
+                                  )
+                                }
+                                onChange={(providerId) =>
+                                  setScheduleForm((current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          providerId,
+                                          doctorId: "",
+                                          skipMedicalProviderBinding: providerId
+                                            ? false
+                                            : current.skipMedicalProviderBinding,
+                                        }
+                                      : current,
+                                  )
+                                }
+                              />
+                              <label className="flex flex-col gap-1.5">
+                                <span className="text-[11.5px] font-medium leading-tight text-muted-foreground">
+                                  {t.common_doctor}
+                                </span>
+                                <NativeComboboxSelect
+                                  value={visibleScheduleForm.doctorId}
+                                  onChange={(event) =>
+                                    setScheduleForm((current) =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            doctorId: event.target.value,
+                                          }
+                                        : current,
+                                    )
+                                  }
+                                  disabled={!visibleScheduleForm.providerId}
+                                  className={selectClass}
+                                >
+                                  <option value="">{t.common_not_set}</option>
+                                  {doctors.map((doctor) => (
+                                    <option key={doctor.id} value={doctor.id}>
+                                      {doctorLabel(doctor, lang)}
+                                    </option>
+                                  ))}
+                                </NativeComboboxSelect>
+                              </label>
+                            </div>
+                            <label className="flex items-start gap-3 rounded-lg border border-border/60 bg-card px-3 py-2 text-sm text-foreground">
+                              <input
+                                type="checkbox"
+                                checked={
+                                  visibleScheduleForm.skipMedicalProviderBinding
+                                }
+                                onChange={(event) =>
+                                  setScheduleForm((current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          skipMedicalProviderBinding:
+                                            event.target.checked,
+                                        }
+                                      : current,
+                                  )
+                                }
+                                disabled={Boolean(
+                                  visibleScheduleForm.providerId,
+                                )}
+                                className={cn(checkboxClass, "mt-0.5")}
+                              />
+                              <span>
+                                <span className="block font-medium text-foreground">
+                                  {appointmentText(
+                                    "appointments_medical_provider_opt_out",
+                                  )}
+                                </span>
+                                <span className="block text-xs text-muted-foreground">
+                                  {appointmentText(
+                                    "appointments_medical_provider_opt_out_hint",
+                                  )}
+                                </span>
+                              </span>
+                            </label>
+                          </div>
+                        ) : null}
                         <label className="flex flex-col gap-1.5">
                           <span className="text-[11.5px] font-medium leading-tight text-muted-foreground">
                             {t.patients_assign_owner}

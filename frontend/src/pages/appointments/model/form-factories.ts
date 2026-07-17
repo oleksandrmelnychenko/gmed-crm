@@ -47,6 +47,7 @@ export function blankAppointmentForm(): AppointmentFormState {
     repeatEnabled: false,
     repeatFrequency: "weekly",
     repeatInterval: "1",
+    repeatEndMode: "count",
     repeatCount: "4",
     repeatUntil: "",
   };
@@ -94,6 +95,7 @@ const APPOINTMENT_FORM_DIRTY_FIELDS: Array<keyof AppointmentFormState> = [
   "repeatEnabled",
   "repeatFrequency",
   "repeatInterval",
+  "repeatEndMode",
   "repeatCount",
   "repeatUntil",
 ];
@@ -110,6 +112,7 @@ export function hasAppointmentFormChanges(
 export function buildEditAppointmentForm(
   detail: AppointmentDetail,
 ): AppointmentFormState {
+  const repeatEndMode = detail.recurrence_end_mode ?? "count";
   return {
     patientId: detail.patient_id,
     providerId: detail.provider_id ?? "",
@@ -132,10 +135,12 @@ export function buildEditAppointmentForm(
     repeatEnabled: Boolean(detail.recurrence_frequency),
     repeatFrequency: detail.recurrence_frequency ?? "weekly",
     repeatInterval: String(detail.recurrence_interval ?? 1),
-    repeatCount: detail.recurrence_count
-      ? String(detail.recurrence_count)
+    repeatEndMode,
+    repeatCount: detail.recurrence_series_size || detail.recurrence_count
+      ? String(detail.recurrence_series_size || detail.recurrence_count)
       : "",
-    repeatUntil: detail.recurrence_until ?? "",
+    repeatUntil:
+      repeatEndMode === "until" ? detail.recurrence_until ?? "" : "",
   };
 }
 
@@ -149,6 +154,7 @@ export function restoreEditAppointmentRecurrenceFields(
     repeatEnabled: saved.repeatEnabled,
     repeatFrequency: saved.repeatFrequency,
     repeatInterval: saved.repeatInterval,
+    repeatEndMode: saved.repeatEndMode,
     repeatCount: saved.repeatCount,
     repeatUntil: saved.repeatUntil,
   };
@@ -198,6 +204,7 @@ export function buildFollowUpVisitForm(
     repeatEnabled: false,
     repeatFrequency: "weekly",
     repeatInterval: "1",
+    repeatEndMode: "count",
     repeatCount: "4",
     repeatUntil: "",
     linkOrder: Boolean(detail.order_id),

@@ -63,8 +63,29 @@ export function AppointmentsSchedulerSurface({
   toolbar,
   calendarSurface,
 }: AppointmentsSchedulerSurfaceProps) {
+  const queueLayer = queueSheet.shouldRender ? (
+    <Suspense
+      fallback={
+        <AppointmentPreviewSheetLoadingState
+          open={queueSheet.open}
+          onOpenChange={queueSheet.onOpenChange}
+          title={queueSheet.loadingTitle}
+          maxWidthClassName="sm:max-w-[760px]"
+          loadingLabel={queueSheet.loadingLabel}
+        />
+      }
+    >
+      <LazyQueueSheet {...queueSheet} />
+    </Suspense>
+  ) : null;
+
   if (useMobileAgenda) {
-    return <InterpreterMobileAgenda {...mobileAgenda} />;
+    return (
+      <>
+        <InterpreterMobileAgenda {...mobileAgenda} />
+        {queueLayer}
+      </>
+    );
   }
 
   return (
@@ -87,23 +108,7 @@ export function AppointmentsSchedulerSurface({
           </Suspense>
         ) : null
       }
-      queueSheet={
-        queueSheet.shouldRender ? (
-          <Suspense
-            fallback={
-              <AppointmentPreviewSheetLoadingState
-                open={queueSheet.open}
-                onOpenChange={queueSheet.onOpenChange}
-                title={queueSheet.loadingTitle}
-                maxWidthClassName="sm:max-w-[640px]"
-                loadingLabel={queueSheet.loadingLabel}
-              />
-            }
-          >
-            <LazyQueueSheet {...queueSheet} />
-          </Suspense>
-        ) : null
-      }
+      queueSheet={queueLayer}
       toolbar={<DesktopSchedulerToolbar {...toolbar} />}
       calendarSurface={<DesktopCalendarSurface {...calendarSurface} />}
     />

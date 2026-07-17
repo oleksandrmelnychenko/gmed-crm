@@ -240,7 +240,7 @@ test.describe("appointments overview detail", () => {
     await expect(summarySection).toBeVisible();
     await expect(summarySection).toContainText("Arzt");
     await expect(summarySection).toContainText("Claudia Neumann");
-    await expect(summarySection).toContainText("Dolmetscher");
+    await expect(summarySection).toContainText("Mitarbeitender");
     await expect(summarySection).toContainText("Marina Sokolova");
     await expect(summarySection).not.toContainText(/Arzt\s*Marina Sokolova/);
 
@@ -250,7 +250,7 @@ test.describe("appointments overview detail", () => {
 
     const attentionSection = page
       .locator("section")
-      .filter({ hasText: "Operativer Follow-up offen" })
+      .filter({ hasText: "Operative Nachsorge offen" })
       .first();
     await expect(attentionSection).toBeVisible();
     await expect(attentionSection).toContainText("1 offener Punkt");

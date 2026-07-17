@@ -11,7 +11,11 @@ import type { DateClickArg } from "@fullcalendar/interaction";
 import type { DatesSetArg } from "@fullcalendar/core";
 
 import { blankAppointmentFormForCurrentUser } from "@/pages/appointments/model/form-factories";
-import { toDateInput, toTimeInput } from "@/pages/appointments/model/date-time";
+import {
+  inclusiveCalendarVisibleRange,
+  toDateInput,
+  toTimeInput,
+} from "@/pages/appointments/model/date-time";
 import type {
   AppointmentFormState,
   CalendarView,
@@ -33,6 +37,10 @@ type UseAppointmentSchedulerControlsOptions = {
   setOperationalScope: Dispatch<SetStateAction<OperationalScope>>;
   setCalendarView: Dispatch<SetStateAction<CalendarView>>;
   setCalendarDate: Dispatch<SetStateAction<string>>;
+  onVisibleDateRangeChange: (range: {
+    dateFrom: string;
+    dateTo: string;
+  }) => void;
   syncQuery: (next: Record<string, string | null>) => void;
   onRefreshAppointments: () => void;
   onOpenCreateSeed: (seed: AppointmentFormState) => void;
@@ -52,6 +60,7 @@ export function useAppointmentSchedulerControls({
   setOperationalScope,
   setCalendarView,
   setCalendarDate,
+  onVisibleDateRangeChange,
   syncQuery,
   onRefreshAppointments,
   onOpenCreateSeed,
@@ -79,8 +88,16 @@ export function useAppointmentSchedulerControls({
       onDismissQuickActionMenu();
       setCalendarView((current) => (current === nextView ? current : nextView));
       setCalendarDate((current) => (current === nextDate ? current : nextDate));
+      onVisibleDateRangeChange(
+        inclusiveCalendarVisibleRange(arg.start, arg.end),
+      );
     },
-    [onDismissQuickActionMenu, setCalendarDate, setCalendarView],
+    [
+      onDismissQuickActionMenu,
+      onVisibleDateRangeChange,
+      setCalendarDate,
+      setCalendarView,
+    ],
   );
 
   const applyTodayScope = useCallback(() => {

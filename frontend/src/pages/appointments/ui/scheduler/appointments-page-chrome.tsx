@@ -34,6 +34,7 @@ type AppointmentsPageChromeProps = {
   totalAppointments: number;
   appointmentsError?: string | null;
   appointmentsNotice?: string | null;
+  appointmentsAuxiliaryError?: string | null;
   metadataError?: string | null;
 };
 
@@ -58,6 +59,7 @@ export function AppointmentsPageChrome({
   totalAppointments,
   appointmentsError,
   appointmentsNotice,
+  appointmentsAuxiliaryError,
   metadataError,
 }: AppointmentsPageChromeProps) {
   return (
@@ -137,6 +139,11 @@ export function AppointmentsPageChrome({
       {appointmentsNotice ? (
         <Banner tone="warning" withIcon>
           {appointmentsNotice}
+        </Banner>
+      ) : null}
+      {appointmentsAuxiliaryError ? (
+        <Banner tone="warning" withIcon>
+          {appointmentsAuxiliaryError}
         </Banner>
       ) : null}
       {metadataError ? (

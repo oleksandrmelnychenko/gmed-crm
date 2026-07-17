@@ -2,6 +2,7 @@ import { useEffect, useReducer } from "react";
 
 import type { CaseRosterItem } from "@/components/cases-roster-section";
 import { apiFetch } from "@/lib/api";
+import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import { normalizeLinkedPreviewPayload } from "@/pages/appointments/model/linked-preview";
 import { appointmentText } from "@/pages/appointments/model/labels";
 import { sortLinkedDocuments } from "@/pages/appointments/model/query-builders";
@@ -151,10 +152,10 @@ export function useAppointmentLinkedRecords({
       } catch (error) {
         if (!active) return;
         dispatchLinkedRecordsState({
-          linkedPreviewError:
-            error instanceof Error
-              ? error.message
-              : appointmentText("appointments_failed_to_load_linked_records"),
+          linkedPreviewError: appointmentActionErrorMessage(
+            error,
+            appointmentText("appointments_failed_to_load_linked_records"),
+          ),
           linkedPreviewLoading: false,
         });
       }
@@ -194,8 +195,10 @@ export function useAppointmentLinkedRecords({
         if (!active) return;
         dispatchLinkedRecordsState({
           linkedProviderDetail: null,
-          linkedProviderDetailError:
-            error instanceof Error ? error.message : failedLoadMessage,
+          linkedProviderDetailError: appointmentActionErrorMessage(
+            error,
+            failedLoadMessage,
+          ),
           linkedProviderDetailLoading: false,
         });
       });
@@ -233,8 +236,10 @@ export function useAppointmentLinkedRecords({
         if (!active) return;
         dispatchLinkedRecordsState({
           linkedCasesItems: [],
-          linkedCasesError:
-            error instanceof Error ? error.message : failedLoadMessage,
+          linkedCasesError: appointmentActionErrorMessage(
+            error,
+            failedLoadMessage,
+          ),
           linkedCasesLoading: false,
         });
       });
@@ -277,8 +282,10 @@ export function useAppointmentLinkedRecords({
         if (!active) return;
         dispatchLinkedRecordsState({
           linkedDocumentsItems: [],
-          linkedDocumentsError:
-            error instanceof Error ? error.message : failedLoadMessage,
+          linkedDocumentsError: appointmentActionErrorMessage(
+            error,
+            failedLoadMessage,
+          ),
           linkedDocumentsLoading: false,
         });
       });

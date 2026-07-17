@@ -11,6 +11,7 @@ type UseAppointmentsSchedulerDataOptions = {
   attentionQuery: string;
   appointmentsVersion: number;
   failedLoadMessage: string;
+  attentionFailedMessage: string;
 };
 
 type SchedulerState = {
@@ -18,6 +19,7 @@ type SchedulerState = {
   attentionItems: AppointmentAttentionItem[];
   appointmentsLoading: boolean;
   appointmentsError: string;
+  attentionError: string;
 };
 
 const INITIAL_SCHEDULER_STATE: SchedulerState = {
@@ -25,6 +27,7 @@ const INITIAL_SCHEDULER_STATE: SchedulerState = {
   attentionItems: [],
   appointmentsLoading: true,
   appointmentsError: "",
+  attentionError: "",
 };
 
 function schedulerReducer(
@@ -34,11 +37,40 @@ function schedulerReducer(
   return { ...state, ...patch };
 }
 
+export function settleAppointmentsSchedulerResults(
+  rowsResult: PromiseSettledResult<AppointmentListItem[]>,
+  attentionResult: PromiseSettledResult<AppointmentAttentionItem[]>,
+  failedLoadMessage: string,
+  attentionFailedMessage: string,
+): Partial<SchedulerState> {
+  const patch: Partial<SchedulerState> = {
+    appointmentsLoading: false,
+    appointmentsError:
+      rowsResult.status === "rejected"
+        ? failedLoadMessage
+        : "",
+    attentionError:
+      attentionResult.status === "rejected"
+        ? attentionFailedMessage
+        : "",
+  };
+
+  if (rowsResult.status === "fulfilled") {
+    patch.appointments = rowsResult.value;
+  }
+  if (attentionResult.status === "fulfilled") {
+    patch.attentionItems = attentionResult.value;
+  }
+
+  return patch;
+}
+
 export function useAppointmentsSchedulerData({
   appointmentsQuery,
   attentionQuery,
   appointmentsVersion,
   failedLoadMessage,
+  attentionFailedMessage,
 }: UseAppointmentsSchedulerDataOptions) {
   const [schedulerState, dispatchSchedulerState] = useReducer(
     schedulerReducer,
@@ -56,29 +88,21 @@ export function useAppointmentsSchedulerData({
       dispatchSchedulerState({
         appointmentsLoading: true,
         appointmentsError: "",
+        attentionError: "",
       });
-      try {
-        const [rows, attention] = await Promise.all([
-          apiFetch<AppointmentListItem[]>(appointmentsQuery),
-          apiFetch<AppointmentAttentionItem[]>(attentionQuery),
-        ]);
-        if (!active) return;
-        dispatchSchedulerState({
-          appointments: rows,
-          attentionItems: attention,
-          appointmentsLoading: false,
-          appointmentsError: "",
-        });
-      } catch (error) {
-        if (!active) return;
-        dispatchSchedulerState({
-          appointments: [],
-          attentionItems: [],
-          appointmentsLoading: false,
-          appointmentsError:
-            error instanceof Error ? error.message : failedLoadMessage,
-        });
-      }
+      const [rowsResult, attentionResult] = await Promise.allSettled([
+        apiFetch<AppointmentListItem[]>(appointmentsQuery),
+        apiFetch<AppointmentAttentionItem[]>(attentionQuery),
+      ]);
+      if (!active) return;
+      dispatchSchedulerState(
+        settleAppointmentsSchedulerResults(
+          rowsResult,
+          attentionResult,
+          failedLoadMessage,
+          attentionFailedMessage,
+        ),
+      );
     }
 
     void loadAppointments();
@@ -89,6 +113,7 @@ export function useAppointmentsSchedulerData({
     appointmentsQuery,
     attentionQuery,
     appointmentsVersion,
+    attentionFailedMessage,
     failedLoadMessage,
   ]);
 
@@ -97,6 +122,7 @@ export function useAppointmentsSchedulerData({
     attentionItems: schedulerState.attentionItems,
     appointmentsLoading: schedulerState.appointmentsLoading,
     appointmentsError: schedulerState.appointmentsError,
+    appointmentsAuxiliaryError: schedulerState.attentionError,
     setAppointmentsError,
   };
 }

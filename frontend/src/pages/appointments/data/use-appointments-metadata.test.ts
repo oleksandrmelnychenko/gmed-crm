@@ -33,6 +33,35 @@ describe("buildAppointmentsMetadataState", () => {
       }),
     ]);
     expect(state.providersError).toBe("");
-    expect(state.metadataError).toBe("");
+    expect(state.metadataError).toBe("Failed to load metadata");
+  });
+
+  it("surfaces taxonomy failure without discarding the flat provider list", () => {
+    const state = buildAppointmentsMetadataState({
+      failedLoadMessage: "Failed to load metadata",
+      patientResult: { rows: [], error: "" },
+      providerResult: {
+        rows: [
+          {
+            id: "provider-1",
+            name: "Clinic QA",
+            provider_type: "medical",
+            address_city: "Munich",
+            fachbereich: null,
+            taxonomy_filter_ids: [],
+          },
+        ],
+        error: "",
+      },
+      taxonomyRows: [],
+      taxonomyError: "Failed to load metadata",
+      interpreterResult: { rows: [], error: "" },
+      staffResult: { rows: [], error: "" },
+    });
+
+    expect(state.providers).toHaveLength(1);
+    expect(state.taxonomyNodes).toEqual([]);
+    expect(state.providersError).toBe("Failed to load metadata");
+    expect(state.metadataError).toBe("Failed to load metadata");
   });
 });
