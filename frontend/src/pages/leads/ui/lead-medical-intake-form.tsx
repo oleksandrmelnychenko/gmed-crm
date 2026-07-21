@@ -81,7 +81,6 @@ export function LeadMedicalIntakeForm({
     <section className="space-y-4">
       {leadIntakeTypeFromLead(lead) === "questionnaire" ? (
         <LeadQuestionnaireFacts
-          topBorder={false}
           items={[
             { label: tx("Сейчас проходит лечение", "Derzeit in Behandlung"), value: yesNoValue(lead.currently_in_treatment, tx) },
             { label: tx("Риск для поездки", "Gesundheitsrisiko für die Reise"), value: yesNoValue(lead.has_health_risk_for_travel, tx) },

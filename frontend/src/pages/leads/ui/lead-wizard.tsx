@@ -29,6 +29,8 @@ import {
   X,
 } from "lucide-react";
 
+import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
@@ -42,9 +44,21 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { selectClass, StatusBadge, textareaClass } from "@/components/ui-shell";
-import { useLang } from "@/lib/i18n";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import {
+  Banner,
+  checkboxClass,
+  CountBadge,
+  EmptyCell,
+  inputClass,
+  Section,
+  selectClass,
+  STATUS_TONE,
+  StatusBadge,
+  textareaClass,
+  tokens,
+} from "@/components/ui-shell";
+import { useLang, type Lang } from "@/lib/i18n";
 import type { LeadDetail } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 import {
@@ -114,6 +128,7 @@ import {
   updateLeadServiceSelection,
 } from "@/pages/leads/model/leads-model";
 
+import { LeadWizardDocumentMetadata } from "./lead-wizard-document-metadata";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 
 import {
@@ -1090,15 +1105,6 @@ function wizardDocumentKind(item: DocumentItem): WizardDocumentKind | null {
   return null;
 }
 
-function formatFileSize(size: number | null, lang: string) {
-  if (!size || size <= 0) return "";
-  const formatter = new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
-    maximumFractionDigits: size >= 1024 * 1024 ? 1 : 0,
-  });
-  if (size >= 1024 * 1024) return `${formatter.format(size / (1024 * 1024))} MB`;
-  return `${formatter.format(size / 1024)} KB`;
-}
-
 function wizardDocumentFilename(document: DocumentItem) {
   const filename = document.original_filename || document.auto_name || "document";
   const mimeType = document.mime_type?.split(";", 1)[0]?.trim().toLowerCase();
@@ -1442,7 +1448,7 @@ function Field({
 }) {
   return (
     <label className={cn("min-w-0 space-y-1.5", className)}>
-      <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      <span className={cn(tokens.text.label, "block")}>
         {label}
         {required ? <span aria-hidden="true" className="ml-0.5 text-destructive">*</span> : null}
       </span>
@@ -1453,6 +1459,17 @@ function Field({
         </span>
       ) : null}
     </label>
+  );
+}
+
+function DocNumberPill({ children }: { children: ReactNode }) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn("rounded-full px-2 py-0.5 font-mono text-[10px] font-medium tabular-nums", STATUS_TONE.brand)}
+    >
+      {children}
+    </Badge>
   );
 }
 
@@ -1480,7 +1497,7 @@ function ToggleRow({
 }) {
   return (
     <label className="flex cursor-pointer items-center gap-3 border-b border-border/70 py-3 last:border-b-0">
-      <input id={id} type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className="size-4 accent-[var(--brand)]" />
+      <input id={id} type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className={checkboxClass} />
       <span className="text-sm text-foreground">{label}</span>
     </label>
   );
@@ -1502,7 +1519,7 @@ function WizardDocumentRows({
   documents: DocumentItem[];
   complianceKind?: DocumentComplianceKind;
   emptyLabel: string;
-  lang: string;
+  lang: Lang;
   busy: string | null;
   disabled: boolean;
   tx: Tx;
@@ -1516,14 +1533,13 @@ function WizardDocumentRows({
   }
 
   return (
-    <div className="divide-y divide-border rounded-md border border-border">
+    <div className={cn("divide-y divide-border/70 rounded-lg", tokens.surface.card)}>
       {documents.map((document) => {
         const signed = Boolean(
           complianceKind
           && document.signed_at
           && document.compliance_kind === complianceKind,
         );
-        const sizeLabel = formatFileSize(document.file_size, lang);
         return (
           <div key={document.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
             <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
@@ -1536,8 +1552,7 @@ function WizardDocumentRows({
                 {wizardDocumentFilename(document)}
               </button>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                <span className="font-mono tabular-nums">{document.document_number || `DOC-${document.id.slice(0, 8).toUpperCase()}`}</span>
-                {sizeLabel ? <span className="font-mono tabular-nums">{sizeLabel}</span> : null}
+                <LeadWizardDocumentMetadata document={document} lang={lang} />
                 {complianceKind ? (
                   <StateMark
                     done={signed}
@@ -3388,27 +3403,33 @@ ${serviceCommentLines.join("\n")}`
         </nav>
 
         <main aria-busy={loading || isBusy} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-5 sm:px-5">
-          {error ? <div role="alert" className="mb-5 border-l-2 border-destructive bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div> : null}
+          {error ? (
+            <div role="alert" className="mb-5">
+              <Banner tone="error">{error}</Banner>
+            </div>
+          ) : null}
           {validationIssues.length > 0 ? (
-            <div role="alert" aria-live="assertive" className="mb-5 border-l-2 border-destructive bg-destructive/5 px-3 py-3 text-sm text-destructive">
-              <div className="flex items-center gap-2 font-medium">
-                <CircleAlert aria-hidden="true" className="size-4 shrink-0" />
-                {tx("Требуют внимания", "Bitte prüfen")}
-              </div>
-              <ul className="mt-2 space-y-1.5">
-                {validationIssues.map((issue) => (
-                  <li key={issue.key}>
-                    <button
-                      type="button"
-                      className="w-full text-left text-xs leading-5 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      onClick={() => openValidationIssue(issue)}
-                    >
-                      <span className="font-medium">{readinessStepLabel(issue.step, tx)}:</span>{" "}
-                      {issue.message}
-                    </button>
-                  </li>
-                ))}
-              </ul>
+            <div role="alert" aria-live="assertive" className="mb-5">
+              <Banner tone="error">
+                <div className="flex items-center gap-2 font-medium">
+                  <CircleAlert aria-hidden="true" className="size-4 shrink-0" />
+                  {tx("Требуют внимания", "Bitte prüfen")}
+                </div>
+                <ul className="mt-2 space-y-1.5">
+                  {validationIssues.map((issue) => (
+                    <li key={issue.key}>
+                      <button
+                        type="button"
+                        className="w-full text-left text-xs leading-5 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={() => openValidationIssue(issue)}
+                      >
+                        <span className="font-medium">{readinessStepLabel(issue.step, tx)}:</span>{" "}
+                        {issue.message}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </Banner>
             </div>
           ) : null}
           {loading && !lead ? <div role="status" aria-live="polite" className="flex items-center gap-2 py-12 text-sm text-muted-foreground"><LoaderCircle aria-hidden="true" className="size-4 animate-spin" />{tx("Загрузка…", "Wird geladen…")}</div> : null}
@@ -3416,8 +3437,8 @@ ${serviceCommentLines.join("\n")}`
           {draft && step === "master_data" ? (
             <section className="min-w-0 space-y-5">
               {lead ? (
+                <Section title={tx("Данные опросника", "Fragebogendaten")}>
                 <LeadQuestionnaireFacts
-                  topBorder={false}
                   items={[
                     { label: tx("Тип", "Typ"), value: <StatusBadge tone={intakeTypeTone(lead)}>{intakeTypeLabel(lead, tx)}</StatusBadge> },
                     { label: tx("Канал поступления", "Eingangskanal"), value: lead.source ? leadSourceLabel(lead.source, t) : tx("Не указано", "Nicht angegeben") },
@@ -3428,9 +3449,25 @@ ${serviceCommentLines.join("\n")}`
                         ? languageLabel(normalizedLanguageCode(lead.locale), lang)
                         : lead.locale || tx("Не указано", "Nicht angegeben"),
                     }] : []),
+                    ...(isExternalIntakeLead ? [
+                      { label: tx("Тип основного телефона", "Typ der Hauptnummer"), value: phoneTypeLabel(lead.primary_phone_type, tx) },
+                      ...(lead.phones?.length
+                        ? lead.phones.map((item, index, all) => ({
+                            label: all.length > 1
+                              ? `${tx("Телефон из опросника", "Telefon aus dem Fragebogen")} ${index + 1}`
+                              : tx("Телефон из опросника", "Telefon aus dem Fragebogen"),
+                            value: `${item.number} · ${phoneTypeLabel(item.type, tx)}`,
+                          }))
+                        : [{
+                            label: tx("Телефоны из опросника", "Telefonnummern aus dem Fragebogen"),
+                            value: tx("Не указано", "Nicht angegeben"),
+                          }]),
+                    ] : []),
                   ]}
                 />
+                </Section>
               ) : null}
+              <Section title={tx("Личные данные", "Persönliche Daten")}>
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")}>
                   <NativeComboboxSelect
@@ -3466,7 +3503,7 @@ ${serviceCommentLines.join("\n")}`
                     required
                     aria-invalid={Boolean(visibleMasterError("firstName"))}
                     aria-describedby={visibleMasterError("firstName") ? `${MASTER_FIELD_IDS.firstName}-error` : undefined}
-                    className={cn(visibleMasterError("firstName") && "border-destructive")}
+                    className={inputClass}
                     value={draft.firstName}
                     onBlur={() => touchMasterField("firstName")}
                     onChange={(event) => patch("firstName", event.target.value)}
@@ -3474,6 +3511,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field label={tx("Отчество / второе имя", "Zweiter Vorname")}>
                   <Input
+                    className={inputClass}
                     name="middle_name"
                     autoComplete="additional-name"
                     value={draft.middleName}
@@ -3493,7 +3531,7 @@ ${serviceCommentLines.join("\n")}`
                     required
                     aria-invalid={Boolean(visibleMasterError("lastName"))}
                     aria-describedby={visibleMasterError("lastName") ? `${MASTER_FIELD_IDS.lastName}-error` : undefined}
-                    className={cn(visibleMasterError("lastName") && "border-destructive")}
+                    className={inputClass}
                     value={draft.lastName}
                     onBlur={() => touchMasterField("lastName")}
                     onChange={(event) => patch("lastName", event.target.value)}
@@ -3501,6 +3539,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field label={tx("Дополнение к имени", "Namenszusatz")}>
                   <Input
+                    className={inputClass}
                     name="name_suffix"
                     value={draft.suffix}
                     onChange={(event) => patch("suffix", event.target.value)}
@@ -3521,7 +3560,7 @@ ${serviceCommentLines.join("\n")}`
                     required
                     aria-invalid={Boolean(visibleMasterError("birthDate"))}
                     aria-describedby={visibleMasterError("birthDate") ? `${MASTER_FIELD_IDS.birthDate}-error` : undefined}
-                    className={cn(visibleMasterError("birthDate") && "border-destructive")}
+                    className={inputClass}
                     value={draft.birthDate}
                     onBlur={() => touchMasterField("birthDate")}
                     onChange={(event) => patch("birthDate", event.target.value)}
@@ -3566,7 +3605,7 @@ ${serviceCommentLines.join("\n")}`
                     aria-required={!draft.phone.trim()}
                     aria-invalid={Boolean(visibleMasterError("email"))}
                     aria-describedby={visibleMasterError("email") ? `${MASTER_FIELD_IDS.email}-error` : undefined}
-                    className={cn(visibleMasterError("email") && "border-destructive")}
+                    className={inputClass}
                     value={draft.email}
                     onBlur={() => touchMasterField("email")}
                     onChange={(event) => patch("email", event.target.value)}
@@ -3586,7 +3625,7 @@ ${serviceCommentLines.join("\n")}`
                     aria-required={!draft.email.trim()}
                     aria-invalid={Boolean(visibleMasterError("phone"))}
                     aria-describedby={visibleMasterError("phone") ? `${MASTER_FIELD_IDS.phone}-error` : undefined}
-                    className={cn(visibleMasterError("phone") && "border-destructive")}
+                    className={inputClass}
                     value={draft.phone}
                     onBlur={() => touchMasterField("phone")}
                     onChange={(event) => patch("phone", event.target.value)}
@@ -3594,6 +3633,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field label="WhatsApp">
                   <Input
+                    className={inputClass}
                     name="whatsapp_number"
                     autoComplete="tel"
                     type="tel"
@@ -3621,7 +3661,7 @@ ${serviceCommentLines.join("\n")}`
                     required={draft.healthcareConsent}
                     aria-invalid={Boolean(visibleMasterError("street"))}
                     aria-describedby={visibleMasterError("street") ? `${MASTER_FIELD_IDS.street}-error` : undefined}
-                    className={cn(visibleMasterError("street") && "border-destructive")}
+                    className={inputClass}
                     value={draft.street}
                     onBlur={() => touchMasterField("street")}
                     onChange={(event) => patch("street", event.target.value)}
@@ -3640,7 +3680,7 @@ ${serviceCommentLines.join("\n")}`
                     required={draft.healthcareConsent}
                     aria-invalid={Boolean(visibleMasterError("city"))}
                     aria-describedby={visibleMasterError("city") ? `${MASTER_FIELD_IDS.city}-error` : undefined}
-                    className={cn(visibleMasterError("city") && "border-destructive")}
+                    className={inputClass}
                     value={draft.city}
                     onBlur={() => touchMasterField("city")}
                     onChange={(event) => patch("city", event.target.value)}
@@ -3648,6 +3688,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field label={tx("Регион / область", "Region / Bundesland")}>
                   <Input
+                    className={inputClass}
                     name="address_region"
                     autoComplete="address-level1"
                     value={draft.state}
@@ -3667,7 +3708,7 @@ ${serviceCommentLines.join("\n")}`
                     required={draft.healthcareConsent}
                     aria-invalid={Boolean(visibleMasterError("zip"))}
                     aria-describedby={visibleMasterError("zip") ? `${MASTER_FIELD_IDS.zip}-error` : undefined}
-                    className={cn(visibleMasterError("zip") && "border-destructive")}
+                    className={inputClass}
                     value={draft.zip}
                     onBlur={() => touchMasterField("zip")}
                     onChange={(event) => patch("zip", event.target.value)}
@@ -3676,11 +3717,10 @@ ${serviceCommentLines.join("\n")}`
                 <Field label={tx("Страна", "Land")} className="md:col-span-2">
                   <CountrySelect value={draft.country} lang={lang} className={selectClass} aria-label={tx("Страна", "Land")} onChange={(value) => patch("country", value ?? "")} />
                 </Field>
-                <div className="border-t border-border pt-4 md:col-span-2">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    {tx("Страхование", "Versicherung")}
-                  </h3>
-                </div>
+              </div>
+              </Section>
+              <Section title={tx("Страхование", "Versicherung")}>
+              <div className="grid gap-4 md:grid-cols-2">
                 <Field label={tx("Есть страхование", "Versicherung vorhanden")}>
                   <NativeComboboxSelect
                     name="has_insurance"
@@ -3742,7 +3782,7 @@ ${serviceCommentLines.join("\n")}`
                     required={draft.hasInsurance === "yes"}
                     aria-invalid={Boolean(visibleMasterError("insuranceProvider"))}
                     aria-describedby={visibleMasterError("insuranceProvider") ? `${MASTER_FIELD_IDS.insuranceProvider}-error` : undefined}
-                    className={cn(visibleMasterError("insuranceProvider") && "border-destructive")}
+                    className={inputClass}
                     value={draft.insuranceProvider}
                     onBlur={() => touchMasterField("insuranceProvider")}
                     onChange={(event) => patch("insuranceProvider", event.target.value)}
@@ -3761,7 +3801,7 @@ ${serviceCommentLines.join("\n")}`
                     required={draft.hasInsurance === "yes"}
                     aria-invalid={Boolean(visibleMasterError("insuranceNumber"))}
                     aria-describedby={visibleMasterError("insuranceNumber") ? `${MASTER_FIELD_IDS.insuranceNumber}-error` : undefined}
-                    className={cn(visibleMasterError("insuranceNumber") && "border-destructive")}
+                    className={inputClass}
                     value={draft.insuranceNumber}
                     onBlur={() => touchMasterField("insuranceNumber")}
                     onChange={(event) => patch("insuranceNumber", event.target.value)}
@@ -3782,26 +3822,14 @@ ${serviceCommentLines.join("\n")}`
                   </NativeComboboxSelect>
                 </Field>
               </div>
-              {isExternalIntakeLead && lead ? (
-                <LeadQuestionnaireFacts
-                  items={[
-                    { label: tx("Тип основного телефона", "Typ der Hauptnummer"), value: phoneTypeLabel(lead.primary_phone_type, tx) },
-                    {
-                      label: tx("Телефоны из опросника", "Telefonnummern aus dem Fragebogen"),
-                      value: lead.phones?.length
-                        ? lead.phones.map((item) => `${item.number} · ${phoneTypeLabel(item.type, tx)}`).join("\n")
-                        : tx("Не указано", "Nicht angegeben"),
-                      wide: true,
-                    },
-                  ]}
-                />
-              ) : null}
+              </Section>
             </section>
           ) : null}
 
           {draft && lead && step === "medical" ? (
             <section className="space-y-5">
-              <Field label={tx("Направивший врач", "Zuweisender Arzt")} className="block pb-2"><Input value={draft.referrer} onChange={(event) => patch("referrer", event.target.value)} /></Field>
+              <Section title={tx("Обращение", "Anliegen")}>
+              <Field label={tx("Направивший врач", "Zuweisender Arzt")} className="block pb-2"><Input className={inputClass} value={draft.referrer} onChange={(event) => patch("referrer", event.target.value)} /></Field>
               <Field
                 required
                 label={tx("Причина обращения", "Anliegen")}
@@ -3821,10 +3849,11 @@ ${serviceCommentLines.join("\n")}`
                   onChange={(event) => patch("concern", event.target.value)}
                 />
               </Field>
+              </Section>
               {medicalLookupsLoading ? (
                 <div
                   role="status"
-                  className="flex items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
+                  className={cn("flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-muted-foreground", tokens.surface.mutedCard)}
                 >
                   <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" />
                   {tx("Загружаются справочники врачей и клиник…", "Ärzte- und Klinikkataloge werden geladen…")}
@@ -3872,6 +3901,8 @@ ${serviceCommentLines.join("\n")}`
 
           {draft && lead && step === "service" ? (
             <section className="space-y-5">
+              {isQuestionnaireLead || lead.message ? (
+                <Section title={tx("Данные опросника", "Fragebogendaten")}>
               {isQuestionnaireLead ? (
                 <LeadQuestionnaireFacts
                   items={[
@@ -3896,10 +3927,12 @@ ${serviceCommentLines.join("\n")}`
                   }]}
                 />
               ) : null}
-              <div className="space-y-3">
-                <span className="block text-sm font-medium text-foreground">
-                  {tx("Запрошенные услуги", "Gewünschte Leistungen")}
-                </span>
+                </Section>
+              ) : null}
+              <Section
+                title={tx("Запрошенные услуги", "Gewünschte Leistungen")}
+                accessory={<CountBadge>{draft.serviceNeeds.length}</CountBadge>}
+              >
                 <div className="grid items-start gap-2 sm:grid-cols-2">
                   {Array.from(new Set([
                     ...LEAD_WIZARD_SERVICE_OPTIONS,
@@ -3916,8 +3949,8 @@ ${serviceCommentLines.join("\n")}`
                       <div
                         key={value}
                         className={cn(
-                          "overflow-hidden rounded-md border bg-background",
-                          checked ? "border-[var(--brand)]" : "border-border",
+                          "overflow-hidden rounded-lg border bg-card",
+                          checked ? "border-[var(--brand)]" : "border-border/50",
                         )}
                       >
                         <label
@@ -3927,7 +3960,7 @@ ${serviceCommentLines.join("\n")}`
                           <input
                             id={checkboxId}
                             type="checkbox"
-                            className="size-4 shrink-0 accent-[var(--brand)]"
+                            className={checkboxClass}
                             checked={checked}
                             onChange={(event) => toggleServiceNeed(value, event.target.checked)}
                           />
@@ -3937,14 +3970,14 @@ ${serviceCommentLines.join("\n")}`
                           <div className="space-y-1.5 border-t border-border px-3 pb-3 pt-2.5">
                             <label
                               htmlFor={commentId}
-                              className="block text-[11px] font-medium uppercase text-muted-foreground"
+                              className={cn(tokens.text.label, "block")}
                             >
                               {commentLabel}
                             </label>
                             <textarea
                               id={commentId}
                               aria-label={`${commentLabel}: ${label}`}
-                              className={cn(textareaClass, "min-h-20 resize-y bg-white text-slate-900")}
+                              className={cn(textareaClass, "min-h-20 resize-y bg-card")}
                               value={draft.serviceComments[value] ?? ""}
                               onChange={(event) => patchServiceComment(value, event.target.value)}
                               placeholder={tx("Детали по этой услуге", "Details zu dieser Leistung")}
@@ -3955,23 +3988,23 @@ ${serviceCommentLines.join("\n")}`
                     );
                   })}
                 </div>
-              </div>
-              <Field label={tx("Общий комментарий", "Allgemeiner Kommentar")}><textarea className={cn(textareaClass, "min-h-24")} value={draft.serviceNotes} onChange={(event) => patch("serviceNotes", event.target.value)} /></Field>
+                <Field label={tx("Общий комментарий", "Allgemeiner Kommentar")}><textarea className={cn(textareaClass, "min-h-24 bg-card")} value={draft.serviceNotes} onChange={(event) => patch("serviceNotes", event.target.value)} /></Field>
+              </Section>
             </section>
           ) : null}
 
           {draft && step === "documents" ? (
             <section className="space-y-5">
-              <div id={CONFIDENTIALITY_RELEASE_ID} tabIndex={-1} className="space-y-4 border-y border-border py-4 focus:outline-none">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    {tx("Освобождение от медицинской тайны", "Schweigepflichtsentbindung")}
-                  </h3>
-                  <Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("confidentiality_release")}>
-                    {busy === "generate-confidentiality_release" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
-                    {wizardDocuments.confidentiality_release.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
-                  </Button>
-                </div>
+              <div id={CONFIDENTIALITY_RELEASE_ID} tabIndex={-1} className="focus:outline-none">
+                <Section
+                  title={tx("Освобождение от медицинской тайны", "Schweigepflichtsentbindung")}
+                  accessory={(
+                    <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("confidentiality_release")}>
+                      {busy === "generate-confidentiality_release" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
+                      {wizardDocuments.confidentiality_release.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
+                    </Button>
+                  )}
+                >
                 <p className="text-xs text-muted-foreground">
                   {tx(
                     "Отдельное освобождение всех лечащих врачей и медицинских учреждений от медицинской тайны.",
@@ -3991,19 +4024,20 @@ ${serviceCommentLines.join("\n")}`
                   onSign={(document, kind) => void signDocument(document.id, kind)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                 />
+                </Section>
               </div>
 
-              <div id={PRIVACY_DOCUMENT_ID} tabIndex={-1} className="space-y-4 border-b border-border pb-4 focus:outline-none">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    {tx("Согласие на использование и передачу персональных и медицинских данных", "Einverständniserklärung zur Datenübermittlung")}
-                  </h3>
-                  <Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_consents")}>
-                    {busy === "generate-privacy_consents" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
-                    {wizardDocuments.privacy_consents.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
-                  </Button>
-                </div>
-                <div className="border-y border-border">
+              <div id={PRIVACY_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
+                <Section
+                  title={tx("Согласие на использование и передачу персональных и медицинских данных", "Einverständniserklärung zur Datenübermittlung")}
+                  accessory={(
+                    <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_consents")}>
+                      {busy === "generate-privacy_consents" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
+                      {wizardDocuments.privacy_consents.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
+                    </Button>
+                  )}
+                >
+                <div className="border-y border-border/70">
                   <ToggleRow id={PRIVACY_CONSENT_ID} checked={draft.privacyConsent} disabled={isBusy} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} />
                   <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={draft.healthcareConsent} disabled={isBusy} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} />
                 </div>
@@ -4011,12 +4045,10 @@ ${serviceCommentLines.join("\n")}`
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs font-semibold uppercase text-muted-foreground">
+                        <span className={cn(tokens.text.label, "font-semibold")}>
                           {tx("Доверенное лицо / дополнительный получатель", "Vertrauenskontakt / zusätzlicher Empfänger")}
                         </span>
-                        <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground">
-                          {draft.trustedContacts.length}
-                        </span>
+                        <CountBadge>{draft.trustedContacts.length}</CountBadge>
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {tx(
@@ -4031,11 +4063,11 @@ ${serviceCommentLines.join("\n")}`
                     </Button>
                   </div>
                   {draft.trustedContacts.length === 0 ? (
-                    <div className="rounded-md border border-dashed border-border px-4 py-5 text-center text-xs text-muted-foreground">
+                    <EmptyCell>
                       {tx("Доверенные контакты пока не добавлены", "Noch keine Vertrauenskontakte hinzugefügt")}
-                    </div>
+                    </EmptyCell>
                   ) : (
-                    <ul aria-label={tx("Доверенные контакты", "Vertrauenskontakte")} className="divide-y divide-border rounded-md border border-border">
+                    <ul aria-label={tx("Доверенные контакты", "Vertrauenskontakte")} className={cn("divide-y divide-border/70 rounded-lg", tokens.surface.card)}>
                       {draft.trustedContacts.map((contact) => (
                         <li key={contact.id} className="flex items-start gap-3 px-3 py-3">
                           <div className="min-w-0 flex-1">
@@ -4093,18 +4125,18 @@ ${serviceCommentLines.join("\n")}`
                   onSign={(document, kind) => void signDocument(document.id, kind)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                 />
+                </Section>
               </div>
 
-              <div className="space-y-4 border-b border-border pb-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    {tx("Информационный лист о защите персональных данных", "Informationsblatt zum Datenschutz")}
-                  </h3>
-                  <Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_information")}>
+              <Section
+                title={tx("Информационный лист о защите персональных данных", "Informationsblatt zum Datenschutz")}
+                accessory={(
+                  <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_information")}>
                     {busy === "generate-privacy_information" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                     {wizardDocuments.privacy_information.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
                   </Button>
-                </div>
+                )}
+              >
                 <WizardDocumentRows
                   documents={wizardDocuments.privacy_information}
                   emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
@@ -4116,38 +4148,39 @@ ${serviceCommentLines.join("\n")}`
                   onDownload={(document) => void downloadDocument(document)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                 />
-              </div>
+              </Section>
 
-              <div className="space-y-3 border-b border-border pb-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    {tx("Документ, удостоверяющий личность", "Ausweisdokument")}
-                  </h3>
-                  <input
-                    id="lead-file-identity"
-                    type="file"
-                    className="peer sr-only"
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    disabled={isBusy}
-                    onChange={(event) => {
-                      const file = event.currentTarget.files?.[0];
-                      if (file) {
-                        void upload("identity", file);
-                        event.currentTarget.value = "";
-                      }
-                    }}
-                  />
-                  <label
-                    htmlFor="lead-file-identity"
-                    className={cn(
-                      "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-3 text-xs font-medium text-foreground shadow-xs hover:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
-                      isBusy && "pointer-events-none opacity-50",
-                    )}
-                  >
-                    <Upload aria-hidden="true" className="size-3.5" />
-                    {wizardDocuments.identity.length > 0 ? tx("Добавить файл", "Datei hinzufügen") : tx("Загрузить файл", "Datei hochladen")}
-                  </label>
-                </div>
+              <Section
+                title={tx("Документ, удостоверяющий личность", "Ausweisdokument")}
+                accessory={(
+                  <span className="inline-flex">
+                    <input
+                      id="lead-file-identity"
+                      type="file"
+                      className="peer sr-only"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      disabled={isBusy}
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        if (file) {
+                          void upload("identity", file);
+                          event.currentTarget.value = "";
+                        }
+                      }}
+                    />
+                    <label
+                      htmlFor="lead-file-identity"
+                      className={cn(
+                        "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground shadow-xs hover:bg-primary/90 peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
+                        isBusy && "pointer-events-none opacity-50",
+                      )}
+                    >
+                      <Upload aria-hidden="true" className="size-3.5" />
+                      {wizardDocuments.identity.length > 0 ? tx("Добавить файл", "Datei hinzufügen") : tx("Загрузить файл", "Datei hochladen")}
+                    </label>
+                  </span>
+                )}
+              >
                 <WizardDocumentRows
                   documents={wizardDocuments.identity}
                   complianceKind="identity"
@@ -4161,12 +4194,9 @@ ${serviceCommentLines.join("\n")}`
                   onSign={(document, kind) => void signDocument(document.id, kind)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                 />
-              </div>
+              </Section>
               {supplementaryDocuments.length > 0 ? (
-                <div className="space-y-3 border-b border-border pb-4">
-                  <div className="text-sm font-medium text-foreground">
-                    {tx("Другие документы", "Weitere Dokumente")}
-                  </div>
+                <Section title={tx("Другие документы", "Weitere Dokumente")}>
                   <WizardDocumentRows
                     documents={supplementaryDocuments}
                     emptyLabel=""
@@ -4178,7 +4208,7 @@ ${serviceCommentLines.join("\n")}`
                     onDownload={(document) => void downloadDocument(document)}
                     onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                   />
-                </div>
+                </Section>
               ) : null}
             </section>
           ) : null}
@@ -4188,17 +4218,19 @@ ${serviceCommentLines.join("\n")}`
               {commercialLookupsLoading ? (
                 <div
                   role="status"
-                  className="flex items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
+                  className={cn("flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-muted-foreground", tokens.surface.mutedCard)}
                 >
                   <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" />
                   {tx("Загружаются каталоги специализаций и услуг…", "Fachrichtungs- und Leistungskataloge werden geladen…")}
                 </div>
               ) : null}
-              <div className="space-y-3">
-                <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  {tx("Специализации", "Fachrichtungen")}
-                  <span aria-hidden="true" className="ml-0.5 text-destructive">*</span>
-                </span>
+              <Section title={tx("Специализации", "Fachrichtungen")}>
+                <Field
+                  label={tx("Добавить специализацию", "Fachrichtung hinzufügen")}
+                  required
+                  error={orderFieldError("specialties")}
+                  errorId={`${SERVICE_SPECIALTIES_ID}-error`}
+                >
                 <NativeComboboxSelect
                   id={SERVICE_SPECIALTIES_ID}
                   aria-label={tx("Добавить специализацию", "Fachrichtung hinzufügen")}
@@ -4221,15 +4253,11 @@ ${serviceCommentLines.join("\n")}`
                     </option>
                   ))}
                 </NativeComboboxSelect>
-                {orderFieldError("specialties") ? (
-                  <span id={`${SERVICE_SPECIALTIES_ID}-error`} role="alert" className="block text-xs leading-4 text-destructive">
-                    {orderFieldError("specialties")}
-                  </span>
-                ) : null}
+                </Field>
                 {draft.specialties.length > 0 ? (
                   <div className="grid gap-2 sm:grid-cols-2">
                     {draft.specialties.map((value) => (
-                      <div key={value} className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-border bg-muted/25 px-3 py-2">
+                      <div key={value} className={cn("flex min-w-0 items-center justify-between gap-3 rounded-lg px-3 py-2", tokens.surface.mutedCard)}>
                         <span className="min-w-0 break-words text-sm text-foreground">{specialtyLabel(value)}</span>
                         <Button
                           type="button"
@@ -4246,7 +4274,8 @@ ${serviceCommentLines.join("\n")}`
                     ))}
                   </div>
                 ) : null}
-              </div>
+              </Section>
+              <Section title={tx("Период программы", "Programmzeitraum")}>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field
                   label={tx("Начало программы", "Programmbeginn")}
@@ -4261,7 +4290,7 @@ ${serviceCommentLines.join("\n")}`
                     required={Boolean(draft.programDateTo)}
                     aria-invalid={Boolean(orderFieldError("program-date-from"))}
                     aria-describedby={orderFieldError("program-date-from") ? `${ORDER_DATE_FROM_ID}-error` : undefined}
-                    className={cn(orderFieldError("program-date-from") && "border-destructive")}
+                    className={inputClass}
                     value={draft.programDateFrom}
                     onChange={(event) => patch("programDateFrom", event.target.value)}
                   />
@@ -4280,12 +4309,13 @@ ${serviceCommentLines.join("\n")}`
                     required={Boolean(draft.programDateFrom)}
                     aria-invalid={Boolean(orderFieldError("program-date-to", "program-date-range"))}
                     aria-describedby={orderFieldError("program-date-to", "program-date-range") ? `${ORDER_DATE_TO_ID}-error` : undefined}
-                    className={cn(orderFieldError("program-date-to", "program-date-range") && "border-destructive")}
+                    className={inputClass}
                     value={draft.programDateTo}
                     onChange={(event) => patch("programDateTo", event.target.value)}
                   />
                 </Field>
               </div>
+              </Section>
             </section>
           ) : null}
 
@@ -4294,35 +4324,38 @@ ${serviceCommentLines.join("\n")}`
               {commercialLookupsLoading ? (
                 <div
                   role="status"
-                  className="flex items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
+                  className={cn("flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-muted-foreground", tokens.surface.mutedCard)}
                 >
                   <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" />
                   {tx("Загружается каталог услуг…", "Leistungskatalog wird geladen…")}
                 </div>
               ) : null}
-              <div id={FRAMEWORK_DOCUMENT_ID} tabIndex={-1} className="space-y-3 border-y border-border py-4 focus:outline-none">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-semibold text-foreground">{tx("Рамочный договор", "Rahmenvertrag")}</h3>
-                    <div className="mt-1 font-mono text-xs tabular-nums text-muted-foreground">
-                      {contract?.contract_number ?? "FC-…"}
+              <div id={FRAMEWORK_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
+                <Section
+                  title={(
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      {tx("Рамочный договор", "Rahmenvertrag")}
+                      <DocNumberPill>{contract?.contract_number ?? "FC-…"}</DocNumberPill>
+                    </span>
+                  )}
+                  accessory={(
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StateMark done={contract?.status === "signed"} label={contract?.status === "signed" ? tx("Подписан", "Unterzeichnet") : tx("Ожидает подписи", "Unterschrift offen")} />
+                      <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("framework_contract")}>
+                        {busy === "generate-framework_contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
+                        {commercialDocuments.framework_contract.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" disabled={isBusy || !contract || commercialDocuments.framework_contract.length === 0} onClick={() => void signContract(commercialDocuments.framework_contract[0]?.id)}>
+                        {busy === "contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileCheck2 className="size-3.5" />}
+                        {tx("Подтвердить подпись", "Unterschrift bestätigen")}
+                      </Button>
                     </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <StateMark done={contract?.status === "signed"} label={contract?.status === "signed" ? tx("Подписан", "Unterzeichnet") : tx("Ожидает подписи", "Unterschrift offen")} />
-                    <Button type="button" variant="outline" size="sm" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("framework_contract")}>
-                      {busy === "generate-framework_contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
-                      {commercialDocuments.framework_contract.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
-                    </Button>
-                    <Button type="button" variant="outline" size="sm" disabled={isBusy || !contract || commercialDocuments.framework_contract.length === 0} onClick={() => void signContract(commercialDocuments.framework_contract[0]?.id)}>
-                      {busy === "contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileCheck2 className="size-3.5" />}
-                      {tx("Подтвердить подпись", "Unterschrift bestätigen")}
-                    </Button>
-                  </div>
-                </div>
+                  )}
+                >
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label={tx("Начало действия договора", "Vertragsbeginn")}>
                     <Input
+                      className={inputClass}
                       id={CONTRACT_EFFECTIVE_DATE_ID}
                       name="contract_effective_date"
                       type="date"
@@ -4341,7 +4374,7 @@ ${serviceCommentLines.join("\n")}`
                         id={COST_THRESHOLD_ID}
                         name="cost_threshold"
                         inputMode="decimal"
-                        className="pr-12 font-mono tabular-nums"
+                        className={cn(inputClass, "pr-12 font-mono tabular-nums")}
                         placeholder="500,00"
                         value={draft.costThreshold}
                         onChange={(event) => patch("costThreshold", event.target.value)}
@@ -4365,20 +4398,23 @@ ${serviceCommentLines.join("\n")}`
                   onSign={(document) => void signContract(document.id)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                 />
+                </Section>
               </div>
-              {draft.serviceNeeds.length > 0 ? (
-                <LeadQuestionnaireFacts
-                  items={[
-                    {
-                      label: tx("Запрос клиента", "Kundenbedarf"),
-                      value: draft.serviceNeeds.map((value) => knownLeadProgramServiceLabel(value, t) ?? serviceNeedLabel(value, tx)).join(", "),
-                      wide: true,
-                    },
-                  ]}
-                />
-              ) : null}
-              <div className="space-y-3">
-                <span className="text-sm font-medium text-foreground">{tx("Позиции заказа", "Auftragspositionen")}</span>
+              <Section
+                title={tx("Позиции заказа", "Auftragspositionen")}
+                accessory={<CountBadge>{lines.length}</CountBadge>}
+              >
+                {draft.serviceNeeds.length > 0 ? (
+                  <LeadQuestionnaireFacts
+                    items={[
+                      {
+                        label: tx("Запрос клиента", "Kundenbedarf"),
+                        value: draft.serviceNeeds.map((value) => knownLeadProgramServiceLabel(value, t) ?? serviceNeedLabel(value, tx)).join(", "),
+                        wide: true,
+                      },
+                    ]}
+                  />
+                ) : null}
                 <NativeComboboxSelect
                   aria-label={tx("Выбрать услугу из каталога", "Leistung aus dem Katalog auswählen")}
                   name="agency_service"
@@ -4400,7 +4436,7 @@ ${serviceCommentLines.join("\n")}`
                 {lines.length === 0 ? (
                   <p className="text-xs text-muted-foreground">{tx("Услуги не выбраны", "Keine Leistungen ausgewählt")}</p>
                 ) : (
-                  <div className="overflow-hidden rounded-md border border-border">
+                  <div className={cn("overflow-hidden rounded-lg", tokens.surface.card)}>
                     <div className="overflow-x-auto">
                       <table
                         aria-label={tx("Позиции заказа", "Auftragspositionen")}
@@ -4409,7 +4445,7 @@ ${serviceCommentLines.join("\n")}`
                       <caption className="sr-only">
                         {tx("Позиции заказа", "Auftragspositionen")}
                       </caption>
-                      <thead className="bg-muted/60 text-[11px] uppercase tracking-wide text-muted-foreground">
+                      <thead className="bg-muted/40 text-[11px] uppercase tracking-wide text-muted-foreground">
                         <tr>
                           <th scope="col" className="px-3 py-2 text-left font-medium">
                             {tx("Услуга", "Leistung")}
@@ -4431,7 +4467,7 @@ ${serviceCommentLines.join("\n")}`
                           </th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-border bg-card">
+                      <tbody className="divide-y divide-border/70 bg-card">
                         {lines.map((line) => {
                           const catalogService = line.agencyServiceId
                             ? agencyServiceById.get(line.agencyServiceId)
@@ -4486,7 +4522,7 @@ ${serviceCommentLines.join("\n")}`
                     </div>
                     <dl
                       aria-label={tx("Итоги заказа", "Auftragssummen")}
-                      className="grid grid-cols-3 divide-x divide-border border-t border-border bg-muted/30"
+                      className="grid grid-cols-3 divide-x divide-border/70 border-t border-border/70 bg-muted/30"
                     >
                       <div className="min-w-0 px-2 py-2.5 text-right sm:px-3">
                         <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -4515,20 +4551,22 @@ ${serviceCommentLines.join("\n")}`
                     </dl>
                   </div>
                 )}
-              </div>
-              <div id={ORDER_DOCUMENT_ID} tabIndex={-1} className="space-y-3 border-y border-border py-4 focus:outline-none">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-semibold text-foreground">{tx("Документ заказа", "Einzelauftrag")}</h3>
-                    <div className="mt-1 font-mono text-xs tabular-nums text-muted-foreground">
-                      {order?.order_number ?? "A-…"}
-                    </div>
-                  </div>
-                  <Button type="button" variant="outline" size="sm" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("single_order")}>
-                    {busy === "generate-single_order" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
-                    {commercialDocuments.single_order.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
-                  </Button>
-                </div>
+              </Section>
+              <div id={ORDER_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
+                <Section
+                  title={(
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      {tx("Документ заказа", "Einzelauftrag")}
+                      <DocNumberPill>{order?.order_number ?? "A-…"}</DocNumberPill>
+                    </span>
+                  )}
+                  accessory={(
+                    <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("single_order")}>
+                      {busy === "generate-single_order" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
+                      {commercialDocuments.single_order.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
+                    </Button>
+                  )}
+                >
                 <WizardDocumentRows
                   documents={commercialDocuments.single_order}
                   emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
@@ -4540,8 +4578,10 @@ ${serviceCommentLines.join("\n")}`
                   onDownload={(document) => void downloadDocument(document)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                 />
+                </Section>
               </div>
-              <div className="border-y border-border">
+              <Section title={tx("Подписи", "Unterschriften")}>
+                <div>
                 <ToggleRow
                   checked={signedPatient}
                   disabled={isBusy}
@@ -4566,51 +4606,52 @@ ${serviceCommentLines.join("\n")}`
                   }}
                   label={tx("Агентство подтвердило заказ", "Auftrag von der Agentur bestätigt")}
                 />
-              </div>
-              <div className="space-y-4 border-b border-border pb-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="text-sm font-semibold text-foreground">
-                      {tx("Смета и предоплата", "Kostenvoranschlag und Vorauszahlung")}
-                    </h3>
-                    <div className="mt-1 font-mono text-xs tabular-nums text-muted-foreground">
-                      {quote?.quote_number ?? "KV-…"}
-                    </div>
-                  </div>
-                  <Button type="button" variant="outline" disabled={isBusy || !lines.some(validLine)} onClick={() => void createOrAcceptQuote(false)}>
+                </div>
+              </Section>
+              <Section
+                title={(
+                  <span className="inline-flex flex-wrap items-center gap-2">
+                    {tx("Смета и предоплата", "Kostenvoranschlag und Vorauszahlung")}
+                    <DocNumberPill>{quote?.quote_number ?? "KV-…"}</DocNumberPill>
+                  </span>
+                )}
+                accessory={(
+                  <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void createOrAcceptQuote(false)}>
                     {busy === "quote" ? <LoaderCircle className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
                     {quote ? tx("Пересчитать", "Neu berechnen") : tx("Рассчитать", "Berechnen")}
                   </Button>
-                </div>
-
+                )}
+              >
                 {quote ? (
-                  <dl className="grid grid-cols-2 border-y border-border sm:grid-cols-4">
-                    <div className="min-w-0 border-b border-r border-border px-3 py-2.5 sm:border-b-0">
-                      <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <div className={cn("min-w-0 rounded-lg px-3 py-2.5", tokens.surface.mutedCard)}>
+                      <dt className={tokens.text.label}>
                         {tx("Статус", "Status")}
                       </dt>
                       <dd className="mt-1 text-xs font-medium text-foreground">
-                        {quote.status === "accepted" ? tx("Подтверждена", "Angenommen") : tx("Черновик", "Entwurf")}
+                        <StatusBadge tone={quote.status === "accepted" ? "success" : "neutral"}>
+                          {quote.status === "accepted" ? tx("Подтверждена", "Angenommen") : tx("Черновик", "Entwurf")}
+                        </StatusBadge>
                       </dd>
                     </div>
-                    <div className="min-w-0 border-b border-border px-3 py-2.5 sm:border-b-0 sm:border-r">
-                      <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    <div className={cn("min-w-0 rounded-lg px-3 py-2.5", tokens.surface.mutedCard)}>
+                      <dt className={tokens.text.label}>
                         {tx("Сумма", "Betrag")}
                       </dt>
                       <dd className="mt-1 whitespace-nowrap font-mono text-xs font-semibold tabular-nums text-foreground">
                         {formatMoneyValue(quoteTotal, lang)} EUR
                       </dd>
                     </div>
-                    <div className="min-w-0 border-r border-border px-3 py-2.5">
-                      <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    <div className={cn("min-w-0 rounded-lg px-3 py-2.5", tokens.surface.mutedCard)}>
+                      <dt className={tokens.text.label}>
                         {tx("Предоплата", "Vorauszahlung")}
                       </dt>
                       <dd className="mt-1 whitespace-nowrap font-mono text-xs tabular-nums text-foreground">
                         {formatMoneyValue(persistedPrepayment, lang)} EUR
                       </dd>
                     </div>
-                    <div className="min-w-0 px-3 py-2.5">
-                      <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    <div className={cn("min-w-0 rounded-lg px-3 py-2.5", tokens.surface.mutedCard)}>
+                      <dt className={tokens.text.label}>
                         {tx("Остаток", "Restbetrag")}
                       </dt>
                       <dd className="mt-1 whitespace-nowrap font-mono text-xs tabular-nums text-foreground">
@@ -4620,7 +4661,7 @@ ${serviceCommentLines.join("\n")}`
                   </dl>
                 ) : null}
 
-                <div className="border-y border-border">
+                <div>
                   <ToggleRow
                     checked={prepayment}
                     disabled={isBusy}
@@ -4638,7 +4679,7 @@ ${serviceCommentLines.join("\n")}`
                 <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
                   <Field label={tx("Полученная предоплата", "Erhaltene Vorauszahlung")}>
                     <Input
-                      className="font-mono tabular-nums"
+                      className={cn(inputClass, "font-mono tabular-nums")}
                       inputMode="decimal"
                       min="0"
                       max={quote ? quoteTotal : undefined}
@@ -4672,20 +4713,22 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                 ) : null}
                 <StateMark done={quoteAndPrepaymentReady} label={quoteStateLabel} />
-              </div>
-              <div id={ORDER_COST_ESTIMATE_DOCUMENT_ID} tabIndex={-1} className="space-y-3 border-b border-border pb-4 focus:outline-none">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-semibold text-foreground">{tx("Смета к заказу", "Kostenvoranschlag zum Einzelauftrag")}</h3>
-                    <div className="mt-1 font-mono text-xs tabular-nums text-muted-foreground">
-                      {quote?.quote_number ?? "KV-…"}
-                    </div>
-                  </div>
-                  <Button type="button" variant="outline" size="sm" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("order_cost_estimate")}>
-                    {busy === "generate-order_cost_estimate" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
-                    {commercialDocuments.order_cost_estimate.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
-                  </Button>
-                </div>
+              </Section>
+              <div id={ORDER_COST_ESTIMATE_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
+                <Section
+                  title={(
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      {tx("Смета к заказу", "Kostenvoranschlag zum Einzelauftrag")}
+                      <DocNumberPill>{quote?.quote_number ?? "KV-…"}</DocNumberPill>
+                    </span>
+                  )}
+                  accessory={(
+                    <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("order_cost_estimate")}>
+                      {busy === "generate-order_cost_estimate" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
+                      {commercialDocuments.order_cost_estimate.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
+                    </Button>
+                  )}
+                >
                 <WizardDocumentRows
                   documents={commercialDocuments.order_cost_estimate}
                   emptyLabel={tx("Смета к заказу ещё не создана", "Kostenvoranschlag zum Einzelauftrag wurde noch nicht erstellt")}
@@ -4697,20 +4740,23 @@ ${serviceCommentLines.join("\n")}`
                   onDownload={(document) => void downloadDocument(document)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                 />
+                </Section>
               </div>
-              <div id={COST_ESTIMATE_DOCUMENT_ID} tabIndex={-1} className="space-y-3 border-b border-border pb-4 focus:outline-none">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-semibold text-foreground">{tx("Предварительный расчёт расходов", "Vorläufige Kostenkalkulation")}</h3>
-                    <div className="mt-1 font-mono text-xs tabular-nums text-muted-foreground">
-                      {quote?.quote_number ?? "KV-…"}
-                    </div>
-                  </div>
-                  <Button type="button" variant="outline" size="sm" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("cost_estimate")}>
-                    {busy === "generate-cost_estimate" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
-                    {commercialDocuments.cost_estimate.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
-                  </Button>
-                </div>
+              <div id={COST_ESTIMATE_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
+                <Section
+                  title={(
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      {tx("Предварительный расчёт расходов", "Vorläufige Kostenkalkulation")}
+                      <DocNumberPill>{quote?.quote_number ?? "KV-…"}</DocNumberPill>
+                    </span>
+                  )}
+                  accessory={(
+                    <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("cost_estimate")}>
+                      {busy === "generate-cost_estimate" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
+                      {commercialDocuments.cost_estimate.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
+                    </Button>
+                  )}
+                >
                 <WizardDocumentRows
                   documents={commercialDocuments.cost_estimate}
                   emptyLabel={tx("Предварительный расчёт ещё не создан", "Vorläufige Kostenkalkulation wurde noch nicht erstellt")}
@@ -4722,17 +4768,50 @@ ${serviceCommentLines.join("\n")}`
                   onDownload={(document) => void downloadDocument(document)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                 />
+                </Section>
               </div>
-              <div className="flex flex-wrap items-center justify-between gap-3"><StateMark done={Boolean(readiness.get("commercial"))} label={readiness.get("commercial") ? tx("Договор и заказ завершены", "Vertrag und Auftrag abgeschlossen") : tx("Договор и заказ ещё не завершены", "Vertrag und Auftrag noch nicht abgeschlossen")} /><Button type="button" disabled={isBusy || !lines.some(validLine)} onClick={() => void prepareCommercial()}>{busy === "commercial" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}{tx("Сохранить договор и заказ", "Vertrag und Auftrag speichern")}</Button></div>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <StateMark
+                  done={Boolean(readiness.get("commercial"))}
+                  label={readiness.get("commercial") ? tx("Договор и заказ завершены", "Vertrag und Auftrag abgeschlossen") : tx("Договор и заказ ещё не завершены", "Vertrag und Auftrag noch nicht abgeschlossen")}
+                />
+                <Button type="button" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={isBusy || !lines.some(validLine)} onClick={() => void prepareCommercial()}>
+                  {busy === "commercial" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
+                  {tx("Сохранить договор и заказ", "Vertrag und Auftrag speichern")}
+                </Button>
+              </div>
             </section>
           ) : null}
 
           {lead && step === "release" ? (
             <section className="space-y-5">
-              <div><h3 className="text-sm font-semibold text-foreground">{tx("Создание пациента", "Patient anlegen")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Проверьте все этапы. После подтверждения система создаст карточку пациента и перенесёт в неё данные обращения.", "Prüfen Sie alle Schritte. Nach der Bestätigung wird die Patientenakte angelegt und die Angaben aus dem Lead werden übernommen.")}</p></div>
-              <div className="border-y border-border">{lead.readiness.steps.map((item) => <div key={item.key} className="flex items-center justify-between gap-4 border-b border-border/70 py-3 last:border-b-0"><span className="text-sm text-foreground">{readinessStepLabel(item.key, tx)}</span><StateMark done={item.ready} label={item.ready ? tx("Выполнено", "Erledigt") : tx("Не завершено", "Noch offen")} /></div>)}</div>
-              {lead.readiness.blocking_reasons.length > 0 ? <div className="border-l-2 border-amber-500 bg-amber-50/50 px-3 py-3 text-sm text-amber-900"><div className="font-medium">{tx("Что осталось заполнить", "Was noch fehlt")}</div><ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5">{lead.readiness.blocking_reasons.map((reason) => <li key={reason}>{readinessReasonLabel(reason, tx)}</li>)}</ul></div> : null}
-              <div className="flex justify-end"><Button type="button" disabled={isBusy || !lead.readiness.conversion_ready || !quoteAndPrepaymentReady} onClick={() => void convert()}>{busy === "convert" ? <LoaderCircle className="size-4 animate-spin" /> : <UserRoundCheck className="size-4" />}{tx("Создать пациента", "Patient anlegen")}</Button></div>
+              <Section title={tx("Создание пациента", "Patient anlegen")}>
+                <p className="text-sm text-muted-foreground">
+                  {tx("Проверьте все этапы. После подтверждения система создаст карточку пациента и перенесёт в неё данные обращения.", "Prüfen Sie alle Schritte. Nach der Bestätigung wird die Patientenakte angelegt und die Angaben aus dem Lead werden übernommen.")}
+                </p>
+                <div>
+                  {lead.readiness.steps.map((item) => (
+                    <div key={item.key} className="flex items-center justify-between gap-4 border-b border-border/70 py-3 last:border-b-0">
+                      <span className="text-sm text-foreground">{readinessStepLabel(item.key, tx)}</span>
+                      <StateMark done={item.ready} label={item.ready ? tx("Выполнено", "Erledigt") : tx("Не завершено", "Noch offen")} />
+                    </div>
+                  ))}
+                </div>
+              </Section>
+              {lead.readiness.blocking_reasons.length > 0 ? (
+                <Banner tone="warning">
+                  <div className="font-medium">{tx("Что осталось заполнить", "Was noch fehlt")}</div>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5">
+                    {lead.readiness.blocking_reasons.map((reason) => <li key={reason}>{readinessReasonLabel(reason, tx)}</li>)}
+                  </ul>
+                </Banner>
+              ) : null}
+              <div className="flex justify-end">
+                <Button type="button" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={isBusy || !lead.readiness.conversion_ready || !quoteAndPrepaymentReady} onClick={() => void convert()}>
+                  {busy === "convert" ? <LoaderCircle className="size-4 animate-spin" /> : <UserRoundCheck className="size-4" />}
+                  {tx("Создать пациента", "Patient anlegen")}
+                </Button>
+              </div>
             </section>
           ) : null}
         </main>
@@ -4751,29 +4830,34 @@ ${serviceCommentLines.join("\n")}`
         >
           {trustedContactEditor ? (
             <form className="flex min-h-0 flex-1 flex-col" onSubmit={saveTrustedContact}>
-              <SheetHeader className="shrink-0 border-b border-border px-6 py-5 pr-14 sm:px-7">
-                <SheetTitle>
-                  {editingTrustedContact
-                    ? tx("Редактировать доверенный контакт", "Vertrauenskontakt bearbeiten")
-                    : tx("Добавить доверенный контакт", "Vertrauenskontakt hinzufügen")}
-                </SheetTitle>
-              </SheetHeader>
-              <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-6 sm:px-7 sm:py-7">
+              <AdminSheetScaffold
+                title={editingTrustedContact
+                  ? tx("Редактировать доверенный контакт", "Vertrauenskontakt bearbeiten")
+                  : tx("Добавить доверенный контакт", "Vertrauenskontakt hinzufügen")}
+                footer={(
+                  <SheetFormFooter
+                    cancelLabel={tx("Отмена", "Abbrechen")}
+                    submitLabel={editingTrustedContact ? tx("Сохранить", "Speichern") : tx("Добавить", "Hinzufügen")}
+                    onCancel={closeTrustedContactEditor}
+                  />
+                )}
+              >
                 <p className="text-xs leading-5 text-muted-foreground">
                   {tx(
                     "Контакт будет сохранён в обращении и перенесён в карточку пациента при конвертации.",
                     "Der Kontakt wird im Lead gespeichert und bei der Konvertierung in die Patientenakte übernommen.",
                   )}
                 </p>
-                <div className="grid gap-x-5 gap-y-6 sm:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-2">
                   <Field
                     required
-                    className="sm:col-span-2"
+                    className="md:col-span-2"
                     label={tx("Имя и фамилия", "Vor- und Nachname")}
                     error={trustedContactEditorError || undefined}
                     errorId="trusted-contact-name-error"
                   >
                     <Input
+                      className={inputClass}
                       autoFocus
                       required
                       value={trustedContactEditor.name}
@@ -4784,6 +4868,7 @@ ${serviceCommentLines.join("\n")}`
                   </Field>
                   <Field label="E-Mail">
                     <Input
+                      className={inputClass}
                       type="email"
                       value={trustedContactEditor.email}
                       onChange={(event) => patchTrustedContactEditor("email", event.target.value)}
@@ -4791,6 +4876,7 @@ ${serviceCommentLines.join("\n")}`
                   </Field>
                   <Field label={tx("Телефон", "Telefon")}>
                     <Input
+                      className={inputClass}
                       type="tel"
                       value={trustedContactEditor.phone}
                       onChange={(event) => patchTrustedContactEditor("phone", event.target.value)}
@@ -4798,34 +4884,29 @@ ${serviceCommentLines.join("\n")}`
                   </Field>
                   <Field label={tx("Кем приходится клиенту", "Beziehung zur Person")}>
                     <Input
+                      className={inputClass}
                       value={trustedContactEditor.relation}
                       onChange={(event) => patchTrustedContactEditor("relation", event.target.value)}
                     />
                   </Field>
                   <Field label={tx("Дата рождения", "Geburtsdatum")}>
                     <Input
+                      className={inputClass}
                       type="date"
                       max={new Date().toISOString().slice(0, 10)}
                       value={trustedContactEditor.birthDate}
                       onChange={(event) => patchTrustedContactEditor("birthDate", event.target.value)}
                     />
                   </Field>
-                  <Field className="sm:col-span-2" label={tx("Адрес", "Adresse")}>
+                  <Field className="md:col-span-2" label={tx("Адрес", "Adresse")}>
                     <Input
+                      className={inputClass}
                       value={trustedContactEditor.address}
                       onChange={(event) => patchTrustedContactEditor("address", event.target.value)}
                     />
                   </Field>
                 </div>
-              </div>
-              <div className="flex shrink-0 justify-end gap-3 border-t border-border px-6 py-4 sm:px-7">
-                <Button type="button" variant="outline" onClick={closeTrustedContactEditor}>
-                  {tx("Отмена", "Abbrechen")}
-                </Button>
-                <Button type="submit">
-                  {editingTrustedContact ? tx("Сохранить", "Speichern") : tx("Добавить", "Hinzufügen")}
-                </Button>
-              </div>
+              </AdminSheetScaffold>
             </form>
           ) : null}
         </SheetContent>

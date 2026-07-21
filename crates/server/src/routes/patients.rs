@@ -378,9 +378,6 @@ pub(crate) struct PatientLabelAgencySettings {
     pub(crate) email: Option<String>,
 }
 
-const DEFAULT_PATIENT_LABEL_RESPONSIBLE_PERSON: &str = "Heorhii Hudiiev";
-const LEGACY_PATIENT_LABEL_CARE_OF: &str = "c/o GMED";
-
 const PATIENT_CARD_ENTRY_CATEGORIES: &[&str] = &[
     "medical_update",
     "patient_report",
@@ -1030,16 +1027,20 @@ pub(crate) async fn load_patient_label_agency_settings(
         }
     }
 
-    let name = values
-        .get("agency_name")
-        .cloned()
-        .unwrap_or_else(|| "GMED".to_string());
-    let care_of = values
-        .get("agency_care_of")
-        .map(String::as_str)
-        .filter(|value| !value.eq_ignore_ascii_case(LEGACY_PATIENT_LABEL_CARE_OF))
-        .unwrap_or(DEFAULT_PATIENT_LABEL_RESPONSIBLE_PERSON)
-        .to_string();
+    let name = values.get("agency_name").cloned().ok_or_else(|| {
+        tracing::error!("Required patient label setting agency_name is missing");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Patient label agency profile is incomplete",
+        )
+    })?;
+    let care_of = values.get("agency_care_of").cloned().ok_or_else(|| {
+        tracing::error!("Required patient label setting agency_care_of is missing");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Patient label agency profile is incomplete",
+        )
+    })?;
 
     Ok(PatientLabelAgencySettings {
         name,
@@ -10181,7 +10182,12 @@ async fn get_patient_medikationsplan_pdf(
         }
     };
 
-    let issuer_row = sqlx::query("SELECT name, email FROM users WHERE id = $1")
+    let issuer_row = sqlx::query(
+        r#"SELECT name, email,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_name') AS agency_name
+           FROM users
+           WHERE id = $1"#,
+    )
         .bind(auth.user_id)
         .fetch_optional(&state.db)
         .await
@@ -10191,7 +10197,13 @@ async fn get_patient_medikationsplan_pdf(
         .as_ref()
         .and_then(|r| r.try_get::<Option<String>, _>("name").ok().flatten())
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "GMED CONSOLE".to_string());
+        .or_else(|| {
+            issuer_row
+                .as_ref()
+                .and_then(|r| r.try_get::<Option<String>, _>("agency_name").ok().flatten())
+                .filter(|s| !s.trim().is_empty())
+        })
+        .unwrap_or_else(|| "System".to_string());
     let issuer_email = issuer_row
         .as_ref()
         .and_then(|r| r.try_get::<Option<String>, _>("email").ok().flatten());

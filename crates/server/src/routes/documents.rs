@@ -989,6 +989,7 @@ struct GeneratedAppointmentConfirmationContext {
 struct GeneratedConsentContext {
     sole_guardian: bool,
     auto_name: String,
+    document_reference: String,
     child_name: Option<String>,
     child_birth_date: Option<NaiveDate>,
     child_address: Option<String>,
@@ -6104,7 +6105,6 @@ fn build_framework_contract_pdf(
         fallback_document_reference,
     );
     let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
-    let agency_display = adult_legal_agency_identity(&context.agency);
     let agency_person = agency_responsible_person(&context.agency).to_string();
 
     let effective_date_str = fmt_de_date(context.effective_date);
@@ -6172,21 +6172,28 @@ fn build_framework_contract_pdf(
     );
 
     fc_body(&mut layout, "und");
-    layout.text_block(
-        &agency_display,
-        11.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        0.5,
-    );
-    for address_line in agency_document_address(&context.agency)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
+    for (index, line) in agency_identity_profile_lines(&context.agency)
+        .into_iter()
+        .enumerate()
     {
-        fc_body_tight(&mut layout, address_line);
+        layout.text_block(
+            &line,
+            11.0,
+            index == 0,
+            0.0,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            0.5,
+        );
+    }
+    if let Some(address) = agency_document_address(&context.agency) {
+        for address_line in address
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+        {
+            fc_body_tight(&mut layout, address_line);
+        }
     }
     if let Some(email) = context
         .agency
@@ -7002,17 +7009,6 @@ fn build_visa_invitation_pdf(
     );
     let mut layout = TreatmentPlanPdfLayout::new(footer_text, regular_handle, bold_handle);
 
-    if let Some(sender) = appointment_sender_line(&context.agency) {
-        layout.text_block(
-            &sender,
-            9.0,
-            false,
-            0.0,
-            TreatmentPlanPdfColor::Muted,
-            0.0,
-            1.0,
-        );
-    }
     for line in agency_block_lines(&context.agency) {
         admin_block(&mut layout, &line, 0.0, 0.3);
     }
@@ -7289,39 +7285,30 @@ fn patient_sticker_meta_lines(context: &GeneratedPatientStickerContext) -> Vec<S
 }
 
 fn patient_sticker_agency_line(context: &GeneratedPatientStickerContext) -> String {
-    [
-        Some(
-            context
-                .agency
-                .care_of
-                .trim()
-                .to_string()
-                .if_empty_then(|| context.agency.name.clone()),
-        ),
-        context.agency.address.clone(),
-        context.agency.phone.clone(),
-        context.agency.email.clone(),
-    ]
-    .into_iter()
-    .flatten()
-    .map(|value| value.trim().to_string())
-    .filter(|value| !value.is_empty())
-    .collect::<Vec<_>>()
-    .join("  ·  ")
-}
-
-trait IfEmptyString {
-    fn if_empty_then(self, fallback: impl FnOnce() -> String) -> String;
-}
-
-impl IfEmptyString for String {
-    fn if_empty_then(self, fallback: impl FnOnce() -> String) -> String {
-        if self.trim().is_empty() {
-            fallback()
-        } else {
-            self
+    let name = context.agency.name.trim();
+    let care_of = context.agency.care_of.trim();
+    let comparable_care_of = normalized_agency_person(care_of).unwrap_or_default();
+    let mut parts = Vec::new();
+    if !name.is_empty() {
+        parts.push(name.to_string());
+    }
+    if !care_of.is_empty()
+        && !name
+            .to_lowercase()
+            .contains(&comparable_care_of.to_lowercase())
+    {
+        parts.push(comparable_care_of.to_string());
+    }
+    for value in [
+        context.agency.address.as_deref(),
+        context.agency.phone.as_deref(),
+        context.agency.email.as_deref(),
+    ] {
+        if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+            parts.push(value.to_string());
         }
     }
+    parts.join("  ·  ")
 }
 
 fn build_patient_sticker_html(context: &GeneratedPatientStickerContext) -> String {
@@ -10863,7 +10850,42 @@ async fn generate_document(
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned);
 
-    let bindings = body.bindings.clone().unwrap_or_default();
+    let mut bindings = body.bindings.clone().unwrap_or_default();
+    if template.id == "privacy_consents"
+        && bindings
+            .extra_release_recipients
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+    {
+        let stored_contacts = if let Some(lead_uuid) = lead_id {
+            sqlx::query_scalar::<_, Value>("SELECT trusted_contacts FROM leads WHERE id = $1")
+                .bind(lead_uuid)
+                .fetch_optional(&state.db)
+                .await
+        } else if let Some(patient_uuid) = patient_id {
+            sqlx::query_scalar::<_, Value>(
+                "SELECT COALESCE(intake_profile -> 'trusted_contacts', '[]'::jsonb) FROM patients WHERE id = $1",
+            )
+            .bind(patient_uuid)
+            .fetch_optional(&state.db)
+            .await
+        } else {
+            Ok(None)
+        };
+        match stored_contacts {
+            Ok(Some(contacts)) => {
+                bindings.extra_release_recipients = trusted_contact_recipients_binding(&contacts);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(error = %error, ?patient_id, ?lead_id, "load trusted contacts for generated document");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load trusted contacts",
+                );
+            }
+        }
+    }
     let generated_bindings_snapshot = generated_binding_snapshot(&bindings);
     let manual_text = match normalize_generated_manual_text(body.manual_text.as_deref()) {
         Ok(value) => value,
@@ -12141,11 +12163,8 @@ async fn generate_document(
         }
         "consent_data_release_child" | "consent_data_release_single" => {
             let sole_guardian = template.id == "consent_data_release_single";
-            // Auto-fill guardians from the child's relations. A parent is labelled
-            // Mutter/Vater only when the linked patient record actually provides that
-            // gender; otherwise use a neutral role instead of guessing by row order.
             let guardian_relations = sqlx::query(
-                r#"SELECT pr.related_name, rp.birth_date, rp.gender
+                r#"SELECT pr.related_name, rp.birth_date
                    FROM patient_relations pr
                    LEFT JOIN patients rp ON rp.id = pr.related_patient_id
                    WHERE pr.patient_id = $1
@@ -12156,33 +12175,22 @@ async fn generate_document(
             .fetch_all(&state.db)
             .await
             .unwrap_or_default();
-            let guardian_at = |idx: usize| -> (Option<String>, Option<String>, Option<NaiveDate>) {
+            let guardian_at = |idx: usize| -> (Option<String>, Option<NaiveDate>) {
                 match guardian_relations.get(idx) {
                     Some(row) => (
                         row.try_get::<String, _>("related_name")
                             .ok()
                             .map(|name| name.trim().to_string())
                             .filter(|name| !name.is_empty()),
-                        row.try_get::<Option<String>, _>("gender")
-                            .ok()
-                            .flatten()
-                            .as_deref()
-                            .map(|gender| match gender {
-                                "female" => "Mutter".to_string(),
-                                "male" => "Vater".to_string(),
-                                _ => format!("Sorgeberechtigte/r {}", idx + 1),
-                            })
-                            .or_else(|| Some(format!("Sorgeberechtigte/r {}", idx + 1))),
                         row.try_get::<Option<NaiveDate>, _>("birth_date")
                             .ok()
                             .flatten(),
                     ),
-                    None => (None, Some(format!("Sorgeberechtigte/r {}", idx + 1)), None),
+                    None => (None, None),
                 }
             };
-            let (guardian1_name, guardian1_label, guardian1_birth) = guardian_at(0);
-            let (guardian2_name_derived, guardian2_label_derived, guardian2_birth_derived) =
-                guardian_at(1);
+            let (guardian1_name, guardian1_birth) = guardian_at(0);
+            let (guardian2_name_derived, guardian2_birth_derived) = guardian_at(1);
             let agency = match load_agency_contract_settings(&state).await {
                 Ok(value) => value,
                 Err(resp) => return resp,
@@ -12190,6 +12198,7 @@ async fn generate_document(
             let context = GeneratedConsentContext {
                 sole_guardian,
                 auto_name: auto_name.clone(),
+                document_reference: generated_doc_id.clone(),
                 child_name: bindings.child_name.clone().or_else(|| {
                     if patient_name.is_empty() {
                         None
@@ -12203,11 +12212,11 @@ async fn generate_document(
                     .clone()
                     .or_else(|| patient_party.address_line()),
                 guardian_name: bindings.guardian_name.clone().or(guardian1_name),
-                guardian_label: bindings.guardian_label.clone().or(guardian1_label),
+                guardian_label: bindings.guardian_label.clone(),
                 guardian_birth_date: bindings.guardian_birth_date.or(guardian1_birth),
                 guardian_address: bindings.guardian_address.clone(),
                 guardian2_name: bindings.guardian2_name.clone().or(guardian2_name_derived),
-                guardian2_label: bindings.guardian2_label.clone().or(guardian2_label_derived),
+                guardian2_label: bindings.guardian2_label.clone(),
                 guardian2_birth_date: bindings.guardian2_birth_date.or(guardian2_birth_derived),
                 extra_release_recipients: bindings.extra_release_recipients.clone(),
                 agency,
@@ -12502,65 +12511,43 @@ async fn load_agency_contract_settings(
         }
     }
 
-    let name = values
-        .get("agency_name")
-        .cloned()
-        .unwrap_or_else(|| DEFAULT_AGENCY_NAME.to_string());
+    let required_value = |key: &'static str| {
+        values.get(key).cloned().ok_or_else(|| {
+            tracing::error!(
+                setting_key = key,
+                "required agency document setting is missing"
+            );
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Agency document profile is incomplete",
+            )
+        })
+    };
+    let name = required_value("agency_name")?;
+    let responsible_person = required_value("agency_care_of")?;
+    let sign_place = required_value("agency_sign_place")?;
+    let data_system_name = required_value("agency_data_system_name")?;
     Ok(AgencyContractSettings {
         name,
-        care_of: values
-            .get("agency_care_of")
-            .cloned()
-            .or_else(|| Some(DEFAULT_AGENCY_RESPONSIBLE_PERSON.to_string())),
+        care_of: Some(responsible_person),
         principal_birth_date: values
             .get("agency_principal_birth_date")
             .and_then(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()),
-        address: values
-            .get("agency_address")
-            .cloned()
-            .or_else(|| Some(DEFAULT_AGENCY_ADDRESS.to_string())),
-        phone: values
-            .get("agency_phone")
-            .cloned()
-            .or_else(|| Some(DEFAULT_AGENCY_PHONE.to_string())),
-        email: values
-            .get("agency_email")
-            .cloned()
-            .or_else(|| Some(DEFAULT_AGENCY_EMAIL.to_string())),
-        website: values
-            .get("agency_website")
-            .cloned()
-            .or_else(|| Some(DEFAULT_AGENCY_WEBSITE.to_string())),
+        address: values.get("agency_address").cloned(),
+        phone: values.get("agency_phone").cloned(),
+        email: values.get("agency_email").cloned(),
+        website: values.get("agency_website").cloned(),
         privacy_email: values
             .get("agency_privacy_email")
             .cloned()
-            .or_else(|| values.get("agency_email").cloned())
-            .or_else(|| Some(DEFAULT_AGENCY_EMAIL.to_string())),
-        sign_place: values
-            .get("agency_sign_place")
-            .cloned()
-            .unwrap_or_else(|| "München".to_string()),
-        data_system_name: values
-            .get("agency_data_system_name")
-            .cloned()
-            .unwrap_or_else(|| "GMED-EDV-System".to_string()),
+            .or_else(|| values.get("agency_email").cloned()),
+        sign_place,
+        data_system_name,
         data_processor_notice: values.get("agency_data_processor_notice").cloned(),
-        bank_holder: values
-            .get("agency_bank_holder")
-            .cloned()
-            .or_else(|| Some(DEFAULT_AGENCY_BANK_HOLDER.to_string())),
-        bank_name: values
-            .get("agency_bank_name")
-            .cloned()
-            .or_else(|| Some(DEFAULT_AGENCY_BANK_NAME.to_string())),
-        bank_swift: values
-            .get("agency_bank_swift")
-            .cloned()
-            .or_else(|| Some(DEFAULT_AGENCY_BANK_SWIFT.to_string())),
-        bank_iban: values
-            .get("agency_bank_iban")
-            .cloned()
-            .or_else(|| Some(DEFAULT_AGENCY_BANK_IBAN.to_string())),
+        bank_holder: values.get("agency_bank_holder").cloned(),
+        bank_name: values.get("agency_bank_name").cloned(),
+        bank_swift: values.get("agency_bank_swift").cloned(),
+        bank_iban: values.get("agency_bank_iban").cloned(),
     })
 }
 
@@ -12592,7 +12579,7 @@ fn party_block_lines(party: &DocPartyBlock) -> Vec<String> {
 }
 
 fn agency_block_lines(agency: &AgencyContractSettings) -> Vec<String> {
-    let mut lines = vec![agency_legal_name(agency)];
+    let mut lines = agency_identity_profile_lines(agency);
     if let Some(address) = agency
         .address
         .as_deref()
@@ -12621,7 +12608,7 @@ fn agency_block_lines(agency: &AgencyContractSettings) -> Vec<String> {
 }
 
 fn legal_agency_block_lines(agency: &AgencyContractSettings) -> Vec<String> {
-    let mut lines = vec![adult_legal_agency_identity(agency)];
+    let mut lines = agency_identity_profile_lines(agency);
     if let Some(address) = agency
         .address
         .as_deref()
@@ -12704,6 +12691,44 @@ fn generated_binding_snapshot(bindings: &DocumentBindingOverrides) -> Option<Val
     serde_json::to_value(bindings)
         .ok()
         .and_then(compact_generated_binding_value)
+}
+
+fn trusted_contact_recipients_binding(contacts: &Value) -> Option<String> {
+    let lines = contacts
+        .as_array()?
+        .iter()
+        .filter_map(|contact| {
+            let contact = contact.as_object()?;
+            let value = |key: &str| {
+                contact
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+            };
+            let name = value("name")?;
+            let mut parts = vec![name.to_string()];
+            if let Some(birth_date) = value("birth_date") {
+                let formatted = NaiveDate::parse_from_str(birth_date, "%Y-%m-%d")
+                    .ok()
+                    .map(|date| fmt_de_date(Some(date)))
+                    .unwrap_or_else(|| birth_date.to_string());
+                parts.push(format!("geb. am {formatted}"));
+            }
+            if let Some(address) = value("address") {
+                parts.push(format!("Adresse: {address}"));
+            }
+            if let Some(email) = value("email") {
+                parts.push(format!("E-Mail: {email}"));
+            }
+            if let Some(phone) = value("phone") {
+                parts.push(format!("Tel.: {phone}"));
+            }
+            Some(parts.join(", "))
+        })
+        .collect::<Vec<_>>();
+
+    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 fn generated_manual_text_paragraphs(value: &str) -> Vec<String> {
@@ -13929,26 +13954,6 @@ fn appointment_nominative_salutation(party: &DocPartyBlock) -> &'static str {
     }
 }
 
-/// Comma-joins the agency contact (responsible person + address) for the letterhead
-/// sender line assembled from the configured responsible person and agency address.
-fn appointment_sender_line(agency: &AgencyContractSettings) -> Option<String> {
-    let responsible_person = agency_responsible_person(agency);
-    let address = agency
-        .address
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty());
-    let parts: Vec<&str> = [Some(responsible_person), address]
-        .into_iter()
-        .flatten()
-        .collect();
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join(", "))
-    }
-}
-
 fn build_appointment_confirmation_pdf(
     context: &GeneratedAppointmentConfirmationContext,
 ) -> Result<Vec<u8>, &'static str> {
@@ -14002,18 +14007,7 @@ fn build_appointment_confirmation_pdf(
     }
     layout.spacer(2.5);
 
-    // --- Agency letterhead sender line + footer agency block ---
-    if let Some(sender) = appointment_sender_line(&context.agency) {
-        layout.text_block(
-            &sender,
-            9.0,
-            false,
-            0.0,
-            TreatmentPlanPdfColor::Muted,
-            0.0,
-            1.0,
-        );
-    }
+    // --- Agency letterhead ---
     for line in agency_block_lines(&context.agency) {
         admin_block(&mut layout, &line, 0.0, 0.3);
     }
@@ -14242,94 +14236,103 @@ fn adult_consent_subject_line(party: &DocPartyBlock) -> String {
     )
 }
 
-const DEFAULT_AGENCY_NAME: &str = "GMED";
-const DEFAULT_AGENCY_RESPONSIBLE_PERSON: &str = "Heorhii Hudiiev";
-const AGENCY_LEGAL_NAME_SUFFIX: &str = "Agentur für Patientenbetreuung";
-const DEFAULT_AGENCY_ADDRESS: &str = "Albert-Schweitzer-Straße 56\n81735 München";
-const DEFAULT_AGENCY_PHONE: &str = "+49 176 22570962";
-const DEFAULT_AGENCY_EMAIL: &str = "office@gmed-health.com";
-const DEFAULT_AGENCY_WEBSITE: &str = "gmed-health.com";
-const DEFAULT_AGENCY_BANK_HOLDER: &str = "Heorhii Hudiiev";
-const DEFAULT_AGENCY_BANK_NAME: &str = "Commerzbank München";
-const DEFAULT_AGENCY_BANK_SWIFT: &str = "COBADEFFXXX";
-const DEFAULT_AGENCY_BANK_IBAN: &str = "DE71 7004 0045 0836 8961 00";
+fn normalized_agency_person(value: &str) -> Option<&str> {
+    let mut value = value.trim();
+    if value
+        .get(..3)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("c/o"))
+    {
+        value = value
+            .get(3..)
+            .unwrap_or_default()
+            .trim_start_matches(|character: char| {
+                character.is_whitespace() || matches!(character, '-' | '/' | ':' | '·')
+            });
+    }
+    (!value.is_empty()).then_some(value)
+}
+
+fn strip_trailing_agency_person<'a>(name: &'a str, responsible_person: &str) -> &'a str {
+    let Some(start) = name.len().checked_sub(responsible_person.len()) else {
+        return name;
+    };
+    let Some(suffix) = name.get(start..) else {
+        return name;
+    };
+    if !suffix.eq_ignore_ascii_case(responsible_person) {
+        return name;
+    }
+    name.get(..start)
+        .unwrap_or(name)
+        .trim_end_matches(|character: char| {
+            character.is_whitespace() || matches!(character, '-' | '/' | '·' | ',')
+        })
+}
 
 fn agency_legal_name(agency: &AgencyContractSettings) -> String {
-    let name = agency.name.trim();
-    let name = if name.is_empty() {
-        DEFAULT_AGENCY_NAME
-    } else {
-        name
-    };
-    if name
-        .to_lowercase()
-        .contains(&AGENCY_LEGAL_NAME_SUFFIX.to_lowercase())
-    {
-        name.to_string()
-    } else {
-        format!("{name} - {AGENCY_LEGAL_NAME_SUFFIX}")
-    }
+    let configured_name = agency.name.trim();
+    let name = configured_agency_responsible_person(agency)
+        .map(|responsible_person| strip_trailing_agency_person(configured_name, responsible_person))
+        .filter(|value| !value.is_empty())
+        .unwrap_or(configured_name);
+    name.to_string()
+}
+
+fn configured_agency_responsible_person(agency: &AgencyContractSettings) -> Option<&str> {
+    agency.care_of.as_deref().and_then(normalized_agency_person)
 }
 
 fn agency_responsible_person(agency: &AgencyContractSettings) -> &str {
-    agency
-        .care_of
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| {
-            value
-                .strip_prefix("c/o ")
-                .or_else(|| value.strip_prefix("C/O "))
-                .unwrap_or(value)
-                .trim()
-        })
-        .filter(|value| !value.is_empty())
-        .unwrap_or(DEFAULT_AGENCY_RESPONSIBLE_PERSON)
+    configured_agency_responsible_person(agency).unwrap_or_default()
+}
+
+fn agency_identity_profile_lines(agency: &AgencyContractSettings) -> Vec<String> {
+    let legal_name = agency_legal_name(agency);
+    let mut lines = vec![legal_name.clone()];
+    if let Some(responsible_person) = configured_agency_responsible_person(agency)
+        && !legal_name
+            .to_lowercase()
+            .contains(&responsible_person.to_lowercase())
+    {
+        lines.push(responsible_person.to_string());
+    }
+    lines
 }
 
 fn adult_legal_agency_identity(agency: &AgencyContractSettings) -> String {
-    format!(
-        "{} {}",
-        agency_legal_name(agency),
-        agency_responsible_person(agency)
-    )
+    agency_identity_profile_lines(agency).join(" ")
 }
 
-fn agency_document_address(agency: &AgencyContractSettings) -> &str {
+fn agency_document_address(agency: &AgencyContractSettings) -> Option<&str> {
     agency
         .address
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(DEFAULT_AGENCY_ADDRESS)
 }
 
-fn agency_document_phone(agency: &AgencyContractSettings) -> &str {
+fn agency_document_phone(agency: &AgencyContractSettings) -> Option<&str> {
     agency
         .phone
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(DEFAULT_AGENCY_PHONE)
 }
 
-fn agency_document_email(agency: &AgencyContractSettings) -> &str {
+fn agency_document_email(agency: &AgencyContractSettings) -> Option<&str> {
     agency
         .email
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(DEFAULT_AGENCY_EMAIL)
 }
 
-fn agency_document_website(agency: &AgencyContractSettings) -> &str {
+fn agency_document_website(agency: &AgencyContractSettings) -> Option<&str> {
     agency
         .website
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(DEFAULT_AGENCY_WEBSITE)
 }
 
 fn footer_website_display(value: &str) -> &str {
@@ -14341,19 +14344,31 @@ fn footer_website_display(value: &str) -> &str {
 }
 
 fn adult_legal_footer_lines(agency: &AgencyContractSettings) -> Vec<String> {
-    let address = agency_document_address(agency)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join(" · ");
-    let contacts = format!(
-        "Tel.: {} · E-Mail: {} · Web: {}",
-        agency_document_phone(agency),
-        agency_document_email(agency),
-        footer_website_display(agency_document_website(agency))
-    );
-    vec![adult_legal_agency_identity(agency), address, contacts]
+    let mut lines = vec![adult_legal_agency_identity(agency)];
+    if let Some(address) = agency_document_address(agency) {
+        lines.push(
+            address
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join(" · "),
+        );
+    }
+    let mut contacts = Vec::new();
+    if let Some(phone) = agency_document_phone(agency) {
+        contacts.push(format!("Tel.: {phone}"));
+    }
+    if let Some(email) = agency_document_email(agency) {
+        contacts.push(format!("E-Mail: {email}"));
+    }
+    if let Some(website) = agency_document_website(agency) {
+        contacts.push(format!("Web: {}", footer_website_display(website)));
+    }
+    if !contacts.is_empty() {
+        lines.push(contacts.join(" · "));
+    }
+    lines
 }
 
 fn legal_document_reference<'a>(business_number: Option<&'a str>, fallback: &'a str) -> &'a str {
@@ -14733,11 +14748,7 @@ fn build_adult_privacy_consents_pdf(
     let (document, regular, bold) = new_admin_pdf()?;
     let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
     let agency_identity = adult_legal_agency_identity(agency);
-    let data_system_name = if agency.data_system_name.trim().is_empty() {
-        "GMED-EDV-System"
-    } else {
-        agency.data_system_name.trim()
-    };
+    let data_system_name = agency.data_system_name.trim();
     let recipients = bindings
         .extra_release_recipients
         .as_deref()
@@ -14841,19 +14852,11 @@ fn build_adult_privacy_consents_pdf(
 
 fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let footer = format!(
-        "{} · {}",
-        context.auto_name,
-        context.generated_at.format("%d.%m.%Y %H:%M UTC")
-    );
-    let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
+    let mut layout =
+        legal_document_pdf_layout(&context.document_reference, &context.agency, regular, bold);
     let agency_person = fc_agency_person(&context.agency);
     let agency_identity = agency_legal_identity(&context.agency);
-    let data_system_name = if context.agency.data_system_name.trim().is_empty() {
-        "GMED-EDV-System"
-    } else {
-        context.agency.data_system_name.trim()
-    };
+    let data_system_name = context.agency.data_system_name.trim();
 
     // Grammar tokens differ between the sole-guardian and the two-guardian (child) variants.
     let we = if context.sole_guardian { "Ich" } else { "Wir" };
@@ -14928,27 +14931,12 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'sta
         );
         admin_block(&mut layout, "– nachfolgend „Ich“ –", 0.5, 1.5);
     } else {
-        let guardian_label = context
-            .guardian_label
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("Sorgeberechtigte/r 1");
-        let guardian2_label = context
-            .guardian2_label
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("Sorgeberechtigte/r 2");
         admin_block(&mut layout, "Wir (Erziehungsberechtigte):", 0.0, 0.5);
         admin_block(
             &mut layout,
-            &format!(
-                "{} ({guardian_label})",
-                consent_person_line(
-                    context.guardian_name.as_deref(),
-                    context.guardian_birth_date
-                )
+            &consent_person_line(
+                context.guardian_name.as_deref(),
+                context.guardian_birth_date,
             ),
             0.0,
             0.5,
@@ -14956,22 +14944,14 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'sta
         admin_block(&mut layout, "und", 0.0, 0.5);
         admin_block(
             &mut layout,
-            &format!(
-                "{} ({guardian2_label})",
-                consent_person_line(
-                    context.guardian2_name.as_deref(),
-                    context.guardian2_birth_date
-                )
+            &consent_person_line(
+                context.guardian2_name.as_deref(),
+                context.guardian2_birth_date,
             ),
             0.0,
             0.5,
         );
-        admin_block(
-            &mut layout,
-            &format!("nachfolgend „Wir“ ({guardian_label} und {guardian2_label}),"),
-            0.5,
-            1.5,
-        );
+        admin_block(&mut layout, "nachfolgend „Wir“,", 0.5, 1.5);
     }
 
     // ---- Child identification + address ----
@@ -15173,31 +15153,15 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'sta
         );
         consent_caption(&mut layout, "(Personensorgeberechtigte/r / ges. Vertreter)");
     } else {
-        let guardian_label = context
-            .guardian_label
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("Sorgeberechtigte/r 1");
-        let guardian2_label = context
-            .guardian2_label
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("Sorgeberechtigte/r 2");
         admin_block(
             &mut layout,
-            &format!(
-                "Ort, Datum: _________________   Unterschrift: ____________________ ({guardian_label})"
-            ),
+            "Ort, Datum: _________________   Unterschrift: ____________________ (Personensorgeberechtigte/r 1)",
             4.0,
             2.0,
         );
         admin_block(
             &mut layout,
-            &format!(
-                "Ort, Datum: _________________   Unterschrift: ____________________ ({guardian2_label})"
-            ),
+            "Ort, Datum: _________________   Unterschrift: ____________________ (Personensorgeberechtigte/r 2)",
             0.0,
             2.0,
         );
@@ -19983,18 +19947,20 @@ async fn list_document_categories(
 #[cfg(test)]
 mod tests {
     use super::{
-        AgencyContractSettings, DocPartyBlock, DocumentBindingOverrides, GeneratedContractLineItem,
-        GeneratedCostEstimateContext, GeneratedFrameworkContractContext,
+        AgencyContractSettings, DocPartyBlock, DocumentBindingOverrides, GeneratedConsentContext,
+        GeneratedContractLineItem, GeneratedCostEstimateContext, GeneratedFrameworkContractContext,
         GeneratedPatientStickerContext, GeneratedSingleOrderContext, ServiceLineInput,
-        adult_legal_agency_identity, agency_responsible_person,
-        build_adult_confidentiality_release_pdf, build_adult_privacy_consents_pdf,
-        build_adult_privacy_information_pdf, build_cost_estimate_pdf, build_framework_contract_pdf,
-        build_manual_generated_text_pdf, build_order_cost_estimate_pdf, build_patient_sticker_pdf,
-        build_single_order_pdf, compute_line_item_totals, cost_coverage_money_cell,
-        cost_estimate_price_text, document_satisfies_compliance_kind, document_template_by_id,
-        generated_binding_snapshot, generated_compliance_document_number, german_document_country,
+        adult_legal_agency_identity, agency_block_lines, agency_identity_profile_lines,
+        agency_responsible_person, build_adult_confidentiality_release_pdf,
+        build_adult_privacy_consents_pdf, build_adult_privacy_information_pdf, build_consent_pdf,
+        build_cost_estimate_pdf, build_framework_contract_pdf, build_manual_generated_text_pdf,
+        build_order_cost_estimate_pdf, build_patient_sticker_pdf, build_single_order_pdf,
+        compute_line_item_totals, cost_coverage_money_cell, cost_estimate_price_text,
+        document_satisfies_compliance_kind, document_template_by_id, generated_binding_snapshot,
+        generated_compliance_document_number, german_document_country,
         is_fixed_legal_document_template, is_lead_allowed_document_template,
-        legal_document_reference, pdf_text_font_handles,
+        legal_document_reference, patient_sticker_agency_line, pdf_text_font_handles,
+        trusted_contact_recipients_binding,
     };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
     use chrono::{NaiveDate, TimeZone, Utc};
@@ -20002,7 +19968,10 @@ mod tests {
     use serde_json::json;
     use uuid::Uuid;
 
-    const LEGAL_IDENTITY: &str = "Test Agentur - Agentur für Patientenbetreuung Configured Owner";
+    const LEGAL_COMPANY_IDENTITY: &str = "Test Agentur - Agentur für Patientenbetreuung";
+    const LEGAL_OWNER: &str = "Configured Owner";
+    const LEGAL_FULL_IDENTITY: &str =
+        "Test Agentur - Agentur für Patientenbetreuung Configured Owner";
     const LEGAL_ADDRESS_STREET: &str = "Albert-Schweitzer-Straße 56";
     const LEGAL_ADDRESS_CITY: &str = "81735 München";
     const LEGAL_PHONE: &str = "+49 176 22570962";
@@ -20011,7 +19980,7 @@ mod tests {
 
     fn legal_test_agency() -> AgencyContractSettings {
         AgencyContractSettings {
-            name: "Test Agentur".to_string(),
+            name: LEGAL_COMPANY_IDENTITY.to_string(),
             care_of: Some("Configured Owner".to_string()),
             principal_birth_date: NaiveDate::from_ymd_opt(1975, 6, 3),
             address: Some(format!("{LEGAL_ADDRESS_STREET}\n{LEGAL_ADDRESS_CITY}")),
@@ -20068,7 +20037,7 @@ mod tests {
                 "missing total-aware legal page number {page_number}/{page_count}"
             );
         }
-        assert!(text.matches(LEGAL_IDENTITY).count() >= page_count);
+        assert!(text.matches(LEGAL_FULL_IDENTITY).count() >= page_count);
         assert!(text.matches(LEGAL_ADDRESS_STREET).count() >= page_count);
         assert!(text.matches(LEGAL_ADDRESS_CITY).count() >= page_count);
         assert!(text.matches(LEGAL_PHONE).count() >= page_count);
@@ -20207,8 +20176,129 @@ mod tests {
     }
 
     #[test]
+    fn agency_identity_profile_keeps_company_and_owner_separate() {
+        let agency = legal_test_agency();
+        let lines = agency_identity_profile_lines(&agency);
+
+        assert_eq!(
+            lines,
+            vec![LEGAL_COMPANY_IDENTITY.to_string(), LEGAL_OWNER.to_string()]
+        );
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|line| line.as_str() == LEGAL_OWNER)
+                .count(),
+            1
+        );
+        let block_lines = agency_block_lines(&agency);
+        assert_eq!(&block_lines[..2], lines.as_slice());
+        assert_eq!(
+            block_lines
+                .iter()
+                .filter(|line| line.as_str() == LEGAL_OWNER)
+                .count(),
+            1
+        );
+        assert!(
+            !block_lines.iter().any(|line| {
+                line.contains(LEGAL_COMPANY_IDENTITY) && line.contains(LEGAL_OWNER)
+            })
+        );
+        assert_eq!(adult_legal_agency_identity(&agency), LEGAL_FULL_IDENTITY);
+        assert_eq!(
+            adult_legal_agency_identity(&agency)
+                .matches(LEGAL_OWNER)
+                .count(),
+            1
+        );
+
+        let mut duplicated_profile = agency.clone();
+        duplicated_profile.name = LEGAL_FULL_IDENTITY.to_string();
+        assert_eq!(
+            agency_identity_profile_lines(&duplicated_profile),
+            vec![LEGAL_COMPANY_IDENTITY.to_string(), LEGAL_OWNER.to_string()]
+        );
+        assert_eq!(
+            adult_legal_agency_identity(&duplicated_profile),
+            LEGAL_FULL_IDENTITY
+        );
+        assert_eq!(
+            adult_legal_agency_identity(&duplicated_profile)
+                .matches(LEGAL_OWNER)
+                .count(),
+            1
+        );
+
+        let mut legacy_profile = agency;
+        legacy_profile.care_of = Some("c/o Test Agentur".to_string());
+        assert_eq!(
+            agency_identity_profile_lines(&legacy_profile),
+            vec![LEGAL_COMPANY_IDENTITY.to_string()]
+        );
+    }
+
+    #[test]
+    fn trusted_contact_pdf_binding_keeps_people_but_omits_relationships() {
+        let binding = trusted_contact_recipients_binding(&json!([
+            {
+                "name": "Alex Beispiel",
+                "birth_date": "1989-02-03",
+                "email": "alex@example.test",
+                "phone": "+49 30 123",
+                "relation": "Vater"
+            },
+            {
+                "name": "Maria Beispiel",
+                "address": "Hauptstr. 2, Berlin",
+                "relation": "Hut"
+            }
+        ]))
+        .unwrap();
+
+        assert_eq!(binding.lines().count(), 2);
+        assert!(binding.contains("Alex Beispiel, geb. am 03.02.1989"));
+        assert!(binding.contains("E-Mail: alex@example.test"));
+        assert!(binding.contains("Tel.: +49 30 123"));
+        assert!(binding.contains("Maria Beispiel, Adresse: Hauptstr. 2, Berlin"));
+        assert!(!binding.contains("Vater"));
+        assert!(!binding.contains("Hut"));
+        assert!(!binding.contains("Beziehung:"));
+    }
+
+    #[test]
+    fn child_consent_uses_legal_chrome_without_relationship_labels() {
+        let context = GeneratedConsentContext {
+            sole_guardian: false,
+            auto_name: "Einverständniserklärung".to_string(),
+            document_reference: "EW-20260721-UNITTEST0001".to_string(),
+            child_name: Some("Kind Beispiel".to_string()),
+            child_birth_date: NaiveDate::from_ymd_opt(2014, 5, 6),
+            child_address: Some("Musterstr. 1 | 10115 Berlin | Deutschland".to_string()),
+            guardian_name: Some("Alex Beispiel".to_string()),
+            guardian_label: Some("Vater".to_string()),
+            guardian_birth_date: NaiveDate::from_ymd_opt(1989, 2, 3),
+            guardian_address: Some("Musterstr. 1, Berlin".to_string()),
+            guardian2_name: Some("Maria Beispiel".to_string()),
+            guardian2_label: Some("Hut".to_string()),
+            guardian2_birth_date: NaiveDate::from_ymd_opt(1990, 4, 5),
+            extra_release_recipients: None,
+            agency: legal_test_agency(),
+            generated_at: Utc.with_ymd_and_hms(2026, 7, 21, 12, 0, 0).unwrap(),
+        };
+
+        let bytes = build_consent_pdf(&context).unwrap();
+        let text = assert_legal_pdf_chrome(&bytes, &context.document_reference);
+        assert!(text.contains("Alex Beispiel, geb. am 03.02.1989"));
+        assert!(text.contains("Maria Beispiel, geb. am 05.04.1990"));
+        assert!(!text.contains("Vater"));
+        assert!(!text.contains("Hut"));
+        assert!(!text.to_ascii_lowercase().contains("c/o"));
+    }
+
+    #[test]
     fn patient_sticker_pdf_uses_renderable_builtin_font_text() {
-        let context = GeneratedPatientStickerContext {
+        let mut context = GeneratedPatientStickerContext {
             patient_pid: "PT-UNIT-1".to_string(),
             patient_title: Some("Dr.".to_string()),
             patient_salutation: "Herr".to_string(),
@@ -20247,6 +20337,11 @@ mod tests {
         assert!(extracted_text.contains("ID: PT-UNIT-1"));
         assert!(extracted_text.contains("Müller"));
         assert!(extracted_text.contains("Agency Street 1"));
+
+        context.agency.name = "GMED - Agentur für Patientenbetreuung Heorhii Hudiiev".to_string();
+        context.agency.care_of = "Heorhii Hudiiev".to_string();
+        let agency_line = patient_sticker_agency_line(&context);
+        assert_eq!(agency_line.matches("Heorhii Hudiiev").count(), 1);
     }
 
     #[test]
@@ -20362,8 +20457,7 @@ mod tests {
     #[test]
     fn framework_contract_pdf_keeps_main_contract_and_annex_index_only() {
         let party = legal_test_party("Germany");
-        let mut agency = legal_test_agency();
-        agency.address = None;
+        let agency = legal_test_agency();
         let context = GeneratedFrameworkContractContext {
             patient_pid: "PT-LEGAL-1".to_string(),
             patient_name: party.name.clone(),

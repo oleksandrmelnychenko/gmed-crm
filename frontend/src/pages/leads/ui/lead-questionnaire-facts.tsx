@@ -10,26 +10,33 @@ export type LeadQuestionnaireFact = {
 
 export function LeadQuestionnaireFacts({
   items,
-  topBorder = true,
+  className,
 }: {
   items: LeadQuestionnaireFact[];
-  topBorder?: boolean;
+  className?: string;
 }) {
   if (items.length === 0) return null;
 
   return (
-    <dl className={cn("grid gap-x-6 border-b border-border sm:grid-cols-2", topBorder && "border-t")}>
-      {items.map((item, index) => (
-        <div
-          key={`${String(item.label)}-${index}`}
-          className={item.wide ? "border-b border-border/70 py-3 sm:col-span-2" : "border-b border-border/70 py-3"}
-        >
-          <dt className="text-xs text-muted-foreground">{item.label}</dt>
-          <dd className="mt-1 whitespace-pre-wrap break-words text-sm font-medium text-foreground">
-            {item.value}
-          </dd>
-        </div>
-      ))}
+    <dl className={cn("grid gap-x-6 gap-y-1 sm:grid-cols-2", className)}>
+      {items.map((item, index) =>
+        item.wide ? (
+          <div key={`${String(item.label)}-${index}`} className="min-w-0 py-1 sm:col-span-2">
+            <dt className="text-xs font-medium text-muted-foreground">{item.label}</dt>
+            <dd className="mt-1 whitespace-pre-wrap break-words text-sm font-medium leading-snug text-foreground">
+              {item.value}
+            </dd>
+          </div>
+        ) : (
+          <div key={`${String(item.label)}-${index}`} className="flex min-w-0 items-center gap-2 py-1">
+            <dt className="min-w-0 break-words text-xs font-medium text-muted-foreground">{item.label}</dt>
+            <span aria-hidden className="h-px min-w-5 flex-1 self-center bg-border/70" />
+            <dd className="min-w-0 max-w-[58%] break-words text-right text-sm font-semibold leading-snug text-foreground">
+              {item.value}
+            </dd>
+          </div>
+        ),
+      )}
     </dl>
   );
 }

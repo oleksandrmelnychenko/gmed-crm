@@ -170,6 +170,21 @@ async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     .unwrap()
 }
 
+async fn configure_agency_identity_profile(pool: &PgPool, agency_name: &str, owner_name: &str) {
+    for (key, value) in [("agency_name", agency_name), ("agency_care_of", owner_name)] {
+        sqlx::query(
+            r#"UPDATE system_settings
+               SET value = $2::jsonb, updated_at = now()
+               WHERE key = $1"#,
+        )
+        .bind(key)
+        .bind(json!(value))
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
 async fn configure_patient_label_profile(pool: &PgPool, patient_id: Uuid) {
     sqlx::query(
         r#"UPDATE patients
@@ -183,6 +198,9 @@ async fn configure_patient_label_profile(pool: &PgPool, patient_id: Uuid) {
     .execute(pool)
     .await
     .unwrap();
+
+    configure_agency_identity_profile(pool, "Configured Label Agency", "Configured Label Owner")
+        .await;
 
     sqlx::query(
         r#"UPDATE system_settings
@@ -3362,7 +3380,7 @@ async fn consent_child_autofills_guardians_from_patient_relations() {
 }
 
 #[tokio::test]
-async fn consent_child_labels_linked_parents_by_gender_not_relation_order() {
+async fn consent_child_keeps_linked_parent_people_without_relationship_labels() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
     };
@@ -3407,12 +3425,30 @@ async fn consent_child_labels_linked_parents_by_gender_not_relation_order() {
         Some(json!({
             "template_id": "consent_data_release_child",
             "patient_id": child_id,
-            "language": "de"
+            "language": "de",
+            "bindings": {
+                "guardian_label": "Vater",
+                "guardian2_label": "Hut"
+            }
         })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "generate consent: {body:?}");
     let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["generated_bindings"]["guardian_label"], "Vater");
+    assert_eq!(detail["generated_bindings"]["guardian2_label"], "Hut");
+    let document_number = detail["document_number"].as_str().unwrap().to_string();
+
     let (status, bytes) = bytes_request(
         &app,
         "GET",
@@ -3423,13 +3459,24 @@ async fn consent_child_labels_linked_parents_by_gender_not_relation_order() {
     assert_eq!(status, StatusCode::OK);
     let pdf_text = extract_pdf_text(&bytes);
     assert!(
-        pdf_text.contains(&format!("{father_name}, geb. am 01.01.1990 (Vater)")),
+        pdf_text.contains(&format!("Dokument-Nr.: {document_number}")),
+        "{pdf_text:?}"
+    );
+    assert!(pdf_text.contains("Seite: 1/"), "{pdf_text:?}");
+    assert!(
+        !pdf_text.to_ascii_lowercase().contains("c/o"),
         "{pdf_text:?}"
     );
     assert!(
-        pdf_text.contains(&format!("{mother_name}, geb. am 01.01.1990 (Mutter)")),
+        pdf_text.contains(&format!("{father_name}, geb. am 01.01.1990")),
         "{pdf_text:?}"
     );
+    assert!(
+        pdf_text.contains(&format!("{mother_name}, geb. am 01.01.1990")),
+        "{pdf_text:?}"
+    );
+    assert!(!pdf_text.contains("Vater"), "{pdf_text:?}");
+    assert!(!pdf_text.contains("Hut"), "{pdf_text:?}");
 }
 
 #[tokio::test]
@@ -4701,6 +4748,12 @@ async fn document_templates_can_generate_framework_contract_pdf_document() {
     };
     let tag = unique_tag("doc-framework-contract");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    configure_agency_identity_profile(
+        &pool,
+        "Configured PDF Agency - Agentur für Patientenbetreuung",
+        "Configured PDF Owner",
+    )
+    .await;
     let contract_id = seed_framework_contract(&pool, patient_id, admin_id, &tag).await;
     let order_id = seed_order_with_contract(&pool, patient_id, contract_id, admin_id, &tag).await;
     let _quote_id = seed_quote_for_order(&pool, order_id, admin_id, &tag).await;
@@ -4790,7 +4843,11 @@ async fn document_templates_can_generate_framework_contract_pdf_document() {
     assert!(!pdf_text.contains("Beschwerderecht"));
     assert!(!pdf_text.contains("Datenschutzkontakt"));
     assert!(!pdf_text.contains("Salesforce"));
-    assert!(pdf_text.contains("Heorhii Hudiiev"));
+    assert!(pdf_text.contains("Configured PDF Agency - Agentur für Patientenbetreuung"));
+    assert!(pdf_text.contains("Configured PDF Owner"));
+    for stale_identity in ["Heorhii", "Heorigii", "Hudiiev", "Hudiev"] {
+        assert!(!pdf_text.contains(stale_identity), "{pdf_text:?}");
+    }
     assert!(pdf_text.contains(&format!("Dokument-Nr.: FC-{tag}")));
     assert!(pdf_text.contains("§ 11 Bestandteile des Vertrages und Rangfolge"));
     assert!(pdf_text.contains("Override Str. 9 | 80331 Muenchen | Deutschland"));
@@ -4802,6 +4859,120 @@ async fn document_templates_can_generate_framework_contract_pdf_document() {
     assert!(!pdf_text.contains("Patientenbetreuung /"));
     assert!(!pdf_text.to_ascii_lowercase().contains("c/o"));
     assert!(!pdf_text.contains("(E-Mail-Adresse"));
+}
+
+#[tokio::test]
+async fn privacy_consents_autobinds_trusted_people_without_relationships() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("trusted-contact-consent");
+    let trusted_contacts = json!([
+        {
+            "id": Uuid::new_v4(),
+            "name": "Alex Trustedperson",
+            "birth_date": "1989-02-03",
+            "email": "alex.trusted@example.test",
+            "phone": "+49 30 123",
+            "address": "Hauptstr. 2, Berlin",
+            "relation": "Vater"
+        },
+        {
+            "id": Uuid::new_v4(),
+            "name": "Maria Trustedperson",
+            "email": "maria.trusted@example.test",
+            "phone": "+49 30 456",
+            "relation": "Hut"
+        }
+    ]);
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, phone, date_of_birth, legal_sex,
+                primary_language, country, street_address, city, zip_code,
+                trusted_contacts, created_by
+           ) VALUES (
+                'Anna', 'Trustedcontact', $1, '+49 30 987654', DATE '1988-04-12', 'female',
+                'de', 'DE', 'Musterstr. 1', 'Berlin', '10115', $2, $3
+           ) RETURNING id"#,
+    )
+    .bind(format!("{tag}@example.test"))
+    .bind(trusted_contacts)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let (status, generated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "privacy_consents",
+            "lead_id": lead_id,
+            "language": "de"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let document_id = Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap();
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let recipient_binding = detail["generated_bindings"]["extra_release_recipients"]
+        .as_str()
+        .unwrap();
+    for expected in [
+        "Alex Trustedperson",
+        "03.02.1989",
+        "alex.trusted@example.test",
+        "+49 30 123",
+        "Hauptstr. 2, Berlin",
+        "Maria Trustedperson",
+        "maria.trusted@example.test",
+        "+49 30 456",
+    ] {
+        assert!(
+            recipient_binding.contains(expected),
+            "{recipient_binding:?}"
+        );
+    }
+    assert!(
+        !recipient_binding.contains("Vater"),
+        "{recipient_binding:?}"
+    );
+    assert!(!recipient_binding.contains("Hut"), "{recipient_binding:?}");
+
+    let (status, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &admin_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let pdf_text = extract_pdf_text(&bytes);
+    for expected in [
+        "Alex Trustedperson",
+        "03.02.1989",
+        "alex.trusted@example.test",
+        "+49 30 123",
+        "Hauptstr. 2, Berlin",
+        "Maria Trustedperson",
+        "maria.trusted@example.test",
+        "+49 30 456",
+    ] {
+        assert!(pdf_text.contains(expected), "{pdf_text:?}");
+    }
+    assert!(!pdf_text.contains("Vater"), "{pdf_text:?}");
+    assert!(!pdf_text.contains("Hut"), "{pdf_text:?}");
 }
 
 #[tokio::test]
@@ -5080,6 +5251,8 @@ async fn document_templates_can_generate_patient_sticker_pdf_document() {
     assert!(preview_html.contains("KT1: SZ"));
     assert!(preview_html.contains("KT2: BG"));
     assert!(preview_html.contains("FRA"));
+    assert!(preview_html.contains("Configured Label Agency"));
+    assert!(preview_html.contains("Configured Label Owner"));
     assert!(preview_html.contains("Agency Street 1"));
     assert!(preview_html.contains("PT-"));
 
@@ -5115,6 +5288,8 @@ async fn document_templates_can_generate_patient_sticker_pdf_document() {
     assert!(pdf_text.contains("KT1: SZ"));
     assert!(pdf_text.contains("KT2: BG"));
     assert!(pdf_text.contains("FRA"));
+    assert!(pdf_text.contains("Configured Label Agency"));
+    assert!(pdf_text.contains("Configured Label Owner"));
     assert!(pdf_text.contains("Agency Street 1"));
 }
 
