@@ -4455,14 +4455,6 @@ impl TreatmentPlanPdfLayout {
         }
     }
 
-    fn table_row(&mut self, cells: &[(&str, f32)], bold: bool, shaded: bool) {
-        let cells = cells
-            .iter()
-            .map(|(text, width_mm)| (*text, *width_mm, PdfCellAlign::Left))
-            .collect::<Vec<_>>();
-        self.table_row_styled(&cells, bold, shaded, false);
-    }
-
     /// Header row in the approved table anatomy: uppercase micro-labels above a
     /// strong ink rule — no fill, no vertical separators.
     fn table_header_row(&mut self, cells: &[(&str, f32, PdfCellAlign)]) {
@@ -6455,10 +6447,14 @@ fn fc_body_tight(layout: &mut TreatmentPlanPdfLayout, text: &str) {
 
 fn build_framework_contract_pdf(
     context: &GeneratedFrameworkContractContext,
-    document_reference: &str,
+    fallback_document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
+    let document_reference = legal_document_reference(
+        Some(context.contract_number.as_str()),
+        fallback_document_reference,
+    );
+    let mut layout = legal_document_pdf_layout(&document_reference, &context.agency, regular, bold);
 
     let effective_date_str = fmt_de_date(context.effective_date);
 
@@ -12630,9 +12626,14 @@ async fn generate_document(
         Err(resp) => return resp,
     };
 
+    let uses_business_document_number = matches!(
+        template.id,
+        "framework_contract" | "single_order" | "order_cost_estimate" | "cost_estimate"
+    );
     let persist_input = NewStoredDocument {
         document_id: Some(generated_document_id),
-        document_number: Some(generated_document_number.as_str()),
+        document_number: (!uses_business_document_number)
+            .then_some(generated_document_number.as_str()),
         patient_id,
         lead_id,
         order_id,
@@ -12706,6 +12707,19 @@ async fn generate_document(
             Ok(value) => value,
             Err(resp) => return resp,
         };
+    let stored_document_number = match sqlx::query_scalar::<_, String>(
+        "SELECT document_number FROM documents WHERE id = $1",
+    )
+    .bind(document_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(error = %error, document_id = %document_id, "load generated document number");
+            generated_document_number.clone()
+        }
+    };
     best_effort_extract_document_text_and_store(
         &state,
         document_id,
@@ -12788,7 +12802,7 @@ async fn generate_document(
     Json(json!({
         "ok": true,
         "id": document_id,
-        "document_number": generated_document_number,
+        "document_number": stored_document_number,
         "auto_name": auto_name,
         "original_filename": original_filename,
         "mime_type": template.mime_type,
@@ -13317,10 +13331,14 @@ fn single_order_party_lines(party: &DocPartyBlock) -> Vec<String> {
 
 fn build_single_order_pdf(
     context: &GeneratedSingleOrderContext,
-    document_reference: &str,
+    fallback_document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
+    let document_reference = legal_document_reference(
+        Some(context.order_number.as_str()),
+        fallback_document_reference,
+    );
+    let mut layout = legal_document_pdf_layout(&document_reference, &context.agency, regular, bold);
 
     let title = context.title_override.clone().unwrap_or_else(|| {
         format!(
@@ -13620,10 +13638,12 @@ fn build_single_order_pdf(
 
 fn build_order_cost_estimate_pdf(
     context: &GeneratedSingleOrderContext,
-    document_reference: &str,
+    fallback_document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
+    let document_reference =
+        legal_document_reference(context.quote_number.as_deref(), fallback_document_reference);
+    let mut layout = legal_document_pdf_layout(&document_reference, &context.agency, regular, bold);
 
     layout.text_block_centered(
         "Anlage 1 zum Einzelauftrag",
@@ -14329,10 +14349,12 @@ fn cost_estimate_legal_notice() -> &'static str {
 
 fn build_cost_estimate_pdf(
     context: &GeneratedCostEstimateContext,
-    document_reference: &str,
+    fallback_document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
+    let document_reference =
+        legal_document_reference(context.quote_number.as_deref(), fallback_document_reference);
+    let mut layout = legal_document_pdf_layout(&document_reference, &context.agency, regular, bold);
 
     let title = context
         .title_override
@@ -14870,6 +14892,24 @@ fn adult_legal_footer_lines(agency: &AgencyContractSettings) -> Vec<String> {
         lines.push(contacts.join(" · "));
     }
     lines
+}
+
+fn legal_document_reference(business_number: Option<&str>, fallback: &str) -> String {
+    let reference = business_number
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback.trim());
+    let Some((base, version)) = reference.rsplit_once("-V") else {
+        return reference.to_string();
+    };
+    if !base.is_empty()
+        && !version.is_empty()
+        && version.chars().all(|character| character.is_ascii_digit())
+    {
+        base.to_string()
+    } else {
+        reference.to_string()
+    }
 }
 
 fn legal_document_pdf_layout(
@@ -20448,9 +20488,9 @@ mod tests {
         document_satisfies_compliance_kind, document_template_by_id, finalize_admin_pdf,
         generated_binding_snapshot, generated_compliance_document_number,
         generated_document_number_for_template, german_document_country,
-        is_fixed_legal_document_template, is_lead_allowed_document_template, new_admin_pdf,
-        patient_sticker_agency_line, pdf_mm_to_pt, pdf_text_font_handles,
-        trusted_contact_recipients_binding,
+        is_fixed_legal_document_template, is_lead_allowed_document_template,
+        legal_document_reference, new_admin_pdf, patient_sticker_agency_line, pdf_mm_to_pt,
+        pdf_text_font_handles, trusted_contact_recipients_binding,
     };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
     use chrono::{NaiveDate, TimeZone, Utc};
@@ -21003,7 +21043,8 @@ mod tests {
         assert!(pages[0].contains("RAHMENDIENSTLEISTUNGSVERTRAG"));
         assert!(!pages[0].contains("Präambel"));
         assert!(pages[1].contains("Präambel"));
-        let text = assert_legal_pdf_chrome(&bytes, "DOC-FRAMEWORK-FALLBACK");
+        let text = assert_legal_pdf_chrome(&bytes, "RV-2026-0042");
+        assert!(!text.contains("DOC-FRAMEWORK-FALLBACK"));
         assert!(text.contains("Deutschland"));
         assert!(text.contains(LEGAL_ADDRESS_STREET));
         assert!(text.contains(LEGAL_ADDRESS_CITY));
@@ -21188,7 +21229,8 @@ mod tests {
         assert!(pages[0].contains("Auftragsnummer: EA-2026-0017"));
         assert!(!pages[0].contains("Präambel"));
         assert!(pages[1].contains("Präambel"));
-        let text = assert_legal_pdf_chrome(&bytes, "DOC-ORDER-FALLBACK");
+        let text = assert_legal_pdf_chrome(&bytes, "EA-2026-0017");
+        assert!(!text.contains("DOC-ORDER-FALLBACK"));
         assert!(!text.contains("Anlage 4"));
         assert!(text.contains("Auftragsnummer: EA-2026-0017"));
         assert!(text.contains("Rahmendienstleistungsvertrag Nr.: RV-2026-0042"));
@@ -21220,7 +21262,8 @@ mod tests {
         assert!(!text.contains("Gesamtsumme: 476,00 EUR"));
 
         let estimate_bytes = build_order_cost_estimate_pdf(&context, "DOC-QUOTE-FALLBACK").unwrap();
-        let estimate_text = assert_legal_pdf_chrome(&estimate_bytes, "DOC-QUOTE-FALLBACK");
+        let estimate_text = assert_legal_pdf_chrome(&estimate_bytes, "KV-2026-0042");
+        assert!(!estimate_text.contains("DOC-QUOTE-FALLBACK"));
         assert!(estimate_text.contains("Anlage 1 zum Einzelauftrag"));
         assert!(estimate_text.contains("KOSTENVORANSCHLAG"));
         assert!(estimate_text.contains("ZUM 2. EINZELAUFTRAG"));
@@ -21324,11 +21367,32 @@ mod tests {
         };
 
         let bytes = build_cost_estimate_pdf(&context, "DOC-COST-FALLBACK").unwrap();
-        let text = assert_legal_pdf_chrome(&bytes, "DOC-COST-FALLBACK");
+        let text = assert_legal_pdf_chrome(&bytes, "KV-2026-0099");
+        assert!(!text.contains("DOC-COST-FALLBACK"));
         assert!(text.contains("Unverbindliche voraussichtliche Kostenschätzung"));
         assert!(text.contains("Patient: Frau Anna Beispiel"));
         assert!(text.contains("Kardiologische Untersuchung"));
         assert!(text.contains("100,00 - 1000,00 EUR"));
+    }
+
+    #[test]
+    fn legal_document_reference_hides_technical_version_suffix() {
+        assert_eq!(
+            legal_document_reference(Some(" FC-20260714-0010-V18 "), "DOC-FALLBACK"),
+            "FC-20260714-0010"
+        );
+        assert_eq!(
+            legal_document_reference(Some("KV-20260721-0019-V01"), "DOC-FALLBACK"),
+            "KV-20260721-0019"
+        );
+        assert_eq!(
+            legal_document_reference(Some("KV-20260721-0019-VX"), "DOC-FALLBACK"),
+            "KV-20260721-0019-VX"
+        );
+        assert_eq!(
+            legal_document_reference(Some("  "), "DOC-FALLBACK"),
+            "DOC-FALLBACK"
+        );
     }
 
     #[test]

@@ -3,11 +3,21 @@ import { describe, expect, it } from "vitest";
 
 import { formatDateTime } from "@/pages/leads/model/leads-model";
 
-import { LeadWizardDocumentMetadata } from "./lead-wizard-document-metadata";
+import {
+  LeadWizardDocumentMetadata,
+  leadWizardDocumentNumber,
+} from "./lead-wizard-document-metadata";
 
 const createdAt = "2026-07-21T10:35:00Z";
 
 describe("LeadWizardDocumentMetadata", () => {
+  it("hides the technical version suffix from business document numbers", () => {
+    expect(leadWizardDocumentNumber({ id: "framework", document_number: "FC-20260714-0010-V18" }))
+      .toBe("FC-20260714-0010");
+    expect(leadWizardDocumentNumber({ id: "quote", document_number: "KV-20260721-0019-V01" }))
+      .toBe("KV-20260721-0019");
+  });
+
   it("renders a generated document date-time pill immediately after the size", () => {
     const expectedDateTime = formatDateTime(createdAt, "de-DE", "");
     const html = renderToStaticMarkup(

@@ -30,7 +30,6 @@ import {
 } from "lucide-react";
 
 import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
-import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
@@ -53,7 +52,6 @@ import {
   inputClass,
   Section,
   selectClass,
-  STATUS_TONE,
   StatusBadge,
   textareaClass,
   tokens,
@@ -128,7 +126,7 @@ import {
   updateLeadServiceSelection,
 } from "@/pages/leads/model/leads-model";
 
-import { LeadWizardDocumentMetadata, metadataPillClass } from "./lead-wizard-document-metadata";
+import { LeadWizardDocumentMetadata } from "./lead-wizard-document-metadata";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 
 import {
@@ -1157,7 +1155,7 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Identity document is not verified": tx("Подтвердите документ, удостоверяющий личность", "Ausweisdokument bestätigen"),
     "Signed DSGVO document is missing": tx("Создайте и подтвердите документ согласий", "Einwilligungsdokument erstellen und bestätigen"),
     "Signed confidentiality release is missing": tx("Создайте и подтвердите освобождение от медицинской тайны", "Schweigepflichtsentbindung erstellen und bestätigen"),
-    "Anamnesis intake is incomplete": tx("Заполните и сохраните анамнез", "Anamnese ausfüllen und abschließen"),
+    "Anamnesis intake is incomplete": tx("Укажите причину обращения", "Anliegen angeben"),
     "Framework contract is not signed": tx("Подпишите рамочный договор", "Rahmenvertrag unterzeichnen"),
     "Framework contract document is missing": tx("Создайте документ рамочного договора", "Rahmenvertragsdokument erstellen"),
     "Onboarding order is missing": tx("Создайте заказ", "Auftrag erstellen"),
@@ -1221,7 +1219,7 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
     "Identity document is not verified": "lead-file-identity",
     "Signed DSGVO document is missing": PRIVACY_DOCUMENT_ID,
     "Signed confidentiality release is missing": CONFIDENTIALITY_RELEASE_ID,
-    "Anamnesis intake is incomplete": MEDICAL_ANAMNESE_ID,
+    "Anamnesis intake is incomplete": SERVICE_CONCERN_ID,
     "Framework contract is not signed": FRAMEWORK_DOCUMENT_ID,
     "Framework contract document is missing": FRAMEWORK_DOCUMENT_ID,
     "Order document is missing": ORDER_DOCUMENT_ID,
@@ -1459,14 +1457,6 @@ function Field({
         </span>
       ) : null}
     </label>
-  );
-}
-
-function DocNumberPill({ children }: { children: ReactNode }) {
-  return (
-    <Badge variant="outline" className={cn(metadataPillClass, STATUS_TONE.brand)}>
-      {children}
-    </Badge>
   );
 }
 
@@ -2211,14 +2201,6 @@ export function LeadWizard({
           fieldId: SERVICE_CONCERN_ID,
         });
       }
-      if (!draft.anamnese.trim()) {
-        issues.push({
-          key: "anamnese",
-          step: "medical",
-          message: tx("Анамнез: обязательное поле", "Anamnese: Pflichtfeld"),
-          fieldId: MEDICAL_ANAMNESE_ID,
-        });
-      }
       return issues;
     }
     if (validationContext.kind === "documents") {
@@ -2596,16 +2578,24 @@ export function LeadWizard({
     return persistMedicalDraft(draft);
   }
 
+  async function completeMedicalIntake() {
+    if (!draft) throw new Error("Lead is not selected");
+    const id = await persistMedicalCase();
+    await completeCaseIntake(id, true, {
+      hauptanfragegrund: draft.concern.trim(),
+      aktuelle_anamnese: draft.anamnese.trim(),
+    });
+  }
+
   async function finishIntake(targetStep: StepId): Promise<boolean> {
     if (!leadId || !draft) return false;
     setError("");
     if (!ensureMasterDataReady()) return false;
-    if (!draft.concern.trim() || !draft.anamnese.trim()) {
+    if (!draft.concern.trim()) {
       setValidationContext({ kind: "medical" });
       setMedicalValidationAttempted(true);
       setStep("medical");
-      const fieldId = !draft.concern.trim() ? SERVICE_CONCERN_ID : MEDICAL_ANAMNESE_ID;
-      window.requestAnimationFrame(() => document.getElementById(fieldId)?.focus());
+      window.requestAnimationFrame(() => document.getElementById(SERVICE_CONCERN_ID)?.focus());
       return false;
     }
     const documentIssues = documentsValidationIssues(draft, wizardDocuments, tx);
@@ -2620,11 +2610,7 @@ export function LeadWizard({
     setBusy("intake");
     setValidationContext(null);
     try {
-      const id = await persistMedicalCase();
-      await completeCaseIntake(id, true, {
-        hauptanfragegrund: draft.concern.trim(),
-        aktuelle_anamnese: draft.anamnese.trim(),
-      });
+      await completeMedicalIntake();
       const saved = await save(targetStep, false);
       if (saved && lead?.qualification_status !== "qualified") {
         await updateLeadStatus(leadId, "qualified");
@@ -3159,6 +3145,22 @@ ${serviceCommentLines.join("\n")}`
     }
   }
 
+  async function prepareReleaseAndNavigate() {
+    try {
+      if (!leadId || !draft) return;
+      setBusy("intake");
+      if (draft.concern.trim()) {
+        await completeMedicalIntake();
+      }
+      if (!(await save("release", false))) return;
+      await refreshLeadState();
+      setStep("release");
+    } finally {
+      setBusy(null);
+      stepNavigationInFlightRef.current = false;
+    }
+  }
+
   function navigateToStep(target: StepId) {
     if (target === step || busy !== null || stepNavigationInFlightRef.current) return;
     setError("");
@@ -3169,6 +3171,12 @@ ${serviceCommentLines.join("\n")}`
     if (!leadId && createMode) {
       stepNavigationInFlightRef.current = true;
       void createLeadAndNavigate(target).catch(showWizardError);
+      return;
+    }
+
+    if (target === "release") {
+      stepNavigationInFlightRef.current = true;
+      void prepareReleaseAndNavigate().catch(showWizardError);
       return;
     }
 
@@ -3876,7 +3884,6 @@ ${serviceCommentLines.join("\n")}`
                   caves={draft.caves}
                   providers={clinicalProviders}
                   allDoctors={allDoctors}
-                  validationAttempted={medicalValidationAttempted}
                   onNarrativeChange={(value) => {
                     setError("");
                     clearServerValidation();
@@ -4330,12 +4337,7 @@ ${serviceCommentLines.join("\n")}`
               ) : null}
               <div id={FRAMEWORK_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
-                  title={(
-                    <span className="inline-flex flex-wrap items-center gap-2">
-                      {tx("Рамочный договор", "Rahmenvertrag")}
-                      <DocNumberPill>{contract?.contract_number ?? "FC-…"}</DocNumberPill>
-                    </span>
-                  )}
+                  title={tx("Рамочный договор", "Rahmenvertrag")}
                   accessory={(
                     <div className="flex flex-wrap items-center gap-2">
                       <StateMark done={contract?.status === "signed"} label={contract?.status === "signed" ? tx("Подписан", "Unterzeichnet") : tx("Ожидает подписи", "Unterschrift offen")} />
@@ -4552,12 +4554,7 @@ ${serviceCommentLines.join("\n")}`
               </Section>
               <div id={ORDER_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
-                  title={(
-                    <span className="inline-flex flex-wrap items-center gap-2">
-                      {tx("Документ заказа", "Einzelauftrag")}
-                      <DocNumberPill>{order?.order_number ?? "A-…"}</DocNumberPill>
-                    </span>
-                  )}
+                  title={tx("Документ заказа", "Einzelauftrag")}
                   accessory={(
                     <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("single_order")}>
                       {busy === "generate-single_order" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
@@ -4607,12 +4604,7 @@ ${serviceCommentLines.join("\n")}`
                 </div>
               </Section>
               <Section
-                title={(
-                  <span className="inline-flex flex-wrap items-center gap-2">
-                    {tx("Смета и предоплата", "Kostenvoranschlag und Vorauszahlung")}
-                    <DocNumberPill>{quote?.quote_number ?? "KV-…"}</DocNumberPill>
-                  </span>
-                )}
+                title={tx("Смета и предоплата", "Kostenvoranschlag und Vorauszahlung")}
                 accessory={(
                   <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void createOrAcceptQuote(false)}>
                     {busy === "quote" ? <LoaderCircle className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
@@ -4714,12 +4706,7 @@ ${serviceCommentLines.join("\n")}`
               </Section>
               <div id={ORDER_COST_ESTIMATE_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
-                  title={(
-                    <span className="inline-flex flex-wrap items-center gap-2">
-                      {tx("Смета к заказу", "Kostenvoranschlag zum Einzelauftrag")}
-                      <DocNumberPill>{quote?.quote_number ?? "KV-…"}</DocNumberPill>
-                    </span>
-                  )}
+                  title={tx("Смета к заказу", "Kostenvoranschlag zum Einzelauftrag")}
                   accessory={(
                     <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("order_cost_estimate")}>
                       {busy === "generate-order_cost_estimate" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
@@ -4742,12 +4729,7 @@ ${serviceCommentLines.join("\n")}`
               </div>
               <div id={COST_ESTIMATE_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
-                  title={(
-                    <span className="inline-flex flex-wrap items-center gap-2">
-                      {tx("Предварительный расчёт расходов", "Vorläufige Kostenkalkulation")}
-                      <DocNumberPill>{quote?.quote_number ?? "KV-…"}</DocNumberPill>
-                    </span>
-                  )}
+                  title={tx("Предварительный расчёт расходов", "Vorläufige Kostenkalkulation")}
                   accessory={(
                     <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("cost_estimate")}>
                       {busy === "generate-cost_estimate" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}

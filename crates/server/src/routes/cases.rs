@@ -1429,18 +1429,11 @@ async fn update_intake_completion(
     };
 
     if body.completed {
-        let fields = [
-            (
-                "hauptanfragegrund",
-                row.try_get::<Option<String>, _>("hauptanfragegrund")
-                    .unwrap_or_default(),
-            ),
-            (
-                "aktuelle_anamnese",
-                row.try_get::<Option<String>, _>("aktuelle_anamnese")
-                    .unwrap_or_default(),
-            ),
-        ];
+        let fields = [(
+            "hauptanfragegrund",
+            row.try_get::<Option<String>, _>("hauptanfragegrund")
+                .unwrap_or_default(),
+        )];
         let blocking_fields = fields
             .into_iter()
             .filter_map(|(key, value)| {

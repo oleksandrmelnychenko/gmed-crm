@@ -1,5 +1,4 @@
 import type { LeadDetail } from "@/lib/api/types";
-import { cn } from "@/lib/utils";
 import { leadIntakeTypeFromLead } from "@/pages/leads/model/leads-model";
 import { LeadQuestionnaireFacts } from "@/pages/leads/ui/lead-questionnaire-facts";
 import type {
@@ -31,7 +30,6 @@ type LeadMedicalIntakeFormProps = {
   caves: ClinicalWarning[];
   providers: ProviderSummary[];
   allDoctors: AllDoctorOption[];
-  validationAttempted: boolean;
   onNarrativeChange: (value: ClinicalNarrative) => void;
   onDiagnosesChange: (value: ClinicalDiagnosis[]) => void;
   onMedicationsChange: (value: ClinicalMedication[]) => void;
@@ -68,15 +66,12 @@ export function LeadMedicalIntakeForm({
   caves,
   providers,
   allDoctors,
-  validationAttempted,
   onNarrativeChange,
   onDiagnosesChange,
   onMedicationsChange,
   onAllergiesChange,
   onCavesChange,
 }: LeadMedicalIntakeFormProps) {
-  const missingAnamnese = validationAttempted && !narrative?.anamnese_aktuelle?.trim();
-
   return (
     <section className="space-y-4">
       {leadIntakeTypeFromLead(lead) === "questionnaire" ? (
@@ -123,11 +118,7 @@ export function LeadMedicalIntakeForm({
           return next;
         }}
       />
-      <div
-        id={anamneseId}
-        tabIndex={-1}
-        className={cn("rounded-xl outline-none", missingAnamnese && "ring-1 ring-destructive")}
-      >
+      <div id={anamneseId} tabIndex={-1} className="rounded-xl outline-none">
         <AnamneseSection
           active={narrative}
           canManage
@@ -139,11 +130,6 @@ export function LeadMedicalIntakeForm({
           }}
           loadHistory={async () => (narrative ? [narrative] : [])}
         />
-        {missingAnamnese ? (
-          <p role="alert" className="px-3 pb-3 text-xs text-destructive">
-            {tx("Заполните актуальный анамнез", "Aktuelle Anamnese ausfüllen")}
-          </p>
-        ) : null}
       </div>
       <PatientMedicationSection
         items={medications}

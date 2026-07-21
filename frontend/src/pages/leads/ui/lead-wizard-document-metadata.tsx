@@ -27,7 +27,10 @@ function formatFileSize(size: number | null, lang: Lang) {
 export function leadWizardDocumentNumber(
   document: Pick<DocumentItem, "document_number" | "id">,
 ) {
-  return document.document_number?.trim() || `DOC-${document.id.slice(0, 8).toUpperCase()}`;
+  const documentNumber = document.document_number?.trim();
+  return documentNumber
+    ? documentNumber.replace(/-V\d+$/i, "")
+    : `DOC-${document.id.slice(0, 8).toUpperCase()}`;
 }
 
 export function LeadWizardDocumentMetadata({
