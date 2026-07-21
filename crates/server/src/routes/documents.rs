@@ -6179,7 +6179,7 @@ fn build_framework_contract_html(context: &GeneratedFrameworkContractContext) ->
 /// Heading for the numbered paragraphs (§ 1 … § 11) and Anlage sub-sections.
 /// Slightly larger/bolder than body text, mirrors `admin_heading` styling.
 fn fc_paragraph_heading(layout: &mut TreatmentPlanPdfLayout, text: &str) {
-    layout.text_block(text, 13.0, true, 0.0, TreatmentPlanPdfColor::Body, 4.0, 2.0);
+    layout.text_block_centered(text, 13.0, true, TreatmentPlanPdfColor::Body, 4.0, 2.0);
 }
 
 /// A regular body paragraph for the contract text.
@@ -12959,7 +12959,7 @@ fn admin_block(layout: &mut TreatmentPlanPdfLayout, text: &str, before: f32, aft
 }
 
 fn admin_heading(layout: &mut TreatmentPlanPdfLayout, text: &str) {
-    layout.text_block(text, 13.0, true, 0.0, TreatmentPlanPdfColor::Body, 3.0, 2.0);
+    layout.text_block_centered(text, 13.0, true, TreatmentPlanPdfColor::Body, 3.0, 2.0);
 }
 
 fn build_manual_generated_text_pdf(
@@ -13483,29 +13483,26 @@ fn build_order_cost_estimate_pdf(
         legal_document_reference(context.quote_number.as_deref(), fallback_document_reference);
     let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
 
-    layout.text_block(
+    layout.text_block_centered(
         "Anlage 1 zum Einzelauftrag",
         11.0,
         true,
-        0.0,
         TreatmentPlanPdfColor::Primary,
         0.0,
         1.0,
     );
-    layout.text_block(
+    layout.text_block_centered(
         "KOSTENVORANSCHLAG",
         18.0,
         true,
-        0.0,
         TreatmentPlanPdfColor::Body,
         0.0,
         0.5,
     );
-    layout.text_block(
+    layout.text_block_centered(
         &format!("ZUM {}. EINZELAUFTRAG", context.order_sequence),
         13.0,
         true,
-        0.0,
         TreatmentPlanPdfColor::Body,
         0.0,
         3.0,
@@ -13805,11 +13802,10 @@ fn build_cost_coverage_pdf(
         .title_override
         .clone()
         .unwrap_or_else(|| admin_doc_label(&context.language, "cost_coverage_title").to_string());
-    layout.text_block(
+    layout.text_block_centered(
         &title.to_uppercase(),
         18.0,
         true,
-        0.0,
         TreatmentPlanPdfColor::Body,
         0.0,
         3.0,
@@ -14108,11 +14104,20 @@ fn build_cost_coverage_pdf(
             1.5,
             1.0,
         );
+        layout.spacer(2.5);
         for (label, value) in bank_lines {
             if let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) {
-                admin_block(&mut layout, &format!("{label}: {value}"), 0.0, 0.5);
+                layout.text_block_centered(
+                    &format!("{label}: {value}"),
+                    10.0,
+                    false,
+                    TreatmentPlanPdfColor::Body,
+                    0.0,
+                    0.5,
+                );
             }
         }
+        layout.spacer(2.5);
     }
 
     admin_signature_block(
@@ -14186,11 +14191,10 @@ fn build_cost_estimate_pdf(
         .title_override
         .clone()
         .unwrap_or_else(|| cost_estimate_default_title().to_string());
-    layout.text_block(
+    layout.text_block_centered(
         &title,
         15.0,
         true,
-        0.0,
         TreatmentPlanPdfColor::Body,
         0.0,
         4.0,
@@ -14418,11 +14422,10 @@ fn build_appointment_confirmation_pdf(
         };
         format!("Terminbestätigung für {addressee}{birth}")
     });
-    layout.text_block(
+    layout.text_block_centered(
         &heading,
         13.0,
         true,
-        0.0,
         TreatmentPlanPdfColor::Body,
         0.0,
         2.0,
@@ -15231,11 +15234,10 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'sta
     // "Mir ist bekannt" (sole) vs "Uns ist bekannt" (child).
     let us_dat = if context.sole_guardian { "Mir" } else { "Uns" };
 
-    layout.text_block(
+    layout.text_block_centered(
         "Einverständniserklärung zur Datenübermittlung und Schweigepflichtsentbindung",
         15.0,
         true,
-        0.0,
         TreatmentPlanPdfColor::Body,
         0.0,
         2.0,
