@@ -216,8 +216,10 @@ const PDF_PAGE_HEIGHT_MM: f32 = 297.0;
 const PDF_LEFT_MARGIN_MM: f32 = 25.0;
 const PDF_RIGHT_MARGIN_MM: f32 = 20.0;
 const PDF_TOP_MARGIN_MM: f32 = 18.0;
+// Legal letterhead pages start lower: air between the top rule and the title.
+const PDF_LEGAL_TOP_MARGIN_MM: f32 = 29.0;
 const PDF_BOTTOM_MARGIN_MM: f32 = 16.0;
-const PDF_FOOTER_GAP_MM: f32 = 10.0;
+const PDF_FOOTER_GAP_MM: f32 = 6.0;
 const PDF_CONTENT_WIDTH_MM: f32 = PDF_PAGE_WIDTH_MM - PDF_LEFT_MARGIN_MM - PDF_RIGHT_MARGIN_MM;
 const IMAGE_OCR_UNAVAILABLE_MESSAGE: &str = "Image OCR is not available in this environment. Enable Windows OCR support or install the tesseract CLI, otherwise manual transcription is required.";
 const IMAGE_OCR_NO_TEXT_MESSAGE: &str = "OCR did not detect readable text in the image.";
@@ -3911,6 +3913,25 @@ fn pt_to_mm(value: f32) -> f32 {
     value * 0.352_778
 }
 
+/// Character-class-aware width estimate for Helvetica: good enough to centre
+/// titles and right-align numeric cells without embedding font metrics.
+fn approx_text_width_mm(text: &str, font_size_pt: f32) -> f32 {
+    let em_total: f32 = text
+        .chars()
+        .map(|ch| match ch {
+            ' ' => 0.28,
+            '.' | ',' | ':' | ';' | '!' | '|' | 'i' | 'j' | 'l' => 0.28,
+            '-' | '/' | '(' | ')' | 'f' | 't' | 'r' | 'I' => 0.36,
+            '0'..='9' => 0.556,
+            'm' | 'w' | 'M' | 'W' => 0.86,
+            'A'..='Z' | 'Ä' | 'Ö' | 'Ü' => 0.70,
+            'a'..='z' | 'ä' | 'ö' | 'ü' | 'ß' => 0.52,
+            _ => 0.58,
+        })
+        .sum();
+    pt_to_mm(font_size_pt) * em_total
+}
+
 fn pdf_line_height_mm(size_pt: f32, multiplier: f32) -> f32 {
     pt_to_mm(size_pt * multiplier)
 }
@@ -4047,6 +4068,12 @@ enum PdfPageStyle {
     Legal,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PdfCellAlign {
+    Left,
+    Right,
+}
+
 struct TreatmentPlanPdfLayout {
     pages: Vec<PdfPage>,
     page_ops: Vec<Op>,
@@ -4085,13 +4112,21 @@ impl TreatmentPlanPdfLayout {
             pages: Vec::new(),
             page_ops: Vec::new(),
             page_number: 1,
-            y_mm: PDF_PAGE_HEIGHT_MM - PDF_TOP_MARGIN_MM,
+            y_mm: PDF_PAGE_HEIGHT_MM - PDF_LEGAL_TOP_MARGIN_MM,
             footer_text: String::new(),
             legal_footer_lines: footer_lines,
             legal_header_line: String::new(),
             page_style: PdfPageStyle::Legal,
             regular_font,
             bold_font,
+        }
+    }
+
+    fn top_start_y_mm(&self) -> f32 {
+        if self.page_style == PdfPageStyle::Legal {
+            PDF_PAGE_HEIGHT_MM - PDF_LEGAL_TOP_MARGIN_MM
+        } else {
+            PDF_PAGE_HEIGHT_MM - PDF_TOP_MARGIN_MM
         }
     }
 
@@ -4179,7 +4214,7 @@ impl TreatmentPlanPdfLayout {
             std::mem::take(&mut self.page_ops),
         ));
         self.page_number += 1;
-        self.y_mm = PDF_PAGE_HEIGHT_MM - PDF_TOP_MARGIN_MM;
+        self.y_mm = self.top_start_y_mm();
     }
 
     fn ensure_space(&mut self, needed_mm: f32) {
@@ -4248,13 +4283,50 @@ impl TreatmentPlanPdfLayout {
     }
 
     fn table_row(&mut self, cells: &[(&str, f32)], bold: bool, shaded: bool) {
+        let cells = cells
+            .iter()
+            .map(|(text, width_mm)| (*text, *width_mm, PdfCellAlign::Left))
+            .collect::<Vec<_>>();
+        self.table_row_styled(&cells, bold, shaded, false);
+    }
+
+    /// Header row in the approved table anatomy: uppercase micro-labels above a
+    /// strong ink rule — no fill, no vertical separators.
+    fn table_header_row(&mut self, cells: &[(&str, f32, PdfCellAlign)]) {
+        let upper = cells
+            .iter()
+            .map(|(text, width_mm, align)| (text.to_uppercase(), *width_mm, *align))
+            .collect::<Vec<_>>();
+        let borrowed = upper
+            .iter()
+            .map(|(text, width_mm, align)| (text.as_str(), *width_mm, *align))
+            .collect::<Vec<_>>();
+        self.table_row_styled(&borrowed, true, false, true);
+    }
+
+    fn table_row_aligned(
+        &mut self,
+        cells: &[(&str, f32, PdfCellAlign)],
+        bold: bool,
+        emphasized: bool,
+    ) {
+        self.table_row_styled(cells, bold, emphasized, false);
+    }
+
+    fn table_row_styled(
+        &mut self,
+        cells: &[(&str, f32, PdfCellAlign)],
+        bold: bool,
+        emphasized: bool,
+        header: bool,
+    ) {
         if cells.is_empty() {
             return;
         }
 
         // Column widths at the call sites are relative weights; normalise them
         // to the content width so tables always end exactly at the right margin.
-        let total_width_mm: f32 = cells.iter().map(|(_, width_mm)| width_mm).sum();
+        let total_width_mm: f32 = cells.iter().map(|(_, width_mm, _)| width_mm).sum();
         let width_scale = if total_width_mm > 0.0 {
             PDF_CONTENT_WIDTH_MM / total_width_mm
         } else {
@@ -4262,14 +4334,20 @@ impl TreatmentPlanPdfLayout {
         };
         let cells = cells
             .iter()
-            .map(|(text, width_mm)| (*text, width_mm * width_scale))
+            .map(|(text, width_mm, align)| (*text, width_mm * width_scale, *align))
             .collect::<Vec<_>>();
 
-        let font_size_pt = if bold { 9.0 } else { 9.5 };
+        let font_size_pt = if header {
+            7.5
+        } else if bold {
+            9.0
+        } else {
+            9.5
+        };
         let line_height_mm = pdf_line_height_mm(font_size_pt, 1.25);
         let wrapped_cells = cells
             .iter()
-            .map(|(text, width_mm)| {
+            .map(|(text, width_mm, _)| {
                 wrap_text_to_width(text, font_size_pt, (width_mm - 4.0).max(12.0))
             })
             .collect::<Vec<_>>();
@@ -4280,9 +4358,27 @@ impl TreatmentPlanPdfLayout {
         let row_top_mm = self.y_mm;
         let row_bottom_mm = row_top_mm - row_height_mm;
         // Open table anatomy from the approved design: no vertical rules and no
-        // outer box. Header rows close with a strong ink rule, body rows with a
-        // warm hairline.
-        if shaded {
+        // outer box. Headers close with a strong ink rule, body rows with a warm
+        // hairline; the totals row gets the brand-soft emphasis fill.
+        if emphasized {
+            append_pdf_filled_rect(
+                &mut self.page_ops,
+                PDF_LEFT_MARGIN_MM,
+                row_bottom_mm,
+                PDF_CONTENT_WIDTH_MM,
+                row_height_mm,
+                Color::Rgb(Rgb::new(1.0, 0.957, 0.929, None)),
+            );
+            append_pdf_filled_rect(
+                &mut self.page_ops,
+                PDF_LEFT_MARGIN_MM,
+                row_top_mm - 0.4,
+                PDF_CONTENT_WIDTH_MM,
+                0.4,
+                treatment_plan_pdf_color(TreatmentPlanPdfColor::Primary),
+            );
+        }
+        if header {
             append_pdf_filled_rect(
                 &mut self.page_ops,
                 PDF_LEFT_MARGIN_MM,
@@ -4291,7 +4387,7 @@ impl TreatmentPlanPdfLayout {
                 0.4,
                 treatment_plan_pdf_color(TreatmentPlanPdfColor::Body),
             );
-        } else {
+        } else if !emphasized {
             append_pdf_filled_rect(
                 &mut self.page_ops,
                 PDF_LEFT_MARGIN_MM,
@@ -4307,18 +4403,25 @@ impl TreatmentPlanPdfLayout {
         } else {
             self.regular_font.clone()
         };
-        let text_color = if shaded {
+        let text_color = if header {
             TreatmentPlanPdfColor::Muted
         } else {
             TreatmentPlanPdfColor::Body
         };
         let mut x_mm = PDF_LEFT_MARGIN_MM;
-        for ((_, width_mm), lines) in cells.iter().zip(wrapped_cells.iter()) {
+        for ((_, width_mm, align), lines) in cells.iter().zip(wrapped_cells.iter()) {
             for (line_index, line) in lines.iter().enumerate() {
+                let text_x_mm = match align {
+                    PdfCellAlign::Left => x_mm + 2.0,
+                    PdfCellAlign::Right => {
+                        (x_mm + width_mm - 2.0 - approx_text_width_mm(line, font_size_pt))
+                            .max(x_mm + 2.0)
+                    }
+                };
                 append_pdf_text_line(
                     &mut self.page_ops,
                     line,
-                    x_mm + 2.0,
+                    text_x_mm,
                     row_top_mm - 3.6 - line_index as f32 * line_height_mm,
                     font_size_pt,
                     &font,
@@ -4328,6 +4431,53 @@ impl TreatmentPlanPdfLayout {
             x_mm += *width_mm;
         }
         self.y_mm = row_bottom_mm;
+    }
+
+    /// Centred variant of `text_block` for titles and letterhead lines.
+    #[allow(clippy::too_many_arguments)]
+    fn text_block_centered(
+        &mut self,
+        text: &str,
+        size_pt: f32,
+        bold: bool,
+        color: TreatmentPlanPdfColor,
+        before_mm: f32,
+        after_mm: f32,
+    ) {
+        let lines = wrap_text_to_width(text, size_pt, self.available_width(0.0));
+        if lines.is_empty() {
+            return;
+        }
+
+        if before_mm > 0.0 {
+            self.spacer(before_mm);
+        }
+
+        let line_height_mm = pdf_line_height_mm(size_pt, 1.45);
+        let font = if bold {
+            self.bold_font.clone()
+        } else {
+            self.regular_font.clone()
+        };
+        for line in lines {
+            self.ensure_space(line_height_mm);
+            let width_mm = approx_text_width_mm(&line, size_pt);
+            let x_mm = PDF_LEFT_MARGIN_MM + ((PDF_CONTENT_WIDTH_MM - width_mm) / 2.0).max(0.0);
+            append_pdf_text_line(
+                &mut self.page_ops,
+                &line,
+                x_mm,
+                self.y_mm,
+                size_pt,
+                &font,
+                color,
+            );
+            self.y_mm -= line_height_mm;
+        }
+
+        if after_mm > 0.0 {
+            self.spacer(after_mm);
+        }
     }
 
     fn finish(mut self) -> Vec<PdfPage> {
@@ -6132,11 +6282,10 @@ fn build_framework_contract_pdf(
     let effective_date_str = fmt_de_date(context.effective_date);
 
     // --- Title ----------------------------------------------------------------
-    layout.text_block(
+    layout.text_block_centered(
         "RAHMENDIENSTLEISTUNGSVERTRAG",
         20.0,
         true,
-        0.0,
         TreatmentPlanPdfColor::Body,
         0.0,
         4.0,
@@ -6609,19 +6758,20 @@ fn build_framework_contract_pdf(
 
     // --- Signature blocks (both parties) --------------------------------------
     layout.spacer(4.0);
-    admin_signature_block(
+    admin_signature_columns(
         &mut layout,
-        context.agency_sign_place.as_deref(),
-        context.agency_sign_date,
-        &agency_person,
-        "Auftragnehmer",
-    );
-    admin_signature_block(
-        &mut layout,
-        context.party_sign_place.as_deref(),
-        context.party_sign_date,
-        &context.patient_name,
-        "Auftraggeber",
+        AdminSignatureParty {
+            place: context.agency_sign_place.as_deref(),
+            date: context.agency_sign_date,
+            name: &agency_person,
+            role: "Auftragnehmer",
+        },
+        AdminSignatureParty {
+            place: context.party_sign_place.as_deref(),
+            date: context.party_sign_date,
+            name: &context.patient_name,
+            role: "Auftraggeber",
+        },
     );
 
     Ok(finalize_admin_pdf(document, layout))
@@ -12877,10 +13027,123 @@ fn admin_signature_block(
     );
 }
 
+struct AdminSignatureParty<'a> {
+    place: Option<&'a str>,
+    date: Option<NaiveDate>,
+    name: &'a str,
+    role: &'a str,
+}
+
+fn admin_signature_columns(
+    layout: &mut TreatmentPlanPdfLayout,
+    left: AdminSignatureParty<'_>,
+    right: AdminSignatureParty<'_>,
+) {
+    const COLUMN_GAP_MM: f32 = 12.0;
+    const BLOCK_HEIGHT_MM: f32 = 34.0;
+    const SIGNATURE_LINE_OFFSET_MM: f32 = 19.0;
+
+    layout.ensure_space(BLOCK_HEIGHT_MM);
+
+    let top_y_mm = layout.y_mm;
+    let column_width_mm = (PDF_CONTENT_WIDTH_MM - COLUMN_GAP_MM) / 2.0;
+    let right_x_mm = PDF_LEFT_MARGIN_MM + column_width_mm + COLUMN_GAP_MM;
+    let regular_font = layout.regular_font.clone();
+    let bold_font = layout.bold_font.clone();
+
+    for (party, x_mm) in [(left, PDF_LEFT_MARGIN_MM), (right, right_x_mm)] {
+        let place = party
+            .place
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("____________________");
+        let place_and_date = truncate_text_to_width(
+            &format!("{place}, den {}", fmt_de_date(party.date)),
+            10.0,
+            column_width_mm,
+        );
+        append_pdf_text_line(
+            &mut layout.page_ops,
+            &place_and_date,
+            x_mm,
+            top_y_mm,
+            10.0,
+            &regular_font,
+            TreatmentPlanPdfColor::Body,
+        );
+        append_pdf_text_line(
+            &mut layout.page_ops,
+            "(Ort, Datum)",
+            x_mm,
+            top_y_mm - 4.5,
+            8.0,
+            &regular_font,
+            TreatmentPlanPdfColor::Muted,
+        );
+
+        let signature_line_y_mm = top_y_mm - SIGNATURE_LINE_OFFSET_MM;
+        append_pdf_filled_rect(
+            &mut layout.page_ops,
+            x_mm,
+            signature_line_y_mm,
+            column_width_mm,
+            0.25,
+            treatment_plan_pdf_color(TreatmentPlanPdfColor::Body),
+        );
+        append_pdf_text_line(
+            &mut layout.page_ops,
+            &truncate_text_to_width(party.name, 10.0, column_width_mm),
+            x_mm,
+            signature_line_y_mm - 4.0,
+            10.0,
+            &bold_font,
+            TreatmentPlanPdfColor::Body,
+        );
+        append_pdf_text_line(
+            &mut layout.page_ops,
+            &format!("({})", party.role),
+            x_mm,
+            signature_line_y_mm - 8.0,
+            8.0,
+            &regular_font,
+            TreatmentPlanPdfColor::Muted,
+        );
+    }
+
+    layout.y_mm = top_y_mm - BLOCK_HEIGHT_MM;
+}
+
 /// Party block lines for the contract letterhead, using the gendered
 /// salutation on the first line (e.g. "Herr Max Musterman") where the
 /// reference .docx shows one, otherwise the bare name. The Einzelauftrag
 /// intentionally omits the customer's birth date from this header block.
+fn legal_party_block(layout: &mut TreatmentPlanPdfLayout, lines: &[String], role_line: &str) {
+    for (index, line) in lines.iter().enumerate() {
+        if index == 0 {
+            layout.text_block(line, 11.0, true, 0.0, TreatmentPlanPdfColor::Body, 0.0, 0.6);
+        } else {
+            layout.text_block(
+                line,
+                9.5,
+                false,
+                0.0,
+                TreatmentPlanPdfColor::Muted,
+                0.0,
+                0.4,
+            );
+        }
+    }
+    layout.text_block(
+        role_line,
+        8.5,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Muted,
+        0.8,
+        0.0,
+    );
+}
+
 fn single_order_party_lines(party: &DocPartyBlock) -> Vec<String> {
     let mut lines = vec![party.name_with_salutation()];
     if let Some(address) = party.address_line() {
@@ -12925,67 +13188,70 @@ fn build_single_order_pdf(
             fmt_de_date(context.contract_date)
         )
     });
-    layout.text_block(
-        &title,
-        18.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        3.0,
-    );
+    layout.text_block_centered(&title, 16.0, true, TreatmentPlanPdfColor::Body, 0.0, 3.5);
     let contract_number = context
         .contract_number
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    let mut meta_lines = Vec::new();
     if !context.order_number.trim().is_empty() {
-        layout.text_block(
-            &format!("Auftragsnummer: {}", context.order_number),
-            10.0,
-            false,
-            0.0,
-            TreatmentPlanPdfColor::Muted,
-            0.0,
-            if contract_number.is_some() { 0.5 } else { 3.0 },
-        );
+        meta_lines.push(format!("Auftragsnummer: {}", context.order_number));
     }
     if let Some(contract_number) = contract_number {
-        layout.text_block(
-            &format!("Rahmendienstleistungsvertrag Nr.: {contract_number}"),
-            10.0,
-            false,
-            0.0,
-            TreatmentPlanPdfColor::Muted,
-            0.0,
-            3.0,
-        );
+        meta_lines.push(format!(
+            "Rahmendienstleistungsvertrag Nr.: {contract_number}"
+        ));
+    }
+    if !meta_lines.is_empty() {
+        let last_index = meta_lines.len() - 1;
+        for (index, line) in meta_lines.iter().enumerate() {
+            layout.text_block_centered(
+                line,
+                10.0,
+                false,
+                TreatmentPlanPdfColor::Muted,
+                0.0,
+                if index == last_index { 4.0 } else { 0.0 },
+            );
+        }
     }
 
-    admin_block(&mut layout, "zwischen", 0.0, 1.0);
-    for line in single_order_party_lines(&context.party) {
-        admin_block(&mut layout, &line, 0.0, 0.5);
-    }
-    admin_block(
+    layout.text_block(
+        "zwischen",
+        9.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Muted,
+        0.0,
+        1.2,
+    );
+    legal_party_block(
         &mut layout,
+        &single_order_party_lines(&context.party),
         "– nachfolgend „Auftraggeber“ genannt –",
-        0.5,
+    );
+    layout.text_block(
+        "und",
+        9.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Muted,
         2.0,
+        1.2,
     );
-    admin_block(&mut layout, "und", 0.0, 1.0);
-    for line in legal_agency_block_lines(&context.agency) {
-        admin_block(&mut layout, &line, 0.0, 0.5);
-    }
-    admin_block(
+    legal_party_block(
         &mut layout,
+        &legal_agency_block_lines(&context.agency),
         "– nachfolgend „Auftragnehmer“ genannt –",
-        0.5,
-        0.5,
     );
-    admin_block(
-        &mut layout,
+    layout.text_block(
         "– nachfolgend „Auftraggeber“ und „Auftragnehmer“ gemeinsam „Vertragsparteien“ genannt –",
-        0.5,
+        8.5,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Muted,
+        0.8,
         4.0,
     );
 
@@ -13086,20 +13352,20 @@ fn build_single_order_pdf(
             );
         } else {
             layout.ensure_space(45.0);
-            layout.table_row(
-                &[
-                    ("Leistungen", 88.0),
-                    ("Honorar*", 30.0),
-                    ("Anmerkung", 56.0),
-                ],
-                true,
-                true,
-            );
+            layout.table_header_row(&[
+                ("Leistungen", 88.0, PdfCellAlign::Left),
+                ("Honorar*", 30.0, PdfCellAlign::Right),
+                ("Anmerkung", 56.0, PdfCellAlign::Left),
+            ]);
             for item in &context.line_items {
                 let fee = cost_coverage_money_cell(&item.unit_price)
                     .unwrap_or_else(|| "____________".to_string());
-                layout.table_row(
-                    &[(item.description.trim(), 88.0), (&fee, 30.0), ("", 56.0)],
+                layout.table_row_aligned(
+                    &[
+                        (item.description.trim(), 88.0, PdfCellAlign::Left),
+                        (&fee, 30.0, PdfCellAlign::Right),
+                        ("", 56.0, PdfCellAlign::Left),
+                    ],
                     false,
                     false,
                 );
@@ -13187,19 +13453,21 @@ fn build_single_order_pdf(
         }
     }
 
-    admin_signature_block(
+    let party_name = context.party.name_with_salutation();
+    admin_signature_columns(
         &mut layout,
-        context.agency_sign_place.as_deref(),
-        context.agency_sign_date,
-        agency_responsible_person(&context.agency),
-        "Auftragnehmer",
-    );
-    admin_signature_block(
-        &mut layout,
-        context.party_sign_place.as_deref(),
-        context.party_sign_date,
-        &context.party.name_with_salutation(),
-        "Auftraggeber",
+        AdminSignatureParty {
+            place: context.agency_sign_place.as_deref(),
+            date: context.agency_sign_date,
+            name: agency_responsible_person(&context.agency),
+            role: "Auftragnehmer",
+        },
+        AdminSignatureParty {
+            place: context.party_sign_place.as_deref(),
+            date: context.party_sign_date,
+            name: &party_name,
+            role: "Auftraggeber",
+        },
     );
 
     let _ = &context.patient_pid;
@@ -13307,19 +13575,20 @@ fn build_order_cost_estimate_pdf(
     const TOTAL_WIDTH_MM: f32 = 30.0;
 
     layout.spacer(1.0);
-    layout.table_row(
-        &[
-            ("Leistungen", SERVICE_WIDTH_MM),
-            ("Honorar pro Einheit", UNIT_PRICE_WIDTH_MM),
-            (
-                "Voraussichtlicher Aufwand (in Einheiten)",
-                QUANTITY_WIDTH_MM,
-            ),
-            ("Summe", TOTAL_WIDTH_MM),
-        ],
-        true,
-        true,
-    );
+    layout.table_header_row(&[
+        ("Leistungen", SERVICE_WIDTH_MM, PdfCellAlign::Left),
+        (
+            "Honorar pro Einheit",
+            UNIT_PRICE_WIDTH_MM,
+            PdfCellAlign::Right,
+        ),
+        (
+            "Voraussichtlicher Aufwand (in Einheiten)",
+            QUANTITY_WIDTH_MM,
+            PdfCellAlign::Right,
+        ),
+        ("Summe", TOTAL_WIDTH_MM, PdfCellAlign::Right),
+    ]);
     for item in &context.line_items {
         let unit_price = cost_coverage_money_cell(&item.unit_price)
             .unwrap_or_else(|| "____________".to_string());
@@ -13330,12 +13599,16 @@ fn build_order_cost_estimate_pdf(
         };
         let line_gross = cost_coverage_money_cell(&item.line_gross)
             .unwrap_or_else(|| "____________".to_string());
-        layout.table_row(
+        layout.table_row_aligned(
             &[
-                (item.description.trim(), SERVICE_WIDTH_MM),
-                (&unit_price, UNIT_PRICE_WIDTH_MM),
-                (quantity, QUANTITY_WIDTH_MM),
-                (&line_gross, TOTAL_WIDTH_MM),
+                (
+                    item.description.trim(),
+                    SERVICE_WIDTH_MM,
+                    PdfCellAlign::Left,
+                ),
+                (&unit_price, UNIT_PRICE_WIDTH_MM, PdfCellAlign::Right),
+                (quantity, QUANTITY_WIDTH_MM, PdfCellAlign::Right),
+                (&line_gross, TOTAL_WIDTH_MM, PdfCellAlign::Right),
             ],
             false,
             false,
@@ -13347,12 +13620,12 @@ fn build_order_cost_estimate_pdf(
         ("Gesamtsumme:", context.total_gross.as_deref(), true, true),
     ] {
         if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-            layout.table_row(
+            layout.table_row_aligned(
                 &[
-                    ("", SERVICE_WIDTH_MM),
-                    ("", UNIT_PRICE_WIDTH_MM),
-                    (label, QUANTITY_WIDTH_MM),
-                    (value, TOTAL_WIDTH_MM),
+                    ("", SERVICE_WIDTH_MM, PdfCellAlign::Left),
+                    ("", UNIT_PRICE_WIDTH_MM, PdfCellAlign::Left),
+                    (label, QUANTITY_WIDTH_MM, PdfCellAlign::Right),
+                    (value, TOTAL_WIDTH_MM, PdfCellAlign::Right),
                 ],
                 bold,
                 shaded,
@@ -13376,11 +13649,20 @@ fn build_order_cost_estimate_pdf(
             1.0,
             0.8,
         );
+        layout.spacer(2.5);
         for (label, value) in bank_lines {
             if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-                admin_block(&mut layout, &format!("{label}: {value}"), 0.0, 0.4);
+                layout.text_block_centered(
+                    &format!("{label}: {value}"),
+                    10.0,
+                    false,
+                    TreatmentPlanPdfColor::Body,
+                    0.0,
+                    0.4,
+                );
             }
         }
+        layout.spacer(2.5);
         admin_block(
             &mut layout,
             "Ggf. fordern wir während der Durchführung des Auftrages zu weiteren Vorauszahlungen auf. Überschreiten die Vorauszahlungen die endgültigen Gesamtauftragskosten, erstatten wir den Restbetrag selbstverständlich zurück.",
@@ -14472,25 +14754,9 @@ fn legal_document_pdf_layout(
 }
 
 fn adult_legal_document_header(layout: &mut TreatmentPlanPdfLayout, annex: &str, title: &str) {
-    // Orange kicker line above an ink title, mirroring the approved letterhead.
-    layout.text_block(
-        annex,
-        11.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Primary,
-        0.0,
-        1.0,
-    );
-    layout.text_block(
-        title,
-        16.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        4.0,
-    );
+    // Centred orange kicker above a centred ink title, as in the Word originals.
+    layout.text_block_centered(annex, 11.0, true, TreatmentPlanPdfColor::Primary, 0.0, 1.0);
+    layout.text_block_centered(title, 16.0, true, TreatmentPlanPdfColor::Body, 0.0, 4.0);
 }
 
 fn adult_legal_identity_block(
@@ -20035,24 +20301,26 @@ async fn list_document_categories(
 #[cfg(test)]
 mod tests {
     use super::{
-        AgencyContractSettings, DocPartyBlock, DocumentBindingOverrides, GeneratedConsentContext,
-        GeneratedContractLineItem, GeneratedCostEstimateContext, GeneratedFrameworkContractContext,
-        GeneratedPatientStickerContext, GeneratedSingleOrderContext, ServiceLineInput,
-        adult_legal_agency_identity, agency_block_lines, agency_identity_profile_lines,
-        agency_responsible_person, build_adult_confidentiality_release_pdf,
-        build_adult_privacy_consents_pdf, build_adult_privacy_information_pdf, build_consent_pdf,
-        build_cost_estimate_pdf, build_framework_contract_pdf, build_manual_generated_text_pdf,
+        AdminSignatureParty, AgencyContractSettings, DocPartyBlock, DocumentBindingOverrides,
+        GeneratedConsentContext, GeneratedContractLineItem, GeneratedCostEstimateContext,
+        GeneratedFrameworkContractContext, GeneratedPatientStickerContext,
+        GeneratedSingleOrderContext, PDF_PAGE_WIDTH_MM, ServiceLineInput, TreatmentPlanPdfLayout,
+        admin_signature_columns, adult_legal_agency_identity, agency_block_lines,
+        agency_identity_profile_lines, agency_responsible_person,
+        build_adult_confidentiality_release_pdf, build_adult_privacy_consents_pdf,
+        build_adult_privacy_information_pdf, build_consent_pdf, build_cost_estimate_pdf,
+        build_framework_contract_pdf, build_manual_generated_text_pdf,
         build_order_cost_estimate_pdf, build_patient_sticker_pdf, build_single_order_pdf,
         compute_line_item_totals, cost_coverage_money_cell, cost_estimate_price_text,
-        document_satisfies_compliance_kind, document_template_by_id, generated_binding_snapshot,
-        generated_compliance_document_number, german_document_country,
+        document_satisfies_compliance_kind, document_template_by_id, finalize_admin_pdf,
+        generated_binding_snapshot, generated_compliance_document_number, german_document_country,
         is_fixed_legal_document_template, is_lead_allowed_document_template,
-        legal_document_reference, patient_sticker_agency_line, pdf_text_font_handles,
-        trusted_contact_recipients_binding,
+        legal_document_reference, new_admin_pdf, patient_sticker_agency_line, pdf_mm_to_pt,
+        pdf_text_font_handles, trusted_contact_recipients_binding,
     };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
     use chrono::{NaiveDate, TimeZone, Utc};
-    use printpdf::{BuiltinFont, PdfFontHandle};
+    use printpdf::{BuiltinFont, Op, PdfFontHandle};
     use serde_json::json;
     use uuid::Uuid;
 
@@ -20612,6 +20880,7 @@ mod tests {
         assert!(text.contains(LEGAL_ADDRESS_CITY));
         assert!(text.contains("500,00 EUR der Gesamtsumme"));
         assert!(text.contains("Der Vertrag tritt zum 01.07.2026"));
+        assert!(text.contains("Köln, den 16.07.2026"));
         assert!(text.contains("Potsdam, den 16.07.2026"));
         assert!(text.contains("nachfolgend „Auftraggeber“ genannt"));
         assert!(text.contains("nachfolgend „Auftragnehmer“ genannt"));
@@ -20655,6 +20924,64 @@ mod tests {
             assert!(
                 !text.contains(annex_body_marker),
                 "embedded annex body marker: {annex_body_marker}"
+            );
+        }
+    }
+
+    #[test]
+    fn admin_signature_columns_place_agency_and_client_side_by_side() {
+        let (document, regular, bold) = new_admin_pdf().unwrap();
+        let mut layout = TreatmentPlanPdfLayout::new("Signatures".to_string(), regular, bold);
+
+        admin_signature_columns(
+            &mut layout,
+            AdminSignatureParty {
+                place: Some("Köln"),
+                date: NaiveDate::from_ymd_opt(2026, 7, 16),
+                name: "Heorhii Hudiiev",
+                role: "Auftragnehmer",
+            },
+            AdminSignatureParty {
+                place: Some("Berlin"),
+                date: NaiveDate::from_ymd_opt(2026, 7, 17),
+                name: "Anna Beispiel",
+                role: "Auftraggeber",
+            },
+        );
+
+        let cursor_x_positions = layout
+            .page_ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::SetTextCursor { pos } => Some(pos.x.0),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(cursor_x_positions.len(), 8);
+        let page_midpoint_pt = pdf_mm_to_pt(PDF_PAGE_WIDTH_MM / 2.0).0;
+        assert!(
+            cursor_x_positions[..4]
+                .iter()
+                .all(|x| *x < page_midpoint_pt)
+        );
+        assert!(
+            cursor_x_positions[4..]
+                .iter()
+                .all(|x| *x > page_midpoint_pt)
+        );
+
+        let text = normalized_pdf_text(&finalize_admin_pdf(document, layout));
+        for expected in [
+            "Köln, den 16.07.2026",
+            "Heorhii Hudiiev",
+            "Auftragnehmer",
+            "Berlin, den 17.07.2026",
+            "Anna Beispiel",
+            "Auftraggeber",
+        ] {
+            assert!(
+                text.contains(expected),
+                "missing signature text: {expected}"
             );
         }
     }
@@ -20741,6 +21068,7 @@ mod tests {
         assert!(text.contains("Rahmendienstleistungsvertrag Nr.: RV-2026-0042"));
         assert!(!text.contains("geb. am 12.04.1988"));
         assert!(text.contains("Deutschland"));
+        assert!(text.contains("Köln, den 16.07.2026"));
         assert!(text.contains("Berlin, den 16.07.2026"));
         assert!(text.contains("I. Leistungsumfang"));
         assert!(!text.contains("1. Individuelle Beratung"));
@@ -20759,8 +21087,8 @@ mod tests {
         assert!(text.contains("Organisation der Behandlung"));
         assert!(text.contains("Beratungsleistungen (auch telefonisch) und Datenmanagement"));
         assert!(text.contains("Dolmetscher-/Betreuungsleistung"));
-        assert!(text.contains("Honorar*"));
-        assert!(text.contains("Anmerkung"));
+        assert!(text.contains("HONORAR*"));
+        assert!(text.contains("ANMERKUNG"));
         assert!(!text.contains("Leistungsumfang 10, 11"));
         assert!(!text.contains("Leistung — Einzelpreis — Menge — Summe"));
         assert!(!text.contains("Gesamtsumme: 476,00 EUR"));
@@ -20778,8 +21106,8 @@ mod tests {
         assert!(estimate_text.contains("12.04.1988"));
         assert!(estimate_text.contains("Rahmendienstleistungsvertrag vom:"));
         assert!(!estimate_text.contains("Auftragsnummer: EA-2026-0017"));
-        assert!(estimate_text.contains("Honorar pro Einheit"));
-        assert!(estimate_text.contains("Voraussichtlicher Aufwand (in Einheiten)"));
+        assert!(estimate_text.contains("HONORAR PRO EINHEIT"));
+        assert!(estimate_text.contains("VORAUSSICHTLICHER AUFWAND (IN EINHEITEN)"));
         assert!(estimate_text.contains("Nettowert:"));
         assert!(estimate_text.contains("MWSt. 19%:"));
         assert!(estimate_text.contains("Gesamtsumme:"));
@@ -20799,7 +21127,7 @@ mod tests {
             "Höhere Kosten können sich z.B. bei Komplikationen",
         ];
         let table_position = estimate_text
-            .find("Honorar pro Einheit")
+            .find("HONORAR PRO EINHEIT")
             .expect("missing estimate table header");
         let mut previous_intro_position = 0;
         for line in intro_block {
@@ -21023,5 +21351,9 @@ mod tests {
         let bytes = build_single_order_pdf(&context, "DOC-ORDER-SAMPLE").unwrap();
         let target = std::path::Path::new(&dir).join("gmed-sample-einzelauftrag.pdf");
         std::fs::write(&target, bytes).unwrap();
+
+        let estimate_bytes = build_order_cost_estimate_pdf(&context, "DOC-QUOTE-SAMPLE").unwrap();
+        let estimate_target = std::path::Path::new(&dir).join("gmed-sample-kostenvoranschlag.pdf");
+        std::fs::write(&estimate_target, estimate_bytes).unwrap();
     }
 }
