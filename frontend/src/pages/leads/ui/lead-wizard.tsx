@@ -31,7 +31,7 @@ import {
 
 import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { LANGUAGE_OPTIONS, languageLabel } from "@/components/ui/language-multi-select";
@@ -128,7 +128,7 @@ import {
   updateLeadServiceSelection,
 } from "@/pages/leads/model/leads-model";
 
-import { LeadWizardDocumentMetadata } from "./lead-wizard-document-metadata";
+import { LeadWizardDocumentMetadata, metadataPillClass } from "./lead-wizard-document-metadata";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 
 import {
@@ -1464,10 +1464,7 @@ function Field({
 
 function DocNumberPill({ children }: { children: ReactNode }) {
   return (
-    <Badge
-      variant="outline"
-      className={cn("rounded-full px-2 py-0.5 font-mono text-[10px] font-medium tabular-nums", STATUS_TONE.brand)}
-    >
+    <Badge variant="outline" className={cn(metadataPillClass, STATUS_TONE.brand)}>
       {children}
     </Badge>
   );
@@ -3840,7 +3837,7 @@ ${serviceCommentLines.join("\n")}`
                   id={SERVICE_CONCERN_ID}
                   className={cn(
                     textareaClass,
-                    "min-h-28",
+                    "min-h-28 bg-card",
                     medicalValidationAttempted && !draft.concern.trim() && "border-destructive",
                   )}
                   aria-invalid={medicalValidationAttempted && !draft.concern.trim()}
@@ -4171,7 +4168,8 @@ ${serviceCommentLines.join("\n")}`
                     <label
                       htmlFor="lead-file-identity"
                       className={cn(
-                        "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground shadow-xs hover:bg-primary/90 peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
+                        buttonVariants({ variant: "default", size: "sm" }),
+                        "h-8 rounded-lg peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
                         isBusy && "pointer-events-none opacity-50",
                       )}
                     >

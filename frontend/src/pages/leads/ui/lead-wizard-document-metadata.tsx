@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/pages/leads/model/leads-model";
 import type { DocumentItem } from "@/pages/documents/model/types";
 
-const metadataPillClass = "rounded-full px-2 py-0.5 font-mono text-[10px] font-medium tabular-nums";
+export const metadataPillClass = "rounded-full px-2 py-0.5 font-mono text-[10px] font-medium tabular-nums";
 
 type LeadWizardDocumentMetadataProps = {
   document: Pick<

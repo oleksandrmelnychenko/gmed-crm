@@ -9,6 +9,7 @@ pub mod config;
 pub mod crypto;
 pub mod file_scan;
 pub mod file_sniff;
+pub(crate) mod pdf_logo;
 pub(crate) mod pdf_text;
 pub mod rate_limit;
 pub mod realtime;

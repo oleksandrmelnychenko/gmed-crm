@@ -29,8 +29,10 @@ export function LeadQuestionnaireFacts({
           </div>
         ) : (
           <div key={`${String(item.label)}-${index}`} className="flex min-w-0 items-center gap-2 py-1">
-            <dt className="min-w-0 break-words text-xs font-medium text-muted-foreground">{item.label}</dt>
-            <span aria-hidden className="h-px min-w-5 flex-1 self-center bg-border/70" />
+            <dt className="flex min-w-0 flex-1 items-center gap-2 text-xs font-medium text-muted-foreground">
+              <span className="min-w-0 break-words">{item.label}</span>
+              <span aria-hidden className="h-px min-w-5 flex-1 self-center bg-border/70" />
+            </dt>
             <dd className="min-w-0 max-w-[58%] break-words text-right text-sm font-semibold leading-snug text-foreground">
               {item.value}
             </dd>

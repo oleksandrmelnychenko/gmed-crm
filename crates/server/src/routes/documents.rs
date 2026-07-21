@@ -904,6 +904,7 @@ struct GeneratedSingleOrderContext {
     party: DocPartyBlock,
     agency: AgencyContractSettings,
     order_number: String,
+    contract_number: Option<String>,
     order_sequence: i64,
     order_date: Option<NaiveDate>,
     contract_date: Option<NaiveDate>,
@@ -3898,9 +3899,10 @@ enum TreatmentPlanPdfColor {
 
 fn treatment_plan_pdf_color(kind: TreatmentPlanPdfColor) -> Color {
     match kind {
-        TreatmentPlanPdfColor::Primary => Color::Rgb(Rgb::new(0.11, 0.30, 0.84, None)),
-        TreatmentPlanPdfColor::Muted => Color::Rgb(Rgb::new(0.40, 0.46, 0.54, None)),
-        TreatmentPlanPdfColor::Body => Color::Rgb(Rgb::new(0.07, 0.13, 0.22, None)),
+        // Brand orange (#f97316) shared with the staff UI accent.
+        TreatmentPlanPdfColor::Primary => Color::Rgb(Rgb::new(0.976, 0.451, 0.086, None)),
+        TreatmentPlanPdfColor::Muted => Color::Rgb(Rgb::new(0.47, 0.44, 0.42, None)),
+        TreatmentPlanPdfColor::Body => Color::Rgb(Rgb::new(0.11, 0.10, 0.09, None)),
     }
 }
 
@@ -4102,14 +4104,14 @@ impl TreatmentPlanPdfLayout {
         }
 
         if self.page_style == PdfPageStyle::Legal {
-            let accent = Color::Rgb(Rgb::new(0.0, 0.55, 0.76, None));
-            append_pdf_filled_rect(&mut self.page_ops, 5.0, 5.0, 4.0, 287.0, accent.clone());
+            // Brand chrome: thin orange rules top and bottom, wordmark in the footer.
+            let accent = treatment_plan_pdf_color(TreatmentPlanPdfColor::Primary);
             append_pdf_filled_rect(
                 &mut self.page_ops,
                 PDF_LEFT_MARGIN_MM,
                 285.0,
                 PDF_CONTENT_WIDTH_MM,
-                0.35,
+                0.25,
                 accent.clone(),
             );
             append_pdf_filled_rect(
@@ -4117,15 +4119,19 @@ impl TreatmentPlanPdfLayout {
                 PDF_LEFT_MARGIN_MM,
                 15.0,
                 PDF_CONTENT_WIDTH_MM,
-                0.35,
+                0.25,
                 accent,
             );
 
             if !self.legal_header_line.is_empty() {
+                // Right-aligned above the top rule, like the letterhead reference.
+                let width_mm = self.legal_header_line.chars().count() as f32 * pt_to_mm(7.0) * 0.54;
+                let x_mm =
+                    (PDF_PAGE_WIDTH_MM - PDF_RIGHT_MARGIN_MM - width_mm).max(PDF_LEFT_MARGIN_MM);
                 append_pdf_text_line(
                     &mut self.page_ops,
                     &self.legal_header_line,
-                    PDF_LEFT_MARGIN_MM,
+                    x_mm,
                     288.0,
                     7.0,
                     &self.regular_font,
@@ -4133,16 +4139,25 @@ impl TreatmentPlanPdfLayout {
                 );
             }
 
+            let logo_height_mm = 7.6;
+            self.page_ops.extend(crate::pdf_logo::gmed_logo_ops(
+                PDF_LEFT_MARGIN_MM,
+                13.4,
+                logo_height_mm,
+                Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None)),
+            ));
+            let footer_text_x_mm =
+                PDF_LEFT_MARGIN_MM + logo_height_mm * crate::pdf_logo::GMED_LOGO_ASPECT + 4.0;
             for (index, line) in self.legal_footer_lines.iter().take(3).enumerate() {
-                let line = truncate_text_to_width(line, 5.8, 145.0);
+                let line = truncate_text_to_width(line, 5.8, 130.0);
                 append_pdf_text_line(
                     &mut self.page_ops,
                     &line,
-                    PDF_LEFT_MARGIN_MM,
+                    footer_text_x_mm,
                     12.0 - index as f32 * 3.0,
                     5.8,
                     &self.regular_font,
-                    TreatmentPlanPdfColor::Primary,
+                    TreatmentPlanPdfColor::Muted,
                 );
             }
         } else {
@@ -4326,7 +4341,7 @@ impl TreatmentPlanPdfLayout {
                     6.0,
                     7.0,
                     &regular_font,
-                    TreatmentPlanPdfColor::Primary,
+                    TreatmentPlanPdfColor::Muted,
                 );
             }
         }
@@ -11757,6 +11772,7 @@ async fn generate_document(
                 party: patient_party.clone(),
                 agency,
                 order_number: resolved_order_number,
+                contract_number: order_metadata.contract_number.clone(),
                 order_sequence,
                 order_date: bindings.order_date.or(order_metadata.order_date),
                 contract_date: bindings.contract_date.or(order_metadata.contract_date),
@@ -12855,13 +12871,10 @@ fn admin_signature_block(
 
 /// Party block lines for the contract letterhead, using the gendered
 /// salutation on the first line (e.g. "Herr Max Musterman") where the
-/// reference .docx shows one, otherwise the bare name. Mirrors
-/// `party_block_lines` for the remaining lines (birth date, address, contacts).
+/// reference .docx shows one, otherwise the bare name. The Einzelauftrag
+/// intentionally omits the customer's birth date from this header block.
 fn single_order_party_lines(party: &DocPartyBlock) -> Vec<String> {
     let mut lines = vec![party.name_with_salutation()];
-    if let Some(birth) = party.birth_date {
-        lines.push(format!("geb. am {}", birth.format("%d.%m.%Y")));
-    }
     if let Some(address) = party.address_line() {
         lines.push(address);
     }
@@ -12913,9 +12926,25 @@ fn build_single_order_pdf(
         0.0,
         3.0,
     );
+    let contract_number = context
+        .contract_number
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
     if !context.order_number.trim().is_empty() {
         layout.text_block(
             &format!("Auftragsnummer: {}", context.order_number),
+            10.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            if contract_number.is_some() { 0.5 } else { 3.0 },
+        );
+    }
+    if let Some(contract_number) = contract_number {
+        layout.text_block(
+            &format!("Rahmendienstleistungsvertrag Nr.: {contract_number}"),
             10.0,
             false,
             0.0,
@@ -13177,49 +13206,92 @@ fn build_order_cost_estimate_pdf(
         legal_document_reference(context.quote_number.as_deref(), fallback_document_reference);
     let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
 
-    admin_heading(
-        &mut layout,
-        &format!(
-            "Anlage 1 zum {}. Einzelauftrag: Kostenvoranschlag",
-            context.order_sequence
-        ),
+    layout.text_block(
+        "Anlage 1 zum Einzelauftrag",
+        11.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Primary,
+        0.0,
+        1.0,
     );
-    if let Some(quote_number) = context
+    layout.text_block(
+        "KOSTENVORANSCHLAG",
+        18.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        0.5,
+    );
+    layout.text_block(
+        &format!("ZUM {}. EINZELAUFTRAG", context.order_sequence),
+        13.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        3.0,
+    );
+
+    let quote_number = context
         .quote_number
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-    {
-        admin_block(
-            &mut layout,
-            &format!("Kostenvoranschlag Nr.: {quote_number}"),
-            0.0,
-            0.5,
-        );
-    }
-    if !context.order_number.trim().is_empty() {
-        admin_block(
-            &mut layout,
-            &format!("Auftragsnummer: {}", context.order_number),
-            0.0,
-            0.5,
-        );
-    }
-    for line in [
-        format!("Datum: {}", fmt_de_date(context.order_date)),
-        format!("Auftraggeber: {}", context.party.name_with_salutation()),
-        format!(
-            "Geburtsdatum des Auftraggebers: {}",
-            fmt_de_date(context.party.birth_date)
+        .unwrap_or("____________________");
+    for (label, value) in [
+        ("Kostenvoranschlag Nr. :", quote_number.to_string()),
+        ("Datum:", fmt_de_date(context.order_date)),
+        ("Auftraggeber:", context.party.name_with_salutation()),
+        (
+            "Geburtsdatum des Auftraggebers:",
+            fmt_de_date(context.party.birth_date),
         ),
-        format!(
-            "Rahmendienstleistungsvertrag vom: {}",
-            fmt_de_date(context.contract_date)
+        (
+            "Rahmendienstleistungsvertrag vom:",
+            fmt_de_date(context.contract_date),
         ),
-        format!("Einzelauftrag vom: {}", fmt_de_date(context.order_date)),
+        ("Einzelauftrag vom:", fmt_de_date(context.order_date)),
     ] {
-        admin_block(&mut layout, &line, 0.0, 0.5);
+        layout.text_block(
+            label,
+            8.5,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Muted,
+            0.0,
+            0.25,
+        );
+        layout.text_block(
+            &value,
+            10.5,
+            true,
+            0.0,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            1.0,
+        );
     }
+    admin_block(&mut layout, "Sehr geehrte Damen und Herren,", 1.0, 1.0);
+    admin_block(
+        &mut layout,
+        "hiermit erhalten Sie eine Übersicht über die zu erwartenden Kosten die im Zusammenhang mit der Erbringung von unseren Leistungen anfallen können.",
+        0.0,
+        1.0,
+    );
+    admin_block(
+        &mut layout,
+        "Bitte beachten Sie, dass es sich lediglich um eine vorläufige Berechnung handelt, die auf den vorliegenden Daten beruht. Eine endgültige Berechnung der anfallenden Kosten für von uns erbrachte Leistungen ist erst mit Abschluss des Einzelauftrags möglich.",
+        0.0,
+        1.0,
+    );
+    admin_block(
+        &mut layout,
+        "Höhere Kosten können sich z.B. bei Komplikationen oder bei zusätzlichem organisatorischen Aufwand entstehen.",
+        0.0,
+        1.0,
+    );
     const SERVICE_WIDTH_MM: f32 = 70.0;
     const UNIT_PRICE_WIDTH_MM: f32 = 34.0;
     const QUANTITY_WIDTH_MM: f32 = 40.0;
@@ -14391,12 +14463,13 @@ fn legal_document_pdf_layout(
 }
 
 fn adult_legal_document_header(layout: &mut TreatmentPlanPdfLayout, annex: &str, title: &str) {
+    // Orange kicker line above an ink title, mirroring the approved letterhead.
     layout.text_block(
         annex,
         11.0,
         true,
         0.0,
-        TreatmentPlanPdfColor::Body,
+        TreatmentPlanPdfColor::Primary,
         0.0,
         1.0,
     );
@@ -14405,7 +14478,7 @@ fn adult_legal_document_header(layout: &mut TreatmentPlanPdfLayout, annex: &str,
         16.0,
         true,
         0.0,
-        TreatmentPlanPdfColor::Primary,
+        TreatmentPlanPdfColor::Body,
         0.0,
         4.0,
     );
@@ -15349,6 +15422,7 @@ struct OrderQuoteSummary {
 struct GeneratedOrderMetadata {
     order_date: Option<NaiveDate>,
     contract_date: Option<NaiveDate>,
+    contract_number: Option<String>,
     order_sequence: i64,
 }
 
@@ -15374,6 +15448,7 @@ async fn load_generated_order_metadata(
     let row = sqlx::query(
         r#"SELECT COALESCE(o.signed_at::date, o.created_at::date) AS order_date,
                   COALESCE(fc.signed_at::date, fc.valid_from) AS contract_date,
+                  NULLIF(BTRIM(fc.contract_number), '') AS contract_number,
                   COALESCE((
                       SELECT COUNT(*)::BIGINT
                       FROM orders sibling
@@ -15406,6 +15481,10 @@ async fn load_generated_order_metadata(
                 .flatten(),
             contract_date: row
                 .try_get::<Option<NaiveDate>, _>("contract_date")
+                .ok()
+                .flatten(),
+            contract_number: row
+                .try_get::<Option<String>, _>("contract_number")
                 .ok()
                 .flatten(),
             order_sequence: row.try_get::<i64, _>("order_sequence").unwrap_or(1).max(1),
@@ -20571,6 +20650,7 @@ mod tests {
                 ..legal_test_agency()
             },
             order_number: "EA-2026-0017".to_string(),
+            contract_number: Some("RV-2026-0042".to_string()),
             order_sequence: 2,
             order_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             contract_date: NaiveDate::from_ymd_opt(2026, 7, 1),
@@ -20628,6 +20708,8 @@ mod tests {
         assert!(!text.contains("DOC-ORDER-FALLBACK"));
         assert!(!text.contains("Anlage 4"));
         assert!(text.contains("Auftragsnummer: EA-2026-0017"));
+        assert!(text.contains("Rahmendienstleistungsvertrag Nr.: RV-2026-0042"));
+        assert!(!text.contains("geb. am 12.04.1988"));
         assert!(text.contains("Deutschland"));
         assert!(text.contains("Berlin, den 16.07.2026"));
         assert!(text.contains("I. Leistungsumfang"));
@@ -20657,8 +20739,15 @@ mod tests {
         let estimate_text = assert_legal_pdf_chrome(&estimate_bytes, "KV-2026-0042");
 
         assert!(!estimate_text.contains("DOC-QUOTE-FALLBACK"));
-        assert!(estimate_text.contains("Anlage 1 zum 2. Einzelauftrag"));
-        assert!(estimate_text.contains("Auftragsnummer: EA-2026-0017"));
+        assert!(estimate_text.contains("Anlage 1 zum Einzelauftrag"));
+        assert!(estimate_text.contains("KOSTENVORANSCHLAG"));
+        assert!(estimate_text.contains("ZUM 2. EINZELAUFTRAG"));
+        assert!(estimate_text.contains("Kostenvoranschlag Nr. :"));
+        assert!(estimate_text.contains("KV-2026-0042"));
+        assert!(estimate_text.contains("Geburtsdatum des Auftraggebers:"));
+        assert!(estimate_text.contains("12.04.1988"));
+        assert!(estimate_text.contains("Rahmendienstleistungsvertrag vom:"));
+        assert!(!estimate_text.contains("Auftragsnummer: EA-2026-0017"));
         assert!(estimate_text.contains("Honorar pro Einheit"));
         assert!(estimate_text.contains("Voraussichtlicher Aufwand (in Einheiten)"));
         assert!(estimate_text.contains("Nettowert:"));
@@ -20673,6 +20762,26 @@ mod tests {
         assert!(estimate_text.contains("2.299,00 EUR"));
         assert!(estimate_text.contains("436,81 EUR"));
         assert!(estimate_text.contains("2.735,81 EUR"));
+        let intro_block = [
+            "Sehr geehrte Damen und Herren",
+            "hiermit erhalten Sie eine Übersicht über die zu erwartenden Kosten",
+            "Bitte beachten Sie, dass es sich lediglich um eine vorläufige Berechnung handelt",
+            "Höhere Kosten können sich z.B. bei Komplikationen",
+        ];
+        let table_position = estimate_text
+            .find("Honorar pro Einheit")
+            .expect("missing estimate table header");
+        let mut previous_intro_position = 0;
+        for line in intro_block {
+            let position = estimate_text
+                .find(line)
+                .unwrap_or_else(|| panic!("missing estimate intro line: {line}"));
+            assert!(
+                position >= previous_intro_position && position < table_position,
+                "estimate intro line is not before the table: {line}"
+            );
+            previous_intro_position = position;
+        }
         assert!(estimate_text.contains("Kontoinhaber: GMED Testkonto"));
         assert!(estimate_text.contains("Bank: Testbank"));
         assert!(estimate_text.contains("SWIFT-Code: TESTDEFF"));
