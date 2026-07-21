@@ -13023,12 +13023,20 @@ fn build_single_order_pdf(
             );
         } else {
             layout.ensure_space(45.0);
-            layout.table_row(&[("Leistungen", 130.0), ("Honorar*", 44.0)], true, true);
+            layout.table_row(
+                &[
+                    ("Leistungen", 88.0),
+                    ("Honorar*", 30.0),
+                    ("Anmerkung", 56.0),
+                ],
+                true,
+                true,
+            );
             for item in &context.line_items {
                 let fee = cost_coverage_money_cell(&item.unit_price)
                     .unwrap_or_else(|| "____________".to_string());
                 layout.table_row(
-                    &[(item.description.trim(), 130.0), (&fee, 44.0)],
+                    &[(item.description.trim(), 88.0), (&fee, 30.0), ("", 56.0)],
                     false,
                     false,
                 );
@@ -13187,15 +13195,24 @@ fn build_order_cost_estimate_pdf(
     ] {
         admin_block(&mut layout, &line, 0.0, 0.5);
     }
+    const SERVICE_WIDTH_MM: f32 = 70.0;
+    const UNIT_PRICE_WIDTH_MM: f32 = 34.0;
+    const QUANTITY_WIDTH_MM: f32 = 40.0;
+    const TOTAL_WIDTH_MM: f32 = 30.0;
+
     layout.spacer(1.0);
-    layout.text_block(
-        "Leistung — Einzelpreis — Menge — Summe",
-        10.0,
+    layout.table_row(
+        &[
+            ("Leistungen", SERVICE_WIDTH_MM),
+            ("Honorar pro Einheit", UNIT_PRICE_WIDTH_MM),
+            (
+                "Voraussichtlicher Aufwand (in Einheiten)",
+                QUANTITY_WIDTH_MM,
+            ),
+            ("Summe", TOTAL_WIDTH_MM),
+        ],
         true,
-        0.0,
-        TreatmentPlanPdfColor::Muted,
-        0.0,
-        1.0,
+        true,
     );
     for item in &context.line_items {
         let unit_price = cost_coverage_money_cell(&item.unit_price)
@@ -13207,49 +13224,36 @@ fn build_order_cost_estimate_pdf(
         };
         let line_gross = cost_coverage_money_cell(&item.line_gross)
             .unwrap_or_else(|| "____________".to_string());
-        layout.text_block(
-            &format!(
-                "•  {} — {unit_price} — {quantity} — {line_gross}",
-                item.description.trim()
-            ),
-            11.0,
+        layout.table_row(
+            &[
+                (item.description.trim(), SERVICE_WIDTH_MM),
+                (&unit_price, UNIT_PRICE_WIDTH_MM),
+                (quantity, QUANTITY_WIDTH_MM),
+                (&line_gross, TOTAL_WIDTH_MM),
+            ],
             false,
-            4.0,
-            TreatmentPlanPdfColor::Body,
-            0.0,
-            0.8,
+            false,
         );
-        if let Some(note) = item
-            .notes
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            layout.text_block(
-                note,
-                9.5,
-                false,
-                8.0,
-                TreatmentPlanPdfColor::Muted,
-                0.0,
-                0.5,
-            );
-        }
     }
-    for (label, value) in [
-        ("Nettowert", context.total_net.as_deref()),
-        ("MwSt.", context.total_vat.as_deref()),
-        ("Gesamtsumme", context.total_gross.as_deref()),
+    for (label, value, bold, shaded) in [
+        ("Nettowert:", context.total_net.as_deref(), false, false),
+        ("MWSt. 19%:", context.total_vat.as_deref(), false, false),
+        ("Gesamtsumme:", context.total_gross.as_deref(), true, true),
     ] {
         if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-            admin_block(
-                &mut layout,
-                &format!("{label}: {value}"),
-                0.0,
-                if label == "Gesamtsumme" { 1.5 } else { 0.5 },
+            layout.table_row(
+                &[
+                    ("", SERVICE_WIDTH_MM),
+                    ("", UNIT_PRICE_WIDTH_MM),
+                    (label, QUANTITY_WIDTH_MM),
+                    (value, TOTAL_WIDTH_MM),
+                ],
+                bold,
+                shaded,
             );
         }
     }
+    layout.spacer(1.5);
     let bank_lines = [
         ("Kontoinhaber", context.agency.bank_holder.as_deref()),
         ("Bank", context.agency.bank_name.as_deref()),
@@ -20487,17 +20491,36 @@ mod tests {
             period_to: NaiveDate::from_ymd_opt(2026, 8, 7),
             payer: None,
             quote_number: Some("KV-2026-0042".to_string()),
-            line_items: vec![GeneratedContractLineItem {
-                description: "UNIQUE-QUOTE-SERVICE".to_string(),
-                quantity: "4".to_string(),
-                unit_price: "100,00 EUR".to_string(),
-                line_gross: "400,00 EUR".to_string(),
-                vat_rate: Some("19".to_string()),
-                notes: Some("Leistungsumfang 10, 11".to_string()),
-            }],
-            total_net: Some("400,00 EUR".to_string()),
-            total_vat: Some("76,00 EUR".to_string()),
-            total_gross: Some("476,00 EUR".to_string()),
+            line_items: vec![
+                GeneratedContractLineItem {
+                    description: "Organisation der Behandlung (pro 1 Ärzte) (im Zeitraum 17.12.2025 bis 19.12.2025)".to_string(),
+                    quantity: "5".to_string(),
+                    unit_price: "100,00 EUR".to_string(),
+                    line_gross: "500,00 EUR".to_string(),
+                    vat_rate: Some("19".to_string()),
+                    notes: Some("Leistungsumfang 10, 11".to_string()),
+                },
+                GeneratedContractLineItem {
+                    description: "Beratungsleistungen (auch telefonisch) und Datenmanagement"
+                        .to_string(),
+                    quantity: "1".to_string(),
+                    unit_price: "999,00 EUR".to_string(),
+                    line_gross: "999,00 EUR".to_string(),
+                    vat_rate: Some("19".to_string()),
+                    notes: None,
+                },
+                GeneratedContractLineItem {
+                    description: "Dolmetscher-/Betreuungsleistung".to_string(),
+                    quantity: "8".to_string(),
+                    unit_price: "100,00 EUR/1 Stunde".to_string(),
+                    line_gross: "800,00 EUR".to_string(),
+                    vat_rate: Some("19".to_string()),
+                    notes: None,
+                },
+            ],
+            total_net: Some("2.299,00 EUR".to_string()),
+            total_vat: Some("436,81 EUR".to_string()),
+            total_gross: Some("2.735,81 EUR".to_string()),
             party_sign_place: Some("Berlin".to_string()),
             party_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             agency_sign_place: Some("Köln".to_string()),
@@ -20527,9 +20550,11 @@ mod tests {
             "Der angegebene Gesamtbetrag ist vor Behandlungs-/Auftragsbeginn zu überweisen an"
         ));
         assert!(!text.contains("Ggf. fordern wir während der Durchführung des Auftrages"));
-        assert!(text.contains("UNIQUE-QUOTE-SERVICE"));
+        assert!(text.contains("Organisation der Behandlung"));
+        assert!(text.contains("Beratungsleistungen (auch telefonisch) und Datenmanagement"));
+        assert!(text.contains("Dolmetscher-/Betreuungsleistung"));
         assert!(text.contains("Honorar*"));
-        assert!(!text.contains("Anmerkung"));
+        assert!(text.contains("Anmerkung"));
         assert!(!text.contains("Leistungsumfang 10, 11"));
         assert!(!text.contains("Leistung — Einzelpreis — Menge — Summe"));
         assert!(!text.contains("Gesamtsumme: 476,00 EUR"));
@@ -20540,8 +20565,20 @@ mod tests {
         assert!(!estimate_text.contains("DOC-QUOTE-FALLBACK"));
         assert!(estimate_text.contains("Anlage 1 zum 2. Einzelauftrag"));
         assert!(estimate_text.contains("Auftragsnummer: EA-2026-0017"));
-        assert!(estimate_text.contains("UNIQUE-QUOTE-SERVICE"));
-        assert!(estimate_text.contains("476,00 EUR"));
+        assert!(estimate_text.contains("Honorar pro Einheit"));
+        assert!(estimate_text.contains("Voraussichtlicher Aufwand (in Einheiten)"));
+        assert!(estimate_text.contains("Nettowert:"));
+        assert!(estimate_text.contains("MWSt. 19%:"));
+        assert!(estimate_text.contains("Gesamtsumme:"));
+        assert!(estimate_text.contains("Organisation der Behandlung"));
+        assert!(
+            estimate_text.contains("Beratungsleistungen (auch telefonisch) und Datenmanagement")
+        );
+        assert!(estimate_text.contains("Dolmetscher-/Betreuungsleistung"));
+        assert!(estimate_text.contains("100,00 EUR/1 Stunde"));
+        assert!(estimate_text.contains("2.299,00 EUR"));
+        assert!(estimate_text.contains("436,81 EUR"));
+        assert!(estimate_text.contains("2.735,81 EUR"));
         assert!(estimate_text.contains("Kontoinhaber: GMED Testkonto"));
         assert!(estimate_text.contains("Bank: Testbank"));
         assert!(estimate_text.contains("SWIFT-Code: TESTDEFF"));
@@ -20562,7 +20599,9 @@ mod tests {
             "Ggf. fordern wir während der Durchführung des Auftrages zu weiteren Vorauszahlungen auf",
             "Die in der Endabrechnung angegebenen, angefallenen Kosten",
         ];
-        let mut previous_position = 0;
+        let mut previous_position = estimate_text
+            .find("Gesamtsumme:")
+            .expect("missing total row before payment block");
         for line in payment_block {
             let position = estimate_text
                 .find(line)
