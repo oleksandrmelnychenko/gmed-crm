@@ -212,8 +212,9 @@ pub(crate) async fn read_document_storage_bytes(
 }
 const PDF_PAGE_WIDTH_MM: f32 = 210.0;
 const PDF_PAGE_HEIGHT_MM: f32 = 297.0;
-const PDF_LEFT_MARGIN_MM: f32 = 18.0;
-const PDF_RIGHT_MARGIN_MM: f32 = 18.0;
+// DIN-5008-style asymmetric margins matching the approved document design.
+const PDF_LEFT_MARGIN_MM: f32 = 25.0;
+const PDF_RIGHT_MARGIN_MM: f32 = 20.0;
 const PDF_TOP_MARGIN_MM: f32 = 18.0;
 const PDF_BOTTOM_MARGIN_MM: f32 = 16.0;
 const PDF_FOOTER_GAP_MM: f32 = 10.0;
@@ -4149,7 +4150,7 @@ impl TreatmentPlanPdfLayout {
             let footer_text_x_mm =
                 PDF_LEFT_MARGIN_MM + logo_height_mm * crate::pdf_logo::GMED_LOGO_ASPECT + 4.0;
             for (index, line) in self.legal_footer_lines.iter().take(3).enumerate() {
-                let line = truncate_text_to_width(line, 5.8, 130.0);
+                let line = truncate_text_to_width(line, 5.8, 118.0);
                 append_pdf_text_line(
                     &mut self.page_ops,
                     &line,
@@ -4187,6 +4188,10 @@ impl TreatmentPlanPdfLayout {
         }
     }
 
+    fn page_break(&mut self) {
+        self.finish_page();
+    }
+
     fn spacer(&mut self, amount_mm: f32) {
         if amount_mm <= 0.0 {
             return;
@@ -4215,7 +4220,7 @@ impl TreatmentPlanPdfLayout {
             self.spacer(before_mm);
         }
 
-        let line_height_mm = pdf_line_height_mm(size_pt, 1.35);
+        let line_height_mm = pdf_line_height_mm(size_pt, 1.45);
         let x_mm = PDF_LEFT_MARGIN_MM + indent_mm;
         let font = if bold {
             self.bold_font.clone()
@@ -4247,6 +4252,19 @@ impl TreatmentPlanPdfLayout {
             return;
         }
 
+        // Column widths at the call sites are relative weights; normalise them
+        // to the content width so tables always end exactly at the right margin.
+        let total_width_mm: f32 = cells.iter().map(|(_, width_mm)| width_mm).sum();
+        let width_scale = if total_width_mm > 0.0 {
+            PDF_CONTENT_WIDTH_MM / total_width_mm
+        } else {
+            1.0
+        };
+        let cells = cells
+            .iter()
+            .map(|(text, width_mm)| (*text, width_mm * width_scale))
+            .collect::<Vec<_>>();
+
         let font_size_pt = if bold { 9.0 } else { 9.5 };
         let line_height_mm = pdf_line_height_mm(font_size_pt, 1.25);
         let wrapped_cells = cells
@@ -4261,49 +4279,41 @@ impl TreatmentPlanPdfLayout {
 
         let row_top_mm = self.y_mm;
         let row_bottom_mm = row_top_mm - row_height_mm;
-        let border_color = Color::Rgb(Rgb::new(0.78, 0.81, 0.83, None));
+        // Open table anatomy from the approved design: no vertical rules and no
+        // outer box. Header rows close with a strong ink rule, body rows with a
+        // warm hairline.
         if shaded {
             append_pdf_filled_rect(
                 &mut self.page_ops,
                 PDF_LEFT_MARGIN_MM,
                 row_bottom_mm,
                 PDF_CONTENT_WIDTH_MM,
-                row_height_mm,
-                Color::Rgb(Rgb::new(0.94, 0.96, 0.97, None)),
+                0.4,
+                treatment_plan_pdf_color(TreatmentPlanPdfColor::Body),
+            );
+        } else {
+            append_pdf_filled_rect(
+                &mut self.page_ops,
+                PDF_LEFT_MARGIN_MM,
+                row_bottom_mm,
+                PDF_CONTENT_WIDTH_MM,
+                0.2,
+                Color::Rgb(Rgb::new(0.84, 0.83, 0.82, None)),
             );
         }
-        append_pdf_filled_rect(
-            &mut self.page_ops,
-            PDF_LEFT_MARGIN_MM,
-            row_top_mm - 0.25,
-            PDF_CONTENT_WIDTH_MM,
-            0.25,
-            border_color.clone(),
-        );
-        append_pdf_filled_rect(
-            &mut self.page_ops,
-            PDF_LEFT_MARGIN_MM,
-            row_bottom_mm,
-            PDF_CONTENT_WIDTH_MM,
-            0.25,
-            border_color.clone(),
-        );
 
         let font = if bold {
             self.bold_font.clone()
         } else {
             self.regular_font.clone()
         };
+        let text_color = if shaded {
+            TreatmentPlanPdfColor::Muted
+        } else {
+            TreatmentPlanPdfColor::Body
+        };
         let mut x_mm = PDF_LEFT_MARGIN_MM;
         for ((_, width_mm), lines) in cells.iter().zip(wrapped_cells.iter()) {
-            append_pdf_filled_rect(
-                &mut self.page_ops,
-                x_mm,
-                row_bottom_mm,
-                0.25,
-                row_height_mm,
-                border_color.clone(),
-            );
             for (line_index, line) in lines.iter().enumerate() {
                 append_pdf_text_line(
                     &mut self.page_ops,
@@ -4312,19 +4322,11 @@ impl TreatmentPlanPdfLayout {
                     row_top_mm - 3.6 - line_index as f32 * line_height_mm,
                     font_size_pt,
                     &font,
-                    TreatmentPlanPdfColor::Body,
+                    text_color,
                 );
             }
             x_mm += *width_mm;
         }
-        append_pdf_filled_rect(
-            &mut self.page_ops,
-            PDF_LEFT_MARGIN_MM + PDF_CONTENT_WIDTH_MM - 0.25,
-            row_bottom_mm,
-            0.25,
-            row_height_mm,
-            border_color,
-        );
         self.y_mm = row_bottom_mm;
     }
 
@@ -4334,10 +4336,15 @@ impl TreatmentPlanPdfLayout {
             let total_pages = self.pages.len();
             let regular_font = self.regular_font.clone();
             for (index, page) in self.pages.iter_mut().enumerate() {
+                let label = format!("Seite: {}/{}", index + 1, total_pages);
+                // Right-aligned inside the content column.
+                let width_mm = label.chars().count() as f32 * pt_to_mm(7.0) * 0.54;
+                let x_mm =
+                    (PDF_PAGE_WIDTH_MM - PDF_RIGHT_MARGIN_MM - width_mm).max(PDF_LEFT_MARGIN_MM);
                 append_pdf_text_line(
                     &mut page.ops,
-                    &format!("Seite: {}/{}", index + 1, total_pages),
-                    176.0,
+                    &label,
+                    x_mm,
                     6.0,
                     7.0,
                     &regular_font,
@@ -6239,6 +6246,7 @@ fn build_framework_contract_pdf(
     );
 
     // --- Präambel -------------------------------------------------------------
+    layout.page_break();
     fc_paragraph_heading(&mut layout, "Präambel");
     fc_body(
         &mut layout,
@@ -12981,6 +12989,7 @@ fn build_single_order_pdf(
         4.0,
     );
 
+    layout.page_break();
     admin_heading(&mut layout, "Präambel");
     admin_block(
         &mut layout,
@@ -13098,7 +13107,7 @@ fn build_single_order_pdf(
             admin_block(
                 &mut layout,
                 "*Alle angegebenen Preise zzgl. MwSt. 19 %. Der konkrete Aufwand wird im Kostenvoranschlag zu diesem Einzelauftrag ausgewiesen.",
-                1.0,
+                4.5,
                 1.5,
             );
             admin_block(
@@ -13665,7 +13674,7 @@ fn build_cost_coverage_pdf(
         admin_block(
             &mut layout,
             "*Alle angegebenen Preise zzgl. MwSt. 19 %.",
-            1.0,
+            4.5,
             2.0,
         );
     }
@@ -20101,6 +20110,14 @@ mod tests {
             .join(" ")
     }
 
+    fn normalized_pdf_pages(bytes: &[u8]) -> Vec<String> {
+        pdf_extract::extract_text_from_mem_by_pages(bytes)
+            .unwrap()
+            .into_iter()
+            .map(|page| page.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect()
+    }
+
     fn assert_legal_pdf_chrome(bytes: &[u8], document_reference: &str) -> String {
         let text = normalized_pdf_text(bytes);
         let page_count = text.matches("Seite:").count();
@@ -20579,6 +20596,14 @@ mod tests {
         };
 
         let bytes = build_framework_contract_pdf(&context, "DOC-FRAMEWORK-FALLBACK").unwrap();
+        let pages = normalized_pdf_pages(&bytes);
+        assert!(
+            pages.len() >= 2,
+            "framework contract must have a second page"
+        );
+        assert!(pages[0].contains("RAHMENDIENSTLEISTUNGSVERTRAG"));
+        assert!(!pages[0].contains("Präambel"));
+        assert!(pages[1].contains("Präambel"));
         let text = assert_legal_pdf_chrome(&bytes, "RV-2026-0042");
 
         assert!(!text.contains("DOC-FRAMEWORK-FALLBACK"));
@@ -20703,6 +20728,11 @@ mod tests {
         };
 
         let bytes = build_single_order_pdf(&context, "DOC-ORDER-FALLBACK").unwrap();
+        let pages = normalized_pdf_pages(&bytes);
+        assert!(pages.len() >= 2, "single order must have a second page");
+        assert!(pages[0].contains("Auftragsnummer: EA-2026-0017"));
+        assert!(!pages[0].contains("Präambel"));
+        assert!(pages[1].contains("Präambel"));
         let text = assert_legal_pdf_chrome(&bytes, "EA-2026-0017");
 
         assert!(!text.contains("DOC-ORDER-FALLBACK"));
@@ -20915,5 +20945,83 @@ mod tests {
                 }]
             }))
         );
+    }
+
+    /// Dev utility: set `GMED_SAMPLE_PDF_DIR` to write branded sample PDFs for
+    /// visual review of the document design. Skipped otherwise (CI-safe).
+    #[test]
+    fn writes_branded_sample_pdfs_when_requested() {
+        let Ok(dir) = std::env::var("GMED_SAMPLE_PDF_DIR") else {
+            return;
+        };
+        let context = GeneratedSingleOrderContext {
+            language: "de".to_string(),
+            auto_name: "Einzelauftrag".to_string(),
+            title_override: None,
+            patient_pid: "PT-SAMPLE-1".to_string(),
+            party: legal_test_party("Germany"),
+            agency: AgencyContractSettings {
+                bank_holder: Some("GMED Testkonto".to_string()),
+                bank_name: Some("Testbank".to_string()),
+                bank_swift: Some("TESTDEFF".to_string()),
+                bank_iban: Some("DE00 0000 0000 0000 0000 00".to_string()),
+                ..legal_test_agency()
+            },
+            order_number: "EA-2026-0017".to_string(),
+            contract_number: Some("RV-2026-0042".to_string()),
+            order_sequence: 2,
+            order_date: NaiveDate::from_ymd_opt(2026, 7, 16),
+            contract_date: NaiveDate::from_ymd_opt(2026, 7, 1),
+            specialties: Some("Kardiologie".to_string()),
+            examination_purpose: Some("kardiologischen Untersuchung".to_string()),
+            treatment_purpose: Some("kardiologische Behandlung".to_string()),
+            order_components: Some(
+                "Anlage 1 zum 2. Einzelauftrag: Kostenvoranschlag Nr.: KV-2026-0042 (separates Dokument)"
+                    .to_string(),
+            ),
+            period_from: NaiveDate::from_ymd_opt(2026, 8, 3),
+            period_to: NaiveDate::from_ymd_opt(2026, 8, 7),
+            payer: None,
+            quote_number: Some("KV-2026-0042".to_string()),
+            line_items: vec![
+                GeneratedContractLineItem {
+                    description: "Organisation der Behandlung (pro 1 Ärzte)".to_string(),
+                    quantity: "5".to_string(),
+                    unit_price: "100,00 EUR".to_string(),
+                    line_gross: "500,00 EUR".to_string(),
+                    vat_rate: Some("19".to_string()),
+                    notes: Some("Leistungsumfang 10, 11".to_string()),
+                },
+                GeneratedContractLineItem {
+                    description: "Beratungsleistungen (auch telefonisch) und Datenmanagement"
+                        .to_string(),
+                    quantity: "1".to_string(),
+                    unit_price: "999,00 EUR".to_string(),
+                    line_gross: "999,00 EUR".to_string(),
+                    vat_rate: Some("19".to_string()),
+                    notes: None,
+                },
+                GeneratedContractLineItem {
+                    description: "Dolmetscher-/Betreuungsleistung".to_string(),
+                    quantity: "8".to_string(),
+                    unit_price: "100,00 EUR/1 Stunde".to_string(),
+                    line_gross: "800,00 EUR".to_string(),
+                    vat_rate: Some("19".to_string()),
+                    notes: None,
+                },
+            ],
+            total_net: Some("2.299,00 EUR".to_string()),
+            total_vat: Some("436,81 EUR".to_string()),
+            total_gross: Some("2.735,81 EUR".to_string()),
+            party_sign_place: Some("Berlin".to_string()),
+            party_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
+            agency_sign_place: Some("Köln".to_string()),
+            agency_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
+            generated_at: Utc.with_ymd_and_hms(2026, 7, 16, 10, 0, 0).unwrap(),
+        };
+
+        let bytes = build_single_order_pdf(&context, "DOC-ORDER-SAMPLE").unwrap();
+        let target = std::path::Path::new(&dir).join("gmed-sample-einzelauftrag.pdf");
+        std::fs::write(&target, bytes).unwrap();
     }
 }
