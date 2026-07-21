@@ -385,6 +385,7 @@ export type GenerateFormState = {
 
 export type GenerateDocumentResponse = {
   id: string;
+  document_number: string;
   auto_name: string;
   original_filename: string;
   mime_type: string;

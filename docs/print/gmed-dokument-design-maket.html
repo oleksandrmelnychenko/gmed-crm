@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>gmed — Dokument-Design (Maket)</title>
+<style>
+  :root {
+    --brand: #f97316;
+    --brand-soft: #fff4ed;
+    --ink: #1c1917;
+    --ink-muted: #78716c;
+    --hairline: #e7e5e4;
+    --hairline-strong: #d6d3d1;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  body {
+    background: #eceae8;
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    color: var(--ink);
+    font-size: 10pt;
+    line-height: 1.45;
+  }
+
+  .screen-note {
+    max-width: 210mm; margin: 24px auto 0; padding: 10px 14px;
+    font-size: 12px; color: #57534e; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 10px;
+  }
+
+  .page {
+    width: 210mm; min-height: 297mm;
+    margin: 16px auto; padding: 18mm 20mm 34mm 25mm; /* DIN-подібні поля: зліва 25мм, справа 20мм */
+    background: #fff; position: relative;
+    box-shadow: 0 2px 18px rgba(28, 25, 23, .14);
+    display: flex; flex-direction: column;
+  }
+
+  /* ── Шапка ───────────────────────────────────────── */
+  .letterhead {
+    display: flex; justify-content: flex-end; align-items: flex-end;
+    padding-bottom: 4mm; border-bottom: .6pt solid var(--brand);
+  }
+  .doc-ref { text-align: right; font-size: 7.5pt; color: var(--ink-muted); }
+  .doc-ref b { display: block; font-size: 9pt; color: var(--ink); font-family: Consolas, "Courier New", monospace; font-weight: 600; }
+
+  /* ── Титул ───────────────────────────────────────── */
+  .doc-kicker {
+    margin-top: 9mm; font-size: 7.5pt; font-weight: 600; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--brand);
+  }
+  h1 { margin-top: 1.5mm; font-size: 17pt; font-weight: 700; letter-spacing: -.01em; }
+  .doc-subtitle { margin-top: 1mm; font-size: 9.5pt; color: var(--ink-muted); }
+
+  /* ── Мета-блок ───────────────────────────────────── */
+  .meta {
+    margin-top: 7mm; display: grid; grid-template-columns: 1fr 1fr; gap: 2.2mm 10mm;
+    padding: 4mm 5mm; background: #faf9f8; border: .5pt solid var(--hairline); border-radius: 2.5mm;
+  }
+  .meta .cell { display: flex; align-items: baseline; gap: 2.5mm; min-width: 0; }
+  .meta dt { font-size: 7pt; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-muted); white-space: nowrap; }
+  .meta .leader { flex: 1; border-bottom: .5pt dotted var(--hairline-strong); transform: translateY(-2px); min-width: 4mm; }
+  .meta dd { font-size: 9.5pt; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* ── Текст ───────────────────────────────────────── */
+  .prose { margin-top: 6mm; text-align: justify; hyphens: auto; }
+  .prose + .prose { margin-top: 3mm; }
+
+  /* ── Таблиця позицій ─────────────────────────────── */
+  table.positions { margin-top: 6mm; width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+  table.positions thead th {
+    padding: 2.2mm 2.5mm; font-size: 7pt; font-weight: 600; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--ink-muted); text-align: left;
+    border-bottom: 1pt solid var(--ink); background: transparent;
+  }
+  table.positions thead th.num, table.positions td.num {
+    text-align: right; font-variant-numeric: tabular-nums;
+  }
+  table.positions tbody td { padding: 2.6mm 2.5mm; border-bottom: .5pt solid var(--hairline); vertical-align: top; }
+  table.positions tbody tr:last-child td { border-bottom: none; }
+  table.positions .pos { color: var(--ink-muted); font-variant-numeric: tabular-nums; width: 8mm; }
+  table.positions .desc b { font-weight: 600; }
+  table.positions .desc .unit { display: block; margin-top: .6mm; font-size: 8pt; color: var(--ink-muted); }
+  table.positions td.num { font-family: Consolas, "Courier New", monospace; font-size: 9pt; }
+
+  /* ── Підсумки ────────────────────────────────────── */
+  .totals { margin-top: 4mm; margin-left: auto; width: 78mm; font-size: 9.5pt; }
+  .totals .row { display: flex; justify-content: space-between; padding: 1.8mm 2.5mm; }
+  .totals .row + .row { border-top: .5pt solid var(--hairline); }
+  .totals .label { color: var(--ink-muted); }
+  .totals .value { font-family: Consolas, "Courier New", monospace; font-variant-numeric: tabular-nums; }
+  .totals .grand {
+    margin-top: 1.5mm; border-top: 1.2pt solid var(--brand) !important;
+    background: var(--brand-soft); border-radius: 0 0 1.5mm 1.5mm;
+  }
+  .totals .grand .label { color: var(--ink); font-weight: 700; }
+  .totals .grand .value { font-weight: 700; font-size: 10.5pt; }
+
+  /* ── Примітка ────────────────────────────────────── */
+  .note {
+    margin-top: 6mm; padding: 3.5mm 4.5mm; font-size: 8.5pt; color: #7c2d12;
+    background: var(--brand-soft); border-left: 2.5pt solid var(--brand); border-radius: 0 1.5mm 1.5mm 0;
+  }
+
+  /* ── Підписи ─────────────────────────────────────── */
+  .signatures { margin-top: auto; padding-top: 12mm; display: grid; grid-template-columns: 1fr 1fr; gap: 14mm; }
+  .sig .line { border-bottom: .7pt solid var(--ink); height: 12mm; }
+  .sig .caption { margin-top: 1.6mm; font-size: 7.5pt; color: var(--ink-muted); }
+  .sig .caption b { display: block; font-size: 8.5pt; font-weight: 600; color: var(--ink); }
+
+  /* ── Колонтитул з лого ───────────────────────────── */
+  .pagefoot {
+    position: absolute; left: 25mm; right: 20mm; bottom: 10mm;
+    padding-top: 3mm; border-top: .6pt solid var(--brand);
+    display: flex; align-items: flex-start; gap: 4mm;
+  }
+  .pagefoot svg.mark-full { width: 21.6mm; height: 8.5mm; flex: none; color: #000; }
+  .pagefoot .agency-lines { flex: 1; font-size: 6.3pt; line-height: 1.5; color: var(--ink-muted); }
+  .pagefoot .agency-lines b { color: var(--ink); font-weight: 600; }
+  .pagefoot .pageno { text-align: right; font-size: 6.5pt; color: var(--ink-muted); white-space: nowrap; }
+  .pagefoot .pageno b { display: block; font-family: Consolas, "Courier New", monospace; color: var(--ink); }
+
+  @media print {
+    body { background: #fff; }
+    .screen-note { display: none; }
+    .page { margin: 0; box-shadow: none; page-break-after: always; }
+    @page { size: A4; margin: 0; }
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><symbol id="gmed-logo-full" viewBox="0 0 726 286">
+      <defs>
+        <linearGradient id="logo-gradient-a" x1="573.366" x2="566.062" y1="139.838" y2="155.158" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="currentColor" stop-opacity=".969" />
+          <stop offset="1" stop-color="currentColor" />
+        </linearGradient>
+        <linearGradient id="logo-gradient-b" x1="640.08" x2="622.266" y1="207.355" y2="207.294" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="currentColor" stop-opacity=".965" />
+          <stop offset="1" stop-color="currentColor" />
+        </linearGradient>
+        <linearGradient id="logo-gradient-c" x1="148.996" x2="148.777" y1="258.305" y2="284.334" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="currentColor" stop-opacity=".714" />
+          <stop offset="1" stop-color="currentColor" stop-opacity=".918" />
+        </linearGradient>
+      </defs>
+      <g fill="currentColor">
+        <path d="M502.995 141.388c6.298.026 13.472-.102 19.697.13l.432.378c.805 20.367-.237 43.156.244 63.997l.209.537c-.558 3.785-.404 8.852-.406 12.797l-.005 18.84.012 21.18c.005 4.317-.136 9.875.341 14.05l.021.26-20.54.035.077-.394c.252-.749.608-129.207-.054-131.44z" />
+        <path d="M590.269 245.191c1.707 2.071-.117 24.02.85 28.784l-1.535-.451c-2.909-1.022-30.361.856-32.49-.895 18.444-2.84 27.638-9.448 33.175-27.438" />
+        <path d="M556.213 189.474c1.29 1.713.717 1.717 1.053 4.286-.07 6.758-.28 15.384-.021 22.032-.091 2.202.144 4.613-.882 6.423-2.47-8.739-8.931-14.917-18.229-15.77l-.677-1.292c9.872-1.278 16.101-6.12 18.756-15.679" />
+        <path fill="url(#logo-gradient-a)" d="M557.815 141.458c6.387.003 17.208-.308 23.279.153-.025 4.443.901 24.181-.628 26.423-3.432-15.465-9.611-22.15-25.24-25.635l.212-.484z" />
+        <path d="M524.811 141.138c6.368-.169 13.271-.242 19.635-.076 12.212.317 25.013-.468 37.157.144-.065 5.109.407 30.773-.417 33.102-.784-.909-1.03-5.135-.72-6.274 1.529-2.242.603-21.98.628-26.423-6.071-.461-16.892-.15-23.279-.153l-8.14-.035c-4.555-.04-21.491.382-24.864-.285" />
+        <path d="M590.269 245.191c.03-2.167.12-5.278.574-7.35l.34-.176c.653 2.592.301 35.829-.064 36.31-.967-4.764.857-26.713-.85-28.784" />
+        <path fillOpacity=".373" d="M523.54 273.557c9.075-.09 18.199.097 27.296.039 3.287-.007 8.408-.171 11.55.049-8.397.815-23.541.277-32.583.308-7.049.024-21.026.409-27.744-.021l.941-.34z" />
+        <path fillOpacity=".835" d="M550.741 273.196c1.916-.165 4.567-.614 6.353-.567 2.129 1.751 29.581-.127 32.49.895-3.045.774-22.65.149-27.198.121-3.142-.22-8.263-.056-11.55-.049z" />
+        <path d="M485.416 141.404c2.078-.833 34.555-.331 39.173-.257l-1.897.371c-6.225-.232-13.399-.104-19.697-.13-5.836-.056-11.737.003-17.579.016" />
+        <path d="M523.368 205.893c2.05-.562 10.942-.522 14.089-.74l.677 1.292c-5.139-.348-9.703.188-14.557-.015z" />
+        <path fillOpacity=".678" d="M502.059 273.932c-3.023-.141-14.724.305-16.504-.542 4.996-.349 12.433-.211 17.522-.192l-.077.394z" />
+        <path fillOpacity=".765" d="m524.589 141.147.222-.009c3.373.667 20.309.245 24.864.285l.105.438c-8.349-.231-18.323-.254-26.656.035l-.432-.378z" />
+        <path fillOpacity=".729" d="M523.519 273.297c8.754-.05 18.594.168 27.222-.101l.095.4c-9.097.058-18.221-.129-27.296-.039z" />
+        <path d="M556.213 189.474c.107-2.168.37-4.554.981-6.642.085 1.593.634 9.936.072 10.928-.336-2.569.237-2.573-1.053-4.286" />
+        <path d="M557.245 215.792c.577 2.941.27 9.295-.058 12.424-.344-1.957-.772-4.023-.824-6.001 1.026-1.81.791-4.221.882-6.423" />
+        <path fillOpacity=".812" d="M485.416 141.404c5.842-.013 11.743-.072 17.579-.016l.028.37c-2.155.092-16.664.332-17.607-.354" />
+        <path d="m549.675 141.423 8.14.035-2.377.457-.212.484c-1.216-.012-4.116-.399-5.446-.538z" />
+        <path d="M260.74 0h12.042c4.027.803 10.164.933 14.508 1.503a137.7 137.7 0 0 1 33.576 8.738c-2.99 1.31-5.598 2.825-8.436 4.42-19.782-8.336-38.113-11.205-59.443-9.986-4.354.25-12.662 1.855-15.555 1.77h-.798c-.344.545-1.324.882-1.926.997l-.103.135A134.59 134.59 0 0 0 151.97 69.37c-13.593 22.561-18.97 45.178-19.847 71.259 6.224.422 13.205.238 19.496.23l29.31-.005 94.278.01 25.414-.024c6.863-.048 13.431-.36 20.263.352l.458.502-.584.352c-.281 3.06-.226 9.058-.312 12.341a1118 1118 0 0 0-.256 37.265q-.284 40.806.384 81.607l.228.754c-2.812.69-8.984 3.349-12.788 4.474a159.4 159.4 0 0 1-39.479 6.547c-54.523 2.294-104.691-24.019-131.818-71.925-12.804-22.61-17.144-42.795-18.222-68.542-5.91.448-15.64-.079-21.9.042-9.34.18-18.988-.139-28.407.358-2.493.132-11.425-.593-13.135-.116l-1.062.075c-1.634-.569-8.354-.174-10.385-.218-6.942-.353-18.11.019-23.23 5.637-8.24 9.04-6.858 10.154-19.97 9.223 10.562-19.23 34.54-18.903 53.515-18.428l1.032-.25c4.195.503 13.402.096 18.186.173 15.009.244 30.301-.415 45.27-.121.005-30.044 11.975-62.328 30.71-85.622 15.563-19.349 36.36-34.792 59.479-43.907 5.498-2.168 11.966-4.845 17.858-5.506l.803-.105a2.7 2.7 0 0 1-.051-1.285c3.191.259 14.629-2.319 18.982-2.884 4.013-.521 10.908-.989 14.55-1.632m18.87 250.594c30.768-34.49 26.271-63.384 26.917-105.954l-121.878-.046-35.099.027c-3.633.005-14.284.236-17.357-.188-.402 35.393 15.064 70.927 39.726 96.11a138.84 138.84 0 0 0 51.976 33.467c9.375 3.356 11.114 4.454 20.584.685a99.1 99.1 0 0 0 32.905-21.588 23 23 0 0 0 2.226-2.513m-30.424 29.686c19.787 2.095 38.251 1.589 57.29-5.263.052-11.371.066-30.169-.124-42.056l-.426-.536-.432-.158c-14.445 22.358-31.829 36.832-57.443 45.303-1.191.394-1.041-.014-1.939.91.656 1.446 1.581 1.493 3.074 1.8" />
+        <path d="M431.86 141.773c1.945-.725 18.035-.502 21.1-.496l.436.416c-.966.758-.802 2.251-.806 3.55-.102 37.532-.057 75.081-.064 112.612-.001 2.371-.211 13.942.402 15.399l.093.31-19.692-.029-.675-1.325c-.303-1.495-.188-8.457-.186-10.352l.025-22.196-.09-89.116c.3-.718.061-1.323.157-1.69.978-3.711-.439-4.355-.7-7.083" />
+        <path fill="url(#logo-gradient-b)" d="M621.001 141.387c6.709.032 15.058.293 21.636.013l-.038.324-1.146.318c-.445 1.393-.735 124.802.083 131.233l.054.29c-6.757-.097-13.761.008-20.537.025l.105-.371c.265-1.232.168-12.847.169-14.927l.005-37.173-.005-57.176c-.001-3.246.162-20.338-.274-22.16z" />
+        <path d="M337.452 142.165c.382-.62.495-.706 1.052-1.179 6.766.572 13.423.205 20.155.526 2.105 4.414 4.105 10.333 5.821 15l8.958 24.352 18.162 49.252c1.709 4.645 4 9.995 5.57 14.475.097 1.196.252 1.463.774 2.558-1.751 4.234-8.299 27.054-10.403 28.362-2.739-2.516-42.365-115.118-48.464-129.389l-.174-1.065c-.725.082-.772.143-1.415.52-.123-1.248-.079-2.174-.036-3.412" />
+        <path d="M691.65 152.119c.142-1.041.461-1.312 1.139-2.113 4.606-.214 21.259 18.306 23.347 22.881 1.077 2.357 4.169 9.266 5.636 10.118 2.134 5.641 2.629 11.114 4.228 16.958v15.416c-1.063 4.145-2.077 10.568-3.161 14.014a67.28 67.28 0 0 1-30.457 37.589c-2.514 1.478-4.534 2.283-7.218 3.328-1.127-.222-.765-.105-1.653-1.054 20.076-11.345 20.8-39.457 21.004-59.805.167-16.69-1.243-44.247-12.865-57.332" />
+        <path d="M53.92 141.139c.37-4.395.414-8.329.9-12.841a141.2 141.2 0 0 1 11.53-42.887c14.077-31.672 42.313-60.727 74.855-73.24l.66.724c-36.349 16.178-63.001 42.297-77.42 79.8a139.3 139.3 0 0 0-8.441 34.677c-.514 4.665-.599 9.059-1.05 13.517z" />
+        <path d="M397.17 244.591c.458-.491.591-.781.803-1.398l21.965-65.766c3.258-9.715 9.53-26.311 11.922-35.654.261 2.728 1.678 3.372.7 7.083-.096.367.143.972-.157 1.69-.173-.841-.214-1.172-.621-1.961l-.539-.046c-1.404 3.024-5.728 16.507-6.998 20.171l-17.806 52.93-5.94 17.625c-.421 1.24-2.437 6.958-2.555 7.884-.522-1.095-.677-1.362-.774-2.558" />
+        <path d="M253.426 12.833c34.289 15.274 58.28 39.596 73.706 73.698l-.902 1.073C311.72 52.88 286.434 29.2 252.651 13.607z" />
+        <path d="M337.488 145.577c.643-.377.69-.438 1.415-.52l.174 1.065-.413.234c-.637 7.085-.387 16.394-.383 23.704l.004 37.136.008 39.065c0 6.766-.26 16.416.253 23.016l-1.141-2.188c-.222-4.163.028-11.053.03-15.418l.011-32.39c.006-24.025-.514-49.887.042-73.704" />
+        <path fill="url(#logo-gradient-c)" d="M113.485 258.112c21.79 16.064 47.513 24.736 74.341 26.775 4.555.346 9.955-.206 14.027.128 2.048.476 4.64.101 5.553.985h-21.575c-1.847-.771-12.894-1.789-16.711-2.552-19.004-3.797-41.027-12.684-56.43-24.649z" />
+        <path d="M669.77 141.376c19.368.779 37.314 14.38 46.85 30.698 2.292 3.923 3.346 6.925 5.152 10.931-1.467-.852-4.559-7.761-5.636-10.118-2.088-4.575-18.741-23.095-23.347-22.881-.678.801-.997 1.072-1.139 2.113-1.029-1.06-3.804-3.973-4.847-4.659-11.671-7.671-30.48-5.469-44.204-5.736l.038-.324c7.184.043 20.456.489 27.133-.024" />
+        <path d="M141.205 12.172a141.3 141.3 0 0 1 73.279-10.02c3.575.483 9.535 1.183 12.724 2.364-.083.492-.071.8.051 1.285l-.803.105c-.789-1.455-9.335-2.315-11.239-2.592-22.761-3.31-52.43-.062-73.352 9.58z" />
+        <path d="m53.991 144.925 1.062-.075a141.8 141.8 0 0 0 17.595 67.28c.702 1.249 4.794 8.309 5.553 9.185l-.718.783c-15.802-24.22-22.734-48.482-23.492-77.173" />
+        <path d="M335.309 110.805c2.231 5.8 4.477 23.96 3.195 30.181-.557.473-.67.559-1.052 1.179-4.078-.456-12.31-.158-16.694-.12l.584-.352-.458-.502c5.391-.309 10.942.033 16.46-.174-.041-7.577-.485-19.996-2.887-27.247.121-1.421.113-1.771.852-2.965" />
+        <path d="M78.2 221.315c8.099 12.029 22.883 29.045 35.285 36.797l-.795.687c-12.027-7.406-27.484-24.957-35.207-36.701z" />
+        <path d="m603.861 141.672-.368-.082.412-.362c2.451-.345 7.777-.205 10.479-.203l18.933.017 23.157-.011c3.447.001 10.219-.177 13.296.345-6.677.513-19.949.067-27.133.024-6.578.28-14.927.019-21.636-.013-2.873-.007-14.99-.194-17.14.285" />
+        <path d="m432.654 272.21.675 1.325c-2.302-.056-4.265-.011-6.568.082-3.716-.075-8.037.35-11.657-.366l-.103-.284c4.549-1.514 15.099.227 17.653-.757" />
+        <path d="m234.605 7.577.103-.135c.602-.115 1.582-.452 1.926-.997h.798c.961 1.03 13.365 5.274 15.994 6.388l-.775.774c-3.827-1.867-14.034-5.52-18.046-6.03" />
+        <path d="M201.853 285.015c6.986-.193 13.957-1.289 20.86-2.403.417.232.902.471 1.266.764-2.477.541-15.489 1.872-16.317 2.624h-.256c-.913-.884-3.505-.509-5.553-.985" />
+        <path fillOpacity=".365" d="M641.59 273.565q9.063-.04 18.125.032c2.73.004 7.575-.158 10.064.045-2.723.443-8.028.341-11.024.342l-19.195-.072c-4.099-.008-16.014.325-19.398-.001l.891-.321c6.776-.017 13.78-.122 20.537-.025" />
+        <path d="m337.405 267.089 1.141 2.188c.904 2.009 1.034 2.763 2.853 4.098-2.603.338-4.135.321-6.779.28l.165-.663c2.427-1.343 2.402-3.422 2.62-5.903" />
+        <path fillOpacity=".725" d="M641.536 273.275c10.358-.015 22.591.398 32.703-1.025l.364.719 1.007.22-5.831.453c-2.489-.203-7.334-.041-10.064-.045q-9.062-.072-18.125-.032z" />
+        <path fillOpacity=".38" d="m470.02 273.317.059.382c-1.45.443-40.383.394-43.318-.082 2.303-.093 4.266-.138 6.568-.082l19.692.029c5.047-.075 12.083.419 16.999-.247" />
+        <path d="M328.492 89.922c1.485 3.201 2.763 6.962 3.86 10.325l-1.253-.074c-.534-.942-2.36-6.798-3.438-9.047z" />
+        <path fillOpacity=".525" d="M341.399 273.375c1.845-.266 12.34-.364 13.859.136-2.789.53-19.653.589-22.928.399l2.29-.255c2.644.041 4.176.058 6.779-.28" />
+        <path d="M683.511 269.256c.888.949.526.832 1.653 1.054a137 137 0 0 1-9.554 2.879l-1.007-.22-.364-.719a32 32 0 0 0 9.272-2.994" />
+        <path d="m334.785 272.992-.165.663-2.29.255c-3.309.2-8.104.08-11.528.102l-.228-.754c4.342-.35 9.572-.049 14.211-.266" />
+        <path d="m332.402 104.608 1.18.207c.488 1.108 1.746 4.915 1.727 5.99-.739 1.194-.731 1.544-.852 2.965-.128-2.964-1.477-6.104-2.055-9.162" />
+        <path fillOpacity=".765" d="M603.804 273.314c4.82-.095 12.602-.337 17.354-.095l-.105.371-.891.321-.674-.038c-4.146-.81-11.182.281-15.684-.559" />
+        <path fillOpacity=".773" d="M453.565 141.12c5.223.65 11.457-.124 16.455.552-3.369.102-13.642.385-16.624.021l-.436-.416z" />
+        <path fillOpacity=".804" d="M603.861 141.672c2.15-.479 14.267-.292 17.14-.285l.052.396c-4.313.248-12.802.045-17.192-.111" />
+        <path d="M453.565 141.12c3.3-.115 13.402-.277 16.51.048l-.055.504c-4.998-.676-11.232.098-16.455-.552" />
+        <path fillOpacity=".733" d="M452.928 273.254c5.509-.01 11.63-.15 17.092.063-4.916.666-11.952.172-16.999.247z" />
+        <path fillOpacity=".408" d="M619.488 273.873c-1.927.118-14.834.352-15.913-.249l.229-.31c4.502.84 11.538-.251 15.684.559" />
+        <path d="m331.099 100.173 1.253.074 1.23 4.568-1.18-.207c-.502-1.5-.887-2.914-1.303-4.435" />
+        <path d="M222.713 282.612c1.604-.306 3.27-.772 4.839-.421l.098.335c-1.318.607-2.253.662-3.671.85-.364-.293-.849-.532-1.266-.764" />
+        <path d="m327.132 86.53 1.36 3.392-.831 1.204c-.138-1.01-.971-2.564-1.431-3.522z" />
+      </g>
+    </symbol></svg>
+
+<div class="screen-note">
+  Макет дизайну згенерованих документів gmed · A4, поля 25/20&nbsp;мм · лого в нижньому колонтитулі ·
+  акцент — фірмовий оранжевий <code>#f97316</code>. Відкрийте «Друк» (Ctrl+P), щоб побачити точний друкований вигляд.
+</div>
+
+<!-- ═══════════ Сторінка 1: Einzelauftrag (замовлення) ═══════════ -->
+<div class="page">
+  <header class="letterhead">
+    <div class="doc-ref">
+      Dokument-Nr.
+      <b>A-2026-0342</b>
+    </div>
+  </header>
+
+  <div class="doc-kicker">Anlage 2 zum Rahmenvertrag FC-2026-0058</div>
+  <h1>Einzelauftrag</h1>
+  <div class="doc-subtitle">Beauftragung von Service- und Koordinationsleistungen</div>
+
+  <dl class="meta">
+    <div class="cell"><dt>Auftraggeber</dt><span class="leader"></span><dd>Herr Max Mustermann</dd></div>
+    <div class="cell"><dt>Geburtsdatum</dt><span class="leader"></span><dd>14.03.1962</dd></div>
+    <div class="cell"><dt>Datum</dt><span class="leader"></span><dd>21.07.2026</dd></div>
+    <div class="cell"><dt>Programmzeitraum</dt><span class="leader"></span><dd>01.09.2026 – 12.09.2026</dd></div>
+  </dl>
+
+  <p class="prose">
+    Der Auftraggeber beauftragt die Agentur auf Grundlage des Rahmenvertrags FC-2026-0058 mit der
+    Organisation und Koordination der nachfolgend aufgeführten Leistungen. Die Vergütung der einzelnen
+    Positionen ergibt sich aus der folgenden Aufstellung; medizinische Heilbehandlungen selbst sind nicht
+    Gegenstand dieses Auftrags und werden durch die behandelnden Einrichtungen direkt abgerechnet.
+  </p>
+
+  <table class="positions">
+    <thead>
+      <tr>
+        <th class="pos">Pos.</th>
+        <th>Leistung</th>
+        <th class="num">Menge</th>
+        <th class="num">Einzelpreis</th>
+        <th class="num">MwSt.</th>
+        <th class="num">Gesamt</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="pos">1</td>
+        <td class="desc"><b>Organisation der medizinischen Behandlung</b><span class="unit">Pauschale je Behandlungsfall</span></td>
+        <td class="num">1</td>
+        <td class="num">1.450,00&nbsp;€</td>
+        <td class="num">19&nbsp;%</td>
+        <td class="num">1.450,00&nbsp;€</td>
+      </tr>
+      <tr>
+        <td class="pos">2</td>
+        <td class="desc"><b>Dolmetscherleistungen Deutsch–Ukrainisch</b><span class="unit">Stundensatz, Begleitung vor Ort</span></td>
+        <td class="num">12</td>
+        <td class="num">65,00&nbsp;€</td>
+        <td class="num">19&nbsp;%</td>
+        <td class="num">780,00&nbsp;€</td>
+      </tr>
+      <tr>
+        <td class="pos">3</td>
+        <td class="desc"><b>Transferservice Flughafen – Klinik – Unterkunft</b><span class="unit">Pauschale, Hin- und Rückfahrt</span></td>
+        <td class="num">2</td>
+        <td class="num">120,00&nbsp;€</td>
+        <td class="num">19&nbsp;%</td>
+        <td class="num">240,00&nbsp;€</td>
+      </tr>
+      <tr>
+        <td class="pos">4</td>
+        <td class="desc"><b>Terminkoordination &amp; Unterlagenmanagement</b><span class="unit">Pauschale je Programmwoche</span></td>
+        <td class="num">2</td>
+        <td class="num">180,00&nbsp;€</td>
+        <td class="num">19&nbsp;%</td>
+        <td class="num">360,00&nbsp;€</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <div class="row"><span class="label">Zwischensumme (netto)</span><span class="value">2.830,00&nbsp;€</span></div>
+    <div class="row"><span class="label">MwSt. 19&nbsp;%</span><span class="value">537,70&nbsp;€</span></div>
+    <div class="row grand"><span class="label">Gesamtbetrag</span><span class="value">3.367,70&nbsp;€</span></div>
+  </div>
+
+  <div class="note">
+    Vorauszahlung: 1.500,00&nbsp;€ bei Auftragsbestätigung, Restbetrag 1.867,70&nbsp;€ vor Programmbeginn.
+    Es gelten die Regelungen des Rahmenvertrags FC-2026-0058.
+  </div>
+
+  <div class="signatures">
+    <div class="sig">
+      <div class="line"></div>
+      <div class="caption"><b>Frankfurt am Main, 21.07.2026</b>Ort, Datum · Unterschrift Auftraggeber</div>
+    </div>
+    <div class="sig">
+      <div class="line"></div>
+      <div class="caption"><b>gmed — Agentur</b>Ort, Datum · Unterschrift, Stempel</div>
+    </div>
+  </div>
+
+  <footer class="pagefoot">
+    <svg class="mark-full" viewBox="0 0 726 286"><use href="#gmed-logo-full"/></svg>
+    <div class="agency-lines">
+      Musterstraße 12 · 60311 Frankfurt am Main · Deutschland<br />
+      Tel.: +49 69 000 00 00 · E-Mail: info@gmed.example · Web: gmed.example
+    </div>
+    <div class="pageno">
+      Seite 1 von 2
+      <b>A-2026-0342</b>
+    </div>
+  </footer>
+</div>
+
+<!-- ═══════════ Сторінка 2: Kostenvoranschlag (кошторис) ═══════════ -->
+<div class="page">
+  <header class="letterhead">
+    <div class="doc-ref">
+      Dokument-Nr.
+      <b>KV-2026-0117</b>
+    </div>
+  </header>
+
+  <div class="doc-kicker">Unverbindliche Kostenschätzung</div>
+  <h1>Kostenvoranschlag zum Einzelauftrag</h1>
+  <div class="doc-subtitle">Medizinische Leistungen der behandelnden Einrichtungen</div>
+
+  <dl class="meta">
+    <div class="cell"><dt>Patient</dt><span class="leader"></span><dd>Herr Max Mustermann</dd></div>
+    <div class="cell"><dt>Geburtsdatum</dt><span class="leader"></span><dd>14.03.1962</dd></div>
+    <div class="cell"><dt>Datum</dt><span class="leader"></span><dd>21.07.2026</dd></div>
+    <div class="cell"><dt>Einzelauftrag</dt><span class="leader"></span><dd>A-2026-0342</dd></div>
+  </dl>
+
+  <p class="prose">
+    Die nachfolgende Aufstellung fasst die voraussichtlichen Kosten der medizinischen Behandlung auf
+    Grundlage der derzeit vorliegenden Unterlagen zusammen. Es handelt sich um eine unverbindliche
+    Schätzung der behandelnden Einrichtungen; die tatsächliche Abrechnung erfolgt direkt zwischen dem
+    Patienten und der jeweiligen Einrichtung nach GOÄ/DRG.
+  </p>
+
+  <table class="positions">
+    <thead>
+      <tr>
+        <th class="pos">Pos.</th>
+        <th>Medizinische Leistung</th>
+        <th class="num">Kostenrahmen</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="pos">1</td>
+        <td class="desc"><b>Stationäre Aufnahme und Diagnostik</b><span class="unit">Universitätsklinikum, Kardiologie · 2–3 Behandlungstage</span></td>
+        <td class="num">4.800,00 – 6.200,00&nbsp;€</td>
+      </tr>
+      <tr>
+        <td class="pos">2</td>
+        <td class="desc"><b>Koronarangiographie, ggf. mit Stentimplantation</b><span class="unit">inkl. Material und Nachsorge</span></td>
+        <td class="num">7.500,00 – 11.300,00&nbsp;€</td>
+      </tr>
+      <tr>
+        <td class="pos">3</td>
+        <td class="desc"><b>Kardiologische Abschlussuntersuchung</b><span class="unit">ambulant, inkl. Belastungs-EKG und Befundbericht</span></td>
+        <td class="num">650,00 – 900,00&nbsp;€</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <div class="row"><span class="label">Geschätzter Rahmen (gesamt)</span><span class="value">12.950,00 – 18.400,00&nbsp;€</span></div>
+    <div class="row grand"><span class="label">Kalkulationsbasis</span><span class="value">15.675,00&nbsp;€</span></div>
+  </div>
+
+  <div class="note">
+    Mehrkosten-Freigabegrenze gemäß Rahmenvertrag: 500,00&nbsp;€. Überschreitungen der Kalkulationsbasis
+    oberhalb dieser Grenze werden vor Leistungserbringung schriftlich abgestimmt.
+  </div>
+
+  <div class="signatures">
+    <div class="sig">
+      <div class="line"></div>
+      <div class="caption"><b>Frankfurt am Main, 21.07.2026</b>Ort, Datum · Zur Kenntnis genommen: Patient</div>
+    </div>
+    <div class="sig">
+      <div class="line"></div>
+      <div class="caption"><b>gmed — Agentur</b>Erstellt durch, Unterschrift</div>
+    </div>
+  </div>
+
+  <footer class="pagefoot">
+    <svg class="mark-full" viewBox="0 0 726 286"><use href="#gmed-logo-full"/></svg>
+    <div class="agency-lines">
+      Musterstraße 12 · 60311 Frankfurt am Main · Deutschland<br />
+      Tel.: +49 69 000 00 00 · E-Mail: info@gmed.example · Web: gmed.example
+    </div>
+    <div class="pageno">
+      Seite 2 von 2
+      <b>KV-2026-0117</b>
+    </div>
+  </footer>
+</div>
+
+</body>
+</html>

@@ -24,6 +24,12 @@ function formatFileSize(size: number | null, lang: Lang) {
   return `${formatter.format(size / 1024)} KB`;
 }
 
+export function leadWizardDocumentNumber(
+  document: Pick<DocumentItem, "document_number" | "id">,
+) {
+  return document.document_number?.trim() || `DOC-${document.id.slice(0, 8).toUpperCase()}`;
+}
+
 export function LeadWizardDocumentMetadata({
   document,
   lang,
@@ -40,7 +46,7 @@ export function LeadWizardDocumentMetadata({
   return (
     <>
       <Badge variant="outline" className={cn(metadataPillClass, STATUS_TONE.brand)}>
-        {document.document_number || `DOC-${document.id.slice(0, 8).toUpperCase()}`}
+        {leadWizardDocumentNumber(document)}
       </Badge>
       {sizeLabel ? <span className="font-mono tabular-nums">{sizeLabel}</span> : null}
       {generatedAtLabel ? (

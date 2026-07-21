@@ -2196,6 +2196,7 @@ struct ClinicInput {
 
 struct GeneratedProviderDocumentResult {
     id: Uuid,
+    document_number: String,
     auto_name: String,
     original_filename: String,
     mime_type: &'static str,
@@ -3990,6 +3991,59 @@ fn wrap_text_to_width(text: &str, font_size_pt: f32, available_width_mm: f32) ->
     lines
 }
 
+fn wrap_text_to_width_precise(
+    text: &str,
+    font_size_pt: f32,
+    available_width_mm: f32,
+) -> Vec<String> {
+    let normalized = text.trim();
+    if normalized.is_empty() {
+        return Vec::new();
+    }
+
+    let mut lines = Vec::new();
+    let mut current = String::new();
+
+    for word in normalized.split_whitespace() {
+        let candidate = if current.is_empty() {
+            word.to_string()
+        } else {
+            format!("{current} {word}")
+        };
+        if approx_text_width_mm(&candidate, font_size_pt) <= available_width_mm {
+            current = candidate;
+            continue;
+        }
+
+        if !current.is_empty() {
+            lines.push(std::mem::take(&mut current));
+        }
+
+        if approx_text_width_mm(word, font_size_pt) <= available_width_mm {
+            current.push_str(word);
+            continue;
+        }
+
+        let mut chunk = String::new();
+        for ch in word.chars() {
+            let candidate = format!("{chunk}{ch}");
+            if !chunk.is_empty()
+                && approx_text_width_mm(&candidate, font_size_pt) > available_width_mm
+            {
+                lines.push(std::mem::take(&mut chunk));
+            }
+            chunk.push(ch);
+        }
+        current = chunk;
+    }
+
+    if !current.is_empty() {
+        lines.push(current);
+    }
+
+    lines
+}
+
 fn truncate_text_to_width(text: &str, font_size_pt: f32, available_width_mm: f32) -> String {
     let normalized = text.trim();
     let average_char_width_mm = pt_to_mm(font_size_pt) * 0.54;
@@ -4026,6 +4080,48 @@ fn append_pdf_text_line(
         col: treatment_plan_pdf_color(color),
     });
     ops.push(win_ansi_show_text_op(text));
+    ops.push(Op::EndTextSection);
+}
+
+fn append_pdf_justified_text_line(
+    ops: &mut Vec<Op>,
+    text: &str,
+    x_mm: f32,
+    y_mm: f32,
+    size_pt: f32,
+    target_width_mm: f32,
+    font: &PdfFontHandle,
+    color: TreatmentPlanPdfColor,
+) {
+    let word_gaps = text.split_whitespace().count().saturating_sub(1);
+    let remaining_width_mm = (target_width_mm - approx_text_width_mm(text, size_pt)).max(0.0);
+    if word_gaps == 0 || remaining_width_mm <= 0.1 {
+        append_pdf_text_line(ops, text, x_mm, y_mm, size_pt, font, color);
+        return;
+    }
+
+    let spacing_mm = remaining_width_mm / word_gaps as f32;
+    if spacing_mm > 2.5 {
+        append_pdf_text_line(ops, text, x_mm, y_mm, size_pt, font, color);
+        return;
+    }
+
+    ops.push(Op::SetFont {
+        font: font.clone(),
+        size: Pt(size_pt),
+    });
+    ops.push(Op::StartTextSection);
+    ops.push(Op::SetTextCursor {
+        pos: Point::new(Mm(x_mm), Mm(y_mm)),
+    });
+    ops.push(Op::SetFillColor {
+        col: treatment_plan_pdf_color(color),
+    });
+    ops.push(Op::SetWordSpacing {
+        pt: pdf_mm_to_pt(spacing_mm),
+    });
+    ops.push(win_ansi_show_text_op(text));
+    ops.push(Op::SetWordSpacing { pt: Pt(0.0) });
     ops.push(Op::EndTextSection);
 }
 
@@ -4081,7 +4177,7 @@ struct TreatmentPlanPdfLayout {
     y_mm: f32,
     footer_text: String,
     legal_footer_lines: Vec<String>,
-    legal_header_line: String,
+    document_reference: String,
     page_style: PdfPageStyle,
     regular_font: PdfFontHandle,
     bold_font: PdfFontHandle,
@@ -4096,7 +4192,7 @@ impl TreatmentPlanPdfLayout {
             y_mm: PDF_PAGE_HEIGHT_MM - PDF_TOP_MARGIN_MM,
             footer_text,
             legal_footer_lines: Vec::new(),
-            legal_header_line: String::new(),
+            document_reference: String::new(),
             page_style: PdfPageStyle::Standard,
             regular_font,
             bold_font,
@@ -4115,7 +4211,7 @@ impl TreatmentPlanPdfLayout {
             y_mm: PDF_PAGE_HEIGHT_MM - PDF_LEGAL_TOP_MARGIN_MM,
             footer_text: String::new(),
             legal_footer_lines: footer_lines,
-            legal_header_line: String::new(),
+            document_reference: String::new(),
             page_style: PdfPageStyle::Legal,
             regular_font,
             bold_font,
@@ -4134,9 +4230,40 @@ impl TreatmentPlanPdfLayout {
         (PDF_CONTENT_WIDTH_MM - indent_mm).max(50.0)
     }
 
+    fn set_document_reference(&mut self, document_reference: &str) {
+        self.document_reference = document_reference.trim().to_string();
+    }
+
     fn finish_page(&mut self) {
         if self.page_ops.is_empty() {
             return;
+        }
+
+        if !self.document_reference.is_empty() {
+            let label = "Dokument-Nr.:";
+            let label_width_mm = approx_text_width_mm(label, 7.5);
+            let reference_width_mm = approx_text_width_mm(&self.document_reference, 9.0);
+            let gap_mm = 2.0;
+            let reference_x_mm = PDF_PAGE_WIDTH_MM - PDF_RIGHT_MARGIN_MM - reference_width_mm;
+            let label_x_mm = (reference_x_mm - gap_mm - label_width_mm).max(PDF_LEFT_MARGIN_MM);
+            append_pdf_text_line(
+                &mut self.page_ops,
+                label,
+                label_x_mm,
+                288.0,
+                7.5,
+                &self.regular_font,
+                TreatmentPlanPdfColor::Muted,
+            );
+            append_pdf_text_line(
+                &mut self.page_ops,
+                &self.document_reference,
+                reference_x_mm.max(PDF_LEFT_MARGIN_MM + label_width_mm + gap_mm),
+                288.0,
+                9.0,
+                &PdfFontHandle::Builtin(BuiltinFont::CourierBold),
+                TreatmentPlanPdfColor::Body,
+            );
         }
 
         if self.page_style == PdfPageStyle::Legal {
@@ -4158,22 +4285,6 @@ impl TreatmentPlanPdfLayout {
                 0.25,
                 accent,
             );
-
-            if !self.legal_header_line.is_empty() {
-                // Right-aligned above the top rule, like the letterhead reference.
-                let width_mm = self.legal_header_line.chars().count() as f32 * pt_to_mm(7.0) * 0.54;
-                let x_mm =
-                    (PDF_PAGE_WIDTH_MM - PDF_RIGHT_MARGIN_MM - width_mm).max(PDF_LEFT_MARGIN_MM);
-                append_pdf_text_line(
-                    &mut self.page_ops,
-                    &self.legal_header_line,
-                    x_mm,
-                    288.0,
-                    7.0,
-                    &self.regular_font,
-                    TreatmentPlanPdfColor::Muted,
-                );
-            }
 
             let logo_height_mm = 7.6;
             self.page_ops.extend(crate::pdf_logo::gmed_logo_ops(
@@ -4274,6 +4385,68 @@ impl TreatmentPlanPdfLayout {
                 &font,
                 color,
             );
+            self.y_mm -= line_height_mm;
+        }
+
+        if after_mm > 0.0 {
+            self.spacer(after_mm);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn text_block_justified(
+        &mut self,
+        text: &str,
+        size_pt: f32,
+        bold: bool,
+        indent_mm: f32,
+        color: TreatmentPlanPdfColor,
+        before_mm: f32,
+        after_mm: f32,
+    ) {
+        let available_width_mm = self.available_width(indent_mm);
+        let lines = wrap_text_to_width_precise(text, size_pt, available_width_mm);
+        if lines.is_empty() {
+            return;
+        }
+
+        if before_mm > 0.0 {
+            self.spacer(before_mm);
+        }
+
+        let line_height_mm = pdf_line_height_mm(size_pt, 1.45);
+        let x_mm = PDF_LEFT_MARGIN_MM + indent_mm;
+        let font = if bold {
+            self.bold_font.clone()
+        } else {
+            self.regular_font.clone()
+        };
+        let last_line_index = lines.len() - 1;
+
+        for (line_index, line) in lines.into_iter().enumerate() {
+            self.ensure_space(line_height_mm);
+            if line_index == last_line_index {
+                append_pdf_text_line(
+                    &mut self.page_ops,
+                    &line,
+                    x_mm,
+                    self.y_mm,
+                    size_pt,
+                    &font,
+                    color,
+                );
+            } else {
+                append_pdf_justified_text_line(
+                    &mut self.page_ops,
+                    &line,
+                    x_mm,
+                    self.y_mm,
+                    size_pt,
+                    available_width_mm,
+                    &font,
+                    color,
+                );
+            }
             self.y_mm -= line_height_mm;
         }
 
@@ -4593,6 +4766,15 @@ fn generated_compliance_document_number(
     ))
 }
 
+fn generated_document_number_for_template(
+    template_id: &str,
+    document_id: Uuid,
+    generated_at: chrono::DateTime<chrono::Utc>,
+) -> String {
+    generated_compliance_document_number(template_id, document_id, generated_at)
+        .unwrap_or_else(|| generated_document_public_id(document_id))
+}
+
 fn build_treatment_plan_html(context: &GeneratedTreatmentPlanContext) -> String {
     let appointments_by_day = grouped_treatment_plan_appointments(context);
 
@@ -4829,6 +5011,7 @@ fn build_treatment_plan_html(context: &GeneratedTreatmentPlanContext) -> String 
 
 fn build_treatment_plan_pdf(
     context: &GeneratedTreatmentPlanContext,
+    document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let mut document = PdfDocument::new(&context.auto_name);
     let (regular_handle, bold_handle) = pdf_text_font_handles();
@@ -4865,6 +5048,7 @@ fn build_treatment_plan_pdf(
         context.generated_at.format("%d.%m.%Y %H:%M UTC")
     );
     let mut layout = TreatmentPlanPdfLayout::new(footer_text, regular_handle, bold_handle);
+    layout.set_document_reference(document_reference);
 
     layout.text_block(
         translated_label(&context.language, "draft_badge"),
@@ -5464,6 +5648,7 @@ fn build_medication_summary_html(context: &GeneratedMedicationSummaryContext) ->
 
 fn build_medication_summary_pdf(
     context: &GeneratedMedicationSummaryContext,
+    document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let mut document = PdfDocument::new(&context.auto_name);
     let (regular_handle, bold_handle) = pdf_text_font_handles();
@@ -5495,6 +5680,7 @@ fn build_medication_summary_pdf(
         context.generated_at.format("%d.%m.%Y %H:%M UTC")
     );
     let mut layout = TreatmentPlanPdfLayout::new(footer_text, regular_handle, bold_handle);
+    layout.set_document_reference(document_reference);
 
     layout.text_block(
         translated_label(&context.language, "draft_badge"),
@@ -6184,7 +6370,7 @@ fn fc_paragraph_heading(layout: &mut TreatmentPlanPdfLayout, text: &str) {
 
 /// A regular body paragraph for the contract text.
 fn fc_body(layout: &mut TreatmentPlanPdfLayout, text: &str) {
-    layout.text_block(
+    layout.text_block_justified(
         text,
         11.0,
         false,
@@ -6269,15 +6455,10 @@ fn fc_body_tight(layout: &mut TreatmentPlanPdfLayout, text: &str) {
 
 fn build_framework_contract_pdf(
     context: &GeneratedFrameworkContractContext,
-    fallback_document_reference: &str,
+    document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let document_reference = legal_document_reference(
-        Some(context.contract_number.as_str()),
-        fallback_document_reference,
-    );
     let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
-    let agency_person = agency_responsible_person(&context.agency).to_string();
 
     let effective_date_str = fmt_de_date(context.effective_date);
 
@@ -6758,19 +6939,20 @@ fn build_framework_contract_pdf(
 
     // --- Signature blocks (both parties) --------------------------------------
     layout.spacer(4.0);
-    admin_signature_columns(
+    let agency_signature_name = agency_legal_name(&context.agency);
+    admin_signature_grid(
         &mut layout,
-        AdminSignatureParty {
-            place: context.agency_sign_place.as_deref(),
-            date: context.agency_sign_date,
-            name: &agency_person,
-            role: "Auftragnehmer",
-        },
         AdminSignatureParty {
             place: context.party_sign_place.as_deref(),
             date: context.party_sign_date,
             name: &context.patient_name,
             role: "Auftraggeber",
+        },
+        AdminSignatureParty {
+            place: context.agency_sign_place.as_deref(),
+            date: context.agency_sign_date,
+            name: &agency_signature_name,
+            role: "Auftragnehmer",
         },
     );
 
@@ -7160,6 +7342,7 @@ fn build_visa_invitation_html(context: &GeneratedVisaInvitationContext) -> Strin
 
 fn build_visa_invitation_pdf(
     context: &GeneratedVisaInvitationContext,
+    document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let mut document = PdfDocument::new(&context.auto_name);
     let (regular_handle, bold_handle) = pdf_text_font_handles();
@@ -7181,6 +7364,7 @@ fn build_visa_invitation_pdf(
         context.generated_at.format("%d.%m.%Y %H:%M UTC")
     );
     let mut layout = TreatmentPlanPdfLayout::new(footer_text, regular_handle, bold_handle);
+    layout.set_document_reference(document_reference);
 
     for line in agency_block_lines(&context.agency) {
         admin_block(&mut layout, &line, 0.0, 0.3);
@@ -7841,6 +8025,7 @@ fn build_provider_template_html(context: &GeneratedProviderTemplateContext) -> S
 
 fn build_provider_template_pdf(
     context: &GeneratedProviderTemplateContext,
+    document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let mut document = PdfDocument::new(&context.auto_name);
     let (regular_handle, bold_handle) = pdf_text_font_handles();
@@ -7851,6 +8036,7 @@ fn build_provider_template_pdf(
         context.generated_at.format("%Y-%m-%d")
     );
     let mut layout = TreatmentPlanPdfLayout::new(footer_text, regular_handle, bold_handle);
+    layout.set_document_reference(document_reference);
 
     layout.text_block(
         &context.title,
@@ -10357,6 +10543,8 @@ async fn generate_provider_document_from_template_internal(
 
     let rendered_body = apply_provider_template_placeholders(template_body, &replacements);
     let generated_at = chrono::Utc::now();
+    let generated_document_id = Uuid::new_v4();
+    let generated_document_number = generated_document_public_id(generated_document_id);
     let auto_name = body
         .auto_name
         .as_deref()
@@ -10423,7 +10611,7 @@ async fn generate_provider_document_from_template_internal(
     };
 
     let preview_html = build_provider_template_html(&context);
-    let pdf_bytes = match build_provider_template_pdf(&context) {
+    let pdf_bytes = match build_provider_template_pdf(&context, &generated_document_number) {
         Ok(bytes) => bytes,
         Err(message) => return Err(err(StatusCode::INTERNAL_SERVER_ERROR, message)),
     };
@@ -10470,8 +10658,8 @@ async fn generate_provider_document_from_template_internal(
     };
 
     let persist_input = NewStoredDocument {
-        document_id: None,
-        document_number: None,
+        document_id: Some(generated_document_id),
+        document_number: Some(generated_document_number.as_str()),
         patient_id,
         lead_id: None,
         order_id,
@@ -10610,6 +10798,7 @@ async fn generate_provider_document_from_template_internal(
 
     Ok(GeneratedProviderDocumentResult {
         id: document_id,
+        document_number: generated_document_number.clone(),
         auto_name: auto_name.clone(),
         original_filename,
         mime_type: "application/pdf",
@@ -10638,6 +10827,7 @@ async fn generate_provider_document_from_template(
         Ok(result) => Json(json!({
             "ok": true,
             "id": result.id,
+            "document_number": result.document_number,
             "auto_name": result.auto_name,
             "original_filename": result.original_filename,
             "mime_type": result.mime_type,
@@ -10991,10 +11181,8 @@ async fn generate_document(
     let generated_at = chrono::Utc::now();
     let generated_document_id = Uuid::new_v4();
     let generated_document_number =
-        generated_compliance_document_number(template.id, generated_document_id, generated_at);
-    let generated_doc_id = generated_document_number
-        .clone()
-        .unwrap_or_else(|| generated_document_public_id(generated_document_id));
+        generated_document_number_for_template(template.id, generated_document_id, generated_at);
+    let generated_doc_id = generated_document_number.clone();
     let auto_name = body
         .auto_name
         .as_deref()
@@ -11131,7 +11319,12 @@ async fn generate_document(
                 .clone()
                 .unwrap_or_else(|| template.label.to_string());
             let preview = manual_generated_text_preview_html(&title, manual_text);
-            let pdf_bytes = match build_manual_generated_text_pdf(&auto_name, &title, manual_text) {
+            let pdf_bytes = match build_manual_generated_text_pdf(
+                &auto_name,
+                &title,
+                manual_text,
+                &generated_doc_id,
+            ) {
                 Ok(bytes) => bytes,
                 Err(message) => {
                     tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build manual generated document PDF");
@@ -11249,7 +11442,7 @@ async fn generate_document(
             };
 
             let preview_html = build_treatment_plan_html(&context);
-            let pdf_bytes = match build_treatment_plan_pdf(&context) {
+            let pdf_bytes = match build_treatment_plan_pdf(&context, &generated_doc_id) {
                 Ok(bytes) => bytes,
                 Err(message) => {
                     tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build generated PDF");
@@ -11436,7 +11629,7 @@ async fn generate_document(
             };
 
             let preview_html = build_medication_summary_html(&context);
-            let pdf_bytes = match build_medication_summary_pdf(&context) {
+            let pdf_bytes = match build_medication_summary_pdf(&context, &generated_doc_id) {
                 Ok(bytes) => bytes,
                 Err(message) => {
                     tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build generated PDF");
@@ -11760,7 +11953,7 @@ async fn generate_document(
             };
 
             let preview_html = build_visa_invitation_html(&context);
-            let pdf_bytes = match build_visa_invitation_pdf(&context) {
+            let pdf_bytes = match build_visa_invitation_pdf(&context, &generated_doc_id) {
                 Ok(bytes) => bytes,
                 Err(message) => {
                     tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build generated visa invitation PDF");
@@ -12109,7 +12302,7 @@ async fn generate_document(
                 }),
                 &cost_coverage_summary_lines(&context),
             );
-            let pdf_bytes = match build_cost_coverage_pdf(&context) {
+            let pdf_bytes = match build_cost_coverage_pdf(&context, &generated_doc_id) {
                 Ok(bytes) => bytes,
                 Err(message) => {
                     tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build cost coverage PDF");
@@ -12247,7 +12440,7 @@ async fn generate_document(
                 admin_doc_label(&context.language, "appointment_confirmation_title"),
                 &party_block_lines(&context.patient),
             );
-            let pdf_bytes = match build_appointment_confirmation_pdf(&context) {
+            let pdf_bytes = match build_appointment_confirmation_pdf(&context, &generated_doc_id) {
                 Ok(bytes) => bytes,
                 Err(message) => {
                     tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build appointment confirmation PDF");
@@ -12439,7 +12632,7 @@ async fn generate_document(
 
     let persist_input = NewStoredDocument {
         document_id: Some(generated_document_id),
-        document_number: generated_document_number.as_deref(),
+        document_number: Some(generated_document_number.as_str()),
         patient_id,
         lead_id,
         order_id,
@@ -12595,6 +12788,7 @@ async fn generate_document(
     Json(json!({
         "ok": true,
         "id": document_id,
+        "document_number": generated_document_number,
         "auto_name": auto_name,
         "original_filename": original_filename,
         "mime_type": template.mime_type,
@@ -12947,7 +13141,7 @@ fn finalize_admin_pdf(mut document: PdfDocument, layout: TreatmentPlanPdfLayout)
 }
 
 fn admin_block(layout: &mut TreatmentPlanPdfLayout, text: &str, before: f32, after: f32) {
-    layout.text_block(
+    layout.text_block_justified(
         text,
         11.0,
         false,
@@ -12966,6 +13160,7 @@ fn build_manual_generated_text_pdf(
     auto_name: &str,
     title: &str,
     text: &str,
+    document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let footer = auto_name.trim();
@@ -12975,6 +13170,7 @@ fn build_manual_generated_text_pdf(
         footer
     };
     let mut layout = TreatmentPlanPdfLayout::new(footer.to_string(), regular, bold);
+    layout.set_document_reference(document_reference);
     admin_heading(&mut layout, title);
     for line in generated_manual_text_paragraphs(text) {
         if line.trim().is_empty() {
@@ -12986,47 +13182,6 @@ fn build_manual_generated_text_pdf(
     Ok(finalize_admin_pdf(document, layout))
 }
 
-fn admin_signature_block(
-    layout: &mut TreatmentPlanPdfLayout,
-    place: Option<&str>,
-    date: Option<NaiveDate>,
-    name: &str,
-    role: &str,
-) {
-    let place = place
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .unwrap_or("____________________");
-    layout.text_block(
-        &format!("{place}, den {}", fmt_de_date(date)),
-        11.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        6.0,
-        0.5,
-    );
-    layout.text_block(
-        "(Ort)                                          (Datum)",
-        9.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Muted,
-        0.0,
-        8.0,
-    );
-    layout.text_block(name, 11.0, true, 0.0, TreatmentPlanPdfColor::Body, 0.0, 0.5);
-    layout.text_block(
-        &format!("({role})"),
-        9.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Muted,
-        0.0,
-        2.0,
-    );
-}
-
 struct AdminSignatureParty<'a> {
     place: Option<&'a str>,
     date: Option<NaiveDate>,
@@ -13034,14 +13189,14 @@ struct AdminSignatureParty<'a> {
     role: &'a str,
 }
 
-fn admin_signature_columns(
+fn admin_signature_grid(
     layout: &mut TreatmentPlanPdfLayout,
     left: AdminSignatureParty<'_>,
     right: AdminSignatureParty<'_>,
 ) {
-    const COLUMN_GAP_MM: f32 = 12.0;
-    const BLOCK_HEIGHT_MM: f32 = 34.0;
-    const SIGNATURE_LINE_OFFSET_MM: f32 = 19.0;
+    const COLUMN_GAP_MM: f32 = 14.0;
+    const BLOCK_HEIGHT_MM: f32 = 27.0;
+    const SIGNATURE_LINE_OFFSET_MM: f32 = 12.0;
 
     layout.ensure_space(BLOCK_HEIGHT_MM);
 
@@ -13059,28 +13214,9 @@ fn admin_signature_columns(
             .unwrap_or("____________________");
         let place_and_date = truncate_text_to_width(
             &format!("{place}, den {}", fmt_de_date(party.date)),
-            10.0,
+            8.5,
             column_width_mm,
         );
-        append_pdf_text_line(
-            &mut layout.page_ops,
-            &place_and_date,
-            x_mm,
-            top_y_mm,
-            10.0,
-            &regular_font,
-            TreatmentPlanPdfColor::Body,
-        );
-        append_pdf_text_line(
-            &mut layout.page_ops,
-            "(Ort, Datum)",
-            x_mm,
-            top_y_mm - 4.5,
-            8.0,
-            &regular_font,
-            TreatmentPlanPdfColor::Muted,
-        );
-
         let signature_line_y_mm = top_y_mm - SIGNATURE_LINE_OFFSET_MM;
         append_pdf_filled_rect(
             &mut layout.page_ops,
@@ -13090,21 +13226,32 @@ fn admin_signature_columns(
             0.25,
             treatment_plan_pdf_color(TreatmentPlanPdfColor::Body),
         );
+        let (headline, caption) = if party.role == "Auftragnehmer" {
+            (
+                truncate_text_to_width(party.name, 8.5, column_width_mm),
+                format!("{place_and_date} · Unterschrift, Stempel"),
+            )
+        } else {
+            (
+                place_and_date,
+                format!("Ort, Datum · Unterschrift {}", party.role),
+            )
+        };
         append_pdf_text_line(
             &mut layout.page_ops,
-            &truncate_text_to_width(party.name, 10.0, column_width_mm),
+            &headline,
             x_mm,
             signature_line_y_mm - 4.0,
-            10.0,
+            8.5,
             &bold_font,
             TreatmentPlanPdfColor::Body,
         );
         append_pdf_text_line(
             &mut layout.page_ops,
-            &format!("({})", party.role),
+            &truncate_text_to_width(&caption, 7.5, column_width_mm),
             x_mm,
             signature_line_y_mm - 8.0,
-            8.0,
+            7.5,
             &regular_font,
             TreatmentPlanPdfColor::Muted,
         );
@@ -13170,13 +13317,9 @@ fn single_order_party_lines(party: &DocPartyBlock) -> Vec<String> {
 
 fn build_single_order_pdf(
     context: &GeneratedSingleOrderContext,
-    fallback_document_reference: &str,
+    document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let document_reference = legal_document_reference(
-        Some(context.order_number.as_str()),
-        fallback_document_reference,
-    );
     let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
 
     let title = context.title_override.clone().unwrap_or_else(|| {
@@ -13454,19 +13597,20 @@ fn build_single_order_pdf(
     }
 
     let party_name = context.party.name_with_salutation();
-    admin_signature_columns(
+    let agency_signature_name = agency_legal_name(&context.agency);
+    admin_signature_grid(
         &mut layout,
-        AdminSignatureParty {
-            place: context.agency_sign_place.as_deref(),
-            date: context.agency_sign_date,
-            name: agency_responsible_person(&context.agency),
-            role: "Auftragnehmer",
-        },
         AdminSignatureParty {
             place: context.party_sign_place.as_deref(),
             date: context.party_sign_date,
             name: &party_name,
             role: "Auftraggeber",
+        },
+        AdminSignatureParty {
+            place: context.agency_sign_place.as_deref(),
+            date: context.agency_sign_date,
+            name: &agency_signature_name,
+            role: "Auftragnehmer",
         },
     );
 
@@ -13476,11 +13620,9 @@ fn build_single_order_pdf(
 
 fn build_order_cost_estimate_pdf(
     context: &GeneratedSingleOrderContext,
-    fallback_document_reference: &str,
+    document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let document_reference =
-        legal_document_reference(context.quote_number.as_deref(), fallback_document_reference);
     let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
 
     layout.text_block_centered(
@@ -13673,19 +13815,22 @@ fn build_order_cost_estimate_pdf(
             1.0,
         );
     }
-    admin_signature_block(
+    let party_name = context.party.name_with_salutation();
+    let agency_signature_name = agency_legal_name(&context.agency);
+    admin_signature_grid(
         &mut layout,
-        context.agency_sign_place.as_deref(),
-        context.agency_sign_date,
-        agency_responsible_person(&context.agency),
-        "Auftragnehmer",
-    );
-    admin_signature_block(
-        &mut layout,
-        context.party_sign_place.as_deref(),
-        context.party_sign_date,
-        &context.party.name_with_salutation(),
-        "Auftraggeber",
+        AdminSignatureParty {
+            place: context.party_sign_place.as_deref(),
+            date: context.party_sign_date,
+            name: &party_name,
+            role: "Auftraggeber",
+        },
+        AdminSignatureParty {
+            place: context.agency_sign_place.as_deref(),
+            date: context.agency_sign_date,
+            name: &agency_signature_name,
+            role: "Auftragnehmer",
+        },
     );
 
     let _ = &context.patient_pid;
@@ -13786,6 +13931,7 @@ fn cost_coverage_money_cell(raw: &str) -> Option<String> {
 
 fn build_cost_coverage_pdf(
     context: &GeneratedCostCoverageContext,
+    document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let footer = format!(
@@ -13794,6 +13940,7 @@ fn build_cost_coverage_pdf(
         context.generated_at.format("%d.%m.%Y %H:%M UTC")
     );
     let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
+    layout.set_document_reference(document_reference);
 
     // Ordinal used throughout the intro / headings ("1." in the reference).
     let ordinal = context.order_sequence.max(1);
@@ -14120,19 +14267,21 @@ fn build_cost_coverage_pdf(
         layout.spacer(2.5);
     }
 
-    admin_signature_block(
+    let agency_signature_name = agency_legal_name(&context.agency);
+    admin_signature_grid(
         &mut layout,
-        context.agency_sign_place.as_deref(),
-        context.agency_sign_date,
-        agency_responsible_person(&context.agency),
-        "Auftragnehmer",
-    );
-    admin_signature_block(
-        &mut layout,
-        context.payer_sign_place.as_deref(),
-        context.payer_sign_date,
-        &context.payer.name,
-        "Kostenübernehmer",
+        AdminSignatureParty {
+            place: context.payer_sign_place.as_deref(),
+            date: context.payer_sign_date,
+            name: &context.payer.name,
+            role: "Kostenübernehmer",
+        },
+        AdminSignatureParty {
+            place: context.agency_sign_place.as_deref(),
+            date: context.agency_sign_date,
+            name: &agency_signature_name,
+            role: "Auftragnehmer",
+        },
     );
 
     let _ = &context.order_number;
@@ -14180,25 +14329,16 @@ fn cost_estimate_legal_notice() -> &'static str {
 
 fn build_cost_estimate_pdf(
     context: &GeneratedCostEstimateContext,
-    fallback_document_reference: &str,
+    document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let document_reference =
-        legal_document_reference(context.quote_number.as_deref(), fallback_document_reference);
     let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
 
     let title = context
         .title_override
         .clone()
         .unwrap_or_else(|| cost_estimate_default_title().to_string());
-    layout.text_block_centered(
-        &title,
-        15.0,
-        true,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        4.0,
-    );
+    layout.text_block_centered(&title, 15.0, true, TreatmentPlanPdfColor::Body, 0.0, 4.0);
 
     // Datum: estimate_date now falls back to the generated date upstream, so it
     // is never a blank placeholder here.
@@ -14323,6 +14463,7 @@ fn appointment_nominative_salutation(party: &DocPartyBlock) -> &'static str {
 
 fn build_appointment_confirmation_pdf(
     context: &GeneratedAppointmentConfirmationContext,
+    document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let footer = format!(
@@ -14331,6 +14472,7 @@ fn build_appointment_confirmation_pdf(
         context.generated_at.format("%d.%m.%Y %H:%M UTC")
     );
     let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
+    layout.set_document_reference(document_reference);
 
     // --- Header meta table (Datum / Seiten / Doc.-ID / Ersteller / Für / Project) ---
     let meta_date = if context.sign_date.is_some() {
@@ -14422,14 +14564,7 @@ fn build_appointment_confirmation_pdf(
         };
         format!("Terminbestätigung für {addressee}{birth}")
     });
-    layout.text_block_centered(
-        &heading,
-        13.0,
-        true,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        2.0,
-    );
+    layout.text_block_centered(&heading, 13.0, true, TreatmentPlanPdfColor::Body, 0.0, 2.0);
     admin_block(&mut layout, "Sehr geehrte Damen und Herren,", 0.0, 1.5);
 
     // --- Confirmation body sentence ---
@@ -14737,13 +14872,6 @@ fn adult_legal_footer_lines(agency: &AgencyContractSettings) -> Vec<String> {
     lines
 }
 
-fn legal_document_reference<'a>(business_number: Option<&'a str>, fallback: &'a str) -> &'a str {
-    business_number
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(fallback)
-}
-
 fn legal_document_pdf_layout(
     document_reference: &str,
     agency: &AgencyContractSettings,
@@ -14752,7 +14880,7 @@ fn legal_document_pdf_layout(
 ) -> TreatmentPlanPdfLayout {
     let mut layout =
         TreatmentPlanPdfLayout::new_legal(adult_legal_footer_lines(agency), regular, bold);
-    layout.legal_header_line = format!("Dokument-Nr.: {document_reference}");
+    layout.set_document_reference(document_reference);
     layout
 }
 
@@ -14853,6 +14981,10 @@ fn adult_legal_signature_line(
     layout.y_mm -= 14.0;
 }
 
+fn agency_data_controller_statement() -> &'static str {
+    "Verantwortlich für die Verarbeitung Ihrer Daten ist Heorhii Hudiiev, geb. am 12.12.1994, Albert-Schweitzer-Straße 56, 81735 München, Deutschland"
+}
+
 fn adult_legal_checkbox(layout: &mut TreatmentPlanPdfLayout, text: &str) {
     layout.text_block(
         &format!("[ ]  {text}"),
@@ -14950,7 +15082,7 @@ fn render_adult_privacy_information(
         ),
     );
     fc_subhead(layout, "Name des Verantwortlichen");
-    fc_body(layout, agency_responsible_person(agency));
+    fc_body(layout, agency_data_controller_statement());
     fc_subhead(layout, "Kontaktdaten des Datenschutzbeauftragten");
     fc_body(
         layout,
@@ -20307,18 +20439,18 @@ mod tests {
         GeneratedConsentContext, GeneratedContractLineItem, GeneratedCostEstimateContext,
         GeneratedFrameworkContractContext, GeneratedPatientStickerContext,
         GeneratedSingleOrderContext, PDF_PAGE_WIDTH_MM, ServiceLineInput, TreatmentPlanPdfLayout,
-        admin_signature_columns, adult_legal_agency_identity, agency_block_lines,
-        agency_identity_profile_lines, agency_responsible_person,
-        build_adult_confidentiality_release_pdf, build_adult_privacy_consents_pdf,
-        build_adult_privacy_information_pdf, build_consent_pdf, build_cost_estimate_pdf,
-        build_framework_contract_pdf, build_manual_generated_text_pdf,
+        admin_signature_grid, adult_legal_agency_identity, agency_block_lines,
+        agency_identity_profile_lines, build_adult_confidentiality_release_pdf,
+        build_adult_privacy_consents_pdf, build_adult_privacy_information_pdf, build_consent_pdf,
+        build_cost_estimate_pdf, build_framework_contract_pdf, build_manual_generated_text_pdf,
         build_order_cost_estimate_pdf, build_patient_sticker_pdf, build_single_order_pdf,
         compute_line_item_totals, cost_coverage_money_cell, cost_estimate_price_text,
         document_satisfies_compliance_kind, document_template_by_id, finalize_admin_pdf,
-        generated_binding_snapshot, generated_compliance_document_number, german_document_country,
-        is_fixed_legal_document_template, is_lead_allowed_document_template,
-        legal_document_reference, new_admin_pdf, patient_sticker_agency_line, pdf_mm_to_pt,
-        pdf_text_font_handles, trusted_contact_recipients_binding,
+        generated_binding_snapshot, generated_compliance_document_number,
+        generated_document_number_for_template, german_document_country,
+        is_fixed_legal_document_template, is_lead_allowed_document_template, new_admin_pdf,
+        patient_sticker_agency_line, pdf_mm_to_pt, pdf_text_font_handles,
+        trusted_contact_recipients_binding,
     };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
     use chrono::{NaiveDate, TimeZone, Utc};
@@ -20390,13 +20522,13 @@ mod tests {
 
     fn assert_legal_pdf_chrome(bytes: &[u8], document_reference: &str) -> String {
         let text = normalized_pdf_text(bytes);
-        let page_count = text.matches("Seite:").count();
+        let pages = normalized_pdf_pages(bytes);
+        let page_count = pages.len();
         assert!(page_count > 0);
-        assert_eq!(
-            text.matches(&format!("Dokument-Nr.: {document_reference}"))
-                .count(),
-            page_count
-        );
+        for page in &pages {
+            assert!(page.contains("Dokument-Nr."));
+            assert!(page.contains(document_reference));
+        }
         for page_number in 1..=page_count {
             assert!(
                 text.contains(&format!("Seite: {page_number}/{page_count}")),
@@ -20451,12 +20583,8 @@ mod tests {
             );
         }
         assert_eq!(
-            legal_document_reference(Some(" FC-2026-17 "), "DOC-FALLBACK"),
-            "FC-2026-17"
-        );
-        assert_eq!(
-            legal_document_reference(Some(" "), "DOC-FALLBACK"),
-            "DOC-FALLBACK"
+            generated_document_number_for_template("framework_contract", document_id, generated_at,),
+            "DOC-01234567"
         );
     }
 
@@ -20724,6 +20852,7 @@ mod tests {
             "Terminbestätigung",
             "Terminbestätigung",
             "Sehr geehrte Damen und Herren,\n\nIndividueller Text für den Patienten.",
+            "DOC-MANUAL-1",
         )
         .unwrap();
 
@@ -20732,6 +20861,8 @@ mod tests {
         assert!(raw_pdf.contains("/F6"));
 
         let extracted_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+        assert!(extracted_text.contains("Dokument-Nr."));
+        assert!(extracted_text.contains("DOC-MANUAL-1"));
         assert!(extracted_text.contains("Sehr geehrte Damen und Herren"));
         assert!(extracted_text.contains("Individueller Text für den Patienten"));
     }
@@ -20811,11 +20942,9 @@ mod tests {
         assert!(privacy_information_text.contains("Betroffenenrechte"));
         assert!(privacy_information_text.contains("datenschutz@example.test"));
         assert!(privacy_information_text.contains("Name des Verantwortlichen"));
-        assert!(privacy_information_text.contains(agency_responsible_person(&agency)));
-        assert!(!privacy_information_text.contains(&format!(
-            "Verantwortlich für die Verarbeitung Ihrer Daten ist {}",
-            adult_legal_agency_identity(&agency)
-        )));
+        assert!(privacy_information_text.contains(
+            "Verantwortlich für die Verarbeitung Ihrer Daten ist Heorhii Hudiiev, geb. am 12.12.1994, Albert-Schweitzer-Straße 56, 81735 München, Deutschland"
+        ));
         assert!(!privacy_information_text.contains("Anna Beispiel"));
         assert!(!privacy_information_text.contains('?'));
     }
@@ -20874,9 +21003,7 @@ mod tests {
         assert!(pages[0].contains("RAHMENDIENSTLEISTUNGSVERTRAG"));
         assert!(!pages[0].contains("Präambel"));
         assert!(pages[1].contains("Präambel"));
-        let text = assert_legal_pdf_chrome(&bytes, "RV-2026-0042");
-
-        assert!(!text.contains("DOC-FRAMEWORK-FALLBACK"));
+        let text = assert_legal_pdf_chrome(&bytes, "DOC-FRAMEWORK-FALLBACK");
         assert!(text.contains("Deutschland"));
         assert!(text.contains(LEGAL_ADDRESS_STREET));
         assert!(text.contains(LEGAL_ADDRESS_CITY));
@@ -20931,23 +21058,23 @@ mod tests {
     }
 
     #[test]
-    fn admin_signature_columns_place_agency_and_client_side_by_side() {
+    fn admin_signature_grid_places_client_left_and_agency_right() {
         let (document, regular, bold) = new_admin_pdf().unwrap();
         let mut layout = TreatmentPlanPdfLayout::new("Signatures".to_string(), regular, bold);
 
-        admin_signature_columns(
+        admin_signature_grid(
             &mut layout,
-            AdminSignatureParty {
-                place: Some("Köln"),
-                date: NaiveDate::from_ymd_opt(2026, 7, 16),
-                name: "Heorhii Hudiiev",
-                role: "Auftragnehmer",
-            },
             AdminSignatureParty {
                 place: Some("Berlin"),
                 date: NaiveDate::from_ymd_opt(2026, 7, 17),
                 name: "Anna Beispiel",
                 role: "Auftraggeber",
+            },
+            AdminSignatureParty {
+                place: Some("Köln"),
+                date: NaiveDate::from_ymd_opt(2026, 7, 16),
+                name: "GMED - Agentur für Patientenbetreuung",
+                role: "Auftragnehmer",
             },
         );
 
@@ -20959,27 +21086,26 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(cursor_x_positions.len(), 8);
+        assert_eq!(cursor_x_positions.len(), 4);
         let page_midpoint_pt = pdf_mm_to_pt(PDF_PAGE_WIDTH_MM / 2.0).0;
         assert!(
-            cursor_x_positions[..4]
+            cursor_x_positions[..2]
                 .iter()
                 .all(|x| *x < page_midpoint_pt)
         );
         assert!(
-            cursor_x_positions[4..]
+            cursor_x_positions[2..]
                 .iter()
                 .all(|x| *x > page_midpoint_pt)
         );
 
         let text = normalized_pdf_text(&finalize_admin_pdf(document, layout));
         for expected in [
-            "Köln, den 16.07.2026",
-            "Heorhii Hudiiev",
-            "Auftragnehmer",
             "Berlin, den 17.07.2026",
-            "Anna Beispiel",
             "Auftraggeber",
+            "GMED - Agentur für Patientenbetreuung",
+            "Köln, den 16.07.2026",
+            "Unterschrift, Stempel",
         ] {
             assert!(
                 text.contains(expected),
@@ -21062,9 +21188,7 @@ mod tests {
         assert!(pages[0].contains("Auftragsnummer: EA-2026-0017"));
         assert!(!pages[0].contains("Präambel"));
         assert!(pages[1].contains("Präambel"));
-        let text = assert_legal_pdf_chrome(&bytes, "EA-2026-0017");
-
-        assert!(!text.contains("DOC-ORDER-FALLBACK"));
+        let text = assert_legal_pdf_chrome(&bytes, "DOC-ORDER-FALLBACK");
         assert!(!text.contains("Anlage 4"));
         assert!(text.contains("Auftragsnummer: EA-2026-0017"));
         assert!(text.contains("Rahmendienstleistungsvertrag Nr.: RV-2026-0042"));
@@ -21096,9 +21220,7 @@ mod tests {
         assert!(!text.contains("Gesamtsumme: 476,00 EUR"));
 
         let estimate_bytes = build_order_cost_estimate_pdf(&context, "DOC-QUOTE-FALLBACK").unwrap();
-        let estimate_text = assert_legal_pdf_chrome(&estimate_bytes, "KV-2026-0042");
-
-        assert!(!estimate_text.contains("DOC-QUOTE-FALLBACK"));
+        let estimate_text = assert_legal_pdf_chrome(&estimate_bytes, "DOC-QUOTE-FALLBACK");
         assert!(estimate_text.contains("Anlage 1 zum Einzelauftrag"));
         assert!(estimate_text.contains("KOSTENVORANSCHLAG"));
         assert!(estimate_text.contains("ZUM 2. EINZELAUFTRAG"));
@@ -21202,9 +21324,7 @@ mod tests {
         };
 
         let bytes = build_cost_estimate_pdf(&context, "DOC-COST-FALLBACK").unwrap();
-        let text = assert_legal_pdf_chrome(&bytes, "KV-2026-0099");
-
-        assert!(!text.contains("DOC-COST-FALLBACK"));
+        let text = assert_legal_pdf_chrome(&bytes, "DOC-COST-FALLBACK");
         assert!(text.contains("Unverbindliche voraussichtliche Kostenschätzung"));
         assert!(text.contains("Patient: Frau Anna Beispiel"));
         assert!(text.contains("Kardiologische Untersuchung"));

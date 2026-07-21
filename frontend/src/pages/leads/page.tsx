@@ -2723,7 +2723,7 @@ function useLeadsPageContent() {
       {wizardLeadId !== null || newLeadWizardOpen ? (
         <Suspense
           fallback={(
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-2 backdrop-blur-[1px]">
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-2">
               <div className="flex h-[90vh] w-full items-center justify-center rounded-lg border border-border bg-background shadow-xl sm:h-[min(88vh,52rem)] sm:w-[min(96vw,84rem)]">
                 <div
                   role="status"

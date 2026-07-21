@@ -4916,7 +4916,6 @@ ${serviceCommentLines.join("\n")}`
         }}
       >
         <DialogContent
-          overlayClassName="supports-backdrop-filter:backdrop-blur-none"
           className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 duration-0 data-closed:animate-none data-open:animate-none sm:h-[min(88vh,52rem)] sm:w-[min(96vw,84rem)] sm:max-w-[84rem]"
         >
           <DialogHeader className="border-b border-border px-4 py-3 pr-14 sm:px-5 sm:pr-14">
