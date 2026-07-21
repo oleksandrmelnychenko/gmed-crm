@@ -147,6 +147,13 @@ const AGENCY_SETTING_FIELDS: SettingFieldMeta[] = [
   { key: "agency_sign_place", labelKey: "settings_agency_sign_place", inputType: "text" },
   { key: "agency_data_system_name", labelKey: "settings_agency_data_system_name", inputType: "text" },
   {
+    key: "agency_data_controller_statement",
+    labelKey: "settings_agency_data_controller_statement",
+    inputType: "textarea",
+    maxLength: 1000,
+    rows: 3,
+  },
+  {
     key: "agency_data_processor_notice",
     labelKey: "settings_agency_data_processor_notice",
     inputType: "textarea",
@@ -1064,6 +1071,7 @@ function useAdminSettingsPageContent() {
                               <textarea
                                 id={`setting-${field.key}`}
                                 rows={field.rows ?? 4}
+                                maxLength={field.maxLength}
                                 value={editValues[field.key] ?? ""}
                                 onChange={(event) => updateEditValue(field.key, event.target.value)}
                                 className={inputClassName}

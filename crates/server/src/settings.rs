@@ -120,6 +120,9 @@ pub async fn update_setting(
         "agency_data_system_name" => {
             validate_string_setting(value, 160, false, "Agency data system name")?
         }
+        "agency_data_controller_statement" => {
+            validate_string_setting(value, 1_000, false, "Agency data controller statement")?
+        }
         "agency_data_processor_notice" => {
             validate_string_setting(value, 4_000, true, "Agency data processor notice")?
         }

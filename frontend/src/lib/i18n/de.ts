@@ -633,6 +633,8 @@ export const de = {
   settings_agency_privacy_email: "Datenschutzkontakt-E-Mail",
   settings_agency_sign_place: "Standard-Unterzeichnungsort der Agentur",
   settings_agency_data_system_name: "Name des GMED-EDV-Systems",
+  settings_agency_data_controller_statement:
+    "Verantwortlicher für die Datenverarbeitung (Dokumenttext)",
   settings_agency_data_processor_notice: "Hinweis zu Auftragsverarbeitung / Drittlandtransfer",
   settings_agency_bank_holder: "Kontoinhaber",
   settings_agency_bank_name: "Bank",

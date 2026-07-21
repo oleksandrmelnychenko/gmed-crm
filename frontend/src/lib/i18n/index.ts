@@ -532,6 +532,7 @@ export interface Translations
   settings_agency_privacy_email: string;
   settings_agency_sign_place: string;
   settings_agency_data_system_name: string;
+  settings_agency_data_controller_statement: string;
   settings_agency_data_processor_notice: string;
   settings_agency_bank_holder: string;
   settings_agency_bank_name: string;

@@ -633,6 +633,8 @@ export const ru = {
   settings_agency_privacy_email: "Электронная почта по вопросам защиты данных",
   settings_agency_sign_place: "Место подписания агентством по умолчанию",
   settings_agency_data_system_name: "Название системы GMED-EDV",
+  settings_agency_data_controller_statement:
+    "Ответственный за обработку данных (текст документа)",
   settings_agency_data_processor_notice: "Уведомление об обработчике / передаче данных за рубеж",
   settings_agency_bank_holder: "Владелец счёта",
   settings_agency_bank_name: "Банк",

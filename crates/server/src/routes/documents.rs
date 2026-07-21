@@ -891,6 +891,7 @@ struct AgencyContractSettings {
     privacy_email: Option<String>,
     sign_place: String,
     data_system_name: String,
+    data_controller_statement: String,
     data_processor_notice: Option<String>,
     bank_holder: Option<String>,
     bank_name: Option<String>,
@@ -12867,7 +12868,8 @@ async fn load_agency_contract_settings(
                'agency_name', 'agency_care_of', 'agency_address', 'agency_phone', 'agency_email',
                'agency_website',
                'agency_principal_birth_date', 'agency_privacy_email',
-               'agency_sign_place', 'agency_data_system_name', 'agency_data_processor_notice',
+               'agency_sign_place', 'agency_data_system_name',
+               'agency_data_controller_statement', 'agency_data_processor_notice',
                'agency_bank_holder', 'agency_bank_name', 'agency_bank_swift', 'agency_bank_iban'
            )"#,
     )
@@ -12909,6 +12911,7 @@ async fn load_agency_contract_settings(
     let responsible_person = required_value("agency_care_of")?;
     let sign_place = required_value("agency_sign_place")?;
     let data_system_name = required_value("agency_data_system_name")?;
+    let data_controller_statement = required_value("agency_data_controller_statement")?;
     Ok(AgencyContractSettings {
         name,
         care_of: Some(responsible_person),
@@ -12925,6 +12928,7 @@ async fn load_agency_contract_settings(
             .or_else(|| values.get("agency_email").cloned()),
         sign_place,
         data_system_name,
+        data_controller_statement,
         data_processor_notice: values.get("agency_data_processor_notice").cloned(),
         bank_holder: values.get("agency_bank_holder").cloned(),
         bank_name: values.get("agency_bank_name").cloned(),
@@ -15021,8 +15025,8 @@ fn adult_legal_signature_line(
     layout.y_mm -= 14.0;
 }
 
-fn agency_data_controller_statement() -> &'static str {
-    "Verantwortlich für die Verarbeitung Ihrer Daten ist Heorhii Hudiiev, geb. am 12.12.1994, Albert-Schweitzer-Straße 56, 81735 München, Deutschland"
+fn agency_data_controller_statement(agency: &AgencyContractSettings) -> &str {
+    agency.data_controller_statement.trim()
 }
 
 fn adult_legal_checkbox(layout: &mut TreatmentPlanPdfLayout, text: &str) {
@@ -15122,7 +15126,7 @@ fn render_adult_privacy_information(
         ),
     );
     fc_subhead(layout, "Name des Verantwortlichen");
-    fc_body(layout, agency_data_controller_statement());
+    fc_body(layout, agency_data_controller_statement(agency));
     fc_subhead(layout, "Kontaktdaten des Datenschutzbeauftragten");
     fc_body(
         layout,
@@ -20507,6 +20511,7 @@ mod tests {
     const LEGAL_PHONE: &str = "+49 176 22570962";
     const LEGAL_EMAIL: &str = "office@gmed-health.com";
     const LEGAL_WEBSITE: &str = "gmed-health.com";
+    const LEGAL_DATA_CONTROLLER_STATEMENT: &str = "Verantwortlich für die Verarbeitung Ihrer Daten ist Configured Owner, Teststraße 1, Deutschland";
 
     fn legal_test_agency() -> AgencyContractSettings {
         AgencyContractSettings {
@@ -20520,6 +20525,7 @@ mod tests {
             privacy_email: Some("datenschutz@example.test".to_string()),
             sign_place: "Köln".to_string(),
             data_system_name: "GMED-EDV-System".to_string(),
+            data_controller_statement: LEGAL_DATA_CONTROLLER_STATEMENT.to_string(),
             data_processor_notice: Some(
                 "Ein beauftragter Auftragsverarbeiter kann technisch beteiligt sein.".to_string(),
             ),
@@ -20982,9 +20988,8 @@ mod tests {
         assert!(privacy_information_text.contains("Betroffenenrechte"));
         assert!(privacy_information_text.contains("datenschutz@example.test"));
         assert!(privacy_information_text.contains("Name des Verantwortlichen"));
-        assert!(privacy_information_text.contains(
-            "Verantwortlich für die Verarbeitung Ihrer Daten ist Heorhii Hudiiev, geb. am 12.12.1994, Albert-Schweitzer-Straße 56, 81735 München, Deutschland"
-        ));
+        assert!(privacy_information_text.contains(LEGAL_DATA_CONTROLLER_STATEMENT));
+        assert!(!privacy_information_text.contains("Heorhii Hudiiev, geb. am 12.12.1994"));
         assert!(!privacy_information_text.contains("Anna Beispiel"));
         assert!(!privacy_information_text.contains('?'));
     }
