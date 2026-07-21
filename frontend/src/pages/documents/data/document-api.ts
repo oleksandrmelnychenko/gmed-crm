@@ -22,6 +22,7 @@ type JsonPayload = Record<string, unknown>;
 
 const DOCUMENT_LOOKUPS_CACHE_TTL_MS = 60_000;
 const DOCUMENT_STATIC_META_CACHE_TTL_MS = 300_000;
+const OBJECT_URL_REVOCATION_DELAY_MS = 60_000;
 
 export type DocumentLookups = {
   patients: PatientOption[];
@@ -96,20 +97,36 @@ function openBlobPreviewWindow(previewWindow: Window | null, blob: Blob) {
   if (!openedWindow) return false;
   const objectUrl = URL.createObjectURL(blob);
   openedWindow.location.href = objectUrl;
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+  window.setTimeout(
+    () => URL.revokeObjectURL(objectUrl),
+    OBJECT_URL_REVOCATION_DELAY_MS,
+  );
   return true;
 }
 
+function downloadFilename(filename: string, contentType: string) {
+  const normalizedFilename = filename.trim() || "document";
+  const normalizedContentType = contentType.split(";", 1)[0]?.trim().toLowerCase();
+  if (normalizedContentType !== "application/pdf") return normalizedFilename;
+  if (/\.pdf$/i.test(normalizedFilename)) return normalizedFilename;
+
+  const filenameWithoutExtension = normalizedFilename.replace(/\.[a-z0-9]{1,10}$/i, "");
+  return `${filenameWithoutExtension || "document"}.pdf`;
+}
+
 export async function downloadDocumentFile(id: string, filename: string) {
-  const { blob } = await fetchDocumentBlob(id);
+  const { blob, contentType } = await fetchDocumentBlob(id);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = filename || "document";
+  link.download = downloadFilename(filename, contentType);
   document.body.appendChild(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(url);
+  window.setTimeout(
+    () => URL.revokeObjectURL(url),
+    OBJECT_URL_REVOCATION_DELAY_MS,
+  );
 }
 
 export async function openDocumentPreview(

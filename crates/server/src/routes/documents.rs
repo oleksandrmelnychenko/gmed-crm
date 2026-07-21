@@ -6060,19 +6060,13 @@ fn fc_patient_salutation_name(context: &GeneratedFrameworkContractContext) -> St
     }
 }
 
-/// The agency responsible person (care_of) or, failing that, the agency name.
+/// The configured agency responsible person used in signatures and legal text.
 fn fc_agency_person(agency: &AgencyContractSettings) -> String {
-    agency
-        .care_of
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| agency.name.clone())
+    agency_responsible_person(agency).to_string()
 }
 
 fn agency_legal_identity(agency: &AgencyContractSettings) -> String {
-    let mut parts = vec![adult_legal_agency_identity()];
+    let mut parts = vec![adult_legal_agency_identity(agency)];
     if let Some(birth_date) = agency.principal_birth_date {
         parts.push(format!("geb. am {}", birth_date.format("%d.%m.%Y")));
     }
@@ -6110,8 +6104,8 @@ fn build_framework_contract_pdf(
         fallback_document_reference,
     );
     let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
-    let agency_display = adult_legal_agency_identity();
-    let agency_person = ADULT_LEGAL_AGENCY_PERSON.to_string();
+    let agency_display = adult_legal_agency_identity(&context.agency);
+    let agency_person = agency_responsible_person(&context.agency).to_string();
 
     let effective_date_str = fmt_de_date(context.effective_date);
 
@@ -7226,13 +7220,7 @@ fn build_visa_invitation_pdf(
     }
 
     admin_block(&mut layout, "Mit freundlichen Grüßen,", 3.0, 8.0);
-    let signer = context
-        .agency
-        .care_of
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(context.agency.name.as_str());
+    let signer = agency_responsible_person(&context.agency);
     layout.text_block(
         signer,
         11.0,
@@ -12517,10 +12505,13 @@ async fn load_agency_contract_settings(
     let name = values
         .get("agency_name")
         .cloned()
-        .unwrap_or_else(|| "GMED".to_string());
+        .unwrap_or_else(|| DEFAULT_AGENCY_NAME.to_string());
     Ok(AgencyContractSettings {
         name,
-        care_of: values.get("agency_care_of").cloned(),
+        care_of: values
+            .get("agency_care_of")
+            .cloned()
+            .or_else(|| Some(DEFAULT_AGENCY_RESPONSIBLE_PERSON.to_string())),
         principal_birth_date: values
             .get("agency_principal_birth_date")
             .and_then(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()),
@@ -12601,7 +12592,7 @@ fn party_block_lines(party: &DocPartyBlock) -> Vec<String> {
 }
 
 fn agency_block_lines(agency: &AgencyContractSettings) -> Vec<String> {
-    let mut lines = vec![format!("{} – Agentur für Patientenbetreuung", agency.name)];
+    let mut lines = vec![agency_legal_name(agency)];
     if let Some(address) = agency
         .address
         .as_deref()
@@ -12630,7 +12621,7 @@ fn agency_block_lines(agency: &AgencyContractSettings) -> Vec<String> {
 }
 
 fn legal_agency_block_lines(agency: &AgencyContractSettings) -> Vec<String> {
-    let mut lines = vec![adult_legal_agency_identity()];
+    let mut lines = vec![adult_legal_agency_identity(agency)];
     if let Some(address) = agency
         .address
         .as_deref()
@@ -12960,66 +12951,12 @@ fn build_single_order_pdf(
         0.0,
         1.0,
     );
-    let specialties = context
-        .specialties
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .unwrap_or("den vereinbarten Fachbereichen");
-    let period = match (context.period_from, context.period_to) {
-        (Some(from), Some(to)) => format!(
-            "im Zeitraum {} bis {}",
-            from.format("%d.%m.%Y"),
-            to.format("%d.%m.%Y")
-        ),
-        _ => "im vereinbarten Zeitraum".to_string(),
-    };
-    let examination_purpose = context
-        .examination_purpose
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .unwrap_or("ausführliche medizinische Untersuchung");
-    let treatment_purpose = context
-        .treatment_purpose
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .unwrap_or("eine medizinische Behandlung");
-    for (item_index, item) in [
-        format!(
-            "Individuelle Beratung und Informationsvermittlung in Bezug auf eine Möglichkeit, eine medizinische Untersuchung bei den Fachärzten für {specialties} {period} in München durchzuführen."
-        ),
-        format!(
-            "Herstellung von Kontakten und Terminvereinbarungen {period} bei Fachärzten für {specialties} mit dem Zweck, sich einer {examination_purpose} zu unterziehen und ggf. {treatment_purpose} bei oben genannten Fachärzten. Bei Bedarf, auch bei weiteren Ärzten und medizinischen Dienstleistern."
-        ),
-        "Administrative Unterstützung bei der Zusammenstellung und Übermittlung medizinischer Unterlagen zwischen dem Auftraggeber und behandelnden Ärzten, sowie bei Bedarf auch anderen weiterbehandelnden Ärzten und medizinischen Dienstleistern.".to_string(),
-        "Koordination und Gewährleistung einer interdisziplinären Zusammenarbeit zwischen den oben genannten Fachärzten und ggf. bei anderen weiterbehandelnden Ärzten und medizinischen Institutionen.".to_string(),
-        "Überwachung der Abrechnungsrichtigkeit.".to_string(),
-        format!(
-            "Bei Bedarf: Kostenübernahmen und Zahlungsabwicklung bei Fachärzten für {specialties}, bei Bedarf, auch bei weiterbehandelnden Ärzten und anderen medizinischen Anbietern."
-        ),
-        "Kalkulation und Planung von voraussichtlichen Behandlungskosten, Anfrage von Kostenvoranschlägen bei den medizinischen Leistungserbringern und Weiterleitung von diesen Informationen an die zahlungspflichtigen Dritten.".to_string(),
-        "Optimierung der Prozesse, um Wartezeiten zu minimieren und den Untersuchungs- und Behandlungsablauf zeit- und kosteneffizient zu gestalten.".to_string(),
-        "Effizientes Ressourcenmanagement.".to_string(),
-        "Professionelle sprachliche Unterstützung zur Überwindung von Sprachbarrieren zwischen dem Auftraggeber und medizinischen Leistungsanbietern.".to_string(),
-        "Bereitstellung von Dolmetschern für den reibungslosen Informationsaustausch zwischen dem Auftraggeber und medizinischem Fachpersonal.".to_string(),
-        "Bei Bedarf und einem ausdrücklichen Wunsch: schriftliche Übersetzung von vom Auftraggeber ausgewählten Arztbriefen, Befunden und anderen Unterlagen.".to_string(),
-        "Koordination von Nachsorgeterminen und Rehabilitationsmaßnahmen.".to_string(),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        layout.text_block(
-            &format!("{}. {item}", item_index + 1),
-            11.0,
-            false,
-            4.0,
-            TreatmentPlanPdfColor::Body,
-            0.0,
-            1.0,
-        );
-    }
+    admin_block(
+        &mut layout,
+        "Der konkrete Leistungsumfang beschränkt sich auf die in Abschnitt II aufgeführten, vom Auftraggeber ausgewählten Leistungen und den zugehörigen Kostenvoranschlag.",
+        0.0,
+        2.0,
+    );
 
     admin_heading(
         &mut layout,
@@ -13086,26 +13023,12 @@ fn build_single_order_pdf(
             );
         } else {
             layout.ensure_space(45.0);
-            layout.table_row(
-                &[
-                    ("Leistungen", 88.0),
-                    ("Honorar*", 30.0),
-                    ("Anmerkung", 56.0),
-                ],
-                true,
-                true,
-            );
+            layout.table_row(&[("Leistungen", 130.0), ("Honorar*", 44.0)], true, true);
             for item in &context.line_items {
                 let fee = cost_coverage_money_cell(&item.unit_price)
                     .unwrap_or_else(|| "____________".to_string());
-                let notes = item
-                    .notes
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .unwrap_or("—");
                 layout.table_row(
-                    &[(item.description.trim(), 88.0), (&fee, 30.0), (notes, 56.0)],
+                    &[(item.description.trim(), 130.0), (&fee, 44.0)],
                     false,
                     false,
                 );
@@ -13135,30 +13058,6 @@ fn build_single_order_pdf(
                 1.5,
             );
         }
-    }
-
-    let bank_lines = [
-        ("Kontoinhaber", context.agency.bank_holder.as_deref()),
-        ("Bank", context.agency.bank_name.as_deref()),
-        ("SWIFT-Code", context.agency.bank_swift.as_deref()),
-        ("IBAN", context.agency.bank_iban.as_deref()),
-    ];
-    if bank_lines
-        .iter()
-        .any(|(_, value)| value.map(str::trim).is_some_and(|value| !value.is_empty()))
-    {
-        admin_block(
-            &mut layout,
-            "Zahlungen aus diesem Einzelauftrag sind auf das folgende Konto des Auftragnehmers zu leisten:",
-            1.0,
-            0.8,
-        );
-        for (label, value) in bank_lines {
-            if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-                admin_block(&mut layout, &format!("{label}: {value}"), 0.0, 0.4);
-            }
-        }
-        layout.spacer(1.0);
     }
 
     for (heading, body) in [
@@ -13221,7 +13120,7 @@ fn build_single_order_pdf(
         &mut layout,
         context.agency_sign_place.as_deref(),
         context.agency_sign_date,
-        ADULT_LEGAL_AGENCY_PERSON,
+        agency_responsible_person(&context.agency),
         "Auftragnehmer",
     );
     admin_signature_block(
@@ -13389,7 +13288,7 @@ fn build_order_cost_estimate_pdf(
         &mut layout,
         context.agency_sign_place.as_deref(),
         context.agency_sign_date,
-        ADULT_LEGAL_AGENCY_PERSON,
+        agency_responsible_person(&context.agency),
         "Auftragnehmer",
     );
     admin_signature_block(
@@ -13828,7 +13727,7 @@ fn build_cost_coverage_pdf(
         &mut layout,
         context.agency_sign_place.as_deref(),
         context.agency_sign_date,
-        &context.agency.name,
+        agency_responsible_person(&context.agency),
         "Auftragnehmer",
     );
     admin_signature_block(
@@ -14029,17 +13928,16 @@ fn appointment_nominative_salutation(party: &DocPartyBlock) -> &'static str {
 /// Comma-joins the agency contact (responsible person + address) for the letterhead
 /// sender line assembled from the configured responsible person and agency address.
 fn appointment_sender_line(agency: &AgencyContractSettings) -> Option<String> {
-    let care_of = agency
-        .care_of
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty());
+    let responsible_person = agency_responsible_person(agency);
     let address = agency
         .address
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty());
-    let parts: Vec<&str> = [care_of, address].into_iter().flatten().collect();
+    let parts: Vec<&str> = [Some(responsible_person), address]
+        .into_iter()
+        .flatten()
+        .collect();
     if parts.is_empty() {
         None
     } else {
@@ -14071,14 +13969,7 @@ fn build_appointment_confirmation_pdf(
         .filter(|v| !v.is_empty())
         .unwrap_or("____________")
         .to_string();
-    let meta_originator = context
-        .agency
-        .care_of
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .unwrap_or(context.agency.name.as_str())
-        .to_string();
+    let meta_originator = agency_responsible_person(&context.agency).to_string();
     let meta_for = {
         let name = context.patient.name.trim();
         if name.is_empty() {
@@ -14293,13 +14184,7 @@ fn build_appointment_confirmation_pdf(
     admin_block(&mut layout, &closing, 0.0, 2.0);
 
     admin_block(&mut layout, "Mit freundlichen Grüßen,", 2.0, 8.0);
-    let signer = context
-        .agency
-        .care_of
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .unwrap_or(context.agency.name.as_str());
+    let signer = agency_responsible_person(&context.agency);
     layout.text_block(
         signer,
         11.0,
@@ -14353,8 +14238,9 @@ fn adult_consent_subject_line(party: &DocPartyBlock) -> String {
     )
 }
 
-const ADULT_LEGAL_AGENCY_LABEL: &str = "GMED - Agentur für Patientenbetreuung";
-const ADULT_LEGAL_AGENCY_PERSON: &str = "Heorhii Hudiiev";
+const DEFAULT_AGENCY_NAME: &str = "GMED";
+const DEFAULT_AGENCY_RESPONSIBLE_PERSON: &str = "Heorhii Hudiiev";
+const AGENCY_LEGAL_NAME_SUFFIX: &str = "Agentur für Patientenbetreuung";
 const DEFAULT_AGENCY_ADDRESS: &str = "Albert-Schweitzer-Straße 56\n81735 München";
 const DEFAULT_AGENCY_PHONE: &str = "+49 176 22570962";
 const DEFAULT_AGENCY_EMAIL: &str = "office@gmed-health.com";
@@ -14364,8 +14250,46 @@ const DEFAULT_AGENCY_BANK_NAME: &str = "Commerzbank München";
 const DEFAULT_AGENCY_BANK_SWIFT: &str = "COBADEFFXXX";
 const DEFAULT_AGENCY_BANK_IBAN: &str = "DE71 7004 0045 0836 8961 00";
 
-fn adult_legal_agency_identity() -> String {
-    format!("{ADULT_LEGAL_AGENCY_LABEL} {ADULT_LEGAL_AGENCY_PERSON}")
+fn agency_legal_name(agency: &AgencyContractSettings) -> String {
+    let name = agency.name.trim();
+    let name = if name.is_empty() {
+        DEFAULT_AGENCY_NAME
+    } else {
+        name
+    };
+    if name
+        .to_lowercase()
+        .contains(&AGENCY_LEGAL_NAME_SUFFIX.to_lowercase())
+    {
+        name.to_string()
+    } else {
+        format!("{name} - {AGENCY_LEGAL_NAME_SUFFIX}")
+    }
+}
+
+fn agency_responsible_person(agency: &AgencyContractSettings) -> &str {
+    agency
+        .care_of
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            value
+                .strip_prefix("c/o ")
+                .or_else(|| value.strip_prefix("C/O "))
+                .unwrap_or(value)
+                .trim()
+        })
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_AGENCY_RESPONSIBLE_PERSON)
+}
+
+fn adult_legal_agency_identity(agency: &AgencyContractSettings) -> String {
+    format!(
+        "{} {}",
+        agency_legal_name(agency),
+        agency_responsible_person(agency)
+    )
 }
 
 fn agency_document_address(agency: &AgencyContractSettings) -> &str {
@@ -14425,7 +14349,7 @@ fn adult_legal_footer_lines(agency: &AgencyContractSettings) -> Vec<String> {
         agency_document_email(agency),
         footer_website_display(agency_document_website(agency))
     );
-    vec![adult_legal_agency_identity(), address, contacts]
+    vec![adult_legal_agency_identity(agency), address, contacts]
 }
 
 fn legal_document_reference<'a>(business_number: Option<&'a str>, fallback: &'a str) -> &'a str {
@@ -14606,7 +14530,7 @@ fn build_adult_confidentiality_release_pdf(
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
-    let agency_identity = adult_legal_agency_identity();
+    let agency_identity = adult_legal_agency_identity(agency);
 
     adult_legal_document_header(&mut layout, "Anlage 2", "Schweigepflichtentbindung");
     adult_legal_identity_block(&mut layout, party, false);
@@ -14639,7 +14563,7 @@ fn render_adult_privacy_information(
     layout: &mut TreatmentPlanPdfLayout,
     agency: &AgencyContractSettings,
 ) {
-    let agency_identity = adult_legal_agency_identity();
+    let agency_identity = adult_legal_agency_identity(agency);
     let privacy_contact = agency_privacy_email(agency)
         .map(|value| format!("Per E-mail erreichen Sie den Datenschutzkontakt unter {value}."))
         .unwrap_or_else(|| {
@@ -14656,7 +14580,7 @@ fn render_adult_privacy_information(
         ),
     );
     fc_subhead(layout, "Name des Verantwortlichen");
-    fc_body(layout, ADULT_LEGAL_AGENCY_PERSON);
+    fc_body(layout, agency_responsible_person(agency));
     fc_subhead(layout, "Kontaktdaten des Datenschutzbeauftragten");
     fc_body(
         layout,
@@ -14804,7 +14728,7 @@ fn build_adult_privacy_consents_pdf(
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
-    let agency_identity = adult_legal_agency_identity();
+    let agency_identity = adult_legal_agency_identity(agency);
     let data_system_name = if agency.data_system_name.trim().is_empty() {
         "GMED-EDV-System"
     } else {
@@ -20055,16 +19979,16 @@ async fn list_document_categories(
 #[cfg(test)]
 mod tests {
     use super::{
-        ADULT_LEGAL_AGENCY_PERSON, AgencyContractSettings, DocPartyBlock, DocumentBindingOverrides,
-        GeneratedContractLineItem, GeneratedCostEstimateContext, GeneratedFrameworkContractContext,
+        AgencyContractSettings, DocPartyBlock, DocumentBindingOverrides, GeneratedContractLineItem,
+        GeneratedCostEstimateContext, GeneratedFrameworkContractContext,
         GeneratedPatientStickerContext, GeneratedSingleOrderContext, ServiceLineInput,
-        adult_legal_agency_identity, build_adult_confidentiality_release_pdf,
-        build_adult_privacy_consents_pdf, build_adult_privacy_information_pdf,
-        build_cost_estimate_pdf, build_framework_contract_pdf, build_manual_generated_text_pdf,
-        build_order_cost_estimate_pdf, build_patient_sticker_pdf, build_single_order_pdf,
-        compute_line_item_totals, cost_coverage_money_cell, cost_estimate_price_text,
-        document_satisfies_compliance_kind, document_template_by_id, generated_binding_snapshot,
-        generated_compliance_document_number, german_document_country,
+        adult_legal_agency_identity, agency_responsible_person,
+        build_adult_confidentiality_release_pdf, build_adult_privacy_consents_pdf,
+        build_adult_privacy_information_pdf, build_cost_estimate_pdf, build_framework_contract_pdf,
+        build_manual_generated_text_pdf, build_order_cost_estimate_pdf, build_patient_sticker_pdf,
+        build_single_order_pdf, compute_line_item_totals, cost_coverage_money_cell,
+        cost_estimate_price_text, document_satisfies_compliance_kind, document_template_by_id,
+        generated_binding_snapshot, generated_compliance_document_number, german_document_country,
         is_fixed_legal_document_template, is_lead_allowed_document_template,
         legal_document_reference, pdf_text_font_handles,
     };
@@ -20074,7 +19998,7 @@ mod tests {
     use serde_json::json;
     use uuid::Uuid;
 
-    const LEGAL_IDENTITY: &str = "GMED - Agentur für Patientenbetreuung Heorhii Hudiiev";
+    const LEGAL_IDENTITY: &str = "Test Agentur - Agentur für Patientenbetreuung Configured Owner";
     const LEGAL_ADDRESS_STREET: &str = "Albert-Schweitzer-Straße 56";
     const LEGAL_ADDRESS_CITY: &str = "81735 München";
     const LEGAL_PHONE: &str = "+49 176 22570962";
@@ -20084,7 +20008,7 @@ mod tests {
     fn legal_test_agency() -> AgencyContractSettings {
         AgencyContractSettings {
             name: "Test Agentur".to_string(),
-            care_of: Some("c/o Alte Identität".to_string()),
+            care_of: Some("Configured Owner".to_string()),
             principal_birth_date: NaiveDate::from_ymd_opt(1975, 6, 3),
             address: Some(format!("{LEGAL_ADDRESS_STREET}\n{LEGAL_ADDRESS_CITY}")),
             phone: Some(LEGAL_PHONE.to_string()),
@@ -20422,10 +20346,10 @@ mod tests {
         assert!(privacy_information_text.contains("Betroffenenrechte"));
         assert!(privacy_information_text.contains("datenschutz@example.test"));
         assert!(privacy_information_text.contains("Name des Verantwortlichen"));
-        assert!(privacy_information_text.contains(ADULT_LEGAL_AGENCY_PERSON));
+        assert!(privacy_information_text.contains(agency_responsible_person(&agency)));
         assert!(!privacy_information_text.contains(&format!(
             "Verantwortlich für die Verarbeitung Ihrer Daten ist {}",
-            adult_legal_agency_identity()
+            adult_legal_agency_identity(&agency)
         )));
         assert!(!privacy_information_text.contains("Anna Beispiel"));
         assert!(!privacy_information_text.contains('?'));
@@ -20590,19 +20514,23 @@ mod tests {
         assert!(text.contains("Deutschland"));
         assert!(text.contains("Berlin, den 16.07.2026"));
         assert!(text.contains("I. Leistungsumfang"));
-        assert!(text.contains("1. Individuelle Beratung"));
+        assert!(!text.contains("1. Individuelle Beratung"));
         assert!(text.contains("II. Vergütungsvereinbarung"));
         assert!(text.contains("IX. Bestandteile des Einzelauftrages und Rangfolge"));
         assert!(text.contains("Kostenvoranschlag Nr.: KV-2026-0042"));
-        assert!(text.contains("Kontoinhaber: GMED Testkonto"));
-        assert!(text.contains("IBAN: DE00 0000 0000 0000 0000 00"));
-        assert!(text.contains("Zahlungen aus diesem Einzelauftrag sind auf das folgende Konto"));
+        assert!(!text.contains("Kontoinhaber: GMED Testkonto"));
+        assert!(!text.contains("Bank: Testbank"));
+        assert!(!text.contains("SWIFT-Code: TESTDEFF"));
+        assert!(!text.contains("IBAN: DE00 0000 0000 0000 0000 00"));
+        assert!(!text.contains("Zahlungen aus diesem Einzelauftrag sind auf das folgende Konto"));
         assert!(!text.contains(
             "Der angegebene Gesamtbetrag ist vor Behandlungs-/Auftragsbeginn zu überweisen an"
         ));
         assert!(!text.contains("Ggf. fordern wir während der Durchführung des Auftrages"));
         assert!(text.contains("UNIQUE-QUOTE-SERVICE"));
         assert!(text.contains("Honorar*"));
+        assert!(!text.contains("Anmerkung"));
+        assert!(!text.contains("Leistungsumfang 10, 11"));
         assert!(!text.contains("Leistung — Einzelpreis — Menge — Summe"));
         assert!(!text.contains("Gesamtsumme: 476,00 EUR"));
 
@@ -20614,6 +20542,10 @@ mod tests {
         assert!(estimate_text.contains("Auftragsnummer: EA-2026-0017"));
         assert!(estimate_text.contains("UNIQUE-QUOTE-SERVICE"));
         assert!(estimate_text.contains("476,00 EUR"));
+        assert!(estimate_text.contains("Kontoinhaber: GMED Testkonto"));
+        assert!(estimate_text.contains("Bank: Testbank"));
+        assert!(estimate_text.contains("SWIFT-Code: TESTDEFF"));
+        assert!(estimate_text.contains("IBAN: DE00 0000 0000 0000 0000 00"));
         assert!(estimate_text.contains(
             "Der angegebene Gesamtbetrag ist vor Behandlungs-/Auftragsbeginn zu überweisen an"
         ));
@@ -20621,6 +20553,26 @@ mod tests {
         assert!(estimate_text.contains(
             "Die in der Endabrechnung angegebenen, angefallenen Kosten für von uns erbrachte Leistungen und Auslagen sind nach Zugang der Rechnung binnen 14 Tagen"
         ));
+        let payment_block = [
+            "Der angegebene Gesamtbetrag ist vor Behandlungs-/Auftragsbeginn zu überweisen an",
+            "Kontoinhaber: GMED Testkonto",
+            "Bank: Testbank",
+            "SWIFT-Code: TESTDEFF",
+            "IBAN: DE00 0000 0000 0000 0000 00",
+            "Ggf. fordern wir während der Durchführung des Auftrages zu weiteren Vorauszahlungen auf",
+            "Die in der Endabrechnung angegebenen, angefallenen Kosten",
+        ];
+        let mut previous_position = 0;
+        for line in payment_block {
+            let position = estimate_text
+                .find(line)
+                .unwrap_or_else(|| panic!("missing payment block line: {line}"));
+            assert!(
+                position >= previous_position,
+                "payment block line is out of order: {line}"
+            );
+            previous_position = position;
+        }
         assert!(estimate_text.contains("Berlin, den 16.07.2026"));
     }
 
@@ -20675,6 +20627,10 @@ mod tests {
         assert_eq!(
             cost_coverage_money_cell("999.00").as_deref(),
             Some("999,00 EUR")
+        );
+        assert_eq!(
+            cost_coverage_money_cell("2735.81").as_deref(),
+            Some("2.735,81 EUR")
         );
     }
 

@@ -1060,11 +1060,6 @@ function useAdminSettingsPageContent() {
                           className={field.inputType === "textarea" ? "md:col-span-2" : undefined}
                         >
                           <>
-                            {settingsMap[field.key]?.description ? (
-                              <p className="mb-2 text-xs text-muted-foreground">
-                                {settingsMap[field.key]?.description}
-                              </p>
-                            ) : null}
                             {field.inputType === "textarea" ? (
                               <textarea
                                 id={`setting-${field.key}`}
@@ -1084,11 +1079,6 @@ function useAdminSettingsPageContent() {
                                 className={inputClassName}
                               />
                             )}
-                            {settingsMap[field.key]?.updated_at ? (
-                              <p className="mt-2 text-xs text-muted-foreground">
-                                {t.common_last_updated}: {formatAdminDateTime(settingsMap[field.key].updated_at, lang)}
-                              </p>
-                            ) : null}
                           </>
                         </Field>
                       );

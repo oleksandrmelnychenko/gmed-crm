@@ -378,6 +378,9 @@ pub(crate) struct PatientLabelAgencySettings {
     pub(crate) email: Option<String>,
 }
 
+const DEFAULT_PATIENT_LABEL_RESPONSIBLE_PERSON: &str = "Heorhii Hudiiev";
+const LEGACY_PATIENT_LABEL_CARE_OF: &str = "c/o GMED";
+
 const PATIENT_CARD_ENTRY_CATEGORIES: &[&str] = &[
     "medical_update",
     "patient_report",
@@ -1033,8 +1036,10 @@ pub(crate) async fn load_patient_label_agency_settings(
         .unwrap_or_else(|| "GMED".to_string());
     let care_of = values
         .get("agency_care_of")
-        .cloned()
-        .unwrap_or_else(|| format!("c/o {name}"));
+        .map(String::as_str)
+        .filter(|value| !value.eq_ignore_ascii_case(LEGACY_PATIENT_LABEL_CARE_OF))
+        .unwrap_or(DEFAULT_PATIENT_LABEL_RESPONSIBLE_PERSON)
+        .to_string();
 
     Ok(PatientLabelAgencySettings {
         name,

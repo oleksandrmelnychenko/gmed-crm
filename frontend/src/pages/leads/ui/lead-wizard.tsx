@@ -15,6 +15,7 @@ import {
   CircleAlert,
   Download,
   Eye,
+  ExternalLink,
   FileCheck2,
   FileText,
   LoaderCircle,
@@ -1018,6 +1019,15 @@ function quoteMatchesServiceLines(quote: QuoteItem, lines: ServiceLine[]) {
     && currentLines.every((line, index) => line === quotedLines[index]);
 }
 
+function quoteMatchesCurrentServices(
+  quote: QuoteItem,
+  lines: ServiceLine[],
+  totalGross: number,
+) {
+  return Math.abs(money(quote.total_gross) - totalGross) < 0.005
+    && quoteMatchesServiceLines(quote, lines);
+}
+
 function quoteLineItemsPayload(lines: ServiceLine[]) {
   return lines.filter(validLine).map((line) => ({
     description: line.description.trim(),
@@ -1090,7 +1100,11 @@ function formatFileSize(size: number | null, lang: string) {
 }
 
 function wizardDocumentFilename(document: DocumentItem) {
-  return document.original_filename || document.auto_name || "document";
+  const filename = document.original_filename || document.auto_name || "document";
+  const mimeType = document.mime_type?.split(";", 1)[0]?.trim().toLowerCase();
+  if (mimeType !== "application/pdf" || /\.pdf$/i.test(filename)) return filename;
+  const filenameWithoutExtension = filename.replace(/\.[a-z0-9]{1,10}$/i, "");
+  return `${filenameWithoutExtension || "document"}.pdf`;
 }
 
 function wizardDocumentPreviewKind(document: DocumentItem): "image" | "pdf" | null {
@@ -1617,6 +1631,7 @@ export function LeadWizard({
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const medicalSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const stepNavigationInFlightRef = useRef(false);
+  const commercialGenerationInFlightRef = useRef(false);
   const reloadVersionRef = useRef(0);
   const caseIdRef = useRef<string | null>(null);
   const documentPreviewUrlRef = useRef<string | null>(null);
@@ -1950,6 +1965,26 @@ export function LeadWizard({
     setDocuments(nextDocuments);
   }, [leadId]);
 
+  const refreshCommercialState = useCallback(async () => {
+    if (!leadId) return [];
+    const targetLeadId = leadId;
+    const [nextDocuments, nextContracts, nextOrders, nextQuotes] = await Promise.all([
+      fetchDocuments(`/documents?lead_id=${encodeURIComponent(targetLeadId)}`),
+      fetchContracts(`/framework-contracts?lead_id=${encodeURIComponent(targetLeadId)}`),
+      fetchOrders(`/orders?lead_id=${encodeURIComponent(targetLeadId)}`),
+      fetchQuotes(`/quotes?lead_id=${encodeURIComponent(targetLeadId)}`),
+    ]);
+    if (hydrated.current !== targetLeadId) return [];
+    setDocuments(nextDocuments);
+    setContracts(nextContracts);
+    setOrders(nextOrders);
+    setQuotes(nextQuotes);
+    const nextOrderId = nextOrders[0]?.id;
+    const nextQuote = nextQuotes.find((item) => !nextOrderId || item.order_id === nextOrderId);
+    setPaidAmount(nextQuote ? String(nextQuote.paid_amount ?? "") : "");
+    return nextDocuments;
+  }, [leadId]);
+
   useEffect(() => {
     if (!open || !createMode || leadId || hydrated.current === "__new__") return;
 
@@ -2066,6 +2101,16 @@ export function LeadWizard({
 
   const order = orders[0] ?? null;
   const contract = contracts.find((item) => item.status !== "terminated") ?? null;
+  const estimate = useMemo(() => {
+    let net = 0;
+    let vat = 0;
+    lines.filter(validLine).forEach((line) => {
+      const lineNet = money(line.quantity) * money(line.price);
+      net += lineNet;
+      vat += lineNet * money(line.vat) / 100;
+    });
+    return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, gross: Math.round((net + vat) * 100) / 100 };
+  }, [lines]);
   const orderQuotes = useMemo(
     () => quotes.filter((item) => !order || item.order_id === order.id),
     [order, quotes],
@@ -2116,20 +2161,9 @@ export function LeadWizard({
   const isQuestionnaireLead = intakeType === "questionnaire";
   const isExternalIntakeLead = intakeType === "questionnaire" || intakeType === "form";
   const readiness = useMemo(() => new Map((lead?.readiness.steps ?? []).map((item) => [item.key, item.ready])), [lead?.readiness.steps]);
-  const estimate = useMemo(() => {
-    let net = 0;
-    let vat = 0;
-    lines.filter(validLine).forEach((line) => {
-      const lineNet = money(line.quantity) * money(line.price);
-      net += lineNet;
-      vat += lineNet * money(line.vat) / 100;
-    });
-    return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, gross: Math.round((net + vat) * 100) / 100 };
-  }, [lines]);
   const quoteIsCurrent = useMemo(() => Boolean(
     quote
-    && Math.abs(money(quote.total_gross) - estimate.gross) < 0.005
-    && quoteMatchesServiceLines(quote, lines)
+    && quoteMatchesCurrentServices(quote, lines, estimate.gross)
   ), [estimate.gross, lines, quote]);
   const acceptedQuote = quote?.status === "accepted" && quoteIsCurrent ? quote : null;
   const quoteTotal = quote ? money(quote.total_gross) : 0;
@@ -2631,7 +2665,10 @@ export function LeadWizard({
     }
   }
 
-  async function openOrDownloadDocument(document: DocumentItem) {
+  async function openOrDownloadDocument(
+    document: DocumentItem,
+    generatedNow = false,
+  ) {
     const previewKind = wizardDocumentPreviewKind(document);
     if (!previewKind) {
       await downloadDocument(document);
@@ -2648,8 +2685,17 @@ export function LeadWizard({
         kind: previewKind,
         title: wizardDocumentFilename(document),
       });
-    } catch (nextError) {
-      showWizardError(nextError);
+    } catch {
+      setValidationContext(null);
+      setError(generatedNow
+        ? tx(
+            "Документ создан, но предпросмотр не открылся. Скачайте PDF из списка документов.",
+            "Das Dokument wurde erstellt, die Vorschau konnte jedoch nicht geöffnet werden. Laden Sie die PDF-Datei aus der Dokumentenliste herunter.",
+          )
+        : tx(
+            "Не удалось открыть предпросмотр. Скачайте PDF из списка документов.",
+            "Die Vorschau konnte nicht geöffnet werden. Laden Sie die PDF-Datei aus der Dokumentenliste herunter.",
+          ));
     } finally {
       setBusy(null);
     }
@@ -2726,7 +2772,7 @@ export function LeadWizard({
       const nextDocuments = await fetchDocuments(`/documents?lead_id=${encodeURIComponent(leadId)}`);
       setDocuments(nextDocuments);
       const generatedDocument = nextDocuments.find((document) => document.id === generated.id);
-      if (generatedDocument) await openOrDownloadDocument(generatedDocument);
+      if (generatedDocument) await openOrDownloadDocument(generatedDocument, true);
     } catch (nextError) {
       showWizardError(nextError);
     } finally {
@@ -2980,12 +3026,18 @@ ${serviceCommentLines.join("\n")}`
   }
 
   async function generateCommercialDocument(templateId: CommercialDocumentKind) {
-    if (!leadId || !draft) return;
+    if (!leadId || !draft || commercialGenerationInFlightRef.current) return;
+    commercialGenerationInFlightRef.current = true;
     setBusy(`generate-${templateId}`);
     setError("");
     try {
       const commercial = await ensureCommercial();
-      if (templateId !== "framework_contract" && (!quote || !quoteIsCurrent)) {
+      const latestOrderQuote = quotes.find((item) => item.order_id === commercial.orderId);
+      const latestQuoteIsCurrent = Boolean(
+        latestOrderQuote
+        && quoteMatchesCurrentServices(latestOrderQuote, lines, estimate.gross),
+      );
+      if (templateId !== "framework_contract" && !latestQuoteIsCurrent) {
         await createQuote(commercial.orderId, {
           line_items: quoteLineItemsPayload(lines),
         });
@@ -3020,16 +3072,31 @@ ${serviceCommentLines.join("\n")}`
           })),
         },
       });
-      const [nextDocuments] = await Promise.all([
-        fetchDocuments(`/documents?lead_id=${encodeURIComponent(leadId)}`),
-        reload(false, true),
-      ]);
-      setDocuments(nextDocuments);
+      let nextDocuments: DocumentItem[];
+      try {
+        nextDocuments = await refreshCommercialState();
+      } catch {
+        setValidationContext(null);
+        setError(tx(
+          "Документ создан, но список документов не обновился. Закройте и снова откройте обращение.",
+          "Das Dokument wurde erstellt, die Dokumentenliste konnte jedoch nicht aktualisiert werden. Schließen und öffnen Sie den Lead erneut.",
+        ));
+        return;
+      }
       const generatedDocument = nextDocuments.find((document) => document.id === generated.id);
-      if (generatedDocument) await openOrDownloadDocument(generatedDocument);
+      if (generatedDocument) {
+        await openOrDownloadDocument(generatedDocument, true);
+      } else {
+        setValidationContext(null);
+        setError(tx(
+          "Документ создан, но пока не появился в списке. Обновите обращение и откройте его из документов.",
+          "Das Dokument wurde erstellt, ist aber noch nicht in der Liste verfügbar. Aktualisieren Sie den Lead und öffnen Sie es über die Dokumente.",
+        ));
+      }
     } catch (nextError) {
       showWizardError(nextError);
     } finally {
+      commercialGenerationInFlightRef.current = false;
       setBusy(null);
     }
   }
@@ -4578,7 +4645,7 @@ ${serviceCommentLines.join("\n")}`
                       step="0.01"
                       value={paidAmount}
                       onChange={(event) => setPaidAmount(event.target.value)}
-                      disabled={!prepayment || !quote || !quoteIsCurrent}
+                      disabled={!prepayment || isBusy}
                       placeholder="0.00"
                     />
                   </Field>
@@ -4784,17 +4851,41 @@ ${serviceCommentLines.join("\n")}`
                 </DialogDescription>
               </div>
               {documentPreview ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-sm"
-                  className="shrink-0"
-                  title={tx("Скачать файл", "Datei herunterladen")}
-                  aria-label={tx("Скачать файл", "Datei herunterladen")}
-                  onClick={() => void downloadDocumentFile(documentPreview.id, documentPreview.title)}
-                >
-                  <Download aria-hidden="true" className="size-3.5" />
-                </Button>
+                <div className="flex shrink-0 items-center gap-1">
+                  {documentPreview.kind === "pdf" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon-sm"
+                      title={tx("Открыть PDF в новой вкладке", "PDF in neuem Tab öffnen")}
+                      aria-label={tx("Открыть PDF в новой вкладке", "PDF in neuem Tab öffnen")}
+                      onClick={() => {
+                        const previewWindow = window.open(documentPreview.url, "_blank");
+                        if (previewWindow) {
+                          previewWindow.opener = null;
+                          return;
+                        }
+                        setValidationContext(null);
+                        setError(tx(
+                          "Браузер заблокировал новую вкладку. Разрешите всплывающие окна или скачайте PDF.",
+                          "Der Browser hat den neuen Tab blockiert. Erlauben Sie Pop-ups oder laden Sie die PDF-Datei herunter.",
+                        ));
+                      }}
+                    >
+                      <ExternalLink aria-hidden="true" className="size-3.5" />
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    title={tx("Скачать файл", "Datei herunterladen")}
+                    aria-label={tx("Скачать файл", "Datei herunterladen")}
+                    onClick={() => void downloadDocumentFile(documentPreview.id, documentPreview.title)}
+                  >
+                    <Download aria-hidden="true" className="size-3.5" />
+                  </Button>
+                </div>
               ) : null}
             </div>
           </DialogHeader>

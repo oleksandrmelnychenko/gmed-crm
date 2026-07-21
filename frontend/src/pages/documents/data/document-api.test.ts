@@ -4,6 +4,7 @@ import { apiFetchFile } from "@/lib/api";
 
 import {
   createDocumentPreviewObjectUrl,
+  downloadDocumentFile,
   revokeDocumentPreviewObjectUrl,
 } from "./document-api";
 
@@ -30,6 +31,7 @@ describe("document preview API", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     createObjectUrlSpy.mockRestore();
     revokeObjectUrlSpy.mockRestore();
     vi.unstubAllGlobals();
@@ -56,6 +58,37 @@ describe("document preview API", () => {
 
   it("revokes inline preview URLs when the viewer closes", () => {
     revokeDocumentPreviewObjectUrl("blob:inline-preview");
+
+    expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:inline-preview");
+  });
+
+  it("downloads generated PDFs with a PDF extension and delays URL revocation", async () => {
+    vi.useFakeTimers();
+    apiFetchFileMock.mockResolvedValue({
+      blob: new Blob(["%PDF"], { type: "application/pdf" }),
+      contentType: "application/pdf",
+    });
+    const link = {
+      click: vi.fn(),
+      download: "",
+      href: "",
+      remove: vi.fn(),
+    };
+    vi.stubGlobal("document", {
+      body: { appendChild: vi.fn() },
+      createElement: vi.fn(() => link),
+    });
+    vi.stubGlobal("window", {
+      setTimeout: globalThis.setTimeout.bind(globalThis),
+    });
+
+    await downloadDocumentFile("document-2", "Kostenvoranschlag.docx");
+
+    expect(link.download).toBe("Kostenvoranschlag.pdf");
+    expect(link.click).toHaveBeenCalledOnce();
+    expect(revokeObjectUrlSpy).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(60_000);
 
     expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:inline-preview");
   });
