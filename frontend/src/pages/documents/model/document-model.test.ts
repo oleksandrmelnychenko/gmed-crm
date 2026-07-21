@@ -263,6 +263,7 @@ describe("buildGenerateDocumentPayload", () => {
   it.each([
     "framework_contract",
     "single_order",
+    "order_cost_estimate",
     "cost_estimate",
     "confidentiality_release",
     "privacy_consents",

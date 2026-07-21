@@ -349,6 +349,7 @@ async fn seed_complete_lead_onboarding(app: &TestApp, lead_id: Uuid) -> SeededOn
     for (template_id, category) in [
         ("framework_contract", "contract"),
         ("single_order", "administrative_single_order"),
+        ("order_cost_estimate", "finance_order_cost_estimate"),
         ("cost_estimate", "finance_cost_estimate"),
     ] {
         let document_id = Uuid::new_v4();
@@ -1161,6 +1162,138 @@ async fn list_leads_conversion_ready_is_false_for_converted_lead() {
         entry["conversion_ready"].as_bool(),
         Some(false),
         "converted leads must report conversion_ready=false; entry was {entry}"
+    );
+}
+
+#[tokio::test]
+async fn lead_readiness_uses_the_newest_quote_for_acceptance_and_prepayment() {
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let billing = app.auth_header("billing");
+    let tag = Uuid::new_v4().simple().to_string();
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Newest",
+            "last_name": "Quote",
+            "email": format!("newest-quote-{tag}@test.local"),
+            "phone": "+49111000001",
+            "source": "Test",
+            "country": "DE"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+
+    make_lead_ready_for_qualification(&app, &pm, &lead_id.to_string()).await;
+    let (status, qualified) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/qualify"),
+        &pm,
+        Some(json!({ "status": "qualified" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{qualified}");
+
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    let readiness_check_passed = |lead: &Value, key: &str| {
+        lead["readiness"]["checks"]
+            .as_array()
+            .and_then(|checks| {
+                checks
+                    .iter()
+                    .find(|check| check["key"].as_str() == Some(key))
+            })
+            .and_then(|check| check["passed"].as_bool())
+            .unwrap_or_else(|| panic!("missing boolean readiness check {key}: {lead}"))
+    };
+
+    let (status, initially_ready) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{initially_ready}");
+    assert_eq!(
+        initially_ready["readiness"]["conversion_ready"], true,
+        "{initially_ready}"
+    );
+    assert!(readiness_check_passed(&initially_ready, "quote_accepted"));
+    assert!(readiness_check_passed(&initially_ready, "prepayment_ready"));
+
+    let newest_quote_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO quotes (
+                order_id, quote_number, total_net, total_vat, total_gross,
+                status, paid_amount, line_items, created_by, created_at
+           )
+           SELECT q.order_id, $1, q.total_net, q.total_vat, q.total_gross,
+                  'draft', 0, q.line_items, $2, q.created_at + interval '1 second'
+           FROM quotes q
+           WHERE q.id = $3
+           RETURNING id"#,
+    )
+    .bind(format!("KV-NEWEST-{tag}"))
+    .bind(app.patient_manager_id)
+    .bind(artifacts.quote_id)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+
+    let (status, draft_readiness) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{draft_readiness}");
+    assert!(!readiness_check_passed(&draft_readiness, "quote_accepted"));
+    assert!(!readiness_check_passed(
+        &draft_readiness,
+        "prepayment_ready"
+    ));
+
+    let (status, partially_paid_quote) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{newest_quote_id}/status"),
+        &billing,
+        Some(json!({
+            "status": "accepted",
+            "paid_amount": 50.0
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{partially_paid_quote}");
+
+    let (status, partial_readiness) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{partial_readiness}");
+    assert!(readiness_check_passed(&partial_readiness, "quote_accepted"));
+    assert!(!readiness_check_passed(
+        &partial_readiness,
+        "prepayment_ready"
+    ));
+
+    let (status, fully_paid_quote) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{newest_quote_id}/status"),
+        &billing,
+        Some(json!({
+            "status": "accepted",
+            "paid_amount": 119.0
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{fully_paid_quote}");
+
+    let (status, full_readiness) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{full_readiness}");
+    assert!(readiness_check_passed(&full_readiness, "quote_accepted"));
+    assert!(readiness_check_passed(&full_readiness, "prepayment_ready"));
+    assert_eq!(
+        full_readiness["readiness"]["conversion_ready"], true,
+        "{full_readiness}"
     );
 }
 

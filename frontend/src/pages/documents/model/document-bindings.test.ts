@@ -199,6 +199,7 @@ describe("document template binding payloads", () => {
     for (const templateId of [
       "framework_contract",
       "single_order",
+      "order_cost_estimate",
       "cost_estimate",
       "confidentiality_release",
       "privacy_information",
@@ -209,7 +210,7 @@ describe("document template binding payloads", () => {
     expect(isDesignedAgencyDocumentTemplate("appointment_confirmation")).toBe(false);
   });
 
-  it("prefills visible party fields from the selected patient", () => {
+  it("prefills visible party fields without binding trusted contacts", () => {
     expect(
       patientPartyBindingDefaults({
         address_street: "Musterallee 11",
@@ -239,8 +240,6 @@ describe("document template binding payloads", () => {
       party_email: "patient@example.test",
       party_phone: "+49 89 123",
       party_sign_place: "München",
-      extra_release_recipients:
-        "Alex Beispiel, geb. am 03.02.1989, Beziehung: Bruder, Tel.: +49 30 123",
     });
   });
 

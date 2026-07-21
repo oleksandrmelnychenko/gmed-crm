@@ -1211,6 +1211,21 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         text_block_keys: &[],
     },
     DocumentTemplateDefinition {
+        id: "order_cost_estimate",
+        label: "Kostenvoranschlag zum Einzelauftrag",
+        description: "Separate Anlage 1 zum Einzelauftrag mit Leistungen, Preisen, Summen, Bankverbindung und Unterschriften.",
+        art: "order_cost_estimate",
+        category: "finance_order_cost_estimate",
+        default_auto_name: "Kostenvoranschlag zum Einzelauftrag",
+        default_status: "draft",
+        default_visibility: "patient_visible",
+        mime_type: "application/pdf",
+        file_extension: "pdf",
+        is_medical: false,
+        languages: &["de"],
+        text_block_keys: &[],
+    },
+    DocumentTemplateDefinition {
         id: "cost_coverage_declaration",
         label: "Kostenübernahmeerklärung",
         description: "Kostenübernahmeerklärung durch Dritte mit Vergütung, Kostenvoranschlag und Bankdaten der Agentur.",
@@ -1227,11 +1242,11 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     },
     DocumentTemplateDefinition {
         id: "cost_estimate",
-        label: "Kostenschätzung",
-        description: "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen.",
+        label: "Vorläufige Kostenkalkulation",
+        description: "Unverbindlicher vorläufiger Kostenrahmen für medizinische Untersuchungen und Leistungen.",
         art: "cost_estimate",
         category: "finance_cost_estimate",
-        default_auto_name: "Kostenschätzung",
+        default_auto_name: "Vorläufige Kostenkalkulation",
         default_status: "draft",
         default_visibility: "patient_visible",
         mime_type: "application/pdf",
@@ -3029,6 +3044,7 @@ fn is_fixed_legal_document_template(template_id: &str) -> bool {
         template_id,
         "framework_contract"
             | "single_order"
+            | "order_cost_estimate"
             | "cost_estimate"
             | "confidentiality_release"
             | "privacy_consents"
@@ -3041,6 +3057,7 @@ fn is_lead_allowed_document_template(template_id: &str) -> bool {
         template_id,
         "framework_contract"
             | "single_order"
+            | "order_cost_estimate"
             | "cost_estimate"
             | "confidentiality_release"
             | "privacy_consents"
@@ -4209,6 +4226,92 @@ impl TreatmentPlanPdfLayout {
         }
     }
 
+    fn table_row(&mut self, cells: &[(&str, f32)], bold: bool, shaded: bool) {
+        if cells.is_empty() {
+            return;
+        }
+
+        let font_size_pt = if bold { 9.0 } else { 9.5 };
+        let line_height_mm = pdf_line_height_mm(font_size_pt, 1.25);
+        let wrapped_cells = cells
+            .iter()
+            .map(|(text, width_mm)| {
+                wrap_text_to_width(text, font_size_pt, (width_mm - 4.0).max(12.0))
+            })
+            .collect::<Vec<_>>();
+        let line_count = wrapped_cells.iter().map(Vec::len).max().unwrap_or(1).max(1);
+        let row_height_mm = line_count as f32 * line_height_mm + 4.0;
+        self.ensure_space(row_height_mm + 0.4);
+
+        let row_top_mm = self.y_mm;
+        let row_bottom_mm = row_top_mm - row_height_mm;
+        let border_color = Color::Rgb(Rgb::new(0.78, 0.81, 0.83, None));
+        if shaded {
+            append_pdf_filled_rect(
+                &mut self.page_ops,
+                PDF_LEFT_MARGIN_MM,
+                row_bottom_mm,
+                PDF_CONTENT_WIDTH_MM,
+                row_height_mm,
+                Color::Rgb(Rgb::new(0.94, 0.96, 0.97, None)),
+            );
+        }
+        append_pdf_filled_rect(
+            &mut self.page_ops,
+            PDF_LEFT_MARGIN_MM,
+            row_top_mm - 0.25,
+            PDF_CONTENT_WIDTH_MM,
+            0.25,
+            border_color.clone(),
+        );
+        append_pdf_filled_rect(
+            &mut self.page_ops,
+            PDF_LEFT_MARGIN_MM,
+            row_bottom_mm,
+            PDF_CONTENT_WIDTH_MM,
+            0.25,
+            border_color.clone(),
+        );
+
+        let font = if bold {
+            self.bold_font.clone()
+        } else {
+            self.regular_font.clone()
+        };
+        let mut x_mm = PDF_LEFT_MARGIN_MM;
+        for ((_, width_mm), lines) in cells.iter().zip(wrapped_cells.iter()) {
+            append_pdf_filled_rect(
+                &mut self.page_ops,
+                x_mm,
+                row_bottom_mm,
+                0.25,
+                row_height_mm,
+                border_color.clone(),
+            );
+            for (line_index, line) in lines.iter().enumerate() {
+                append_pdf_text_line(
+                    &mut self.page_ops,
+                    line,
+                    x_mm + 2.0,
+                    row_top_mm - 3.6 - line_index as f32 * line_height_mm,
+                    font_size_pt,
+                    &font,
+                    TreatmentPlanPdfColor::Body,
+                );
+            }
+            x_mm += *width_mm;
+        }
+        append_pdf_filled_rect(
+            &mut self.page_ops,
+            PDF_LEFT_MARGIN_MM + PDF_CONTENT_WIDTH_MM - 0.25,
+            row_bottom_mm,
+            0.25,
+            row_height_mm,
+            border_color,
+        );
+        self.y_mm = row_bottom_mm;
+    }
+
     fn finish(mut self) -> Vec<PdfPage> {
         self.finish_page();
         if self.page_style == PdfPageStyle::Legal {
@@ -4262,10 +4365,13 @@ fn default_generated_document_name(
         ("treatment_plan", _) => "Behandlungsplan",
         ("single_order", "en") => "Single order",
         ("single_order", _) => "Einzelauftrag",
+        ("order_cost_estimate", "en") => "Cost estimate for single order",
+        ("order_cost_estimate", _) => "Kostenvoranschlag zum Einzelauftrag",
         ("cost_coverage_declaration", "en") => "Cost coverage declaration",
         ("cost_coverage_declaration", _) => "Kostenübernahmeerklärung",
-        ("cost_estimate", "en") => "Cost estimate",
-        ("cost_estimate", _) => "Kostenschätzung",
+        ("cost_estimate", "uk") => "Попередній розрахунок витрат",
+        ("cost_estimate", "en") => "Preliminary cost calculation",
+        ("cost_estimate", _) => "Vorläufige Kostenkalkulation",
         ("privacy_information", _) => "Informationsblatt zum Datenschutz",
         ("appointment_confirmation", "en") => "Appointment confirmation",
         ("appointment_confirmation", _) => "Terminbestätigung",
@@ -6152,7 +6258,7 @@ fn build_framework_contract_pdf(
     layout.ensure_space(26.0);
     fc_body(
         &mut layout,
-        "Die Erteilung und Annahme eines Einzelauftrags kann schriftlich unter Einbeziehung dieses Rahmendienstleistungsvertrags erfolgen. Die entsprechende Vorlage für Anlage 4 wird separat als eigenes Dokument generiert und diesem Rahmendienstleistungsvertrag zugeordnet.",
+        "Die Erteilung und Annahme eines Einzelauftrags kann schriftlich unter Einbeziehung dieses Rahmendienstleistungsvertrags erfolgen. Die entsprechende Vorlage des Einzelauftrags wird separat als eigenes Dokument generiert und diesem Rahmendienstleistungsvertrag zugeordnet.",
     );
     fc_body(
         &mut layout,
@@ -6461,7 +6567,6 @@ fn build_framework_contract_pdf(
         "Anlage 1:  Einverständnis zur Datenübermittlung",
         "Anlage 2:  Schweigepflichtentbindung",
         "Anlage 3:  Informationsblatt zum Datenschutz",
-        "Anlage 4:  Vorlage: Einzelauftrag",
     ] {
         layout.text_block(
             line,
@@ -10770,42 +10875,7 @@ async fn generate_document(
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned);
 
-    let mut bindings = body.bindings.clone().unwrap_or_default();
-    if template.id == "privacy_consents"
-        && bindings
-            .extra_release_recipients
-            .as_deref()
-            .is_none_or(|value| value.trim().is_empty())
-    {
-        let stored_contacts = if let Some(lead_uuid) = lead_id {
-            sqlx::query_scalar::<_, Value>("SELECT trusted_contacts FROM leads WHERE id = $1")
-                .bind(lead_uuid)
-                .fetch_optional(&state.db)
-                .await
-        } else if let Some(patient_uuid) = patient_id {
-            sqlx::query_scalar::<_, Value>(
-                "SELECT COALESCE(intake_profile -> 'trusted_contacts', '[]'::jsonb) FROM patients WHERE id = $1",
-            )
-            .bind(patient_uuid)
-            .fetch_optional(&state.db)
-            .await
-        } else {
-            Ok(None)
-        };
-        match stored_contacts {
-            Ok(Some(contacts)) => {
-                bindings.extra_release_recipients = trusted_contact_recipients_binding(&contacts);
-            }
-            Ok(None) => {}
-            Err(error) => {
-                tracing::error!(error = %error, ?patient_id, ?lead_id, "load trusted contacts for generated document");
-                return err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to load trusted contacts",
-                );
-            }
-        }
-    }
+    let bindings = body.bindings.clone().unwrap_or_default();
     let generated_bindings_snapshot = generated_binding_snapshot(&bindings);
     let manual_text = match normalize_generated_manual_text(body.manual_text.as_deref()) {
         Ok(value) => value,
@@ -11245,7 +11315,7 @@ async fn generate_document(
                     r#"SELECT contract_number, status, signed_at, valid_from, valid_to, conditions
                        FROM framework_contracts
                        WHERE patient_id = $1
-                       ORDER BY created_at DESC
+                       ORDER BY created_at DESC, id DESC
                        LIMIT 1"#,
                 )
                 .bind(patient_uuid)
@@ -11277,7 +11347,7 @@ async fn generate_document(
                               line_items, notes
                        FROM quotes
                        WHERE order_id = $1
-                       ORDER BY created_at DESC
+                       ORDER BY created_at DESC, id DESC
                        LIMIT 1"#,
                 )
                 .bind(order_uuid)
@@ -11569,7 +11639,8 @@ async fn generate_document(
             };
             (preview_html, pdf_bytes)
         }
-        "single_order" => {
+        "single_order" | "order_cost_estimate" => {
+            let is_order_cost_estimate = template.id == "order_cost_estimate";
             let mut agency = match load_agency_contract_settings(&state).await {
                 Ok(value) => value,
                 Err(resp) => return resp,
@@ -11646,6 +11717,28 @@ async fn generate_document(
                         .filter(|value| !value.trim().is_empty())
                 })
                 .unwrap_or_default();
+            let order_sequence = bindings
+                .order_sequence
+                .unwrap_or(order_metadata.order_sequence);
+            let quote_annex_reference = quote_number.as_ref().map(|number| {
+                format!(
+                    "Anlage 1 zum {order_sequence}. Einzelauftrag: Kostenvoranschlag Nr.: {number} (separates Dokument)"
+                )
+            });
+            let configured_order_components = bindings
+                .order_components
+                .clone()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+            let order_components = match (configured_order_components, quote_annex_reference) {
+                (Some(configured), Some(reference))
+                    if !configured.to_ascii_lowercase().contains("anlage 1") =>
+                {
+                    Some(format!("{configured}\n{reference}"))
+                }
+                (Some(configured), _) => Some(configured),
+                (None, reference) => reference,
+            };
             let context = GeneratedSingleOrderContext {
                 language: language.to_string(),
                 auto_name: auto_name.clone(),
@@ -11654,9 +11747,7 @@ async fn generate_document(
                 party: patient_party.clone(),
                 agency,
                 order_number: resolved_order_number,
-                order_sequence: bindings
-                    .order_sequence
-                    .unwrap_or(order_metadata.order_sequence),
+                order_sequence,
                 order_date: bindings.order_date.or(order_metadata.order_date),
                 contract_date: bindings.contract_date.or(order_metadata.contract_date),
                 specialties: bindings
@@ -11665,15 +11756,7 @@ async fn generate_document(
                     .or(appointment_scope.specialties),
                 examination_purpose: bindings.examination_purpose.clone(),
                 treatment_purpose: bindings.treatment_purpose.clone(),
-                order_components: bindings.order_components.clone().or_else(|| {
-                    if payer.is_none() {
-                        quote_number.as_ref().map(|number| {
-                            format!("Anlage 1 zum Einzelauftrag: Kostenvoranschlag Nr.: {number}")
-                        })
-                    } else {
-                        None
-                    }
-                }),
+                order_components,
                 period_from: bindings.period_from.or(appointment_scope.first_date),
                 period_to: bindings.period_to.or(appointment_scope.last_date),
                 payer,
@@ -11706,14 +11789,27 @@ async fn generate_document(
             };
             let preview = admin_preview_html(
                 &context.title_override.clone().unwrap_or_else(|| {
-                    admin_doc_label(&context.language, "single_order_title").to_string()
+                    admin_doc_label(
+                        &context.language,
+                        if is_order_cost_estimate {
+                            "order_cost_estimate_title"
+                        } else {
+                            "single_order_title"
+                        },
+                    )
+                    .to_string()
                 }),
                 &party_block_lines(&context.party),
             );
-            let pdf_bytes = match build_single_order_pdf(&context, &generated_doc_id) {
+            let pdf_result = if is_order_cost_estimate {
+                build_order_cost_estimate_pdf(&context, &generated_doc_id)
+            } else {
+                build_single_order_pdf(&context, &generated_doc_id)
+            };
+            let pdf_bytes = match pdf_result {
                 Ok(bytes) => bytes,
                 Err(message) => {
-                    tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build single order PDF");
+                    tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build order document PDF");
                     return err(StatusCode::INTERNAL_SERVER_ERROR, message);
                 }
             };
@@ -12359,16 +12455,19 @@ fn fmt_de_date(date: Option<NaiveDate>) -> String {
 fn admin_doc_label(language: &str, key: &str) -> &'static str {
     match (language, key) {
         ("uk", "single_order_title") => "Окреме замовлення",
+        ("uk", "order_cost_estimate_title") => "Кошторис до окремого замовлення",
         ("uk", "cost_coverage_title") => "Декларація про прийняття витрат",
         ("uk", "cost_estimate_title") => "Орієнтовний кошторис витрат",
         ("uk", "appointment_confirmation_title") => "Підтвердження запису",
         ("uk", "consent_title") => "Згода на передачу даних та звільнення від таємниці",
         ("en", "single_order_title") => "Single order",
+        ("en", "order_cost_estimate_title") => "Cost estimate for single order",
         ("en", "cost_coverage_title") => "Cost coverage declaration",
         ("en", "cost_estimate_title") => "Non-binding cost estimate",
         ("en", "appointment_confirmation_title") => "Appointment confirmation",
         ("en", "consent_title") => "Data transfer and confidentiality release",
         (_, "single_order_title") => "Einzelauftrag",
+        (_, "order_cost_estimate_title") => "Kostenvoranschlag zum Einzelauftrag",
         (_, "cost_coverage_title") => "Kostenübernahmeerklärung",
         (_, "cost_estimate_title") => cost_estimate_default_title(),
         (_, "appointment_confirmation_title") => "Terminbestätigung",
@@ -12455,10 +12554,22 @@ async fn load_agency_contract_settings(
             .cloned()
             .unwrap_or_else(|| "GMED-EDV-System".to_string()),
         data_processor_notice: values.get("agency_data_processor_notice").cloned(),
-        bank_holder: values.get("agency_bank_holder").cloned(),
-        bank_name: values.get("agency_bank_name").cloned(),
-        bank_swift: values.get("agency_bank_swift").cloned(),
-        bank_iban: values.get("agency_bank_iban").cloned(),
+        bank_holder: values
+            .get("agency_bank_holder")
+            .cloned()
+            .or_else(|| Some(DEFAULT_AGENCY_BANK_HOLDER.to_string())),
+        bank_name: values
+            .get("agency_bank_name")
+            .cloned()
+            .or_else(|| Some(DEFAULT_AGENCY_BANK_NAME.to_string())),
+        bank_swift: values
+            .get("agency_bank_swift")
+            .cloned()
+            .or_else(|| Some(DEFAULT_AGENCY_BANK_SWIFT.to_string())),
+        bank_iban: values
+            .get("agency_bank_iban")
+            .cloned()
+            .or_else(|| Some(DEFAULT_AGENCY_BANK_IBAN.to_string())),
     })
 }
 
@@ -12602,47 +12713,6 @@ fn generated_binding_snapshot(bindings: &DocumentBindingOverrides) -> Option<Val
     serde_json::to_value(bindings)
         .ok()
         .and_then(compact_generated_binding_value)
-}
-
-fn trusted_contact_recipients_binding(contacts: &Value) -> Option<String> {
-    let lines = contacts
-        .as_array()?
-        .iter()
-        .filter_map(|contact| {
-            let contact = contact.as_object()?;
-            let value = |key: &str| {
-                contact
-                    .get(key)
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-            };
-            let name = value("name")?;
-            let mut parts = vec![name.to_string()];
-            if let Some(birth_date) = value("birth_date") {
-                let formatted = NaiveDate::parse_from_str(birth_date, "%Y-%m-%d")
-                    .ok()
-                    .map(|date| fmt_de_date(Some(date)))
-                    .unwrap_or_else(|| birth_date.to_string());
-                parts.push(format!("geb. am {formatted}"));
-            }
-            if let Some(relation) = value("relation") {
-                parts.push(format!("Beziehung: {relation}"));
-            }
-            if let Some(address) = value("address") {
-                parts.push(format!("Adresse: {address}"));
-            }
-            if let Some(email) = value("email") {
-                parts.push(format!("E-Mail: {email}"));
-            }
-            if let Some(phone) = value("phone") {
-                parts.push(format!("Tel.: {phone}"));
-            }
-            Some(parts.join(", "))
-        })
-        .collect::<Vec<_>>();
-
-    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 fn generated_manual_text_paragraphs(value: &str) -> Vec<String> {
@@ -12819,15 +12889,6 @@ fn build_single_order_pdf(
         )
     });
     layout.text_block(
-        "Anlage 4",
-        11.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        1.0,
-    );
-    layout.text_block(
         &title,
         18.0,
         true,
@@ -12892,7 +12953,7 @@ fn build_single_order_pdf(
         2.0,
     );
 
-    admin_heading(&mut layout, "§ 1 Leistungsumfang");
+    admin_heading(&mut layout, "I. Leistungsumfang");
     admin_block(
         &mut layout,
         "Im Zuge der vorliegenden Beauftragung sind durch den Auftragnehmer folgende Leistungen zu erbringen:",
@@ -12925,7 +12986,7 @@ fn build_single_order_pdf(
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .unwrap_or("eine medizinische Behandlung");
-    for item in [
+    for (item_index, item) in [
         format!(
             "Individuelle Beratung und Informationsvermittlung in Bezug auf eine Möglichkeit, eine medizinische Untersuchung bei den Fachärzten für {specialties} {period} in München durchzuführen."
         ),
@@ -12945,9 +13006,12 @@ fn build_single_order_pdf(
         "Bereitstellung von Dolmetschern für den reibungslosen Informationsaustausch zwischen dem Auftraggeber und medizinischem Fachpersonal.".to_string(),
         "Bei Bedarf und einem ausdrücklichen Wunsch: schriftliche Übersetzung von vom Auftraggeber ausgewählten Arztbriefen, Befunden und anderen Unterlagen.".to_string(),
         "Koordination von Nachsorgeterminen und Rehabilitationsmaßnahmen.".to_string(),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         layout.text_block(
-            &format!("•  {item}"),
+            &format!("{}. {item}", item_index + 1),
             11.0,
             false,
             4.0,
@@ -12959,11 +13023,19 @@ fn build_single_order_pdf(
 
     admin_heading(
         &mut layout,
-        "§ 2 Vergütungsvereinbarung, Kostenübernahme durch Dritte und aufschiebende Bedingung für die Wirksamkeit des Einzelauftrags",
+        if context.payer.is_some() {
+            "II. Vergütungsvereinbarung, Kostenübernahme durch Dritte und aufschiebende Bedingung für die Wirksamkeit des Einzelauftrags"
+        } else {
+            "II. Vergütungsvereinbarung"
+        },
     );
     admin_block(
         &mut layout,
-        "Für diese Auftragserfüllung wird folgendes vereinbart:",
+        if context.payer.is_some() {
+            "Für diese Auftragserfüllung wird folgendes vereinbart:"
+        } else {
+            "1. Für diese Auftragserfüllung wird folgende Vergütung vereinbart:"
+        },
         0.0,
         1.0,
     );
@@ -13013,14 +13085,15 @@ fn build_single_order_pdf(
                 2.0,
             );
         } else {
-            layout.text_block(
-                "Leistungen — Honorar* — Anmerkung",
-                10.0,
+            layout.ensure_space(45.0);
+            layout.table_row(
+                &[
+                    ("Leistungen", 88.0),
+                    ("Honorar*", 30.0),
+                    ("Anmerkung", 56.0),
+                ],
                 true,
-                0.0,
-                TreatmentPlanPdfColor::Muted,
-                0.0,
-                1.0,
+                true,
             );
             for item in &context.line_items {
                 let fee = cost_coverage_money_cell(&item.unit_price)
@@ -13031,14 +13104,10 @@ fn build_single_order_pdf(
                     .map(str::trim)
                     .filter(|value| !value.is_empty())
                     .unwrap_or("—");
-                layout.text_block(
-                    &format!("•  {} — {fee} — {notes}", item.description.trim()),
-                    11.0,
+                layout.table_row(
+                    &[(item.description.trim(), 88.0), (&fee, 30.0), (notes, 56.0)],
                     false,
-                    4.0,
-                    TreatmentPlanPdfColor::Body,
-                    0.0,
-                    0.8,
+                    false,
                 );
             }
             admin_block(
@@ -13047,32 +13116,74 @@ fn build_single_order_pdf(
                 1.0,
                 1.5,
             );
+            admin_block(
+                &mut layout,
+                "2. Die Pauschale für die Kommunikation mit den Ärzten und die Koordination der Behandlungen ist in voller Höhe zu zahlen, unabhängig davon, wie viele Ärzte tatsächlich konsultiert worden sind.",
+                0.0,
+                1.0,
+            );
+            admin_block(
+                &mut layout,
+                "3. Die Parteien sind sich einig, dass sich die Vergütung auf die unter § 1 genannten Leistungen bezieht. Den Parteien steht es frei, jederzeit Folgeaufträge unter Geltung der Regelungen des Dienstleistungsvertrages abzuschließen.",
+                0.0,
+                1.0,
+            );
+            admin_block(
+                &mut layout,
+                "4. Im Übrigen gelten die Regelungen des § 2 des Rahmendienstleistungsvertrages.",
+                0.0,
+                1.5,
+            );
         }
+    }
+
+    let bank_lines = [
+        ("Kontoinhaber", context.agency.bank_holder.as_deref()),
+        ("Bank", context.agency.bank_name.as_deref()),
+        ("SWIFT-Code", context.agency.bank_swift.as_deref()),
+        ("IBAN", context.agency.bank_iban.as_deref()),
+    ];
+    if bank_lines
+        .iter()
+        .any(|(_, value)| value.map(str::trim).is_some_and(|value| !value.is_empty()))
+    {
+        admin_block(
+            &mut layout,
+            "Zahlungen aus diesem Einzelauftrag sind auf das folgende Konto des Auftragnehmers zu leisten:",
+            1.0,
+            0.8,
+        );
+        for (label, value) in bank_lines {
+            if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+                admin_block(&mut layout, &format!("{label}: {value}"), 0.0, 0.4);
+            }
+        }
+        layout.spacer(1.0);
     }
 
     for (heading, body) in [
         (
-            "§ 3 Fortgeltung",
+            "III. Fortgeltung",
             "Im Übrigen gelten die Regelungen des Rahmendienstleistungsvertrag mit allen enthaltenden Regelungen und Bestandteilen unverändert fort.",
         ),
         (
-            "§ 4 Anwendbares Recht",
+            "IV. Anwendbares Recht",
             "Auf diesen Vertrag ist ausschließlich das deutsche Recht anzuwenden.",
         ),
         (
-            "§ 5 Erfüllungsort",
+            "V. Erfüllungsort",
             "Erfüllungsort für sämtliche Leistungen ist München.",
         ),
         (
-            "§ 6 Gerichtstand",
+            "VI. Gerichtstand",
             "Ausschließlicher Gerichtstand für alle, sich aus dem Vertragsverhältnis ergebenden Streitigkeiten, ist München, Deutschland.",
         ),
         (
-            "§ 7 Änderungen und Ergänzungen",
+            "VII. Änderungen und Ergänzungen",
             "Die Parteien vereinbaren, dass das Schriftformerfordernis für diesen Einzelauftrag als gewahrt gilt, sofern beide Parteien diesen mittels eines anerkannten elektronischen Signaturtools, wie beispielsweise DocuSign, unterzeichnen. Kurzfristige Änderungen oder Ergänzungen des festgelegten Leistungsumfangs dieses Einzelauftrags können hingegen per E-Mail vereinbart werden.",
         ),
         (
-            "§ 8 Salvatorische Klausel",
+            "VIII. Salvatorische Klausel",
             "Sollten einzelne Bestimmungen dieses Vertrages ganz oder teilweise unwirksam sein oder werden, so wird hierdurch die Wirksamkeit der übrigen Bestimmungen nicht berührt. Anstelle der unwirksamen Bestimmung gilt diejenige wirksame Bestimmung als vereinbart, die dem Sinn und Zweck der unwirksamen Bestimmung am nächsten kommt.",
         ),
     ] {
@@ -13082,15 +13193,29 @@ fn build_single_order_pdf(
 
     admin_heading(
         &mut layout,
-        "§ 9 Bestandteile des Einzelauftrages und Rangfolge",
+        "IX. Bestandteile des Einzelauftrages und Rangfolge",
     );
     let order_components = context
         .order_components
         .as_deref()
+        .into_iter()
+        .flat_map(str::lines)
         .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .unwrap_or("Keine");
-    admin_block(&mut layout, order_components, 0.0, 2.0);
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if order_components.is_empty() {
+        admin_block(&mut layout, "Keine", 0.0, 2.0);
+    } else {
+        let last_index = order_components.len() - 1;
+        for (index, component) in order_components.into_iter().enumerate() {
+            admin_block(
+                &mut layout,
+                component,
+                0.0,
+                if index == last_index { 2.0 } else { 0.5 },
+            );
+        }
+    }
 
     admin_signature_block(
         &mut layout,
@@ -13107,145 +13232,173 @@ fn build_single_order_pdf(
         "Auftraggeber",
     );
 
-    // The no-payer DOCX variant contains a complete quote as Anlage 1. Keeping
-    // it in the same generated PDF avoids silently dropping the highlighted
-    // service, total and bank binding sockets from the reference document.
-    if context.payer.is_none() && !context.line_items.is_empty() {
-        admin_heading(
+    let _ = &context.patient_pid;
+    Ok(finalize_admin_pdf(document, layout))
+}
+
+fn build_order_cost_estimate_pdf(
+    context: &GeneratedSingleOrderContext,
+    fallback_document_reference: &str,
+) -> Result<Vec<u8>, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let document_reference =
+        legal_document_reference(context.quote_number.as_deref(), fallback_document_reference);
+    let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
+
+    admin_heading(
+        &mut layout,
+        &format!(
+            "Anlage 1 zum {}. Einzelauftrag: Kostenvoranschlag",
+            context.order_sequence
+        ),
+    );
+    if let Some(quote_number) = context
+        .quote_number
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        admin_block(
             &mut layout,
-            &format!(
-                "Anlage 1 zum {}. Einzelauftrag: Kostenvoranschlag",
-                context.order_sequence
-            ),
+            &format!("Kostenvoranschlag Nr.: {quote_number}"),
+            0.0,
+            0.5,
         );
-        if let Some(quote_number) = context
-            .quote_number
+    }
+    if !context.order_number.trim().is_empty() {
+        admin_block(
+            &mut layout,
+            &format!("Auftragsnummer: {}", context.order_number),
+            0.0,
+            0.5,
+        );
+    }
+    for line in [
+        format!("Datum: {}", fmt_de_date(context.order_date)),
+        format!("Auftraggeber: {}", context.party.name_with_salutation()),
+        format!(
+            "Geburtsdatum des Auftraggebers: {}",
+            fmt_de_date(context.party.birth_date)
+        ),
+        format!(
+            "Rahmendienstleistungsvertrag vom: {}",
+            fmt_de_date(context.contract_date)
+        ),
+        format!("Einzelauftrag vom: {}", fmt_de_date(context.order_date)),
+    ] {
+        admin_block(&mut layout, &line, 0.0, 0.5);
+    }
+    layout.spacer(1.0);
+    layout.text_block(
+        "Leistung — Einzelpreis — Menge — Summe",
+        10.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Muted,
+        0.0,
+        1.0,
+    );
+    for item in &context.line_items {
+        let unit_price = cost_coverage_money_cell(&item.unit_price)
+            .unwrap_or_else(|| "____________".to_string());
+        let quantity = if item.quantity.trim().is_empty() {
+            "1"
+        } else {
+            item.quantity.trim()
+        };
+        let line_gross = cost_coverage_money_cell(&item.line_gross)
+            .unwrap_or_else(|| "____________".to_string());
+        layout.text_block(
+            &format!(
+                "•  {} — {unit_price} — {quantity} — {line_gross}",
+                item.description.trim()
+            ),
+            11.0,
+            false,
+            4.0,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            0.8,
+        );
+        if let Some(note) = item
+            .notes
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            admin_block(
-                &mut layout,
-                &format!("Kostenvoranschlag Nr.: {quote_number}"),
+            layout.text_block(
+                note,
+                9.5,
+                false,
+                8.0,
+                TreatmentPlanPdfColor::Muted,
                 0.0,
                 0.5,
             );
         }
-        for line in [
-            format!("Datum: {}", fmt_de_date(context.order_date)),
-            format!("Auftraggeber: {}", context.party.name_with_salutation()),
-            format!(
-                "Geburtsdatum des Auftraggebers: {}",
-                fmt_de_date(context.party.birth_date)
-            ),
-            format!(
-                "Rahmendienstleistungsvertrag vom: {}",
-                fmt_de_date(context.contract_date)
-            ),
-            format!("Einzelauftrag vom: {}", fmt_de_date(context.order_date)),
-        ] {
-            admin_block(&mut layout, &line, 0.0, 0.5);
+    }
+    for (label, value) in [
+        ("Nettowert", context.total_net.as_deref()),
+        ("MwSt.", context.total_vat.as_deref()),
+        ("Gesamtsumme", context.total_gross.as_deref()),
+    ] {
+        if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+            admin_block(
+                &mut layout,
+                &format!("{label}: {value}"),
+                0.0,
+                if label == "Gesamtsumme" { 1.5 } else { 0.5 },
+            );
         }
-        layout.spacer(1.0);
-        layout.text_block(
-            "Leistung — Einzelpreis — Menge — Summe",
-            10.0,
-            true,
-            0.0,
-            TreatmentPlanPdfColor::Muted,
+    }
+    let bank_lines = [
+        ("Kontoinhaber", context.agency.bank_holder.as_deref()),
+        ("Bank", context.agency.bank_name.as_deref()),
+        ("SWIFT-Code", context.agency.bank_swift.as_deref()),
+        ("IBAN", context.agency.bank_iban.as_deref()),
+    ];
+    if bank_lines
+        .iter()
+        .any(|(_, value)| value.map(str::trim).is_some_and(|value| !value.is_empty()))
+    {
+        admin_block(
+            &mut layout,
+            "Der angegebene Gesamtbetrag ist vor Behandlungs-/Auftragsbeginn zu überweisen an:",
+            1.0,
+            0.8,
+        );
+        for (label, value) in bank_lines {
+            if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+                admin_block(&mut layout, &format!("{label}: {value}"), 0.0, 0.4);
+            }
+        }
+        admin_block(
+            &mut layout,
+            "Ggf. fordern wir während der Durchführung des Auftrages zu weiteren Vorauszahlungen auf. Überschreiten die Vorauszahlungen die endgültigen Gesamtauftragskosten, erstatten wir den Restbetrag selbstverständlich zurück.",
+            1.0,
+            1.0,
+        );
+        admin_block(
+            &mut layout,
+            "Die in der Endabrechnung angegebenen, angefallenen Kosten für von uns erbrachte Leistungen und Auslagen sind nach Zugang der Rechnung binnen 14 Tagen auf das oben genannte Konto zur Zahlung fällig.",
             0.0,
             1.0,
         );
-        for item in &context.line_items {
-            let unit_price = cost_coverage_money_cell(&item.unit_price)
-                .unwrap_or_else(|| "____________".to_string());
-            let quantity = if item.quantity.trim().is_empty() {
-                "1"
-            } else {
-                item.quantity.trim()
-            };
-            let line_gross = cost_coverage_money_cell(&item.line_gross)
-                .unwrap_or_else(|| "____________".to_string());
-            layout.text_block(
-                &format!(
-                    "•  {} — {unit_price} — {quantity} — {line_gross}",
-                    item.description.trim()
-                ),
-                11.0,
-                false,
-                4.0,
-                TreatmentPlanPdfColor::Body,
-                0.0,
-                0.8,
-            );
-            if let Some(note) = item
-                .notes
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-            {
-                layout.text_block(
-                    note,
-                    9.5,
-                    false,
-                    8.0,
-                    TreatmentPlanPdfColor::Muted,
-                    0.0,
-                    0.5,
-                );
-            }
-        }
-        for (label, value) in [
-            ("Nettowert", context.total_net.as_deref()),
-            ("MwSt.", context.total_vat.as_deref()),
-            ("Gesamtsumme", context.total_gross.as_deref()),
-        ] {
-            if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-                admin_block(
-                    &mut layout,
-                    &format!("{label}: {value}"),
-                    0.0,
-                    if label == "Gesamtsumme" { 1.5 } else { 0.5 },
-                );
-            }
-        }
-        let bank_lines = [
-            ("Kontoinhaber", context.agency.bank_holder.as_deref()),
-            ("Bank", context.agency.bank_name.as_deref()),
-            ("SWIFT-Code", context.agency.bank_swift.as_deref()),
-            ("IBAN", context.agency.bank_iban.as_deref()),
-        ];
-        if bank_lines
-            .iter()
-            .any(|(_, value)| value.map(str::trim).is_some_and(|value| !value.is_empty()))
-        {
-            admin_block(
-                &mut layout,
-                "Die ausgewiesenen Kosten sind nach Zugang der Rechnung binnen 14 Tagen auf das folgende Konto zu zahlen:",
-                1.0,
-                0.8,
-            );
-            for (label, value) in bank_lines {
-                if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-                    admin_block(&mut layout, &format!("{label}: {value}"), 0.0, 0.4);
-                }
-            }
-        }
-        admin_signature_block(
-            &mut layout,
-            context.agency_sign_place.as_deref(),
-            context.agency_sign_date,
-            ADULT_LEGAL_AGENCY_PERSON,
-            "Auftragnehmer",
-        );
-        admin_signature_block(
-            &mut layout,
-            context.party_sign_place.as_deref(),
-            context.party_sign_date,
-            &context.party.name_with_salutation(),
-            "Auftraggeber",
-        );
     }
+    admin_signature_block(
+        &mut layout,
+        context.agency_sign_place.as_deref(),
+        context.agency_sign_date,
+        ADULT_LEGAL_AGENCY_PERSON,
+        "Auftragnehmer",
+    );
+    admin_signature_block(
+        &mut layout,
+        context.party_sign_place.as_deref(),
+        context.party_sign_date,
+        &context.party.name_with_salutation(),
+        "Auftraggeber",
+    );
 
     let _ = &context.patient_pid;
     Ok(finalize_admin_pdf(document, layout))
@@ -14206,6 +14359,10 @@ const DEFAULT_AGENCY_ADDRESS: &str = "Albert-Schweitzer-Straße 56\n81735 Münch
 const DEFAULT_AGENCY_PHONE: &str = "+49 176 22570962";
 const DEFAULT_AGENCY_EMAIL: &str = "office@gmed-health.com";
 const DEFAULT_AGENCY_WEBSITE: &str = "gmed-health.com";
+const DEFAULT_AGENCY_BANK_HOLDER: &str = "Heorhii Hudiiev";
+const DEFAULT_AGENCY_BANK_NAME: &str = "Commerzbank München";
+const DEFAULT_AGENCY_BANK_SWIFT: &str = "COBADEFFXXX";
+const DEFAULT_AGENCY_BANK_IBAN: &str = "DE71 7004 0045 0836 8961 00";
 
 fn adult_legal_agency_identity() -> String {
     format!("{ADULT_LEGAL_AGENCY_LABEL} {ADULT_LEGAL_AGENCY_PERSON}")
@@ -14499,10 +14656,7 @@ fn render_adult_privacy_information(
         ),
     );
     fc_subhead(layout, "Name des Verantwortlichen");
-    fc_body(
-        layout,
-        &format!("Verantwortlich für die Verarbeitung Ihrer Daten ist {agency_identity}."),
-    );
+    fc_body(layout, ADULT_LEGAL_AGENCY_PERSON);
     fc_subhead(layout, "Kontaktdaten des Datenschutzbeauftragten");
     fc_body(
         layout,
@@ -14735,9 +14889,14 @@ fn build_adult_privacy_consents_pdf(
         fc_body(&mut layout, "Mir ist bekannt:");
         fc_body(&mut layout, processor_notice);
     }
-    fc_body(
-        &mut layout,
+    layout.text_block(
         "Die Einwilligung in die Verarbeitung meiner Daten ist freiwillig und kann jederzeit ohne Angabe von Gründen schriftlich mit Wirkung für die Zukunft widerrufen werden. Der Widerruf berührt die Rechtmäßigkeit der bisherigen Verarbeitung nicht.",
+        11.0,
+        true,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        2.0,
     );
     fc_body(
         &mut layout,
@@ -15512,7 +15671,7 @@ async fn load_order_quote_summary(
                   line_items
            FROM quotes
            WHERE order_id = $1
-           ORDER BY created_at DESC
+           ORDER BY created_at DESC, id DESC
            LIMIT 1"#,
     )
     .bind(order_id)
@@ -19896,17 +20055,18 @@ async fn list_document_categories(
 #[cfg(test)]
 mod tests {
     use super::{
-        AgencyContractSettings, DocPartyBlock, DocumentBindingOverrides, GeneratedContractLineItem,
-        GeneratedCostEstimateContext, GeneratedFrameworkContractContext,
+        ADULT_LEGAL_AGENCY_PERSON, AgencyContractSettings, DocPartyBlock, DocumentBindingOverrides,
+        GeneratedContractLineItem, GeneratedCostEstimateContext, GeneratedFrameworkContractContext,
         GeneratedPatientStickerContext, GeneratedSingleOrderContext, ServiceLineInput,
-        build_adult_confidentiality_release_pdf, build_adult_privacy_consents_pdf,
-        build_adult_privacy_information_pdf, build_cost_estimate_pdf, build_framework_contract_pdf,
-        build_manual_generated_text_pdf, build_patient_sticker_pdf, build_single_order_pdf,
+        adult_legal_agency_identity, build_adult_confidentiality_release_pdf,
+        build_adult_privacy_consents_pdf, build_adult_privacy_information_pdf,
+        build_cost_estimate_pdf, build_framework_contract_pdf, build_manual_generated_text_pdf,
+        build_order_cost_estimate_pdf, build_patient_sticker_pdf, build_single_order_pdf,
         compute_line_item_totals, cost_coverage_money_cell, cost_estimate_price_text,
         document_satisfies_compliance_kind, document_template_by_id, generated_binding_snapshot,
         generated_compliance_document_number, german_document_country,
         is_fixed_legal_document_template, is_lead_allowed_document_template,
-        legal_document_reference, pdf_text_font_handles, trusted_contact_recipients_binding,
+        legal_document_reference, pdf_text_font_handles,
     };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
     use chrono::{NaiveDate, TimeZone, Utc};
@@ -20016,7 +20176,12 @@ mod tests {
                 .as_deref(),
             Some("DS-20260713-0123456789AB")
         );
-        for template_id in ["framework_contract", "single_order", "cost_estimate"] {
+        for template_id in [
+            "framework_contract",
+            "single_order",
+            "order_cost_estimate",
+            "cost_estimate",
+        ] {
             assert!(
                 generated_compliance_document_number(template_id, document_id, generated_at)
                     .is_none()
@@ -20083,6 +20248,7 @@ mod tests {
         for template_id in [
             "framework_contract",
             "single_order",
+            "order_cost_estimate",
             "cost_estimate",
             "confidentiality_release",
             "privacy_consents",
@@ -20255,6 +20421,12 @@ mod tests {
         );
         assert!(privacy_information_text.contains("Betroffenenrechte"));
         assert!(privacy_information_text.contains("datenschutz@example.test"));
+        assert!(privacy_information_text.contains("Name des Verantwortlichen"));
+        assert!(privacy_information_text.contains(ADULT_LEGAL_AGENCY_PERSON));
+        assert!(!privacy_information_text.contains(&format!(
+            "Verantwortlich für die Verarbeitung Ihrer Daten ist {}",
+            adult_legal_agency_identity()
+        )));
         assert!(!privacy_information_text.contains("Anna Beispiel"));
         assert!(!privacy_information_text.contains('?'));
     }
@@ -20340,13 +20512,13 @@ mod tests {
             "Anlage 1: Einverständnis zur Datenübermittlung",
             "Anlage 2: Schweigepflichtentbindung",
             "Anlage 3: Informationsblatt zum Datenschutz",
-            "Anlage 4: Vorlage: Einzelauftrag",
         ] {
             assert!(text.contains(annex), "missing annex index entry: {annex}");
         }
         assert!(text.contains(
-            "Die entsprechende Vorlage für Anlage 4 wird separat als eigenes Dokument generiert"
+            "Die entsprechende Vorlage des Einzelauftrags wird separat als eigenes Dokument generiert"
         ));
+        assert!(!text.contains("Anlage 4"));
         assert!(!text.contains("beigefügt"));
         for annex_body_marker in [
             "bitte ankreuzen",
@@ -20362,14 +20534,20 @@ mod tests {
     }
 
     #[test]
-    fn single_order_pdf_uses_order_number_and_shared_legal_chrome() {
+    fn single_order_and_order_cost_estimate_are_separate_legal_documents() {
         let context = GeneratedSingleOrderContext {
             language: "de".to_string(),
             auto_name: "Einzelauftrag".to_string(),
             title_override: None,
             patient_pid: "PT-LEGAL-2".to_string(),
             party: legal_test_party("Germany"),
-            agency: legal_test_agency(),
+            agency: AgencyContractSettings {
+                bank_holder: Some("GMED Testkonto".to_string()),
+                bank_name: Some("Testbank".to_string()),
+                bank_swift: Some("TESTDEFF".to_string()),
+                bank_iban: Some("DE00 0000 0000 0000 0000 00".to_string()),
+                ..legal_test_agency()
+            },
             order_number: "EA-2026-0017".to_string(),
             order_sequence: 2,
             order_date: NaiveDate::from_ymd_opt(2026, 7, 16),
@@ -20377,15 +20555,25 @@ mod tests {
             specialties: Some("Kardiologie".to_string()),
             examination_purpose: Some("kardiologischen Untersuchung".to_string()),
             treatment_purpose: Some("kardiologische Behandlung".to_string()),
-            order_components: Some("Keine weiteren Anlagen".to_string()),
+            order_components: Some(
+                "Anlage 1 zum 2. Einzelauftrag: Kostenvoranschlag Nr.: KV-2026-0042 (separates Dokument)"
+                    .to_string(),
+            ),
             period_from: NaiveDate::from_ymd_opt(2026, 8, 3),
             period_to: NaiveDate::from_ymd_opt(2026, 8, 7),
             payer: None,
-            quote_number: None,
-            line_items: Vec::new(),
-            total_net: None,
-            total_vat: None,
-            total_gross: None,
+            quote_number: Some("KV-2026-0042".to_string()),
+            line_items: vec![GeneratedContractLineItem {
+                description: "UNIQUE-QUOTE-SERVICE".to_string(),
+                quantity: "4".to_string(),
+                unit_price: "100,00 EUR".to_string(),
+                line_gross: "400,00 EUR".to_string(),
+                vat_rate: Some("19".to_string()),
+                notes: Some("Leistungsumfang 10, 11".to_string()),
+            }],
+            total_net: Some("400,00 EUR".to_string()),
+            total_vat: Some("76,00 EUR".to_string()),
+            total_gross: Some("476,00 EUR".to_string()),
             party_sign_place: Some("Berlin".to_string()),
             party_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             agency_sign_place: Some("Köln".to_string()),
@@ -20397,12 +20585,43 @@ mod tests {
         let text = assert_legal_pdf_chrome(&bytes, "EA-2026-0017");
 
         assert!(!text.contains("DOC-ORDER-FALLBACK"));
-        assert!(text.contains("Anlage 4"));
+        assert!(!text.contains("Anlage 4"));
         assert!(text.contains("Auftragsnummer: EA-2026-0017"));
         assert!(text.contains("Deutschland"));
         assert!(text.contains("Berlin, den 16.07.2026"));
-        assert!(text.contains("§ 1 Leistungsumfang"));
-        assert!(text.contains("§ 9 Bestandteile des Einzelauftrages und Rangfolge"));
+        assert!(text.contains("I. Leistungsumfang"));
+        assert!(text.contains("1. Individuelle Beratung"));
+        assert!(text.contains("II. Vergütungsvereinbarung"));
+        assert!(text.contains("IX. Bestandteile des Einzelauftrages und Rangfolge"));
+        assert!(text.contains("Kostenvoranschlag Nr.: KV-2026-0042"));
+        assert!(text.contains("Kontoinhaber: GMED Testkonto"));
+        assert!(text.contains("IBAN: DE00 0000 0000 0000 0000 00"));
+        assert!(text.contains("Zahlungen aus diesem Einzelauftrag sind auf das folgende Konto"));
+        assert!(!text.contains(
+            "Der angegebene Gesamtbetrag ist vor Behandlungs-/Auftragsbeginn zu überweisen an"
+        ));
+        assert!(!text.contains("Ggf. fordern wir während der Durchführung des Auftrages"));
+        assert!(text.contains("UNIQUE-QUOTE-SERVICE"));
+        assert!(text.contains("Honorar*"));
+        assert!(!text.contains("Leistung — Einzelpreis — Menge — Summe"));
+        assert!(!text.contains("Gesamtsumme: 476,00 EUR"));
+
+        let estimate_bytes = build_order_cost_estimate_pdf(&context, "DOC-QUOTE-FALLBACK").unwrap();
+        let estimate_text = assert_legal_pdf_chrome(&estimate_bytes, "KV-2026-0042");
+
+        assert!(!estimate_text.contains("DOC-QUOTE-FALLBACK"));
+        assert!(estimate_text.contains("Anlage 1 zum 2. Einzelauftrag"));
+        assert!(estimate_text.contains("Auftragsnummer: EA-2026-0017"));
+        assert!(estimate_text.contains("UNIQUE-QUOTE-SERVICE"));
+        assert!(estimate_text.contains("476,00 EUR"));
+        assert!(estimate_text.contains(
+            "Der angegebene Gesamtbetrag ist vor Behandlungs-/Auftragsbeginn zu überweisen an"
+        ));
+        assert!(estimate_text.contains("Ggf. fordern wir während der Durchführung des Auftrages"));
+        assert!(estimate_text.contains(
+            "Die in der Endabrechnung angegebenen, angefallenen Kosten für von uns erbrachte Leistungen und Auslagen sind nach Zugang der Rechnung binnen 14 Tagen"
+        ));
+        assert!(estimate_text.contains("Berlin, den 16.07.2026"));
     }
 
     #[test]
@@ -20474,28 +20693,6 @@ mod tests {
         assert_eq!(totals.0, "400,00 EUR");
         assert_eq!(totals.1, "76,00 EUR");
         assert_eq!(totals.2, "476,00 EUR");
-    }
-
-    #[test]
-    fn trusted_contacts_are_bound_as_separate_document_lines() {
-        let binding = trusted_contact_recipients_binding(&json!([
-            {
-                "name": "Alex Beispiel",
-                "birth_date": "1989-02-03",
-                "email": "alex@example.test",
-                "phone": "+49 30 123"
-            },
-            {
-                "name": "Maria Beispiel",
-                "relation": "Schwester",
-                "address": "Hauptstr. 2, Berlin"
-            }
-        ]))
-        .unwrap();
-
-        assert_eq!(binding.lines().count(), 2);
-        assert!(binding.contains("Alex Beispiel, geb. am 03.02.1989"));
-        assert!(binding.contains("Maria Beispiel, Beziehung: Schwester"));
     }
 
     #[test]

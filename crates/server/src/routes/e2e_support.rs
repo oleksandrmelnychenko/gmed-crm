@@ -1139,6 +1139,7 @@ async fn seed_complete_lead_onboarding(
     for (template_id, category) in [
         ("framework_contract", "contract"),
         ("single_order", "administrative_single_order"),
+        ("order_cost_estimate", "finance_order_cost_estimate"),
         ("cost_estimate", "finance_cost_estimate"),
     ] {
         let document_id = Uuid::new_v4();

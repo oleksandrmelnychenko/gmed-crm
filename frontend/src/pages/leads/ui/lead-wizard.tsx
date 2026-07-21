@@ -210,7 +210,11 @@ type WizardDocumentKind =
   | "confidentiality_release"
   | "privacy_information"
   | "privacy_consents";
-type CommercialDocumentKind = "framework_contract" | "single_order" | "cost_estimate";
+type CommercialDocumentKind =
+  | "framework_contract"
+  | "single_order"
+  | "order_cost_estimate"
+  | "cost_estimate";
 
 type AutosaveSnapshot = {
   draft: Draft;
@@ -292,6 +296,7 @@ const FRAMEWORK_DOCUMENT_ID = "lead-wizard-framework-document";
 const CONTRACT_EFFECTIVE_DATE_ID = "lead-wizard-contract-effective-date";
 const COST_THRESHOLD_ID = "lead-wizard-cost-threshold";
 const ORDER_DOCUMENT_ID = "lead-wizard-order-document";
+const ORDER_COST_ESTIMATE_DOCUMENT_ID = "lead-wizard-order-cost-estimate-document";
 const COST_ESTIMATE_DOCUMENT_ID = "lead-wizard-cost-estimate-document";
 
 const DISCOVERY_SOURCE_OPTIONS = [
@@ -957,8 +962,11 @@ function newLine(index = 1): ServiceLine {
   };
 }
 
-function money(value: string): number {
-  const parsed = Number(value.replace(",", ".").trim());
+function money(value: unknown): number {
+  const normalized = typeof value === "string"
+    ? value.replace(",", ".").trim()
+    : String(value ?? "").trim();
+  const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -981,6 +989,48 @@ function formatMoneyValue(value: number, lang: string) {
 
 function validLine(line: ServiceLine): boolean {
   return line.description.trim().length > 0 && money(line.quantity) > 0 && money(line.price) >= 0 && money(line.vat) >= 0 && money(line.vat) <= 100;
+}
+
+function quoteLineSignature(
+  description: string,
+  quantity: unknown,
+  unitPrice: unknown,
+  vatRate: unknown,
+) {
+  return JSON.stringify([
+    description.trim(),
+    money(quantity).toFixed(4),
+    money(unitPrice).toFixed(4),
+    money(vatRate).toFixed(4),
+  ]);
+}
+
+function quoteMatchesServiceLines(quote: QuoteItem, lines: ServiceLine[]) {
+  if (!Array.isArray(quote.line_items)) return false;
+  const currentLines = lines
+    .filter(validLine)
+    .map((line) => quoteLineSignature(line.description, line.quantity, line.price, line.vat))
+    .sort();
+  const quotedLines = quote.line_items
+    .map((line) => quoteLineSignature(line.description, line.quantity, line.unit_price, line.vat_rate))
+    .sort();
+  return currentLines.length === quotedLines.length
+    && currentLines.every((line, index) => line === quotedLines[index]);
+}
+
+function quoteLineItemsPayload(lines: ServiceLine[]) {
+  return lines.filter(validLine).map((line) => ({
+    description: line.description.trim(),
+    quantity: money(line.quantity),
+    unit_price: money(line.price),
+    vat_rate: money(line.vat),
+  }));
+}
+
+function validMoneyInput(value: string) {
+  if (!value.trim()) return true;
+  const parsed = Number(value.replace(",", ".").trim());
+  return Number.isFinite(parsed) && parsed >= 0;
 }
 
 function lineFromOrderLeistung(item: Leistung): ServiceLine {
@@ -1093,10 +1143,12 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Onboarding order is missing": tx("Создайте заказ", "Auftrag erstellen"),
     "Order needs at least one valid service": tx("Добавьте в заказ хотя бы одну услугу", "Mindestens eine Leistung zum Auftrag hinzufügen"),
     "Order document is missing": tx("Создайте документ заказа", "Einzelauftrag erstellen"),
+    "Order cost estimate document is missing": tx("Создайте смету к заказу", "Kostenvoranschlag zum Einzelauftrag erstellen"),
     "Customer order signature is missing": tx("Получите подпись клиента на заказе", "Unterschrift des Kunden für den Auftrag einholen"),
     "Agency order signature is missing": tx("Подтвердите заказ со стороны агентства", "Auftrag durch die Agentur bestätigen"),
     "Quote is not accepted": tx("Подтвердите смету", "Kostenvoranschlag annehmen"),
-    "Cost estimate document is missing": tx("Создайте документ сметы", "Kostenvoranschlag als Dokument erstellen"),
+    "Cost estimate document is missing": tx("Создайте предварительный расчёт расходов", "Vorläufige Kostenkalkulation erstellen"),
+    "Preliminary cost calculation document is missing": tx("Создайте предварительный расчёт расходов", "Vorläufige Kostenkalkulation erstellen"),
     "Required prepayment is not complete": tx("Укажите полученную предоплату", "Erforderliche Vorauszahlung erfassen"),
     "Lead is already converted": tx("Пациент уже создан", "Patient wurde bereits angelegt"),
   };
@@ -1125,10 +1177,12 @@ function readinessReasonStep(reason: string): StepId {
     "Onboarding order is missing": "commercial",
     "Order needs at least one valid service": "commercial",
     "Order document is missing": "commercial",
+    "Order cost estimate document is missing": "commercial",
     "Customer order signature is missing": "commercial",
     "Agency order signature is missing": "commercial",
     "Quote is not accepted": "commercial",
     "Cost estimate document is missing": "commercial",
+    "Preliminary cost calculation document is missing": "commercial",
     "Required prepayment is not complete": "commercial",
     "Lead is already converted": "release",
   };
@@ -1151,7 +1205,9 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
     "Framework contract is not signed": FRAMEWORK_DOCUMENT_ID,
     "Framework contract document is missing": FRAMEWORK_DOCUMENT_ID,
     "Order document is missing": ORDER_DOCUMENT_ID,
+    "Order cost estimate document is missing": ORDER_COST_ESTIMATE_DOCUMENT_ID,
     "Cost estimate document is missing": COST_ESTIMATE_DOCUMENT_ID,
+    "Preliminary cost calculation document is missing": COST_ESTIMATE_DOCUMENT_ID,
   };
   if (reason === "Complete street, city and postal code" || reason === "Complete city and postal code") {
     if (!draft?.street.trim() && reason !== "Complete city and postal code") return MASTER_FIELD_IDS.street;
@@ -1706,7 +1762,7 @@ export function LeadWizard({
           : Promise.resolve(null),
       ]);
       if (!isCurrentReload()) return;
-      const paymentQuote = nextQuotes.find((item) => item.status === "accepted") ?? nextQuotes[0];
+      const paymentQuote = nextQuotes[0];
       const storedCommercialDraft = storedCommercialDraftFromLead(nextLead);
       const storedLeadDraft = draftFromLead(nextLead);
       const leadDraft: Draft = {
@@ -1822,14 +1878,12 @@ export function LeadWizard({
         : nextOrderDetail?.leistungen.length
           ? nextOrderDetail.leistungen.map(lineFromOrderLeistung)
           : [];
-      const nextPrepayment = storedCommercialDraft
-        ? storedCommercialDraft.prepayment
-        : Boolean(nextOrder?.prepayment_required);
-      const nextPaidAmount = storedCommercialDraft
-        ? storedCommercialDraft.paidAmount
-        : paymentQuote?.paid_amount == null
-          ? ""
-          : String(paymentQuote.paid_amount);
+      const nextPrepayment = nextOrder
+        ? Boolean(nextOrder.prepayment_required)
+        : storedCommercialDraft?.prepayment ?? false;
+      const nextPaidAmount = paymentQuote
+        ? String(paymentQuote.paid_amount ?? "")
+        : storedCommercialDraft?.paidAmount ?? "";
 
       setLead(nextLead);
       setCases(nextCases as CaseListItem[]);
@@ -2017,7 +2071,6 @@ export function LeadWizard({
     [order, quotes],
   );
   const quote = orderQuotes[0] ?? null;
-  const acceptedQuote = orderQuotes.find((item) => item.status === "accepted") ?? null;
   const agencyServiceById = useMemo(
     () => new Map(agencyServices.map((service) => [service.id, service])),
     [agencyServices],
@@ -2040,6 +2093,7 @@ export function LeadWizard({
     const grouped: Record<CommercialDocumentKind, DocumentItem[]> = {
       framework_contract: [],
       single_order: [],
+      order_cost_estimate: [],
       cost_estimate: [],
     };
     documents.forEach((item) => {
@@ -2054,7 +2108,7 @@ export function LeadWizard({
       !item.file_deleted_at
       && item.has_stored_file !== false
       && !wizardDocumentKind(item)
-      && !["framework_contract", "single_order", "cost_estimate"].includes(item.generated_template_id ?? "")
+      && !["framework_contract", "single_order", "order_cost_estimate", "cost_estimate"].includes(item.generated_template_id ?? "")
     )),
     [documents],
   );
@@ -2072,6 +2126,27 @@ export function LeadWizard({
     });
     return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, gross: Math.round((net + vat) * 100) / 100 };
   }, [lines]);
+  const quoteIsCurrent = useMemo(() => Boolean(
+    quote
+    && Math.abs(money(quote.total_gross) - estimate.gross) < 0.005
+    && quoteMatchesServiceLines(quote, lines)
+  ), [estimate.gross, lines, quote]);
+  const acceptedQuote = quote?.status === "accepted" && quoteIsCurrent ? quote : null;
+  const quoteTotal = quote ? money(quote.total_gross) : 0;
+  const persistedPrepayment = quote ? money(quote.paid_amount) : 0;
+  const enteredPrepayment = money(paidAmount);
+  const prepaymentRemaining = Math.max(quoteTotal - enteredPrepayment, 0);
+  const quoteAndPrepaymentReady = Boolean(acceptedQuote)
+    && (!prepayment || persistedPrepayment + 0.005 >= quoteTotal);
+  const quoteStateLabel = !quote
+    ? tx("Смета ещё не рассчитана", "Kostenvoranschlag noch nicht berechnet")
+    : !quoteIsCurrent
+      ? tx("Услуги изменены — пересчитайте смету", "Leistungen geändert — Kostenvoranschlag neu berechnen")
+      : quote.status !== "accepted"
+        ? tx("Смета ожидает подтверждения", "Kostenvoranschlag wartet auf Annahme")
+        : prepayment && persistedPrepayment + 0.005 < quoteTotal
+          ? tx("Смета подтверждена, ожидается предоплата", "Kostenvoranschlag angenommen, Vorauszahlung ausstehend")
+          : tx("Смета и предоплата актуальны", "Kostenvoranschlag und Vorauszahlung sind aktuell");
   const masterErrors = useMemo(() => validateMasterDraft(draft, tx), [draft, tx]);
   const orderIssues = useMemo(() => orderValidationIssues(draft, tx), [draft, tx]);
   const validationIssues = useMemo<ValidationIssue[]>(() => {
@@ -2614,18 +2689,6 @@ export function LeadWizard({
     }
   }
 
-  function trustedContactRecipients() {
-    if (!draft) return "";
-    return draft.trustedContacts.map((contact) => [
-      contact.name.trim(),
-      contact.birthDate ? `geb. am ${germanDocumentDate(contact.birthDate)}` : "",
-      contact.relation.trim() ? `Beziehung: ${contact.relation.trim()}` : "",
-      contact.address.trim() ? `Adresse: ${contact.address.trim()}` : "",
-      contact.email.trim() ? `E-Mail: ${contact.email.trim()}` : "",
-      contact.phone.trim() ? `Tel.: ${contact.phone.trim()}` : "",
-    ].filter(Boolean).join(", ")).filter(Boolean).join("\n");
-  }
-
   async function generateLeadComplianceDocument(
     templateId:
       | "confidentiality_release"
@@ -2651,7 +2714,6 @@ export function LeadWizard({
           party_sign_place: draft.city.trim() || undefined,
           ...(templateId === "privacy_consents"
             ? {
-                extra_release_recipients: trustedContactRecipients(),
                 consent_privacy: draft.privacyConsent,
                 consent_healthcare: draft.healthcareConsent,
                 consent_provider_release: draft.healthcareConsent,
@@ -2845,15 +2907,37 @@ ${serviceCommentLines.join("\n")}`
   }
 
   async function createOrAcceptQuote(accept: boolean) {
+    if (accept && (!quote || !quoteIsCurrent)) {
+      setError(tx(
+        "Сначала пересчитайте смету по текущим услугам",
+        "Berechnen Sie zuerst den Kostenvoranschlag für die aktuellen Leistungen neu",
+      ));
+      return;
+    }
+    if (prepayment && !validMoneyInput(paidAmount)) {
+      setError(tx(
+        "Предоплата должна быть числом не меньше нуля",
+        "Die Vorauszahlung muss eine Zahl größer oder gleich null sein",
+      ));
+      return;
+    }
+    if (accept && prepayment && enteredPrepayment > quoteTotal + 0.005) {
+      setError(tx(
+        "Предоплата не может превышать сумму сметы",
+        "Die Vorauszahlung darf den Betrag des Kostenvoranschlags nicht überschreiten",
+      ));
+      return;
+    }
+
     setBusy(accept ? "accept" : "quote");
+    setError("");
     try {
-      let quoteId = quote?.id;
-      let createdQuote: QuoteItem | null = null;
-      if (!accept || !quoteId) {
-        const result = await ensureCommercial();
-        const created = await createQuote(result.orderId, {});
-        quoteId = created.id;
-        createdQuote = {
+      const result = await ensureCommercial();
+      if (!accept) {
+        const created = await createQuote(result.orderId, {
+          line_items: quoteLineItemsPayload(lines),
+        });
+        const createdQuote: QuoteItem = {
           id: created.id,
           order_id: created.order_id,
           order_number: order?.order_number ?? "",
@@ -2877,17 +2961,17 @@ ${serviceCommentLines.join("\n")}`
           updated_at: created.updated_at,
           line_items: created.line_items,
         };
-      }
-      if (accept) {
-        const accepted = await updateQuoteStatus(quoteId, {
+        setPaidAmount(String(createdQuote.paid_amount ?? ""));
+        setQuotes((current) => [createdQuote, ...current.filter((item) => item.id !== createdQuote.id)]);
+      } else if (quote) {
+        const accepted = await updateQuoteStatus(quote.id, {
           status: "accepted",
           paid_amount: prepayment ? money(paidAmount) : undefined,
         });
+        setPaidAmount(String(accepted.paid_amount ?? ""));
         setQuotes((current) => [accepted, ...current.filter((item) => item.id !== accepted.id)]);
-      } else if (createdQuote) {
-        setQuotes((current) => [createdQuote, ...current.filter((item) => item.id !== createdQuote.id)]);
       }
-      void reload(false, true);
+      await reload(false, true);
     } catch (nextError) {
       showWizardError(nextError);
     } finally {
@@ -2901,8 +2985,10 @@ ${serviceCommentLines.join("\n")}`
     setError("");
     try {
       const commercial = await ensureCommercial();
-      if (templateId === "cost_estimate" && !quote) {
-        await createQuote(commercial.orderId, {});
+      if (templateId !== "framework_contract" && (!quote || !quoteIsCurrent)) {
+        await createQuote(commercial.orderId, {
+          line_items: quoteLineItemsPayload(lines),
+        });
       }
       const generated = await generateDocument({
         template_id: templateId,
@@ -2912,7 +2998,9 @@ ${serviceCommentLines.join("\n")}`
         document_language: "de",
         document_direction: "outgoing",
         document_variant: "original",
-        access_category: templateId === "cost_estimate" ? "financial" : "patient",
+        access_category: ["order_cost_estimate", "cost_estimate"].includes(templateId)
+          ? "financial"
+          : "patient",
         status: "active",
         bindings: {
           contract_date: draft.contractEffectiveDate || undefined,
@@ -2926,8 +3014,9 @@ ${serviceCommentLines.join("\n")}`
           service_lines: lines.filter(validLine).map((line) => ({
             description: serviceDocumentDescription(line),
             quantity: line.quantity,
-            fee: `${money(line.price).toFixed(2)} EUR`,
+            fee: serviceDocumentFee(line),
             line_total: `${(money(line.quantity) * money(line.price)).toFixed(2)} EUR`,
+            note: serviceDocumentNote(line),
           })),
         },
       });
@@ -2951,6 +3040,7 @@ ${serviceCommentLines.join("\n")}`
     if (!(await finishOrder("release"))) return;
     setBusy("convert");
     try {
+      await ensureCommercial();
       const result = await wizardConvertLead(leadId);
       if (onConverted) onConverted(result.patient_id);
       else onOpenChange(false);
@@ -3058,6 +3148,21 @@ ${serviceCommentLines.join("\n")}`
       ? agencyServiceById.get(line.agencyServiceId)
       : undefined;
     return catalogService?.service_name.trim() || line.description.trim();
+  }
+
+  function serviceDocumentNote(line: ServiceLine) {
+    const catalogService = line.agencyServiceId
+      ? agencyServiceById.get(line.agencyServiceId)
+      : undefined;
+    return catalogService?.description?.trim() || undefined;
+  }
+
+  function serviceDocumentFee(line: ServiceLine) {
+    const catalogService = line.agencyServiceId
+      ? agencyServiceById.get(line.agencyServiceId)
+      : undefined;
+    const unit = catalogService?.unit_label?.trim();
+    return `${money(line.price).toFixed(2)} EUR${unit ? `/${unit}` : ""}`;
   }
 
   if (!leadId && !createMode) return null;
@@ -4394,38 +4499,142 @@ ${serviceCommentLines.join("\n")}`
                   }}
                   label={tx("Агентство подтвердило заказ", "Auftrag von der Agentur bestätigt")}
                 />
-                <ToggleRow
-                  checked={prepayment}
-                  disabled={isBusy}
-                  onChange={(checked) => {
-                    setPrepayment(checked);
-                    void saveFlags(
-                      { prepayment_required: checked },
-                      { prepayment_required: prepayment },
-                    );
-                  }}
-                  label={tx("Требуется предоплата", "Vorauszahlung erforderlich")}
-                />
               </div>
-              <div className="grid gap-3 border-b border-border pb-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-                <Field label={tx("Полученная предоплата", "Erhaltene Vorauszahlung")}>
-                  <Input className="font-mono tabular-nums" inputMode="decimal" value={paidAmount} onChange={(event) => setPaidAmount(event.target.value)} disabled={!prepayment} placeholder="0.00" />
-                </Field>
-                <div className="flex flex-wrap gap-2">
+              <div className="space-y-4 border-b border-border pb-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold text-foreground">
+                      {tx("Смета и предоплата", "Kostenvoranschlag und Vorauszahlung")}
+                    </h3>
+                    <div className="mt-1 font-mono text-xs tabular-nums text-muted-foreground">
+                      {quote?.quote_number ?? "KV-…"}
+                    </div>
+                  </div>
                   <Button type="button" variant="outline" disabled={isBusy || !lines.some(validLine)} onClick={() => void createOrAcceptQuote(false)}>
-                    {busy === "quote" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-                    {quote ? tx("Пересчитать смету", "Kostenvoranschlag neu berechnen") : tx("Рассчитать смету", "Kostenvoranschlag berechnen")}
-                  </Button>
-                  <Button type="button" variant="outline" disabled={isBusy || !quote} onClick={() => void createOrAcceptQuote(true)}>
-                    {busy === "accept" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-                    {tx("Подтвердить смету", "Kostenvoranschlag annehmen")}
+                    {busy === "quote" ? <LoaderCircle className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+                    {quote ? tx("Пересчитать", "Neu berechnen") : tx("Рассчитать", "Berechnen")}
                   </Button>
                 </div>
+
+                {quote ? (
+                  <dl className="grid grid-cols-2 border-y border-border sm:grid-cols-4">
+                    <div className="min-w-0 border-b border-r border-border px-3 py-2.5 sm:border-b-0">
+                      <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        {tx("Статус", "Status")}
+                      </dt>
+                      <dd className="mt-1 text-xs font-medium text-foreground">
+                        {quote.status === "accepted" ? tx("Подтверждена", "Angenommen") : tx("Черновик", "Entwurf")}
+                      </dd>
+                    </div>
+                    <div className="min-w-0 border-b border-border px-3 py-2.5 sm:border-b-0 sm:border-r">
+                      <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        {tx("Сумма", "Betrag")}
+                      </dt>
+                      <dd className="mt-1 whitespace-nowrap font-mono text-xs font-semibold tabular-nums text-foreground">
+                        {formatMoneyValue(quoteTotal, lang)} EUR
+                      </dd>
+                    </div>
+                    <div className="min-w-0 border-r border-border px-3 py-2.5">
+                      <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        {tx("Предоплата", "Vorauszahlung")}
+                      </dt>
+                      <dd className="mt-1 whitespace-nowrap font-mono text-xs tabular-nums text-foreground">
+                        {formatMoneyValue(persistedPrepayment, lang)} EUR
+                      </dd>
+                    </div>
+                    <div className="min-w-0 px-3 py-2.5">
+                      <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        {tx("Остаток", "Restbetrag")}
+                      </dt>
+                      <dd className="mt-1 whitespace-nowrap font-mono text-xs tabular-nums text-foreground">
+                        {formatMoneyValue(Math.max(quoteTotal - persistedPrepayment, 0), lang)} EUR
+                      </dd>
+                    </div>
+                  </dl>
+                ) : null}
+
+                <div className="border-y border-border">
+                  <ToggleRow
+                    checked={prepayment}
+                    disabled={isBusy}
+                    onChange={(checked) => {
+                      setPrepayment(checked);
+                      void saveFlags(
+                        { prepayment_required: checked },
+                        { prepayment_required: prepayment },
+                      );
+                    }}
+                    label={tx("Требуется предоплата", "Vorauszahlung erforderlich")}
+                  />
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                  <Field label={tx("Полученная предоплата", "Erhaltene Vorauszahlung")}>
+                    <Input
+                      className="font-mono tabular-nums"
+                      inputMode="decimal"
+                      min="0"
+                      max={quote ? quoteTotal : undefined}
+                      step="0.01"
+                      value={paidAmount}
+                      onChange={(event) => setPaidAmount(event.target.value)}
+                      disabled={!prepayment || !quote || !quoteIsCurrent}
+                      placeholder="0.00"
+                    />
+                  </Field>
+                  {!acceptedQuote || prepayment ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={isBusy || !quote || !quoteIsCurrent || !validMoneyInput(paidAmount)}
+                      onClick={() => void createOrAcceptQuote(true)}
+                    >
+                      {busy === "accept" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+                      {acceptedQuote
+                        ? tx("Учесть предоплату", "Vorauszahlung verbuchen")
+                        : tx("Подтвердить смету", "Kostenvoranschlag annehmen")}
+                    </Button>
+                  ) : null}
+                </div>
+                {prepayment && quote ? (
+                  <div className="flex justify-end text-xs text-muted-foreground">
+                    <span>{tx("Остаток после ввода", "Restbetrag nach Eingabe")}: </span>
+                    <span className="ml-1 font-mono tabular-nums text-foreground">
+                      {formatMoneyValue(prepaymentRemaining, lang)} EUR
+                    </span>
+                  </div>
+                ) : null}
+                <StateMark done={quoteAndPrepaymentReady} label={quoteStateLabel} />
+              </div>
+              <div id={ORDER_COST_ESTIMATE_DOCUMENT_ID} tabIndex={-1} className="space-y-3 border-b border-border pb-4 focus:outline-none">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-foreground">{tx("Смета к заказу", "Kostenvoranschlag zum Einzelauftrag")}</h3>
+                    <div className="mt-1 font-mono text-xs tabular-nums text-muted-foreground">
+                      {quote?.quote_number ?? "KV-…"}
+                    </div>
+                  </div>
+                  <Button type="button" variant="outline" size="sm" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("order_cost_estimate")}>
+                    {busy === "generate-order_cost_estimate" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
+                    {commercialDocuments.order_cost_estimate.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
+                  </Button>
+                </div>
+                <WizardDocumentRows
+                  documents={commercialDocuments.order_cost_estimate}
+                  emptyLabel={tx("Смета к заказу ещё не создана", "Kostenvoranschlag zum Einzelauftrag wurde noch nicht erstellt")}
+                  lang={lang}
+                  busy={busy}
+                  disabled={isBusy}
+                  tx={tx}
+                  onOpen={(document) => void openOrDownloadDocument(document)}
+                  onDownload={(document) => void downloadDocument(document)}
+                  onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                />
               </div>
               <div id={COST_ESTIMATE_DOCUMENT_ID} tabIndex={-1} className="space-y-3 border-b border-border pb-4 focus:outline-none">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-sm font-semibold text-foreground">{tx("Документ сметы", "Kostenvoranschlag")}</h3>
+                    <h3 className="text-sm font-semibold text-foreground">{tx("Предварительный расчёт расходов", "Vorläufige Kostenkalkulation")}</h3>
                     <div className="mt-1 font-mono text-xs tabular-nums text-muted-foreground">
                       {quote?.quote_number ?? "KV-…"}
                     </div>
@@ -4437,7 +4646,7 @@ ${serviceCommentLines.join("\n")}`
                 </div>
                 <WizardDocumentRows
                   documents={commercialDocuments.cost_estimate}
-                  emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
+                  emptyLabel={tx("Предварительный расчёт ещё не создан", "Vorläufige Kostenkalkulation wurde noch nicht erstellt")}
                   lang={lang}
                   busy={busy}
                   disabled={isBusy}
@@ -4447,7 +4656,7 @@ ${serviceCommentLines.join("\n")}`
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                 />
               </div>
-              <div className="flex flex-wrap items-center justify-between gap-3"><StateMark done={Boolean(readiness.get("commercial"))} label={acceptedQuote ? tx("Смета подтверждена", "Kostenvoranschlag angenommen") : quote ? tx("Смета создана и ожидает подтверждения", "Kostenvoranschlag erstellt, Annahme ausstehend") : tx("Смета ещё не создана", "Kostenvoranschlag noch nicht erstellt")} /><Button type="button" disabled={isBusy || !lines.some(validLine)} onClick={() => void prepareCommercial()}>{busy === "commercial" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}{tx("Сохранить договор и заказ", "Vertrag und Auftrag speichern")}</Button></div>
+              <div className="flex flex-wrap items-center justify-between gap-3"><StateMark done={Boolean(readiness.get("commercial"))} label={readiness.get("commercial") ? tx("Договор и заказ завершены", "Vertrag und Auftrag abgeschlossen") : tx("Договор и заказ ещё не завершены", "Vertrag und Auftrag noch nicht abgeschlossen")} /><Button type="button" disabled={isBusy || !lines.some(validLine)} onClick={() => void prepareCommercial()}>{busy === "commercial" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}{tx("Сохранить договор и заказ", "Vertrag und Auftrag speichern")}</Button></div>
             </section>
           ) : null}
 
@@ -4456,7 +4665,7 @@ ${serviceCommentLines.join("\n")}`
               <div><h3 className="text-sm font-semibold text-foreground">{tx("Создание пациента", "Patient anlegen")}</h3><p className="mt-1 text-sm text-muted-foreground">{tx("Проверьте все этапы. После подтверждения система создаст карточку пациента и перенесёт в неё данные обращения.", "Prüfen Sie alle Schritte. Nach der Bestätigung wird die Patientenakte angelegt und die Angaben aus dem Lead werden übernommen.")}</p></div>
               <div className="border-y border-border">{lead.readiness.steps.map((item) => <div key={item.key} className="flex items-center justify-between gap-4 border-b border-border/70 py-3 last:border-b-0"><span className="text-sm text-foreground">{readinessStepLabel(item.key, tx)}</span><StateMark done={item.ready} label={item.ready ? tx("Выполнено", "Erledigt") : tx("Не завершено", "Noch offen")} /></div>)}</div>
               {lead.readiness.blocking_reasons.length > 0 ? <div className="border-l-2 border-amber-500 bg-amber-50/50 px-3 py-3 text-sm text-amber-900"><div className="font-medium">{tx("Что осталось заполнить", "Was noch fehlt")}</div><ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5">{lead.readiness.blocking_reasons.map((reason) => <li key={reason}>{readinessReasonLabel(reason, tx)}</li>)}</ul></div> : null}
-              <div className="flex justify-end"><Button type="button" disabled={isBusy || !lead.readiness.conversion_ready} onClick={() => void convert()}>{busy === "convert" ? <LoaderCircle className="size-4 animate-spin" /> : <UserRoundCheck className="size-4" />}{tx("Создать пациента", "Patient anlegen")}</Button></div>
+              <div className="flex justify-end"><Button type="button" disabled={isBusy || !lead.readiness.conversion_ready || !quoteAndPrepaymentReady} onClick={() => void convert()}>{busy === "convert" ? <LoaderCircle className="size-4 animate-spin" /> : <UserRoundCheck className="size-4" />}{tx("Создать пациента", "Patient anlegen")}</Button></div>
             </section>
           ) : null}
         </main>
@@ -4485,8 +4694,8 @@ ${serviceCommentLines.join("\n")}`
               <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-6 sm:px-7 sm:py-7">
                 <p className="text-xs leading-5 text-muted-foreground">
                   {tx(
-                    "Контакт будет сохранён в лиде и отдельной строкой добавлен в согласие на передачу данных.",
-                    "Der Kontakt wird im Lead gespeichert und als eigener Eintrag in die Datenübermittlungserklärung übernommen.",
+                    "Контакт будет сохранён в обращении и перенесён в карточку пациента при конвертации.",
+                    "Der Kontakt wird im Lead gespeichert und bei der Konvertierung in die Patientenakte übernommen.",
                   )}
                 </p>
                 <div className="grid gap-x-5 gap-y-6 sm:grid-cols-2">

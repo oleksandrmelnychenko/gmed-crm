@@ -48,7 +48,7 @@ function bindingGroup(field: BindingFieldDef): BindingGroup {
 function groupLabel(group: BindingGroup, lang: "de" | "ru") {
   const labels: Record<BindingGroup, [string, string]> = {
     document: ["Данные документа", "Dokumentdaten"],
-    consents: ["Согласия и доверенные контакты", "Einwilligungen und Vertrauenskontakte"],
+    consents: ["Согласия и получатели данных", "Einwilligungen und Datenempfänger"],
     patient: ["Данные клиента", "Kundendaten"],
     payer: ["Плательщик", "Kostenübernehmer"],
     bank: ["Банковские реквизиты", "Bankverbindung"],

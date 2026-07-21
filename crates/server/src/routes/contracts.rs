@@ -1578,7 +1578,8 @@ async fn list_quotes(
 
     match sqlx::query(
         r#"SELECT q.id, q.order_id, q.quote_number, q.total_net, q.total_vat, q.total_gross,
-                  q.status, q.valid_until, q.paid_amount, q.paid_at, q.notes, q.created_at, q.updated_at,
+                  q.status, q.valid_until, q.paid_amount, q.paid_at, q.line_items, q.notes,
+                  q.created_at, q.updated_at,
                   o.patient_id, o.source_lead_id, o.order_number, o.contract_id,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
                   COALESCE(p.last_name, l.last_name) AS subject_last_name,
@@ -1597,7 +1598,7 @@ async fn list_quotes(
              AND ($3::uuid IS NULL OR o.patient_id = $3)
              AND ($4::uuid IS NULL OR o.source_lead_id = $4)
              AND ($5::text IS NULL OR q.status = $5)
-           ORDER BY q.created_at DESC
+           ORDER BY q.created_at DESC, q.id DESC
            LIMIT 200"#,
     )
     .bind(search_pattern)
@@ -1657,6 +1658,7 @@ async fn list_quotes(
                     "valid_until": row.try_get::<Option<NaiveDate>, _>("valid_until").unwrap_or_default().map(|v| v.to_string()),
                     "paid_amount": decimal_to_string(row.try_get::<Decimal, _>("paid_amount").unwrap_or(Decimal::ZERO)),
                     "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+                    "line_items": row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
                     "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
                     "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                     "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),

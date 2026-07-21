@@ -2994,7 +2994,7 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
     let tag = unique_tag("admin-docs");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
 
-    let cases: [(&str, &str, serde_json::Value); 6] = [
+    let cases: [(&str, &str, serde_json::Value); 7] = [
         (
             "single_order",
             "administrative_single_order",
@@ -3007,6 +3007,26 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
                 "period_to": "2025-11-19",
                 "payer_name": "Justus Geldgeber",
                 "payer_birth_date": "2000-01-01"
+            }),
+        ),
+        (
+            "order_cost_estimate",
+            "finance_order_cost_estimate",
+            json!({
+                "order_sequence": 1,
+                "order_number": "EA-2026-1",
+                "order_date": "2025-11-11",
+                "contract_date": "2025-11-11",
+                "quote_number": "KV-2026-1",
+                "bank_iban": "DE00 0000 0000 0000 0000 00",
+                "service_lines": [
+                    {
+                        "description": "Organisation der Behandlung",
+                        "fee": "999,00 EUR",
+                        "quantity": "1",
+                        "line_total": "999,00 EUR"
+                    }
+                ]
             }),
         ),
         (
@@ -3109,7 +3129,7 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
         );
         let expected_sensitivity = if matches!(
             template_id,
-            "single_order" | "cost_coverage_declaration" | "cost_estimate"
+            "single_order" | "order_cost_estimate" | "cost_coverage_declaration" | "cost_estimate"
         ) {
             "Financial"
         } else {
@@ -3469,6 +3489,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
         "patient_sticker_standard",
         "patient_sticker_sheet",
         "single_order",
+        "order_cost_estimate",
         "cost_coverage_declaration",
         "cost_estimate",
         "appointment_confirmation",
@@ -3609,6 +3630,20 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             text_block_keys: vec![],
             min_pdf_size: 800,
             expected_pdf_text: "Anlage A: Vorbefunde",
+        },
+        TemplateCase {
+            template_id: "order_cost_estimate",
+            expected_art: "order_cost_estimate",
+            expected_category: "finance_order_cost_estimate",
+            order_id: Some(order_id),
+            appointment_id: None,
+            bindings: json!({
+                "order_date": "2026-05-01",
+                "contract_date": "2026-04-01"
+            }),
+            text_block_keys: vec![],
+            min_pdf_size: 800,
+            expected_pdf_text: "Koordination vor stationärer Aufnahme",
         },
         TemplateCase {
             template_id: "cost_coverage_declaration",
@@ -3888,7 +3923,7 @@ async fn cost_coverage_declaration_includes_contract_obligations_and_annexes() {
 }
 
 #[tokio::test]
-async fn single_order_without_payer_includes_quote_annex_and_separate_signatures() {
+async fn single_order_and_order_cost_estimate_are_generated_as_separate_documents() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
     };
@@ -3916,7 +3951,7 @@ async fn single_order_without_payer_includes_quote_annex_and_separate_signatures
             "patient_id": patient_id,
             "order_id": order_id,
             "language": "de",
-            "bindings": bindings
+            "bindings": bindings.clone()
         })),
     )
     .await;
@@ -3948,16 +3983,77 @@ async fn single_order_without_payer_includes_quote_annex_and_separate_signatures
         "{pdf_text:?}"
     );
     assert!(pdf_text.contains(&format!("KV-{tag}")), "{pdf_text:?}");
-    assert!(
-        pdf_text.contains("Koordination vor stationärer Aufnahme"),
-        "{pdf_text:?}"
-    );
-    assert!(
-        pdf_text.contains("Configured account holder"),
-        "{pdf_text:?}"
-    );
+    assert!(pdf_text.contains("separates Dokument"), "{pdf_text:?}");
+    assert!(pdf_text.contains("Koordination vor stationärer Aufnahme"));
+    assert!(pdf_text.contains("Honorar*"));
+    assert!(!pdf_text.contains("Leistung — Einzelpreis — Menge — Summe"));
+    assert!(!pdf_text.contains(
+        "Der angegebene Gesamtbetrag ist vor Behandlungs-/Auftragsbeginn zu überweisen an"
+    ));
+    assert!(pdf_text.contains("Configured account holder"));
     assert!(pdf_text.contains("Paris-signature"), "{pdf_text:?}");
     assert!(pdf_text.contains("Munich-signature"), "{pdf_text:?}");
+
+    let (status, estimate_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "order_cost_estimate",
+            "patient_id": patient_id,
+            "order_id": order_id,
+            "language": "de",
+            "bindings": bindings
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "generate order cost estimate: {estimate_body:?}"
+    );
+    let estimate_document_id = Uuid::parse_str(estimate_body["id"].as_str().unwrap()).unwrap();
+    let (status, estimate_bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{estimate_document_id}/download"),
+        &admin_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let estimate_text = extract_pdf_text(&estimate_bytes);
+    assert!(
+        estimate_text.contains("Anlage 1 zum 1. Einzelauftrag"),
+        "{estimate_text:?}"
+    );
+    assert!(
+        estimate_text.contains(&format!("KV-{tag}")),
+        "{estimate_text:?}"
+    );
+    assert!(
+        estimate_text.contains("Koordination vor stationärer Aufnahme"),
+        "{estimate_text:?}"
+    );
+    assert!(
+        estimate_text.contains("Configured account holder"),
+        "{estimate_text:?}"
+    );
+    assert!(estimate_text.contains(
+        "Der angegebene Gesamtbetrag ist vor Behandlungs-/Auftragsbeginn zu überweisen an"
+    ));
+    assert!(estimate_text.contains("Ggf. fordern wir während der Durchführung des Auftrages"));
+    assert!(estimate_text.contains(
+        "Die in der Endabrechnung angegebenen, angefallenen Kosten für von uns erbrachte Leistungen und Auslagen sind nach Zugang der Rechnung binnen 14 Tagen"
+    ));
+    assert!(
+        estimate_text.contains("Paris-signature"),
+        "{estimate_text:?}"
+    );
+    assert!(
+        estimate_text.contains("Munich-signature"),
+        "{estimate_text:?}"
+    );
 }
 
 #[tokio::test]

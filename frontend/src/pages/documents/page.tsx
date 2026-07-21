@@ -3792,7 +3792,7 @@ function StaffDocumentsPage({
                       templateId={selectedTemplate?.id ?? ""}
                       useOrderServices={Boolean(
                         generateForm.orderId &&
-                        ["single_order", "cost_estimate"].includes(
+                        ["single_order", "order_cost_estimate", "cost_estimate"].includes(
                           selectedTemplate?.id ?? "",
                         ),
                       )}

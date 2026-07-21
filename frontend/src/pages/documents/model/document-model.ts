@@ -157,12 +157,13 @@ const DOCUMENT_ART_LABELS: Record<string, string> = {
   consent_data_release_child: "Einverständniserklärung (Kind)",
   consent_data_release_single: "Einverständniserklärung (alleiniges Sorgerecht)",
   cost_coverage_declaration: "Kostenübernahmeerklärung",
-  cost_estimate: "Kostenschätzung",
+  cost_estimate: "Vorläufige Kostenkalkulation",
   framework_contract: "Rahmendienstleistungsvertrag",
   medication_summary: "Medikamentenübersicht",
   patient_sticker: "Patientenetikett",
   privacy_information: "Informationsblatt zum Datenschutz",
   privacy_consents: "Einverständniserklärung zur Datenübermittlung",
+  order_cost_estimate: "Kostenvoranschlag zum Einzelauftrag",
   single_order: "Einzelauftrag",
   treatment_plan: "Behandlungsplan",
   visa_invitation: "Einladungsschreiben (Visum)",
@@ -543,6 +544,26 @@ function buildKnownGeneratedDocumentDraft(
         draftValue(form.bindings.order_components),
       ]);
     }
+    case "order_cost_estimate": {
+      const services = serviceRows.map(([description, fee, quantity, total]) =>
+        [description, fee, quantity, total].filter(Boolean).join(" | "),
+      );
+      return joinDraftLines([
+        title,
+        draftValue(form.bindings.quote_number)
+          ? `Kostenvoranschlag Nr.: ${form.bindings.quote_number}`
+          : "",
+        orderNumber || draftValue(form.bindings.order_number)
+          ? `Auftragsnummer: ${orderNumber || form.bindings.order_number}`
+          : "",
+        "",
+        `Einzelauftrag vom: ${orderDate}`,
+        `Rahmendienstleistungsvertrag vom: ${contractDate}`,
+        `Auftraggeber: ${patient}`,
+        services.length ? "Leistungen:" : "",
+        ...services.map((line) => `- ${line}`),
+      ]);
+    }
     case "cost_coverage_declaration": {
       const services = serviceRows.map(([description, fee, quantity, total]) =>
         [description, fee, quantity, total].filter(Boolean).join(" | "),
@@ -736,7 +757,7 @@ export function resolveGeneratedDocumentAccessCategory(
   }
   if (
     category.startsWith("finance") ||
-    ["cost_coverage_declaration", "cost_estimate"].includes(templateId)
+    ["cost_coverage_declaration", "order_cost_estimate", "cost_estimate"].includes(templateId)
   ) {
     return "financial";
   }

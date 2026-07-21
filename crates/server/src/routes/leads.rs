@@ -578,6 +578,7 @@ struct LeadConversionReadinessInput {
     order_exists: bool,
     order_service_ready: bool,
     order_document_generated: bool,
+    order_cost_estimate_document_generated: bool,
     order_signed_patient: bool,
     order_signed_agency: bool,
     quote_accepted: bool,
@@ -636,6 +637,7 @@ fn evaluate_lead_conversion_readiness(
         && input.order_exists
         && input.order_service_ready
         && input.order_document_generated
+        && input.order_cost_estimate_document_generated
         && input.order_signed_patient
         && input.order_signed_agency
         && input.quote_accepted
@@ -777,6 +779,13 @@ fn evaluate_lead_conversion_readiness(
             "stage": "commercial",
         }),
         json!({
+            "key": "order_cost_estimate_document_generated",
+            "label": "Order cost estimate document generated",
+            "passed": input.order_cost_estimate_document_generated,
+            "blocking_for": "conversion",
+            "stage": "commercial",
+        }),
+        json!({
             "key": "order_signed_patient",
             "label": "Order signed by customer",
             "passed": input.order_signed_patient,
@@ -874,6 +883,9 @@ fn evaluate_lead_conversion_readiness(
     if !input.order_document_generated {
         conversion_reasons.push("Order document is missing".to_string());
     }
+    if !input.order_cost_estimate_document_generated {
+        conversion_reasons.push("Order cost estimate document is missing".to_string());
+    }
     if !input.order_signed_patient {
         conversion_reasons.push("Customer order signature is missing".to_string());
     }
@@ -884,7 +896,7 @@ fn evaluate_lead_conversion_readiness(
         conversion_reasons.push("Quote is not accepted".to_string());
     }
     if !input.cost_estimate_document_generated {
-        conversion_reasons.push("Cost estimate document is missing".to_string());
+        conversion_reasons.push("Preliminary cost calculation document is missing".to_string());
     }
     if !input.prepayment_ready {
         conversion_reasons.push("Required prepayment is not complete".to_string());
@@ -946,6 +958,9 @@ fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversio
         order_exists: row.try_get("order_exists").unwrap_or(false),
         order_service_ready: row.try_get("order_service_ready").unwrap_or(false),
         order_document_generated: row.try_get("order_document_generated").unwrap_or(false),
+        order_cost_estimate_document_generated: row
+            .try_get("order_cost_estimate_document_generated")
+            .unwrap_or(false),
         order_signed_patient: row.try_get("order_signed_patient").unwrap_or(false),
         order_signed_agency: row.try_get("order_signed_agency").unwrap_or(false),
         quote_accepted: row.try_get("quote_accepted").unwrap_or(false),
@@ -1034,6 +1049,13 @@ async fn load_lead_conversion_readiness(
                         AND d.status = 'active'
                         AND d.file_deleted_at IS NULL
                   ) AS order_document_generated,
+                  EXISTS (
+                      SELECT 1 FROM documents d
+                      WHERE d.lead_id = leads.id
+                        AND d.generated_template_id = 'order_cost_estimate'
+                        AND d.status = 'active'
+                        AND d.file_deleted_at IS NULL
+                  ) AS order_cost_estimate_document_generated,
                   COALESCE((
                       SELECT o.signed_patient
                       FROM orders o
@@ -1046,13 +1068,20 @@ async fn load_lead_conversion_readiness(
                       WHERE o.source_lead_id = leads.id
                       LIMIT 1
                   ), false) AS order_signed_agency,
-                  EXISTS (
-                      SELECT 1
+                  COALESCE((
+                      SELECT q.status = 'accepted'
+                             AND q.total_gross = o.total_estimated
                       FROM orders o
-                      JOIN quotes q ON q.order_id = o.id
+                      JOIN LATERAL (
+                          SELECT status, total_gross
+                          FROM quotes
+                          WHERE order_id = o.id
+                          ORDER BY created_at DESC, id DESC
+                          LIMIT 1
+                      ) q ON true
                       WHERE o.source_lead_id = leads.id
-                        AND q.status = 'accepted'
-                  ) AS quote_accepted,
+                      LIMIT 1
+                  ), false) AS quote_accepted,
                   EXISTS (
                       SELECT 1 FROM documents d
                       WHERE d.lead_id = leads.id
@@ -1063,12 +1092,15 @@ async fn load_lead_conversion_readiness(
                   COALESCE((
                       SELECT CASE
                           WHEN NOT o.prepayment_required THEN true
-                          ELSE EXISTS (
-                              SELECT 1 FROM quotes q
+                          ELSE COALESCE((
+                              SELECT q.status = 'accepted'
+                                     AND q.total_gross = o.total_estimated
+                                     AND q.paid_amount >= q.total_gross
+                              FROM quotes q
                               WHERE q.order_id = o.id
-                                AND q.status = 'accepted'
-                                AND q.paid_amount >= q.total_gross
-                          )
+                              ORDER BY q.created_at DESC, q.id DESC
+                              LIMIT 1
+                          ), false)
                       END
                       FROM orders o
                       WHERE o.source_lead_id = leads.id
@@ -4800,6 +4832,7 @@ mod lead_conversion_readiness_tests {
             order_exists: true,
             order_service_ready: true,
             order_document_generated: true,
+            order_cost_estimate_document_generated: true,
             order_signed_patient: true,
             order_signed_agency: true,
             quote_accepted: true,
@@ -4838,6 +4871,20 @@ mod lead_conversion_readiness_tests {
                     .find(|check| { check["key"] == "confidentiality_release_signed" }))
                 .map(|check| &check["passed"]),
             Some(&Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn order_cost_estimate_document_is_required_for_conversion() {
+        let mut input = ready_input();
+        input.order_cost_estimate_document_generated = false;
+
+        let readiness = evaluate_lead_conversion_readiness(&input);
+
+        assert!(!readiness.conversion_ready);
+        assert_eq!(
+            readiness.conversion_reasons,
+            vec!["Order cost estimate document is missing".to_string()]
         );
     }
 
