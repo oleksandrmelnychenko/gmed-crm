@@ -4251,7 +4251,7 @@ impl TreatmentPlanPdfLayout {
             let font_size_pt = 8.5;
             let text_width_mm = approx_text_width_mm(&header_text, font_size_pt);
             let text_x_mm =
-                PDF_LEFT_MARGIN_MM + ((PDF_CONTENT_WIDTH_MM - text_width_mm) / 2.0).max(0.0);
+                (PDF_PAGE_WIDTH_MM - PDF_RIGHT_MARGIN_MM - text_width_mm).max(PDF_LEFT_MARGIN_MM);
             let reference_y_mm = if self.page_style == PdfPageStyle::Legal {
                 PDF_LEGAL_HEADER_REFERENCE_Y_MM
             } else {
@@ -6369,15 +6369,7 @@ fn fc_paragraph_heading(layout: &mut TreatmentPlanPdfLayout, text: &str) {
 
 /// A regular body paragraph for the contract text.
 fn fc_body(layout: &mut TreatmentPlanPdfLayout, text: &str) {
-    layout.text_block_justified(
-        text,
-        11.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        2.0,
-    );
+    layout.text_block_centered(text, 11.0, false, TreatmentPlanPdfColor::Body, 0.0, 2.0);
 }
 
 /// A bold inline sub-label inside § 1 (e.g. "Individuelle Beratung und ...").
@@ -13165,15 +13157,26 @@ fn finalize_admin_pdf(mut document: PdfDocument, layout: TreatmentPlanPdfLayout)
 }
 
 fn admin_block(layout: &mut TreatmentPlanPdfLayout, text: &str, before: f32, after: f32) {
-    layout.text_block_justified(
-        text,
-        11.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        before,
-        after,
-    );
+    if layout.page_style == PdfPageStyle::Legal {
+        layout.text_block_centered(
+            text,
+            11.0,
+            false,
+            TreatmentPlanPdfColor::Body,
+            before,
+            after,
+        );
+    } else {
+        layout.text_block_justified(
+            text,
+            11.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Body,
+            before,
+            after,
+        );
+    }
 }
 
 fn admin_heading(layout: &mut TreatmentPlanPdfLayout, text: &str) {
