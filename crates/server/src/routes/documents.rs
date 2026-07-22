@@ -220,7 +220,7 @@ const PDF_TOP_MARGIN_MM: f32 = 18.0;
 // visually close to the document reference while preserving body whitespace.
 const PDF_LEGAL_TOP_MARGIN_MM: f32 = 39.5;
 const PDF_LEGAL_HEADER_REFERENCE_Y_MM: f32 = 278.0;
-const PDF_LEGAL_HEADER_RULE_Y_MM: f32 = 272.5;
+const PDF_LEGAL_HEADER_RULE_Y_MM: f32 = 274.5;
 const PDF_LEGAL_CONTENT_BOTTOM_MM: f32 = 34.0;
 const PDF_LEGAL_FOOTER_RULE_Y_MM: f32 = 21.5;
 const PDF_LEGAL_FOOTER_CONTENT_TOP_MM: f32 = 18.5;
