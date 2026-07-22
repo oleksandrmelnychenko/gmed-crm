@@ -216,11 +216,11 @@ const PDF_PAGE_HEIGHT_MM: f32 = 297.0;
 const PDF_LEFT_MARGIN_MM: f32 = 25.0;
 const PDF_RIGHT_MARGIN_MM: f32 = 20.0;
 const PDF_TOP_MARGIN_MM: f32 = 18.0;
-// Legal pages follow the approved print mockup: the running header ends around
-// 27 mm from the top and the document body starts after another 9 mm of air.
+// Legal pages follow the approved print mockup: keep the running header rule
+// visually close to the document reference while preserving body whitespace.
 const PDF_LEGAL_TOP_MARGIN_MM: f32 = 39.5;
 const PDF_LEGAL_HEADER_REFERENCE_Y_MM: f32 = 278.0;
-const PDF_LEGAL_HEADER_RULE_Y_MM: f32 = 270.5;
+const PDF_LEGAL_HEADER_RULE_Y_MM: f32 = 272.5;
 const PDF_LEGAL_CONTENT_BOTTOM_MM: f32 = 34.0;
 const PDF_LEGAL_FOOTER_RULE_Y_MM: f32 = 21.5;
 const PDF_LEGAL_FOOTER_CONTENT_TOP_MM: f32 = 18.5;
