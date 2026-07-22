@@ -6387,7 +6387,7 @@ fn fc_subhead(layout: &mut TreatmentPlanPdfLayout, text: &str) {
 
 /// An indented bullet point.
 fn fc_bullet(layout: &mut TreatmentPlanPdfLayout, text: &str) {
-    layout.text_block(
+    layout.text_block_justified(
         &format!("•  {text}"),
         11.0,
         false,
@@ -15127,7 +15127,7 @@ fn agency_data_controller_statement(agency: &AgencyContractSettings) -> &str {
 }
 
 fn adult_legal_checkbox(layout: &mut TreatmentPlanPdfLayout, text: &str) {
-    layout.text_block(
+    layout.text_block_justified(
         &format!("[ ]  {text}"),
         10.5,
         false,
@@ -15188,7 +15188,7 @@ fn build_adult_confidentiality_release_pdf(
         ),
     );
 
-    layout.text_block(
+    layout.text_block_justified(
         "Mir ist bekannt, dass ich diese Erklärung über die Entbindung von der Schweigepflicht jederzeit mit Wirkung für die Zukunft widerrufen kann.",
         11.0,
         true,
@@ -15452,7 +15452,7 @@ fn build_adult_privacy_consents_pdf(
         fc_body(&mut layout, "Mir ist bekannt:");
         fc_body(&mut layout, processor_notice);
     }
-    layout.text_block(
+    layout.text_block_justified(
         "Die Einwilligung in die Verarbeitung meiner Daten ist freiwillig und kann jederzeit ohne Angabe von Gründen schriftlich mit Wirkung für die Zukunft widerrufen werden. Der Widerruf berührt die Rechtmäßigkeit der bisherigen Verarbeitung nicht.",
         11.0,
         true,
