@@ -4247,12 +4247,11 @@ impl TreatmentPlanPdfLayout {
         }
 
         if !self.document_reference.is_empty() {
-            let label = "Dokument-Nr.:";
-            let label_width_mm = approx_text_width_mm(label, 7.5);
-            let reference_width_mm = approx_text_width_mm(&self.document_reference, 9.0);
-            let gap_mm = 2.0;
-            let reference_x_mm = PDF_PAGE_WIDTH_MM - PDF_RIGHT_MARGIN_MM - reference_width_mm;
-            let label_x_mm = (reference_x_mm - gap_mm - label_width_mm).max(PDF_LEFT_MARGIN_MM);
+            let header_text = format!("Dokument-Nr.: {}", self.document_reference);
+            let font_size_pt = 8.5;
+            let text_width_mm = approx_text_width_mm(&header_text, font_size_pt);
+            let text_x_mm =
+                PDF_LEFT_MARGIN_MM + ((PDF_CONTENT_WIDTH_MM - text_width_mm) / 2.0).max(0.0);
             let reference_y_mm = if self.page_style == PdfPageStyle::Legal {
                 PDF_LEGAL_HEADER_REFERENCE_Y_MM
             } else {
@@ -4260,20 +4259,11 @@ impl TreatmentPlanPdfLayout {
             };
             append_pdf_text_line(
                 &mut self.page_ops,
-                label,
-                label_x_mm,
+                &header_text,
+                text_x_mm,
                 reference_y_mm,
-                7.5,
+                font_size_pt,
                 &self.regular_font,
-                TreatmentPlanPdfColor::Muted,
-            );
-            append_pdf_text_line(
-                &mut self.page_ops,
-                &self.document_reference,
-                reference_x_mm.max(PDF_LEFT_MARGIN_MM + label_width_mm + gap_mm),
-                reference_y_mm,
-                9.0,
-                &PdfFontHandle::Builtin(BuiltinFont::CourierBold),
                 TreatmentPlanPdfColor::Body,
             );
         }
