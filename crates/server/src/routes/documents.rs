@@ -6369,7 +6369,15 @@ fn fc_paragraph_heading(layout: &mut TreatmentPlanPdfLayout, text: &str) {
 
 /// A regular body paragraph for the contract text.
 fn fc_body(layout: &mut TreatmentPlanPdfLayout, text: &str) {
-    layout.text_block_centered(text, 11.0, false, TreatmentPlanPdfColor::Body, 0.0, 2.0);
+    layout.text_block_justified(
+        text,
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        2.0,
+    );
 }
 
 /// A bold inline sub-label inside § 1 (e.g. "Individuelle Beratung und ...").
@@ -13157,26 +13165,15 @@ fn finalize_admin_pdf(mut document: PdfDocument, layout: TreatmentPlanPdfLayout)
 }
 
 fn admin_block(layout: &mut TreatmentPlanPdfLayout, text: &str, before: f32, after: f32) {
-    if layout.page_style == PdfPageStyle::Legal {
-        layout.text_block_centered(
-            text,
-            11.0,
-            false,
-            TreatmentPlanPdfColor::Body,
-            before,
-            after,
-        );
-    } else {
-        layout.text_block_justified(
-            text,
-            11.0,
-            false,
-            0.0,
-            TreatmentPlanPdfColor::Body,
-            before,
-            after,
-        );
-    }
+    layout.text_block_justified(
+        text,
+        11.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        before,
+        after,
+    );
 }
 
 fn admin_heading(layout: &mut TreatmentPlanPdfLayout, text: &str) {
