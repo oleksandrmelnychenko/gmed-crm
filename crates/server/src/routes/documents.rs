@@ -216,8 +216,14 @@ const PDF_PAGE_HEIGHT_MM: f32 = 297.0;
 const PDF_LEFT_MARGIN_MM: f32 = 25.0;
 const PDF_RIGHT_MARGIN_MM: f32 = 20.0;
 const PDF_TOP_MARGIN_MM: f32 = 18.0;
-// Legal letterhead pages start lower: air between the top rule and the title.
-const PDF_LEGAL_TOP_MARGIN_MM: f32 = 29.0;
+// Legal pages follow the approved print mockup: the running header ends around
+// 27 mm from the top and the document body starts after another 9 mm of air.
+const PDF_LEGAL_TOP_MARGIN_MM: f32 = 39.5;
+const PDF_LEGAL_HEADER_REFERENCE_Y_MM: f32 = 278.0;
+const PDF_LEGAL_HEADER_RULE_Y_MM: f32 = 270.5;
+const PDF_LEGAL_CONTENT_BOTTOM_MM: f32 = 34.0;
+const PDF_LEGAL_FOOTER_RULE_Y_MM: f32 = 21.5;
+const PDF_LEGAL_FOOTER_CONTENT_TOP_MM: f32 = 18.5;
 const PDF_BOTTOM_MARGIN_MM: f32 = 16.0;
 const PDF_FOOTER_GAP_MM: f32 = 6.0;
 const PDF_CONTENT_WIDTH_MM: f32 = PDF_PAGE_WIDTH_MM - PDF_LEFT_MARGIN_MM - PDF_RIGHT_MARGIN_MM;
@@ -4247,11 +4253,16 @@ impl TreatmentPlanPdfLayout {
             let gap_mm = 2.0;
             let reference_x_mm = PDF_PAGE_WIDTH_MM - PDF_RIGHT_MARGIN_MM - reference_width_mm;
             let label_x_mm = (reference_x_mm - gap_mm - label_width_mm).max(PDF_LEFT_MARGIN_MM);
+            let reference_y_mm = if self.page_style == PdfPageStyle::Legal {
+                PDF_LEGAL_HEADER_REFERENCE_Y_MM
+            } else {
+                288.0
+            };
             append_pdf_text_line(
                 &mut self.page_ops,
                 label,
                 label_x_mm,
-                288.0,
+                reference_y_mm,
                 7.5,
                 &self.regular_font,
                 TreatmentPlanPdfColor::Muted,
@@ -4260,7 +4271,7 @@ impl TreatmentPlanPdfLayout {
                 &mut self.page_ops,
                 &self.document_reference,
                 reference_x_mm.max(PDF_LEFT_MARGIN_MM + label_width_mm + gap_mm),
-                288.0,
+                reference_y_mm,
                 9.0,
                 &PdfFontHandle::Builtin(BuiltinFont::CourierBold),
                 TreatmentPlanPdfColor::Body,
@@ -4273,7 +4284,7 @@ impl TreatmentPlanPdfLayout {
             append_pdf_filled_rect(
                 &mut self.page_ops,
                 PDF_LEFT_MARGIN_MM,
-                285.0,
+                PDF_LEGAL_HEADER_RULE_Y_MM,
                 PDF_CONTENT_WIDTH_MM,
                 0.25,
                 accent.clone(),
@@ -4281,29 +4292,29 @@ impl TreatmentPlanPdfLayout {
             append_pdf_filled_rect(
                 &mut self.page_ops,
                 PDF_LEFT_MARGIN_MM,
-                15.0,
+                PDF_LEGAL_FOOTER_RULE_Y_MM,
                 PDF_CONTENT_WIDTH_MM,
                 0.25,
                 accent,
             );
 
-            let logo_height_mm = 7.6;
+            let logo_height_mm = 8.5;
             self.page_ops.extend(crate::pdf_logo::gmed_logo_ops(
                 PDF_LEFT_MARGIN_MM,
-                13.4,
+                PDF_LEGAL_FOOTER_CONTENT_TOP_MM,
                 logo_height_mm,
                 Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None)),
             ));
             let footer_text_x_mm =
                 PDF_LEFT_MARGIN_MM + logo_height_mm * crate::pdf_logo::GMED_LOGO_ASPECT + 4.0;
             for (index, line) in self.legal_footer_lines.iter().take(3).enumerate() {
-                let line = truncate_text_to_width(line, 5.8, 118.0);
+                let line = truncate_text_to_width(line, 6.3, 112.0);
                 append_pdf_text_line(
                     &mut self.page_ops,
                     &line,
                     footer_text_x_mm,
-                    12.0 - index as f32 * 3.0,
-                    5.8,
+                    16.8 - index as f32 * 3.35,
+                    6.3,
                     &self.regular_font,
                     TreatmentPlanPdfColor::Muted,
                 );
@@ -4330,7 +4341,12 @@ impl TreatmentPlanPdfLayout {
     }
 
     fn ensure_space(&mut self, needed_mm: f32) {
-        if self.y_mm - needed_mm < PDF_BOTTOM_MARGIN_MM + PDF_FOOTER_GAP_MM {
+        let content_bottom_mm = if self.page_style == PdfPageStyle::Legal {
+            PDF_LEGAL_CONTENT_BOTTOM_MM
+        } else {
+            PDF_BOTTOM_MARGIN_MM + PDF_FOOTER_GAP_MM
+        };
+        if self.y_mm - needed_mm < content_bottom_mm {
             self.finish_page();
         }
     }
@@ -4661,7 +4677,7 @@ impl TreatmentPlanPdfLayout {
                     &mut page.ops,
                     &label,
                     x_mm,
-                    6.0,
+                    16.8,
                     7.0,
                     &regular_font,
                     TreatmentPlanPdfColor::Muted,
@@ -13174,6 +13190,98 @@ fn admin_heading(layout: &mut TreatmentPlanPdfLayout, text: &str) {
     layout.text_block_centered(text, 13.0, true, TreatmentPlanPdfColor::Body, 3.0, 2.0);
 }
 
+fn legal_meta_grid(layout: &mut TreatmentPlanPdfLayout, cells: &[(&str, String)]) {
+    if cells.is_empty() {
+        return;
+    }
+
+    const COLUMN_GAP_MM: f32 = 10.0;
+    const CARD_PADDING_X_MM: f32 = 5.0;
+    const CARD_PADDING_Y_MM: f32 = 4.0;
+    const ROW_HEIGHT_MM: f32 = 8.5;
+
+    // The title helper already leaves 3 mm below the subtitle. Together these
+    // 4 mm reproduce the 7 mm title-to-metadata gap from the approved mockup.
+    layout.spacer(4.0);
+    let row_count = (cells.len() + 1) / 2;
+    let card_height_mm = CARD_PADDING_Y_MM * 2.0 + row_count as f32 * ROW_HEIGHT_MM;
+    layout.ensure_space(card_height_mm);
+
+    let card_top_mm = layout.y_mm;
+    let card_bottom_mm = card_top_mm - card_height_mm;
+    let background = Color::Rgb(Rgb::new(0.98, 0.976, 0.973, None));
+    let border = Color::Rgb(Rgb::new(0.91, 0.90, 0.89, None));
+    append_pdf_filled_rect(
+        &mut layout.page_ops,
+        PDF_LEFT_MARGIN_MM,
+        card_bottom_mm,
+        PDF_CONTENT_WIDTH_MM,
+        card_height_mm,
+        background,
+    );
+    for (x, y, width, height) in [
+        (
+            PDF_LEFT_MARGIN_MM,
+            card_top_mm - 0.2,
+            PDF_CONTENT_WIDTH_MM,
+            0.2,
+        ),
+        (
+            PDF_LEFT_MARGIN_MM,
+            card_bottom_mm,
+            PDF_CONTENT_WIDTH_MM,
+            0.2,
+        ),
+        (PDF_LEFT_MARGIN_MM, card_bottom_mm, 0.2, card_height_mm),
+        (
+            PDF_LEFT_MARGIN_MM + PDF_CONTENT_WIDTH_MM - 0.2,
+            card_bottom_mm,
+            0.2,
+            card_height_mm,
+        ),
+    ] {
+        append_pdf_filled_rect(&mut layout.page_ops, x, y, width, height, border.clone());
+    }
+
+    let column_width_mm = (PDF_CONTENT_WIDTH_MM - COLUMN_GAP_MM) / 2.0;
+    let regular_font = layout.regular_font.clone();
+    let bold_font = layout.bold_font.clone();
+    for (index, (label, value)) in cells.iter().enumerate() {
+        let row = index / 2;
+        let column = index % 2;
+        let column_left_mm = PDF_LEFT_MARGIN_MM + column as f32 * (column_width_mm + COLUMN_GAP_MM);
+        let text_x_mm = column_left_mm + CARD_PADDING_X_MM;
+        let column_right_mm = column_left_mm + column_width_mm - CARD_PADDING_X_MM;
+        let baseline_y_mm = card_top_mm - CARD_PADDING_Y_MM - 3.2 - row as f32 * ROW_HEIGHT_MM;
+        let value = truncate_text_to_width(value, 9.5, column_width_mm * 0.58);
+        let value_width_mm = approx_text_width_mm(&value, 9.5);
+        let value_x_mm = (column_right_mm - value_width_mm).max(text_x_mm + 24.0);
+        let label = truncate_text_to_width(label, 7.0, (value_x_mm - text_x_mm - 3.0).max(15.0));
+
+        append_pdf_text_line(
+            &mut layout.page_ops,
+            &label,
+            text_x_mm,
+            baseline_y_mm,
+            7.0,
+            &regular_font,
+            TreatmentPlanPdfColor::Muted,
+        );
+        append_pdf_text_line(
+            &mut layout.page_ops,
+            &value,
+            value_x_mm,
+            baseline_y_mm,
+            9.5,
+            &bold_font,
+            TreatmentPlanPdfColor::Body,
+        );
+    }
+
+    layout.y_mm = card_bottom_mm;
+    layout.spacer(6.0);
+}
+
 fn build_manual_generated_text_pdf(
     auto_name: &str,
     title: &str,
@@ -13216,7 +13324,15 @@ fn admin_signature_grid(
     const BLOCK_HEIGHT_MM: f32 = 27.0;
     const SIGNATURE_LINE_OFFSET_MM: f32 = 12.0;
 
-    layout.ensure_space(BLOCK_HEIGHT_MM);
+    if layout.page_style == PdfPageStyle::Legal {
+        let anchored_top_mm = PDF_LEGAL_CONTENT_BOTTOM_MM + BLOCK_HEIGHT_MM;
+        if layout.y_mm < anchored_top_mm + 12.0 {
+            layout.page_break();
+        }
+        layout.y_mm = anchored_top_mm;
+    } else {
+        layout.ensure_space(BLOCK_HEIGHT_MM);
+    }
 
     let top_y_mm = layout.y_mm;
     let column_width_mm = (PDF_CONTENT_WIDTH_MM - COLUMN_GAP_MM) / 2.0;
@@ -13680,64 +13796,48 @@ fn build_order_cost_estimate_pdf(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("____________________");
-    for (label, value) in [
-        ("Kostenvoranschlag Nr. :", quote_number.to_string()),
-        ("Datum:", fmt_de_date(context.order_date)),
-        ("Auftraggeber:", context.party.name_with_salutation()),
-        (
-            "Geburtsdatum des Auftraggebers:",
-            fmt_de_date(context.party.birth_date),
-        ),
-        (
-            "Rahmendienstleistungsvertrag vom:",
-            fmt_de_date(context.contract_date),
-        ),
-        ("Einzelauftrag vom:", fmt_de_date(context.order_date)),
-    ] {
-        layout.text_block(
-            label,
-            8.5,
-            false,
-            0.0,
-            TreatmentPlanPdfColor::Muted,
-            0.0,
-            0.25,
-        );
-        layout.text_block(
-            &value,
-            10.5,
-            true,
-            0.0,
-            TreatmentPlanPdfColor::Body,
-            0.0,
-            1.0,
-        );
-    }
-    admin_block(&mut layout, "Sehr geehrte Damen und Herren,", 1.0, 1.0);
+    legal_meta_grid(
+        &mut layout,
+        &[
+            ("Kostenvoranschlag Nr. :", quote_number.to_string()),
+            ("Datum:", fmt_de_date(context.order_date)),
+            ("Auftraggeber:", context.party.name_with_salutation()),
+            (
+                "Geburtsdatum des Auftraggebers:",
+                fmt_de_date(context.party.birth_date),
+            ),
+            (
+                "Rahmendienstleistungsvertrag vom:",
+                fmt_de_date(context.contract_date),
+            ),
+            ("Einzelauftrag vom:", fmt_de_date(context.order_date)),
+        ],
+    );
+    admin_block(&mut layout, "Sehr geehrte Damen und Herren,", 0.0, 3.0);
     admin_block(
         &mut layout,
         "hiermit erhalten Sie eine Übersicht über die zu erwartenden Kosten die im Zusammenhang mit der Erbringung von unseren Leistungen anfallen können.",
         0.0,
-        1.0,
+        3.0,
     );
     admin_block(
         &mut layout,
         "Bitte beachten Sie, dass es sich lediglich um eine vorläufige Berechnung handelt, die auf den vorliegenden Daten beruht. Eine endgültige Berechnung der anfallenden Kosten für von uns erbrachte Leistungen ist erst mit Abschluss des Einzelauftrags möglich.",
         0.0,
-        1.0,
+        3.0,
     );
     admin_block(
         &mut layout,
         "Höhere Kosten können sich z.B. bei Komplikationen oder bei zusätzlichem organisatorischen Aufwand entstehen.",
         0.0,
-        1.0,
+        0.0,
     );
     const SERVICE_WIDTH_MM: f32 = 70.0;
     const UNIT_PRICE_WIDTH_MM: f32 = 34.0;
     const QUANTITY_WIDTH_MM: f32 = 40.0;
     const TOTAL_WIDTH_MM: f32 = 30.0;
 
-    layout.spacer(1.0);
+    layout.spacer(6.0);
     layout.table_header_row(&[
         ("Leistungen", SERVICE_WIDTH_MM, PdfCellAlign::Left),
         (
@@ -13777,12 +13877,16 @@ fn build_order_cost_estimate_pdf(
             false,
         );
     }
+    layout.spacer(4.0);
     for (label, value, bold, shaded) in [
         ("Nettowert:", context.total_net.as_deref(), false, false),
         ("MWSt. 19%:", context.total_vat.as_deref(), false, false),
         ("Gesamtsumme:", context.total_gross.as_deref(), true, true),
     ] {
         if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+            if shaded {
+                layout.spacer(1.5);
+            }
             layout.table_row_aligned(
                 &[
                     ("", SERVICE_WIDTH_MM, PdfCellAlign::Left),
@@ -13795,7 +13899,6 @@ fn build_order_cost_estimate_pdf(
             );
         }
     }
-    layout.spacer(1.5);
     let bank_lines = [
         ("Kontoinhaber", context.agency.bank_holder.as_deref()),
         ("Bank", context.agency.bank_name.as_deref()),
@@ -13806,10 +13909,14 @@ fn build_order_cost_estimate_pdf(
         .iter()
         .any(|(_, value)| value.map(str::trim).is_some_and(|value| !value.is_empty()))
     {
+        // Keep the payment lead-in together with the bank details instead of
+        // leaving a single introductory line at the bottom of the table page.
+        layout.ensure_space(42.0);
+        layout.spacer(6.0);
         admin_block(
             &mut layout,
             "Der angegebene Gesamtbetrag ist vor Behandlungs-/Auftragsbeginn zu überweisen an:",
-            1.0,
+            0.0,
             0.8,
         );
         layout.spacer(2.5);
