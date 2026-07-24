@@ -218,7 +218,7 @@ const PDF_RIGHT_MARGIN_MM: f32 = 20.0;
 const PDF_TOP_MARGIN_MM: f32 = 18.0;
 // Legal pages follow the approved print mockup: keep the running header rule
 // visually close to the document reference while preserving body whitespace.
-const PDF_LEGAL_TOP_MARGIN_MM: f32 = 39.5;
+const PDF_LEGAL_TOP_MARGIN_MM: f32 = 36.5;
 const PDF_LEGAL_HEADER_REFERENCE_Y_MM: f32 = 278.0;
 const PDF_LEGAL_HEADER_RULE_Y_MM: f32 = 274.5;
 const PDF_LEGAL_CONTENT_BOTTOM_MM: f32 = 34.0;
@@ -4473,7 +4473,7 @@ impl TreatmentPlanPdfLayout {
             .iter()
             .map(|(text, width_mm, align)| (text.as_str(), *width_mm, *align))
             .collect::<Vec<_>>();
-        self.table_row_styled(&borrowed, true, false, true);
+        self.table_row_styled(&borrowed, true, false, true, true);
     }
 
     fn table_row_aligned(
@@ -4482,7 +4482,16 @@ impl TreatmentPlanPdfLayout {
         bold: bool,
         emphasized: bool,
     ) {
-        self.table_row_styled(cells, bold, emphasized, false);
+        self.table_row_styled(cells, bold, emphasized, false, true);
+    }
+
+    fn table_row_aligned_without_rule(
+        &mut self,
+        cells: &[(&str, f32, PdfCellAlign)],
+        bold: bool,
+        emphasized: bool,
+    ) {
+        self.table_row_styled(cells, bold, emphasized, false, false);
     }
 
     fn table_row_styled(
@@ -4491,6 +4500,7 @@ impl TreatmentPlanPdfLayout {
         bold: bool,
         emphasized: bool,
         header: bool,
+        draw_body_rule: bool,
     ) {
         if cells.is_empty() {
             return;
@@ -4559,7 +4569,7 @@ impl TreatmentPlanPdfLayout {
                 0.4,
                 treatment_plan_pdf_color(TreatmentPlanPdfColor::Body),
             );
-        } else if !emphasized {
+        } else if !emphasized && draw_body_rule {
             append_pdf_filled_rect(
                 &mut self.page_ops,
                 PDF_LEFT_MARGIN_MM,
@@ -4643,6 +4653,68 @@ impl TreatmentPlanPdfLayout {
                 size_pt,
                 &font,
                 color,
+            );
+            self.y_mm -= line_height_mm;
+        }
+
+        if after_mm > 0.0 {
+            self.spacer(after_mm);
+        }
+    }
+
+    fn key_value_rows_centered(
+        &mut self,
+        rows: &[(&str, &str)],
+        size_pt: f32,
+        before_mm: f32,
+        after_mm: f32,
+    ) {
+        if rows.is_empty() {
+            return;
+        }
+
+        if before_mm > 0.0 {
+            self.spacer(before_mm);
+        }
+
+        let label_width_mm = rows
+            .iter()
+            .map(|(label, _)| approx_text_width_mm(&format!("{label}:"), size_pt))
+            .fold(0.0, f32::max);
+        let value_width_mm = rows
+            .iter()
+            .map(|(_, value)| approx_text_width_mm(value, size_pt))
+            .fold(0.0, f32::max);
+        let column_gap_mm = 4.0;
+        let group_width_mm =
+            (label_width_mm + column_gap_mm + value_width_mm).min(PDF_CONTENT_WIDTH_MM);
+        let group_x_mm =
+            PDF_LEFT_MARGIN_MM + ((PDF_CONTENT_WIDTH_MM - group_width_mm) / 2.0).max(0.0);
+        let value_x_mm = group_x_mm + label_width_mm + column_gap_mm;
+        let line_height_mm = pdf_line_height_mm(size_pt, 1.45);
+        let font = self.regular_font.clone();
+
+        for (label, value) in rows {
+            self.ensure_space(line_height_mm);
+            let label = format!("{label}:");
+            let label_x_mm = group_x_mm + label_width_mm - approx_text_width_mm(&label, size_pt);
+            append_pdf_text_line(
+                &mut self.page_ops,
+                &label,
+                label_x_mm,
+                self.y_mm,
+                size_pt,
+                &font,
+                TreatmentPlanPdfColor::Body,
+            );
+            append_pdf_text_line(
+                &mut self.page_ops,
+                value,
+                value_x_mm,
+                self.y_mm,
+                size_pt,
+                &font,
+                TreatmentPlanPdfColor::Body,
             );
             self.y_mm -= line_height_mm;
         }
@@ -6364,7 +6436,7 @@ fn build_framework_contract_html(context: &GeneratedFrameworkContractContext) ->
 /// Heading for the numbered paragraphs (§ 1 … § 11) and Anlage sub-sections.
 /// Slightly larger/bolder than body text, mirrors `admin_heading` styling.
 fn fc_paragraph_heading(layout: &mut TreatmentPlanPdfLayout, text: &str) {
-    layout.text_block_centered(text, 13.0, true, TreatmentPlanPdfColor::Body, 4.0, 2.0);
+    layout.text_block(text, 13.0, true, 0.0, TreatmentPlanPdfColor::Body, 4.0, 2.0);
 }
 
 /// A regular body paragraph for the contract text.
@@ -13177,7 +13249,7 @@ fn admin_block(layout: &mut TreatmentPlanPdfLayout, text: &str, before: f32, aft
 }
 
 fn admin_heading(layout: &mut TreatmentPlanPdfLayout, text: &str) {
-    layout.text_block_centered(text, 13.0, true, TreatmentPlanPdfColor::Body, 3.0, 2.0);
+    layout.text_block(text, 13.0, true, 0.0, TreatmentPlanPdfColor::Body, 3.0, 2.0);
 }
 
 fn legal_meta_grid(layout: &mut TreatmentPlanPdfLayout, cells: &[(&str, String)]) {
@@ -13287,7 +13359,7 @@ fn build_manual_generated_text_pdf(
     };
     let mut layout = TreatmentPlanPdfLayout::new(footer.to_string(), regular, bold);
     layout.set_document_reference(document_reference);
-    admin_heading(&mut layout, title);
+    layout.text_block_centered(title, 13.0, true, TreatmentPlanPdfColor::Body, 3.0, 2.0);
     for line in generated_manual_text_paragraphs(text) {
         if line.trim().is_empty() {
             layout.spacer(3.0);
@@ -13868,25 +13940,36 @@ fn build_order_cost_estimate_pdf(
         );
     }
     layout.spacer(4.0);
-    for (label, value, bold, shaded) in [
+    let totals = [
         ("Nettowert:", context.total_net.as_deref(), false, false),
         ("MWSt. 19%:", context.total_vat.as_deref(), false, false),
         ("Gesamtsumme:", context.total_gross.as_deref(), true, true),
-    ] {
-        if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-            if shaded {
-                layout.spacer(1.5);
-            }
-            layout.table_row_aligned(
-                &[
-                    ("", SERVICE_WIDTH_MM, PdfCellAlign::Left),
-                    ("", UNIT_PRICE_WIDTH_MM, PdfCellAlign::Left),
-                    (label, QUANTITY_WIDTH_MM, PdfCellAlign::Right),
-                    (value, TOTAL_WIDTH_MM, PdfCellAlign::Right),
-                ],
-                bold,
-                shaded,
-            );
+    ]
+    .into_iter()
+    .filter_map(|(label, value, bold, shaded)| {
+        value
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| (label, value, bold, shaded))
+    })
+    .collect::<Vec<_>>();
+    for (index, (label, value, bold, shaded)) in totals.iter().copied().enumerate() {
+        if shaded {
+            layout.spacer(1.5);
+        }
+        let cells = [
+            ("", SERVICE_WIDTH_MM, PdfCellAlign::Left),
+            ("", UNIT_PRICE_WIDTH_MM, PdfCellAlign::Left),
+            (label, QUANTITY_WIDTH_MM, PdfCellAlign::Right),
+            (value, TOTAL_WIDTH_MM, PdfCellAlign::Right),
+        ];
+        if totals
+            .get(index + 1)
+            .is_some_and(|(_, _, _, next_shaded)| *next_shaded)
+        {
+            layout.table_row_aligned_without_rule(&cells, bold, shaded);
+        } else {
+            layout.table_row_aligned(&cells, bold, shaded);
         }
     }
     let bank_lines = [
@@ -13895,10 +13978,16 @@ fn build_order_cost_estimate_pdf(
         ("SWIFT-Code", context.agency.bank_swift.as_deref()),
         ("IBAN", context.agency.bank_iban.as_deref()),
     ];
-    if bank_lines
+    let bank_rows = bank_lines
         .iter()
-        .any(|(_, value)| value.map(str::trim).is_some_and(|value| !value.is_empty()))
-    {
+        .filter_map(|(label, value)| {
+            value
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| (*label, value))
+        })
+        .collect::<Vec<_>>();
+    if !bank_rows.is_empty() {
         // Keep the payment lead-in together with the bank details instead of
         // leaving a single introductory line at the bottom of the table page.
         layout.ensure_space(42.0);
@@ -13910,18 +13999,7 @@ fn build_order_cost_estimate_pdf(
             0.8,
         );
         layout.spacer(2.5);
-        for (label, value) in bank_lines {
-            if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-                layout.text_block_centered(
-                    &format!("{label}: {value}"),
-                    10.0,
-                    false,
-                    TreatmentPlanPdfColor::Body,
-                    0.0,
-                    0.4,
-                );
-            }
-        }
+        layout.key_value_rows_centered(&bank_rows, 10.0, 0.0, 0.4);
         layout.spacer(2.5);
         admin_block(
             &mut layout,
@@ -14362,10 +14440,16 @@ fn build_cost_coverage_pdf(
         ("SWIFT-Code", context.agency.bank_swift.as_deref()),
         ("IBAN", context.agency.bank_iban.as_deref()),
     ];
-    if bank_lines
+    let bank_rows = bank_lines
         .iter()
-        .any(|(_, v)| v.map(str::trim).is_some_and(|v| !v.is_empty()))
-    {
+        .filter_map(|(label, value)| {
+            value
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| (*label, value))
+        })
+        .collect::<Vec<_>>();
+    if !bank_rows.is_empty() {
         admin_block(
             &mut layout,
             "Die in der Endabrechnung angegebenen, angefallenen Kosten für von uns erbrachte Leistungen und Auslagen sind nach Zugang der Rechnung binnen 14 Tagen auf das folgende Konto zur Zahlung fällig:",
@@ -14373,18 +14457,7 @@ fn build_cost_coverage_pdf(
             1.0,
         );
         layout.spacer(2.5);
-        for (label, value) in bank_lines {
-            if let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) {
-                layout.text_block_centered(
-                    &format!("{label}: {value}"),
-                    10.0,
-                    false,
-                    TreatmentPlanPdfColor::Body,
-                    0.0,
-                    0.5,
-                );
-            }
-        }
+        layout.key_value_rows_centered(&bank_rows, 10.0, 0.0, 0.5);
         layout.spacer(2.5);
     }
 
