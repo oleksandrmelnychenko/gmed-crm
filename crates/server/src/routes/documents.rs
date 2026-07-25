@@ -14682,7 +14682,7 @@ fn build_cost_estimate_pdf(
         true,
     );
 
-    admin_block(&mut layout, cost_estimate_legal_notice(), 5.0, 3.0);
+    admin_block(&mut layout, cost_estimate_legal_notice(), 8.0, 3.0);
 
     let _ = &context.patient_pid;
 
