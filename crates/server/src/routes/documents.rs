@@ -968,7 +968,7 @@ struct GeneratedCostEstimateContext {
     title_override: Option<String>,
     patient: DocPartyBlock,
     patient_pid: String,
-    quote_number: Option<String>,
+    order_number: Option<String>,
     estimate_date: Option<NaiveDate>,
     line_items: Vec<GeneratedContractLineItem>,
     total_range: Option<String>,
@@ -1264,7 +1264,7 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         mime_type: "application/pdf",
         file_extension: "pdf",
         is_medical: false,
-        languages: &["de"],
+        languages: &["de", "ru", "de-ru"],
         text_block_keys: &[],
     },
     DocumentTemplateDefinition {
@@ -2998,6 +2998,7 @@ fn normalize_document_language(value: Option<&str>) -> Option<&'static str> {
         Some("uk") | Some("uk-ua") | Some("ua") | Some("ukrainian") => Some("uk"),
         Some("en") | Some("en-gb") | Some("en-us") | Some("english") => Some("en"),
         Some("ru") | Some("ru-ru") | Some("russian") => Some("ru"),
+        Some("de-ru") | Some("de_ru") => Some("de-ru"),
         _ => None,
     }
 }
@@ -3040,6 +3041,41 @@ fn resolve_document_language(
         {
             return language;
         }
+    }
+
+    supported_languages.first().copied().unwrap_or("de")
+}
+
+fn resolve_cost_estimate_language(
+    requested: Option<&str>,
+    patient_languages: &[String],
+    residence_country: Option<&str>,
+    supported_languages: &[&'static str],
+) -> &'static str {
+    if normalize_document_language(requested).is_some()
+        || patient_languages
+            .iter()
+            .any(|language| !language.trim().is_empty())
+    {
+        return resolve_document_language(requested, patient_languages, supported_languages);
+    }
+
+    let country = residence_country
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_lowercase();
+    if supported_languages.contains(&"ru")
+        && matches!(
+            country.as_str(),
+            "ru" | "rus"
+                | "russia"
+                | "russland"
+                | "russian federation"
+                | "russische föderation"
+                | "россия"
+        )
+    {
+        return "ru";
     }
 
     supported_languages.first().copied().unwrap_or("de")
@@ -3481,6 +3517,10 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         ("uk", "service_unit_price") => "Ціна за одиницю",
         ("uk", "service_total") => "Разом",
         ("uk", "no_services") => "Для вибраного контексту ще немає комерційних позицій.",
+        ("ru", "no_services") => "Медицинские услуги ещё не добавлены.",
+        ("de-ru", "no_services") => {
+            "Noch keine medizinischen Leistungen / Медицинские услуги ещё не добавлены."
+        }
         ("uk", "sticker_title") => "Пацієнтський стікер",
         ("uk", "sticker_dob") => "Дата народження",
         ("uk", "sticker_country") => "Країна",
@@ -4473,7 +4513,7 @@ impl TreatmentPlanPdfLayout {
             .iter()
             .map(|(text, width_mm, align)| (text.as_str(), *width_mm, *align))
             .collect::<Vec<_>>();
-        self.table_row_styled(&borrowed, true, false, true, true, false);
+        self.table_row_styled(&borrowed, true, false, true, true, false, 4.0);
     }
 
     fn table_row_aligned(
@@ -4482,7 +4522,7 @@ impl TreatmentPlanPdfLayout {
         bold: bool,
         emphasized: bool,
     ) {
-        self.table_row_styled(cells, bold, emphasized, false, true, false);
+        self.table_row_styled(cells, bold, emphasized, false, true, false, 4.0);
     }
 
     fn table_row_aligned_middle(
@@ -4491,16 +4531,25 @@ impl TreatmentPlanPdfLayout {
         bold: bool,
         emphasized: bool,
     ) {
-        self.table_row_styled(cells, bold, emphasized, false, true, true);
+        self.table_row_styled(cells, bold, emphasized, false, true, true, 4.0);
     }
 
-    fn table_row_aligned_middle_without_rule(
+    fn table_row_aligned_middle_compact(
         &mut self,
         cells: &[(&str, f32, PdfCellAlign)],
         bold: bool,
         emphasized: bool,
     ) {
-        self.table_row_styled(cells, bold, emphasized, false, false, true);
+        self.table_row_styled(cells, bold, emphasized, false, true, true, 2.0);
+    }
+
+    fn table_row_aligned_middle_compact_without_rule(
+        &mut self,
+        cells: &[(&str, f32, PdfCellAlign)],
+        bold: bool,
+        emphasized: bool,
+    ) {
+        self.table_row_styled(cells, bold, emphasized, false, false, true, 2.0);
     }
 
     fn table_row_styled(
@@ -4511,6 +4560,7 @@ impl TreatmentPlanPdfLayout {
         header: bool,
         draw_body_rule: bool,
         vertically_centered: bool,
+        row_padding_mm: f32,
     ) {
         if cells.is_empty() {
             return;
@@ -4544,7 +4594,7 @@ impl TreatmentPlanPdfLayout {
             })
             .collect::<Vec<_>>();
         let line_count = wrapped_cells.iter().map(Vec::len).max().unwrap_or(1).max(1);
-        let row_height_mm = line_count as f32 * line_height_mm + 4.0;
+        let row_height_mm = line_count as f32 * line_height_mm + row_padding_mm;
         self.ensure_space(row_height_mm + 0.4);
 
         let row_top_mm = self.y_mm;
@@ -11203,11 +11253,20 @@ async fn generate_document(
             "Language is not supported by the selected template",
         );
     }
-    let language = resolve_document_language(
-        body.language.as_deref(),
-        &patient_languages,
-        template.languages,
-    );
+    let language = if template.id == "cost_estimate" {
+        resolve_cost_estimate_language(
+            body.language.as_deref(),
+            &patient_languages,
+            residence_country.as_deref(),
+            template.languages,
+        )
+    } else {
+        resolve_document_language(
+            body.language.as_deref(),
+            &patient_languages,
+            template.languages,
+        )
+    };
 
     let order_number = if let Some(order_uuid) = order_id {
         match sqlx::query_scalar::<_, String>("SELECT order_number FROM orders WHERE id = $1")
@@ -12437,13 +12496,12 @@ async fn generate_document(
                 title_override: title_override.clone(),
                 patient: patient_party.clone(),
                 patient_pid: patient_pid.clone(),
-                quote_number: quote
-                    .as_ref()
-                    .and_then(|value| value.quote_number.clone())
+                order_number: order_number
+                    .clone()
                     .filter(|value| !value.trim().is_empty())
                     .or_else(|| {
                         bindings
-                            .quote_number
+                            .order_number
                             .clone()
                             .filter(|value| !value.trim().is_empty())
                     }),
@@ -12942,7 +13000,7 @@ fn admin_doc_label(language: &str, key: &str) -> &'static str {
         (_, "single_order_title") => "Einzelauftrag",
         (_, "order_cost_estimate_title") => "Kostenvoranschlag zum Einzelauftrag",
         (_, "cost_coverage_title") => "Kostenübernahmeerklärung",
-        (_, "cost_estimate_title") => cost_estimate_default_title(),
+        (_, "cost_estimate_title") => cost_estimate_default_title(language),
         (_, "appointment_confirmation_title") => "Terminbestätigung",
         (_, "consent_title") => {
             "Einverständniserklärung zur Datenübermittlung und Schweigepflichtsentbindung"
@@ -14008,9 +14066,9 @@ fn build_order_cost_estimate_pdf(
             .get(index + 1)
             .is_some_and(|(_, _, _, next_shaded)| *next_shaded)
         {
-            layout.table_row_aligned_middle_without_rule(&cells, bold, shaded);
+            layout.table_row_aligned_middle_compact_without_rule(&cells, bold, shaded);
         } else {
-            layout.table_row_aligned_middle(&cells, bold, shaded);
+            layout.table_row_aligned_middle_compact(&cells, bold, shaded);
         }
     }
     let bank_lines = [
@@ -14540,17 +14598,33 @@ fn cost_estimate_price_text(raw: &str) -> String {
     }
 }
 
-fn cost_estimate_default_title() -> &'static str {
-    "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen"
+fn cost_estimate_default_title(language: &str) -> &'static str {
+    match language {
+        "ru" => "Ориентировочный расчёт стоимости медицинских услуг диагностики",
+        "de-ru" => {
+            "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen / \
+             Ориентировочный расчёт стоимости медицинских услуг диагностики"
+        }
+        _ => "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen",
+    }
 }
 
-fn cost_estimate_total_label() -> &'static str {
-    "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen \
-     (gesamt):"
+fn cost_estimate_total_label(language: &str) -> &'static str {
+    match language {
+        "ru" => "Ориентировочный расчёт стоимости медицинских услуг диагностики (общий):",
+        "de-ru" => {
+            "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen \
+             (gesamt) / Ориентировочный расчёт стоимости медицинских услуг диагностики (общий):"
+        }
+        _ => {
+            "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen \
+             (gesamt):"
+        }
+    }
 }
 
-fn cost_estimate_legal_notice() -> &'static str {
-    "Rechtliche Hinweise: Die Kosten für medizinische Diagnostik und/oder Behandlung können von \
+fn cost_estimate_legal_notice(language: &str) -> String {
+    let german = "Rechtliche Hinweise: Die Kosten für medizinische Diagnostik und/oder Behandlung können von \
      angegebenen Preisen/Kosten abweichen und dienen ausschließlich Informationszwecken. \
      Dementsprechend geben wir keine Gewährleistungen oder Zusicherungen hinsichtlich der \
      Genauigkeit, Vollständigkeit oder Richtigkeit der hierin enthaltenen Informationen oder \
@@ -14559,7 +14633,21 @@ fn cost_estimate_legal_notice() -> &'static str {
      Verteilung und/oder Verwendung dieses Dokuments im Zusammenhang stehen. Die Aussagen \
      entsprechen dem Stand zum Zeitpunkt der Erstellung des Dokuments und entspricht den \
      Medianpreisen für aufgeführte medizinische Leistungen aufgrund unserer Erfahrung. Sie können \
-     aufgrund künftiger Entwicklungen überholt sein, ohne dass das Dokument geändert wurde."
+     aufgrund künftiger Entwicklungen überholt sein, ohne dass das Dokument geändert wurde.";
+    let russian = "Правовая информация: Стоимость медицинской диагностики и/или лечения может \
+         отличаться от заявленных цен/стоимостей и представлена исключительно в информационных \
+         целях. Следовательно, мы не предоставляем никаких гарантий или заявлений относительно \
+         точности, полноты или правильности любой информации или мнения, содержащихся здесь. Мы \
+         не несем ответственности за прямые или косвенные убытки, вызванные и/или связанные с \
+         распространением и/или использованием данного документа. Информация соответствует \
+         статусу на момент создания документа и соответствует среднему диапазону цен за \
+         указанные медицинские услуги исходя из нашего опыта. Дальнейшее развитие может сделать \
+         предоставленную информацию устаревшей без внесения изменений в данный документ.";
+    match language {
+        "ru" => russian.to_string(),
+        "de-ru" => format!("{german} / {russian}"),
+        _ => german.to_string(),
+    }
 }
 
 fn build_cost_estimate_pdf(
@@ -14568,49 +14656,71 @@ fn build_cost_estimate_pdf(
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let document_reference =
-        legal_document_reference(context.quote_number.as_deref(), fallback_document_reference);
+        legal_document_reference(context.order_number.as_deref(), fallback_document_reference);
     let mut layout = legal_document_pdf_layout(&document_reference, &context.agency, regular, bold);
 
     let title = context
         .title_override
         .clone()
-        .unwrap_or_else(|| cost_estimate_default_title().to_string());
+        .unwrap_or_else(|| cost_estimate_default_title(&context.language).to_string());
     layout.text_block_centered(&title, 15.0, true, TreatmentPlanPdfColor::Body, 0.0, 4.0);
 
-    legal_meta_grid(
+    let (date_label, patient_label, birth_label) = match context.language.as_str() {
+        "ru" => ("Дата", "Пациент:", "Дата рождения:"),
+        "de-ru" => ("Datum/Дата", "Patient/Пациент:", "Geb. am./дата рождения:"),
+        _ => ("Datum", "Patient:", "Geburtsdatum:"),
+    };
+    admin_block(
         &mut layout,
+        &format!("{date_label}: {}", fmt_de_date(context.estimate_date)),
+        0.0,
+        2.0,
+    );
+    let birth_date = context
+        .patient
+        .birth_date
+        .map(|value| value.format("%d.%m.%Y").to_string())
+        .unwrap_or_else(|| "____________________".to_string());
+    layout.table_row_aligned_middle(
         &[
-            ("Patient:", context.patient.name_with_salutation()),
+            (patient_label, 55.0, PdfCellAlign::Left),
             (
-                "Geburtsdatum:",
-                context
-                    .patient
-                    .birth_date
-                    .map(|value| value.format("%d.%m.%Y").to_string())
-                    .unwrap_or_else(|| "____________________".to_string()),
+                context.patient.name_with_salutation().as_str(),
+                119.0,
+                PdfCellAlign::Left,
             ),
-            ("Datum:", fmt_de_date(context.estimate_date)),
-            ("Kostenvoranschlag Nr.:", document_reference.to_string()),
         ],
+        false,
+        false,
+    );
+    layout.table_row_aligned_middle(
+        &[
+            (birth_label, 55.0, PdfCellAlign::Left),
+            (&birth_date, 119.0, PdfCellAlign::Left),
+        ],
+        false,
+        false,
     );
 
-    const POSITION_WIDTH_MM: f32 = 14.0;
-    const SERVICE_WIDTH_MM: f32 = 120.0;
+    const SERVICE_WIDTH_MM: f32 = 134.0;
     const PRICE_WIDTH_MM: f32 = 40.0;
 
-    layout.table_header_row(&[
-        ("Pos.", POSITION_WIDTH_MM, PdfCellAlign::Left),
-        (
-            "Medizinische Leistung",
-            SERVICE_WIDTH_MM,
-            PdfCellAlign::Left,
+    layout.spacer(4.0);
+    let (services_heading, estimate_heading) = match context.language.as_str() {
+        "ru" => ("Медицинские услуги", "Ориентировочная стоимость"),
+        "de-ru" => (
+            "Medizinische Leistungen/Медицинские услуги",
+            "Unverbindliche Kostenschätzung/Ориентировочная стоимость",
         ),
-        ("Kostenrahmen", PRICE_WIDTH_MM, PdfCellAlign::Right),
+        _ => ("Medizinische Leistungen", "Unverbindliche Kostenschätzung"),
+    };
+    layout.table_header_row(&[
+        (services_heading, SERVICE_WIDTH_MM, PdfCellAlign::Left),
+        (estimate_heading, PRICE_WIDTH_MM, PdfCellAlign::Right),
     ]);
     if context.line_items.is_empty() {
         layout.table_row_aligned_middle(
             &[
-                ("", POSITION_WIDTH_MM, PdfCellAlign::Left),
                 (
                     translated_label(&context.language, "no_services"),
                     SERVICE_WIDTH_MM,
@@ -14622,7 +14732,7 @@ fn build_cost_estimate_pdf(
             false,
         );
     } else {
-        for (index, item) in context.line_items.iter().enumerate() {
+        for item in &context.line_items {
             // Range estimate: prefer the operator's free-text line total, fall
             // back to the unit price. Verbatim ranges are preserved; only single
             // numeric quote-fallback values are normalised via fmt_money_de.
@@ -14635,10 +14745,8 @@ fn build_cost_estimate_pdf(
                 }
             };
             let price = cost_estimate_price_text(raw_price);
-            let position = (index + 1).to_string();
             layout.table_row_aligned_middle(
                 &[
-                    (position.as_str(), POSITION_WIDTH_MM, PdfCellAlign::Left),
                     (
                         item.description.trim(),
                         SERVICE_WIDTH_MM,
@@ -14660,11 +14768,10 @@ fn build_cost_estimate_pdf(
         .map(cost_estimate_price_text)
         .unwrap_or_else(|| "____________".to_string());
     layout.spacer(1.5);
-    layout.table_row_aligned_middle(
+    layout.table_row_aligned_middle_compact(
         &[
-            ("", POSITION_WIDTH_MM, PdfCellAlign::Left),
             (
-                cost_estimate_total_label(),
+                cost_estimate_total_label(&context.language),
                 SERVICE_WIDTH_MM,
                 PdfCellAlign::Left,
             ),
@@ -14674,7 +14781,12 @@ fn build_cost_estimate_pdf(
         true,
     );
 
-    admin_block(&mut layout, cost_estimate_legal_notice(), 8.0, 3.0);
+    admin_block(
+        &mut layout,
+        &cost_estimate_legal_notice(&context.language),
+        8.0,
+        3.0,
+    );
 
     let _ = &context.patient_pid;
 
@@ -21576,14 +21688,14 @@ mod tests {
     }
 
     #[test]
-    fn cost_estimate_pdf_uses_quote_number_and_shared_legal_chrome() {
+    fn cost_estimate_pdf_uses_order_number_and_shared_legal_chrome() {
         let context = GeneratedCostEstimateContext {
             language: "de".to_string(),
             auto_name: "Kostenschätzung".to_string(),
             title_override: None,
             patient: legal_test_party("Germany"),
             patient_pid: "PT-LEGAL-3".to_string(),
-            quote_number: Some("KV-2026-0099".to_string()),
+            order_number: Some("A-2026-0099".to_string()),
             estimate_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             line_items: vec![GeneratedContractLineItem {
                 description: "Kardiologische Untersuchung".to_string(),
@@ -21599,7 +21711,7 @@ mod tests {
         };
 
         let bytes = build_cost_estimate_pdf(&context, "DOC-COST-FALLBACK").unwrap();
-        let text = assert_legal_pdf_chrome(&bytes, "KV-2026-0099");
+        let text = assert_legal_pdf_chrome(&bytes, "A-2026-0099");
         assert!(!text.contains("DOC-COST-FALLBACK"));
         assert!(text.contains("Unverbindliche voraussichtliche Kostenschätzung"));
         assert!(text.contains("Patient: Frau Anna Beispiel"));

@@ -4373,7 +4373,14 @@ async fn document_templates_are_german_only_even_when_patient_prefers_another_la
         .iter()
         .filter(|item| item["template_kind"].as_str().unwrap_or("builtin") == "builtin")
     {
-        assert_eq!(template["supported_languages"], json!(["de"]));
+        if template["id"] == "cost_estimate" {
+            assert_eq!(
+                template["supported_languages"],
+                json!(["de", "ru", "de-ru"])
+            );
+        } else {
+            assert_eq!(template["supported_languages"], json!(["de"]));
+        }
     }
 
     let (status, body) = json_request(

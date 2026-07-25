@@ -855,6 +855,7 @@ export function normalizeTemplateLanguage(value?: string | null) {
   if (["uk", "uk-ua", "ua", "ukrainian"].includes(normalized)) return "uk";
   if (["en", "en-gb", "en-us", "english"].includes(normalized)) return "en";
   if (["ru", "ru-ru", "russian"].includes(normalized)) return "ru";
+  if (["de-ru", "de_ru"].includes(normalized)) return "de-ru";
   return null;
 }
 

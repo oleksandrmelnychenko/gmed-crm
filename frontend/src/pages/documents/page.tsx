@@ -228,6 +228,8 @@ function formatLanguageLabel(language?: string | null) {
       return uiText("documents_language_uk");
     case "ru":
       return uiText("documents_language_ru");
+    case "de-ru":
+      return getLang() === "ru" ? "Немецкий + русский" : "Deutsch + Russisch";
     default: {
       const option = normalized
         ? LANGUAGE_OPTIONS.find((item) => item.value === normalized)
