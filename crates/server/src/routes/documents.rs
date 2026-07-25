@@ -13876,12 +13876,12 @@ fn build_order_cost_estimate_pdf(
             ("Datum:", fmt_de_date(context.order_date)),
             ("Auftraggeber:", context.party.name_with_salutation()),
             (
-                "Geburtsdatum des Auftraggebers:",
-                fmt_de_date(context.party.birth_date),
-            ),
-            (
                 "Rahmendienstleistungsvertrag Nr.:",
                 contract_number.to_string(),
+            ),
+            (
+                "Geburtsdatum des Auftraggebers:",
+                fmt_de_date(context.party.birth_date),
             ),
             ("Einzelauftrag Nr.:", order_number.to_string()),
         ],
