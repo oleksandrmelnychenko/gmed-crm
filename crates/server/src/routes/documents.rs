@@ -4473,7 +4473,7 @@ impl TreatmentPlanPdfLayout {
             .iter()
             .map(|(text, width_mm, align)| (text.as_str(), *width_mm, *align))
             .collect::<Vec<_>>();
-        self.table_row_styled(&borrowed, true, false, true, true);
+        self.table_row_styled(&borrowed, true, false, true, true, false);
     }
 
     fn table_row_aligned(
@@ -4482,7 +4482,16 @@ impl TreatmentPlanPdfLayout {
         bold: bool,
         emphasized: bool,
     ) {
-        self.table_row_styled(cells, bold, emphasized, false, true);
+        self.table_row_styled(cells, bold, emphasized, false, true, false);
+    }
+
+    fn table_row_aligned_middle(
+        &mut self,
+        cells: &[(&str, f32, PdfCellAlign)],
+        bold: bool,
+        emphasized: bool,
+    ) {
+        self.table_row_styled(cells, bold, emphasized, false, true, true);
     }
 
     fn table_row_aligned_without_rule(
@@ -4491,7 +4500,7 @@ impl TreatmentPlanPdfLayout {
         bold: bool,
         emphasized: bool,
     ) {
-        self.table_row_styled(cells, bold, emphasized, false, false);
+        self.table_row_styled(cells, bold, emphasized, false, false, false);
     }
 
     fn table_row_styled(
@@ -4501,6 +4510,7 @@ impl TreatmentPlanPdfLayout {
         emphasized: bool,
         header: bool,
         draw_body_rule: bool,
+        vertically_centered: bool,
     ) {
         if cells.is_empty() {
             return;
@@ -4592,6 +4602,11 @@ impl TreatmentPlanPdfLayout {
         };
         let mut x_mm = PDF_LEFT_MARGIN_MM;
         for ((_, width_mm, align), lines) in cells.iter().zip(wrapped_cells.iter()) {
+            let vertical_offset_mm = if vertically_centered {
+                line_count.saturating_sub(lines.len()) as f32 * line_height_mm / 2.0
+            } else {
+                0.0
+            };
             for (line_index, line) in lines.iter().enumerate() {
                 let text_x_mm = match align {
                     PdfCellAlign::Left => x_mm + 2.0,
@@ -4604,7 +4619,7 @@ impl TreatmentPlanPdfLayout {
                     &mut self.page_ops,
                     line,
                     text_x_mm,
-                    row_top_mm - 3.6 - line_index as f32 * line_height_mm,
+                    row_top_mm - 3.6 - vertical_offset_mm - line_index as f32 * line_height_mm,
                     font_size_pt,
                     &font,
                     text_color,
@@ -13935,7 +13950,7 @@ fn build_order_cost_estimate_pdf(
         };
         let line_gross = cost_coverage_money_cell(&item.line_gross)
             .unwrap_or_else(|| "____________".to_string());
-        layout.table_row_aligned(
+        layout.table_row_aligned_middle(
             &[
                 (
                     item.description.trim(),
