@@ -13044,13 +13044,8 @@ fn party_block_lines(party: &DocPartyBlock) -> Vec<String> {
 
 fn agency_block_lines(agency: &AgencyContractSettings) -> Vec<String> {
     let mut lines = agency_identity_profile_lines(agency);
-    if let Some(address) = agency
-        .address
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        lines.push(address.to_string());
+    if let Some(address) = agency.address.as_deref().and_then(agency_address_line) {
+        lines.push(address);
     }
     if let Some(email) = agency
         .email
@@ -13073,13 +13068,8 @@ fn agency_block_lines(agency: &AgencyContractSettings) -> Vec<String> {
 
 fn legal_agency_block_lines(agency: &AgencyContractSettings) -> Vec<String> {
     let mut lines = agency_identity_profile_lines(agency);
-    if let Some(address) = agency
-        .address
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        lines.push(address.to_string());
+    if let Some(address) = agency.address.as_deref().and_then(agency_address_line) {
+        lines.push(address);
     }
     if let Some(email) = agency
         .email
@@ -13098,6 +13088,15 @@ fn legal_agency_block_lines(agency: &AgencyContractSettings) -> Vec<String> {
         lines.push(format!("Tel.: {phone}"));
     }
     lines
+}
+
+fn agency_address_line(address: &str) -> Option<String> {
+    let parts = address
+        .lines()
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    (!parts.is_empty()).then(|| parts.join(" | "))
 }
 
 fn admin_preview_html(title: &str, lines: &[String]) -> String {
@@ -13858,6 +13857,18 @@ fn build_order_cost_estimate_pdf(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("____________________");
+    let contract_number = context
+        .contract_number
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("____________________");
+    let order_number = context.order_number.trim();
+    let order_number = if order_number.is_empty() {
+        "____________________"
+    } else {
+        order_number
+    };
     legal_meta_grid(
         &mut layout,
         &[
@@ -13869,10 +13880,10 @@ fn build_order_cost_estimate_pdf(
                 fmt_de_date(context.party.birth_date),
             ),
             (
-                "Rahmendienstleistungsvertrag vom:",
-                fmt_de_date(context.contract_date),
+                "Rahmendienstleistungsvertrag Nr.:",
+                contract_number.to_string(),
             ),
-            ("Einzelauftrag vom:", fmt_de_date(context.order_date)),
+            ("Einzelauftrag Nr.:", order_number.to_string()),
         ],
     );
     admin_block(&mut layout, "Sehr geehrte Damen und Herren,", 0.0, 3.0);
@@ -14560,35 +14571,37 @@ fn build_cost_estimate_pdf(
         );
     }
 
-    layout.text_block(
-        "Medizinische Leistungen",
-        12.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        2.0,
-        0.0,
-    );
-    layout.text_block(
-        "Unverbindliche Kostenschätzung",
-        11.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Muted,
-        0.0,
-        2.0,
-    );
+    const SERVICE_WIDTH_MM: f32 = 134.0;
+    const PRICE_WIDTH_MM: f32 = 40.0;
 
+    layout.spacer(4.0);
+    layout.table_header_row(&[
+        (
+            "Medizinische Leistungen",
+            SERVICE_WIDTH_MM,
+            PdfCellAlign::Left,
+        ),
+        (
+            "Unverbindliche Kostenschätzung",
+            PRICE_WIDTH_MM,
+            PdfCellAlign::Right,
+        ),
+    ]);
     if context.line_items.is_empty() {
-        admin_block(
-            &mut layout,
-            translated_label(&context.language, "no_services"),
-            0.0,
-            1.0,
+        layout.table_row_aligned(
+            &[
+                (
+                    translated_label(&context.language, "no_services"),
+                    SERVICE_WIDTH_MM,
+                    PdfCellAlign::Left,
+                ),
+                ("____________", PRICE_WIDTH_MM, PdfCellAlign::Right),
+            ],
+            false,
+            false,
         );
     } else {
         for item in &context.line_items {
-            admin_block(&mut layout, &item.description, 1.0, 0.5);
             // Range estimate: prefer the operator's free-text line total, fall
             // back to the unit price. Verbatim ranges are preserved; only single
             // numeric quote-fallback values are normalised via fmt_money_de.
@@ -14600,19 +14613,22 @@ fn build_cost_estimate_pdf(
                     line_gross
                 }
             };
-            layout.text_block(
-                &cost_estimate_price_text(raw_price),
-                11.0,
-                true,
-                4.0,
-                TreatmentPlanPdfColor::Primary,
-                0.0,
-                1.0,
+            let price = cost_estimate_price_text(raw_price);
+            layout.table_row_aligned(
+                &[
+                    (
+                        item.description.trim(),
+                        SERVICE_WIDTH_MM,
+                        PdfCellAlign::Left,
+                    ),
+                    (&price, PRICE_WIDTH_MM, PdfCellAlign::Right),
+                ],
+                false,
+                false,
             );
         }
     }
 
-    admin_block(&mut layout, cost_estimate_total_label(), 2.0, 0.5);
     let total_text = context
         .total_range
         .as_deref()
@@ -14620,17 +14636,21 @@ fn build_cost_estimate_pdf(
         .filter(|v| !v.is_empty())
         .map(cost_estimate_price_text)
         .unwrap_or_else(|| "____________".to_string());
-    layout.text_block(
-        &total_text,
-        12.0,
+    layout.spacer(1.5);
+    layout.table_row_aligned(
+        &[
+            (
+                cost_estimate_total_label(),
+                SERVICE_WIDTH_MM,
+                PdfCellAlign::Left,
+            ),
+            (&total_text, PRICE_WIDTH_MM, PdfCellAlign::Right),
+        ],
         true,
-        4.0,
-        TreatmentPlanPdfColor::Primary,
-        0.0,
-        3.0,
+        true,
     );
 
-    admin_block(&mut layout, cost_estimate_legal_notice(), 2.0, 3.0);
+    admin_block(&mut layout, cost_estimate_legal_notice(), 5.0, 3.0);
 
     let _ = &context.patient_pid;
 
@@ -15257,7 +15277,7 @@ fn build_adult_confidentiality_release_pdf(
     fc_body(
         &mut layout,
         &format!(
-            "Daher entbinde ich alle meine behandelnden Ärzte und medizinischen Einrichtungen von ihrer Schweigepflicht gegenüber {agency_identity} und den von ihm beauftragten Mitarbeitenden."
+            "Daher entbinde ich alle meine behandelnden Ärzte und medizinischen Einrichtungen von ihrer Schweigepflicht gegenüber {agency_identity} und den von der Agentur beauftragten Mitarbeitenden."
         ),
     );
 
@@ -20904,6 +20924,14 @@ mod tests {
         let block_lines = agency_block_lines(&agency);
         assert_eq!(&block_lines[..2], lines.as_slice());
         assert_eq!(
+            block_lines.get(2).map(String::as_str),
+            Some("Albert-Schweitzer-Straße 56 | 81735 München")
+        );
+        assert_eq!(
+            legal_agency_block_lines(&agency).get(2).map(String::as_str),
+            Some("Albert-Schweitzer-Straße 56 | 81735 München")
+        );
+        assert_eq!(
             block_lines
                 .iter()
                 .filter(|line| line.as_str() == LEGAL_OWNER)
@@ -21116,7 +21144,7 @@ mod tests {
         assert!(!release_text.contains("Anlage 3"));
         assert!(!release_text.contains("Anlage 4"));
         assert!(release_text.contains("Deutschland"));
-        assert!(release_text.contains("den von ihm beauftragten Mitarbeitenden"));
+        assert!(release_text.contains("den von der Agentur beauftragten Mitarbeitenden"));
         assert!(!release_text.contains("Maria Beispiel, Vertrauenskontakt"));
         assert!(!release_text.contains('?'));
 
@@ -21446,7 +21474,12 @@ mod tests {
         assert!(estimate_text.contains("KV-2026-0042"));
         assert!(estimate_text.contains("Geburtsdatum des Auftraggebers:"));
         assert!(estimate_text.contains("12.04.1988"));
-        assert!(estimate_text.contains("Rahmendienstleistungsvertrag vom:"));
+        assert!(estimate_text.contains("Rahmendienstleistungsvertrag Nr.:"));
+        assert!(estimate_text.contains("RV-2026-0042"));
+        assert!(estimate_text.contains("Einzelauftrag Nr.:"));
+        assert!(estimate_text.contains("EA-2026-0017"));
+        assert!(!estimate_text.contains("Rahmendienstleistungsvertrag vom:"));
+        assert!(!estimate_text.contains("Einzelauftrag vom:"));
         assert!(!estimate_text.contains("Auftragsnummer: EA-2026-0017"));
         assert!(estimate_text.contains("HONORAR PRO EINHEIT"));
         assert!(estimate_text.contains("VORAUSSICHTLICHER AUFWAND (IN EINHEITEN)"));
