@@ -14583,49 +14583,40 @@ fn build_cost_estimate_pdf(
         .unwrap_or_else(|| cost_estimate_default_title().to_string());
     layout.text_block_centered(&title, 15.0, true, TreatmentPlanPdfColor::Body, 0.0, 4.0);
 
-    // Datum: estimate_date now falls back to the generated date upstream, so it
-    // is never a blank placeholder here.
-    admin_block(
+    legal_meta_grid(
         &mut layout,
-        &format!("Datum: {}", fmt_de_date(context.estimate_date)),
-        0.0,
-        0.5,
+        &[
+            ("Patient:", context.patient.name_with_salutation()),
+            (
+                "Geburtsdatum:",
+                context
+                    .patient
+                    .birth_date
+                    .map(|value| value.format("%d.%m.%Y").to_string())
+                    .unwrap_or_else(|| "____________________".to_string()),
+            ),
+            ("Datum:", fmt_de_date(context.estimate_date)),
+            ("Kostenvoranschlag Nr.:", document_reference.to_string()),
+        ],
     );
-    // Patient line uses the gendered salutation ("Herr Max Musterman").
-    admin_block(
-        &mut layout,
-        &format!("Patient: {}", context.patient.name_with_salutation()),
-        0.0,
-        0.5,
-    );
-    if let Some(birth) = context.patient.birth_date {
-        admin_block(
-            &mut layout,
-            &format!("Geburtsdatum: {}", birth.format("%d.%m.%Y")),
-            0.0,
-            2.0,
-        );
-    }
 
-    const SERVICE_WIDTH_MM: f32 = 134.0;
+    const POSITION_WIDTH_MM: f32 = 14.0;
+    const SERVICE_WIDTH_MM: f32 = 120.0;
     const PRICE_WIDTH_MM: f32 = 40.0;
 
-    layout.spacer(4.0);
     layout.table_header_row(&[
+        ("Pos.", POSITION_WIDTH_MM, PdfCellAlign::Left),
         (
-            "Medizinische Leistungen",
+            "Medizinische Leistung",
             SERVICE_WIDTH_MM,
             PdfCellAlign::Left,
         ),
-        (
-            "Unverbindliche Kostenschätzung",
-            PRICE_WIDTH_MM,
-            PdfCellAlign::Right,
-        ),
+        ("Kostenrahmen", PRICE_WIDTH_MM, PdfCellAlign::Right),
     ]);
     if context.line_items.is_empty() {
         layout.table_row_aligned_middle(
             &[
+                ("", POSITION_WIDTH_MM, PdfCellAlign::Left),
                 (
                     translated_label(&context.language, "no_services"),
                     SERVICE_WIDTH_MM,
@@ -14637,7 +14628,7 @@ fn build_cost_estimate_pdf(
             false,
         );
     } else {
-        for item in &context.line_items {
+        for (index, item) in context.line_items.iter().enumerate() {
             // Range estimate: prefer the operator's free-text line total, fall
             // back to the unit price. Verbatim ranges are preserved; only single
             // numeric quote-fallback values are normalised via fmt_money_de.
@@ -14650,8 +14641,10 @@ fn build_cost_estimate_pdf(
                 }
             };
             let price = cost_estimate_price_text(raw_price);
+            let position = (index + 1).to_string();
             layout.table_row_aligned_middle(
                 &[
+                    (position.as_str(), POSITION_WIDTH_MM, PdfCellAlign::Left),
                     (
                         item.description.trim(),
                         SERVICE_WIDTH_MM,
@@ -14675,6 +14668,7 @@ fn build_cost_estimate_pdf(
     layout.spacer(1.5);
     layout.table_row_aligned_middle(
         &[
+            ("", POSITION_WIDTH_MM, PdfCellAlign::Left),
             (
                 cost_estimate_total_label(),
                 SERVICE_WIDTH_MM,
