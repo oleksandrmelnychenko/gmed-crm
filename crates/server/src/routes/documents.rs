@@ -16264,9 +16264,10 @@ async fn load_lead_cost_estimate_catalog_selection(
     let rows = sqlx::query(
         r#"SELECT wt.id,
                   wt.name_de,
-                  wt.name_ru,
-                  wt.min_price_eur::text AS min_price_eur,
-                  wt.max_price_eur::text AS max_price_eur
+                   wt.name_ru,
+                   wt.min_price_eur::text AS min_price_eur,
+                   wt.max_price_eur::text AS max_price_eur,
+                   wt.duration_hours
            FROM medical_specialization_work_types wt
            WHERE wt.id = ANY($1::uuid[])
              AND wt.deleted_at IS NULL
@@ -16355,6 +16356,7 @@ async fn load_lead_cost_estimate_catalog_selection(
         let max_raw = row
             .try_get::<String, _>("max_price_eur")
             .unwrap_or_default();
+        let duration_hours = row.try_get::<i32, _>("duration_hours").unwrap_or(1);
         let Some(min_price) = parse_eur_amount(&min_raw) else {
             return Err(err(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -16367,8 +16369,9 @@ async fn load_lead_cost_estimate_catalog_selection(
                 "Failed to decode specialization work type maximum price",
             ));
         };
-        total_min += min_price;
-        total_max += max_price;
+        let duration = f64::from(duration_hours);
+        total_min += min_price * duration;
+        total_max += max_price * duration;
 
         let localized_description = localized_estimate_work_type_description(
             language,
@@ -16380,11 +16383,12 @@ async fn load_lead_cost_estimate_catalog_selection(
                 .unwrap_or_default(),
         );
         let price_range = format_eur_range(min_price, max_price);
+        let line_total_range = format_eur_range(min_price * duration, max_price * duration);
         line_items.push(GeneratedContractLineItem {
             description: localized_description,
-            quantity: "1".to_string(),
-            unit_price: price_range.clone(),
-            line_gross: price_range,
+            quantity: duration_hours.to_string(),
+            unit_price: price_range,
+            line_gross: line_total_range,
             vat_rate: None,
             notes: None,
         });

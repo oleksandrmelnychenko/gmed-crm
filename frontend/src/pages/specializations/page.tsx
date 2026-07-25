@@ -1360,7 +1360,7 @@ function WorkTypeSheet({
                   className="h-9 w-full rounded-lg bg-card"
                   required
                 >
-                  {Array.from({ length: 50 }, (_, index) => index + 1).map(
+                  {Array.from({ length: 100 }, (_, index) => index + 1).map(
                     (hours) => (
                       <option key={hours} value={hours}>
                         {hours}
@@ -1554,20 +1554,27 @@ function WorkTypeSheet({
                       className="flex min-w-0 items-start justify-between gap-4 px-1 py-2.5"
                     >
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-foreground">
-                          {provider.name}
-                        </p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          {provider.provider_type === "medical"
-                            ? tx("Медицинский", "Medizinisch")
-                            : tx("Немедицинский", "Nicht medizinisch")}
-                          {provider.address_city
-                            ? ` · ${provider.address_city}`
-                            : ""}
+                        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                          <p className="min-w-0 truncate text-sm font-semibold text-foreground">
+                            {provider.name}
+                          </p>
+                          <Badge
+                            variant="outline"
+                            className="rounded-full border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700"
+                          >
+                            {provider.provider_type === "medical"
+                              ? tx("Медицинский", "Medizinisch")
+                              : tx("Немедицинский", "Nicht medizinisch")}
+                          </Badge>
+                        </div>
+                        {provider.address_city || !provider.is_active ? (
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {provider.address_city ?? ""}
                           {!provider.is_active
-                            ? ` · ${tx("неактивен", "inaktiv")}`
+                            ? `${provider.address_city ? " · " : ""}${tx("неактивен", "inaktiv")}`
                             : ""}
-                        </p>
+                          </p>
+                        ) : null}
                       </div>
                       <div className="flex max-w-[50%] flex-wrap justify-end gap-1">
                         {provider.specialization_ids.map(

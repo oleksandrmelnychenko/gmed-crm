@@ -5508,8 +5508,8 @@ fn normalize_specialization_work_type_payload(
         return Err("Work type price is too large");
     }
     let duration_hours = body.duration_hours.unwrap_or(1);
-    if !(1..=50).contains(&duration_hours) {
-        return Err("Work type duration must be between 1 and 50 hours");
+    if !(1..=100).contains(&duration_hours) {
+        return Err("Work type duration must be between 1 and 100 hours");
     }
 
     if body.descriptions.len() > 100 {

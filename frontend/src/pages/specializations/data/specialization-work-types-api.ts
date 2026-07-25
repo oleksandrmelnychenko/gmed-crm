@@ -96,7 +96,7 @@ function normalizeWorkType(item: SpecializationWorkType): SpecializationWorkType
     min_price_eur: numberOrZero(item.min_price_eur),
     max_price_eur: numberOrZero(item.max_price_eur),
     duration_hours: Math.min(
-      50,
+      100,
       Math.max(1, Math.trunc(numberOrZero(item.duration_hours) || 1)),
     ),
     sort_order: numberOrZero(item.sort_order) || 1000,
