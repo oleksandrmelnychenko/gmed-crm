@@ -6634,14 +6634,8 @@ fn build_framework_contract_pdf(
             0.5,
         );
     }
-    if let Some(address) = agency_document_address(&context.agency) {
-        for address_line in address
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-        {
-            fc_body_tight(&mut layout, address_line);
-        }
+    if let Some(address) = agency_document_address(&context.agency).and_then(agency_address_line) {
+        fc_body_tight(&mut layout, &address);
     }
     if let Some(email) = context
         .agency
@@ -13747,7 +13741,7 @@ fn build_single_order_pdf(
             admin_block(
                 &mut layout,
                 "*Alle angegebenen Preise zzgl. MwSt. 19 %. Der konkrete Aufwand wird im Kostenvoranschlag zu diesem Einzelauftrag ausgewiesen.",
-                4.5,
+                7.0,
                 1.5,
             );
             admin_block(
