@@ -13280,7 +13280,7 @@ fn legal_meta_grid(layout: &mut TreatmentPlanPdfLayout, cells: &[(&str, String)]
     const COLUMN_GAP_MM: f32 = 10.0;
     const CARD_PADDING_X_MM: f32 = 5.0;
     const CARD_PADDING_Y_MM: f32 = 4.0;
-    const ROW_HEIGHT_MM: f32 = 12.0;
+    const ROW_HEIGHT_MM: f32 = 8.5;
 
     // The title helper already leaves 3 mm below the subtitle. Together these
     // 4 mm reproduce the 7 mm title-to-metadata gap from the approved mockup.
@@ -13334,29 +13334,38 @@ fn legal_meta_grid(layout: &mut TreatmentPlanPdfLayout, cells: &[(&str, String)]
         let column_left_mm = PDF_LEFT_MARGIN_MM + column as f32 * (column_width_mm + COLUMN_GAP_MM);
         let text_x_mm = column_left_mm + CARD_PADDING_X_MM;
         let column_right_mm = column_left_mm + column_width_mm - CARD_PADDING_X_MM;
-        let label_y_mm = card_top_mm - CARD_PADDING_Y_MM - 2.8 - row as f32 * ROW_HEIGHT_MM;
-        let value_y_mm = label_y_mm - 4.5;
+        let baseline_y_mm = card_top_mm - CARD_PADDING_Y_MM - 3.2 - row as f32 * ROW_HEIGHT_MM;
         let available_text_width_mm = column_width_mm - CARD_PADDING_X_MM * 2.0;
-        let label = truncate_text_to_width(label, 7.0, available_text_width_mm);
-        let value = truncate_text_to_width(value, 9.5, available_text_width_mm);
-        let value_width_mm = approx_text_width_mm(&value, 9.5);
+        let label_size_pt = 7.0;
+        let value_size_pt = 9.5;
+        let gap_mm = 2.0;
+        let natural_text_width_mm =
+            approx_text_width_mm(label, label_size_pt) + approx_text_width_mm(value, value_size_pt);
+        let scale = if natural_text_width_mm + gap_mm > available_text_width_mm {
+            (available_text_width_mm - gap_mm) / natural_text_width_mm
+        } else {
+            1.0
+        };
+        let label_size_pt = label_size_pt * scale;
+        let value_size_pt = value_size_pt * scale;
+        let value_width_mm = approx_text_width_mm(value, value_size_pt);
         let value_x_mm = (column_right_mm - value_width_mm).max(text_x_mm);
 
         append_pdf_text_line(
             &mut layout.page_ops,
-            &label,
+            label,
             text_x_mm,
-            label_y_mm,
-            7.0,
+            baseline_y_mm,
+            label_size_pt,
             &regular_font,
             TreatmentPlanPdfColor::Muted,
         );
         append_pdf_text_line(
             &mut layout.page_ops,
-            &value,
+            value,
             value_x_mm,
-            value_y_mm,
-            9.5,
+            baseline_y_mm,
+            value_size_pt,
             &bold_font,
             TreatmentPlanPdfColor::Body,
         );
