@@ -192,6 +192,10 @@ import { clearApiCache } from "@/lib/api";
 import { useSecurePersistedState } from "@/lib/secure-persist";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { CountrySelect } from "@/pages/patients/ui/shared/patient-form-primitives";
+import {
+  fetchSpecializationWorkTypes,
+  type SpecializationWorkType,
+} from "@/pages/specializations/data/specialization-work-types-api";
 import { ProviderSelectWithTaxonomyFilter } from "./ui/provider-select-with-taxonomy-filter";
 import { ProviderTaxonomyCascadeSelect } from "./ui/provider-taxonomy-cascade-select";
 
@@ -7407,6 +7411,177 @@ function StaffSection({
   );
 }
 
+function providerWorkTypeName(
+  workType: SpecializationWorkType,
+  lang: "de" | "ru",
+) {
+  return lang === "de"
+    ? workType.name_de ||
+        workType.name_en ||
+        workType.name_ru ||
+        workType.name_es ||
+        workType.code
+    : workType.name_ru ||
+        workType.name_de ||
+        workType.name_en ||
+        workType.name_es ||
+        workType.code;
+}
+
+function providerWorkTypePrice(
+  workType: SpecializationWorkType,
+  lang: "de" | "ru",
+) {
+  const formatter = new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${formatter.format(workType.min_price_eur)} - ${formatter.format(workType.max_price_eur)} EUR`;
+}
+
+function ProviderWorkTypesCatalog({ detail }: { detail: ProviderDetail }) {
+  const { t, lang } = useLang();
+  const [workTypes, setWorkTypes] = useState<SpecializationWorkType[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const specializationIds = useMemo(
+    () =>
+      detail.specializations
+        .filter((specialization) => specialization.is_active)
+        .map((specialization) => specialization.id)
+        .toSorted(),
+    [detail.specializations],
+  );
+
+  useEffect(() => {
+    let active = true;
+    if (specializationIds.length === 0) {
+      setWorkTypes([]);
+      setLoading(false);
+      setError("");
+      return () => {
+        active = false;
+      };
+    }
+
+    setLoading(true);
+    setError("");
+    void Promise.all(
+      specializationIds.map((specializationId) =>
+        fetchSpecializationWorkTypes(specializationId),
+      ),
+    )
+      .then((groups) => {
+        if (!active) return;
+        const uniqueWorkTypes = new Map<string, SpecializationWorkType>();
+        for (const workType of groups.flat()) {
+          if (workType.is_active) {
+            uniqueWorkTypes.set(workType.id, workType);
+          }
+        }
+        setWorkTypes(
+          [...uniqueWorkTypes.values()].toSorted(
+            (left, right) =>
+              left.sort_order - right.sort_order ||
+              providerWorkTypeName(left, lang).localeCompare(
+                providerWorkTypeName(right, lang),
+              ),
+          ),
+        );
+      })
+      .catch((nextError: unknown) => {
+        if (!active) return;
+        setWorkTypes([]);
+        setError(
+          providerLoadErrorMessage(nextError, t.common_failed_load),
+        );
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [lang, specializationIds, t.common_failed_load]);
+
+  const specializationIdSet = useMemo(
+    () => new Set(specializationIds),
+    [specializationIds],
+  );
+
+  return (
+    <div className="mt-4 border-y border-border/70">
+      <div className="flex items-center justify-between gap-3 bg-muted/25 px-3 py-2">
+        <p className="text-xs font-semibold text-foreground">
+          {lang === "de" ? "Leistungsarten" : "Виды работ"}
+        </p>
+        <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+          {workTypes.length}
+        </span>
+      </div>
+
+      {loading ? (
+        <div className="flex min-h-20 items-center justify-center text-muted-foreground">
+          <LoaderCircle className="size-4 animate-spin" />
+        </div>
+      ) : error ? (
+        <div className="px-3 py-3 text-xs text-destructive">{error}</div>
+      ) : workTypes.length === 0 ? (
+        <p className="px-3 py-5 text-center text-sm text-muted-foreground">
+          {lang === "de"
+            ? "Für die Spezialisierungen sind keine Leistungsarten hinterlegt."
+            : "Для специализаций виды работ не добавлены."}
+        </p>
+      ) : (
+        <div className="max-h-80 divide-y divide-border/60 overflow-y-auto overscroll-contain">
+          {workTypes.map((workType) => (
+            <div
+              key={workType.id}
+              className="grid min-w-0 gap-2 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_90px_190px] sm:items-center"
+            >
+              <div className="min-w-0">
+                <p className="break-words text-sm font-medium text-foreground">
+                  {providerWorkTypeName(workType, lang)}
+                </p>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {workType.specialization_ids
+                    .filter((specializationId) =>
+                      specializationIdSet.has(specializationId),
+                    )
+                    .map((specializationId) => {
+                      const specialization = detail.specializations.find(
+                        (candidate) => candidate.id === specializationId,
+                      );
+                      return specialization ? (
+                        <Badge
+                          key={specializationId}
+                          variant="outline"
+                          className="rounded-full px-2 py-0.5 text-[11px]"
+                        >
+                          {specializationLabelForItem(specialization, lang)}
+                        </Badge>
+                      ) : null;
+                    })}
+                </div>
+              </div>
+              <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                {workType.duration_hours}{" "}
+                {lang === "de" ? "Std." : "ч."}
+              </span>
+              <span className="font-mono text-sm tabular-nums text-foreground">
+                {providerWorkTypePrice(workType, lang)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ServiceSection({
   detail,
   busy,
@@ -7451,6 +7626,8 @@ function ServiceSection({
           </Button>
         ) : null}
       </div>
+
+      <ProviderWorkTypesCatalog detail={detail} />
 
       {detail.services.length === 0 ? (
         <div className="mt-4">

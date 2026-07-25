@@ -25,6 +25,15 @@ export type SpecializationWorkType = {
   descriptions: WorkTypeDescription[];
 };
 
+export type SpecializationLinkedProvider = {
+  id: string;
+  name: string;
+  provider_type: string;
+  address_city: string | null;
+  is_active: boolean;
+  specialization_ids: string[];
+};
+
 export type WorkTypeUpsertPayload = Omit<
   SpecializationWorkType,
   "id" | "specialization_id" | "specialization_ids" | "code"
@@ -115,6 +124,31 @@ export function fetchSpecializationWorkTypes(
       forceFresh: true,
     },
   ).then((response) => responseItems(response).map(normalizeWorkType));
+}
+
+export function fetchProvidersBySpecializations(specializationIds: string[]) {
+  const uniqueIds = [...new Set(specializationIds.filter(Boolean))];
+  if (uniqueIds.length === 0) {
+    return Promise.resolve([] as SpecializationLinkedProvider[]);
+  }
+  const query = new URLSearchParams({
+    specialization_ids: uniqueIds.join(","),
+  });
+  return apiFetch<SpecializationLinkedProvider[]>(
+    `/providers/by-specializations?${query.toString()}`,
+    { forceFresh: true },
+  ).then((items) =>
+    items.map((item) => ({
+      ...item,
+      name: item.name ?? "",
+      provider_type: item.provider_type ?? "",
+      address_city: item.address_city ?? null,
+      is_active: item.is_active ?? true,
+      specialization_ids: Array.isArray(item.specialization_ids)
+        ? item.specialization_ids
+        : [],
+    })),
+  );
 }
 
 export function createSpecializationWorkType(

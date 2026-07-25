@@ -44,8 +44,10 @@ import type { SpecializationItem } from "@/pages/providers/model/types";
 import {
   createSpecializationWorkType,
   deleteSpecializationWorkType,
+  fetchProvidersBySpecializations,
   fetchSpecializationWorkTypes,
   updateSpecializationWorkType,
+  type SpecializationLinkedProvider,
   type SpecializationWorkType,
   type WorkTypeDescription,
   type WorkTypeUpsertPayload,
@@ -690,6 +692,7 @@ export function SpecializationsPage() {
         <WorkTypeSheet
           key={workTypeSheet.item?.id ?? "new-work-type"}
           item={workTypeSheet.item}
+          specializationId={selectedSpecializationId}
           specializations={specializations}
           lang={lang}
           busy={busyAction.startsWith("work-type-")}
@@ -888,7 +891,10 @@ function descriptionDraft(
   };
 }
 
-function workTypeDraft(item?: SpecializationWorkType): WorkTypeDraft {
+function workTypeDraft(
+  item?: SpecializationWorkType,
+  fallbackSpecializationId = "",
+): WorkTypeDraft {
   return {
     code: item?.code ?? "",
     specializationIds:
@@ -896,7 +902,9 @@ function workTypeDraft(item?: SpecializationWorkType): WorkTypeDraft {
         ? item.specialization_ids
         : item?.specialization_id
           ? [item.specialization_id]
-          : [],
+          : fallbackSpecializationId
+            ? [fallbackSpecializationId]
+            : [],
     nameDe: item?.name_de ?? "",
     nameRu: item?.name_ru ?? "",
     nameEn: item?.name_en ?? "",
@@ -915,6 +923,7 @@ function workTypeDraft(item?: SpecializationWorkType): WorkTypeDraft {
 
 function WorkTypeSheet({
   item,
+  specializationId,
   specializations,
   lang,
   busy,
@@ -923,6 +932,7 @@ function WorkTypeSheet({
   onSave,
 }: {
   item?: SpecializationWorkType;
+  specializationId: string;
   specializations: SpecializationItem[];
   lang: Lang;
   busy: boolean;
@@ -933,10 +943,50 @@ function WorkTypeSheet({
     payload: WorkTypeUpsertPayload,
   ) => Promise<void>;
 }) {
-  const initialDraft = useMemo(() => workTypeDraft(item), [item]);
+  const initialDraft = useMemo(
+    () => workTypeDraft(item, specializationId),
+    [item, specializationId],
+  );
   const [draft, setDraft] = useState(initialDraft);
   const [error, setError] = useState("");
+  const [linkedProviders, setLinkedProviders] = useState<
+    SpecializationLinkedProvider[]
+  >([]);
+  const [linkedProvidersLoading, setLinkedProvidersLoading] = useState(false);
+  const [linkedProvidersError, setLinkedProvidersError] = useState("");
   const dirty = JSON.stringify(draft) !== JSON.stringify(initialDraft);
+
+  useEffect(() => {
+    let active = true;
+    setLinkedProvidersLoading(true);
+    setLinkedProvidersError("");
+    void fetchProvidersBySpecializations(draft.specializationIds)
+      .then((items) => {
+        if (active) {
+          setLinkedProviders(items);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setLinkedProviders([]);
+          setLinkedProvidersError(
+            tx(
+              "Не удалось загрузить связанных провайдеров.",
+              "Zugeordnete Provider konnten nicht geladen werden.",
+            ),
+          );
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLinkedProvidersLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [draft.specializationIds, tx]);
 
   function addDescription() {
     setDraft((current) => ({
@@ -1463,6 +1513,84 @@ function WorkTypeSheet({
                         >
                           <Trash2 />
                         </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+            <section className="border-t border-border/70 pt-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-foreground">
+                  {tx("Провайдеры", "Provider")}
+                </h3>
+                <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                  {linkedProviders.length}
+                </span>
+              </div>
+
+              {linkedProvidersLoading ? (
+                <div className="mt-3 flex min-h-20 items-center justify-center text-muted-foreground">
+                  <LoaderCircle className="size-4 animate-spin" />
+                </div>
+              ) : linkedProvidersError ? (
+                <div className="mt-3">
+                  <Banner tone="error" withIcon>
+                    {linkedProvidersError}
+                  </Banner>
+                </div>
+              ) : linkedProviders.length === 0 ? (
+                <p className="mt-3 border-y border-dashed border-border/70 py-6 text-center text-sm text-muted-foreground">
+                  {tx(
+                    "К выбранным специализациям провайдеры не привязаны.",
+                    "Den ausgewählten Spezialisierungen sind keine Provider zugeordnet.",
+                  )}
+                </p>
+              ) : (
+                <div className="mt-3 max-h-64 divide-y divide-border/60 overflow-y-auto overscroll-contain border-y border-border/70">
+                  {linkedProviders.map((provider) => (
+                    <div
+                      key={provider.id}
+                      className="flex min-w-0 items-start justify-between gap-4 px-1 py-2.5"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-foreground">
+                          {provider.name}
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {provider.provider_type === "medical"
+                            ? tx("Медицинский", "Medizinisch")
+                            : tx("Немедицинский", "Nicht medizinisch")}
+                          {provider.address_city
+                            ? ` · ${provider.address_city}`
+                            : ""}
+                          {!provider.is_active
+                            ? ` · ${tx("неактивен", "inaktiv")}`
+                            : ""}
+                        </p>
+                      </div>
+                      <div className="flex max-w-[50%] flex-wrap justify-end gap-1">
+                        {provider.specialization_ids.map(
+                          (providerSpecializationId) => {
+                            const specialization = specializations.find(
+                              (candidate) =>
+                                candidate.id === providerSpecializationId,
+                            );
+                            return (
+                              <Badge
+                                key={providerSpecializationId}
+                                variant="outline"
+                                className="max-w-full rounded-full px-2 py-0.5 text-[11px]"
+                              >
+                                <span className="truncate">
+                                  {specialization
+                                    ? specializationName(specialization, lang)
+                                    : providerSpecializationId}
+                                </span>
+                              </Badge>
+                            );
+                          },
+                        )}
                       </div>
                     </div>
                   ))}

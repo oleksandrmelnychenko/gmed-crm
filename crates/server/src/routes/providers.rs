@@ -21,6 +21,10 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/providers", get(list_providers).post(create_provider))
         .route(
+            "/providers/by-specializations",
+            get(list_providers_by_specializations),
+        )
+        .route(
             "/providers/specializations",
             get(list_specializations).post(create_specialization),
         )
@@ -181,6 +185,11 @@ struct ListProvidersQuery {
 #[derive(Deserialize)]
 struct ListSpecializationsQuery {
     include_inactive: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct ListProvidersBySpecializationsQuery {
+    specialization_ids: String,
 }
 
 #[derive(Deserialize)]
@@ -1057,6 +1066,110 @@ async fn list_providers(
     }
 
     Json(providers).into_response()
+}
+
+async fn list_providers_by_specializations(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<ListProvidersBySpecializationsQuery>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::Concierge,
+        Role::Billing,
+        Role::Sales,
+        Role::ItAdmin,
+    ]) {
+        return e;
+    }
+
+    let mut seen = HashSet::new();
+    let specialization_ids = match query
+        .specialization_ids
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(Uuid::parse_str)
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(ids) => ids
+            .into_iter()
+            .filter(|specialization_id| seen.insert(*specialization_id))
+            .collect::<Vec<_>>(),
+        Err(_) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid specialization IDs",
+            );
+        }
+    };
+    if specialization_ids.is_empty() {
+        return Json(Vec::<Value>::new()).into_response();
+    }
+    if specialization_ids.len() > 100 {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Too many specialization IDs",
+        );
+    }
+
+    match sqlx::query(
+        r#"SELECT
+               p.id,
+               p.name,
+               p.provider_type,
+               p.address_city,
+               p.is_active,
+               ARRAY_AGG(
+                   DISTINCT ps.specialization_id
+                   ORDER BY ps.specialization_id
+               ) AS specialization_ids
+           FROM providers p
+           JOIN provider_specializations ps
+             ON ps.provider_id = p.id
+            AND ps.specialization_id = ANY($1)
+           GROUP BY
+               p.id,
+               p.name,
+               p.provider_type,
+               p.address_city,
+               p.is_active
+           ORDER BY p.is_active DESC, p.name, p.id"#,
+    )
+    .bind(&specialization_ids)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => Json(
+            rows.into_iter()
+                .filter_map(|row| {
+                    Some(json!({
+                        "id": row.try_get::<Uuid, _>("id").ok()?,
+                        "name": row.try_get::<String, _>("name").unwrap_or_default(),
+                        "provider_type": row
+                            .try_get::<String, _>("provider_type")
+                            .unwrap_or_default(),
+                        "address_city": row
+                            .try_get::<Option<String>, _>("address_city")
+                            .unwrap_or_default(),
+                        "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+                        "specialization_ids": row
+                            .try_get::<Vec<Uuid>, _>("specialization_ids")
+                            .unwrap_or_default(),
+                    }))
+                })
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to load providers by specializations");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load providers by specializations",
+            )
+        }
+    }
 }
 
 async fn list_specializations(
