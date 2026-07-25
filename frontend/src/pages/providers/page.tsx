@@ -7456,16 +7456,22 @@ function ProviderWorkTypesCatalog({ detail }: { detail: ProviderDetail }) {
   useEffect(() => {
     let active = true;
     if (specializationIds.length === 0) {
-      setWorkTypes([]);
-      setLoading(false);
-      setError("");
+      queueMicrotask(() => {
+        if (!active) return;
+        setWorkTypes([]);
+        setLoading(false);
+        setError("");
+      });
       return () => {
         active = false;
       };
     }
 
-    setLoading(true);
-    setError("");
+    queueMicrotask(() => {
+      if (!active) return;
+      setLoading(true);
+      setError("");
+    });
     void Promise.all(
       specializationIds.map((specializationId) =>
         fetchSpecializationWorkTypes(specializationId),

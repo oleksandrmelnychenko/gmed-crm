@@ -2,12 +2,12 @@ import {
   Component,
   Suspense,
   lazy,
+  useEffect,
   type ErrorInfo,
   type ReactNode,
 } from "react";
 import {
   BrowserRouter,
-  Navigate,
   Routes,
   Route,
   useLocation,
@@ -20,6 +20,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppLayout } from "@/components/layout";
 import { LoginPage } from "@/pages/login";
 import { useLang } from "@/lib/i18n";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 
 const STALE_CHUNK_RELOAD_KEY = "gmed:stale-chunk-reload";
 const STALE_CHUNK_ERROR_PATTERNS = [
@@ -360,7 +361,7 @@ function AppRoutes() {
             <Route path="documents/translation-requests" element={<DocumentsPage />} />
             <Route
               path="documents/specializations"
-              element={<Navigate replace to="/specializations" />}
+              element={<StaffRouteRedirect to="/specializations" />}
             />
             <Route path="documents/:documentId" element={<DocumentsPage />} />
             <Route path="specializations" element={<SpecializationsPage />} />
@@ -388,6 +389,16 @@ function AppRoutes() {
       </Suspense>
     </RouteErrorBoundary>
   );
+}
+
+function StaffRouteRedirect({ to }: { to: string }) {
+  const { staffGo } = useStaffNavigate();
+
+  useEffect(() => {
+    staffGo(to);
+  }, [staffGo, to]);
+
+  return null;
 }
 
 export default function App() {

@@ -205,6 +205,7 @@ type Draft = {
   serviceNotes: string;
   specialties: string[];
   selectedSpecializationWorkTypeIds: string[];
+  costEstimateAdditionalLanguage: CostEstimateAdditionalLanguage;
   programDateFrom: string;
   programDateTo: string;
   contractEffectiveDate: string;
@@ -389,6 +390,13 @@ function inputStringArray(value: unknown) {
     : [];
 }
 
+function costEstimateAdditionalLanguage(value: unknown): CostEstimateAdditionalLanguage {
+  const normalized = inputString(value).toLowerCase();
+  return normalized === "ru" || normalized === "en" || normalized === "es"
+    ? normalized
+    : "";
+}
+
 function germanDocumentDate(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
   return match ? `${match[3]}.${match[2]}.${match[1]}` : value.trim();
@@ -542,6 +550,8 @@ function autosavePayload(
       cost_threshold: draft.costThreshold,
       selected_specialization_work_type_ids:
         draft.selectedSpecializationWorkTypeIds,
+      cost_estimate_additional_language:
+        draft.costEstimateAdditionalLanguage || null,
       service_comments: draft.serviceNeeds.reduce<Record<string, string>>((comments, value) => {
         const comment = draft.serviceComments[value];
         if (comment?.trim()) comments[value] = comment;
@@ -858,6 +868,10 @@ function draftFromLead(lead: LeadDetail): Draft {
       lead.wizard_state?.["selected_specialization_work_type_ids"]
       ?? lead.wizard_state?.["selectedSpecializationWorkTypeIds"],
     ),
+    costEstimateAdditionalLanguage: costEstimateAdditionalLanguage(
+      lead.wizard_state?.["cost_estimate_additional_language"]
+      ?? lead.wizard_state?.["costEstimateAdditionalLanguage"],
+    ),
     programDateFrom: inputString(lead.wizard_state?.["program_date_from"]),
     programDateTo: inputString(lead.wizard_state?.["program_date_to"]),
     contractEffectiveDate: inputString(lead.wizard_state?.["contract_effective_date"]),
@@ -904,6 +918,7 @@ function blankDraft(): Draft {
     serviceNotes: "",
     specialties: [],
     selectedSpecializationWorkTypeIds: [],
+    costEstimateAdditionalLanguage: "",
     programDateFrom: "",
     programDateTo: "",
     contractEffectiveDate: "",
@@ -1020,21 +1035,25 @@ function formatMoneyValue(value: number, lang: string) {
 }
 
 type CostEstimateDocumentLanguage = "de" | "ru" | "de-ru";
+type CostEstimateAdditionalLanguage = "" | "ru" | "en" | "es";
 
-function costEstimateDocumentLanguage(value: string): CostEstimateDocumentLanguage {
-  const normalized = value.trim().toLowerCase().replace("_", "-");
-  if (normalized === "de-ru" || normalized === "ru-de") return "de-ru";
-  if (normalized === "ru" || normalized.startsWith("ru-")) return "ru";
-  return "de";
+function costEstimateDocumentLanguage(
+  additionalLanguage: CostEstimateAdditionalLanguage,
+): CostEstimateDocumentLanguage {
+  return additionalLanguage === "ru" ? "de-ru" : "de";
 }
 
 function costEstimateLanguageBlock(
   item: SpecializationWorkType,
-  language: "de" | "ru",
+  language: Exclude<CostEstimateAdditionalLanguage, ""> | "de",
 ) {
-  const name = language === "de"
-    ? item.name_de.trim() || item.name_ru.trim() || item.code
-    : item.name_ru.trim() || item.name_de.trim() || item.code;
+  const names = {
+    de: item.name_de,
+    ru: item.name_ru,
+    en: item.name_en,
+    es: item.name_es,
+  };
+  const name = names[language].trim() || item.name_de.trim() || item.code;
   const descriptions = item.descriptions
     .filter((description) => (
       description.is_active
@@ -1050,45 +1069,42 @@ function costEstimateLanguageBlock(
 
 function costEstimateWorkTypeDescription(
   item: SpecializationWorkType,
-  language: CostEstimateDocumentLanguage,
+  additionalLanguage: CostEstimateAdditionalLanguage,
 ) {
-  if (language === "de-ru") {
-    return `${costEstimateLanguageBlock(item, "de")} / ${costEstimateLanguageBlock(item, "ru")}`;
-  }
-  return costEstimateLanguageBlock(item, language);
+  const german = costEstimateLanguageBlock(item, "de");
+  return additionalLanguage
+    ? `${german} / ${costEstimateLanguageBlock(item, additionalLanguage)}`
+    : german;
 }
 
-function costEstimateWorkTypeRange(
-  item: SpecializationWorkType,
-  language: CostEstimateDocumentLanguage,
-) {
-  const moneyLanguage = language === "ru" ? "ru" : "de";
-  return `${formatMoneyValue(item.min_price_eur, moneyLanguage)} - ${formatMoneyValue(item.max_price_eur, moneyLanguage)} EUR`;
+function costEstimateWorkTypeRange(item: SpecializationWorkType) {
+  const duration = Math.max(1, item.duration_hours);
+  return `${formatMoneyValue(item.min_price_eur * duration, "de")} - ${formatMoneyValue(item.max_price_eur * duration, "de")} EUR`;
 }
 
 function costEstimateServiceLines(
   workTypes: SpecializationWorkType[],
-  language: CostEstimateDocumentLanguage,
+  additionalLanguage: CostEstimateAdditionalLanguage,
 ) {
   return workTypes.map((item) => ({
-    description: costEstimateWorkTypeDescription(item, language),
-    line_total: costEstimateWorkTypeRange(item, language),
+    description: costEstimateWorkTypeDescription(item, additionalLanguage),
+    quantity: String(Math.max(1, item.duration_hours)),
+    fee: `${formatMoneyValue(item.min_price_eur, "de")} - ${formatMoneyValue(item.max_price_eur, "de")} EUR`,
+    line_total: costEstimateWorkTypeRange(item),
   }));
 }
 
 function costEstimateTotalRange(
   workTypes: SpecializationWorkType[],
-  language: CostEstimateDocumentLanguage,
 ) {
   const total = workTypes.reduce(
     (result, item) => ({
-      minimum: result.minimum + item.min_price_eur,
-      maximum: result.maximum + item.max_price_eur,
+      minimum: result.minimum + item.min_price_eur * Math.max(1, item.duration_hours),
+      maximum: result.maximum + item.max_price_eur * Math.max(1, item.duration_hours),
     }),
     { minimum: 0, maximum: 0 },
   );
-  const moneyLanguage = language === "ru" ? "ru" : "de";
-  return `${formatMoneyValue(total.minimum, moneyLanguage)} - ${formatMoneyValue(total.maximum, moneyLanguage)} EUR`;
+  return `${formatMoneyValue(total.minimum, "de")} - ${formatMoneyValue(total.maximum, "de")} EUR`;
 }
 
 function validLine(line: ServiceLine): boolean {
@@ -3283,7 +3299,7 @@ ${serviceCommentLines.join("\n")}`
     setError("");
     try {
       const documentLanguage = templateId === "cost_estimate"
-        ? costEstimateDocumentLanguage(draft.language)
+        ? costEstimateDocumentLanguage(draft.costEstimateAdditionalLanguage)
         : "de";
       const commercial = await ensureCommercial(
         {},
@@ -3326,13 +3342,12 @@ ${serviceCommentLines.join("\n")}`
           estimate_total: templateId === "cost_estimate"
             ? costEstimateTotalRange(
                 selectedCostEstimateWorkTypes,
-                documentLanguage,
               )
             : `${estimate.gross.toFixed(2)} EUR`,
           service_lines: templateId === "cost_estimate"
             ? costEstimateServiceLines(
                 selectedCostEstimateWorkTypes,
-                documentLanguage,
+                draft.costEstimateAdditionalLanguage,
               )
             : lines.filter(validLine).map((line) => ({
                 description: serviceDocumentDescription(line),
@@ -4573,6 +4588,52 @@ ${serviceCommentLines.join("\n")}`
                   ))}
                 </NativeComboboxSelect>
                 </Field>
+                <div className="border-y border-border/60 py-2.5">
+                  <p className="mb-2 text-xs font-semibold text-foreground">
+                    {tx("Языки документа", "Dokumentsprachen")}
+                  </p>
+                  <div className="flex flex-wrap gap-x-5 gap-y-2">
+                    <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <input
+                        type="checkbox"
+                        checked
+                        disabled
+                        className={checkboxClass}
+                      />
+                      Deutsch
+                    </label>
+                    {([
+                      { code: "ru", label: "Русский" },
+                      { code: "en", label: "English" },
+                      { code: "es", label: "Español" },
+                    ] satisfies Array<{
+                      code: Exclude<CostEstimateAdditionalLanguage, "">;
+                      label: string;
+                    }>).map((languageOption) => (
+                      <label
+                        key={languageOption.code}
+                        className="flex cursor-pointer items-center gap-2 text-sm text-foreground"
+                      >
+                        <input
+                          type="checkbox"
+                          name="cost_estimate_additional_language"
+                          checked={
+                            draft.costEstimateAdditionalLanguage ===
+                            languageOption.code
+                          }
+                          onChange={(event) =>
+                            patch(
+                              "costEstimateAdditionalLanguage",
+                              event.target.checked ? languageOption.code : "",
+                            )
+                          }
+                          className={checkboxClass}
+                        />
+                        {languageOption.label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
                 {selectedSpecializationItems.length > 0 ? (
                   <div className="mt-3 border-t border-border/70 pt-3">
                     <div className="mb-2 flex items-center justify-between gap-3">

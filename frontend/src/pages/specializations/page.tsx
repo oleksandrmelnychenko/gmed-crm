@@ -228,7 +228,6 @@ export function SpecializationsPage() {
   useEffect(() => {
     void loadSpecializations();
     // The initial catalog request is intentionally tied only to page mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -958,8 +957,11 @@ function WorkTypeSheet({
 
   useEffect(() => {
     let active = true;
-    setLinkedProvidersLoading(true);
-    setLinkedProvidersError("");
+    queueMicrotask(() => {
+      if (!active) return;
+      setLinkedProvidersLoading(true);
+      setLinkedProvidersError("");
+    });
     void fetchProvidersBySpecializations(draft.specializationIds)
       .then((items) => {
         if (active) {

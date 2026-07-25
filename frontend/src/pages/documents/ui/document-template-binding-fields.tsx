@@ -109,15 +109,20 @@ function ServiceLinesEditor({
   });
 
   useEffect(() => {
-    if (serializeServiceLines(lines) === value.trim()) return;
-    const parsedLines = parseServiceLines(value);
-    setLines(
-      parsedLines.length > 0
-        ? parsedLines
-        : [{ description: "", fee: "", quantity: "", lineTotal: "", note: "" }],
-    );
-    // `lines` intentionally stays local so an added blank row remains visible.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setLines((current) => {
+        if (serializeServiceLines(current) === value.trim()) return current;
+        const parsedLines = parseServiceLines(value);
+        return parsedLines.length > 0
+          ? parsedLines
+          : [{ description: "", fee: "", quantity: "", lineTotal: "", note: "" }];
+      });
+    });
+    return () => {
+      active = false;
+    };
   }, [value]);
 
   function updateLine(index: number, patch: Partial<ServiceLineDraft>) {

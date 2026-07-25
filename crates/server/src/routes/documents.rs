@@ -1553,8 +1553,7 @@ fn document_satisfies_compliance_kind(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| art.trim());
-    let matches_document_kind =
-        |allowed: &[&str]| allowed.iter().any(|candidate| document_kind == *candidate);
+    let matches_document_kind = |allowed: &[&str]| allowed.contains(&document_kind);
 
     match compliance_kind {
         "dsgvo" => matches_document_kind(&[
@@ -12471,7 +12470,7 @@ async fn generate_document(
                 Err(resp) => return resp,
             };
             let catalog_selection =
-                match load_lead_cost_estimate_catalog_selection(&state, lead_id, language).await {
+                match load_lead_cost_estimate_catalog_selection(&state, lead_id).await {
                     Ok(value) => value,
                     Err(resp) => return resp,
                 };
@@ -13352,7 +13351,7 @@ fn legal_meta_grid(layout: &mut TreatmentPlanPdfLayout, cells: &[(&str, String)]
     // The title helper already leaves 3 mm below the subtitle. Together these
     // 4 mm reproduce the 7 mm title-to-metadata gap from the approved mockup.
     layout.spacer(4.0);
-    let row_count = (cells.len() + 1) / 2;
+    let row_count = cells.len().div_ceil(2);
     let card_height_mm = CARD_PADDING_Y_MM * 2.0 + row_count as f32 * ROW_HEIGHT_MM;
     layout.ensure_space(card_height_mm);
 
@@ -16215,7 +16214,6 @@ fn service_lines_to_items(lines: &[ServiceLineInput]) -> Vec<GeneratedContractLi
 async fn load_lead_cost_estimate_catalog_selection(
     state: &AppState,
     lead_id: Option<Uuid>,
-    language: &str,
 ) -> Result<Option<GeneratedCostEstimateCatalogSelection>, axum::response::Response> {
     let Some(lead_id) = lead_id else {
         return Ok(None);
@@ -16246,6 +16244,12 @@ async fn load_lead_cost_estimate_catalog_selection(
     if selected_values.is_empty() {
         return Ok(None);
     }
+    let additional_language = wizard_state
+        .get("cost_estimate_additional_language")
+        .or_else(|| wizard_state.get("costEstimateAdditionalLanguage"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|language| matches!(*language, "ru" | "en" | "es"));
 
     let mut seen = HashSet::new();
     let selected_ids = selected_values
@@ -16263,8 +16267,10 @@ async fn load_lead_cost_estimate_catalog_selection(
 
     let rows = sqlx::query(
         r#"SELECT wt.id,
-                  wt.name_de,
+                   wt.name_de,
                    wt.name_ru,
+                   wt.name_en,
+                   wt.name_es,
                    wt.min_price_eur::text AS min_price_eur,
                    wt.max_price_eur::text AS max_price_eur,
                    wt.duration_hours
@@ -16350,6 +16356,14 @@ async fn load_lead_cost_estimate_catalog_selection(
         })?;
         let name_de = row.try_get::<String, _>("name_de").unwrap_or_default();
         let name_ru = row.try_get::<String, _>("name_ru").unwrap_or_default();
+        let name_en = row
+            .try_get::<Option<String>, _>("name_en")
+            .unwrap_or_default()
+            .unwrap_or_default();
+        let name_es = row
+            .try_get::<Option<String>, _>("name_es")
+            .unwrap_or_default()
+            .unwrap_or_default();
         let min_raw = row
             .try_get::<String, _>("min_price_eur")
             .unwrap_or_default();
@@ -16374,9 +16388,11 @@ async fn load_lead_cost_estimate_catalog_selection(
         total_max += max_price * duration;
 
         let localized_description = localized_estimate_work_type_description(
-            language,
+            additional_language,
             &name_de,
             &name_ru,
+            &name_en,
+            &name_es,
             descriptions
                 .get(&work_type_id)
                 .map(Vec::as_slice)
@@ -16401,9 +16417,11 @@ async fn load_lead_cost_estimate_catalog_selection(
 }
 
 fn localized_estimate_work_type_description(
-    language: &str,
+    additional_language: Option<&str>,
     name_de: &str,
     name_ru: &str,
+    name_en: &str,
+    name_es: &str,
     descriptions: &[(String, String)],
 ) -> String {
     fn language_block(name: &str, language: &str, descriptions: &[(String, String)]) -> String {
@@ -16419,19 +16437,23 @@ fn localized_estimate_work_type_description(
             .collect::<Vec<_>>();
         if paragraphs.is_empty() {
             name.trim().to_string()
+        } else if name.trim().is_empty() {
+            paragraphs.join(" ")
         } else {
             format!("{}: {}", name.trim(), paragraphs.join(" "))
         }
     }
 
-    match language {
-        "ru" => language_block(name_ru, "ru", descriptions),
-        "de-ru" => format!(
-            "{} / {}",
-            language_block(name_de, "de", descriptions),
-            language_block(name_ru, "ru", descriptions)
-        ),
-        _ => language_block(name_de, "de", descriptions),
+    let german = language_block(name_de, "de", descriptions);
+    let additional = match additional_language {
+        Some("ru") => Some(language_block(name_ru, "ru", descriptions)),
+        Some("en") => Some(language_block(name_en, "en", descriptions)),
+        Some("es") => Some(language_block(name_es, "es", descriptions)),
+        _ => None,
+    };
+    match additional.filter(|value| !value.trim().is_empty()) {
+        Some(value) => format!("{german} / {value}"),
+        None => german,
     }
 }
 
@@ -21071,8 +21093,9 @@ mod tests {
         generated_binding_snapshot, generated_compliance_document_number,
         generated_document_number_for_template, german_document_country,
         is_fixed_legal_document_template, is_lead_allowed_document_template,
-        legal_document_reference, new_admin_pdf, patient_sticker_agency_line, pdf_mm_to_pt,
-        pdf_text_font_handles, trusted_contact_recipients_binding,
+        legal_agency_block_lines, legal_document_reference,
+        localized_estimate_work_type_description, new_admin_pdf, patient_sticker_agency_line,
+        pdf_mm_to_pt, pdf_text_font_handles, trusted_contact_recipients_binding,
     };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
     use chrono::{NaiveDate, TimeZone, Utc};
@@ -21998,6 +22021,62 @@ mod tests {
             "100,00 - 1000,00 €"
         );
         assert_eq!(cost_estimate_price_text("1428.00"), "1.428,00 EUR");
+    }
+
+    #[test]
+    fn cost_estimate_catalog_description_is_always_german_first() {
+        let descriptions = vec![
+            ("de".to_string(), "Klinische Untersuchung".to_string()),
+            ("ru".to_string(), "Клиническое обследование".to_string()),
+        ];
+
+        assert_eq!(
+            localized_estimate_work_type_description(
+                Some("ru"),
+                "Kardiologische Untersuchung",
+                "Кардиологическое обследование",
+                "Cardiology examination",
+                "Examen cardiológico",
+                &descriptions,
+            ),
+            "Kardiologische Untersuchung: Klinische Untersuchung / \
+             Кардиологическое обследование: Клиническое обследование"
+        );
+        assert_eq!(
+            localized_estimate_work_type_description(
+                None,
+                "Kardiologische Untersuchung",
+                "Кардиологическое обследование",
+                "Cardiology examination",
+                "Examen cardiológico",
+                &descriptions,
+            ),
+            "Kardiologische Untersuchung: Klinische Untersuchung"
+        );
+    }
+
+    #[test]
+    fn cost_estimate_catalog_description_includes_all_selected_language_paragraphs() {
+        let descriptions = vec![
+            ("de-DE".to_string(), "Erster Abschnitt".to_string()),
+            ("de".to_string(), "Zweiter Abschnitt".to_string()),
+            ("es".to_string(), "Primera sección".to_string()),
+            ("es-ES".to_string(), "Segunda sección".to_string()),
+            ("en".to_string(), "English section".to_string()),
+        ];
+
+        assert_eq!(
+            localized_estimate_work_type_description(
+                Some("es"),
+                "Untersuchung",
+                "Обследование",
+                "Examination",
+                "Examen",
+                &descriptions,
+            ),
+            "Untersuchung: Erster Abschnitt Zweiter Abschnitt / \
+             Examen: Primera sección Segunda sección"
+        );
     }
 
     #[test]

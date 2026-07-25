@@ -1368,8 +1368,8 @@ async fn convert_appointment_request(
         .try_get::<Uuid, _>("id")
         .unwrap_or_else(|_| Uuid::nil());
 
-    if let Some(interpreter_id) = body.interpreter_id {
-        if let Err(e) = sqlx::query(
+    if let Some(interpreter_id) = body.interpreter_id
+        && let Err(e) = sqlx::query(
             "INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
              VALUES ($1, $2, $3)
              ON CONFLICT (patient_id, user_id)
@@ -1380,13 +1380,12 @@ async fn convert_appointment_request(
         .bind(auth.user_id)
         .execute(&mut *tx)
         .await
-        {
-            tracing::error!(error = %e, request_id = %id, interpreter_id = %interpreter_id, "assign interpreter during request conversion");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to convert appointment request",
-            );
-        }
+    {
+        tracing::error!(error = %e, request_id = %id, interpreter_id = %interpreter_id, "assign interpreter during request conversion");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to convert appointment request",
+        );
     }
 
     let request_update = sqlx::query(
@@ -1446,8 +1445,8 @@ async fn convert_appointment_request(
             "post-conversion interpreter reminder failed"
         );
     }
-    if request_type == "non_medical" {
-        if let Err(resp) = bootstrap_non_medical_artifacts(
+    if request_type == "non_medical"
+        && let Err(resp) = bootstrap_non_medical_artifacts(
             &state,
             auth.user_id,
             appointment_id,
@@ -1460,14 +1459,13 @@ async fn convert_appointment_request(
             false,
         )
         .await
-        {
-            tracing::error!(
-                request_id = %id,
-                appointment_id = %appointment_id,
-                status = ?resp.status(),
-                "post-conversion concierge workflow bootstrap failed"
-            );
-        }
+    {
+        tracing::error!(
+            request_id = %id,
+            appointment_id = %appointment_id,
+            status = ?resp.status(),
+            "post-conversion concierge workflow bootstrap failed"
+        );
     }
 
     state.audit_sender.try_send(audit::domain_event(
@@ -4301,9 +4299,8 @@ async fn update_appointment(
         };
     let recurrence_dates = if let Some(ref recurrence) = recurrence_rule {
         if let Some(total_count) = recurrence.count {
-            let desired_active_count = (total_count as usize)
-                .checked_sub(terminal_occurrence_count)
-                .unwrap_or_default();
+            let desired_active_count =
+                (total_count as usize).saturating_sub(terminal_occurrence_count);
             if desired_active_count == 0 {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
