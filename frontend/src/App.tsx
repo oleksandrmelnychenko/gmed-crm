@@ -141,6 +141,12 @@ const DocumentsPage = lazy(() =>
   })),
 );
 
+const SpecializationsPage = lazy(() =>
+  import("@/pages/specializations").then((module) => ({
+    default: module.SpecializationsPage,
+  })),
+);
+
 const PrivacyPage = lazy(() =>
   import("@/pages/privacy").then((module) => ({
     default: module.PrivacyPage,
@@ -346,6 +352,7 @@ function AppRoutes() {
             <Route path="documents" element={<DocumentsPage />} />
             <Route path="documents/intake" element={<DocumentsPage />} />
             <Route path="documents/translation-requests" element={<DocumentsPage />} />
+            <Route path="documents/specializations" element={<SpecializationsPage />} />
             <Route path="documents/:documentId" element={<DocumentsPage />} />
             <Route path="services" element={<ServicesPage />} />
             <Route path="feedback" element={<FeedbackPage />} />

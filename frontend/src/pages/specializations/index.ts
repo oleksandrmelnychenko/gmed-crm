@@ -1,0 +1,1 @@
+export { SpecializationsPage } from "./page";

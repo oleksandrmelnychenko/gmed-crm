@@ -281,6 +281,12 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     nav: { section: "medicine", labelKey: "nav_interpreters" },
   },
   {
+    id: "documents/specializations",
+    match: "exact",
+    path: "/documents/specializations",
+    roles: ROLES_PROVIDERS,
+  },
+  {
     id: "documents",
     match: "prefix",
     path: "/documents",

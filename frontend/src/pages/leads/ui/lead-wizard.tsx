@@ -110,6 +110,10 @@ import {
 import { fetchProviders, fetchSpecializations } from "@/pages/providers/data/provider-api";
 import type { ProviderSummary, SpecializationItem } from "@/pages/providers/model/types";
 import {
+  fetchSpecializationWorkTypes,
+  type SpecializationWorkType,
+} from "@/pages/specializations/data/specialization-work-types-api";
+import {
   LEAD_WIZARD_SERVICE_OPTIONS,
   leadIntakeTypeFromLead,
   leadErrorBlockingReasons,
@@ -200,6 +204,7 @@ type Draft = {
   referrer: string;
   serviceNotes: string;
   specialties: string[];
+  selectedSpecializationWorkTypeIds: string[];
   programDateFrom: string;
   programDateTo: string;
   contractEffectiveDate: string;
@@ -378,6 +383,12 @@ function inputString(value: unknown, fallback = "") {
     : fallback;
 }
 
+function inputStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+}
+
 function germanDocumentDate(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
   return match ? `${match[3]}.${match[2]}.${match[1]}` : value.trim();
@@ -529,6 +540,8 @@ function autosavePayload(
       program_date_to: draft.programDateTo,
       contract_effective_date: draft.contractEffectiveDate,
       cost_threshold: draft.costThreshold,
+      selected_specialization_work_type_ids:
+        draft.selectedSpecializationWorkTypeIds,
       service_comments: draft.serviceNeeds.reduce<Record<string, string>>((comments, value) => {
         const comment = draft.serviceComments[value];
         if (comment?.trim()) comments[value] = comment;
@@ -841,6 +854,10 @@ function draftFromLead(lead: LeadDetail): Draft {
     referrer: inputString(lead.wizard_state?.["referrer"]),
     serviceNotes: lead.notes ?? "",
     specialties: lead.requested_specialties ?? [],
+    selectedSpecializationWorkTypeIds: inputStringArray(
+      lead.wizard_state?.["selected_specialization_work_type_ids"]
+      ?? lead.wizard_state?.["selectedSpecializationWorkTypeIds"],
+    ),
     programDateFrom: inputString(lead.wizard_state?.["program_date_from"]),
     programDateTo: inputString(lead.wizard_state?.["program_date_to"]),
     contractEffectiveDate: inputString(lead.wizard_state?.["contract_effective_date"]),
@@ -886,6 +903,7 @@ function blankDraft(): Draft {
     referrer: "",
     serviceNotes: "",
     specialties: [],
+    selectedSpecializationWorkTypeIds: [],
     programDateFrom: "",
     programDateTo: "",
     contractEffectiveDate: "",
@@ -1001,8 +1019,84 @@ function formatMoneyValue(value: number, lang: string) {
   return (lang === "de" ? MONEY_FORMATTERS.de : MONEY_FORMATTERS.ru).format(value);
 }
 
+type CostEstimateDocumentLanguage = "de" | "ru" | "de-ru";
+
+function costEstimateDocumentLanguage(value: string): CostEstimateDocumentLanguage {
+  const normalized = value.trim().toLowerCase().replace("_", "-");
+  if (normalized === "de-ru" || normalized === "ru-de") return "de-ru";
+  if (normalized === "ru" || normalized.startsWith("ru-")) return "ru";
+  return "de";
+}
+
+function costEstimateLanguageBlock(
+  item: SpecializationWorkType,
+  language: "de" | "ru",
+) {
+  const name = language === "de"
+    ? item.name_de.trim() || item.name_ru.trim() || item.code
+    : item.name_ru.trim() || item.name_de.trim() || item.code;
+  const descriptions = item.descriptions
+    .filter((description) => (
+      description.is_active
+      && description.language_code.split(/[-_]/)[0]?.toLowerCase() === language
+      && description.body.trim()
+    ))
+    .toSorted((left, right) => left.sort_order - right.sort_order)
+    .map((description) => description.body.trim());
+  return descriptions.length > 0
+    ? `${name}: ${descriptions.join(" ")}`
+    : name;
+}
+
+function costEstimateWorkTypeDescription(
+  item: SpecializationWorkType,
+  language: CostEstimateDocumentLanguage,
+) {
+  if (language === "de-ru") {
+    return `${costEstimateLanguageBlock(item, "de")} / ${costEstimateLanguageBlock(item, "ru")}`;
+  }
+  return costEstimateLanguageBlock(item, language);
+}
+
+function costEstimateWorkTypeRange(
+  item: SpecializationWorkType,
+  language: CostEstimateDocumentLanguage,
+) {
+  const moneyLanguage = language === "ru" ? "ru" : "de";
+  return `${formatMoneyValue(item.min_price_eur, moneyLanguage)} - ${formatMoneyValue(item.max_price_eur, moneyLanguage)} EUR`;
+}
+
+function costEstimateServiceLines(
+  workTypes: SpecializationWorkType[],
+  language: CostEstimateDocumentLanguage,
+) {
+  return workTypes.map((item) => ({
+    description: costEstimateWorkTypeDescription(item, language),
+    line_total: costEstimateWorkTypeRange(item, language),
+  }));
+}
+
+function costEstimateTotalRange(
+  workTypes: SpecializationWorkType[],
+  language: CostEstimateDocumentLanguage,
+) {
+  const total = workTypes.reduce(
+    (result, item) => ({
+      minimum: result.minimum + item.min_price_eur,
+      maximum: result.maximum + item.max_price_eur,
+    }),
+    { minimum: 0, maximum: 0 },
+  );
+  const moneyLanguage = language === "ru" ? "ru" : "de";
+  return `${formatMoneyValue(total.minimum, moneyLanguage)} - ${formatMoneyValue(total.maximum, moneyLanguage)} EUR`;
+}
+
 function validLine(line: ServiceLine): boolean {
   return line.description.trim().length > 0 && money(line.quantity) > 0 && money(line.price) >= 0 && money(line.vat) >= 0 && money(line.vat) <= 100;
+}
+
+function specializationValue(item: SpecializationItem) {
+  return item.code || item.name_en;
 }
 
 function quoteLineSignature(
@@ -1596,6 +1690,11 @@ export function LeadWizard({
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [quotes, setQuotes] = useState<QuoteItem[]>([]);
   const [specialties, setSpecialties] = useState<SpecializationItem[]>([]);
+  const [workTypesBySpecialization, setWorkTypesBySpecialization] = useState<
+    Record<string, SpecializationWorkType[]>
+  >({});
+  const [workTypesLoading, setWorkTypesLoading] = useState(false);
+  const [workTypesError, setWorkTypesError] = useState("");
   const [agencyServices, setAgencyServices] = useState<AgencyServiceItem[]>([]);
   const [clinicalProviders, setClinicalProviders] = useState<ProviderSummary[]>([]);
   const [allDoctors, setAllDoctors] = useState<AllDoctorOption[]>([]);
@@ -1646,6 +1745,70 @@ export function LeadWizard({
     signed_agency: 0,
     prepayment_required: 0,
   });
+  const selectedSpecializationItems = useMemo(() => {
+    const values = new Set(draft?.specialties ?? []);
+    return specialties.filter((item) => values.has(specializationValue(item)));
+  }, [draft?.specialties, specialties]);
+
+  useEffect(() => {
+    if (!open || selectedSpecializationItems.length === 0) {
+      setWorkTypesBySpecialization({});
+      setWorkTypesLoading(false);
+      setWorkTypesError("");
+      return;
+    }
+
+    let active = true;
+    setWorkTypesLoading(true);
+    setWorkTypesError("");
+    void Promise.all(
+      selectedSpecializationItems.map(async (specialization) => {
+        const items = await fetchSpecializationWorkTypes(specialization.id);
+        return [
+          specialization.id,
+          items.filter((item) => item.is_active),
+        ] as const;
+      }),
+    )
+      .then((groups) => {
+        if (active) {
+          setWorkTypesBySpecialization(Object.fromEntries(groups));
+        }
+      })
+      .catch((nextError) => {
+        if (active) {
+          setWorkTypesBySpecialization({});
+          setWorkTypesError(errorText(nextError, tx));
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setWorkTypesLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [open, selectedSpecializationItems, tx]);
+  const selectedWorkTypeIdSet = useMemo(
+    () => new Set(draft?.selectedSpecializationWorkTypeIds ?? []),
+    [draft?.selectedSpecializationWorkTypeIds],
+  );
+  const selectedCostEstimateWorkTypes = useMemo(
+    () => selectedSpecializationItems.flatMap((specialization) =>
+      (workTypesBySpecialization[specialization.id] ?? [])
+        .filter((item) => item.is_active && selectedWorkTypeIdSet.has(item.id))
+        .toSorted((left, right) =>
+          left.sort_order - right.sort_order || left.code.localeCompare(right.code),
+        ),
+    ),
+    [
+      selectedSpecializationItems,
+      selectedWorkTypeIdSet,
+      workTypesBySpecialization,
+    ],
+  );
 
   const showWizardError = useCallback((nextError: unknown) => {
     const reasons = leadErrorBlockingReasons(nextError);
@@ -2009,6 +2172,9 @@ export function LeadWizard({
     setOrders([]);
     setQuotes([]);
     setSpecialties([]);
+    setWorkTypesBySpecialization({});
+    setWorkTypesLoading(false);
+    setWorkTypesError("");
     setAgencyServices([]);
     setClinicalProviders([]);
     setAllDoctors([]);
@@ -2404,6 +2570,42 @@ export function LeadWizard({
     setError("");
     clearServerValidation();
     setDraft((current) => current ? { ...current, [key]: value } : current);
+  };
+
+  const toggleSpecializationWorkType = (workTypeId: string, checked: boolean) => {
+    setError("");
+    clearServerValidation();
+    setDraft((current) => {
+      if (!current) return current;
+      const selected = new Set(current.selectedSpecializationWorkTypeIds);
+      if (checked) selected.add(workTypeId);
+      else selected.delete(workTypeId);
+      return {
+        ...current,
+        selectedSpecializationWorkTypeIds: [...selected],
+      };
+    });
+  };
+
+  const removeSpecializationSelection = (value: string) => {
+    const specialization = specialties.find(
+      (item) => specializationValue(item) === value,
+    );
+    const removedWorkTypeIds = new Set(
+      specialization
+        ? (workTypesBySpecialization[specialization.id] ?? []).map((item) => item.id)
+        : [],
+    );
+    setError("");
+    clearServerValidation();
+    setDraft((current) => current ? {
+      ...current,
+      specialties: current.specialties.filter((item) => item !== value),
+      selectedSpecializationWorkTypeIds:
+        current.selectedSpecializationWorkTypeIds.filter(
+          (id) => !removedWorkTypeIds.has(id),
+        ),
+    } : current);
   };
 
   const openNewTrustedContact = () => {
@@ -2820,9 +3022,19 @@ ${serviceCommentLines.join("\n")}`
     ].filter(Boolean).join("\n");
   }
 
-  async function ensureCommercial(flags: CommercialFlagsPatch = {}) {
+  async function ensureCommercial(
+    flags: CommercialFlagsPatch = {},
+    syncOrderServiceLines = true,
+  ) {
     if (!leadId || !draft) throw new Error(tx("Обращение не выбрано", "Kein Lead ausgewählt"));
-    if (!lines.some(validLine)) throw new Error(tx("Добавьте корректную услугу", "Mindestens eine gültige Leistung ist erforderlich"));
+    if (syncOrderServiceLines && !lines.some(validLine)) {
+      throw new Error(
+        tx(
+          "Добавьте корректную услугу",
+          "Mindestens eine gültige Leistung ist erforderlich",
+        ),
+      );
+    }
     if (!(await save("commercial", false))) throw new Error(tx("Не удалось сохранить обращение", "Lead konnte nicht gespeichert werden"));
     let contractId = contract?.id;
     if (!contractId) {
@@ -2852,21 +3064,25 @@ ${serviceCommentLines.join("\n")}`
         date_to: draft.programDateTo,
       })).id;
     }
-    await Promise.all(
-      lines.filter(validLine).map((line) =>
-        createOrderLeistung(orderId, {
-          agency_service_id: line.agencyServiceId,
-          description: line.description.trim(),
-          quantity: money(line.quantity),
-          unit_price: money(line.price),
-          vat_rate: money(line.vat),
-          client_reference: line.clientReference ?? "lead-wizard:" + leadId + ":" + line.id,
-        }),
-      ),
-    );
+    if (syncOrderServiceLines) {
+      await Promise.all(
+        lines.filter(validLine).map((line) =>
+          createOrderLeistung(orderId, {
+            agency_service_id: line.agencyServiceId,
+            description: line.description.trim(),
+            quantity: money(line.quantity),
+            unit_price: money(line.price),
+            vat_rate: money(line.vat),
+            client_reference: line.clientReference ?? "lead-wizard:" + leadId + ":" + line.id,
+          }),
+        ),
+      );
+    }
     await updateOrderCommercialBasis(orderId, {
       contract_id: contractId,
-      total_estimated: estimate.gross.toFixed(2),
+      ...(syncOrderServiceLines
+        ? { total_estimated: estimate.gross.toFixed(2) }
+        : {}),
       prepayment_required: flags.prepayment_required ?? prepayment,
       signed_patient: flags.signed_patient ?? signedPatient,
       signed_agency: flags.signed_agency ?? signedAgency,
@@ -3025,17 +3241,36 @@ ${serviceCommentLines.join("\n")}`
 
   async function generateCommercialDocument(templateId: CommercialDocumentKind) {
     if (!leadId || !draft || commercialGenerationInFlightRef.current) return;
+    if (templateId === "cost_estimate" && selectedCostEstimateWorkTypes.length === 0) {
+      setError(
+        tx(
+          "Выберите хотя бы один вид работы.",
+          "Wählen Sie mindestens eine Leistungsart aus.",
+        ),
+      );
+      return;
+    }
     commercialGenerationInFlightRef.current = true;
     setBusy(`generate-${templateId}`);
     setError("");
     try {
-      const commercial = await ensureCommercial();
+      const documentLanguage = templateId === "cost_estimate"
+        ? costEstimateDocumentLanguage(draft.language)
+        : "de";
+      const commercial = await ensureCommercial(
+        {},
+        templateId !== "cost_estimate",
+      );
       const latestOrderQuote = quotes.find((item) => item.order_id === commercial.orderId);
       const latestQuoteIsCurrent = Boolean(
         latestOrderQuote
         && quoteMatchesCurrentServices(latestOrderQuote, lines, estimate.gross),
       );
-      if (templateId !== "framework_contract" && !latestQuoteIsCurrent) {
+      if (
+        templateId !== "framework_contract"
+        && templateId !== "cost_estimate"
+        && !latestQuoteIsCurrent
+      ) {
         await createQuote(commercial.orderId, {
           line_items: quoteLineItemsPayload(lines),
         });
@@ -3044,8 +3279,8 @@ ${serviceCommentLines.join("\n")}`
         template_id: templateId,
         lead_id: leadId,
         order_id: commercial.orderId,
-        language: "de",
-        document_language: "de",
+        language: documentLanguage,
+        document_language: documentLanguage,
         document_direction: "outgoing",
         document_variant: "original",
         access_category: ["order_cost_estimate", "cost_estimate"].includes(templateId)
@@ -3060,14 +3295,24 @@ ${serviceCommentLines.join("\n")}`
           specialties: draft.specialties.map((value) => specialtyDocumentLabel(value)).join(", "),
           period_from: draft.programDateFrom || undefined,
           period_to: draft.programDateTo || undefined,
-          estimate_total: `${estimate.gross.toFixed(2)} EUR`,
-          service_lines: lines.filter(validLine).map((line) => ({
-            description: serviceDocumentDescription(line),
-            quantity: line.quantity,
-            fee: serviceDocumentFee(line),
-            line_total: `${(money(line.quantity) * money(line.price)).toFixed(2)} EUR`,
-            note: serviceDocumentNote(line),
-          })),
+          estimate_total: templateId === "cost_estimate"
+            ? costEstimateTotalRange(
+                selectedCostEstimateWorkTypes,
+                documentLanguage,
+              )
+            : `${estimate.gross.toFixed(2)} EUR`,
+          service_lines: templateId === "cost_estimate"
+            ? costEstimateServiceLines(
+                selectedCostEstimateWorkTypes,
+                documentLanguage,
+              )
+            : lines.filter(validLine).map((line) => ({
+                description: serviceDocumentDescription(line),
+                quantity: line.quantity,
+                fee: serviceDocumentFee(line),
+                line_total: `${(money(line.quantity) * money(line.price)).toFixed(2)} EUR`,
+                note: serviceDocumentNote(line),
+              })),
         },
       });
       let nextDocuments: DocumentItem[];
@@ -3215,7 +3460,7 @@ ${serviceCommentLines.join("\n")}`
 
   function specialtyLabel(value: string) {
     const specialty = specialties.find(
-      (item) => (item.code || item.name_en) === value,
+      (item) => specializationValue(item) === value,
     );
     if (!specialty) return value;
     return lang === "de"
@@ -3225,7 +3470,7 @@ ${serviceCommentLines.join("\n")}`
 
   function specialtyDocumentLabel(value: string) {
     const specialty = specialties.find(
-      (item) => (item.code || item.name_en) === value,
+      (item) => specializationValue(item) === value,
     );
     return specialty?.name_de || specialty?.name_en || specialty?.name_ru || value;
   }
@@ -4246,7 +4491,7 @@ ${serviceCommentLines.join("\n")}`
                   onChange={(event) => {
                     const selected = specialties.find((item) => item.id === event.target.value);
                     if (!selected) return;
-                    const value = selected.code || selected.name_en;
+                    const value = specializationValue(selected);
                     if (!draft.specialties.includes(value)) patch("specialties", [...draft.specialties, value]);
                   }}
                   className={cn(selectClass, orderFieldError("specialties") && "border-destructive")}
@@ -4271,12 +4516,87 @@ ${serviceCommentLines.join("\n")}`
                           className="shrink-0"
                           title={tx("Удалить специализацию", "Fachrichtung entfernen")}
                           aria-label={tx("Удалить специализацию", "Fachrichtung entfernen")}
-                          onClick={() => patch("specialties", draft.specialties.filter((item) => item !== value))}
+                          onClick={() => removeSpecializationSelection(value)}
                         >
                           <X aria-hidden="true" className="size-3.5" />
                         </Button>
                       </div>
                     ))}
+                  </div>
+                ) : null}
+                {selectedSpecializationItems.length > 0 ? (
+                  <div className="mt-3 border-t border-border/70 pt-3">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <p className="text-xs font-semibold text-foreground">
+                        {tx("Виды работ", "Leistungsarten")}
+                      </p>
+                      {workTypesLoading ? (
+                        <LoaderCircle
+                          aria-label={tx("Загрузка видов работ", "Leistungsarten werden geladen")}
+                          className="size-3.5 animate-spin text-muted-foreground"
+                        />
+                      ) : null}
+                    </div>
+                    {workTypesError ? (
+                      <p className="mb-2 text-xs text-destructive">{workTypesError}</p>
+                    ) : null}
+                    {!workTypesLoading && !workTypesError ? (
+                      <div className="divide-y divide-border/60 border-y border-border/60">
+                        {selectedSpecializationItems.map((specialization) => {
+                          const specializationWorkTypes =
+                            workTypesBySpecialization[specialization.id] ?? [];
+                          return (
+                            <div
+                              key={specialization.id}
+                              className="grid gap-1.5 py-2.5 sm:grid-cols-[150px_minmax(0,1fr)]"
+                            >
+                              <p className="truncate pt-1 text-xs font-medium text-muted-foreground">
+                                {specialtyLabel(specializationValue(specialization))}
+                              </p>
+                              {specializationWorkTypes.length > 0 ? (
+                                <div className="divide-y divide-border/50">
+                                  {specializationWorkTypes.map((workType) => (
+                                    <label
+                                      key={workType.id}
+                                      className="flex cursor-pointer items-start gap-2.5 py-1.5 text-sm text-foreground"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        name="selected_specialization_work_type_ids"
+                                        checked={selectedWorkTypeIdSet.has(workType.id)}
+                                        onChange={(event) =>
+                                          toggleSpecializationWorkType(
+                                            workType.id,
+                                            event.target.checked,
+                                          )
+                                        }
+                                        className={cn(checkboxClass, "mt-0.5")}
+                                      />
+                                      <span className="min-w-0 flex-1">
+                                        <span className="block break-words leading-5">
+                                          {lang === "de"
+                                            ? workType.name_de || workType.name_ru || workType.code
+                                            : workType.name_ru || workType.name_de || workType.code}
+                                        </span>
+                                        <span className="block font-mono text-[11px] tabular-nums text-muted-foreground">
+                                          {formatMoneyValue(workType.min_price_eur, lang)}
+                                          {" - "}
+                                          {formatMoneyValue(workType.max_price_eur, lang)} EUR
+                                        </span>
+                                      </span>
+                                    </label>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="py-1 text-xs text-muted-foreground">
+                                  {tx("Нет активных видов работ", "Keine aktiven Leistungsarten")}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </Section>
@@ -4731,7 +5051,16 @@ ${serviceCommentLines.join("\n")}`
                 <Section
                   title={tx("Предварительный расчёт расходов", "Vorläufige Kostenkalkulation")}
                   accessory={(
-                    <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("cost_estimate")}>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8 rounded-lg"
+                      disabled={
+                        isBusy
+                        || selectedCostEstimateWorkTypes.length === 0
+                      }
+                      onClick={() => void generateCommercialDocument("cost_estimate")}
+                    >
                       {busy === "generate-cost_estimate" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {commercialDocuments.cost_estimate.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
                     </Button>

@@ -5,9 +5,11 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::{Postgres, Row, Transaction, postgres::PgRow};
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::audit::{self as audit_mod};
@@ -37,6 +39,17 @@ pub fn router() -> Router<AppState> {
         .route(
             "/providers/specializations/{specialization_id}/delete",
             post(delete_specialization),
+        )
+        .route(
+            "/providers/specializations/{specialization_id}/work-types",
+            get(list_specialization_work_types).post(create_specialization_work_type),
+        )
+        .route(
+            "/providers/specializations/{specialization_id}/work-types/{work_type_id}",
+            get(get_specialization_work_type)
+                .post(update_specialization_work_type)
+                .put(update_specialization_work_type)
+                .delete(delete_specialization_work_type),
         )
         .route(
             "/providers/insurance-providers",
@@ -167,6 +180,11 @@ struct ListProvidersQuery {
 
 #[derive(Deserialize)]
 struct ListSpecializationsQuery {
+    include_inactive: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct ListSpecializationWorkTypesQuery {
     include_inactive: Option<bool>,
 }
 
@@ -322,6 +340,27 @@ struct UpsertSpecializationRequest {
     name_ru: Option<String>,
     sort_order: Option<i32>,
     is_active: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct UpsertSpecializationWorkTypeDescriptionRequest {
+    id: Option<Uuid>,
+    language_code: String,
+    body: String,
+    sort_order: Option<i32>,
+    is_active: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct UpsertSpecializationWorkTypeRequest {
+    code: Option<String>,
+    name_de: String,
+    name_ru: String,
+    min_price_eur: Decimal,
+    max_price_eur: Decimal,
+    sort_order: Option<i32>,
+    is_active: Option<bool>,
+    descriptions: Vec<UpsertSpecializationWorkTypeDescriptionRequest>,
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -1291,6 +1330,397 @@ async fn delete_specialization(
     .await;
 
     Json(json!({ "ok": true })).into_response()
+}
+
+async fn list_specialization_work_types(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(specialization_id): Path<Uuid>,
+    Query(query): Query<ListSpecializationWorkTypesQuery>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::Concierge,
+        Role::Billing,
+        Role::Sales,
+        Role::Patient,
+        Role::ItAdmin,
+    ]) {
+        return e;
+    }
+
+    match load_specialization_work_types_json(
+        &state,
+        specialization_id,
+        query.include_inactive.unwrap_or(false),
+        None,
+    )
+    .await
+    {
+        Ok(items) => Json(items).into_response(),
+        Err(response) => response,
+    }
+}
+
+async fn get_specialization_work_type(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((specialization_id, work_type_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::Concierge,
+        Role::Billing,
+        Role::Sales,
+        Role::Patient,
+        Role::ItAdmin,
+    ]) {
+        return e;
+    }
+
+    match load_specialization_work_types_json(&state, specialization_id, true, Some(work_type_id))
+        .await
+    {
+        Ok(mut items) => match items.pop() {
+            Some(item) => Json(item).into_response(),
+            None => err(StatusCode::NOT_FOUND, "Specialization work type not found"),
+        },
+        Err(response) => response,
+    }
+}
+
+async fn create_specialization_work_type(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(specialization_id): Path<Uuid>,
+    Json(body): Json<UpsertSpecializationWorkTypeRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    let work_type = match normalize_specialization_work_type_payload(body) {
+        Ok(payload) => payload,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let code = work_type
+        .code
+        .clone()
+        .unwrap_or_else(|| specialization_code(&work_type.name_de));
+    if code.len() > 120 {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Work type code is too long",
+        );
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, specialization_id = %specialization_id, "Failed to begin specialization work type create");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create specialization work type",
+            );
+        }
+    };
+    if let Err(response) = ensure_specialization_exists_tx(&mut tx, specialization_id).await {
+        return response;
+    }
+
+    let row = match sqlx::query(
+        r#"INSERT INTO medical_specialization_work_types (
+                specialization_id,
+                code,
+                name_de,
+                name_ru,
+                min_price_eur,
+                max_price_eur,
+                sort_order,
+                is_active
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           RETURNING id"#,
+    )
+    .bind(specialization_id)
+    .bind(&code)
+    .bind(&work_type.name_de)
+    .bind(&work_type.name_ru)
+    .bind(work_type.min_price_eur)
+    .bind(work_type.max_price_eur)
+    .bind(work_type.sort_order)
+    .bind(work_type.is_active)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) if is_unique_violation(&e) => {
+            return err(
+                StatusCode::CONFLICT,
+                "Specialization work type code already exists",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, specialization_id = %specialization_id, code = %code, "Failed to create specialization work type");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create specialization work type",
+            );
+        }
+    };
+    let work_type_id = match row.try_get::<Uuid, _>("id") {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::error!(error = %e, specialization_id = %specialization_id, "Failed to decode specialization work type");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create specialization work type",
+            );
+        }
+    };
+
+    if let Err(response) = sync_specialization_work_type_descriptions_tx(
+        &mut tx,
+        work_type_id,
+        &work_type.descriptions,
+    )
+    .await
+    {
+        return response;
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, specialization_id = %specialization_id, work_type_id = %work_type_id, "Failed to commit specialization work type create");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create specialization work type",
+        );
+    }
+
+    let _ = audit(
+        &state,
+        auth.user_id,
+        "create_provider_specialization_work_type",
+        "medical_specialization_work_type",
+        Some(work_type_id),
+        Some(json!({
+            "specialization_id": specialization_id,
+            "code": code,
+            "description_count": work_type.descriptions.len(),
+        })),
+    )
+    .await;
+
+    match load_specialization_work_types_json(&state, specialization_id, true, Some(work_type_id))
+        .await
+    {
+        Ok(mut items) => match items.pop() {
+            Some(item) => (StatusCode::CREATED, Json(item)).into_response(),
+            None => err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load created specialization work type",
+            ),
+        },
+        Err(response) => response,
+    }
+}
+
+async fn update_specialization_work_type(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((specialization_id, work_type_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<UpsertSpecializationWorkTypeRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    let work_type = match normalize_specialization_work_type_payload(body) {
+        Ok(payload) => payload,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, specialization_id = %specialization_id, work_type_id = %work_type_id, "Failed to begin specialization work type update");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update specialization work type",
+            );
+        }
+    };
+
+    match sqlx::query(
+        r#"UPDATE medical_specialization_work_types
+           SET code = COALESCE($3, code),
+               name_de = $4,
+               name_ru = $5,
+               min_price_eur = $6,
+               max_price_eur = $7,
+               sort_order = $8,
+               is_active = $9,
+               updated_at = now()
+           WHERE id = $1
+             AND specialization_id = $2
+             AND deleted_at IS NULL"#,
+    )
+    .bind(work_type_id)
+    .bind(specialization_id)
+    .bind(&work_type.code)
+    .bind(&work_type.name_de)
+    .bind(&work_type.name_ru)
+    .bind(work_type.min_price_eur)
+    .bind(work_type.max_price_eur)
+    .bind(work_type.sort_order)
+    .bind(work_type.is_active)
+    .execute(&mut *tx)
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {}
+        Ok(_) => {
+            return err(StatusCode::NOT_FOUND, "Specialization work type not found");
+        }
+        Err(e) if is_unique_violation(&e) => {
+            return err(
+                StatusCode::CONFLICT,
+                "Specialization work type code already exists",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, specialization_id = %specialization_id, work_type_id = %work_type_id, "Failed to update specialization work type");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update specialization work type",
+            );
+        }
+    }
+
+    if let Err(response) = sync_specialization_work_type_descriptions_tx(
+        &mut tx,
+        work_type_id,
+        &work_type.descriptions,
+    )
+    .await
+    {
+        return response;
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, specialization_id = %specialization_id, work_type_id = %work_type_id, "Failed to commit specialization work type update");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update specialization work type",
+        );
+    }
+
+    let _ = audit(
+        &state,
+        auth.user_id,
+        "update_provider_specialization_work_type",
+        "medical_specialization_work_type",
+        Some(work_type_id),
+        Some(json!({
+            "specialization_id": specialization_id,
+            "description_count": work_type.descriptions.len(),
+        })),
+    )
+    .await;
+
+    match load_specialization_work_types_json(&state, specialization_id, true, Some(work_type_id))
+        .await
+    {
+        Ok(mut items) => match items.pop() {
+            Some(item) => Json(item).into_response(),
+            None => err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load updated specialization work type",
+            ),
+        },
+        Err(response) => response,
+    }
+}
+
+async fn delete_specialization_work_type(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((specialization_id, work_type_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, specialization_id = %specialization_id, work_type_id = %work_type_id, "Failed to begin specialization work type delete");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete specialization work type",
+            );
+        }
+    };
+    match sqlx::query(
+        r#"UPDATE medical_specialization_work_types
+           SET is_active = FALSE,
+               deleted_at = now(),
+               updated_at = now()
+           WHERE id = $1
+             AND specialization_id = $2
+             AND deleted_at IS NULL"#,
+    )
+    .bind(work_type_id)
+    .bind(specialization_id)
+    .execute(&mut *tx)
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {}
+        Ok(_) => {
+            return err(StatusCode::NOT_FOUND, "Specialization work type not found");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, specialization_id = %specialization_id, work_type_id = %work_type_id, "Failed to delete specialization work type");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete specialization work type",
+            );
+        }
+    }
+    if let Err(e) = sqlx::query(
+        r#"UPDATE medical_specialization_work_type_descriptions
+           SET is_active = FALSE,
+               deleted_at = now(),
+               updated_at = now()
+           WHERE work_type_id = $1
+             AND deleted_at IS NULL"#,
+    )
+    .bind(work_type_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, specialization_id = %specialization_id, work_type_id = %work_type_id, "Failed to delete specialization work type descriptions");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to delete specialization work type",
+        );
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, specialization_id = %specialization_id, work_type_id = %work_type_id, "Failed to commit specialization work type delete");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to delete specialization work type",
+        );
+    }
+
+    let _ = audit(
+        &state,
+        auth.user_id,
+        "delete_provider_specialization_work_type",
+        "medical_specialization_work_type",
+        Some(work_type_id),
+        Some(json!({ "specialization_id": specialization_id })),
+    )
+    .await;
+
+    Json(json!({ "ok": true, "id": work_type_id })).into_response()
 }
 
 async fn list_provider_staff_roles(
@@ -4271,6 +4701,25 @@ struct SpecializationPayload {
     is_active: bool,
 }
 
+struct SpecializationWorkTypeDescriptionPayload {
+    id: Option<Uuid>,
+    language_code: String,
+    body: String,
+    sort_order: i32,
+    is_active: bool,
+}
+
+struct SpecializationWorkTypePayload {
+    code: Option<String>,
+    name_de: String,
+    name_ru: String,
+    min_price_eur: Decimal,
+    max_price_eur: Decimal,
+    sort_order: i32,
+    is_active: bool,
+    descriptions: Vec<SpecializationWorkTypeDescriptionPayload>,
+}
+
 struct ProviderTemplatePayload {
     label: String,
     description: Option<String>,
@@ -4775,6 +5224,105 @@ fn normalize_specialization_payload(
         sort_order: body.sort_order.unwrap_or(1000),
         is_active: body.is_active.unwrap_or(true),
     })
+}
+
+fn normalize_specialization_work_type_payload(
+    body: UpsertSpecializationWorkTypeRequest,
+) -> Result<SpecializationWorkTypePayload, &'static str> {
+    let name_de =
+        normalize_optional(Some(body.name_de)).ok_or("Work type German name is required")?;
+    let name_ru =
+        normalize_optional(Some(body.name_ru)).ok_or("Work type Russian name is required")?;
+    if name_de.chars().count() > 200 || name_ru.chars().count() > 200 {
+        return Err("Work type name is too long");
+    }
+
+    let code = normalize_optional(body.code).map(|value| specialization_code(&value));
+    if code.as_ref().is_some_and(|value| value.len() > 120) {
+        return Err("Work type code is too long");
+    }
+
+    let min_price_eur = body.min_price_eur.round_dp(2);
+    let max_price_eur = body.max_price_eur.round_dp(2);
+    let largest_supported_price = Decimal::new(999_999_999_999, 2);
+    if min_price_eur < Decimal::ZERO || max_price_eur < Decimal::ZERO {
+        return Err("Work type prices must be non-negative");
+    }
+    if max_price_eur < min_price_eur {
+        return Err("Work type maximum price must be greater than or equal to minimum price");
+    }
+    if min_price_eur > largest_supported_price || max_price_eur > largest_supported_price {
+        return Err("Work type price is too large");
+    }
+
+    if body.descriptions.len() > 100 {
+        return Err("Work type cannot contain more than 100 descriptions");
+    }
+    let mut description_ids = HashSet::new();
+    let mut descriptions = Vec::with_capacity(body.descriptions.len());
+    for (index, description) in body.descriptions.into_iter().enumerate() {
+        if let Some(description_id) = description.id
+            && !description_ids.insert(description_id)
+        {
+            return Err("Work type description IDs must be unique");
+        }
+
+        let language_code = normalize_work_type_language_code(&description.language_code)?;
+        let body = description.body.trim().to_string();
+        if body.is_empty() {
+            return Err("Work type description body is required");
+        }
+        if body.chars().count() > 20_000 {
+            return Err("Work type description is too long");
+        }
+        descriptions.push(SpecializationWorkTypeDescriptionPayload {
+            id: description.id,
+            language_code,
+            body,
+            sort_order: description
+                .sort_order
+                .unwrap_or_else(|| i32::try_from(index).unwrap_or(i32::MAX).saturating_mul(10)),
+            is_active: description.is_active.unwrap_or(true),
+        });
+    }
+
+    Ok(SpecializationWorkTypePayload {
+        code,
+        name_de,
+        name_ru,
+        min_price_eur,
+        max_price_eur,
+        sort_order: body.sort_order.unwrap_or(1000),
+        is_active: body.is_active.unwrap_or(true),
+        descriptions,
+    })
+}
+
+fn normalize_work_type_language_code(value: &str) -> Result<String, &'static str> {
+    let normalized = value.trim().to_lowercase().replace('_', "-");
+    if normalized.is_empty() || normalized.len() > 16 {
+        return Err("Work type description language code is invalid");
+    }
+    let mut segments = normalized.split('-');
+    let Some(primary) = segments.next() else {
+        return Err("Work type description language code is invalid");
+    };
+    if !(2..=3).contains(&primary.len())
+        || !primary
+            .chars()
+            .all(|character| character.is_ascii_lowercase())
+    {
+        return Err("Work type description language code is invalid");
+    }
+    if segments.any(|segment| {
+        !(2..=8).contains(&segment.len())
+            || !segment
+                .chars()
+                .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
+    }) {
+        return Err("Work type description language code is invalid");
+    }
+    Ok(normalized)
 }
 
 fn normalize_person_contacts(
@@ -5641,6 +6189,292 @@ async fn load_specializations_json(
             })
         })
         .collect())
+}
+
+async fn load_specialization_work_types_json(
+    state: &AppState,
+    specialization_id: Uuid,
+    include_inactive: bool,
+    work_type_id: Option<Uuid>,
+) -> Result<Vec<Value>, axum::response::Response> {
+    let specialization_exists = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM medical_specializations
+               WHERE id = $1 AND deleted_at IS NULL
+           )"#,
+    )
+    .bind(specialization_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, specialization_id = %specialization_id, "Failed to validate specialization");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load specialization work types",
+        )
+    })?;
+    if !specialization_exists {
+        return Err(err(StatusCode::NOT_FOUND, "Specialization not found"));
+    }
+
+    let rows = sqlx::query(
+        r#"SELECT
+               id,
+               specialization_id,
+               code,
+               name_de,
+               name_ru,
+               min_price_eur,
+               max_price_eur,
+               sort_order,
+               is_active,
+               created_at,
+               updated_at
+           FROM medical_specialization_work_types
+           WHERE specialization_id = $1
+             AND deleted_at IS NULL
+             AND ($2 OR is_active = TRUE)
+             AND ($3::uuid IS NULL OR id = $3)
+           ORDER BY is_active DESC, sort_order, name_de, id"#,
+    )
+    .bind(specialization_id)
+    .bind(include_inactive)
+    .bind(work_type_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, specialization_id = %specialization_id, "Failed to load specialization work types");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load specialization work types",
+        )
+    })?;
+
+    let work_type_ids = rows
+        .iter()
+        .filter_map(|row| row.try_get::<Uuid, _>("id").ok())
+        .collect::<Vec<_>>();
+    let description_rows = if work_type_ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query(
+            r#"SELECT
+                   id,
+                   work_type_id,
+                   language_code,
+                   body,
+                   sort_order,
+                   is_active,
+                   created_at,
+                   updated_at
+               FROM medical_specialization_work_type_descriptions
+               WHERE work_type_id = ANY($1)
+                 AND deleted_at IS NULL
+                 AND ($2 OR is_active = TRUE)
+               ORDER BY work_type_id, is_active DESC, sort_order, language_code, id"#,
+        )
+        .bind(&work_type_ids)
+        .bind(include_inactive)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, specialization_id = %specialization_id, "Failed to load specialization work type descriptions");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load specialization work types",
+            )
+        })?
+    };
+
+    let mut descriptions_by_work_type: HashMap<Uuid, Vec<Value>> = HashMap::new();
+    for row in description_rows {
+        let Ok(description_id) = row.try_get::<Uuid, _>("id") else {
+            continue;
+        };
+        let Ok(parent_work_type_id) = row.try_get::<Uuid, _>("work_type_id") else {
+            continue;
+        };
+        descriptions_by_work_type
+            .entry(parent_work_type_id)
+            .or_default()
+            .push(json!({
+                "id": description_id,
+                "work_type_id": parent_work_type_id,
+                "language_code": row.try_get::<String, _>("language_code").unwrap_or_default(),
+                "body": row.try_get::<String, _>("body").unwrap_or_default(),
+                "sort_order": row.try_get::<i32, _>("sort_order").unwrap_or_default(),
+                "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+                "created_at": row
+                    .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+                    .map(|value| value.to_rfc3339())
+                    .unwrap_or_default(),
+                "updated_at": row
+                    .try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")
+                    .map(|value| value.to_rfc3339())
+                    .unwrap_or_default(),
+            }));
+    }
+
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            let id = row.try_get::<Uuid, _>("id").ok()?;
+            Some(json!({
+                "id": id,
+                "specialization_id": row
+                    .try_get::<Uuid, _>("specialization_id")
+                    .unwrap_or(specialization_id),
+                "code": row.try_get::<String, _>("code").unwrap_or_default(),
+                "name_de": row.try_get::<String, _>("name_de").unwrap_or_default(),
+                "name_ru": row.try_get::<String, _>("name_ru").unwrap_or_default(),
+                "min_price_eur": row
+                    .try_get::<Decimal, _>("min_price_eur")
+                    .map(normalized_money_string)
+                    .unwrap_or_else(|_| "0.00".to_string()),
+                "max_price_eur": row
+                    .try_get::<Decimal, _>("max_price_eur")
+                    .map(normalized_money_string)
+                    .unwrap_or_else(|_| "0.00".to_string()),
+                "sort_order": row.try_get::<i32, _>("sort_order").unwrap_or_default(),
+                "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+                "created_at": row
+                    .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+                    .map(|value| value.to_rfc3339())
+                    .unwrap_or_default(),
+                "updated_at": row
+                    .try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")
+                    .map(|value| value.to_rfc3339())
+                    .unwrap_or_default(),
+                "descriptions": descriptions_by_work_type.remove(&id).unwrap_or_default(),
+            }))
+        })
+        .collect())
+}
+
+async fn ensure_specialization_exists_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    specialization_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let exists = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM medical_specializations
+               WHERE id = $1 AND deleted_at IS NULL
+           )"#,
+    )
+    .bind(specialization_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, specialization_id = %specialization_id, "Failed to validate specialization");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate specialization",
+        )
+    })?;
+    if !exists {
+        return Err(err(StatusCode::NOT_FOUND, "Specialization not found"));
+    }
+    Ok(())
+}
+
+async fn sync_specialization_work_type_descriptions_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    work_type_id: Uuid,
+    descriptions: &[SpecializationWorkTypeDescriptionPayload],
+) -> Result<(), axum::response::Response> {
+    let mut retained_ids = Vec::with_capacity(descriptions.len());
+    for description in descriptions {
+        let description_id = if let Some(description_id) = description.id {
+            let result = sqlx::query(
+                r#"UPDATE medical_specialization_work_type_descriptions
+                   SET language_code = $3,
+                       body = $4,
+                       sort_order = $5,
+                       is_active = $6,
+                       updated_at = now()
+                   WHERE id = $1
+                     AND work_type_id = $2
+                     AND deleted_at IS NULL"#,
+            )
+            .bind(description_id)
+            .bind(work_type_id)
+            .bind(&description.language_code)
+            .bind(&description.body)
+            .bind(description.sort_order)
+            .bind(description.is_active)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, work_type_id = %work_type_id, description_id = %description_id, "Failed to update specialization work type description");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update specialization work type descriptions",
+                )
+            })?;
+            if result.rows_affected() == 0 {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Work type description does not belong to this work type",
+                ));
+            }
+            description_id
+        } else {
+            sqlx::query_scalar::<_, Uuid>(
+                r#"INSERT INTO medical_specialization_work_type_descriptions (
+                       work_type_id,
+                       language_code,
+                       body,
+                       sort_order,
+                       is_active
+                   ) VALUES ($1, $2, $3, $4, $5)
+                   RETURNING id"#,
+            )
+            .bind(work_type_id)
+            .bind(&description.language_code)
+            .bind(&description.body)
+            .bind(description.sort_order)
+            .bind(description.is_active)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, work_type_id = %work_type_id, "Failed to create specialization work type description");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update specialization work type descriptions",
+                )
+            })?
+        };
+        retained_ids.push(description_id);
+    }
+
+    sqlx::query(
+        r#"UPDATE medical_specialization_work_type_descriptions
+           SET is_active = FALSE,
+               deleted_at = now(),
+               updated_at = now()
+           WHERE work_type_id = $1
+             AND deleted_at IS NULL
+             AND NOT (id = ANY($2::uuid[]))"#,
+    )
+    .bind(work_type_id)
+    .bind(&retained_ids)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, work_type_id = %work_type_id, "Failed to remove stale specialization work type descriptions");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update specialization work type descriptions",
+        )
+    })?;
+
+    Ok(())
+}
+
+fn normalized_money_string(value: Decimal) -> String {
+    format!("{:.2}", value.round_dp(2))
 }
 
 async fn toggle_specialization_active(

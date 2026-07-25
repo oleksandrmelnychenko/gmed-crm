@@ -55,6 +55,7 @@ export function resolveWorkspaceRailKind({
     userRole !== "patient" &&
     (matchPath("/documents", pathname) ||
       matchPath("/documents/intake", pathname) ||
+      matchPath("/documents/specializations", pathname) ||
       matchPath("/documents/translation-requests", pathname) ||
       matchPath("/documents/:documentId", pathname))
   ) {

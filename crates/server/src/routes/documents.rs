@@ -365,6 +365,11 @@ struct GeneratedContractLineItem {
     notes: Option<String>,
 }
 
+struct GeneratedCostEstimateCatalogSelection {
+    line_items: Vec<GeneratedContractLineItem>,
+    total_range: String,
+}
+
 #[allow(dead_code)]
 struct GeneratedFrameworkContractContext {
     patient_pid: String,
@@ -12465,6 +12470,11 @@ async fn generate_document(
                 Ok(value) => value,
                 Err(resp) => return resp,
             };
+            let catalog_selection =
+                match load_lead_cost_estimate_catalog_selection(&state, lead_id, language).await {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                };
             let quote = if let Some(order_uuid) = order_id {
                 match load_order_quote_summary(&state, order_uuid).await {
                     Ok(value) => value,
@@ -12473,8 +12483,11 @@ async fn generate_document(
             } else {
                 None
             };
-            let uses_quote_lines = bindings.service_lines.is_empty();
-            let line_items = if uses_quote_lines {
+            let uses_catalog_lines = catalog_selection.is_some();
+            let uses_quote_lines = !uses_catalog_lines && bindings.service_lines.is_empty();
+            let line_items = if let Some(selection) = catalog_selection.as_ref() {
+                selection.line_items.clone()
+            } else if uses_quote_lines {
                 quote
                     .as_ref()
                     .map(|q| q.line_items.clone())
@@ -12482,7 +12495,9 @@ async fn generate_document(
             } else {
                 service_lines_to_items(&bindings.service_lines)
             };
-            let total_range = if uses_quote_lines {
+            let total_range = if let Some(selection) = catalog_selection.as_ref() {
+                Some(selection.total_range.clone())
+            } else if uses_quote_lines {
                 bindings
                     .estimate_total
                     .clone()
@@ -14705,7 +14720,15 @@ fn build_cost_estimate_pdf(
     const SERVICE_WIDTH_MM: f32 = 134.0;
     const PRICE_WIDTH_MM: f32 = 40.0;
 
-    layout.spacer(4.0);
+    admin_block(
+        &mut layout,
+        "Die nachfolgende Aufstellung fasst die voraussichtlichen Kosten der medizinischen \
+         Behandlung auf Grundlage der derzeit vorliegenden Daten zusammen. Es handelt sich \
+         um eine unverbindliche Schätzung; die tatsächliche Abrechnung erfolgt direkt zwischen dem \
+         Patienten und der jeweiligen Einrichtung nach GOÄ/DRG.",
+        4.0,
+        4.0,
+    );
     let (services_heading, estimate_heading) = match context.language.as_str() {
         "ru" => ("Медицинские услуги", "Ориентировочная стоимость"),
         "de-ru" => (
@@ -16187,6 +16210,226 @@ fn service_lines_to_items(lines: &[ServiceLineInput]) -> Vec<GeneratedContractLi
                 .map(ToOwned::to_owned),
         })
         .collect()
+}
+
+async fn load_lead_cost_estimate_catalog_selection(
+    state: &AppState,
+    lead_id: Option<Uuid>,
+    language: &str,
+) -> Result<Option<GeneratedCostEstimateCatalogSelection>, axum::response::Response> {
+    let Some(lead_id) = lead_id else {
+        return Ok(None);
+    };
+
+    let wizard_state = sqlx::query_scalar::<_, Value>(
+        "SELECT wizard_state FROM leads WHERE id = $1 AND converted_patient_id IS NULL",
+    )
+    .bind(lead_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, %lead_id, "load lead estimate work type selection");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load selected specialization work types",
+        )
+    })?
+    .unwrap_or_else(|| json!({}));
+
+    let selected_values = wizard_state
+        .get("selected_specialization_work_type_ids")
+        .or_else(|| wizard_state.get("selectedSpecializationWorkTypeIds"))
+        .and_then(Value::as_array);
+    let Some(selected_values) = selected_values else {
+        return Ok(None);
+    };
+    if selected_values.is_empty() {
+        return Ok(None);
+    }
+
+    let mut seen = HashSet::new();
+    let selected_ids = selected_values
+        .iter()
+        .filter_map(Value::as_str)
+        .filter_map(|value| Uuid::parse_str(value.trim()).ok())
+        .filter(|id| seen.insert(*id))
+        .collect::<Vec<_>>();
+    if selected_ids.len() != selected_values.len() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Selected specialization work type IDs are invalid",
+        ));
+    }
+
+    let rows = sqlx::query(
+        r#"SELECT wt.id,
+                  wt.name_de,
+                  wt.name_ru,
+                  wt.min_price_eur::text AS min_price_eur,
+                  wt.max_price_eur::text AS max_price_eur
+           FROM medical_specialization_work_types wt
+           JOIN medical_specializations specialization
+             ON specialization.id = wt.specialization_id
+            AND specialization.deleted_at IS NULL
+            AND specialization.is_active = TRUE
+           WHERE wt.id = ANY($1::uuid[])
+             AND wt.deleted_at IS NULL
+             AND wt.is_active = TRUE
+           ORDER BY specialization.sort_order, specialization.name_de, wt.sort_order, wt.name_de, wt.id"#,
+    )
+    .bind(&selected_ids)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, %lead_id, "load lead estimate work types");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load selected specialization work types",
+        )
+    })?;
+
+    if rows.len() != selected_ids.len() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "One or more selected specialization work types are no longer available",
+        ));
+    }
+
+    let description_rows = sqlx::query(
+        r#"SELECT work_type_id, language_code, body
+           FROM medical_specialization_work_type_descriptions
+           WHERE work_type_id = ANY($1::uuid[])
+             AND deleted_at IS NULL
+             AND is_active = TRUE
+           ORDER BY work_type_id, sort_order, created_at, id"#,
+    )
+    .bind(&selected_ids)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, %lead_id, "load lead estimate work type descriptions");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load selected specialization work type descriptions",
+        )
+    })?;
+
+    let mut descriptions = BTreeMap::<Uuid, Vec<(String, String)>>::new();
+    for row in description_rows {
+        let Ok(work_type_id) = row.try_get::<Uuid, _>("work_type_id") else {
+            continue;
+        };
+        let language_code = row
+            .try_get::<String, _>("language_code")
+            .unwrap_or_default();
+        let body = row.try_get::<String, _>("body").unwrap_or_default();
+        if !body.trim().is_empty() {
+            descriptions
+                .entry(work_type_id)
+                .or_default()
+                .push((language_code, body));
+        }
+    }
+
+    let mut total_min = 0.0_f64;
+    let mut total_max = 0.0_f64;
+    let mut line_items = Vec::with_capacity(rows.len());
+    for row in rows {
+        let work_type_id = row.try_get::<Uuid, _>("id").map_err(|error| {
+            tracing::error!(%error, %lead_id, "decode lead estimate work type");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to decode selected specialization work type",
+            )
+        })?;
+        let name_de = row.try_get::<String, _>("name_de").unwrap_or_default();
+        let name_ru = row.try_get::<String, _>("name_ru").unwrap_or_default();
+        let min_raw = row
+            .try_get::<String, _>("min_price_eur")
+            .unwrap_or_default();
+        let max_raw = row
+            .try_get::<String, _>("max_price_eur")
+            .unwrap_or_default();
+        let Some(min_price) = parse_eur_amount(&min_raw) else {
+            return Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to decode specialization work type minimum price",
+            ));
+        };
+        let Some(max_price) = parse_eur_amount(&max_raw) else {
+            return Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to decode specialization work type maximum price",
+            ));
+        };
+        total_min += min_price;
+        total_max += max_price;
+
+        let localized_description = localized_estimate_work_type_description(
+            language,
+            &name_de,
+            &name_ru,
+            descriptions
+                .get(&work_type_id)
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+        );
+        let price_range = format_eur_range(min_price, max_price);
+        line_items.push(GeneratedContractLineItem {
+            description: localized_description,
+            quantity: "1".to_string(),
+            unit_price: price_range.clone(),
+            line_gross: price_range,
+            vat_rate: None,
+            notes: None,
+        });
+    }
+
+    Ok(Some(GeneratedCostEstimateCatalogSelection {
+        line_items,
+        total_range: format_eur_range(total_min, total_max),
+    }))
+}
+
+fn localized_estimate_work_type_description(
+    language: &str,
+    name_de: &str,
+    name_ru: &str,
+    descriptions: &[(String, String)],
+) -> String {
+    fn language_block(name: &str, language: &str, descriptions: &[(String, String)]) -> String {
+        let paragraphs = descriptions
+            .iter()
+            .filter(|(code, _)| {
+                code.split(['-', '_'])
+                    .next()
+                    .is_some_and(|primary| primary.eq_ignore_ascii_case(language))
+            })
+            .map(|(_, body)| body.trim())
+            .filter(|body| !body.is_empty())
+            .collect::<Vec<_>>();
+        if paragraphs.is_empty() {
+            name.trim().to_string()
+        } else {
+            format!("{}: {}", name.trim(), paragraphs.join(" "))
+        }
+    }
+
+    match language {
+        "ru" => language_block(name_ru, "ru", descriptions),
+        "de-ru" => format!(
+            "{} / {}",
+            language_block(name_de, "de", descriptions),
+            language_block(name_ru, "ru", descriptions)
+        ),
+        _ => language_block(name_de, "de", descriptions),
+    }
+}
+
+fn format_eur_range(minimum: f64, maximum: f64) -> String {
+    let minimum = format_eur(minimum);
+    let minimum = minimum.strip_suffix(" EUR").unwrap_or(&minimum);
+    format!("{minimum} - {}", format_eur(maximum))
 }
 
 struct OrderQuoteSummary {
