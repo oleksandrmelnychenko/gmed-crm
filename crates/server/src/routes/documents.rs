@@ -14000,11 +14000,15 @@ fn build_order_cost_estimate_pdf(
         if shaded {
             layout.spacer(1.5);
         }
+        let summary = format!("{label} {value}");
         let cells = [
             ("", SERVICE_WIDTH_MM, PdfCellAlign::Left),
             ("", UNIT_PRICE_WIDTH_MM, PdfCellAlign::Left),
-            (label, QUANTITY_WIDTH_MM, PdfCellAlign::Right),
-            (value, TOTAL_WIDTH_MM, PdfCellAlign::Right),
+            (
+                summary.as_str(),
+                QUANTITY_WIDTH_MM + TOTAL_WIDTH_MM,
+                PdfCellAlign::Right,
+            ),
         ];
         if totals
             .get(index + 1)
@@ -14620,7 +14624,7 @@ fn build_cost_estimate_pdf(
         ),
     ]);
     if context.line_items.is_empty() {
-        layout.table_row_aligned(
+        layout.table_row_aligned_middle(
             &[
                 (
                     translated_label(&context.language, "no_services"),
@@ -14646,7 +14650,7 @@ fn build_cost_estimate_pdf(
                 }
             };
             let price = cost_estimate_price_text(raw_price);
-            layout.table_row_aligned(
+            layout.table_row_aligned_middle(
                 &[
                     (
                         item.description.trim(),
@@ -14669,7 +14673,7 @@ fn build_cost_estimate_pdf(
         .map(cost_estimate_price_text)
         .unwrap_or_else(|| "____________".to_string());
     layout.spacer(1.5);
-    layout.table_row_aligned(
+    layout.table_row_aligned_middle(
         &[
             (
                 cost_estimate_total_label(),
