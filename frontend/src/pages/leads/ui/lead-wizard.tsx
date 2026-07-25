@@ -4502,6 +4502,47 @@ ${serviceCommentLines.join("\n")}`
                   {tx("Загружаются каталоги специализаций и услуг…", "Fachrichtungs- und Leistungskataloge werden geladen…")}
                 </div>
               ) : null}
+              <Section title={tx("Период программы", "Programmzeitraum")}>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field
+                    label={tx("Начало программы", "Programmbeginn")}
+                    required={Boolean(draft.programDateTo)}
+                    error={orderFieldError("program-date-from")}
+                    errorId={`${ORDER_DATE_FROM_ID}-error`}
+                  >
+                    <Input
+                      id={ORDER_DATE_FROM_ID}
+                      name="program_date_from"
+                      type="date"
+                      required={Boolean(draft.programDateTo)}
+                      aria-invalid={Boolean(orderFieldError("program-date-from"))}
+                      aria-describedby={orderFieldError("program-date-from") ? `${ORDER_DATE_FROM_ID}-error` : undefined}
+                      className={inputClass}
+                      value={draft.programDateFrom}
+                      onChange={(event) => patch("programDateFrom", event.target.value)}
+                    />
+                  </Field>
+                  <Field
+                    label={tx("Окончание программы", "Programmende")}
+                    required={Boolean(draft.programDateFrom)}
+                    error={orderFieldError("program-date-to", "program-date-range")}
+                    errorId={`${ORDER_DATE_TO_ID}-error`}
+                  >
+                    <Input
+                      id={ORDER_DATE_TO_ID}
+                      name="program_date_to"
+                      type="date"
+                      min={draft.programDateFrom || undefined}
+                      required={Boolean(draft.programDateFrom)}
+                      aria-invalid={Boolean(orderFieldError("program-date-to", "program-date-range"))}
+                      aria-describedby={orderFieldError("program-date-to", "program-date-range") ? `${ORDER_DATE_TO_ID}-error` : undefined}
+                      className={inputClass}
+                      value={draft.programDateTo}
+                      onChange={(event) => patch("programDateTo", event.target.value)}
+                    />
+                  </Field>
+                </div>
+              </Section>
               <Section title={tx("Специализации", "Fachrichtungen")}>
                 <Field
                   label={tx("Добавить специализацию", "Fachrichtung hinzufügen")}
@@ -4532,26 +4573,6 @@ ${serviceCommentLines.join("\n")}`
                   ))}
                 </NativeComboboxSelect>
                 </Field>
-                {draft.specialties.length > 0 ? (
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {draft.specialties.map((value) => (
-                      <div key={value} className={cn("flex min-w-0 items-center justify-between gap-3 rounded-lg px-3 py-2", tokens.surface.mutedCard)}>
-                        <span className="min-w-0 break-words text-sm text-foreground">{specialtyLabel(value)}</span>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          className="shrink-0"
-                          title={tx("Удалить специализацию", "Fachrichtung entfernen")}
-                          aria-label={tx("Удалить специализацию", "Fachrichtung entfernen")}
-                          onClick={() => removeSpecializationSelection(value)}
-                        >
-                          <X aria-hidden="true" className="size-3.5" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
                 {selectedSpecializationItems.length > 0 ? (
                   <div className="mt-3 border-t border-border/70 pt-3">
                     <div className="mb-2 flex items-center justify-between gap-3">
@@ -4582,9 +4603,26 @@ ${serviceCommentLines.join("\n")}`
                                 <p className="min-w-0 break-words text-xs font-semibold text-foreground">
                                   {specialtyLabel(specializationValue(specialization))}
                                 </p>
-                                <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
-                                  {specializationWorkTypes.length}
-                                </span>
+                                <div className="flex shrink-0 items-center gap-2">
+                                  <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                                    {specializationWorkTypes.length}
+                                  </span>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    className="size-7"
+                                    title={tx("Удалить специализацию", "Fachrichtung entfernen")}
+                                    aria-label={tx("Удалить специализацию", "Fachrichtung entfernen")}
+                                    onClick={() =>
+                                      removeSpecializationSelection(
+                                        specializationValue(specialization),
+                                      )
+                                    }
+                                  >
+                                    <X aria-hidden="true" className="size-3.5" />
+                                  </Button>
+                                </div>
                               </div>
                               {specializationWorkTypes.length > 0 ? (
                                 <div className="divide-y divide-border/50 px-3">
@@ -4643,47 +4681,6 @@ ${serviceCommentLines.join("\n")}`
                     ) : null}
                   </div>
                 ) : null}
-              </Section>
-              <Section title={tx("Период программы", "Programmzeitraum")}>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field
-                  label={tx("Начало программы", "Programmbeginn")}
-                  required={Boolean(draft.programDateTo)}
-                  error={orderFieldError("program-date-from")}
-                  errorId={`${ORDER_DATE_FROM_ID}-error`}
-                >
-                  <Input
-                    id={ORDER_DATE_FROM_ID}
-                    name="program_date_from"
-                    type="date"
-                    required={Boolean(draft.programDateTo)}
-                    aria-invalid={Boolean(orderFieldError("program-date-from"))}
-                    aria-describedby={orderFieldError("program-date-from") ? `${ORDER_DATE_FROM_ID}-error` : undefined}
-                    className={inputClass}
-                    value={draft.programDateFrom}
-                    onChange={(event) => patch("programDateFrom", event.target.value)}
-                  />
-                </Field>
-                <Field
-                  label={tx("Окончание программы", "Programmende")}
-                  required={Boolean(draft.programDateFrom)}
-                  error={orderFieldError("program-date-to", "program-date-range")}
-                  errorId={`${ORDER_DATE_TO_ID}-error`}
-                >
-                  <Input
-                    id={ORDER_DATE_TO_ID}
-                    name="program_date_to"
-                    type="date"
-                    min={draft.programDateFrom || undefined}
-                    required={Boolean(draft.programDateFrom)}
-                    aria-invalid={Boolean(orderFieldError("program-date-to", "program-date-range"))}
-                    aria-describedby={orderFieldError("program-date-to", "program-date-range") ? `${ORDER_DATE_TO_ID}-error` : undefined}
-                    className={inputClass}
-                    value={draft.programDateTo}
-                    onChange={(event) => patch("programDateTo", event.target.value)}
-                  />
-                </Field>
-              </div>
               </Section>
             </section>
           ) : null}
