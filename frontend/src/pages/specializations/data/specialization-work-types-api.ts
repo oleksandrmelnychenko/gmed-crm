@@ -23,8 +23,10 @@ export type SpecializationWorkType = {
 
 export type WorkTypeUpsertPayload = Omit<
   SpecializationWorkType,
-  "id" | "specialization_id"
->;
+  "id" | "specialization_id" | "code"
+> & {
+  code?: string;
+};
 
 type CreateResponse = {
   id: string;

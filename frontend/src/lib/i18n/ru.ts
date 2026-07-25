@@ -19,6 +19,7 @@ export const ru = {
   nav_dashboard: "Панель управления",
   nav_main: "Главное",
   nav_documents: "Документы",
+  nav_specializations: "Специализации",
   nav_contracts: "Договоры",
   nav_invoices: "Счета",
   nav_finance_catalog: "Финансовый каталог",

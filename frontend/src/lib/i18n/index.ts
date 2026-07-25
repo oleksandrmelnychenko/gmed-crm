@@ -27,6 +27,7 @@ export interface Translations
   nav_dashboard: string;
   nav_main: string;
   nav_documents: string;
+  nav_specializations: string;
   nav_contracts: string;
   nav_invoices: string;
   nav_finance_catalog: string;

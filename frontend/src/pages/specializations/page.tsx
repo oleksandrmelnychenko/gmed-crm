@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useId,
   useMemo,
   useState,
   type FormEvent,
@@ -18,20 +17,17 @@ import {
 } from "lucide-react";
 
 import { Banner } from "@/components/record-workspace/recipes";
+import {
+  AdminSheetScaffold,
+  SheetFormFooter,
+} from "@/components/admin-page-patterns";
 import { PageHeader, checkboxClass, inputClass, textareaClass } from "@/components/ui-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { toast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
@@ -56,11 +52,11 @@ import {
 
 type Translate = (ru: string, de: string) => string;
 
-type SpecializationDialogState = {
+type SpecializationSheetState = {
   item?: SpecializationItem;
 };
 
-type WorkTypeDialogState = {
+type WorkTypeSheetState = {
   item?: SpecializationWorkType;
 };
 
@@ -163,9 +159,9 @@ export function SpecializationsPage() {
   const [workTypesError, setWorkTypesError] = useState("");
   const [reloadWorkTypesToken, setReloadWorkTypesToken] = useState(0);
   const [busyAction, setBusyAction] = useState("");
-  const [specializationDialog, setSpecializationDialog] =
-    useState<SpecializationDialogState | null>(null);
-  const [workTypeDialog, setWorkTypeDialog] = useState<WorkTypeDialogState | null>(null);
+  const [specializationSheet, setSpecializationSheet] =
+    useState<SpecializationSheetState | null>(null);
+  const [workTypeSheet, setWorkTypeSheet] = useState<WorkTypeSheetState | null>(null);
 
   async function loadSpecializations(preferredId?: string) {
     setSpecializationsLoading(true);
@@ -257,7 +253,7 @@ export function SpecializationsPage() {
         const created = await createSpecialization(payload);
         await loadSpecializations(created.id);
       }
-      setSpecializationDialog(null);
+      setSpecializationSheet(null);
       toast.success(
         item
           ? tx("Специализация обновлена.", "Spezialisierung aktualisiert.")
@@ -311,7 +307,7 @@ export function SpecializationsPage() {
       } else {
         await createSpecializationWorkType(selectedSpecializationId, payload);
       }
-      setWorkTypeDialog(null);
+      setWorkTypeSheet(null);
       setReloadWorkTypesToken((current) => current + 1);
       toast.success(
         item
@@ -349,7 +345,7 @@ export function SpecializationsPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-4 lg:space-y-0">
       <PageHeader
         title={tx("Специализации", "Spezialisierungen")}
         actions={
@@ -370,7 +366,7 @@ export function SpecializationsPage() {
               <Button
                 type="button"
                 size="sm"
-                onClick={() => setSpecializationDialog({})}
+                onClick={() => setSpecializationSheet({})}
               >
                 <Plus className="size-3.5" />
                 {tx("Специализация", "Spezialisierung")}
@@ -386,8 +382,8 @@ export function SpecializationsPage() {
         </Banner>
       ) : null}
 
-      <div className="grid min-h-[620px] overflow-hidden rounded-lg border border-border/70 bg-card lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]">
-        <aside className="flex min-h-0 flex-col border-b border-border/70 lg:border-r lg:border-b-0">
+      <div className="grid min-h-[620px] overflow-hidden rounded-lg border border-border/70 bg-card lg:min-h-0 lg:flex-1 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]">
+        <aside className="flex min-h-0 flex-col overflow-hidden border-b border-border/70 lg:border-r lg:border-b-0">
           <div className="border-b border-border/70 p-3">
             <div className="relative">
               <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -401,7 +397,7 @@ export function SpecializationsPage() {
             </div>
           </div>
 
-          <div className="max-h-[280px] flex-1 overflow-y-auto p-2 lg:max-h-none">
+          <div className="min-h-0 max-h-[280px] flex-1 overflow-y-auto overscroll-contain p-2 lg:max-h-none">
             {specializationsLoading ? (
               <div className="flex min-h-36 items-center justify-center text-muted-foreground">
                 <LoaderCircle className="size-5 animate-spin" />
@@ -449,7 +445,7 @@ export function SpecializationsPage() {
           </div>
         </aside>
 
-        <main className="min-w-0">
+        <main className="min-w-0 lg:flex lg:min-h-0 lg:flex-col lg:overflow-hidden">
           {!selectedSpecialization ? (
             <div className="flex min-h-[420px] items-center justify-center px-6 text-center text-sm text-muted-foreground">
               {tx(
@@ -470,7 +466,8 @@ export function SpecializationsPage() {
                   <p className="mt-1 text-xs text-muted-foreground">
                     DE: {selectedSpecialization.name_de || "-"} · RU:{" "}
                     {selectedSpecialization.name_ru || "-"} ·{" "}
-                    {tx("Порядок", "Sortierung")}: {selectedSpecialization.sort_order}
+                    {tx("Порядок отображения", "Anzeigereihenfolge")}:{" "}
+                    {selectedSpecialization.sort_order}
                   </p>
                 </div>
                 {canManage ? (
@@ -482,7 +479,7 @@ export function SpecializationsPage() {
                       title={tx("Редактировать", "Bearbeiten")}
                       aria-label={tx("Редактировать специализацию", "Spezialisierung bearbeiten")}
                       onClick={() =>
-                        setSpecializationDialog({ item: selectedSpecialization })
+                        setSpecializationSheet({ item: selectedSpecialization })
                       }
                     >
                       <Pencil />
@@ -509,7 +506,7 @@ export function SpecializationsPage() {
                     <Button
                       type="button"
                       size="sm"
-                      onClick={() => setWorkTypeDialog({})}
+                      onClick={() => setWorkTypeSheet({})}
                     >
                       <Plus className="size-3.5" />
                       {tx("Вид работы", "Leistungsart")}
@@ -526,7 +523,7 @@ export function SpecializationsPage() {
                 </div>
               ) : null}
 
-              <div className="min-w-0 overflow-x-auto">
+              <div className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain">
                 <div className="hidden min-w-[720px] grid-cols-[minmax(220px,1.5fr)_190px_110px_96px_80px] gap-3 border-b border-border/60 bg-muted/25 px-5 py-2 text-[11px] font-semibold uppercase text-muted-foreground md:grid">
                   <span>{tx("Вид работы", "Leistungsart")}</span>
                   <span>{tx("Диапазон, EUR", "Preisspanne, EUR")}</span>
@@ -561,7 +558,9 @@ export function SpecializationsPage() {
                             {lang === "ru" ? item.name_de : item.name_ru}
                           </p>
                           <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
-                            {item.code} · {tx("порядок", "Sortierung")} {item.sort_order}
+                            {item.code} ·{" "}
+                            {tx("порядок отображения", "Anzeigereihenfolge")}{" "}
+                            {item.sort_order}
                           </p>
                         </div>
                         <span className="font-mono text-sm tabular-nums text-foreground">
@@ -580,7 +579,7 @@ export function SpecializationsPage() {
                                 size="icon-sm"
                                 title={tx("Редактировать", "Bearbeiten")}
                                 aria-label={tx("Редактировать вид работы", "Leistungsart bearbeiten")}
-                                onClick={() => setWorkTypeDialog({ item })}
+                                onClick={() => setWorkTypeSheet({ item })}
                               >
                                 <Pencil />
                               </Button>
@@ -615,24 +614,24 @@ export function SpecializationsPage() {
         </main>
       </div>
 
-      {specializationDialog ? (
-        <SpecializationDialog
-          key={specializationDialog.item?.id ?? "new-specialization"}
-          item={specializationDialog.item}
+      {specializationSheet ? (
+        <SpecializationSheet
+          key={specializationSheet.item?.id ?? "new-specialization"}
+          item={specializationSheet.item}
           busy={busyAction.startsWith("specialization-")}
           tx={tx}
-          onClose={() => setSpecializationDialog(null)}
+          onClose={() => setSpecializationSheet(null)}
           onSave={saveSpecialization}
         />
       ) : null}
 
-      {workTypeDialog ? (
-        <WorkTypeDialog
-          key={workTypeDialog.item?.id ?? "new-work-type"}
-          item={workTypeDialog.item}
+      {workTypeSheet ? (
+        <WorkTypeSheet
+          key={workTypeSheet.item?.id ?? "new-work-type"}
+          item={workTypeSheet.item}
           busy={busyAction.startsWith("work-type-")}
           tx={tx}
-          onClose={() => setWorkTypeDialog(null)}
+          onClose={() => setWorkTypeSheet(null)}
           onSave={saveWorkType}
         />
       ) : null}
@@ -649,7 +648,7 @@ function specializationDraft(item?: SpecializationItem): SpecializationDraft {
   };
 }
 
-function SpecializationDialog({
+function SpecializationSheet({
   item,
   busy,
   tx,
@@ -665,7 +664,6 @@ function SpecializationDialog({
     payload: Record<string, unknown>,
   ) => Promise<void>;
 }) {
-  const formId = useId();
   const initialDraft = useMemo(() => specializationDraft(item), [item]);
   const [draft, setDraft] = useState(initialDraft);
   const [error, setError] = useState("");
@@ -699,88 +697,92 @@ function SpecializationDialog({
     }
   }
 
+  const title = item
+    ? tx("Редактировать специализацию", "Spezialisierung bearbeiten")
+    : tx("Новая специализация", "Neue Spezialisierung");
+
   return (
-    <Dialog open dirty={dirty} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[min(90vh,680px)] max-w-2xl gap-0 overflow-hidden p-0 sm:max-w-2xl">
-        <DialogHeader className="border-b border-border/70 px-5 py-4 pr-12">
-          <DialogTitle>
-            {item
-              ? tx("Редактировать специализацию", "Spezialisierung bearbeiten")
-              : tx("Новая специализация", "Neue Spezialisierung")}
-          </DialogTitle>
-        </DialogHeader>
-        <form id={formId} onSubmit={handleSubmit} className="overflow-y-auto p-5">
+    <Sheet open dirty={dirty} onOpenChange={(open) => !open && onClose()}>
+      <SheetContent
+        side="right"
+        className="w-full border-l border-border p-0 sm:max-w-[680px]"
+      >
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <AdminSheetScaffold
+            title={title}
+            footer={
+              <SheetFormFooter
+                cancelLabel={tx("Отмена", "Abbrechen")}
+                submitLabel={tx("Сохранить", "Speichern")}
+                submittingLabel={tx("Сохранение...", "Wird gespeichert...")}
+                submitting={busy}
+                onCancel={onClose}
+              />
+            }
+          >
           {error ? (
-            <div className="mb-4">
-              <Banner tone="error" withIcon>
-                {error}
-              </Banner>
-            </div>
+            <Banner tone="error" withIcon>
+              {error}
+            </Banner>
           ) : null}
-          <div className="grid gap-4 sm:grid-cols-2">
-            <FormField label={tx("Название DE", "Bezeichnung DE")} required>
-              <Input
-                value={draft.nameDe}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, nameDe: event.target.value }))
-                }
-                className={inputClass}
-                required
-                autoFocus
-              />
-            </FormField>
-            <FormField label={tx("Название RU", "Bezeichnung RU")} required>
-              <Input
-                value={draft.nameRu}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, nameRu: event.target.value }))
-                }
-                className={inputClass}
-                required
-              />
-            </FormField>
-            <FormField label={tx("Порядок", "Sortierung")}>
-              <Input
-                type="number"
-                min="0"
-                step="1"
-                value={draft.sortOrder}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    sortOrder: event.target.value,
-                  }))
-                }
-                className={inputClass}
-              />
-            </FormField>
-            <label className="flex items-end gap-2 pb-2 text-sm text-foreground">
-              <input
-                type="checkbox"
-                checked={draft.isActive}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    isActive: event.target.checked,
-                  }))
-                }
-                className={checkboxClass}
-              />
-              {tx("Активна", "Aktiv")}
-            </label>
-          </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField label={tx("Название DE", "Bezeichnung DE")} required>
+                <Input
+                  value={draft.nameDe}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, nameDe: event.target.value }))
+                  }
+                  className={inputClass}
+                  required
+                  autoFocus
+                />
+              </FormField>
+              <FormField label={tx("Название RU", "Bezeichnung RU")} required>
+                <Input
+                  value={draft.nameRu}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, nameRu: event.target.value }))
+                  }
+                  className={inputClass}
+                  required
+                />
+              </FormField>
+              <FormField
+                label={tx("Порядок отображения", "Anzeigereihenfolge")}
+              >
+                <Input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={draft.sortOrder}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      sortOrder: event.target.value,
+                    }))
+                  }
+                  className={inputClass}
+                />
+              </FormField>
+              <label className="flex items-end gap-2 pb-2 text-sm text-foreground">
+                <input
+                  type="checkbox"
+                  checked={draft.isActive}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      isActive: event.target.checked,
+                    }))
+                  }
+                  className={checkboxClass}
+                />
+                {tx("Активна", "Aktiv")}
+              </label>
+            </div>
+          </AdminSheetScaffold>
         </form>
-        <DialogFooter className="m-0 rounded-none px-5 py-3">
-          <DialogClose render={<Button type="button" variant="outline" disabled={busy} />}>
-            {tx("Отмена", "Abbrechen")}
-          </DialogClose>
-          <Button type="submit" form={formId} disabled={busy}>
-            {busy ? <LoaderCircle className="animate-spin" /> : null}
-            {tx("Сохранить", "Speichern")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -814,7 +816,7 @@ function workTypeDraft(item?: SpecializationWorkType): WorkTypeDraft {
   };
 }
 
-function WorkTypeDialog({
+function WorkTypeSheet({
   item,
   busy,
   tx,
@@ -830,7 +832,6 @@ function WorkTypeDialog({
     payload: WorkTypeUpsertPayload,
   ) => Promise<void>;
 }) {
-  const formId = useId();
   const initialDraft = useMemo(() => workTypeDraft(item), [item]);
   const [draft, setDraft] = useState(initialDraft);
   const [error, setError] = useState("");
@@ -894,11 +895,11 @@ function WorkTypeDialog({
     const minPrice = Number(draft.minPriceEur);
     const maxPrice = Number(draft.maxPriceEur);
 
-    if (!draft.code.trim() || !draft.nameDe.trim() || !draft.nameRu.trim()) {
+    if (!draft.nameDe.trim() || !draft.nameRu.trim()) {
       setError(
         tx(
-          "Заполните код и названия DE/RU.",
-          "Füllen Sie Code sowie DE/RU-Bezeichnungen aus.",
+          "Заполните названия DE/RU.",
+          "Füllen Sie die DE/RU-Bezeichnungen aus.",
         ),
       );
       return;
@@ -937,7 +938,6 @@ function WorkTypeDialog({
 
     try {
       await onSave(item, {
-        code: draft.code.trim(),
         name_de: draft.nameDe.trim(),
         name_ru: draft.nameRu.trim(),
         min_price_eur: minPrice,
@@ -951,39 +951,48 @@ function WorkTypeDialog({
     }
   }
 
+  const title = item
+    ? tx("Редактировать вид работы", "Leistungsart bearbeiten")
+    : tx("Новый вид работы", "Neue Leistungsart");
+
   return (
-    <Dialog open dirty={dirty} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[min(94vh,860px)] max-w-4xl gap-0 overflow-hidden p-0 sm:max-w-4xl">
-        <DialogHeader className="border-b border-border/70 px-5 py-4 pr-12">
-          <DialogTitle>
-            {item
-              ? tx("Редактировать вид работы", "Leistungsart bearbeiten")
-              : tx("Новый вид работы", "Neue Leistungsart")}
-          </DialogTitle>
-        </DialogHeader>
-        <form id={formId} onSubmit={handleSubmit} className="overflow-y-auto">
-          <div className="space-y-5 p-5">
+    <Sheet open dirty={dirty} onOpenChange={(open) => !open && onClose()}>
+      <SheetContent
+        side="right"
+        className="w-full border-l border-border p-0 sm:max-w-[900px]"
+      >
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <AdminSheetScaffold
+            title={title}
+            footer={
+              <SheetFormFooter
+                cancelLabel={tx("Отмена", "Abbrechen")}
+                submitLabel={tx("Сохранить", "Speichern")}
+                submittingLabel={tx("Сохранение...", "Wird gespeichert...")}
+                submitting={busy}
+                onCancel={onClose}
+              />
+            }
+          >
+            <div className="space-y-5">
             {error ? (
               <Banner tone="error" withIcon>
                 {error}
               </Banner>
             ) : null}
 
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <FormField label={tx("Код", "Code")} required>
+            {item ? (
+              <FormField label={tx("Технический код", "Technischer Code")}>
                 <Input
                   value={draft.code}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      code: event.target.value,
-                    }))
-                  }
-                  className={inputClass}
-                  required
-                  autoFocus
+                  className={cn(inputClass, "font-mono")}
+                  readOnly
+                  disabled
                 />
               </FormField>
+            ) : null}
+
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <FormField label={tx("Название DE", "Bezeichnung DE")} required>
                 <Input
                   value={draft.nameDe}
@@ -995,6 +1004,7 @@ function WorkTypeDialog({
                   }
                   className={inputClass}
                   required
+                  autoFocus
                 />
               </FormField>
               <FormField label={tx("Название RU", "Bezeichnung RU")} required>
@@ -1042,7 +1052,9 @@ function WorkTypeDialog({
                   required
                 />
               </FormField>
-              <FormField label={tx("Порядок", "Sortierung")}>
+              <FormField
+                label={tx("Порядок отображения", "Anzeigereihenfolge")}
+              >
                 <Input
                   type="number"
                   min="0"
@@ -1188,19 +1200,11 @@ function WorkTypeDialog({
                 </div>
               )}
             </section>
-          </div>
+            </div>
+          </AdminSheetScaffold>
         </form>
-        <DialogFooter className="m-0 rounded-none px-5 py-3">
-          <DialogClose render={<Button type="button" variant="outline" disabled={busy} />}>
-            {tx("Отмена", "Abbrechen")}
-          </DialogClose>
-          <Button type="submit" form={formId} disabled={busy}>
-            {busy ? <LoaderCircle className="animate-spin" /> : null}
-            {tx("Сохранить", "Speichern")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }
 

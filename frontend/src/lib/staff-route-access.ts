@@ -168,6 +168,7 @@ type RouteRule = {
   nav?: {
     section: StaffNavSection;
     labelKey: string;
+    after?: string;
   };
 };
 
@@ -182,6 +183,7 @@ export type StaffNavItem = {
   to: string;
   labelKey: string;
   section: StaffNavSection;
+  after?: string;
 };
 
 function pathMatches(pathname: string, rule: RouteRule): boolean {
@@ -281,10 +283,15 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     nav: { section: "medicine", labelKey: "nav_interpreters" },
   },
   {
-    id: "documents/specializations",
+    id: "specializations",
     match: "exact",
-    path: "/documents/specializations",
+    path: "/specializations",
     roles: ROLES_PROVIDERS,
+    nav: {
+      section: "crm",
+      labelKey: "nav_specializations",
+      after: "documents",
+    },
   },
   {
     id: "documents",
@@ -506,7 +513,29 @@ export function listStaffNavItems(role: string): StaffNavItem[] {
       to: rule.path,
       labelKey: rule.nav.labelKey,
       section: rule.nav.section,
+      after: rule.nav.after,
     });
   }
-  return items;
+
+  const ordered: StaffNavItem[] = [];
+  const pending = new Map<string, StaffNavItem[]>();
+  const append = (item: StaffNavItem) => {
+    ordered.push(item);
+    for (const dependent of pending.get(item.id) ?? []) {
+      append(dependent);
+    }
+    pending.delete(item.id);
+  };
+
+  for (const item of items) {
+    if (item.after && !ordered.some((candidate) => candidate.id === item.after)) {
+      pending.set(item.after, [...(pending.get(item.after) ?? []), item]);
+      continue;
+    }
+    append(item);
+  }
+  for (const deferred of pending.values()) {
+    deferred.forEach(append);
+  }
+  return ordered;
 }

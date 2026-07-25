@@ -5,7 +5,13 @@ import {
   type ErrorInfo,
   type ReactNode,
 } from "react";
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import {
+  BrowserRouter,
+  Navigate,
+  Routes,
+  Route,
+  useLocation,
+} from "react-router-dom";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { AuthProvider } from "@/lib/auth";
@@ -352,8 +358,12 @@ function AppRoutes() {
             <Route path="documents" element={<DocumentsPage />} />
             <Route path="documents/intake" element={<DocumentsPage />} />
             <Route path="documents/translation-requests" element={<DocumentsPage />} />
-            <Route path="documents/specializations" element={<SpecializationsPage />} />
+            <Route
+              path="documents/specializations"
+              element={<Navigate replace to="/specializations" />}
+            />
             <Route path="documents/:documentId" element={<DocumentsPage />} />
+            <Route path="specializations" element={<SpecializationsPage />} />
             <Route path="services" element={<ServicesPage />} />
             <Route path="feedback" element={<FeedbackPage />} />
             <Route path="privacy" element={<PrivacyPage />} />

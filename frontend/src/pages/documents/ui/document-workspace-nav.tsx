@@ -2,7 +2,6 @@ import {
   FileText,
   Inbox,
   Languages,
-  Stethoscope,
   type LucideIcon,
 } from "lucide-react";
 import { matchPath, useLocation } from "react-router-dom";
@@ -20,7 +19,7 @@ type WorkspaceItem = {
 
 export function DocumentWorkspaceNav() {
   const { pathname } = useLocation();
-  const { t, lang } = useLang();
+  const { t } = useLang();
 
   const items: WorkspaceItem[] = [
     {
@@ -36,12 +35,6 @@ export function DocumentWorkspaceNav() {
       icon: FileText,
     },
     {
-      key: "specializations",
-      label: lang === "ru" ? "Специализации" : "Spezialisierungen",
-      to: "/documents/specializations",
-      icon: Stethoscope,
-    },
-    {
       key: "translation-requests",
       label: t.documents_translation_requests,
       to: "/documents/translation-requests",
@@ -51,8 +44,6 @@ export function DocumentWorkspaceNav() {
 
   const currentKey = matchPath("/documents/intake", pathname)
     ? "intake"
-    : matchPath("/documents/specializations", pathname)
-      ? "specializations"
     : matchPath("/documents/translation-requests", pathname)
       ? "translation-requests"
       : "documents";

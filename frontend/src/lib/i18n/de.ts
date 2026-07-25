@@ -19,6 +19,7 @@ export const de = {
   nav_dashboard: "Dashboard",
   nav_main: "Haupt",
   nav_documents: "Dokumente",
+  nav_specializations: "Spezialisierungen",
   nav_contracts: "Verträge",
   nav_invoices: "Rechnungen",
   nav_finance_catalog: "Finanzkatalog",
