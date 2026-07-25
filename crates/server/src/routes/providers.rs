@@ -338,6 +338,7 @@ struct UpsertSpecializationRequest {
     name_en: String,
     name_de: Option<String>,
     name_ru: Option<String>,
+    name_es: Option<String>,
     sort_order: Option<i32>,
     is_active: Option<bool>,
 }
@@ -354,10 +355,14 @@ struct UpsertSpecializationWorkTypeDescriptionRequest {
 #[derive(Deserialize)]
 struct UpsertSpecializationWorkTypeRequest {
     code: Option<String>,
+    specialization_ids: Option<Vec<Uuid>>,
     name_de: String,
     name_ru: String,
+    name_en: Option<String>,
+    name_es: Option<String>,
     min_price_eur: Decimal,
     max_price_eur: Decimal,
+    duration_hours: Option<i32>,
     sort_order: Option<i32>,
     is_active: Option<bool>,
     descriptions: Vec<UpsertSpecializationWorkTypeDescriptionRequest>,
@@ -1155,12 +1160,13 @@ async fn create_specialization(
 
     let row = match sqlx::query(
         r#"INSERT INTO medical_specializations (
-                code, name_en, name_de, name_ru, sort_order, is_active
-           ) VALUES ($1, $2, $3, $4, $5, $6)
+                code, name_en, name_de, name_ru, name_es, sort_order, is_active
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7)
            ON CONFLICT (code) DO UPDATE
            SET name_en = EXCLUDED.name_en,
                name_de = EXCLUDED.name_de,
                name_ru = EXCLUDED.name_ru,
+               name_es = EXCLUDED.name_es,
                sort_order = EXCLUDED.sort_order,
                is_active = EXCLUDED.is_active,
                deleted_at = NULL,
@@ -1172,6 +1178,7 @@ async fn create_specialization(
     .bind(&specialization.name_en)
     .bind(&specialization.name_de)
     .bind(&specialization.name_ru)
+    .bind(&specialization.name_es)
     .bind(specialization.sort_order)
     .bind(specialization.is_active)
     .fetch_optional(&state.db)
@@ -1234,8 +1241,9 @@ async fn update_specialization(
            SET name_en = $2,
                name_de = $3,
                name_ru = $4,
-               sort_order = $5,
-               is_active = $6,
+               name_es = $5,
+               sort_order = $6,
+               is_active = $7,
                updated_at = now()
            WHERE id = $1 AND deleted_at IS NULL"#,
     )
@@ -1243,6 +1251,7 @@ async fn update_specialization(
     .bind(&specialization.name_en)
     .bind(&specialization.name_de)
     .bind(&specialization.name_ru)
+    .bind(&specialization.name_es)
     .bind(specialization.sort_order)
     .bind(specialization.is_active)
     .execute(&state.db)
@@ -1436,19 +1445,25 @@ async fn create_specialization_work_type(
                 code,
                 name_de,
                 name_ru,
+                name_en,
+                name_es,
                 min_price_eur,
                 max_price_eur,
+                duration_hours,
                 sort_order,
                 is_active
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
            RETURNING id"#,
     )
     .bind(specialization_id)
     .bind(&code)
     .bind(&work_type.name_de)
     .bind(&work_type.name_ru)
+    .bind(&work_type.name_en)
+    .bind(&work_type.name_es)
     .bind(work_type.min_price_eur)
     .bind(work_type.max_price_eur)
+    .bind(work_type.duration_hours)
     .bind(work_type.sort_order)
     .bind(work_type.is_active)
     .fetch_one(&mut *tx)
@@ -1480,6 +1495,12 @@ async fn create_specialization_work_type(
         }
     };
 
+    if let Err(response) =
+        sync_specialization_work_type_assignments_tx(&mut tx, work_type_id, &[specialization_id])
+            .await
+    {
+        return response;
+    }
     if let Err(response) = sync_specialization_work_type_descriptions_tx(
         &mut tx,
         work_type_id,
@@ -1550,27 +1571,97 @@ async fn update_specialization_work_type(
         }
     };
 
-    match sqlx::query(
-        r#"UPDATE medical_specialization_work_types
-           SET code = COALESCE($3, code),
-               name_de = $4,
-               name_ru = $5,
-               min_price_eur = $6,
-               max_price_eur = $7,
-               sort_order = $8,
-               is_active = $9,
-               updated_at = now()
-           WHERE id = $1
-             AND specialization_id = $2
-             AND deleted_at IS NULL"#,
+    let current_primary_specialization_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT wt.specialization_id
+           FROM medical_specialization_work_types wt
+           JOIN medical_specialization_work_type_assignments assignment
+             ON assignment.work_type_id = wt.id
+            AND assignment.specialization_id = $2
+           WHERE wt.id = $1
+             AND wt.deleted_at IS NULL
+           FOR UPDATE OF wt"#,
     )
     .bind(work_type_id)
     .bind(specialization_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return err(StatusCode::NOT_FOUND, "Specialization work type not found");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, specialization_id = %specialization_id, work_type_id = %work_type_id, "Failed to lock specialization work type");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update specialization work type",
+            );
+        }
+    };
+
+    let specialization_ids = match work_type.specialization_ids.clone() {
+        Some(ids) => ids,
+        None => match sqlx::query_scalar::<_, Uuid>(
+            r#"SELECT specialization_id
+               FROM medical_specialization_work_type_assignments
+               WHERE work_type_id = $1
+               ORDER BY specialization_id"#,
+        )
+        .bind(work_type_id)
+        .fetch_all(&mut *tx)
+        .await
+        {
+            Ok(ids) if !ids.is_empty() => ids,
+            Ok(_) => vec![current_primary_specialization_id],
+            Err(e) => {
+                tracing::error!(error = %e, work_type_id = %work_type_id, "Failed to load specialization work type assignments");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update specialization work type",
+                );
+            }
+        },
+    };
+    let primary_specialization_id =
+        if specialization_ids.contains(&current_primary_specialization_id) {
+            current_primary_specialization_id
+        } else {
+            specialization_ids[0]
+        };
+    if let Err(response) =
+        sync_specialization_work_type_assignments_tx(&mut tx, work_type_id, &specialization_ids)
+            .await
+    {
+        return response;
+    }
+
+    match sqlx::query(
+        r#"UPDATE medical_specialization_work_types
+           SET specialization_id = $2,
+               code = COALESCE($3, code),
+               name_de = $4,
+               name_ru = $5,
+               name_en = $6,
+               name_es = $7,
+               min_price_eur = $8,
+               max_price_eur = $9,
+               duration_hours = $10,
+               sort_order = $11,
+               is_active = $12,
+               updated_at = now()
+           WHERE id = $1
+             AND deleted_at IS NULL"#,
+    )
+    .bind(work_type_id)
+    .bind(primary_specialization_id)
     .bind(&work_type.code)
     .bind(&work_type.name_de)
     .bind(&work_type.name_ru)
+    .bind(&work_type.name_en)
+    .bind(&work_type.name_es)
     .bind(work_type.min_price_eur)
     .bind(work_type.max_price_eur)
+    .bind(work_type.duration_hours)
     .bind(work_type.sort_order)
     .bind(work_type.is_active)
     .execute(&mut *tx)
@@ -1619,14 +1710,20 @@ async fn update_specialization_work_type(
         "medical_specialization_work_type",
         Some(work_type_id),
         Some(json!({
-            "specialization_id": specialization_id,
+            "source_specialization_id": specialization_id,
+            "specialization_ids": specialization_ids,
             "description_count": work_type.descriptions.len(),
         })),
     )
     .await;
 
-    match load_specialization_work_types_json(&state, specialization_id, true, Some(work_type_id))
-        .await
+    match load_specialization_work_types_json(
+        &state,
+        primary_specialization_id,
+        true,
+        Some(work_type_id),
+    )
+    .await
     {
         Ok(mut items) => match items.pop() {
             Some(item) => Json(item).into_response(),
@@ -1659,13 +1756,18 @@ async fn delete_specialization_work_type(
         }
     };
     match sqlx::query(
-        r#"UPDATE medical_specialization_work_types
+        r#"UPDATE medical_specialization_work_types wt
            SET is_active = FALSE,
                deleted_at = now(),
                updated_at = now()
-           WHERE id = $1
-             AND specialization_id = $2
-             AND deleted_at IS NULL"#,
+           WHERE wt.id = $1
+             AND wt.deleted_at IS NULL
+             AND EXISTS (
+                 SELECT 1
+                 FROM medical_specialization_work_type_assignments assignment
+                 WHERE assignment.work_type_id = wt.id
+                   AND assignment.specialization_id = $2
+             )"#,
     )
     .bind(work_type_id)
     .bind(specialization_id)
@@ -4697,6 +4799,7 @@ struct SpecializationPayload {
     name_en: String,
     name_de: Option<String>,
     name_ru: Option<String>,
+    name_es: Option<String>,
     sort_order: i32,
     is_active: bool,
 }
@@ -4711,10 +4814,14 @@ struct SpecializationWorkTypeDescriptionPayload {
 
 struct SpecializationWorkTypePayload {
     code: Option<String>,
+    specialization_ids: Option<Vec<Uuid>>,
     name_de: String,
     name_ru: String,
+    name_en: Option<String>,
+    name_es: Option<String>,
     min_price_eur: Decimal,
     max_price_eur: Decimal,
+    duration_hours: i32,
     sort_order: i32,
     is_active: bool,
     descriptions: Vec<SpecializationWorkTypeDescriptionPayload>,
@@ -5206,6 +5313,10 @@ fn normalize_specialization_payload(
     if name_ru.as_ref().is_some_and(|value| value.len() > 120) {
         return Err("Specialization alternate name is too long");
     }
+    let name_es = normalize_optional(body.name_es);
+    if name_es.as_ref().is_some_and(|value| value.len() > 120) {
+        return Err("Specialization Spanish name is too long");
+    }
 
     let code = if allow_code {
         normalize_optional(body.code).map(|value| specialization_code(&value))
@@ -5221,6 +5332,7 @@ fn normalize_specialization_payload(
         name_en,
         name_de,
         name_ru,
+        name_es,
         sort_order: body.sort_order.unwrap_or(1000),
         is_active: body.is_active.unwrap_or(true),
     })
@@ -5233,7 +5345,17 @@ fn normalize_specialization_work_type_payload(
         normalize_optional(Some(body.name_de)).ok_or("Work type German name is required")?;
     let name_ru =
         normalize_optional(Some(body.name_ru)).ok_or("Work type Russian name is required")?;
-    if name_de.chars().count() > 200 || name_ru.chars().count() > 200 {
+    let name_en = normalize_optional(body.name_en);
+    let name_es = normalize_optional(body.name_es);
+    if name_de.chars().count() > 200
+        || name_ru.chars().count() > 200
+        || name_en
+            .as_ref()
+            .is_some_and(|value| value.chars().count() > 200)
+        || name_es
+            .as_ref()
+            .is_some_and(|value| value.chars().count() > 200)
+    {
         return Err("Work type name is too long");
     }
 
@@ -5241,6 +5363,24 @@ fn normalize_specialization_work_type_payload(
     if code.as_ref().is_some_and(|value| value.len() > 120) {
         return Err("Work type code is too long");
     }
+
+    let specialization_ids = match body.specialization_ids {
+        Some(ids) => {
+            if ids.is_empty() {
+                return Err("Work type must belong to at least one specialization");
+            }
+            if ids.len() > 100 {
+                return Err("Work type cannot belong to more than 100 specializations");
+            }
+            let mut seen = HashSet::new();
+            Some(
+                ids.into_iter()
+                    .filter(|specialization_id| seen.insert(*specialization_id))
+                    .collect(),
+            )
+        }
+        None => None,
+    };
 
     let min_price_eur = body.min_price_eur.round_dp(2);
     let max_price_eur = body.max_price_eur.round_dp(2);
@@ -5253,6 +5393,10 @@ fn normalize_specialization_work_type_payload(
     }
     if min_price_eur > largest_supported_price || max_price_eur > largest_supported_price {
         return Err("Work type price is too large");
+    }
+    let duration_hours = body.duration_hours.unwrap_or(1);
+    if !(1..=50).contains(&duration_hours) {
+        return Err("Work type duration must be between 1 and 50 hours");
     }
 
     if body.descriptions.len() > 100 {
@@ -5288,10 +5432,14 @@ fn normalize_specialization_work_type_payload(
 
     Ok(SpecializationWorkTypePayload {
         code,
+        specialization_ids,
         name_de,
         name_ru,
+        name_en,
+        name_es,
         min_price_eur,
         max_price_eur,
+        duration_hours,
         sort_order: body.sort_order.unwrap_or(1000),
         is_active: body.is_active.unwrap_or(true),
         descriptions,
@@ -6156,7 +6304,7 @@ async fn load_specializations_json(
     include_inactive: bool,
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
     let rows = sqlx::query(
-        r#"SELECT id, code, name_en, name_de, name_ru, is_active, sort_order, created_at, updated_at
+        r#"SELECT id, code, name_en, name_de, name_ru, name_es, is_active, sort_order, created_at, updated_at
            FROM medical_specializations
            WHERE deleted_at IS NULL
              AND ($1 OR is_active = TRUE)
@@ -6182,6 +6330,7 @@ async fn load_specializations_json(
                 "name_en": row.try_get::<String, _>("name_en").unwrap_or_default(),
                 "name_de": row.try_get::<Option<String>, _>("name_de").unwrap_or_default(),
                 "name_ru": row.try_get::<Option<String>, _>("name_ru").unwrap_or_default(),
+                "name_es": row.try_get::<Option<String>, _>("name_es").unwrap_or_default(),
                 "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
                 "sort_order": row.try_get::<i32, _>("sort_order").unwrap_or_default(),
                 "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
@@ -6220,23 +6369,34 @@ async fn load_specialization_work_types_json(
 
     let rows = sqlx::query(
         r#"SELECT
-               id,
-               specialization_id,
-               code,
-               name_de,
-               name_ru,
-               min_price_eur,
-               max_price_eur,
-               sort_order,
-               is_active,
-               created_at,
-               updated_at
-           FROM medical_specialization_work_types
-           WHERE specialization_id = $1
-             AND deleted_at IS NULL
-             AND ($2 OR is_active = TRUE)
-             AND ($3::uuid IS NULL OR id = $3)
-           ORDER BY is_active DESC, sort_order, name_de, id"#,
+               wt.id,
+               wt.specialization_id,
+               wt.code,
+               wt.name_de,
+               wt.name_ru,
+               wt.name_en,
+               wt.name_es,
+               wt.min_price_eur,
+               wt.max_price_eur,
+               wt.duration_hours,
+               wt.sort_order,
+               wt.is_active,
+               wt.created_at,
+               wt.updated_at,
+               ARRAY(
+                   SELECT all_assignments.specialization_id
+                   FROM medical_specialization_work_type_assignments all_assignments
+                   WHERE all_assignments.work_type_id = wt.id
+                   ORDER BY all_assignments.specialization_id
+               ) AS specialization_ids
+           FROM medical_specialization_work_types wt
+           JOIN medical_specialization_work_type_assignments assignment
+             ON assignment.work_type_id = wt.id
+            AND assignment.specialization_id = $1
+           WHERE wt.deleted_at IS NULL
+             AND ($2 OR wt.is_active = TRUE)
+             AND ($3::uuid IS NULL OR wt.id = $3)
+           ORDER BY wt.is_active DESC, wt.sort_order, wt.name_de, wt.id"#,
     )
     .bind(specialization_id)
     .bind(include_inactive)
@@ -6325,9 +6485,14 @@ async fn load_specialization_work_types_json(
                 "specialization_id": row
                     .try_get::<Uuid, _>("specialization_id")
                     .unwrap_or(specialization_id),
+                "specialization_ids": row
+                    .try_get::<Vec<Uuid>, _>("specialization_ids")
+                    .unwrap_or_else(|_| vec![specialization_id]),
                 "code": row.try_get::<String, _>("code").unwrap_or_default(),
                 "name_de": row.try_get::<String, _>("name_de").unwrap_or_default(),
                 "name_ru": row.try_get::<String, _>("name_ru").unwrap_or_default(),
+                "name_en": row.try_get::<Option<String>, _>("name_en").unwrap_or_default(),
+                "name_es": row.try_get::<Option<String>, _>("name_es").unwrap_or_default(),
                 "min_price_eur": row
                     .try_get::<Decimal, _>("min_price_eur")
                     .map(normalized_money_string)
@@ -6336,6 +6501,7 @@ async fn load_specialization_work_types_json(
                     .try_get::<Decimal, _>("max_price_eur")
                     .map(normalized_money_string)
                     .unwrap_or_else(|_| "0.00".to_string()),
+                "duration_hours": row.try_get::<i32, _>("duration_hours").unwrap_or(1),
                 "sort_order": row.try_get::<i32, _>("sort_order").unwrap_or_default(),
                 "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
                 "created_at": row
@@ -6376,6 +6542,82 @@ async fn ensure_specialization_exists_tx(
     if !exists {
         return Err(err(StatusCode::NOT_FOUND, "Specialization not found"));
     }
+    Ok(())
+}
+
+async fn sync_specialization_work_type_assignments_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    work_type_id: Uuid,
+    specialization_ids: &[Uuid],
+) -> Result<(), axum::response::Response> {
+    if specialization_ids.is_empty() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Work type must belong to at least one specialization",
+        ));
+    }
+
+    let existing_count = sqlx::query_scalar::<_, i64>(
+        r#"SELECT COUNT(*)
+           FROM medical_specializations
+           WHERE id = ANY($1)
+             AND deleted_at IS NULL"#,
+    )
+    .bind(specialization_ids)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, work_type_id = %work_type_id, "Failed to validate specialization work type assignments");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update specialization work type assignments",
+        )
+    })?;
+    if existing_count != i64::try_from(specialization_ids.len()).unwrap_or(i64::MAX) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "One or more specializations are unavailable",
+        ));
+    }
+
+    sqlx::query(
+        r#"DELETE FROM medical_specialization_work_type_assignments
+           WHERE work_type_id = $1
+             AND NOT (specialization_id = ANY($2))"#,
+    )
+    .bind(work_type_id)
+    .bind(specialization_ids)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, work_type_id = %work_type_id, "Failed to remove specialization work type assignments");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update specialization work type assignments",
+        )
+    })?;
+
+    sqlx::query(
+        r#"INSERT INTO medical_specialization_work_type_assignments (
+                work_type_id,
+                specialization_id
+           )
+           SELECT $1, assignment.specialization_id
+           FROM UNNEST($2::uuid[]) AS assignment(specialization_id)
+           ON CONFLICT DO NOTHING"#,
+    )
+    .bind(work_type_id)
+    .bind(specialization_ids)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, work_type_id = %work_type_id, "Failed to create specialization work type assignments");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update specialization work type assignments",
+        )
+    })?;
+
     Ok(())
 }
 

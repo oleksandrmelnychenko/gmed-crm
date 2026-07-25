@@ -11,11 +11,15 @@ export type WorkTypeDescription = {
 export type SpecializationWorkType = {
   id: string;
   specialization_id: string;
+  specialization_ids: string[];
   code: string;
   name_de: string;
   name_ru: string;
+  name_en: string;
+  name_es: string;
   min_price_eur: number;
   max_price_eur: number;
+  duration_hours: number;
   sort_order: number;
   is_active: boolean;
   descriptions: WorkTypeDescription[];
@@ -23,9 +27,10 @@ export type SpecializationWorkType = {
 
 export type WorkTypeUpsertPayload = Omit<
   SpecializationWorkType,
-  "id" | "specialization_id" | "code"
+  "id" | "specialization_id" | "specialization_ids" | "code"
 > & {
   code?: string;
+  specialization_ids?: string[];
 };
 
 type CreateResponse = {
@@ -70,11 +75,21 @@ function normalizeDescription(
 function normalizeWorkType(item: SpecializationWorkType): SpecializationWorkType {
   return {
     ...item,
+    specialization_ids:
+      Array.isArray(item.specialization_ids) && item.specialization_ids.length > 0
+        ? item.specialization_ids
+        : [item.specialization_id].filter(Boolean),
     code: item.code ?? "",
     name_de: item.name_de ?? "",
     name_ru: item.name_ru ?? "",
+    name_en: item.name_en ?? "",
+    name_es: item.name_es ?? "",
     min_price_eur: numberOrZero(item.min_price_eur),
     max_price_eur: numberOrZero(item.max_price_eur),
+    duration_hours: Math.min(
+      50,
+      Math.max(1, Math.trunc(numberOrZero(item.duration_hours) || 1)),
+    ),
     sort_order: numberOrZero(item.sort_order) || 1000,
     is_active: item.is_active ?? true,
     descriptions: Array.isArray(item.descriptions)

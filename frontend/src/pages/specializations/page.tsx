@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Search,
   Trash2,
+  X,
 } from "lucide-react";
 
 import { Banner } from "@/components/record-workspace/recipes";
@@ -63,6 +64,8 @@ type WorkTypeSheetState = {
 type SpecializationDraft = {
   nameDe: string;
   nameRu: string;
+  nameEn: string;
+  nameEs: string;
   sortOrder: string;
   isActive: boolean;
 };
@@ -78,10 +81,14 @@ type DescriptionDraft = {
 
 type WorkTypeDraft = {
   code: string;
+  specializationIds: string[];
   nameDe: string;
   nameRu: string;
+  nameEn: string;
+  nameEs: string;
   minPriceEur: string;
   maxPriceEur: string;
+  durationHours: string;
   sortOrder: string;
   isActive: boolean;
   descriptions: DescriptionDraft[];
@@ -96,15 +103,49 @@ function nextDescriptionKey() {
 
 function specializationName(item: SpecializationItem, lang: Lang) {
   if (lang === "de") {
-    return item.name_de?.trim() || item.name_ru?.trim() || item.name_en || item.code;
+    return (
+      item.name_de?.trim() ||
+      item.name_en?.trim() ||
+      item.name_ru?.trim() ||
+      item.name_es?.trim() ||
+      item.code
+    );
   }
-  return item.name_ru?.trim() || item.name_de?.trim() || item.name_en || item.code;
+  return (
+    item.name_ru?.trim() ||
+    item.name_de?.trim() ||
+    item.name_en?.trim() ||
+    item.name_es?.trim() ||
+    item.code
+  );
 }
 
 function workTypeName(item: SpecializationWorkType, lang: Lang) {
   return lang === "de"
-    ? item.name_de.trim() || item.name_ru.trim() || item.code
-    : item.name_ru.trim() || item.name_de.trim() || item.code;
+    ? item.name_de.trim() ||
+        item.name_en.trim() ||
+        item.name_ru.trim() ||
+        item.name_es.trim() ||
+        item.code
+    : item.name_ru.trim() ||
+        item.name_de.trim() ||
+        item.name_en.trim() ||
+        item.name_es.trim() ||
+        item.code;
+}
+
+function workTypeDescription(item: SpecializationWorkType, lang: Lang) {
+  const exactLanguage = item.descriptions.find(
+    (description) =>
+      description.is_active &&
+      description.language_code.toLowerCase().split("-")[0] === lang,
+  );
+  return (
+    exactLanguage?.body.trim() ||
+    item.descriptions.find((description) => description.is_active)?.body.trim() ||
+    item.descriptions[0]?.body.trim() ||
+    ""
+  );
 }
 
 function compareCatalogItems<T extends { sort_order: number; code: string }>(
@@ -232,6 +273,7 @@ export function SpecializationsPage() {
         item.name_en,
         item.name_de ?? "",
         item.name_ru ?? "",
+        item.name_es ?? "",
       ].some((value) => value.toLocaleLowerCase().includes(normalizedSearch)),
     );
   }, [search, specializations]);
@@ -308,7 +350,15 @@ export function SpecializationsPage() {
         await createSpecializationWorkType(selectedSpecializationId, payload);
       }
       setWorkTypeSheet(null);
-      setReloadWorkTypesToken((current) => current + 1);
+      const nextSpecializationIds =
+        payload.specialization_ids ?? [selectedSpecializationId];
+      if (!nextSpecializationIds.includes(selectedSpecializationId)) {
+        setSelectedSpecializationId(
+          nextSpecializationIds[0] ?? selectedSpecializationId,
+        );
+      } else {
+        setReloadWorkTypesToken((current) => current + 1);
+      }
       toast.success(
         item
           ? tx("Вид работы обновлён.", "Leistungsart aktualisiert.")
@@ -465,7 +515,9 @@ export function SpecializationsPage() {
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
                     DE: {selectedSpecialization.name_de || "-"} · RU:{" "}
-                    {selectedSpecialization.name_ru || "-"} ·{" "}
+                    {selectedSpecialization.name_ru || "-"} · EN:{" "}
+                    {selectedSpecialization.name_en || "-"} · ES:{" "}
+                    {selectedSpecialization.name_es || "-"} ·{" "}
                     {tx("Порядок отображения", "Anzeigereihenfolge")}:{" "}
                     {selectedSpecialization.sort_order}
                   </p>
@@ -557,10 +609,19 @@ export function SpecializationsPage() {
                           <p className="mt-0.5 truncate text-xs text-muted-foreground">
                             {lang === "ru" ? item.name_de : item.name_ru}
                           </p>
+                          {workTypeDescription(item, lang) ? (
+                            <p
+                              className="mt-1 line-clamp-2 text-xs leading-4 text-muted-foreground"
+                              title={workTypeDescription(item, lang)}
+                            >
+                              {workTypeDescription(item, lang)}
+                            </p>
+                          ) : null}
                           <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
                             {item.code} ·{" "}
                             {tx("порядок отображения", "Anzeigereihenfolge")}{" "}
-                            {item.sort_order}
+                            {item.sort_order} · {item.duration_hours}{" "}
+                            {tx("ч.", "Std.")}
                           </p>
                         </div>
                         <span className="font-mono text-sm tabular-nums text-foreground">
@@ -629,6 +690,8 @@ export function SpecializationsPage() {
         <WorkTypeSheet
           key={workTypeSheet.item?.id ?? "new-work-type"}
           item={workTypeSheet.item}
+          specializations={specializations}
+          lang={lang}
           busy={busyAction.startsWith("work-type-")}
           tx={tx}
           onClose={() => setWorkTypeSheet(null)}
@@ -643,6 +706,8 @@ function specializationDraft(item?: SpecializationItem): SpecializationDraft {
   return {
     nameDe: item?.name_de ?? "",
     nameRu: item?.name_ru ?? "",
+    nameEn: item?.name_en ?? "",
+    nameEs: item?.name_es ?? "",
     sortOrder: String(item?.sort_order ?? 1000),
     isActive: item?.is_active ?? true,
   };
@@ -674,11 +739,13 @@ function SpecializationSheet({
     setError("");
     const nameDe = draft.nameDe.trim();
     const nameRu = draft.nameRu.trim();
-    if (!nameDe || !nameRu) {
+    const nameEn = draft.nameEn.trim();
+    const nameEs = draft.nameEs.trim();
+    if (!nameDe || !nameRu || !nameEn || !nameEs) {
       setError(
         tx(
-          "Заполните названия на немецком и русском.",
-          "Füllen Sie die deutschen und russischen Bezeichnungen aus.",
+          "Заполните названия DE, RU, EN и ES.",
+          "Füllen Sie die Bezeichnungen DE, RU, EN und ES aus.",
         ),
       );
       return;
@@ -686,9 +753,10 @@ function SpecializationSheet({
 
     try {
       await onSave(item, {
-        name_en: nameDe || nameRu,
+        name_en: nameEn,
         name_de: nameDe,
         name_ru: nameRu,
+        name_es: nameEs,
         sort_order: Number.parseInt(draft.sortOrder, 10) || 1000,
         is_active: draft.isActive,
       });
@@ -742,6 +810,26 @@ function SpecializationSheet({
                   value={draft.nameRu}
                   onChange={(event) =>
                     setDraft((current) => ({ ...current, nameRu: event.target.value }))
+                  }
+                  className={inputClass}
+                  required
+                />
+              </FormField>
+              <FormField label={tx("Название EN", "Bezeichnung EN")} required>
+                <Input
+                  value={draft.nameEn}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, nameEn: event.target.value }))
+                  }
+                  className={inputClass}
+                  required
+                />
+              </FormField>
+              <FormField label={tx("Название ES", "Bezeichnung ES")} required>
+                <Input
+                  value={draft.nameEs}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, nameEs: event.target.value }))
                   }
                   className={inputClass}
                   required
@@ -803,10 +891,19 @@ function descriptionDraft(
 function workTypeDraft(item?: SpecializationWorkType): WorkTypeDraft {
   return {
     code: item?.code ?? "",
+    specializationIds:
+      item?.specialization_ids?.length
+        ? item.specialization_ids
+        : item?.specialization_id
+          ? [item.specialization_id]
+          : [],
     nameDe: item?.name_de ?? "",
     nameRu: item?.name_ru ?? "",
+    nameEn: item?.name_en ?? "",
+    nameEs: item?.name_es ?? "",
     minPriceEur: item ? String(item.min_price_eur) : "",
     maxPriceEur: item ? String(item.max_price_eur) : "",
+    durationHours: String(item?.duration_hours ?? 1),
     sortOrder: String(item?.sort_order ?? 1000),
     isActive: item?.is_active ?? true,
     descriptions:
@@ -818,12 +915,16 @@ function workTypeDraft(item?: SpecializationWorkType): WorkTypeDraft {
 
 function WorkTypeSheet({
   item,
+  specializations,
+  lang,
   busy,
   tx,
   onClose,
   onSave,
 }: {
   item?: SpecializationWorkType;
+  specializations: SpecializationItem[];
+  lang: Lang;
   busy: boolean;
   tx: Translate;
   onClose: () => void;
@@ -895,11 +996,34 @@ function WorkTypeSheet({
     const minPrice = Number(draft.minPriceEur);
     const maxPrice = Number(draft.maxPriceEur);
 
-    if (!draft.nameDe.trim() || !draft.nameRu.trim()) {
+    if (
+      !draft.nameDe.trim() ||
+      !draft.nameRu.trim() ||
+      !draft.nameEn.trim() ||
+      !draft.nameEs.trim()
+    ) {
       setError(
         tx(
-          "Заполните названия DE/RU.",
-          "Füllen Sie die DE/RU-Bezeichnungen aus.",
+          "Заполните названия DE, RU, EN и ES.",
+          "Füllen Sie die Bezeichnungen DE, RU, EN und ES aus.",
+        ),
+      );
+      return;
+    }
+    if (
+      item &&
+      (draft.specializationIds.length === 0 ||
+        draft.specializationIds.some(
+          (specializationId) =>
+            !specializations.some(
+              (specialization) => specialization.id === specializationId,
+            ),
+        ))
+    ) {
+      setError(
+        tx(
+          "Выберите специализацию.",
+          "Wählen Sie eine Spezialisierung aus.",
         ),
       );
       return;
@@ -938,10 +1062,16 @@ function WorkTypeSheet({
 
     try {
       await onSave(item, {
+        ...(item
+          ? { specialization_ids: draft.specializationIds }
+          : {}),
         name_de: draft.nameDe.trim(),
         name_ru: draft.nameRu.trim(),
+        name_en: draft.nameEn.trim(),
+        name_es: draft.nameEs.trim(),
         min_price_eur: minPrice,
         max_price_eur: maxPrice,
+        duration_hours: Number.parseInt(draft.durationHours, 10),
         sort_order: Number.parseInt(draft.sortOrder, 10) || 1000,
         is_active: draft.isActive,
         descriptions,
@@ -975,22 +1105,109 @@ function WorkTypeSheet({
             }
           >
             <div className="space-y-5">
-            {error ? (
-              <Banner tone="error" withIcon>
-                {error}
-              </Banner>
-            ) : null}
+              {error ? (
+                <Banner tone="error" withIcon>
+                  {error}
+                </Banner>
+              ) : null}
 
-            {item ? (
-              <FormField label={tx("Технический код", "Technischer Code")}>
-                <Input
-                  value={draft.code}
-                  className={cn(inputClass, "font-mono")}
-                  readOnly
-                  disabled
-                />
-              </FormField>
-            ) : null}
+              {item ? (
+                <div className="space-y-4">
+                  <FormField
+                    label={tx("Специализации", "Spezialisierungen")}
+                    required
+                  >
+                  <NativeComboboxSelect
+                    value=""
+                    onChange={(event) => {
+                      const specializationId = event.target.value;
+                      if (!specializationId) return;
+                      setDraft((current) =>
+                        current.specializationIds.includes(specializationId)
+                          ? current
+                          : {
+                              ...current,
+                              specializationIds: [
+                                ...current.specializationIds,
+                                specializationId,
+                              ],
+                            },
+                      );
+                    }}
+                    className="h-9 w-full rounded-lg bg-card"
+                  >
+                    <option value="">
+                      {tx("Добавить специализацию", "Spezialisierung hinzufügen")}
+                    </option>
+                    {specializations
+                      .filter(
+                        (specialization) =>
+                          !draft.specializationIds.includes(specialization.id),
+                      )
+                      .map((specialization) => (
+                        <option key={specialization.id} value={specialization.id}>
+                          {specializationName(specialization, lang)}
+                          {!specialization.is_active
+                            ? ` (${tx("неактивна", "inaktiv")})`
+                            : ""}
+                        </option>
+                      ))}
+                  </NativeComboboxSelect>
+                  <div className="flex min-h-9 flex-wrap gap-1.5 pt-2">
+                    {draft.specializationIds.map((specializationId) => {
+                      const specialization = specializations.find(
+                        (candidate) => candidate.id === specializationId,
+                      );
+                      return (
+                        <Badge
+                          key={specializationId}
+                          variant="secondary"
+                          className="h-8 max-w-full gap-1.5 rounded-full px-2.5 text-xs"
+                        >
+                          <span className="truncate">
+                            {specialization
+                              ? specializationName(specialization, lang)
+                              : specializationId}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={draft.specializationIds.length === 1}
+                            onClick={() =>
+                              setDraft((current) => ({
+                                ...current,
+                                specializationIds:
+                                  current.specializationIds.filter(
+                                    (id) => id !== specializationId,
+                                  ),
+                              }))
+                            }
+                            className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                            title={tx(
+                              "Убрать привязку",
+                              "Zuordnung entfernen",
+                            )}
+                            aria-label={tx(
+                              "Убрать специализацию",
+                              "Spezialisierung entfernen",
+                            )}
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </Badge>
+                      );
+                    })}
+                  </div>
+                  </FormField>
+                  <FormField label={tx("Технический код", "Technischer Code")}>
+                    <Input
+                      value={draft.code}
+                      className={cn(inputClass, "font-mono")}
+                      readOnly
+                      disabled
+                    />
+                  </FormField>
+                </div>
+              ) : null}
 
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <FormField label={tx("Название DE", "Bezeichnung DE")} required>
@@ -1014,6 +1231,32 @@ function WorkTypeSheet({
                     setDraft((current) => ({
                       ...current,
                       nameRu: event.target.value,
+                    }))
+                  }
+                  className={inputClass}
+                  required
+                />
+              </FormField>
+              <FormField label={tx("Название EN", "Bezeichnung EN")} required>
+                <Input
+                  value={draft.nameEn}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      nameEn: event.target.value,
+                    }))
+                  }
+                  className={inputClass}
+                  required
+                />
+              </FormField>
+              <FormField label={tx("Название ES", "Bezeichnung ES")} required>
+                <Input
+                  value={draft.nameEs}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      nameEs: event.target.value,
                     }))
                   }
                   className={inputClass}
@@ -1051,6 +1294,30 @@ function WorkTypeSheet({
                   className={cn(inputClass, "font-mono tabular-nums")}
                   required
                 />
+              </FormField>
+              <FormField
+                label={tx("Длительность, часов", "Dauer, Stunden")}
+                required
+              >
+                <NativeComboboxSelect
+                  value={draft.durationHours}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      durationHours: event.target.value,
+                    }))
+                  }
+                  className="h-9 w-full rounded-lg bg-card"
+                  required
+                >
+                  {Array.from({ length: 50 }, (_, index) => index + 1).map(
+                    (hours) => (
+                      <option key={hours} value={hours}>
+                        {hours}
+                      </option>
+                    ),
+                  )}
+                </NativeComboboxSelect>
               </FormField>
               <FormField
                 label={tx("Порядок отображения", "Anzeigereihenfolge")}
@@ -1127,6 +1394,8 @@ function WorkTypeSheet({
                           >
                             <option value="de">Deutsch</option>
                             <option value="ru">Русский</option>
+                            <option value="en">English</option>
+                            <option value="es">Español</option>
                           </NativeComboboxSelect>
                         </FormField>
                         <label className="flex items-center gap-2 text-xs text-muted-foreground">

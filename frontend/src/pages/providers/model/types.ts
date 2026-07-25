@@ -16,6 +16,7 @@ export type SpecializationItem = {
   name_en: string;
   name_de: string | null;
   name_ru: string | null;
+  name_es?: string | null;
   is_active: boolean;
   sort_order: number;
   created_at?: string;

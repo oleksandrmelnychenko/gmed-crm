@@ -16268,14 +16268,19 @@ async fn load_lead_cost_estimate_catalog_selection(
                   wt.min_price_eur::text AS min_price_eur,
                   wt.max_price_eur::text AS max_price_eur
            FROM medical_specialization_work_types wt
-           JOIN medical_specializations specialization
-             ON specialization.id = wt.specialization_id
-            AND specialization.deleted_at IS NULL
-            AND specialization.is_active = TRUE
            WHERE wt.id = ANY($1::uuid[])
              AND wt.deleted_at IS NULL
              AND wt.is_active = TRUE
-           ORDER BY specialization.sort_order, specialization.name_de, wt.sort_order, wt.name_de, wt.id"#,
+             AND EXISTS (
+                 SELECT 1
+                 FROM medical_specialization_work_type_assignments assignment
+                 JOIN medical_specializations specialization
+                   ON specialization.id = assignment.specialization_id
+                  AND specialization.deleted_at IS NULL
+                  AND specialization.is_active = TRUE
+                 WHERE assignment.work_type_id = wt.id
+             )
+           ORDER BY wt.sort_order, wt.name_de, wt.id"#,
     )
     .bind(&selected_ids)
     .fetch_all(&state.db)

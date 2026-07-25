@@ -1796,13 +1796,21 @@ export function LeadWizard({
     [draft?.selectedSpecializationWorkTypeIds],
   );
   const selectedCostEstimateWorkTypes = useMemo(
-    () => selectedSpecializationItems.flatMap((specialization) =>
-      (workTypesBySpecialization[specialization.id] ?? [])
-        .filter((item) => item.is_active && selectedWorkTypeIdSet.has(item.id))
-        .toSorted((left, right) =>
-          left.sort_order - right.sort_order || left.code.localeCompare(right.code),
-        ),
-    ),
+    () => {
+      const uniqueWorkTypes = new Map<string, SpecializationWorkType>();
+      for (const specialization of selectedSpecializationItems) {
+        for (const item of workTypesBySpecialization[specialization.id] ?? []) {
+          if (item.is_active && selectedWorkTypeIdSet.has(item.id)) {
+            uniqueWorkTypes.set(item.id, item);
+          }
+        }
+      }
+      return [...uniqueWorkTypes.values()].toSorted(
+        (left, right) =>
+          left.sort_order - right.sort_order ||
+          left.code.localeCompare(right.code),
+      );
+    },
     [
       selectedSpecializationItems,
       selectedWorkTypeIdSet,
@@ -2598,14 +2606,34 @@ export function LeadWizard({
     );
     setError("");
     clearServerValidation();
-    setDraft((current) => current ? {
-      ...current,
-      specialties: current.specialties.filter((item) => item !== value),
-      selectedSpecializationWorkTypeIds:
-        current.selectedSpecializationWorkTypeIds.filter(
-          (id) => !removedWorkTypeIds.has(id),
-        ),
-    } : current);
+    setDraft((current) => {
+      if (!current) return current;
+      const remainingSpecialties = current.specialties.filter(
+        (item) => item !== value,
+      );
+      const stillAvailableWorkTypeIds = new Set(
+        remainingSpecialties.flatMap((specialtyValue) => {
+          const remainingSpecialization = specialties.find(
+            (item) => specializationValue(item) === specialtyValue,
+          );
+          return remainingSpecialization
+            ? (workTypesBySpecialization[remainingSpecialization.id] ?? []).map(
+                (item) => item.id,
+              )
+            : [];
+        }),
+      );
+      return {
+        ...current,
+        specialties: remainingSpecialties,
+        selectedSpecializationWorkTypeIds:
+          current.selectedSpecializationWorkTypeIds.filter(
+            (id) =>
+              !removedWorkTypeIds.has(id) ||
+              stillAvailableWorkTypeIds.has(id),
+          ),
+      };
+    });
   };
 
   const openNewTrustedContact = () => {
@@ -4541,24 +4569,29 @@ ${serviceCommentLines.join("\n")}`
                       <p className="mb-2 text-xs text-destructive">{workTypesError}</p>
                     ) : null}
                     {!workTypesLoading && !workTypesError ? (
-                      <div className="divide-y divide-border/60 border-y border-border/60">
+                      <div className="max-h-[380px] divide-y divide-border/70 overflow-y-auto overscroll-contain border-y border-border/60">
                         {selectedSpecializationItems.map((specialization) => {
                           const specializationWorkTypes =
                             workTypesBySpecialization[specialization.id] ?? [];
                           return (
                             <div
                               key={specialization.id}
-                              className="grid gap-1.5 py-2.5 sm:grid-cols-[150px_minmax(0,1fr)]"
+                              className="min-w-0"
                             >
-                              <p className="truncate pt-1 text-xs font-medium text-muted-foreground">
-                                {specialtyLabel(specializationValue(specialization))}
-                              </p>
+                              <div className="sticky top-0 z-[1] flex items-center justify-between gap-3 border-b border-border/60 bg-muted/95 px-3 py-2 backdrop-blur-sm">
+                                <p className="min-w-0 break-words text-xs font-semibold text-foreground">
+                                  {specialtyLabel(specializationValue(specialization))}
+                                </p>
+                                <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+                                  {specializationWorkTypes.length}
+                                </span>
+                              </div>
                               {specializationWorkTypes.length > 0 ? (
-                                <div className="divide-y divide-border/50">
+                                <div className="divide-y divide-border/50 px-3">
                                   {specializationWorkTypes.map((workType) => (
                                     <label
                                       key={workType.id}
-                                      className="flex cursor-pointer items-start gap-2.5 py-1.5 text-sm text-foreground"
+                                      className="flex cursor-pointer items-start gap-2.5 py-2 text-sm text-foreground"
                                     >
                                       <input
                                         type="checkbox"
@@ -4575,20 +4608,31 @@ ${serviceCommentLines.join("\n")}`
                                       <span className="min-w-0 flex-1">
                                         <span className="block break-words leading-5">
                                           {lang === "de"
-                                            ? workType.name_de || workType.name_ru || workType.code
-                                            : workType.name_ru || workType.name_de || workType.code}
+                                            ? workType.name_de ||
+                                              workType.name_en ||
+                                              workType.name_ru ||
+                                              workType.name_es ||
+                                              workType.code
+                                            : workType.name_ru ||
+                                              workType.name_de ||
+                                              workType.name_en ||
+                                              workType.name_es ||
+                                              workType.code}
                                         </span>
                                         <span className="block font-mono text-[11px] tabular-nums text-muted-foreground">
                                           {formatMoneyValue(workType.min_price_eur, lang)}
                                           {" - "}
                                           {formatMoneyValue(workType.max_price_eur, lang)} EUR
+                                          {" · "}
+                                          {workType.duration_hours}{" "}
+                                          {tx("ч.", "Std.")}
                                         </span>
                                       </span>
                                     </label>
                                   ))}
                                 </div>
                               ) : (
-                                <p className="py-1 text-xs text-muted-foreground">
+                                <p className="px-3 py-2.5 text-xs text-muted-foreground">
                                   {tx("Нет активных видов работ", "Keine aktiven Leistungsarten")}
                                 </p>
                               )}
