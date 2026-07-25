@@ -4494,13 +4494,13 @@ impl TreatmentPlanPdfLayout {
         self.table_row_styled(cells, bold, emphasized, false, true, true);
     }
 
-    fn table_row_aligned_without_rule(
+    fn table_row_aligned_middle_without_rule(
         &mut self,
         cells: &[(&str, f32, PdfCellAlign)],
         bold: bool,
         emphasized: bool,
     ) {
-        self.table_row_styled(cells, bold, emphasized, false, false, false);
+        self.table_row_styled(cells, bold, emphasized, false, false, true);
     }
 
     fn table_row_styled(
@@ -4602,10 +4602,16 @@ impl TreatmentPlanPdfLayout {
         };
         let mut x_mm = PDF_LEFT_MARGIN_MM;
         for ((_, width_mm, align), lines) in cells.iter().zip(wrapped_cells.iter()) {
-            let vertical_offset_mm = if vertically_centered {
-                line_count.saturating_sub(lines.len()) as f32 * line_height_mm / 2.0
+            let first_line_offset_mm = if vertically_centered {
+                let glyph_height_mm = font_size_pt * 0.352_778;
+                let text_height_mm = if lines.is_empty() {
+                    0.0
+                } else {
+                    glyph_height_mm + lines.len().saturating_sub(1) as f32 * line_height_mm
+                };
+                ((row_height_mm - text_height_mm) / 2.0).max(0.0) + glyph_height_mm
             } else {
-                0.0
+                3.6
             };
             for (line_index, line) in lines.iter().enumerate() {
                 let text_x_mm = match align {
@@ -4619,7 +4625,7 @@ impl TreatmentPlanPdfLayout {
                     &mut self.page_ops,
                     line,
                     text_x_mm,
-                    row_top_mm - 3.6 - vertical_offset_mm - line_index as f32 * line_height_mm,
+                    row_top_mm - first_line_offset_mm - line_index as f32 * line_height_mm,
                     font_size_pt,
                     &font,
                     text_color,
@@ -13274,7 +13280,7 @@ fn legal_meta_grid(layout: &mut TreatmentPlanPdfLayout, cells: &[(&str, String)]
     const COLUMN_GAP_MM: f32 = 10.0;
     const CARD_PADDING_X_MM: f32 = 5.0;
     const CARD_PADDING_Y_MM: f32 = 4.0;
-    const ROW_HEIGHT_MM: f32 = 8.5;
+    const ROW_HEIGHT_MM: f32 = 12.0;
 
     // The title helper already leaves 3 mm below the subtitle. Together these
     // 4 mm reproduce the 7 mm title-to-metadata gap from the approved mockup.
@@ -13328,17 +13334,19 @@ fn legal_meta_grid(layout: &mut TreatmentPlanPdfLayout, cells: &[(&str, String)]
         let column_left_mm = PDF_LEFT_MARGIN_MM + column as f32 * (column_width_mm + COLUMN_GAP_MM);
         let text_x_mm = column_left_mm + CARD_PADDING_X_MM;
         let column_right_mm = column_left_mm + column_width_mm - CARD_PADDING_X_MM;
-        let baseline_y_mm = card_top_mm - CARD_PADDING_Y_MM - 3.2 - row as f32 * ROW_HEIGHT_MM;
-        let value = truncate_text_to_width(value, 9.5, column_width_mm * 0.58);
+        let label_y_mm = card_top_mm - CARD_PADDING_Y_MM - 2.8 - row as f32 * ROW_HEIGHT_MM;
+        let value_y_mm = label_y_mm - 4.5;
+        let available_text_width_mm = column_width_mm - CARD_PADDING_X_MM * 2.0;
+        let label = truncate_text_to_width(label, 7.0, available_text_width_mm);
+        let value = truncate_text_to_width(value, 9.5, available_text_width_mm);
         let value_width_mm = approx_text_width_mm(&value, 9.5);
-        let value_x_mm = (column_right_mm - value_width_mm).max(text_x_mm + 24.0);
-        let label = truncate_text_to_width(label, 7.0, (value_x_mm - text_x_mm - 3.0).max(15.0));
+        let value_x_mm = (column_right_mm - value_width_mm).max(text_x_mm);
 
         append_pdf_text_line(
             &mut layout.page_ops,
             &label,
             text_x_mm,
-            baseline_y_mm,
+            label_y_mm,
             7.0,
             &regular_font,
             TreatmentPlanPdfColor::Muted,
@@ -13347,7 +13355,7 @@ fn legal_meta_grid(layout: &mut TreatmentPlanPdfLayout, cells: &[(&str, String)]
             &mut layout.page_ops,
             &value,
             value_x_mm,
-            baseline_y_mm,
+            value_y_mm,
             9.5,
             &bold_font,
             TreatmentPlanPdfColor::Body,
@@ -13891,12 +13899,12 @@ fn build_order_cost_estimate_pdf(
             ("Datum:", fmt_de_date(context.order_date)),
             ("Auftraggeber:", context.party.name_with_salutation()),
             (
-                "Rahmendienstleistungsvertrag Nr.:",
-                contract_number.to_string(),
-            ),
-            (
                 "Geburtsdatum des Auftraggebers:",
                 fmt_de_date(context.party.birth_date),
+            ),
+            (
+                "Rahmendienstleistungsvertrag Nr.:",
+                contract_number.to_string(),
             ),
             ("Einzelauftrag Nr.:", order_number.to_string()),
         ],
@@ -13993,9 +14001,9 @@ fn build_order_cost_estimate_pdf(
             .get(index + 1)
             .is_some_and(|(_, _, _, next_shaded)| *next_shaded)
         {
-            layout.table_row_aligned_without_rule(&cells, bold, shaded);
+            layout.table_row_aligned_middle_without_rule(&cells, bold, shaded);
         } else {
-            layout.table_row_aligned(&cells, bold, shaded);
+            layout.table_row_aligned_middle(&cells, bold, shaded);
         }
     }
     let bank_lines = [
