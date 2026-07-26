@@ -15,8 +15,8 @@ use axum::{
 };
 use chrono::{Datelike, NaiveDate, NaiveTime, Weekday};
 use printpdf::{
-    BuiltinFont, Color, Mm, Op, PaintMode, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point,
-    Pt, Rect, Rgb, WindingOrder,
+    Color, FontMetrics, Mm, Op, PaintMode, ParsedFont, PdfDocument, PdfFontHandle, PdfPage,
+    PdfWarnMsg, Point, Pt, Rect, Rgb, TextItem, WindingOrder,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -4130,7 +4130,7 @@ fn append_pdf_text_line(
     ops.push(Op::SetFillColor {
         col: treatment_plan_pdf_color(color),
     });
-    ops.push(win_ansi_show_text_op(text));
+    ops.push(pdf_show_text_op(text, font));
     ops.push(Op::EndTextSection);
 }
 
@@ -4171,16 +4171,18 @@ fn append_pdf_justified_text_line(
     ops.push(Op::SetWordSpacing {
         pt: pdf_mm_to_pt(spacing_mm),
     });
-    ops.push(win_ansi_show_text_op(text));
+    ops.push(pdf_show_text_op(text, font));
     ops.push(Op::SetWordSpacing { pt: Pt(0.0) });
     ops.push(Op::EndTextSection);
 }
 
-fn pdf_text_font_handles() -> (PdfFontHandle, PdfFontHandle) {
-    (
-        PdfFontHandle::Builtin(BuiltinFont::Helvetica),
-        PdfFontHandle::Builtin(BuiltinFont::HelveticaBold),
-    )
+fn pdf_show_text_op(text: &str, font: &PdfFontHandle) -> Op {
+    match font {
+        PdfFontHandle::External(_) => Op::ShowText {
+            items: vec![TextItem::Text(text.to_string())],
+        },
+        PdfFontHandle::Builtin(_) => win_ansi_show_text_op(text),
+    }
 }
 
 fn pdf_mm_to_pt(value: f32) -> Pt {
@@ -5160,7 +5162,7 @@ fn build_treatment_plan_pdf(
     document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let mut document = PdfDocument::new(&context.auto_name);
-    let (regular_handle, bold_handle) = pdf_text_font_handles();
+    let (regular_handle, bold_handle) = add_unicode_pdf_fonts(&mut document)?;
 
     let title = context.title_override.clone().unwrap_or_else(|| {
         format!(
@@ -5797,7 +5799,7 @@ fn build_medication_summary_pdf(
     document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let mut document = PdfDocument::new(&context.auto_name);
-    let (regular_handle, bold_handle) = pdf_text_font_handles();
+    let (regular_handle, bold_handle) = add_unicode_pdf_fonts(&mut document)?;
 
     let title = context.title_override.clone().unwrap_or_else(|| {
         format!(
@@ -7489,7 +7491,7 @@ fn build_visa_invitation_pdf(
     document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let mut document = PdfDocument::new(&context.auto_name);
-    let (regular_handle, bold_handle) = pdf_text_font_handles();
+    let (regular_handle, bold_handle) = add_unicode_pdf_fonts(&mut document)?;
 
     let title = context.title_override.clone().unwrap_or_else(|| {
         format!(
@@ -7865,7 +7867,7 @@ fn build_patient_sticker_pdf(
     context: &GeneratedPatientStickerContext,
 ) -> Result<Vec<u8>, &'static str> {
     let mut document = PdfDocument::new(&context.auto_name);
-    let (regular_handle, bold_handle) = pdf_text_font_handles();
+    let (regular_handle, bold_handle) = add_unicode_pdf_fonts(&mut document)?;
 
     let width_mm = context.format.width_mm as f32;
     let height_mm = context.format.height_mm as f32;
@@ -8172,7 +8174,7 @@ fn build_provider_template_pdf(
     document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let mut document = PdfDocument::new(&context.auto_name);
-    let (regular_handle, bold_handle) = pdf_text_font_handles();
+    let (regular_handle, bold_handle) = add_unicode_pdf_fonts(&mut document)?;
 
     let footer_text = format!(
         "{} · {}",
@@ -13307,9 +13309,64 @@ fn manual_generated_text_preview_html(title: &str, text: &str) -> String {
     )
 }
 
+const PDF_ARIAL_REGULAR_BYTES: &[u8] =
+    include_bytes!("../../../../docs/comparison/fonts/arial.ttf");
+const PDF_ARIAL_BOLD_BYTES: &[u8] = include_bytes!("../../../../docs/comparison/fonts/arialbd.ttf");
+
+fn parsed_unicode_pdf_font(bytes: &[u8], font_name: &str) -> Option<ParsedFont> {
+    let face = ttf_parser::Face::parse(bytes, 0).ok()?;
+    let cmap = face.tables().cmap?;
+    let mut codepoint_to_glyph = BTreeMap::new();
+    let mut glyph_widths = BTreeMap::new();
+
+    for subtable in cmap.subtables {
+        if !subtable.is_unicode() {
+            continue;
+        }
+        subtable.codepoints(|codepoint| {
+            let Some(character) = char::from_u32(codepoint) else {
+                return;
+            };
+            let Some(glyph) = face.glyph_index(character) else {
+                return;
+            };
+            codepoint_to_glyph.entry(codepoint).or_insert(glyph.0);
+            glyph_widths.entry(glyph.0).or_insert_with(|| {
+                face.glyph_hor_advance(glyph)
+                    .unwrap_or(face.units_per_em() / 2)
+            });
+        });
+    }
+
+    Some(ParsedFont::with_glyph_data(
+        bytes.to_vec(),
+        0,
+        Some(font_name.to_string()),
+        codepoint_to_glyph,
+        glyph_widths,
+        face.units_per_em(),
+        FontMetrics {
+            ascent: face.ascender(),
+            descent: face.descender(),
+        },
+    ))
+}
+
+fn add_unicode_pdf_fonts(
+    document: &mut PdfDocument,
+) -> Result<(PdfFontHandle, PdfFontHandle), &'static str> {
+    let regular_font = parsed_unicode_pdf_font(PDF_ARIAL_REGULAR_BYTES, "Arial")
+        .ok_or("Failed to load PDF regular font")?;
+    let bold_font = parsed_unicode_pdf_font(PDF_ARIAL_BOLD_BYTES, "Arial Bold")
+        .ok_or("Failed to load PDF bold font")?;
+    let regular = PdfFontHandle::External(document.add_font(&regular_font));
+    let bold = PdfFontHandle::External(document.add_font(&bold_font));
+    Ok((regular, bold))
+}
+
 fn new_admin_pdf() -> Result<(PdfDocument, PdfFontHandle, PdfFontHandle), &'static str> {
-    let document = PdfDocument::new("Generated document");
-    let (regular, bold) = pdf_text_font_handles();
+    let mut document = PdfDocument::new("Generated document");
+    let (regular, bold) = add_unicode_pdf_fonts(&mut document)?;
     Ok((document, regular, bold))
 }
 
@@ -21095,11 +21152,11 @@ mod tests {
         is_fixed_legal_document_template, is_lead_allowed_document_template,
         legal_agency_block_lines, legal_document_reference,
         localized_estimate_work_type_description, new_admin_pdf, patient_sticker_agency_line,
-        pdf_mm_to_pt, pdf_text_font_handles, trusted_contact_recipients_binding,
+        pdf_mm_to_pt, trusted_contact_recipients_binding,
     };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
     use chrono::{NaiveDate, TimeZone, Utc};
-    use printpdf::{BuiltinFont, Op, PdfFontHandle};
+    use printpdf::{Op, PdfFontHandle};
     use serde_json::json;
     use uuid::Uuid;
 
@@ -21446,7 +21503,7 @@ mod tests {
     }
 
     #[test]
-    fn patient_sticker_pdf_uses_renderable_builtin_font_text() {
+    fn patient_sticker_pdf_uses_renderable_unicode_font_text() {
         let mut context = GeneratedPatientStickerContext {
             patient_pid: "PT-UNIT-1".to_string(),
             patient_title: Some("Dr.".to_string()),
@@ -21477,9 +21534,6 @@ mod tests {
 
         assert!(raw_pdf.contains("/F5"));
         assert!(raw_pdf.contains("/F6"));
-        assert!(raw_pdf.contains("ID: PT-UNIT-1"));
-        assert!(raw_pdf.contains("4DFC6C6C65722"));
-        assert!(!raw_pdf.contains("4DC3BC6C6C65722"));
         assert!(!raw_pdf.contains("[] TJ"));
 
         let extracted_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
@@ -21494,11 +21548,11 @@ mod tests {
     }
 
     #[test]
-    fn document_pdf_font_handles_are_builtin_helvetica() {
-        let (regular, bold) = pdf_text_font_handles();
+    fn document_pdf_font_handles_embed_unicode_fonts() {
+        let (_, regular, bold) = new_admin_pdf().unwrap();
 
-        assert_eq!(regular, PdfFontHandle::Builtin(BuiltinFont::Helvetica));
-        assert_eq!(bold, PdfFontHandle::Builtin(BuiltinFont::HelveticaBold));
+        assert!(matches!(regular, PdfFontHandle::External(_)));
+        assert!(matches!(bold, PdfFontHandle::External(_)));
     }
 
     #[test]
@@ -21992,6 +22046,37 @@ mod tests {
         assert!(text.contains("Patient: Frau Anna Beispiel"));
         assert!(text.contains("Kardiologische Untersuchung"));
         assert!(text.contains("100,00 - 1000,00 EUR"));
+    }
+
+    #[test]
+    fn cost_estimate_pdf_preserves_cyrillic_text() {
+        let context = GeneratedCostEstimateContext {
+            language: "de-ru".to_string(),
+            auto_name: "Kostenschätzung".to_string(),
+            title_override: None,
+            patient: legal_test_party("Germany"),
+            patient_pid: "PT-LEGAL-CYRILLIC".to_string(),
+            order_number: Some("A-2026-0100".to_string()),
+            estimate_date: NaiveDate::from_ymd_opt(2026, 7, 16),
+            line_items: vec![GeneratedContractLineItem {
+                description: "Kardiologische Untersuchung / Кардиологическое обследование"
+                    .to_string(),
+                quantity: "1".to_string(),
+                unit_price: "100,00 - 1000,00 EUR".to_string(),
+                line_gross: "100,00 - 1000,00 EUR".to_string(),
+                vat_rate: None,
+                notes: None,
+            }],
+            total_range: Some("100,00 - 1000,00 EUR".to_string()),
+            agency: legal_test_agency(),
+            generated_at: Utc.with_ymd_and_hms(2026, 7, 16, 10, 30, 0).unwrap(),
+        };
+
+        let bytes = build_cost_estimate_pdf(&context, "DOC-COST-CYRILLIC").unwrap();
+        let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+
+        assert!(text.contains("Кардиологическое обследование"));
+        assert!(!text.contains("????????"));
     }
 
     #[test]

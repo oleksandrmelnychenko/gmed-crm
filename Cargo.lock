@@ -1306,6 +1306,7 @@ dependencies = [
  "tower_governor",
  "tracing",
  "tracing-subscriber",
+ "ttf-parser",
  "uuid",
  "windows",
  "zip",
