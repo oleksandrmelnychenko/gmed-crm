@@ -14725,7 +14725,7 @@ fn build_cost_estimate_pdf(
          Behandlung auf Grundlage der derzeit vorliegenden Daten zusammen. Es handelt sich \
          um eine unverbindliche Schätzung; die tatsächliche Abrechnung erfolgt direkt zwischen dem \
          Patienten und der jeweiligen Einrichtung nach GOÄ/DRG.",
-        4.0,
+        8.0,
         4.0,
     );
     let (services_heading, estimate_heading) = match context.language.as_str() {
