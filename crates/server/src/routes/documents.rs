@@ -4560,6 +4560,125 @@ impl TreatmentPlanPdfLayout {
         self.table_row_styled(cells, bold, emphasized, false, false, true, 2.0);
     }
 
+    fn table_localized_service_row(
+        &mut self,
+        sections: &[(String, String)],
+        price: &str,
+        service_width_weight: f32,
+        price_width_weight: f32,
+    ) {
+        let total_width_weight = service_width_weight + price_width_weight;
+        let width_scale = if total_width_weight > 0.0 {
+            PDF_CONTENT_WIDTH_MM / total_width_weight
+        } else {
+            1.0
+        };
+        let service_width_mm = service_width_weight * width_scale;
+        let price_width_mm = price_width_weight * width_scale;
+        let available_service_width_mm = (service_width_mm - 4.0).max(12.0);
+        let mut lines = Vec::<(String, bool, f32, f32)>::new();
+        let mut has_previous_section = false;
+
+        for (heading, description) in sections {
+            let heading_lines =
+                wrap_text_to_width_precise(heading, 9.0, available_service_width_mm);
+            let description_lines =
+                wrap_text_to_width_precise(description, 9.5, available_service_width_mm);
+            if heading_lines.is_empty() && description_lines.is_empty() {
+                continue;
+            }
+
+            let section_gap_mm = if has_previous_section { 1.5 } else { 0.0 };
+            for (line_index, line) in heading_lines.iter().enumerate() {
+                lines.push((
+                    line.clone(),
+                    true,
+                    pdf_line_height_mm(9.0, 1.25),
+                    if line_index == 0 { section_gap_mm } else { 0.0 },
+                ));
+            }
+            for (line_index, line) in description_lines.iter().enumerate() {
+                lines.push((
+                    line.clone(),
+                    false,
+                    pdf_line_height_mm(9.5, 1.25),
+                    if line_index == 0 {
+                        if heading_lines.is_empty() {
+                            section_gap_mm
+                        } else {
+                            0.8
+                        }
+                    } else {
+                        0.0
+                    },
+                ));
+            }
+            has_previous_section = true;
+        }
+
+        if lines.is_empty() {
+            return;
+        }
+
+        let content_height_mm: f32 = lines
+            .iter()
+            .map(|(_, _, line_height_mm, gap_before_mm)| line_height_mm + gap_before_mm)
+            .sum();
+        let price_font_size_pt = 9.5;
+        let price_glyph_height_mm = pt_to_mm(price_font_size_pt);
+        let row_height_mm =
+            (content_height_mm + 4.0).max(pdf_line_height_mm(price_font_size_pt, 1.25) + 4.0);
+        self.ensure_space(row_height_mm + 0.2);
+
+        let row_top_mm = self.y_mm;
+        let row_bottom_mm = row_top_mm - row_height_mm;
+        append_pdf_filled_rect(
+            &mut self.page_ops,
+            PDF_LEFT_MARGIN_MM,
+            row_bottom_mm,
+            PDF_CONTENT_WIDTH_MM,
+            0.2,
+            Color::Rgb(Rgb::new(0.84, 0.83, 0.82, None)),
+        );
+
+        let mut cursor_y_mm = row_top_mm - 2.0;
+        for (line, bold, line_height_mm, gap_before_mm) in lines {
+            cursor_y_mm -= gap_before_mm;
+            let font_size_pt = if bold { 9.0 } else { 9.5 };
+            let glyph_height_mm = pt_to_mm(font_size_pt);
+            append_pdf_text_line(
+                &mut self.page_ops,
+                &line,
+                PDF_LEFT_MARGIN_MM + 2.0,
+                cursor_y_mm - glyph_height_mm,
+                font_size_pt,
+                if bold {
+                    &self.bold_font
+                } else {
+                    &self.regular_font
+                },
+                TreatmentPlanPdfColor::Body,
+            );
+            cursor_y_mm -= line_height_mm;
+        }
+
+        let price_x_mm = (PDF_LEFT_MARGIN_MM + service_width_mm + price_width_mm
+            - 2.0
+            - approx_text_width_mm(price, price_font_size_pt))
+        .max(PDF_LEFT_MARGIN_MM + service_width_mm + 2.0);
+        append_pdf_text_line(
+            &mut self.page_ops,
+            price,
+            price_x_mm,
+            row_bottom_mm + (row_height_mm - price_glyph_height_mm) / 2.0,
+            price_font_size_pt,
+            &self.regular_font,
+            TreatmentPlanPdfColor::Body,
+        );
+
+        self.y_mm = row_bottom_mm;
+    }
+
     fn table_row_styled(
         &mut self,
         cells: &[(&str, f32, PdfCellAlign)],
@@ -14801,7 +14920,7 @@ fn build_cost_estimate_pdf(
         "Die nachfolgende Aufstellung fasst die voraussichtlichen Kosten der medizinischen \
          Behandlung auf Grundlage der derzeit vorliegenden Daten zusammen. Es handelt sich \
          um eine unverbindliche Schätzung; die tatsächliche Abrechnung erfolgt direkt zwischen dem \
-         Patienten und der jeweiligen Einrichtung nach GOÄ/DRG.",
+         Patienten und der jeweiligen Einrichtung.",
         8.0,
         4.0,
     );
@@ -14845,54 +14964,12 @@ fn build_cost_estimate_pdf(
             };
             let price = cost_estimate_price_text(raw_price);
             if !item.localized_sections.is_empty() {
-                let mut price_rendered = false;
-                let section_count = item.localized_sections.len();
-                for (section_index, (heading, description)) in
-                    item.localized_sections.iter().enumerate()
-                {
-                    let heading = heading.trim();
-                    let description = description.trim();
-                    let is_last_section = section_index + 1 == section_count;
-
-                    if !heading.is_empty() {
-                        let price_cell = if price_rendered {
-                            ""
-                        } else {
-                            price_rendered = true;
-                            price.as_str()
-                        };
-                        let cells = [
-                            (heading, SERVICE_WIDTH_MM, PdfCellAlign::Left),
-                            (price_cell, PRICE_WIDTH_MM, PdfCellAlign::Right),
-                        ];
-                        if description.is_empty() && is_last_section {
-                            layout.table_row_aligned_middle(&cells, true, false);
-                        } else {
-                            layout
-                                .table_row_aligned_middle_compact_without_rule(&cells, true, false);
-                        }
-                    }
-
-                    if !description.is_empty() {
-                        let price_cell = if price_rendered {
-                            ""
-                        } else {
-                            price_rendered = true;
-                            price.as_str()
-                        };
-                        let cells = [
-                            (description, SERVICE_WIDTH_MM, PdfCellAlign::Left),
-                            (price_cell, PRICE_WIDTH_MM, PdfCellAlign::Right),
-                        ];
-                        if is_last_section {
-                            layout.table_row_aligned_middle(&cells, false, false);
-                        } else {
-                            layout.table_row_aligned_middle_compact_without_rule(
-                                &cells, false, false,
-                            );
-                        }
-                    }
-                }
+                layout.table_localized_service_row(
+                    &item.localized_sections,
+                    &price,
+                    SERVICE_WIDTH_MM,
+                    PRICE_WIDTH_MM,
+                );
             } else {
                 layout.table_row_aligned_middle(
                     &[
@@ -22140,6 +22217,8 @@ mod tests {
         assert!(text.contains("Patient: Frau Anna Beispiel"));
         assert!(text.contains("Geburtsdatum: 12.04.1988"));
         assert!(text.contains("Einzelauftrag Nr.: A-2026-0099"));
+        assert!(text.contains("Patienten und der jeweiligen Einrichtung."));
+        assert!(!text.contains("GOÄ/DRG"));
         assert!(text.contains("Kardiologische Untersuchung"));
         assert!(text.contains("100,00 - 1000,00 EUR"));
     }
