@@ -357,7 +357,7 @@ struct GeneratedMedicationSummaryContext {
 
 #[derive(Clone)]
 struct GeneratedContractLineItem {
-    emphasized_heading: Option<String>,
+    localized_sections: Vec<(String, String)>,
     description: String,
     quantity: String,
     unit_price: String,
@@ -3799,7 +3799,7 @@ fn parse_quote_line_items(value: &Value) -> Vec<GeneratedContractLineItem> {
                 return None;
             }
             Some(GeneratedContractLineItem {
-                emphasized_heading: None,
+                localized_sections: Vec::new(),
                 description,
                 quantity: object
                     .get("quantity")
@@ -14762,41 +14762,22 @@ fn build_cost_estimate_pdf(
         .unwrap_or_else(|| cost_estimate_default_title(&context.language).to_string());
     layout.text_block_centered(&title, 15.0, true, TreatmentPlanPdfColor::Body, 0.0, 4.0);
 
-    let (document_label, date_label, patient_label, birth_label, order_label) =
-        match context.language.as_str() {
-            "ru" => (
-                "Номер документа:",
-                "Дата:",
-                "Пациент:",
-                "Дата рождения:",
-                "Номер заказа:",
-            ),
-            "de-ru" => (
-                "Dokument-Nr./Номер документа:",
-                "Datum/Дата:",
-                "Patient/Пациент:",
-                "Geburtsdatum/Дата рождения:",
-                "Einzelauftrag Nr./Номер заказа:",
-            ),
-            _ => (
-                "Dokument-Nr.:",
-                "Datum:",
-                "Patient:",
-                "Geburtsdatum:",
-                "Einzelauftrag Nr.:",
-            ),
-        };
+    let (date_label, patient_label, birth_label, order_label) = match context.language.as_str() {
+        "ru" => ("Дата:", "Пациент:", "Дата рождения:", "Номер заказа:"),
+        "de-ru" => (
+            "Datum/Дата:",
+            "Patient/Пациент:",
+            "Geburtsdatum/Дата рождения:",
+            "Einzelauftrag Nr./Номер заказа:",
+        ),
+        _ => ("Datum:", "Patient:", "Geburtsdatum:", "Einzelauftrag Nr.:"),
+    };
     let order_number = context
         .order_number
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("____________________");
-    let document_number = if document_reference.is_empty() {
-        "____________________"
-    } else {
-        document_reference
-    };
     let birth_date = context
         .patient
         .birth_date
@@ -14805,7 +14786,6 @@ fn build_cost_estimate_pdf(
     legal_meta_grid(
         &mut layout,
         &[
-            (document_label, document_number.to_string()),
             (date_label, fmt_de_date(context.estimate_date)),
             (patient_label, context.patient.name_with_salutation()),
             (birth_label, birth_date),
@@ -14864,33 +14844,54 @@ fn build_cost_estimate_pdf(
                 }
             };
             let price = cost_estimate_price_text(raw_price);
-            if let Some(heading) = item
-                .emphasized_heading
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-            {
-                let description = item.description.trim();
-                let heading_cells = [
-                    (heading, SERVICE_WIDTH_MM, PdfCellAlign::Left),
-                    (price.as_str(), PRICE_WIDTH_MM, PdfCellAlign::Right),
-                ];
-                if description.is_empty() {
-                    layout.table_row_aligned_middle(&heading_cells, true, false);
-                } else {
-                    layout.table_row_aligned_middle_compact_without_rule(
-                        &heading_cells,
-                        true,
-                        false,
-                    );
-                    layout.table_row_aligned_middle(
-                        &[
+            if !item.localized_sections.is_empty() {
+                let mut price_rendered = false;
+                let section_count = item.localized_sections.len();
+                for (section_index, (heading, description)) in
+                    item.localized_sections.iter().enumerate()
+                {
+                    let heading = heading.trim();
+                    let description = description.trim();
+                    let is_last_section = section_index + 1 == section_count;
+
+                    if !heading.is_empty() {
+                        let price_cell = if price_rendered {
+                            ""
+                        } else {
+                            price_rendered = true;
+                            price.as_str()
+                        };
+                        let cells = [
+                            (heading, SERVICE_WIDTH_MM, PdfCellAlign::Left),
+                            (price_cell, PRICE_WIDTH_MM, PdfCellAlign::Right),
+                        ];
+                        if description.is_empty() && is_last_section {
+                            layout.table_row_aligned_middle(&cells, true, false);
+                        } else {
+                            layout
+                                .table_row_aligned_middle_compact_without_rule(&cells, true, false);
+                        }
+                    }
+
+                    if !description.is_empty() {
+                        let price_cell = if price_rendered {
+                            ""
+                        } else {
+                            price_rendered = true;
+                            price.as_str()
+                        };
+                        let cells = [
                             (description, SERVICE_WIDTH_MM, PdfCellAlign::Left),
-                            ("", PRICE_WIDTH_MM, PdfCellAlign::Right),
-                        ],
-                        false,
-                        false,
-                    );
+                            (price_cell, PRICE_WIDTH_MM, PdfCellAlign::Right),
+                        ];
+                        if is_last_section {
+                            layout.table_row_aligned_middle(&cells, false, false);
+                        } else {
+                            layout.table_row_aligned_middle_compact_without_rule(
+                                &cells, false, false,
+                            );
+                        }
+                    }
                 }
             } else {
                 layout.table_row_aligned_middle(
@@ -16323,7 +16324,7 @@ fn service_lines_to_items(lines: &[ServiceLineInput]) -> Vec<GeneratedContractLi
         .iter()
         .filter(|line| !line.description.trim().is_empty())
         .map(|line| GeneratedContractLineItem {
-            emphasized_heading: None,
+            localized_sections: Vec::new(),
             description: line.description.trim().to_string(),
             quantity: line.quantity.clone().unwrap_or_default(),
             unit_price: line.fee.clone().unwrap_or_default(),
@@ -16515,7 +16516,7 @@ async fn load_lead_cost_estimate_catalog_selection(
         total_min += min_price * duration;
         total_max += max_price * duration;
 
-        let (localized_heading, localized_description) = localized_estimate_work_type_parts(
+        let localized_sections = localized_estimate_work_type_sections(
             additional_language,
             &name_de,
             &name_ru,
@@ -16529,8 +16530,8 @@ async fn load_lead_cost_estimate_catalog_selection(
         let price_range = format_eur_range(min_price, max_price);
         let line_total_range = format_eur_range(min_price * duration, max_price * duration);
         line_items.push(GeneratedContractLineItem {
-            emphasized_heading: (!localized_heading.is_empty()).then_some(localized_heading),
-            description: localized_description,
+            localized_sections,
+            description: String::new(),
             quantity: duration_hours.to_string(),
             unit_price: price_range,
             line_gross: line_total_range,
@@ -16564,15 +16565,19 @@ fn estimate_work_type_language_parts(
     (name.trim().to_string(), body)
 }
 
-fn localized_estimate_work_type_parts(
+fn localized_estimate_work_type_sections(
     additional_language: Option<&str>,
     name_de: &str,
     name_ru: &str,
     name_en: &str,
     name_es: &str,
     descriptions: &[(String, String)],
-) -> (String, String) {
-    let german = estimate_work_type_language_parts("de", name_de, descriptions);
+) -> Vec<(String, String)> {
+    let mut sections = vec![estimate_work_type_language_parts(
+        "de",
+        name_de,
+        descriptions,
+    )];
     let additional = match additional_language {
         Some("ru") => Some(estimate_work_type_language_parts(
             "ru",
@@ -16591,22 +16596,11 @@ fn localized_estimate_work_type_parts(
         )),
         _ => None,
     };
-    let heading = [
-        Some(german.0),
-        additional.as_ref().map(|value| value.0.clone()),
-    ]
-    .into_iter()
-    .flatten()
-    .filter(|value| !value.is_empty())
-    .collect::<Vec<_>>()
-    .join(" / ");
-    let body = [Some(german.1), additional.map(|value| value.1)]
-        .into_iter()
-        .flatten()
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>()
-        .join(" / ");
-    (heading, body)
+    if let Some(section) = additional {
+        sections.push(section);
+    }
+    sections.retain(|(heading, body)| !heading.is_empty() || !body.is_empty());
+    sections
 }
 
 fn format_eur_range(minimum: f64, maximum: f64) -> String {
@@ -21246,7 +21240,7 @@ mod tests {
         generated_document_number_for_template, generated_typed_document_number,
         german_document_country, is_fixed_legal_document_template,
         is_lead_allowed_document_template, legal_agency_block_lines, legal_document_reference,
-        localized_estimate_work_type_parts, new_admin_pdf, patient_sticker_agency_line,
+        localized_estimate_work_type_sections, new_admin_pdf, patient_sticker_agency_line,
         pdf_mm_to_pt, trusted_contact_recipients_binding,
     };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
@@ -21948,7 +21942,7 @@ mod tests {
             quote_number: Some("KV-2026-0042".to_string()),
             line_items: vec![
                 GeneratedContractLineItem {
-                    emphasized_heading: None,
+                    localized_sections: Vec::new(),
                     description: "Organisation der Behandlung (pro 1 Ärzte) (im Zeitraum 17.12.2025 bis 19.12.2025)".to_string(),
                     quantity: "5".to_string(),
                     unit_price: "100,00 EUR".to_string(),
@@ -21957,7 +21951,7 @@ mod tests {
                     notes: Some("Leistungsumfang 10, 11".to_string()),
                 },
                 GeneratedContractLineItem {
-                    emphasized_heading: None,
+                    localized_sections: Vec::new(),
                     description: "Beratungsleistungen (auch telefonisch) und Datenmanagement"
                         .to_string(),
                     quantity: "1".to_string(),
@@ -21967,7 +21961,7 @@ mod tests {
                     notes: None,
                 },
                 GeneratedContractLineItem {
-                    emphasized_heading: None,
+                    localized_sections: Vec::new(),
                     description: "Dolmetscher-/Betreuungsleistung".to_string(),
                     quantity: "8".to_string(),
                     unit_price: "100,00 EUR/1 Stunde".to_string(),
@@ -22122,8 +22116,11 @@ mod tests {
             order_number: Some("A-2026-0099".to_string()),
             estimate_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             line_items: vec![GeneratedContractLineItem {
-                emphasized_heading: Some("Kardiologische Untersuchung".to_string()),
-                description: "Klinische Untersuchung".to_string(),
+                localized_sections: vec![(
+                    "Kardiologische Untersuchung".to_string(),
+                    "Klinische Untersuchung".to_string(),
+                )],
+                description: String::new(),
                 quantity: "1".to_string(),
                 unit_price: "100,00 - 1000,00 EUR".to_string(),
                 line_gross: "100,00 - 1000,00 EUR".to_string(),
@@ -22158,10 +22155,17 @@ mod tests {
             order_number: Some("A-2026-0100".to_string()),
             estimate_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             line_items: vec![GeneratedContractLineItem {
-                emphasized_heading: Some(
-                    "Kardiologische Untersuchung / Кардиологическое обследование".to_string(),
-                ),
-                description: "Klinische Untersuchung / Клиническое обследование".to_string(),
+                localized_sections: vec![
+                    (
+                        "Kardiologische Untersuchung".to_string(),
+                        "Klinische Untersuchung".to_string(),
+                    ),
+                    (
+                        "Кардиологическое обследование".to_string(),
+                        "Клиническое обследование".to_string(),
+                    ),
+                ],
+                description: String::new(),
                 quantity: "1".to_string(),
                 unit_price: "100,00 - 1000,00 EUR".to_string(),
                 line_gross: "100,00 - 1000,00 EUR".to_string(),
@@ -22177,6 +22181,13 @@ mod tests {
         let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
 
         assert!(text.contains("Кардиологическое обследование"));
+        let german_heading = text.find("Kardiologische Untersuchung").unwrap();
+        let german_body = text.find("Klinische Untersuchung").unwrap();
+        let russian_heading = text.find("Кардиологическое обследование").unwrap();
+        let russian_body = text.find("Клиническое обследование").unwrap();
+        assert!(german_heading < german_body);
+        assert!(german_body < russian_heading);
+        assert!(russian_heading < russian_body);
         assert!(!text.contains("????????"));
     }
 
@@ -22217,7 +22228,7 @@ mod tests {
         ];
 
         assert_eq!(
-            localized_estimate_work_type_parts(
+            localized_estimate_work_type_sections(
                 Some("ru"),
                 "Kardiologische Untersuchung",
                 "Кардиологическое обследование",
@@ -22225,13 +22236,19 @@ mod tests {
                 "Examen cardiológico",
                 &descriptions,
             ),
-            (
-                "Kardiologische Untersuchung / Кардиологическое обследование".to_string(),
-                "Klinische Untersuchung / Клиническое обследование".to_string(),
-            )
+            vec![
+                (
+                    "Kardiologische Untersuchung".to_string(),
+                    "Klinische Untersuchung".to_string(),
+                ),
+                (
+                    "Кардиологическое обследование".to_string(),
+                    "Клиническое обследование".to_string(),
+                ),
+            ]
         );
         assert_eq!(
-            localized_estimate_work_type_parts(
+            localized_estimate_work_type_sections(
                 None,
                 "Kardiologische Untersuchung",
                 "Кардиологическое обследование",
@@ -22239,10 +22256,10 @@ mod tests {
                 "Examen cardiológico",
                 &descriptions,
             ),
-            (
+            vec![(
                 "Kardiologische Untersuchung".to_string(),
                 "Klinische Untersuchung".to_string(),
-            )
+            )]
         );
     }
 
@@ -22257,7 +22274,7 @@ mod tests {
         ];
 
         assert_eq!(
-            localized_estimate_work_type_parts(
+            localized_estimate_work_type_sections(
                 Some("es"),
                 "Untersuchung",
                 "Обследование",
@@ -22265,10 +22282,16 @@ mod tests {
                 "Examen",
                 &descriptions,
             ),
-            (
-                "Untersuchung / Examen".to_string(),
-                "Erster Abschnitt Zweiter Abschnitt / Primera sección Segunda sección".to_string(),
-            )
+            vec![
+                (
+                    "Untersuchung".to_string(),
+                    "Erster Abschnitt Zweiter Abschnitt".to_string(),
+                ),
+                (
+                    "Examen".to_string(),
+                    "Primera sección Segunda sección".to_string(),
+                ),
+            ]
         );
     }
 
@@ -22291,7 +22314,7 @@ mod tests {
     #[test]
     fn manual_line_totals_multiply_unit_price_by_quantity() {
         let totals = compute_line_item_totals(&[GeneratedContractLineItem {
-            emphasized_heading: None,
+            localized_sections: Vec::new(),
             description: "Dolmetscher".to_string(),
             quantity: "4".to_string(),
             unit_price: "100,00 EUR/1 Stunde".to_string(),
@@ -22368,7 +22391,7 @@ mod tests {
             quote_number: Some("KV-2026-0042".to_string()),
             line_items: vec![
                 GeneratedContractLineItem {
-                    emphasized_heading: None,
+                    localized_sections: Vec::new(),
                     description: "Organisation der Behandlung (pro 1 Ärzte)".to_string(),
                     quantity: "5".to_string(),
                     unit_price: "100,00 EUR".to_string(),
@@ -22377,7 +22400,7 @@ mod tests {
                     notes: Some("Leistungsumfang 10, 11".to_string()),
                 },
                 GeneratedContractLineItem {
-                    emphasized_heading: None,
+                    localized_sections: Vec::new(),
                     description: "Beratungsleistungen (auch telefonisch) und Datenmanagement"
                         .to_string(),
                     quantity: "1".to_string(),
@@ -22387,7 +22410,7 @@ mod tests {
                     notes: None,
                 },
                 GeneratedContractLineItem {
-                    emphasized_heading: None,
+                    localized_sections: Vec::new(),
                     description: "Dolmetscher-/Betreuungsleistung".to_string(),
                     quantity: "8".to_string(),
                     unit_price: "100,00 EUR/1 Stunde".to_string(),
