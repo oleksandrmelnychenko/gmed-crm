@@ -18,6 +18,13 @@ describe("LeadWizardDocumentMetadata", () => {
       .toBe("KV-20260721-0019");
   });
 
+  it("keeps the preliminary cost estimate own document number", () => {
+    expect(leadWizardDocumentNumber({
+      id: "preliminary",
+      document_number: "VKS-20260727-A1B2C3D4E5F6",
+    })).toBe("VKS-20260727-A1B2C3D4E5F6");
+  });
+
   it("renders a generated document date-time pill immediately after the size", () => {
     const expectedDateTime = formatDateTime(createdAt, "de-DE", "");
     const html = renderToStaticMarkup(

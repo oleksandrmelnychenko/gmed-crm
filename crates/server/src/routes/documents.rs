@@ -4892,7 +4892,7 @@ fn generated_document_public_id(document_id: Uuid) -> String {
     format!("DOC-{suffix}")
 }
 
-fn generated_compliance_document_number(
+fn generated_typed_document_number(
     template_id: &str,
     document_id: Uuid,
     generated_at: chrono::DateTime<chrono::Utc>,
@@ -4901,6 +4901,7 @@ fn generated_compliance_document_number(
         "confidentiality_release" => "SE",
         "privacy_consents" | "consent_data_release_child" | "consent_data_release_single" => "EW",
         "privacy_information" => "DS",
+        "cost_estimate" => "VKS",
         _ => return None,
     };
     let simple = document_id.simple().to_string();
@@ -4919,7 +4920,7 @@ fn generated_document_number_for_template(
     document_id: Uuid,
     generated_at: chrono::DateTime<chrono::Utc>,
 ) -> String {
-    generated_compliance_document_number(template_id, document_id, generated_at)
+    generated_typed_document_number(template_id, document_id, generated_at)
         .unwrap_or_else(|| generated_document_public_id(document_id))
 }
 
@@ -12796,7 +12797,7 @@ async fn generate_document(
 
     let uses_business_document_number = matches!(
         template.id,
-        "framework_contract" | "single_order" | "order_cost_estimate" | "cost_estimate"
+        "framework_contract" | "single_order" | "order_cost_estimate"
     );
     let persist_input = NewStoredDocument {
         document_id: Some(generated_document_id),
@@ -14726,8 +14727,7 @@ fn build_cost_estimate_pdf(
     fallback_document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let document_reference =
-        legal_document_reference(context.order_number.as_deref(), fallback_document_reference);
+    let document_reference = fallback_document_reference.trim();
     let mut layout = legal_document_pdf_layout(&document_reference, &context.agency, regular, bold);
 
     let title = context
@@ -21147,10 +21147,9 @@ mod tests {
         build_order_cost_estimate_pdf, build_patient_sticker_pdf, build_single_order_pdf,
         compute_line_item_totals, cost_coverage_money_cell, cost_estimate_price_text,
         document_satisfies_compliance_kind, document_template_by_id, finalize_admin_pdf,
-        generated_binding_snapshot, generated_compliance_document_number,
-        generated_document_number_for_template, german_document_country,
-        is_fixed_legal_document_template, is_lead_allowed_document_template,
-        legal_agency_block_lines, legal_document_reference,
+        generated_binding_snapshot, generated_document_number_for_template,
+        generated_typed_document_number, german_document_country, is_fixed_legal_document_template,
+        is_lead_allowed_document_template, legal_agency_block_lines, legal_document_reference,
         localized_estimate_work_type_description, new_admin_pdf, patient_sticker_agency_line,
         pdf_mm_to_pt, trusted_contact_recipients_binding,
     };
@@ -21257,33 +21256,27 @@ mod tests {
         let generated_at = Utc.with_ymd_and_hms(2026, 7, 13, 9, 30, 0).unwrap();
 
         assert_eq!(
-            generated_compliance_document_number(
-                "confidentiality_release",
-                document_id,
-                generated_at,
-            )
-            .as_deref(),
+            generated_typed_document_number("confidentiality_release", document_id, generated_at,)
+                .as_deref(),
             Some("SE-20260713-0123456789AB")
         );
         assert_eq!(
-            generated_compliance_document_number("privacy_consents", document_id, generated_at)
+            generated_typed_document_number("privacy_consents", document_id, generated_at)
                 .as_deref(),
             Some("EW-20260713-0123456789AB")
         );
         assert_eq!(
-            generated_compliance_document_number("privacy_information", document_id, generated_at,)
+            generated_typed_document_number("privacy_information", document_id, generated_at,)
                 .as_deref(),
             Some("DS-20260713-0123456789AB")
         );
-        for template_id in [
-            "framework_contract",
-            "single_order",
-            "order_cost_estimate",
-            "cost_estimate",
-        ] {
+        assert_eq!(
+            generated_typed_document_number("cost_estimate", document_id, generated_at).as_deref(),
+            Some("VKS-20260713-0123456789AB")
+        );
+        for template_id in ["framework_contract", "single_order", "order_cost_estimate"] {
             assert!(
-                generated_compliance_document_number(template_id, document_id, generated_at)
-                    .is_none()
+                generated_typed_document_number(template_id, document_id, generated_at).is_none()
             );
         }
         assert_eq!(
@@ -22017,7 +22010,7 @@ mod tests {
     }
 
     #[test]
-    fn cost_estimate_pdf_uses_order_number_and_shared_legal_chrome() {
+    fn cost_estimate_pdf_uses_its_own_document_number_and_shared_legal_chrome() {
         let context = GeneratedCostEstimateContext {
             language: "de".to_string(),
             auto_name: "Kostenschätzung".to_string(),
@@ -22039,9 +22032,8 @@ mod tests {
             generated_at: Utc.with_ymd_and_hms(2026, 7, 16, 10, 30, 0).unwrap(),
         };
 
-        let bytes = build_cost_estimate_pdf(&context, "DOC-COST-FALLBACK").unwrap();
-        let text = assert_legal_pdf_chrome(&bytes, "A-2026-0099");
-        assert!(!text.contains("DOC-COST-FALLBACK"));
+        let bytes = build_cost_estimate_pdf(&context, "VKS-20260716-ABCDEF123456").unwrap();
+        let text = assert_legal_pdf_chrome(&bytes, "VKS-20260716-ABCDEF123456");
         assert!(text.contains("Unverbindliche voraussichtliche Kostenschätzung"));
         assert!(text.contains("Patient: Frau Anna Beispiel"));
         assert!(text.contains("Kardiologische Untersuchung"));
