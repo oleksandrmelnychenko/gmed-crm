@@ -357,6 +357,7 @@ struct GeneratedMedicationSummaryContext {
 
 #[derive(Clone)]
 struct GeneratedContractLineItem {
+    emphasized_heading: Option<String>,
     description: String,
     quantity: String,
     unit_price: String,
@@ -3798,6 +3799,7 @@ fn parse_quote_line_items(value: &Value) -> Vec<GeneratedContractLineItem> {
                 return None;
             }
             Some(GeneratedContractLineItem {
+                emphasized_heading: None,
                 description,
                 quantity: object
                     .get("quantity")
@@ -4901,7 +4903,6 @@ fn generated_typed_document_number(
         "confidentiality_release" => "SE",
         "privacy_consents" | "consent_data_release_child" | "consent_data_release_single" => "EW",
         "privacy_information" => "DS",
-        "cost_estimate" => "VKS",
         _ => return None,
     };
     let simple = document_id.simple().to_string();
@@ -4913,6 +4914,13 @@ fn generated_typed_document_number(
         "{prefix}-{}-{suffix}",
         generated_at.format("%Y%m%d")
     ))
+}
+
+fn generated_cost_estimate_document_number(
+    generated_at: chrono::DateTime<chrono::Utc>,
+    sequence: i64,
+) -> String {
+    format!("VKS-{}-{sequence:04}", generated_at.format("%Y%m%d"))
 }
 
 fn generated_document_number_for_template(
@@ -11336,8 +11344,26 @@ async fn generate_document(
 
     let generated_at = chrono::Utc::now();
     let generated_document_id = Uuid::new_v4();
-    let generated_document_number =
-        generated_document_number_for_template(template.id, generated_document_id, generated_at);
+    let generated_document_number = if template.id == "cost_estimate" {
+        let sequence = match sqlx::query_scalar::<_, i64>(
+            "SELECT nextval('cost_estimate_document_number_seq')",
+        )
+        .fetch_one(&state.db)
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(error = %error, "allocate preliminary cost estimate number");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to allocate document number",
+                );
+            }
+        };
+        generated_cost_estimate_document_number(generated_at, sequence)
+    } else {
+        generated_document_number_for_template(template.id, generated_document_id, generated_at)
+    };
     let generated_doc_id = generated_document_number.clone();
     let auto_name = body
         .auto_name
@@ -14736,45 +14762,59 @@ fn build_cost_estimate_pdf(
         .unwrap_or_else(|| cost_estimate_default_title(&context.language).to_string());
     layout.text_block_centered(&title, 15.0, true, TreatmentPlanPdfColor::Body, 0.0, 4.0);
 
-    let (date_label, patient_label, birth_label) = match context.language.as_str() {
-        "ru" => ("Дата", "Пациент:", "Дата рождения:"),
-        "de-ru" => ("Datum/Дата", "Patient/Пациент:", "Geb. am./дата рождения:"),
-        _ => ("Datum", "Patient:", "Geburtsdatum:"),
+    let (document_label, date_label, patient_label, birth_label, order_label) =
+        match context.language.as_str() {
+            "ru" => (
+                "Номер документа:",
+                "Дата:",
+                "Пациент:",
+                "Дата рождения:",
+                "Номер заказа:",
+            ),
+            "de-ru" => (
+                "Dokument-Nr./Номер документа:",
+                "Datum/Дата:",
+                "Patient/Пациент:",
+                "Geburtsdatum/Дата рождения:",
+                "Einzelauftrag Nr./Номер заказа:",
+            ),
+            _ => (
+                "Dokument-Nr.:",
+                "Datum:",
+                "Patient:",
+                "Geburtsdatum:",
+                "Einzelauftrag Nr.:",
+            ),
+        };
+    let order_number = context
+        .order_number
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("____________________");
+    let document_number = if document_reference.is_empty() {
+        "____________________"
+    } else {
+        document_reference
     };
-    admin_block(
-        &mut layout,
-        &format!("{date_label}: {}", fmt_de_date(context.estimate_date)),
-        0.0,
-        2.0,
-    );
     let birth_date = context
         .patient
         .birth_date
         .map(|value| value.format("%d.%m.%Y").to_string())
         .unwrap_or_else(|| "____________________".to_string());
-    layout.table_row_aligned_middle(
+    legal_meta_grid(
+        &mut layout,
         &[
-            (patient_label, 55.0, PdfCellAlign::Left),
-            (
-                context.patient.name_with_salutation().as_str(),
-                119.0,
-                PdfCellAlign::Left,
-            ),
+            (document_label, document_number.to_string()),
+            (date_label, fmt_de_date(context.estimate_date)),
+            (patient_label, context.patient.name_with_salutation()),
+            (birth_label, birth_date),
+            (order_label, order_number.to_string()),
         ],
-        false,
-        false,
-    );
-    layout.table_row_aligned_middle(
-        &[
-            (birth_label, 55.0, PdfCellAlign::Left),
-            (&birth_date, 119.0, PdfCellAlign::Left),
-        ],
-        false,
-        false,
     );
 
-    const SERVICE_WIDTH_MM: f32 = 134.0;
-    const PRICE_WIDTH_MM: f32 = 40.0;
+    const SERVICE_WIDTH_MM: f32 = 126.0;
+    const PRICE_WIDTH_MM: f32 = 48.0;
 
     admin_block(
         &mut layout,
@@ -14788,8 +14828,8 @@ fn build_cost_estimate_pdf(
     let (services_heading, estimate_heading) = match context.language.as_str() {
         "ru" => ("Медицинские услуги", "Ориентировочная стоимость"),
         "de-ru" => (
-            "Medizinische Leistungen/Медицинские услуги",
-            "Unverbindliche Kostenschätzung/Ориентировочная стоимость",
+            "Medizinische Leistungen / Медицинские услуги",
+            "Unverbindliche Kostenschätzung / Ориентировочная стоимость",
         ),
         _ => ("Medizinische Leistungen", "Unverbindliche Kostenschätzung"),
     };
@@ -14824,18 +14864,48 @@ fn build_cost_estimate_pdf(
                 }
             };
             let price = cost_estimate_price_text(raw_price);
-            layout.table_row_aligned_middle(
-                &[
-                    (
-                        item.description.trim(),
-                        SERVICE_WIDTH_MM,
-                        PdfCellAlign::Left,
-                    ),
-                    (&price, PRICE_WIDTH_MM, PdfCellAlign::Right),
-                ],
-                false,
-                false,
-            );
+            if let Some(heading) = item
+                .emphasized_heading
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                let description = item.description.trim();
+                let heading_cells = [
+                    (heading, SERVICE_WIDTH_MM, PdfCellAlign::Left),
+                    (price.as_str(), PRICE_WIDTH_MM, PdfCellAlign::Right),
+                ];
+                if description.is_empty() {
+                    layout.table_row_aligned_middle(&heading_cells, true, false);
+                } else {
+                    layout.table_row_aligned_middle_compact_without_rule(
+                        &heading_cells,
+                        true,
+                        false,
+                    );
+                    layout.table_row_aligned_middle(
+                        &[
+                            (description, SERVICE_WIDTH_MM, PdfCellAlign::Left),
+                            ("", PRICE_WIDTH_MM, PdfCellAlign::Right),
+                        ],
+                        false,
+                        false,
+                    );
+                }
+            } else {
+                layout.table_row_aligned_middle(
+                    &[
+                        (
+                            item.description.trim(),
+                            SERVICE_WIDTH_MM,
+                            PdfCellAlign::Left,
+                        ),
+                        (&price, PRICE_WIDTH_MM, PdfCellAlign::Right),
+                    ],
+                    false,
+                    false,
+                );
+            }
         }
     }
 
@@ -16253,6 +16323,7 @@ fn service_lines_to_items(lines: &[ServiceLineInput]) -> Vec<GeneratedContractLi
         .iter()
         .filter(|line| !line.description.trim().is_empty())
         .map(|line| GeneratedContractLineItem {
+            emphasized_heading: None,
             description: line.description.trim().to_string(),
             quantity: line.quantity.clone().unwrap_or_default(),
             unit_price: line.fee.clone().unwrap_or_default(),
@@ -16444,7 +16515,7 @@ async fn load_lead_cost_estimate_catalog_selection(
         total_min += min_price * duration;
         total_max += max_price * duration;
 
-        let localized_description = localized_estimate_work_type_description(
+        let (localized_heading, localized_description) = localized_estimate_work_type_parts(
             additional_language,
             &name_de,
             &name_ru,
@@ -16458,6 +16529,7 @@ async fn load_lead_cost_estimate_catalog_selection(
         let price_range = format_eur_range(min_price, max_price);
         let line_total_range = format_eur_range(min_price * duration, max_price * duration);
         line_items.push(GeneratedContractLineItem {
+            emphasized_heading: (!localized_heading.is_empty()).then_some(localized_heading),
             description: localized_description,
             quantity: duration_hours.to_string(),
             unit_price: price_range,
@@ -16473,45 +16545,68 @@ async fn load_lead_cost_estimate_catalog_selection(
     }))
 }
 
-fn localized_estimate_work_type_description(
+fn estimate_work_type_language_parts(
+    language: &str,
+    name: &str,
+    descriptions: &[(String, String)],
+) -> (String, String) {
+    let body = descriptions
+        .iter()
+        .filter(|(code, _)| {
+            code.split(['-', '_'])
+                .next()
+                .is_some_and(|primary| primary.eq_ignore_ascii_case(language))
+        })
+        .map(|(_, body)| body.trim())
+        .filter(|body| !body.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    (name.trim().to_string(), body)
+}
+
+fn localized_estimate_work_type_parts(
     additional_language: Option<&str>,
     name_de: &str,
     name_ru: &str,
     name_en: &str,
     name_es: &str,
     descriptions: &[(String, String)],
-) -> String {
-    fn language_block(name: &str, language: &str, descriptions: &[(String, String)]) -> String {
-        let paragraphs = descriptions
-            .iter()
-            .filter(|(code, _)| {
-                code.split(['-', '_'])
-                    .next()
-                    .is_some_and(|primary| primary.eq_ignore_ascii_case(language))
-            })
-            .map(|(_, body)| body.trim())
-            .filter(|body| !body.is_empty())
-            .collect::<Vec<_>>();
-        if paragraphs.is_empty() {
-            name.trim().to_string()
-        } else if name.trim().is_empty() {
-            paragraphs.join(" ")
-        } else {
-            format!("{}: {}", name.trim(), paragraphs.join(" "))
-        }
-    }
-
-    let german = language_block(name_de, "de", descriptions);
+) -> (String, String) {
+    let german = estimate_work_type_language_parts("de", name_de, descriptions);
     let additional = match additional_language {
-        Some("ru") => Some(language_block(name_ru, "ru", descriptions)),
-        Some("en") => Some(language_block(name_en, "en", descriptions)),
-        Some("es") => Some(language_block(name_es, "es", descriptions)),
+        Some("ru") => Some(estimate_work_type_language_parts(
+            "ru",
+            name_ru,
+            descriptions,
+        )),
+        Some("en") => Some(estimate_work_type_language_parts(
+            "en",
+            name_en,
+            descriptions,
+        )),
+        Some("es") => Some(estimate_work_type_language_parts(
+            "es",
+            name_es,
+            descriptions,
+        )),
         _ => None,
     };
-    match additional.filter(|value| !value.trim().is_empty()) {
-        Some(value) => format!("{german} / {value}"),
-        None => german,
-    }
+    let heading = [
+        Some(german.0),
+        additional.as_ref().map(|value| value.0.clone()),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|value| !value.is_empty())
+    .collect::<Vec<_>>()
+    .join(" / ");
+    let body = [Some(german.1), additional.map(|value| value.1)]
+        .into_iter()
+        .flatten()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(" / ");
+    (heading, body)
 }
 
 fn format_eur_range(minimum: f64, maximum: f64) -> String {
@@ -21147,10 +21242,11 @@ mod tests {
         build_order_cost_estimate_pdf, build_patient_sticker_pdf, build_single_order_pdf,
         compute_line_item_totals, cost_coverage_money_cell, cost_estimate_price_text,
         document_satisfies_compliance_kind, document_template_by_id, finalize_admin_pdf,
-        generated_binding_snapshot, generated_document_number_for_template,
-        generated_typed_document_number, german_document_country, is_fixed_legal_document_template,
+        generated_binding_snapshot, generated_cost_estimate_document_number,
+        generated_document_number_for_template, generated_typed_document_number,
+        german_document_country, is_fixed_legal_document_template,
         is_lead_allowed_document_template, legal_agency_block_lines, legal_document_reference,
-        localized_estimate_work_type_description, new_admin_pdf, patient_sticker_agency_line,
+        localized_estimate_work_type_parts, new_admin_pdf, patient_sticker_agency_line,
         pdf_mm_to_pt, trusted_contact_recipients_binding,
     };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
@@ -21270,9 +21366,12 @@ mod tests {
                 .as_deref(),
             Some("DS-20260713-0123456789AB")
         );
+        assert!(
+            generated_typed_document_number("cost_estimate", document_id, generated_at).is_none()
+        );
         assert_eq!(
-            generated_typed_document_number("cost_estimate", document_id, generated_at).as_deref(),
-            Some("VKS-20260713-0123456789AB")
+            generated_cost_estimate_document_number(generated_at, 19),
+            "VKS-20260713-0019"
         );
         for template_id in ["framework_contract", "single_order", "order_cost_estimate"] {
             assert!(
@@ -21849,6 +21948,7 @@ mod tests {
             quote_number: Some("KV-2026-0042".to_string()),
             line_items: vec![
                 GeneratedContractLineItem {
+                    emphasized_heading: None,
                     description: "Organisation der Behandlung (pro 1 Ärzte) (im Zeitraum 17.12.2025 bis 19.12.2025)".to_string(),
                     quantity: "5".to_string(),
                     unit_price: "100,00 EUR".to_string(),
@@ -21857,6 +21957,7 @@ mod tests {
                     notes: Some("Leistungsumfang 10, 11".to_string()),
                 },
                 GeneratedContractLineItem {
+                    emphasized_heading: None,
                     description: "Beratungsleistungen (auch telefonisch) und Datenmanagement"
                         .to_string(),
                     quantity: "1".to_string(),
@@ -21866,6 +21967,7 @@ mod tests {
                     notes: None,
                 },
                 GeneratedContractLineItem {
+                    emphasized_heading: None,
                     description: "Dolmetscher-/Betreuungsleistung".to_string(),
                     quantity: "8".to_string(),
                     unit_price: "100,00 EUR/1 Stunde".to_string(),
@@ -22020,7 +22122,8 @@ mod tests {
             order_number: Some("A-2026-0099".to_string()),
             estimate_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             line_items: vec![GeneratedContractLineItem {
-                description: "Kardiologische Untersuchung".to_string(),
+                emphasized_heading: Some("Kardiologische Untersuchung".to_string()),
+                description: "Klinische Untersuchung".to_string(),
                 quantity: "1".to_string(),
                 unit_price: "100,00 - 1000,00 EUR".to_string(),
                 line_gross: "100,00 - 1000,00 EUR".to_string(),
@@ -22035,7 +22138,11 @@ mod tests {
         let bytes = build_cost_estimate_pdf(&context, "VKS-20260716-ABCDEF123456").unwrap();
         let text = assert_legal_pdf_chrome(&bytes, "VKS-20260716-ABCDEF123456");
         assert!(text.contains("Unverbindliche voraussichtliche Kostenschätzung"));
+        assert!(text.contains("Dokument-Nr.: VKS-20260716-ABCDEF123456"));
+        assert!(text.contains("Datum: 16.07.2026"));
         assert!(text.contains("Patient: Frau Anna Beispiel"));
+        assert!(text.contains("Geburtsdatum: 12.04.1988"));
+        assert!(text.contains("Einzelauftrag Nr.: A-2026-0099"));
         assert!(text.contains("Kardiologische Untersuchung"));
         assert!(text.contains("100,00 - 1000,00 EUR"));
     }
@@ -22051,8 +22158,10 @@ mod tests {
             order_number: Some("A-2026-0100".to_string()),
             estimate_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             line_items: vec![GeneratedContractLineItem {
-                description: "Kardiologische Untersuchung / Кардиологическое обследование"
-                    .to_string(),
+                emphasized_heading: Some(
+                    "Kardiologische Untersuchung / Кардиологическое обследование".to_string(),
+                ),
+                description: "Klinische Untersuchung / Клиническое обследование".to_string(),
                 quantity: "1".to_string(),
                 unit_price: "100,00 - 1000,00 EUR".to_string(),
                 line_gross: "100,00 - 1000,00 EUR".to_string(),
@@ -22108,7 +22217,7 @@ mod tests {
         ];
 
         assert_eq!(
-            localized_estimate_work_type_description(
+            localized_estimate_work_type_parts(
                 Some("ru"),
                 "Kardiologische Untersuchung",
                 "Кардиологическое обследование",
@@ -22116,11 +22225,13 @@ mod tests {
                 "Examen cardiológico",
                 &descriptions,
             ),
-            "Kardiologische Untersuchung: Klinische Untersuchung / \
-             Кардиологическое обследование: Клиническое обследование"
+            (
+                "Kardiologische Untersuchung / Кардиологическое обследование".to_string(),
+                "Klinische Untersuchung / Клиническое обследование".to_string(),
+            )
         );
         assert_eq!(
-            localized_estimate_work_type_description(
+            localized_estimate_work_type_parts(
                 None,
                 "Kardiologische Untersuchung",
                 "Кардиологическое обследование",
@@ -22128,7 +22239,10 @@ mod tests {
                 "Examen cardiológico",
                 &descriptions,
             ),
-            "Kardiologische Untersuchung: Klinische Untersuchung"
+            (
+                "Kardiologische Untersuchung".to_string(),
+                "Klinische Untersuchung".to_string(),
+            )
         );
     }
 
@@ -22143,7 +22257,7 @@ mod tests {
         ];
 
         assert_eq!(
-            localized_estimate_work_type_description(
+            localized_estimate_work_type_parts(
                 Some("es"),
                 "Untersuchung",
                 "Обследование",
@@ -22151,8 +22265,10 @@ mod tests {
                 "Examen",
                 &descriptions,
             ),
-            "Untersuchung: Erster Abschnitt Zweiter Abschnitt / \
-             Examen: Primera sección Segunda sección"
+            (
+                "Untersuchung / Examen".to_string(),
+                "Erster Abschnitt Zweiter Abschnitt / Primera sección Segunda sección".to_string(),
+            )
         );
     }
 
@@ -22175,6 +22291,7 @@ mod tests {
     #[test]
     fn manual_line_totals_multiply_unit_price_by_quantity() {
         let totals = compute_line_item_totals(&[GeneratedContractLineItem {
+            emphasized_heading: None,
             description: "Dolmetscher".to_string(),
             quantity: "4".to_string(),
             unit_price: "100,00 EUR/1 Stunde".to_string(),
@@ -22251,6 +22368,7 @@ mod tests {
             quote_number: Some("KV-2026-0042".to_string()),
             line_items: vec![
                 GeneratedContractLineItem {
+                    emphasized_heading: None,
                     description: "Organisation der Behandlung (pro 1 Ärzte)".to_string(),
                     quantity: "5".to_string(),
                     unit_price: "100,00 EUR".to_string(),
@@ -22259,6 +22377,7 @@ mod tests {
                     notes: Some("Leistungsumfang 10, 11".to_string()),
                 },
                 GeneratedContractLineItem {
+                    emphasized_heading: None,
                     description: "Beratungsleistungen (auch telefonisch) und Datenmanagement"
                         .to_string(),
                     quantity: "1".to_string(),
@@ -22268,6 +22387,7 @@ mod tests {
                     notes: None,
                 },
                 GeneratedContractLineItem {
+                    emphasized_heading: None,
                     description: "Dolmetscher-/Betreuungsleistung".to_string(),
                     quantity: "8".to_string(),
                     unit_price: "100,00 EUR/1 Stunde".to_string(),
