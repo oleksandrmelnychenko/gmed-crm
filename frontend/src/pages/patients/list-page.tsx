@@ -307,6 +307,7 @@ export function PatientsPage() {
           onCreate={openCreateSheet}
         />
 
+        <div className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
         <PatientsListToolbar
           anyTopFilterActive={anyTopFilterActive}
           columns={columns}
@@ -360,7 +361,11 @@ export function PatientsPage() {
           t={tr}
         />
 
-        {listError ? <Banner tone="error">{listError}</Banner> : null}
+        {listError ? (
+          <div className="border-b border-border/60 px-3 py-2">
+            <Banner tone="error">{listError}</Banner>
+          </div>
+        ) : null}
 
         <PatientsTableSurface
           columns={columns}
@@ -411,6 +416,7 @@ export function PatientsPage() {
           tr={tr}
           viewMode={viewMode}
         />
+        </div>
       </div>
 
       <PatientsPageSheets

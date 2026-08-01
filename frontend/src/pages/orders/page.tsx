@@ -21,9 +21,7 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Stethoscope,
   UserRound,
-  Wallet,
   X,
 } from "lucide-react";
 
@@ -1080,23 +1078,6 @@ function useOrdersPageContent() {
       ),
     [orderDocuments, selectedOrderId],
   );
-
-  const metrics = useMemo(() => {
-    const active = orders.filter((item) => item.status === "active").length;
-    const execution = orders.filter(
-      (item) => item.phase === "execution" || item.phase === "closure",
-    ).length;
-    const estimatedTotal = orders.reduce((sum, item) => {
-      return sum + (numberFromUnknown(item.total_estimated) ?? 0);
-    }, 0);
-
-    return {
-      total: orders.length,
-      active,
-      execution,
-      estimatedTotal,
-    };
-  }, [orders]);
 
   const orderTableColumns: ColumnDef<OrderSummary>[] = [
     {
@@ -2686,38 +2667,7 @@ function useOrdersPageContent() {
         }
       />
 
-      <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
-        <AdminInlineMetric
-          icon={ClipboardList}
-          label={tx.orders_title}
-          value={String(metrics.total)}
-          description={t.orders_metric_total_description}
-          tone="sky"
-        />
-        <AdminInlineMetric
-          icon={CheckCircle2}
-          label={t.orders_metric_active_label}
-          value={String(metrics.active)}
-          description={t.orders_metric_active_description}
-          tone="emerald"
-        />
-        <AdminInlineMetric
-          icon={Stethoscope}
-          label={t.orders_metric_execution_label}
-          value={String(metrics.execution)}
-          description={t.orders_metric_execution_description}
-          tone="amber"
-        />
-        <AdminInlineMetric
-          icon={Wallet}
-          label={t.orders_metric_business_volume_label}
-          value={formatMoney(metrics.estimatedTotal)}
-          description={t.orders_metric_business_volume_description}
-          tone="slate"
-        />
-      </div>
-
-      {canManageDebt && (debtQueueLoading || Boolean(debtQueueError) || debtQueue.length > 0) ? (
+      {canManageDebt && (Boolean(debtQueueError) || debtQueue.length > 0) ? (
         <section className="rounded-xl border border-border bg-card p-6">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
@@ -2841,8 +2791,24 @@ function useOrdersPageContent() {
         </section>
       ) : null}
 
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
-        <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b border-border/70 bg-card px-3 py-2">
+      <div>
+        {listError ? (
+          <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            {listError}
+          </div>
+        ) : null}
+        <DataTableSurface
+          rows={orders}
+          columns={orderTableColumns}
+          rowId={(row) => row.id}
+          defaultDensity="comfortable"
+          defaultFrozenColumns={ORDER_DEFAULT_FROZEN_COLUMNS}
+          dictionary={tx}
+          groupLabels={orderColumnGroupLabels}
+          loading={loading}
+          maxFrozenColumns={ORDER_MAX_FROZEN_COLUMNS}
+          toolbarStart={
+            <>
           <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -3012,26 +2978,8 @@ function useOrdersPageContent() {
               </Button>
             ) : null}
           </div>
-        </div>
-
-        {listError ? (
-          <div className="border-b border-border/70 px-3 py-2">
-            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-              {listError}
-            </div>
-          </div>
-        ) : null}
-        <DataTableSurface
-          rows={orders}
-          columns={orderTableColumns}
-          rowId={(row) => row.id}
-          defaultDensity="comfortable"
-          defaultFrozenColumns={ORDER_DEFAULT_FROZEN_COLUMNS}
-          dictionary={tx}
-          groupLabels={orderColumnGroupLabels}
-          loading={loading}
-          maxFrozenColumns={ORDER_MAX_FROZEN_COLUMNS}
-          toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
+            </>
+          }
           activeRowId={selectedOrderId}
           onRowClick={(row) => openOrder(row.id, row.patient_id)}
           rowAccent={(row) => {

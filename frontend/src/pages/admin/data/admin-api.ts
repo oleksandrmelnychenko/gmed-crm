@@ -236,6 +236,13 @@ export async function fetchPatientComplianceWorkspace<
   return { consents, privacyRequests };
 }
 
+export function fetchPatientCompliancePrivacyRequests<TPrivacyRequest>(patientId: string) {
+  return apiFetch<TPrivacyRequest[]>(
+    `/admin/compliance/patient/${patientId}/privacy-requests`,
+    { cacheTtlMs: ADMIN_FAST_CACHE_TTL_MS },
+  );
+}
+
 export function savePatientConsent(patientId: string, payload: JsonPayload) {
   return postJson(`/admin/compliance/patient/${patientId}/consents`, payload);
 }

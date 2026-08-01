@@ -119,7 +119,7 @@ export function PatientsTableSurface({
         onRowClick={(patient) => onOpenPatient(patient.id)}
         loading={loading}
         emptyState={<span className="text-sm text-muted-foreground">{emptyLabel}</span>}
-        className="min-h-[400px]"
+        className="min-h-[400px] rounded-none border-0 shadow-none"
         footer={
           <div className="flex items-center justify-between">
             <span className="tabular-nums">

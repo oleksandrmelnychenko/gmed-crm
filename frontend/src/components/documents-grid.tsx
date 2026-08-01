@@ -10,7 +10,6 @@ import { applySort } from "@/components/data-table/sort-logic";
 import { SortBuilder } from "@/components/data-table/sort-builder";
 import type {
   ColumnDef,
-  DensityLevel,
   FilterPredicate,
   SortStack,
 } from "@/components/data-table/types";
@@ -81,7 +80,6 @@ type DocumentsGridProps = {
   formatDateTime: (value?: string | null) => string;
   paginated?: boolean;
   paginationResetKey?: string;
-  rowHeightOverrides?: Partial<Record<DensityLevel, number>>;
 };
 
 type PaginatedDocumentsTableProps = {
@@ -91,7 +89,6 @@ type PaginatedDocumentsTableProps = {
   onOpenDocument: (id: string) => void;
   onSelectionChange: (ids: string[]) => void;
   paginationResetKey: string;
-  rowHeightOverrides?: Partial<Record<DensityLevel, number>>;
   selectedDocumentIds: string[];
   selectedId: string | null;
   showSelection: boolean;
@@ -104,7 +101,6 @@ function PaginatedDocumentsTable({
   onOpenDocument,
   onSelectionChange,
   paginationResetKey,
-  rowHeightOverrides,
   selectedDocumentIds,
   selectedId,
   showSelection,
@@ -221,8 +217,8 @@ function PaginatedDocumentsTable({
   }
 
   return (
-    <div className="space-y-2">
-      <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b border-border/70 px-3 py-2">
+    <div className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
+      <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
         <FilterBuilder
           columns={enhancedColumns}
           rows={documents}
@@ -264,7 +260,6 @@ function PaginatedDocumentsTable({
         onSelectedIdsChange={updatePageSelection}
         onRowClick={(document) => onOpenDocument(document.id)}
         className="min-h-[360px] rounded-none border-0 shadow-none"
-        rowHeightOverrides={rowHeightOverrides}
         footer={
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="tabular-nums">
@@ -341,7 +336,6 @@ export function DocumentsGrid({
   formatDateTime,
   paginated = false,
   paginationResetKey = "",
-  rowHeightOverrides,
 }: DocumentsGridProps) {
   const {
     filename: filenameLabel,
@@ -370,33 +364,21 @@ export function DocumentsGrid({
       pinned: "left",
       width: 300,
       render: (item) => (
-        <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate font-medium text-foreground">
-              {localizeCode(item.auto_name)}
-            </span>
-            {item.needs_categorization ? (
-              <Badge
-                variant="outline"
-                className="shrink-0 rounded-full border-amber-200 bg-amber-50 text-[10px] text-amber-700"
-              >
-                {needsCategorization}
-              </Badge>
-            ) : null}
-          </div>
-          <div className="mt-0.5 flex items-center gap-x-1 text-[11px] text-muted-foreground">
-            <span className="truncate">
-              {item.original_filename ?? unclassifiedLabel}
-            </span>
-            <span className="text-muted-foreground/60">·</span>
-            <span>{uiText("common_version_prefix")}{item.version_number}</span>
-            {item.is_latest_version ? (
-              <>
-                <span className="text-muted-foreground/60">·</span>
-                <span>{currentVersionLabel}</span>
-              </>
-            ) : null}
-          </div>
+        <div
+          className="flex min-w-0 items-center gap-2"
+          title={`${item.original_filename ?? unclassifiedLabel} · ${uiText("common_version_prefix")}${item.version_number}${item.is_latest_version ? ` · ${currentVersionLabel}` : ""}`}
+        >
+          <span className="truncate text-xs font-medium text-foreground">
+            {localizeCode(item.auto_name)}
+          </span>
+          {item.needs_categorization ? (
+            <Badge
+              variant="outline"
+              className="shrink-0 rounded-full border-amber-200 bg-amber-50 text-[10px] text-amber-700"
+            >
+              {needsCategorization}
+            </Badge>
+          ) : null}
         </div>
       ),
     },
@@ -409,12 +391,12 @@ export function DocumentsGrid({
       width: 210,
       render: (item) =>
         item.patient_name ? (
-          <div className="min-w-0">
-            <span className="font-mono text-[11px] text-muted-foreground">
-              {item.patient_pid ?? pidFallback}
-            </span>
-            <div className="truncate text-xs text-foreground">{item.patient_name}</div>
-          </div>
+          <span
+            className="block truncate font-mono text-xs text-foreground"
+            title={item.patient_pid ?? undefined}
+          >
+            {item.patient_name}
+          </span>
         ) : (
           <span className="text-xs text-muted-foreground">{notSet}</span>
         ),
@@ -428,18 +410,12 @@ export function DocumentsGrid({
       width: 210,
       render: (item) =>
         item.art || item.category ? (
-          <div className="min-w-0">
-            {item.art ? (
-              <div className="truncate text-xs text-foreground">
-                {localizeCode(item.art)}
-              </div>
-            ) : null}
-            {item.category ? (
-              <div className="truncate text-[11px] text-muted-foreground">
-                {localizeCode(item.category)}
-              </div>
-            ) : null}
-          </div>
+          <span
+            className="inline-flex max-w-full truncate rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-sky-700"
+            title={item.category ? localizeCode(item.category) : undefined}
+          >
+            {localizeCode(item.art ?? item.category ?? "")}
+          </span>
         ) : (
           <span className="text-xs text-muted-foreground">{unclassifiedLabel}</span>
         ),
@@ -466,17 +442,17 @@ export function DocumentsGrid({
       sortable: true,
       width: 170,
       render: (item) => (
-        <div className="flex flex-col items-start gap-1">
+        <div className="flex min-w-0 items-center gap-1">
           <Badge
             variant="outline"
-            className={cn("rounded-full text-[10px]", visibilityBadge(item.visibility))}
+            className={cn("shrink-0 rounded-full text-[10px]", visibilityBadge(item.visibility))}
           >
             {formatVisibilityLabel(item.visibility)}
           </Badge>
           <Badge
             variant="outline"
             className={cn(
-              "rounded-full text-[10px]",
+              "shrink-0 rounded-full text-[10px]",
               sensitivityBadge(item.data_sensitivity),
             )}
           >
@@ -505,13 +481,13 @@ export function DocumentsGrid({
       searchable: true,
       width: 210,
       render: (item) => (
-        <div className="min-w-0">
-          <div className="truncate text-xs text-foreground">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-xs text-foreground">
             {item.uploaded_by_name || unknownUploader}
-          </div>
-          <div className="text-[11px] text-muted-foreground">
+          </span>
+          <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
             {formatDateTime(item.updated_at)}
-          </div>
+          </span>
         </div>
       ),
     },
@@ -557,7 +533,6 @@ export function DocumentsGrid({
         onOpenDocument={onOpenDocument}
         onSelectionChange={onSelectionChange}
         paginationResetKey={paginationResetKey}
-        rowHeightOverrides={rowHeightOverrides}
         selectedDocumentIds={selectedDocumentIds}
         selectedId={selectedId}
         showSelection={showSelection}
@@ -578,7 +553,6 @@ export function DocumentsGrid({
       onSelectedIdsChange={onSelectionChange}
       onRowClick={(item) => onOpenDocument(item.id)}
       tableClassName="min-h-[360px]"
-      rowHeightOverrides={rowHeightOverrides}
       footer={({ filteredCount, totalCount }) => (
         <span className="tabular-nums">
           {filteredCount === totalCount

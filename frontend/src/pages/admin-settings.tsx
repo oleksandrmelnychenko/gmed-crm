@@ -8,20 +8,18 @@ import {
 import {
   Building2,
   KeyRound,
+  Pencil,
   LoaderCircle,
   RefreshCcw,
   ScrollText,
   ShieldCheck,
-  UsersRound,
 } from "lucide-react";
 
 import { AdminGuideButton } from "@/components/admin-guide";
 import {
-  AdminInlineMetric,
   AdminSectionTitle,
   AdminSheetScaffold,
   SheetActionsFooter,
-  AdminTableCard,
 } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -40,11 +38,10 @@ import {
 } from "@/pages/admin-pages.helpers";
 import {
   Banner,
+  CountBadge,
   EmptyCell,
   Field,
-  ListItem,
   PageHeader,
-  Section,
   StatusBadge,
   SuccessBanner,
   TabLoader,
@@ -400,8 +397,6 @@ function useAdminSettingsPageContent() {
     void load();
   });
 
-  const accessTokenMinutes = editValues.access_token_minutes || "-";
-
   const closeGroupSheet = useCallback(() => {
     setSelectedGroupId(null);
     setSheetState({ saving: false, error: "", warning: "" });
@@ -567,6 +562,78 @@ function useAdminSettingsPageContent() {
       setActionBusyKey("");
     }
   }, [load, t.common_error, t.settings_updated]);
+
+  type SettingsTableRow = {
+    key: string;
+    groupId: SettingsGroupId;
+    groupTitle: string;
+    label: string;
+    value: string;
+  };
+  const settingsTableRows = useMemo<SettingsTableRow[]>(
+    () =>
+      SETTINGS_GROUPS.flatMap((group) =>
+        group.fields.map((field) => ({
+          key: field.key,
+          groupId: group.id,
+          groupTitle: tr[group.titleKey] ?? group.id,
+          label: tr[field.labelKey] ?? field.key,
+          value: summarizeAdminSettingValue(
+            field.key,
+            editValues[field.key] ?? settingsMap[field.key]?.value ?? "",
+          ),
+        })),
+      ),
+    [editValues, settingsMap, tr],
+  );
+  const settingsTableColumns = useMemo<ColumnDef<SettingsTableRow>[]>(
+    () => [
+      {
+        id: "group",
+        label: t.common_configuration,
+        accessor: (row) => row.groupTitle,
+        filterType: "enum",
+        filterOptions: SETTINGS_GROUPS.map((group) => ({
+          value: tr[group.titleKey] ?? group.id,
+          label: tr[group.titleKey] ?? group.id,
+        })),
+        sortable: true,
+        width: 250,
+        render: (row) => (
+          <span className="inline-flex max-w-full truncate rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] font-medium text-foreground">
+            {row.groupTitle}
+          </span>
+        ),
+      },
+      {
+        id: "label",
+        label: tr.common_name ?? "Parameter",
+        accessor: (row) => row.label,
+        filterType: "text",
+        sortable: true,
+        searchable: true,
+        required: true,
+        width: 300,
+        render: (row) => (
+          <span className="truncate text-xs font-medium text-foreground">{row.label}</span>
+        ),
+      },
+      {
+        id: "value",
+        label: t.common_value,
+        accessor: (row) => row.value,
+        filterType: "text",
+        searchable: true,
+        width: 380,
+        render: (row) => (
+          <span className="truncate font-mono text-xs text-foreground" title={row.value}>
+            {row.value || "—"}
+          </span>
+        ),
+      },
+    ],
+    [t, tr],
+  );
 
   const pendingColumns = useMemo<ColumnDef<PendingLogin>[]>(() => [
     {
@@ -837,132 +904,74 @@ function useAdminSettingsPageContent() {
 
         {!loading && !error ? (
           <>
-            <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
-              <AdminInlineMetric
-                icon={KeyRound}
-                tone="sky"
-                label={t.settings_token_config}
-                value={accessTokenMinutes}
-                description={t.settings_access_token_min}
-              />
-              <AdminInlineMetric
-                icon={UsersRound}
-                tone="emerald"
-                label={t.settings_active_sessions}
-                value={sessions.length}
-                description={t.settings_sessions}
-              />
-              <AdminInlineMetric
-                icon={ShieldCheck}
-                tone={pending.length > 0 ? "amber" : "slate"}
-                label={t.mfa_pending_logins}
-                value={pending.length}
-                description={t.security_title}
-              />
-              <AdminInlineMetric
-                icon={Building2}
-                tone="slate"
-                label={t.common_configuration}
-                value={settings.length}
-                description={t.common_registry}
-              />
-            </div>
+            <DataTableSurface
+              rows={settingsTableRows}
+              columns={settingsTableColumns}
+              defaultDensity="comfortable"
+              dictionary={t as unknown as Record<string, string>}
+              rowId={(row) => row.key}
+              onRowClick={(row) => openGroupSheet(row.groupId)}
+              toolbarStart={
+                <>
+                  <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
+                    {t.common_configuration}
+                  </span>
+                  <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
+                </>
+              }
+              rowActions={(row) => (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                  onClick={() => openGroupSheet(row.groupId)}
+                  aria-label={t.common_edit}
+                  title={t.common_edit}
+                >
+                  <Pencil className="size-3.5" />
+                </Button>
+              )}
+            />
+            <DataTableSurface
+              rows={pending}
+              columns={pendingColumns}
+              defaultDensity="comfortable"
+              defaultSort={[{ field: "created_at", dir: "desc" }]}
+              dictionary={t as unknown as Record<string, string>}
+              rowId={(entry) => entry.id}
+              emptyState={<EmptyCell>{t.mfa_no_pending}</EmptyCell>}
+              toolbarStart={
+                <>
+                  <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
+                    {t.mfa_pending_logins}
+                  </span>
+                  <CountBadge>{pending.length}</CountBadge>
+                  <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
+                </>
+              }
+            />
 
-            <Section title={t.common_configuration}>
-              <div className="grid gap-2.5 xl:grid-cols-2">
-                {SETTINGS_GROUPS.map((group) => {
-                  const Icon = group.icon;
-                  return (
-                    <ListItem
-                      key={group.id}
-                      onClick={() => {
-                        openGroupSheet(group.id);
-                      }}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex min-w-0 gap-3">
-                          <span
-                            className={cn(
-                              "mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-2xl",
-                              group.tone === "sky"
-                                ? "bg-sky-100 text-sky-700"
-                                : group.tone === "emerald"
-                                  ? "bg-emerald-100 text-emerald-700"
-                                  : group.tone === "amber"
-                                    ? "bg-amber-100 text-amber-700"
-                                    : "bg-slate-100 text-slate-700",
-                            )}
-                          >
-                            <Icon className="size-4.5" />
-                          </span>
-                          <div className="min-w-0">
-                            <div className="text-[13px] font-semibold tracking-tight text-foreground">
-                              {tr[group.titleKey]}
-                            </div>
-                            <p className="mt-1 text-sm text-muted-foreground">
-                              {tr[group.descriptionKey]}
-                            </p>
-                          </div>
-                        </div>
-                        <StatusBadge tone="info">{t.common_edit}</StatusBadge>
-                      </div>
-
-                      <div className="mt-2.5 grid gap-1.5 md:grid-cols-2">
-                        {group.fields.map((field) => (
-                          <div
-                            key={field.key}
-                            className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5"
-                          >
-                            <p className="text-[11.5px] text-muted-foreground">
-                              {tr[field.labelKey] ?? field.key}
-                            </p>
-                            <p className="mt-1 text-sm text-foreground">
-                              {summarizeAdminSettingValue(field.key, editValues[field.key] ?? settingsMap[field.key]?.value ?? "")}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    </ListItem>
-                  );
-                })}
-              </div>
-            </Section>
-
-            <Section title={t.mfa_pending_logins}>
-              <AdminTableCard
-                title={t.common_monitoring}
-                description={t.mfa_pending_logins}
-                count={pending.length}
-              >
-                {pending.length === 0 ? (
-                  <div className="p-4">
-                    <EmptyCell>{t.mfa_no_pending}</EmptyCell>
-                  </div>
-                ) : (
-                  <DataTableSurface
-                    rows={pending}
-                    columns={pendingColumns}
-                    defaultDensity="comfortable"
-                    defaultSort={[{ field: "created_at", dir: "desc" }]}
-                    dictionary={t as unknown as Record<string, string>}
-                    rowId={(entry) => entry.id}
-                    tableClassName="min-h-[320px]"
-                  />
-                )}
-              </AdminTableCard>
-            </Section>
-
-            <Section title={t.settings_active_sessions}>
-              <AdminTableCard
-                title={t.common_monitoring}
-                description={t.settings_active_sessions}
-                count={sessions.length}
-                accessory={(
+            <DataTableSurface
+              rows={sessions}
+              columns={sessionColumns}
+              defaultDensity="comfortable"
+              defaultSort={[{ field: "last_activity_at", dir: "desc" }]}
+              dictionary={t as unknown as Record<string, string>}
+              rowId={(session) => session.family_id}
+              emptyState={<EmptyCell>{t.settings_no_sessions}</EmptyCell>}
+              toolbarStart={
+                <>
+                  <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
+                    {t.settings_active_sessions}
+                  </span>
+                  <CountBadge>{sessions.length}</CountBadge>
+                  <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
                   <Button
                     type="button"
                     variant="destructive"
                     size="sm"
-                    className="h-8 rounded-lg"
+                    className="h-7 rounded-lg"
                     disabled={sessions.length === 0 || actionBusyKey === "sessions:all"}
                     onClick={() => void logoutAll()}
                   >
@@ -971,25 +980,9 @@ function useAdminSettingsPageContent() {
                     ) : null}
                     {t.settings_logout_all}
                   </Button>
-                )}
-              >
-                {sessions.length === 0 ? (
-                  <div className="p-4">
-                    <EmptyCell>{t.settings_no_sessions}</EmptyCell>
-                  </div>
-                ) : (
-                  <DataTableSurface
-                    rows={sessions}
-                    columns={sessionColumns}
-                    defaultDensity="comfortable"
-                    defaultSort={[{ field: "last_activity_at", dir: "desc" }]}
-                    dictionary={t as unknown as Record<string, string>}
-                    rowId={(session) => session.family_id}
-                    tableClassName="min-h-[360px]"
-                  />
-                )}
-              </AdminTableCard>
-            </Section>
+                </>
+              }
+            />
           </>
         ) : null}
       </div>

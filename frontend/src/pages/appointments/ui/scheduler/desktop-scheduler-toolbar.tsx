@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   appointmentSchedulerToolbarGroupClassName,
   appointmentSchedulerToolbarIconButtonClassName,
@@ -12,6 +13,10 @@ type DesktopSchedulerToolbarProps = {
   searchAriaLabel: string;
   searchPlaceholder: string;
   queueLabel: string;
+  patientFilterLabel: string;
+  patientFilterValue: string;
+  patientOptions: Array<{ id: string; label: string }>;
+  onPatientChange: (patientId: string) => void;
   onOpenFilters: () => void;
   onOpenSearch: () => void;
   onOpenQueue: () => void;
@@ -21,6 +26,10 @@ export function DesktopSchedulerToolbar({
   searchAriaLabel,
   searchPlaceholder,
   queueLabel,
+  patientFilterLabel,
+  patientFilterValue,
+  patientOptions,
+  onPatientChange,
   onOpenFilters,
   onOpenSearch,
   onOpenQueue,
@@ -61,6 +70,26 @@ export function DesktopSchedulerToolbar({
           >
             {searchPlaceholder}
           </Button>
+          <NativeComboboxSelect
+            value={patientFilterValue || "__all__"}
+            onChange={(event) =>
+              onPatientChange(
+                event.target.value && event.target.value !== "__all__"
+                  ? event.target.value
+                  : "",
+              )
+            }
+            aria-label={patientFilterLabel}
+            title={patientFilterLabel}
+            className="h-8 w-[220px] shrink-0 rounded-lg border-border bg-background px-3 text-[13px]"
+          >
+            <option value="__all__">{patientFilterLabel}</option>
+            {patientOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </NativeComboboxSelect>
           <Button
             variant="outline"
             size="sm"

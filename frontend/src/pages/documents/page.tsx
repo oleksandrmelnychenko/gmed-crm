@@ -196,16 +196,6 @@ const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
 const DEFAULT_GENERATE_TEMPLATE_ID = "patient_sticker_compact";
 const documentSectionClassName = "border-border/50 bg-transparent";
-const documentQueueRowHeightOverrides = {
-  comfortable: 56,
-  compact: 48,
-  condensed: 40,
-};
-const documentListRowHeightOverrides = {
-  comfortable: 64,
-  compact: 56,
-  condensed: 48,
-};
 
 function runtimeTranslations() {
   return translateCatalog(getLang());
@@ -3267,7 +3257,6 @@ function StaffDocumentsPage({
             formatSensitivityLabel={formatSensitivityLabel}
             formatFileSize={formatFileSize}
             formatDateTime={formatDateTime}
-            rowHeightOverrides={documentListRowHeightOverrides}
           />
         )}
       </DocumentSection>
@@ -7025,12 +7014,9 @@ function DocumentIntakeQueueTable({
         width: 220,
         render: (item) =>
           item.patient_name || item.patient_pid ? (
-            <div className="flex min-w-0 items-center gap-1.5">
-              <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                {item.patient_pid ?? text.pidFallback}
-              </span>
+            <div className="flex min-w-0 items-center" title={item.patient_pid ?? undefined}>
               <span className="truncate font-mono text-xs text-foreground">
-                {item.patient_name ?? t.common_not_set}
+                {item.patient_name ?? item.patient_pid ?? t.common_not_set}
               </span>
             </div>
           ) : (
@@ -7159,7 +7145,6 @@ function DocumentIntakeQueueTable({
       loadingState={<TabLoader />}
       emptyState={<span>{emptyText}</span>}
       tableClassName="min-h-[360px]"
-      rowHeightOverrides={documentQueueRowHeightOverrides}
       onRowClick={(item) => onOpenDocument(item.id)}
       rowAccent={() => "bg-amber-500"}
       footer={({ filteredCount, totalCount }) => (
@@ -7234,12 +7219,9 @@ function DocumentTranslationRequestsTable({
         width: 220,
         render: (request) =>
           request.patient_name || request.patient_pid ? (
-            <div className="flex min-w-0 items-center gap-1.5">
-              <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                {request.patient_pid ?? t.uiText.documents_pid_fallback}
-              </span>
+            <div className="flex min-w-0 items-center" title={request.patient_pid ?? undefined}>
               <span className="truncate font-mono text-xs text-foreground">
-                {request.patient_name ?? t.common_not_set}
+                {request.patient_name ?? request.patient_pid ?? t.common_not_set}
               </span>
             </div>
           ) : (
@@ -7384,7 +7366,6 @@ function DocumentTranslationRequestsTable({
       loadingState={<TabLoader />}
       emptyState={<span>{emptyText}</span>}
       tableClassName="min-h-[360px]"
-      rowHeightOverrides={documentQueueRowHeightOverrides}
       onRowClick={(request) => onOpenDocument(request.document_id)}
       rowAccent={(request) => {
         if (request.status === "completed") return "bg-emerald-500";

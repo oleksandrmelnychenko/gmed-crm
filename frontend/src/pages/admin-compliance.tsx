@@ -7,12 +7,9 @@ import {
   type SetStateAction,
 } from "react";
 import {
-  CheckCircle2,
-  Clock3,
   Download,
   RefreshCcw,
   ShieldAlert,
-  ShieldCheck,
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
@@ -20,7 +17,6 @@ import { AdminGuideButton } from "@/components/admin-guide";
 import {
   AdminSectionTitle,
   AdminSheetScaffold,
-  AdminInlineMetric,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -51,72 +47,15 @@ import {
 } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
 import {
-  buildConsentFormPatchAfterSuccess,
-  type ConsentAction,
-} from "./admin-compliance.helpers";
-import {
   createPatientPrivacyRequest,
   downloadPatientComplianceExport,
   executeCompliancePrivacyRequest,
-  fetchComplianceDashboard,
   fetchCompliancePrivacyQueue,
-  fetchPatientComplianceWorkspace,
+  fetchPatientCompliancePrivacyRequests,
   reviewCompliancePrivacyRequest,
-  savePatientConsent,
 } from "@/pages/admin/data/admin-api";
 import { clearApiCache } from "@/lib/api";
 import { useRealtimeSubscription } from "@/lib/realtime";
-
-interface ConsentTypeSummary {
-  consent_type: string;
-  total: number;
-  active: number;
-}
-
-interface ConsentChange {
-  patient_id: string;
-  patient_pid: string;
-  patient_name: string;
-  user_name: string;
-  consent_type: string;
-  granted: boolean;
-  granted_at: string | null;
-  expires_at: string | null;
-  revoked_at: string | null;
-}
-
-interface ConsentDashboard {
-  total: number;
-  granted_active: number;
-  revoked: number;
-  by_type: ConsentTypeSummary[];
-  recent_changes: ConsentChange[];
-}
-
-interface ExpiredConsent {
-  patient_id: string;
-  patient_pid: string;
-  patient_name: string;
-  user_name: string;
-  consent_type: string;
-  granted_at: string | null;
-  expires_at: string | null;
-}
-
-interface PatientConsentRecord {
-  id: string;
-  patient_id: string;
-  patient_pid: string;
-  patient_name: string;
-  managed_by_name: string;
-  consent_type: string;
-  granted: boolean;
-  granted_at: string | null;
-  expires_at: string | null;
-  revoked_at: string | null;
-  note?: string | null;
-  created_at: string;
-}
 
 interface RecordSummary {
   appointments?: number;
@@ -153,14 +92,6 @@ interface PrivacyRequestRecord {
 type PrivacyRequestType = "erasure" | "restriction" | "third_party_revoke";
 type PrivacyReviewAction = "approve" | "hold" | "reject";
 
-const CONSENT_TYPE_VALUES = [
-  "dsgvo_data_transfer",
-  "schweigepflicht_release",
-  "patient_portal_release",
-  "treatment_contract",
-  "third_party_sharing",
-] as const;
-
 const PRIVACY_REQUEST_TYPE_VALUES = [
   "erasure",
   "restriction",
@@ -181,37 +112,11 @@ const COMPLIANCE_REALTIME_EVENTS = [
   "privacy_request.created",
   "privacy_request.reviewed",
   "privacy_request.executed",
-  "consent.granted",
-  "consent.revoked",
 ] as const;
 
 function compactDt(dt: string | null | undefined): string {
   if (!dt) return "\u2014";
   return dt.split("T")[0] ?? dt;
-}
-
-function isPastDate(dt: string | null | undefined): boolean {
-  if (!dt) return false;
-  const timestamp = Date.parse(dt);
-  if (Number.isNaN(timestamp)) return false;
-  return timestamp < Date.now();
-}
-
-function consentTypeLabel(consentType: string, t: Translations): string {
-  switch (consentType) {
-    case "dsgvo_data_transfer":
-      return t.compliance_consent_type_dsgvo;
-    case "schweigepflicht_release":
-      return t.compliance_consent_type_schweigepflicht;
-    case "patient_portal_release":
-      return t.compliance_consent_type_portal;
-    case "treatment_contract":
-      return t.compliance_consent_type_treatment;
-    case "third_party_sharing":
-      return t.compliance_consent_type_third_party;
-    default:
-      return formatUnknownValue(consentType, t);
-  }
 }
 
 function privacyRequestTypeLabel(
@@ -310,26 +215,17 @@ function canExecutePrivacyRequest(
 }
 
 type AdminComplianceState = {
-  dashboard: ConsentDashboard | null;
-  expired: ExpiredConsent[];
-  loading: boolean;
   privacyQueue: PrivacyRequestRecord[];
   privacyQueueLoading: boolean;
   patientInput: string;
   activePatientId: string;
-  patientConsents: PatientConsentRecord[];
   patientPrivacyRequests: PrivacyRequestRecord[];
   patientLoading: boolean;
   patientError: string;
-  consentType: string;
-  consentNote: string;
-  consentExpiresAt: string;
-  consentBusy: "grant" | "revoke" | null;
   privacyRequestType: PrivacyRequestType;
   privacyReason: string;
   privacyCreateBusy: boolean;
   privacyActionBusy: string | null;
-  consentSheetOpen: boolean;
   privacySheetOpen: boolean;
   reviewSheetRecord: PrivacyRequestRecord | null;
   exportResult: string | null;
@@ -378,26 +274,17 @@ function useAdminCompliancePageContent() {
     adminComplianceReducer,
     undefined,
     (): AdminComplianceState => ({
-      dashboard: null,
-      expired: [],
-      loading: true,
       privacyQueue: [],
       privacyQueueLoading: true,
       patientInput: patientParam,
       activePatientId: patientParam,
-      patientConsents: [],
       patientPrivacyRequests: [],
       patientLoading: false,
       patientError: "",
-      consentType: CONSENT_TYPE_VALUES[0],
-      consentNote: "",
-      consentExpiresAt: "",
-      consentBusy: null,
       privacyRequestType: "erasure",
       privacyReason: "",
       privacyCreateBusy: false,
       privacyActionBusy: null,
-      consentSheetOpen: false,
       privacySheetOpen: false,
       reviewSheetRecord: null,
       exportResult: null,
@@ -407,16 +294,7 @@ function useAdminCompliancePageContent() {
   const {
     actionError,
     activePatientId,
-    consentBusy,
-    consentExpiresAt,
-    consentNote,
-    consentSheetOpen,
-    consentType,
-    dashboard,
-    expired,
     exportResult,
-    loading,
-    patientConsents,
     patientError,
     patientInput,
     patientLoading,
@@ -435,12 +313,6 @@ function useAdminCompliancePageContent() {
     nextValue: SetStateAction<AdminComplianceState[K]>,
   ) =>
     dispatchComplianceState(createAdminComplianceFieldPatch(field, nextValue));
-  const setDashboard = (nextValue: SetStateAction<ConsentDashboard | null>) =>
-    setComplianceField("dashboard", nextValue);
-  const setExpired = (nextValue: SetStateAction<ExpiredConsent[]>) =>
-    setComplianceField("expired", nextValue);
-  const setLoading = (nextValue: SetStateAction<boolean>) =>
-    setComplianceField("loading", nextValue);
   const setPrivacyQueue = (
     nextValue: SetStateAction<PrivacyRequestRecord[]>,
   ) => setComplianceField("privacyQueue", nextValue);
@@ -450,9 +322,6 @@ function useAdminCompliancePageContent() {
     setComplianceField("patientInput", nextValue);
   const setActivePatientId = (nextValue: SetStateAction<string>) =>
     setComplianceField("activePatientId", nextValue);
-  const setPatientConsents = (
-    nextValue: SetStateAction<PatientConsentRecord[]>,
-  ) => setComplianceField("patientConsents", nextValue);
   const setPatientPrivacyRequests = (
     nextValue: SetStateAction<PrivacyRequestRecord[]>,
   ) => setComplianceField("patientPrivacyRequests", nextValue);
@@ -460,15 +329,6 @@ function useAdminCompliancePageContent() {
     setComplianceField("patientLoading", nextValue);
   const setPatientError = (nextValue: SetStateAction<string>) =>
     setComplianceField("patientError", nextValue);
-  const setConsentType = (nextValue: SetStateAction<string>) =>
-    setComplianceField("consentType", nextValue);
-  const setConsentNote = (nextValue: SetStateAction<string>) =>
-    setComplianceField("consentNote", nextValue);
-  const setConsentExpiresAt = (nextValue: SetStateAction<string>) =>
-    setComplianceField("consentExpiresAt", nextValue);
-  const setConsentBusy = (
-    nextValue: SetStateAction<"grant" | "revoke" | null>,
-  ) => setComplianceField("consentBusy", nextValue);
   const setPrivacyRequestType = (
     nextValue: SetStateAction<PrivacyRequestType>,
   ) => setComplianceField("privacyRequestType", nextValue);
@@ -478,8 +338,6 @@ function useAdminCompliancePageContent() {
     setComplianceField("privacyCreateBusy", nextValue);
   const setPrivacyActionBusy = (nextValue: SetStateAction<string | null>) =>
     setComplianceField("privacyActionBusy", nextValue);
-  const setConsentSheetOpen = (nextValue: SetStateAction<boolean>) =>
-    setComplianceField("consentSheetOpen", nextValue);
   const setPrivacySheetOpen = (nextValue: SetStateAction<boolean>) =>
     setComplianceField("privacySheetOpen", nextValue);
   const setReviewSheetRecord = (
@@ -491,14 +349,6 @@ function useAdminCompliancePageContent() {
     setComplianceField("actionError", nextValue);
 
   const activePatientLabel = useMemo(() => {
-    const latestConsent = patientConsents[0];
-    if (latestConsent) {
-      return patientLabel(
-        latestConsent.patient_pid,
-        latestConsent.patient_name,
-      );
-    }
-
     const latestPrivacyRequest = patientPrivacyRequests[0];
     if (latestPrivacyRequest) {
       return patientLabel(
@@ -508,7 +358,7 @@ function useAdminCompliancePageContent() {
     }
 
     return activePatientId || "\u2014";
-  }, [activePatientId, patientConsents, patientPrivacyRequests]);
+  }, [activePatientId, patientPrivacyRequests]);
 
   const privacyCounters = useMemo(() => {
     const requested = privacyQueue.filter(
@@ -556,21 +406,6 @@ function useAdminCompliancePageContent() {
     [searchParams, setSearchParams],
   );
 
-  const loadConsentDashboard = useCallback(async () => {
-    setLoading(true);
-    try {
-      const { dashboard: dash, expired: exp } =
-        await fetchComplianceDashboard<ConsentDashboard, ExpiredConsent>();
-      setDashboard(dash);
-      setExpired(exp);
-    } catch {
-      setDashboard(null);
-      setExpired([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   const loadPrivacyQueue = useCallback(async () => {
     setPrivacyQueueLoading(true);
     try {
@@ -588,15 +423,10 @@ function useAdminCompliancePageContent() {
     setPatientError("");
 
     try {
-      const { consents, privacyRequests } =
-        await fetchPatientComplianceWorkspace<
-          PatientConsentRecord,
-          PrivacyRequestRecord
-        >(patientId);
-      setPatientConsents(consents);
+      const privacyRequests =
+        await fetchPatientCompliancePrivacyRequests<PrivacyRequestRecord>(patientId);
       setPatientPrivacyRequests(privacyRequests);
     } catch (error) {
-      setPatientConsents([]);
       setPatientPrivacyRequests([]);
       setPatientError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -605,9 +435,8 @@ function useAdminCompliancePageContent() {
   }, []);
 
   useEffect(() => {
-    void loadConsentDashboard();
     void loadPrivacyQueue();
-  }, [loadConsentDashboard, loadPrivacyQueue]);
+  }, [loadPrivacyQueue]);
 
   useEffect(() => {
     if (!patientParam || patientParam === activePatientId) {
@@ -621,15 +450,12 @@ function useAdminCompliancePageContent() {
 
   const refreshWorkspace = useCallback(async () => {
     await Promise.all([
-      loadConsentDashboard(),
       loadPrivacyQueue(),
       activePatientId ? loadPatientWorkspace(activePatientId) : Promise.resolve(),
     ]);
-  }, [activePatientId, loadConsentDashboard, loadPatientWorkspace, loadPrivacyQueue]);
+  }, [activePatientId, loadPatientWorkspace, loadPrivacyQueue]);
 
   useRealtimeSubscription(COMPLIANCE_REALTIME_EVENTS, () => {
-    clearApiCache("/admin/compliance/consents");
-    clearApiCache("/admin/compliance/consents/expired");
     clearApiCache("/admin/compliance/privacy-requests");
     if (activePatientId) {
       clearApiCache(`/admin/compliance/patient/${activePatientId}`);
@@ -646,7 +472,6 @@ function useAdminCompliancePageContent() {
 
     if (!targetPatientId) {
       setActivePatientId("");
-      setPatientConsents([]);
       setPatientPrivacyRequests([]);
       setPatientError("");
       syncPatientQuery("");
@@ -656,39 +481,6 @@ function useAdminCompliancePageContent() {
     syncPatientQuery(targetPatientId);
     setActivePatientId(targetPatientId);
     await loadPatientWorkspace(targetPatientId);
-  };
-
-  const handleConsentAction = async (action: ConsentAction) => {
-    const targetPatientId = (activePatientId || patientInput).trim();
-    if (!targetPatientId) {
-      setActionError(t.compliance_uuid_required);
-      return;
-    }
-
-    setConsentBusy(action);
-    setActionError("");
-
-    try {
-      await savePatientConsent(targetPatientId, {
-        consent_type: consentType,
-        action,
-        note: consentNote.trim() || undefined,
-        expires_at:
-          action === "grant" ? consentExpiresAt.trim() || undefined : undefined,
-      });
-
-      setActivePatientId(targetPatientId);
-      dispatchComplianceState(buildConsentFormPatchAfterSuccess(action));
-      syncPatientQuery(targetPatientId);
-      await Promise.all([
-        loadConsentDashboard(),
-        loadPatientWorkspace(targetPatientId),
-      ]);
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setConsentBusy(null);
-    }
   };
 
   const handleCreatePrivacyRequest = async () => {
@@ -771,7 +563,6 @@ function useAdminCompliancePageContent() {
 
       await Promise.all([
         loadPrivacyQueue(),
-        loadConsentDashboard(),
         activePatientId === patientId
           ? loadPatientWorkspace(patientId)
           : Promise.resolve(),
@@ -823,103 +614,6 @@ function useAdminCompliancePageContent() {
       );
     }
   };
-
-  const patientConsentColumns = useMemo<ColumnDef<PatientConsentRecord>[]>(() => [
-    {
-      id: "consent",
-      label: t.compliance_col_consent,
-      accessor: (record) => consentTypeLabel(record.consent_type, t),
-      required: true,
-      pinned: "left",
-      width: 220,
-      render: (record) => (
-        <span className="truncate font-medium text-foreground">
-          {consentTypeLabel(record.consent_type, t)}
-        </span>
-      ),
-    },
-    {
-      id: "status",
-      label: t.compliance_col_status,
-      accessor: (record) => {
-        const isRevoked = Boolean(record.revoked_at) && !record.granted;
-        const isExpired =
-          !isRevoked && record.granted && isPastDate(record.expires_at);
-        return isRevoked
-          ? t.compliance_revoked
-          : isExpired
-            ? t.compliance_expired
-            : t.compliance_granted;
-      },
-      width: 132,
-      render: (record) => {
-        const isRevoked = Boolean(record.revoked_at) && !record.granted;
-        const isExpired =
-          !isRevoked && record.granted && isPastDate(record.expires_at);
-        const badgeClass = isRevoked
-          ? "bg-red-500/15 text-red-700"
-          : isExpired
-            ? "bg-amber-500/15 text-amber-700"
-            : record.granted
-              ? "bg-green-500/15 text-green-700"
-              : "bg-zinc-500/15 text-zinc-700";
-
-        return (
-          <Badge className={badgeClass}>
-            {isRevoked
-              ? t.compliance_revoked
-              : isExpired
-                ? t.compliance_expired
-                : t.compliance_granted}
-          </Badge>
-        );
-      },
-    },
-    {
-      id: "managed_by",
-      label: t.compliance_col_managed_by,
-      accessor: (record) => record.managed_by_name,
-      width: 170,
-    },
-    {
-      id: "effective_at",
-      label: t.compliance_col_effective_at,
-      accessor: (record) =>
-        Boolean(record.revoked_at) && !record.granted
-          ? compactDt(record.revoked_at)
-          : compactDt(record.granted_at ?? record.created_at),
-      width: 132,
-      render: (record) => (
-        <span className="font-mono text-sm text-zinc-500">
-          {Boolean(record.revoked_at) && !record.granted
-            ? compactDt(record.revoked_at)
-            : compactDt(record.granted_at ?? record.created_at)}
-        </span>
-      ),
-    },
-    {
-      id: "expires_at",
-      label: t.compliance_col_expires,
-      accessor: (record) => compactDt(record.expires_at),
-      width: 132,
-      render: (record) => (
-        <span className="font-mono text-sm text-zinc-500">
-          {compactDt(record.expires_at)}
-        </span>
-      ),
-    },
-    {
-      id: "note",
-      label: t.compliance_col_note,
-      accessor: (record) => record.note?.trim() || "",
-      width: 240,
-      render: (record) => (
-        <span className="truncate text-sm text-zinc-600">
-          {record.note?.trim() || "\u2014"}
-        </span>
-      ),
-    },
-  ], [t]);
 
   const patientPrivacyColumns = useMemo<ColumnDef<PrivacyRequestRecord>[]>(() => [
     {
@@ -1005,147 +699,6 @@ function useAdminCompliancePageContent() {
       render: (record) => (
         <span className="truncate text-sm text-zinc-600">
           {privacyNotesLabel(record)}
-        </span>
-      ),
-    },
-  ], [t]);
-
-  const consentTypeColumns = useMemo<ColumnDef<ConsentTypeSummary>[]>(() => [
-    {
-      id: "type",
-      label: t.compliance_col_type,
-      accessor: (entry) => consentTypeLabel(entry.consent_type, t),
-      required: true,
-      pinned: "left",
-      width: 260,
-      render: (entry) => (
-        <span className="truncate font-medium text-foreground">
-          {consentTypeLabel(entry.consent_type, t)}
-        </span>
-      ),
-    },
-    {
-      id: "total",
-      label: t.compliance_col_total,
-      accessor: (entry) => entry.total,
-      width: 110,
-      render: (entry) => (
-        <span className="font-mono text-sm">{entry.total}</span>
-      ),
-    },
-    {
-      id: "active",
-      label: t.compliance_granted,
-      accessor: (entry) => entry.active,
-      width: 120,
-      render: (entry) => (
-        <Badge className="bg-green-500/15 text-green-700">
-          {entry.active}
-        </Badge>
-      ),
-    },
-  ], [t]);
-
-  const expiredConsentColumns = useMemo<ColumnDef<ExpiredConsent>[]>(() => [
-    {
-      id: "patient",
-      label: t.compliance_col_patient,
-      accessor: (item) => patientLabel(item.patient_pid, item.patient_name),
-      required: true,
-      pinned: "left",
-      width: 260,
-      render: (item) => (
-        <span className="truncate font-medium text-foreground">
-          {patientLabel(item.patient_pid, item.patient_name)}
-        </span>
-      ),
-    },
-    {
-      id: "user",
-      label: t.activity_user,
-      accessor: (item) => item.user_name,
-      width: 180,
-    },
-    {
-      id: "type",
-      label: t.compliance_col_type,
-      accessor: (item) => consentTypeLabel(item.consent_type, t),
-      width: 220,
-    },
-    {
-      id: "expired_at",
-      label: t.compliance_col_expired_at,
-      accessor: (item) => compactDt(item.expires_at),
-      width: 132,
-      render: (item) => (
-        <span className="font-mono text-sm text-zinc-500">
-          {compactDt(item.expires_at)}
-        </span>
-      ),
-    },
-  ], [t]);
-
-  const recentChangeColumns = useMemo<ColumnDef<ConsentChange>[]>(() => [
-    {
-      id: "patient",
-      label: t.compliance_col_patient,
-      accessor: (item) => patientLabel(item.patient_pid, item.patient_name),
-      required: true,
-      pinned: "left",
-      width: 260,
-      render: (item) => (
-        <span className="truncate font-medium text-foreground">
-          {patientLabel(item.patient_pid, item.patient_name)}
-        </span>
-      ),
-    },
-    {
-      id: "user",
-      label: t.activity_user,
-      accessor: (item) => item.user_name,
-      width: 180,
-    },
-    {
-      id: "type",
-      label: t.compliance_col_type,
-      accessor: (item) => consentTypeLabel(item.consent_type, t),
-      width: 220,
-    },
-    {
-      id: "status",
-      label: t.users_status,
-      accessor: (item) =>
-        Boolean(item.revoked_at) && !item.granted
-          ? t.compliance_revoked
-          : t.compliance_granted,
-      width: 130,
-      render: (item) => {
-        const isRevoked = Boolean(item.revoked_at) && !item.granted;
-        const badgeCls = isRevoked
-          ? "bg-red-500/15 text-red-700"
-          : item.granted
-            ? "bg-green-500/15 text-green-700"
-            : "bg-zinc-500/15 text-zinc-700";
-        return (
-          <Badge className={badgeCls}>
-            {isRevoked ? t.compliance_revoked : t.compliance_granted}
-          </Badge>
-        );
-      },
-    },
-    {
-      id: "time",
-      label: t.activity_time,
-      accessor: (item) =>
-        Boolean(item.revoked_at) && !item.granted
-          ? compactDt(item.revoked_at)
-          : compactDt(item.granted_at),
-      width: 132,
-      render: (item) => (
-        <span className="font-mono text-sm text-zinc-500">
-          {Boolean(item.revoked_at) && !item.granted
-            ? compactDt(item.revoked_at)
-            : compactDt(item.granted_at)}
         </span>
       ),
     },
@@ -1278,21 +831,6 @@ function useAdminCompliancePageContent() {
     },
   ], [privacyActionBusy, t, user?.role]);
 
-  const stats = [
-    { label: t.compliance_consents, value: dashboard?.total ?? 0 },
-    { label: t.compliance_granted, value: dashboard?.granted_active ?? 0 },
-    { label: t.compliance_revoked, value: dashboard?.revoked ?? 0 },
-    { label: t.compliance_expired, value: expired.length },
-    { label: t.compliance_stat_privacy_queue, value: privacyCounters.open },
-    {
-      label: t.compliance_stat_ready_for_execution,
-      value: privacyCounters.approved,
-    },
-    {
-      label: t.compliance_stat_overdue_privacy,
-      value: privacyCounters.overdue,
-    },
-  ];
   const exportResultIsError =
     exportResult?.startsWith(`${t.admin_system_export_error_prefix}:`) ?? false;
   const exportResultIsJson = Boolean(
@@ -1312,7 +850,7 @@ function useAdminCompliancePageContent() {
               type="button"
               variant="outline"
               className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
-              disabled={loading}
+              disabled={privacyQueueLoading}
               onClick={() => void refreshWorkspace()}
             >
               <RefreshCcw className="size-3.5" />
@@ -1322,51 +860,10 @@ function useAdminCompliancePageContent() {
         )}
       />
 
-      {loading ? <TabLoader /> : null}
-      {!loading && actionError ? <Banner tone="error">{actionError}</Banner> : null}
+      {actionError ? <Banner tone="error">{actionError}</Banner> : null}
 
-      {!loading ? (
-        <>
-          <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
-            <AdminInlineMetric
-              icon={ShieldCheck}
-              tone="sky"
-              label={stats[0].label}
-              value={stats[0].value}
-              description={t.common_registry}
-            />
-            <AdminInlineMetric
-              icon={CheckCircle2}
-              tone="emerald"
-              label={stats[1].label}
-              value={stats[1].value}
-              description={t.compliance_consents}
-            />
-            <AdminInlineMetric
-              icon={Clock3}
-              tone="amber"
-              label={stats[3].label}
-              value={stats[3].value}
-              description={t.compliance_expired_consents}
-            />
-            <AdminInlineMetric
-              icon={ShieldAlert}
-              tone="slate"
-              label={stats[4].label}
-              value={stats[4].value}
-              description={t.compliance_privacy_review_queue}
-            />
-            <AdminInlineMetric
-              icon={Download}
-              tone="rose"
-              label={stats[5].label}
-              value={stats[5].value}
-              description={stats[6].label}
-            />
-          </div>
-
-          <Section
-            title={t.compliance_patient_register_title}
+      <Section
+            title={t.compliance_privacy_requests_title}
             accessory={(
               <div className="rounded-full border border-border/60 bg-muted/25 px-3 py-1 text-xs font-medium text-foreground">
                 {activePatientLabel}
@@ -1388,68 +885,13 @@ function useAdminCompliancePageContent() {
               </Field>
               <div className="flex items-end">
                 <Button type="submit" className="h-9 rounded-lg px-3.5">
-                  {t.compliance_load_register}
+                  {t.common_search}
                 </Button>
               </div>
             </form>
 
             {patientError ? <Banner tone="error">{patientError}</Banner> : null}
 
-            <div className={cn("flex flex-wrap items-center justify-between gap-3 rounded-xl p-3.5", tokens.surface.card)}>
-              <div className="space-y-1.5">
-                <div className="text-xs text-muted-foreground">{t.compliance_consent_type_label}</div>
-                <Badge className="bg-sky-500/15 text-sky-700">
-                  {consentTypeLabel(consentType, t)}
-                </Badge>
-                <p className="text-xs text-muted-foreground">{t.compliance_expiry_hint}</p>
-              </div>
-              <Button
-                type="button"
-                className="h-9 rounded-lg px-3.5"
-                disabled={consentBusy !== null || (!activePatientId && !patientInput.trim())}
-                onClick={() => setConsentSheetOpen(true)}
-              >
-                {t.activity_details}
-              </Button>
-            </div>
-
-            <AdminTableCard
-              title={`${t.compliance_consent_history}${activePatientId ? ` - ${activePatientId}` : ""}`}
-              description={t.compliance_patient_register_hint}
-              count={patientConsents.length}
-            >
-              {patientLoading ? (
-                <TabLoader />
-              ) : patientConsents.length === 0 ? (
-                <div className="p-4">
-                  <EmptyCell>
-                    {activePatientId
-                      ? t.compliance_no_consent_events
-                      : t.compliance_load_patient_consent_hint}
-                  </EmptyCell>
-                </div>
-              ) : (
-                <DataTableSurface
-                  rows={patientConsents}
-                  columns={patientConsentColumns}
-                  defaultDensity="comfortable"
-                  defaultSort={[{ field: "effective_at", dir: "desc" }]}
-                  dictionary={t as unknown as Record<string, string>}
-                  rowId={(record) => record.id}
-                  tableClassName="min-h-[320px]"
-                />
-              )}
-            </AdminTableCard>
-          </Section>
-
-          <Section
-            title={t.compliance_privacy_requests_title}
-            accessory={(
-              <div className="rounded-full border border-border/60 bg-muted/25 px-3 py-1 text-xs font-medium text-foreground">
-                {activePatientLabel}
-              </div>
-            )}
-          >
             <div className={cn("flex flex-wrap items-center justify-between gap-3 rounded-xl p-3.5", tokens.surface.card)}>
               <div className="space-y-1.5">
                 <div className="text-xs text-muted-foreground">{t.compliance_request_type_label}</div>
@@ -1527,70 +969,6 @@ function useAdminCompliancePageContent() {
             ) : null}
           </Section>
 
-          <Section title={t.compliance_consents}>
-            {dashboard && dashboard.by_type.length > 0 ? (
-              <AdminTableCard
-                title={t.compliance_consents}
-                description={t.common_registry}
-                count={dashboard.by_type.length}
-              >
-                <DataTableSurface
-                  rows={dashboard.by_type}
-                  columns={consentTypeColumns}
-                  defaultDensity="comfortable"
-                  defaultSort={[{ field: "total", dir: "desc" }]}
-                  dictionary={t as unknown as Record<string, string>}
-                  rowId={(entry) => entry.consent_type}
-                  tableClassName="min-h-[240px]"
-                />
-              </AdminTableCard>
-            ) : null}
-
-            <AdminTableCard
-              title={`${t.compliance_expired_consents} (${expired.length})`}
-              description={t.compliance_expired}
-              count={expired.length}
-            >
-              {expired.length === 0 ? (
-                <div className="p-4">
-                  <EmptyCell>{t.compliance_no_expired}</EmptyCell>
-                </div>
-              ) : (
-                <DataTableSurface
-                  rows={expired}
-                  columns={expiredConsentColumns}
-                  defaultDensity="comfortable"
-                  defaultSort={[{ field: "expired_at", dir: "desc" }]}
-                  dictionary={t as unknown as Record<string, string>}
-                  rowId={(item) =>
-                    `${item.patient_id}-${item.consent_type}-${item.expires_at ?? item.granted_at}`
-                  }
-                  tableClassName="min-h-[280px]"
-                />
-              )}
-            </AdminTableCard>
-
-            {dashboard && dashboard.recent_changes.length > 0 ? (
-              <AdminTableCard
-                title={t.compliance_recent}
-                description={t.common_monitoring}
-                count={dashboard.recent_changes.length}
-              >
-                <DataTableSurface
-                  rows={dashboard.recent_changes}
-                  columns={recentChangeColumns}
-                  defaultDensity="comfortable"
-                  defaultSort={[{ field: "time", dir: "desc" }]}
-                  dictionary={t as unknown as Record<string, string>}
-                  rowId={(item) =>
-                    `${item.patient_id}-${item.consent_type}-${item.granted_at ?? item.revoked_at}`
-                  }
-                  tableClassName="min-h-[280px]"
-                />
-              </AdminTableCard>
-            ) : null}
-          </Section>
-
           <Section title={t.compliance_privacy_review_queue}>
             <AdminTableCard
               title={t.compliance_privacy_review_queue}
@@ -1616,73 +994,6 @@ function useAdminCompliancePageContent() {
               )}
             </AdminTableCard>
           </Section>
-
-          <Sheet open={consentSheetOpen} onOpenChange={setConsentSheetOpen}>
-            <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
-              <AdminSheetScaffold
-                title={t.compliance_consent_type_label}
-                description={activePatientLabel}
-              >
-                <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
-                  <AdminSectionTitle>{t.compliance_consents}</AdminSectionTitle>
-                  <Field label={t.compliance_consent_type_label}>
-                    <NativeComboboxSelect
-                      value={consentType}
-
-
-                      onChange={(event) => setConsentType(event.target.value ?? CONSENT_TYPE_VALUES[0])} className="h-9 w-full rounded-lg bg-card">
-                        {CONSENT_TYPE_VALUES.map((value) => (
-                          <option key={value} value={value}>
-                            {consentTypeLabel(value, t)}
-                          </option>
-                        ))}
-                      </NativeComboboxSelect>
-                  </Field>
-                  <Field label={t.compliance_operational_note} htmlFor="consent-note">
-                    <textarea
-                      id="consent-note"
-                      value={consentNote}
-                      onChange={(event) => setConsentNote(event.target.value)}
-                      placeholder={t.compliance_consent_note_placeholder}
-                      rows={3}
-                      className={textareaClass}
-                    />
-                  </Field>
-                  <Field label={t.compliance_expiry_date} htmlFor="consent-expires-at">
-                    <Input
-                      id="consent-expires-at"
-                      type="date"
-                      value={consentExpiresAt}
-                      onChange={(event) => setConsentExpiresAt(event.target.value)}
-                      className="h-9 rounded-lg bg-card"
-                    />
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      {t.compliance_expiry_hint}
-                    </p>
-                  </Field>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      className="h-9 rounded-lg"
-                      disabled={consentBusy !== null}
-                      onClick={() => void handleConsentAction("grant")}
-                    >
-                      {consentBusy === "grant" ? t.compliance_saving : t.compliance_grant_consent}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-9 rounded-lg"
-                      disabled={consentBusy !== null}
-                      onClick={() => void handleConsentAction("revoke")}
-                    >
-                      {consentBusy === "revoke" ? t.compliance_saving : t.compliance_revoke_consent}
-                    </Button>
-                  </div>
-                </section>
-              </AdminSheetScaffold>
-            </SheetContent>
-          </Sheet>
 
           <Sheet open={privacySheetOpen} onOpenChange={setPrivacySheetOpen}>
             <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
@@ -1877,8 +1188,6 @@ function useAdminCompliancePageContent() {
               ) : null}
             </SheetContent>
           </Sheet>
-        </>
-      ) : null}
     </div>
   );
 }

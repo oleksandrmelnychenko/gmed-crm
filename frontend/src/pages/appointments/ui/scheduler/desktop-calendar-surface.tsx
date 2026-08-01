@@ -304,7 +304,7 @@ export function DesktopCalendarSurface({
   }, [baseSlotHeight, calendarView, isTimeGridView, slotHeightResetKey]);
 
   return (
-    <section className="overflow-hidden rounded-xl border border-border bg-card">
+    <section className="bg-card">
       <div
         ref={shellRef}
         className="appointments-calendar-shell p-3"

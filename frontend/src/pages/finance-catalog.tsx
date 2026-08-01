@@ -8,15 +8,11 @@ import {
   type SetStateAction,
 } from "react";
 import {
-  BadgePercent,
-  Boxes,
   ChevronDown,
-  ClipboardList,
   Pencil,
   Plus,
   Search,
   Trash2,
-  Wallet,
   X,
 } from "lucide-react";
 
@@ -26,7 +22,6 @@ import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  AdminInlineMetric,
   AdminSheetScaffold,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
@@ -542,8 +537,6 @@ function useFinanceCatalogPageContent() {
     if (key?.trim()) return formatUnknownValue(key, t);
     return t.common_not_set;
   };
-  const totalCountLabel = (count: number) =>
-    t.finance_catalog_total_count.replace("{count}", String(count));
   const blankPackageItem = useCallback(
     () => createBlankPackageItem(t.finance_catalog_unit_default),
     [t.finance_catalog_unit_default],
@@ -658,18 +651,6 @@ function useFinanceCatalogPageContent() {
   const setAgencyServiceForm = (nextValue: SetStateAction<AgencyServiceFormState>) =>
     setFinanceCatalogField("agencyServiceForm", nextValue);
 
-  const activeTaxProfiles = useMemo(
-    () => taxProfiles.filter((item) => item.is_active).length,
-    [taxProfiles],
-  );
-  const activeAgencyServices = useMemo(
-    () => agencyServices.filter((item) => item.is_active).length,
-    [agencyServices],
-  );
-  const activePackages = useMemo(
-    () => servicePackages.filter((item) => item.is_active).length,
-    [servicePackages],
-  );
   const agencyServicePackageUsages = useMemo(
     () => agencyServicePackageUsagesByServiceId(servicePackages),
     [servicePackages],
@@ -690,6 +671,97 @@ function useFinanceCatalogPageContent() {
         .includes(query),
     );
   }, [agencyServicePackageUsages, agencyServices, catalogSearch, t]);
+  const taxProfileColumns = useMemo<ColumnDef<TaxProfile>[]>(
+    () => [
+      {
+        id: "name",
+        label: t.finance_catalog_tax_profile_prefix,
+        accessor: (profile) => profile.name,
+        filterType: "text",
+        sortable: true,
+        searchable: true,
+        required: true,
+        width: 260,
+        render: (profile) => (
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate font-mono text-xs font-medium text-foreground">
+              {profile.name}
+            </span>
+            {profile.is_default ? (
+              <Badge variant="outline" className="shrink-0 rounded-full">
+                {t.finance_catalog_default_badge}
+              </Badge>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        id: "vat_rate",
+        label: t.finance_catalog_vat_label,
+        accessor: (profile) => Number(profile.vat_rate) || 0,
+        filterType: "number",
+        sortable: true,
+        width: 100,
+        render: (profile) => (
+          <span className="font-medium tabular-nums text-foreground">{profile.vat_rate}%</span>
+        ),
+      },
+      {
+        id: "category",
+        label: t.finance_catalog_source,
+        accessor: (profile) => vatCategoryLabel(profile.vat_category),
+        filterType: "text",
+        sortable: true,
+        searchable: true,
+        width: 220,
+        render: (profile) => (
+          <span className="truncate text-muted-foreground">
+            {vatCategoryLabel(profile.vat_category)}
+          </span>
+        ),
+      },
+      {
+        id: "description",
+        label: t.revenue_agency_service_description_label,
+        accessor: (profile) => profile.description ?? "",
+        filterType: "text",
+        searchable: true,
+        width: 320,
+        render: (profile) => (
+          <span className="truncate text-muted-foreground" title={profile.description ?? undefined}>
+            {profile.description || "—"}
+          </span>
+        ),
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (profile) => (profile.is_active ? "active" : "inactive"),
+        filterType: "enum",
+        filterOptions: [
+          { value: "active", label: t.common_active },
+          { value: "inactive", label: t.common_inactive },
+        ],
+        sortable: true,
+        width: 110,
+        render: (profile) => (
+          <Badge
+            variant="outline"
+            className={cn(
+              "w-fit rounded-full",
+              profile.is_active
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-slate-200 bg-slate-50 text-slate-600",
+            )}
+          >
+            {profile.is_active ? t.common_active : t.common_inactive}
+          </Badge>
+        ),
+      },
+    ],
+    [t, vatCategoryLabel],
+  );
+
   const agencyServiceColumns = useMemo<ColumnDef<AgencyServiceItem>[]>(
     () => [
       {
@@ -834,29 +906,6 @@ function useFinanceCatalogPageContent() {
     ],
     [agencyServicePackageUsages, t],
   );
-  const defaultTaxProfile = taxProfiles.find((item) => item.is_default);
-  const financeCatalogMetrics = [
-    {
-      label: t.finance_catalog_active_tax_profiles,
-      value: activeTaxProfiles,
-      description: totalCountLabel(taxProfiles.length),
-    },
-    {
-      label: t.finance_catalog_default_vat,
-      value: defaultTaxProfile ? `${defaultTaxProfile.vat_rate}%` : t.common_not_set,
-      description: defaultTaxProfile?.name ?? t.finance_catalog_no_default_profile,
-    },
-    {
-      label: t.finance_catalog_active_packages,
-      value: activePackages,
-      description: totalCountLabel(servicePackages.length),
-    },
-    {
-      label: t.finance_catalog_catalog_services,
-      value: activeAgencyServices,
-      description: totalCountLabel(agencyServices.length),
-    },
-  ];
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1258,29 +1307,6 @@ function useFinanceCatalogPageContent() {
         </Banner>
       ) : null}
 
-      <section className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
-        <AdminInlineMetric
-          icon={ClipboardList}
-          label={financeCatalogMetrics[0].label}
-          value={financeCatalogMetrics[0].value}
-        />
-        <AdminInlineMetric
-          icon={BadgePercent}
-          label={financeCatalogMetrics[1].label}
-          value={financeCatalogMetrics[1].value}
-        />
-        <AdminInlineMetric
-          icon={Wallet}
-          label={financeCatalogMetrics[2].label}
-          value={financeCatalogMetrics[2].value}
-        />
-        <AdminInlineMetric
-          icon={Boxes}
-          label={financeCatalogMetrics[3].label}
-          value={financeCatalogMetrics[3].value}
-        />
-      </section>
-
       <Section
         title={t.finance_catalog_tax_profiles}
         accessory={
@@ -1301,70 +1327,34 @@ function useFinanceCatalogPageContent() {
           </div>
         }
       >
-        {loading ? (
-          <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-8 text-center text-sm text-muted-foreground">
-            {t.finance_catalog_loading_tax_profiles}
-          </div>
-        ) : taxProfiles.length === 0 ? (
+        {!loading && taxProfiles.length === 0 ? (
           <EmptyCell>{t.finance_catalog_empty_tax_profiles}</EmptyCell>
         ) : (
-          <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-3">
-            {taxProfiles.map((profile) => (
-              <article
-                key={profile.id}
-                className="relative overflow-hidden rounded-xl border border-border/50 bg-card px-4 py-2.5"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-1.5">
-                  <div className="min-w-0">
-                    <p className="max-w-full break-words text-sm font-semibold text-foreground">
-                      {profile.name}
-                    </p>
-                    <p className="font-mono text-xs text-muted-foreground">
-                      {profile.profile_key}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {profile.is_default ? (
-                      <Badge variant="outline" className="rounded-full">
-                        {t.finance_catalog_default_badge}
-                      </Badge>
-                    ) : null}
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "rounded-full",
-                        profile.is_active
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                          : "border-slate-200 bg-slate-50 text-slate-600",
-                      )}
+          <DataTableSurface
+            loading={loading}
+            rows={taxProfiles}
+            columns={taxProfileColumns}
+            dictionary={t as unknown as Record<string, string>}
+            rowId={(profile) => profile.id}
+            emptyState={<EmptyCell>{t.finance_catalog_empty_tax_profiles}</EmptyCell>}
+            rowActions={
+              canManageTaxProfiles
+                ? (profile) => (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                      onClick={() => openEditTaxProfile(profile)}
+                      aria-label={t.finance_catalog_edit}
+                      title={t.finance_catalog_edit}
                     >
-                      {profile.is_active ? t.common_active : t.common_inactive}
-                    </Badge>
-                    {canManageTaxProfiles ? (
-                      <Button
-                        type="button"
-                        size="icon-sm"
-                        variant="ghost"
-                        className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 p-0 text-orange-700 transition-all duration-200 hover:bg-orange-200 hover:text-orange-800"
-                        aria-label={t.finance_catalog_edit}
-                        title={t.finance_catalog_edit}
-                        onClick={() => openEditTaxProfile(profile)}
-                      >
-                        <Pencil className="size-4" />
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-                <p className="mt-2.5 text-2xl font-semibold text-foreground">
-                  {profile.vat_rate}%
-                </p>
-                <p className="mt-1 pr-16 text-xs text-muted-foreground">
-                  {vatCategoryLabel(profile.vat_category)}
-                  {profile.description ? ` / ${profile.description}` : ""}
-                </p>
-              </article>
-            ))}
-          </div>
+                      <Pencil className="size-3.5" />
+                    </Button>
+                  )
+                : undefined
+            }
+          />
         )}
       </Section>
 
@@ -1388,14 +1378,11 @@ function useFinanceCatalogPageContent() {
           </div>
         }
       >
-        {loading ? (
-          <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-8 text-center text-sm text-muted-foreground">
-            {t.finance_catalog_loading_mapping}
-          </div>
-        ) : agencyServices.length === 0 ? (
+        {!loading && agencyServices.length === 0 ? (
           <EmptyCell>{t.revenue_agency_service_empty_title}</EmptyCell>
         ) : (
           <DataTableSurface
+            loading={loading}
             rows={filteredAgencyServices}
             columns={agencyServiceColumns}
             dictionary={t as unknown as Record<string, string>}
@@ -1578,7 +1565,7 @@ function useFinanceCatalogPageContent() {
                         className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
                       >
                         {t.finance_catalog_package_total}: {" "}
-                        <span className="ml-1 font-semibold text-foreground">
+                        <span className="ml-1 font-mono text-sm font-semibold tabular-nums text-foreground">
                           {formatMoney(item.base_price_gross, item.currency)}
                         </span>
                       </Badge>
@@ -1587,7 +1574,7 @@ function useFinanceCatalogPageContent() {
                         className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
                       >
                         {t.finance_catalog_net_label}: {" "}
-                        <span className="ml-1 font-semibold text-foreground">
+                        <span className="ml-1 font-mono text-sm font-semibold tabular-nums text-foreground">
                           {formatMoney(item.base_price_net, item.currency)}
                         </span>
                       </Badge>
@@ -1596,7 +1583,7 @@ function useFinanceCatalogPageContent() {
                         className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
                       >
                         {t.finance_catalog_vat_label}: {" "}
-                        <span className="ml-1 font-semibold text-foreground">
+                        <span className="ml-1 font-mono text-sm font-semibold tabular-nums text-foreground">
                           {formatMoney(item.base_price_vat, item.currency)}
                         </span>
                       </Badge>
@@ -1690,7 +1677,7 @@ function useFinanceCatalogPageContent() {
           <EmptyCell>{t.finance_catalog_empty_mapping}</EmptyCell>
         ) : (
           <div className="overflow-hidden rounded-xl border border-border/50 bg-card">
-            <div className="grid grid-cols-[minmax(0,1.2fr)_120px_120px_minmax(0,1fr)] gap-3 border-b border-border/50 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            <div className="grid grid-cols-[minmax(0,1.2fr)_120px_120px_minmax(0,1fr)] gap-3 border-b border-border/50 px-4 py-2 text-xs font-medium text-muted-foreground">
               <span>{t.finance_catalog_service}</span>
               <span>{t.finance_catalog_vat_label}</span>
               <span>{t.finance_catalog_source}</span>
@@ -1705,11 +1692,8 @@ function useFinanceCatalogPageContent() {
                   <p className="truncate font-medium text-foreground">
                     {agencyServiceNameLabel(row.service_key, row.service_name, t)}
                   </p>
-                  <p className="font-mono text-xs text-muted-foreground">
-                    {row.service_key}
-                  </p>
                 </div>
-                <span className="text-foreground">{row.vat_rate}%</span>
+                <span className="font-mono tabular-nums text-foreground">{row.vat_rate}%</span>
                 <span className="text-muted-foreground">{vatSourceLabel(row.vat_source)}</span>
                 <span className="truncate text-muted-foreground">
                   {taxProfileLabel(row.tax_profile_name, row.tax_profile_key)}

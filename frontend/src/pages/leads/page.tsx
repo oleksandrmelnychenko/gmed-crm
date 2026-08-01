@@ -15,7 +15,6 @@ import {
 import { useSearchParams } from "react-router-dom";
 import {
   ArrowRight,
-  CheckCircle2,
   ClipboardCheck,
   FileCheck2,
   LoaderCircle,
@@ -23,14 +22,11 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
-  TrendingUp,
   UserPlus,
-  Users,
   X,
 } from "lucide-react";
 
 import {
-  AdminInlineMetric,
   AdminSheetScaffold,
   AdminTableCard,
   SheetFormFooter,
@@ -86,7 +82,6 @@ import {
   createLead,
   downloadLeadAttachment,
   fetchLeadDetail,
-  fetchLeadStats,
   fetchLeads,
   promoteLeadToConsole,
   resolveFailedLead,
@@ -405,7 +400,7 @@ function useLeadsPageContent() {
     () => ({
       version: 0,
       leads: [],
-      loading: false,
+      loading: true,
       error: "",
       stats: null,
     }),
@@ -415,7 +410,6 @@ function useLeadsPageContent() {
     leads,
     loading,
     error,
-    stats,
   } = listState;
   const setVersion = (nextValue: SetStateAction<number>) => {
     dispatchListState((current) => ({
@@ -792,24 +786,6 @@ function useLeadsPageContent() {
   }, [failedLoadMessage, leadsPath, localizeLeadError, permissions.canViewPage, version]);
 
   useEffect(() => {
-    if (!permissions.canViewPage) return;
-    let cancelled = false;
-
-    void fetchLeadStats().then(({ stats: statsPayload }) => {
-      if (cancelled) return;
-      startTransition(() => {
-        dispatchListState({
-          stats: statsPayload,
-        });
-      });
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [permissions.canViewPage, version]);
-
-  useEffect(() => {
     if (!detailOpen || !selectedLeadId) return;
 
     let cancelled = false;
@@ -1096,9 +1072,6 @@ function useLeadsPageContent() {
     );
   }
 
-  const growthPct = stats?.growth_pct ?? 0;
-  const growthAbs = stats?.growth_abs ?? 0;
-  const growthSign = growthPct >= 0 ? "+" : "";
   const anyQuickFilterActive =
     filters.search.trim() !== "" ||
     filters.status !== "" ||
@@ -2443,37 +2416,6 @@ function useLeadsPageContent() {
             </>
           }
         />
-
-        <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
-          <AdminInlineMetric
-            icon={Users}
-            label={t.leads_title}
-            value={String(stats?.total_this_month ?? 0)}
-            description={`${growthSign}${growthPct}% (${growthSign}${growthAbs})`}
-            tone="sky"
-          />
-          <AdminInlineMetric
-            icon={CheckCircle2}
-            label={t.users_status}
-            value={String(stats?.qualified_this_month ?? 0)}
-            description={statusLabel("qualified", t)}
-            tone="emerald"
-          />
-          <AdminInlineMetric
-            icon={UserPlus}
-            label={t.leads_convert}
-            value={String(stats?.converted_this_month ?? 0)}
-            description={statusLabel("converted", t)}
-            tone="amber"
-          />
-          <AdminInlineMetric
-            icon={TrendingUp}
-            label={t.common_active}
-            value={String(stats?.total_all ?? 0)}
-            description={t.common_archive}
-            tone="slate"
-          />
-        </div>
 
         {error ? <ShellBanner tone="error">{error}</ShellBanner> : null}
         {successMessage ? <SuccessBanner>{successMessage}</SuccessBanner> : null}

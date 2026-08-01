@@ -4,18 +4,13 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Shield,
-  UserRound,
-  UsersRound,
 } from "lucide-react";
 
 import { AdminGuideButton } from "@/components/admin-guide";
 import {
   AdminSheetScaffold,
-  AdminInlineMetric,
   SheetFormFooter,
   AdminTableCard,
-  AdminToolbar,
 } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -318,13 +313,6 @@ function useAdminUsersPageContent() {
     void loadUsers();
   });
 
-  const metrics = useMemo(() => {
-    const total = users.length;
-    const active = users.filter((u) => u.is_active).length;
-    const admins = users.filter((u) => ["ceo", "ceo_assistant", "it_admin"].includes(u.role)).length;
-    return { total, active, inactive: total - active, admins };
-  }, [users]);
-
   const filtered = useMemo(() => {
     if (!search.trim()) return users;
     const q = search.toLowerCase();
@@ -601,53 +589,6 @@ function useAdminUsersPageContent() {
         )}
       />
 
-      {!loading && !error ? (
-        <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
-          <AdminInlineMetric
-            icon={UsersRound}
-            tone="sky"
-            label={t.users_count}
-            value={metrics.total}
-            description={t.common_registry}
-          />
-          <AdminInlineMetric
-            icon={UserRound}
-            tone="emerald"
-            label={t.users_active}
-            value={metrics.active}
-            description={t.users_status}
-          />
-          <AdminInlineMetric
-            icon={UserRound}
-            tone="amber"
-            label={t.users_inactive}
-            value={metrics.inactive}
-            description={t.users_status}
-          />
-          <AdminInlineMetric
-            icon={Shield}
-            tone="slate"
-            label={t.users_admins}
-            value={metrics.admins}
-            description={t.users_role}
-          />
-        </div>
-      ) : null}
-
-      {!loading && !error ? (
-        <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-            <Input
-              placeholder={t.common_search}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="h-8 w-[240px] rounded-lg bg-card pl-8 text-[13px]"
-            />
-          </div>
-        </AdminToolbar>
-      ) : null}
-
       <Sheet
         open={showCreate}
         onOpenChange={handleCreateSheetOpenChange}
@@ -840,6 +781,17 @@ function useAdminUsersPageContent() {
           <DataTableSurface
             rows={filtered}
             columns={columns}
+            toolbarStart={
+              <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder={t.common_search}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="h-8 w-full rounded-lg bg-background pl-8 text-[13px]"
+                />
+              </div>
+            }
             defaultDensity="comfortable"
             defaultFrozenColumns={["name", "email"]}
             defaultSort={[{ field: "created_at", dir: "desc" }]}

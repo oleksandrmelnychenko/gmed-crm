@@ -129,8 +129,8 @@ export function PatientsListToolbar({
   };
 
   return (
-    <div className="relative z-30 flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-1.5">
+    <div className="relative z-30 border-b border-border/70 bg-card px-3 py-2">
+      <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto">
         <div className="relative min-w-[170px] flex-1 sm:max-w-[220px]">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
           <Input

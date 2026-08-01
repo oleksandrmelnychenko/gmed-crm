@@ -85,6 +85,7 @@ import {
 import {
   appointmentText,
   appointmentTypeLabel,
+  patientName,
 } from "@/pages/appointments/model/labels";
 import {
   buildHandoffStakeholders,
@@ -1205,11 +1206,8 @@ function useStaffAppointmentsPageContent() {
       ),
     [activeOperationalScope, appointments, attentionIds, user?.id, user?.role],
   );
-  const attentionCount = attentionItems.length;
   const {
     todayAppointments,
-    activeAppointments,
-    pendingInterpreterResponses,
     queueAppointments,
     mobileAgendaPendingCount,
     mobileAgendaWeekCount,
@@ -1658,18 +1656,6 @@ function useStaffAppointmentsPageContent() {
           canCreate={permissions.canCreate}
           onCreate={() => openCreateSheetFromDate()}
           onRefresh={refreshAppointments}
-          todayLabel={t.dash_patients_today}
-          activeLabel={t.common_active}
-          pendingLabel={t.mfa_pending}
-          requestLabel={appointmentText("appointments_portal_requests")}
-          attentionLabel={t.common_error}
-          totalLabel={t.providers_all}
-          todayAppointments={todayAppointments}
-          activeAppointments={activeAppointments}
-          pendingInterpreterResponses={pendingInterpreterResponses}
-          appointmentRequestCount={appointmentRequests.length}
-          attentionCount={attentionCount}
-          totalAppointments={scopedAppointments.length}
           appointmentsError={appointmentsError}
           appointmentsNotice={appointmentsNotice}
           appointmentsAuxiliaryError={appointmentsAuxiliaryError}
@@ -1790,6 +1776,13 @@ function useStaffAppointmentsPageContent() {
           toolbar={{
             searchAriaLabel: t.common_search,
             searchPlaceholder: t.common_search.replace(/[.…]+$/u, ""),
+            patientFilterLabel: t.orders_patient,
+            patientFilterValue: filters.patientId,
+            patientOptions: patients.map((patient) => ({
+              id: patient.id,
+              label: `${patient.patient_id} · ${patientName(patient)}`,
+            })),
+            onPatientChange: handleSearchPatientChange,
             queueLabel:
               appointmentRequests.length > 0
                 ? `${appointmentText("appointments_queue")} (${appointmentRequests.length})`

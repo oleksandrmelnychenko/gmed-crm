@@ -7,11 +7,18 @@ import type {
 
 function appointmentEventClass(item: AppointmentListItem) {
   if (item.is_blocked) return "fc-apt-event-blocked";
-  if (item.status === "completed") return "fc-apt-event-completed";
-  if (item.status === "cancelled") return "fc-apt-event-cancelled";
-  if (item.type === "non_medical") return "fc-apt-event-concierge";
-  if (item.type === "internal") return "fc-apt-event-internal";
-  return "fc-apt-event-medical";
+  switch (item.status) {
+    case "completed":
+      return "fc-apt-event-status-completed";
+    case "cancelled":
+      return "fc-apt-event-status-cancelled";
+    case "in_progress":
+      return "fc-apt-event-status-in-progress";
+    case "confirmed":
+      return "fc-apt-event-status-confirmed";
+    default:
+      return "fc-apt-event-status-planned";
+  }
 }
 
 export function toCalendarEvent(

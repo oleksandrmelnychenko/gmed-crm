@@ -16,13 +16,15 @@ export function DesktopSchedulerShell({
   calendarSurface,
 }: DesktopSchedulerShellProps) {
   return (
-    <div className="grid gap-1">
+    <div>
       {filtersDialog}
       {searchSheet}
       {queueSheet}
 
-      {toolbar}
-      {calendarSurface}
+      <div className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
+        {toolbar}
+        {calendarSurface}
+      </div>
     </div>
   );
 }

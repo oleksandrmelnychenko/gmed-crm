@@ -796,11 +796,6 @@ function useContractsPageContent() {
     return orders.filter((order) => order.patient_id === quoteFilters.patientId);
   }, [orders, quoteFilters.patientId]);
 
-  const agencyServiceStats = useMemo(() => {
-    const active = agencyServices.filter((item) => item.is_active).length;
-    const priced = agencyServices.filter((item) => Number(item.unit_price ?? 0) > 0).length;
-    return { total: agencyServices.length, active, priced };
-  }, [agencyServices]);
 
   const contractParam = searchParams.get("contract") ?? "";
   const quoteParam = searchParams.get("quote") ?? "";
@@ -1921,24 +1916,11 @@ function useContractsPageContent() {
         {optionsError ? <ShellBanner tone="error">{optionsError}</ShellBanner> : null}
 
         <section>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.agencyServiceTitle)}</h2>
+          {agencyServicesError ? (
+            <div className="mb-3">
+              <ShellBanner tone="error">{agencyServicesError}</ShellBanner>
             </div>
-            <Badge variant="outline" className="rounded-full">
-              {agencyServiceStats.active} / {agencyServiceStats.total}
-            </Badge>
-          </div>
-
-          <div className="mt-5 space-y-3">
-            <div className="grid gap-1.5 sm:grid-cols-3">
-              <MiniMetric label={text.catalogItems} value={String(agencyServiceStats.total)} />
-              <MiniMetric label={text.activeLabel} value={String(agencyServiceStats.active)} />
-              <MiniMetric label={text.priced} value={String(agencyServiceStats.priced)} />
-            </div>
-
-            {agencyServicesError ? <ShellBanner tone="error">{agencyServicesError}</ShellBanner> : null}
-          </div>
+          ) : null}
 
           <DataTableSurface
             rows={filteredAgencyServices}
@@ -1949,9 +1931,12 @@ function useContractsPageContent() {
             loading={agencyServicesLoading}
             activeRowId={agencyServiceForm.id || null}
             onRowClick={permissions.canManageCatalog ? handleEditAgencyService : undefined}
-            surfaceClassName="mt-3"
             toolbarStart={
               <>
+                <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
+                  {titleWithDot(text.agencyServiceTitle)}
+                </span>
+                <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
                 <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
                   <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -2015,17 +2000,8 @@ function useContractsPageContent() {
 
         <div className="space-y-4">
             <section>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.contractsTab)}</h2>
-                </div>
-                <Badge variant="outline" className="rounded-full">
-                  {contracts.length}
-                </Badge>
-              </div>
-
               {contractsError ? (
-                <div className="mt-3">
+                <div className="mb-3">
                   <ShellBanner tone="error">{contractsError}</ShellBanner>
                 </div>
               ) : null}
@@ -2039,9 +2015,12 @@ function useContractsPageContent() {
                 loading={contractsLoading}
                 activeRowId={selectedContractId || null}
                 onRowClick={(row) => openContract(row.id)}
-                surfaceClassName="mt-3"
                 toolbarStart={
                   <>
+                    <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
+                      {titleWithDot(text.contractsTab)}
+                    </span>
+                    <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
                     <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
                       <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                       <Input
@@ -2135,17 +2114,8 @@ function useContractsPageContent() {
             </section>
           
             <section>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.quotesTab)}</h2>
-                </div>
-                <Badge variant="outline" className="rounded-full">
-                  {quotes.length}
-                </Badge>
-              </div>
-
               {quotesError ? (
-                <div className="mt-3">
+                <div className="mb-3">
                   <ShellBanner tone="error">{quotesError}</ShellBanner>
                 </div>
               ) : null}
@@ -2159,9 +2129,12 @@ function useContractsPageContent() {
                 loading={quotesLoading}
                 activeRowId={selectedQuoteId || null}
                 onRowClick={(row) => openQuote(row.id)}
-                surfaceClassName="mt-3"
                 toolbarStart={
                   <>
+                  <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
+                    {titleWithDot(text.quotesTab)}
+                  </span>
+                  <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
                   <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
                     <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                     <Input
@@ -3143,17 +3116,6 @@ function useContractsPageContent() {
 
 export function ContractsPage(...args: Parameters<typeof useContractsPageContent>) {
   return useContractsPageContent(...args);
-}
-
-function MiniMetric({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="flex min-w-[210px] flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-4 py-2">
-      <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
-        {label}
-      </span>
-      <span className="shrink-0 text-sm font-semibold leading-none text-foreground">{value}</span>
-    </div>
-  );
 }
 
 function titleWithDot(title: ReactNode) {

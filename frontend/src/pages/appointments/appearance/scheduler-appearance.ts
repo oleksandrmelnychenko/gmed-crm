@@ -1,17 +1,17 @@
 import { cn } from "@/lib/utils";
 
 export const appointmentSchedulerToolbarShellClassName =
-  "appointments-scheduler-divider w-full rounded-[6px] p-3";
+  "appointments-scheduler-divider relative z-30 w-full border-b border-border/70 bg-card px-3 py-2";
 export const appointmentSchedulerToolbarRowClassName =
-  "appointments-scheduler-toolbar flex w-full flex-col gap-2 lg:flex-row lg:items-start";
+  "appointments-scheduler-toolbar flex w-full flex-nowrap items-center gap-1.5 overflow-x-auto";
 export const appointmentSchedulerToolbarGroupClassName =
-  "appointments-scheduler-search flex w-full items-center gap-2 lg:w-auto";
+  "appointments-scheduler-search flex w-full items-center gap-1.5";
 export const appointmentSchedulerToolbarIconButtonClassName =
-  "h-8 w-8 shrink-0 rounded-full border-slate-200 bg-transparent hover:cursor-pointer hover:bg-transparent";
+  "size-8 shrink-0 rounded-lg";
 export const appointmentSchedulerToolbarSearchButtonClassName =
-  "h-8 w-full justify-start rounded-full border-slate-200 bg-transparent px-3 text-xs font-normal text-slate-500 lg:w-[18rem] hover:cursor-pointer hover:bg-transparent";
+  "h-8 w-full justify-start rounded-lg border-border bg-background px-3 text-[13px] font-normal text-muted-foreground lg:w-[18rem]";
 export const appointmentSchedulerToolbarQueueButtonClassName =
-  "h-8 shrink-0 rounded-full bg-transparent px-3 hover:cursor-pointer hover:bg-transparent";
+  "h-8 shrink-0 rounded-lg px-3";
 export const appointmentMobileAgendaCardClassName =
   "rounded-lg border border-slate-200/80 bg-slate-50/85 p-4 shadow-sm";
 export const appointmentMobileAgendaSearchInputClassName =

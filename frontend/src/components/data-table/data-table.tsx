@@ -833,23 +833,34 @@ function SelectCheckbox({ checked, indeterminate = false, onChange, ariaLabel }:
 
 type DefaultSkeletonProps = { rows: number; height: number };
 
+const SKELETON_BAR_WIDTHS = [
+  ["w-24", "w-40", "w-16", "w-24"],
+  ["w-32", "w-28", "w-20", "w-16"],
+  ["w-20", "w-44", "w-14", "w-28"],
+] as const;
+
 function DefaultSkeleton({ rows, height }: DefaultSkeletonProps) {
   return (
     <div className="flex flex-col">
-      {Array.from({ length: rows }).map((_, i) => (
-        <div
-          key={`skeleton-row-${i + 1}`}
-          className="animate-pulse border-b border-border/40 px-3"
-          style={{ height }}
-        >
-          <div className="flex h-full items-center gap-3">
-            <div className="h-3 w-24 rounded bg-muted" />
-            <div className="h-3 w-40 rounded bg-muted/70" />
-            <div className="h-3 w-16 rounded bg-muted/70" />
-            <div className="h-3 w-24 rounded bg-muted/70" />
+      {Array.from({ length: rows }).map((_, i) => {
+        const widths = SKELETON_BAR_WIDTHS[i % SKELETON_BAR_WIDTHS.length];
+        return (
+          <div
+            key={`skeleton-row-${i + 1}`}
+            className="border-b border-border/40 px-3"
+            style={{ height }}
+          >
+            <div className="flex h-full items-center gap-3">
+              {widths.map((width, barIndex) => (
+                <div
+                  key={`skeleton-bar-${barIndex + 1}`}
+                  className={cn("shimmer h-3 rounded", width)}
+                />
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

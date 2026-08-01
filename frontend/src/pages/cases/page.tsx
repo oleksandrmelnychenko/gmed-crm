@@ -28,10 +28,7 @@ import type { CaseRosterItem } from "@/components/cases-roster-section";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import {
-  AdminInlineMetric,
   AdminSheetScaffold,
-  AdminTableCard,
-  AdminToolbar,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
 import {
@@ -1658,18 +1655,6 @@ function useCasesPageContent({
     () => snippets.filter((snippet) => snippet.is_active),
     [snippets],
   );
-  const metrics = useMemo(() => {
-    return cases.reduce(
-      (acc, item) => {
-        acc.total += 1;
-        if (item.status === "open") acc.open += 1;
-        if (item.status === "in_progress") acc.inProgress += 1;
-        if (item.status === "closed") acc.closed += 1;
-        return acc;
-      },
-      { total: 0, open: 0, inProgress: 0, closed: 0 },
-    );
-  }, [cases]);
   const caseTableColumns = useMemo<ColumnDef<CaseRosterItem>[]>(
     () => [
       {
@@ -1835,7 +1820,6 @@ function useCasesPageContent({
     setSelectedId(caseId);
     setDetailOpen(true);
   }, []);
-
   const openCreateCaseFromRoute = useCallback(
     (patientParam: string, currentSearchParams: URLSearchParams) => {
       setCreateError("");
@@ -2575,39 +2559,24 @@ function useCasesPageContent({
             )}
           />
 
-          <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
-            <AdminInlineMetric
-              icon={ClipboardList}
-              tone="sky"
-              label={t.cases_title}
-              value={metrics.total}
-              description={t.common_registry}
-            />
-            <AdminInlineMetric
-              icon={Plus}
-              tone="slate"
-              label={t.cases_open}
-              value={metrics.open}
-              description={t.users_status}
-            />
-            <AdminInlineMetric
-              icon={Stethoscope}
-              tone="amber"
-              label={t.cases_in_progress}
-              value={metrics.inProgress}
-              description={t.users_status}
-            />
-            <AdminInlineMetric
-              icon={CalendarClock}
-              tone="emerald"
-              label={t.cases_closed}
-              value={metrics.closed}
-              description={t.users_status}
-            />
-          </div>
-
-          <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
-            <div className="relative">
+          {listError ? (
+            <div className="mb-3">
+              <Banner tone="error">{listError}</Banner>
+            </div>
+          ) : null}
+          <DataTableSurface
+            rows={cases}
+            columns={caseTableColumns}
+            rowId={(item) => item.id}
+            defaultDensity="comfortable"
+            dictionary={t as unknown as Record<string, string>}
+            activeRowId={selectedId || undefined}
+            onRowClick={(item) => openCase(item.id)}
+            loading={listBusy}
+            tableClassName="min-h-[440px]"
+            toolbarStart={
+              <>
+            <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
               <Input
                 value={filters.search}
@@ -2665,35 +2634,9 @@ function useCasesPageContent({
                 {t.common_reset}
               </Button>
             ) : null}
-          </AdminToolbar>
-
-          <AdminTableCard
-            title={t.cases_roster}
-            description={t.cases_subtitle}
-            count={listBusy ? t.patients_syncing : `${cases.length}`}
-            className="min-h-[440px]"
-          >
-            {listError ? (
-              <div className="p-4">
-                <Banner tone="error">{listError}</Banner>
-              </div>
-            ) : (
-              <DataTableSurface
-                rows={cases}
-                columns={caseTableColumns}
-                rowId={(item) => item.id}
-                defaultDensity="comfortable"
-                dictionary={t as unknown as Record<string, string>}
-                activeRowId={selectedId || undefined}
-                onRowClick={(item) => openCase(item.id)}
-                loading={listBusy}
-                loadingState={(
-                  <div className="flex min-h-[320px] items-center justify-center text-sm text-muted-foreground">
-                    <LoaderCircle className="mr-2 size-4 animate-spin" />
-                    {t.common_loading}
-                  </div>
-                )}
-                emptyState={(
+              </>
+            }
+            emptyState={(
                   <EmptyPanel
                     title={t.cases_no_match}
                     text={t.cases_no_match}
@@ -2714,21 +2657,18 @@ function useCasesPageContent({
                       ) : undefined
                     }
                   />
-                )}
-                tableClassName="min-h-[360px]"
-                footer={({ filteredCount, totalCount }) => (
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span className="tabular-nums">
-                      {filteredCount === totalCount
-                        ? `${totalCount}`
-                        : `${filteredCount} / ${totalCount}`}
-                    </span>
-                    <span>{t.patients_records}</span>
-                  </div>
-                )}
-              />
             )}
-          </AdminTableCard>
+            footer={({ filteredCount, totalCount }) => (
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span className="tabular-nums">
+                  {filteredCount === totalCount
+                    ? `${totalCount}`
+                    : `${filteredCount} / ${totalCount}`}
+                </span>
+                <span>{t.patients_records}</span>
+              </div>
+            )}
+          />
         </div>
       )}
 

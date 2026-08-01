@@ -13,16 +13,15 @@ import {
   useReducer,
   type SetStateAction,
 } from "react";
-import { Activity, ClipboardList, LoaderCircle, Pencil, Plus, RefreshCw, Search, Wallet } from "lucide-react";
+import { LoaderCircle, Pencil, Plus, RefreshCw, Search } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { AdminInlineMetric, AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
+import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
 import { ColumnVisibilityMenu } from "@/components/data-table/column-visibility-menu";
 import { DataTable } from "@/components/data-table/data-table";
-import { DensityToggle } from "@/components/data-table/density-toggle";
 import { FilterBuilder } from "@/components/data-table/filter-builder";
 import { applyFilters } from "@/components/data-table/filter-logic";
 import { SortBuilder } from "@/components/data-table/sort-builder";
@@ -192,8 +191,6 @@ type ConciergeServiceUpdatePayload = Partial<{
 
 const STAFF_SERVICES_CACHE_TTL_MS = 10_000;
 const SERVICE_LOOKUPS_CACHE_TTL_MS = 30_000;
-const ACTIVE_SERVICE_STATUSES = new Set(["planned", "booked", "confirmed", "in_service"]);
-const BILLING_READY_STATUSES = new Set(["ready", "billed"]);
 const DEFAULT_FROZEN_COLUMNS = ["title"];
 const MAX_FROZEN_COLUMNS = 3;
 const STAFF_SERVICES_REALTIME_EVENTS = [
@@ -927,8 +924,6 @@ function useStaffServicesPageContent() {
     setStaffServicesField("filterPredicates", value);
   const setSortStack = (value: SetStateAction<SortStack>) =>
     setStaffServicesField("sortStack", value);
-  const setDensity = (value: SetStateAction<DensityLevel>) =>
-    setStaffServicesField("density", value);
   const setHiddenColumns = (value: SetStateAction<string[]>) =>
     setStaffServicesField("hiddenColumns", value);
   const setFrozenColumns = (value: SetStateAction<string[]>) =>
@@ -1484,18 +1479,6 @@ function useStaffServicesPageContent() {
     }
   }
 
-  const activeCount = useMemo(
-    () => items.filter((item) => ACTIVE_SERVICE_STATUSES.has(item.status)).length,
-    [items],
-  );
-  const readyForBillingCount = useMemo(
-    () => items.filter((item) => BILLING_READY_STATUSES.has(item.billing_status)).length,
-    [items],
-  );
-  const portalRequestCount = useMemo(
-    () => items.filter((item) => item.request_source === "patient_portal").length,
-    [items],
-  );
 
   const operatorLabels = useMemo(
     () => ({
@@ -1560,14 +1543,8 @@ function useStaffServicesPageContent() {
         </div>
       ) : null}
 
-      <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
-        <AdminInlineMetric icon={Activity} label={t.staff_services_stat_active} value={activeCount} />
-        <AdminInlineMetric icon={Wallet} label={t.staff_services_stat_billing_ready} value={readyForBillingCount} />
-        <AdminInlineMetric icon={ClipboardList} label={t.staff_services_stat_portal_requests} value={portalRequestCount} />
-      </div>
-
-      <div className="relative z-30 flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-1.5">
+      <div className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
+        <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
           <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -1602,26 +1579,6 @@ function useStaffServicesPageContent() {
             onChange={setTaxonomyNodeId}
           />
 
-          <div className="ml-auto flex items-center gap-1.5">
-            <span className="text-[11px] tabular-nums text-muted-foreground">
-              {visibleRows.length === items.length
-                ? `${items.length}`
-                : `${visibleRows.length} / ${items.length}`}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              title={t.common_refresh}
-              aria-label={t.common_refresh}
-                onClick={() => dispatchStaffServicesState({ type: "bump-version" })}
-            >
-              <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
-            </Button>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5 border-t border-border/70 pt-2">
           <FilterBuilder
             columns={columns}
             rows={items}
@@ -1677,44 +1634,52 @@ function useStaffServicesPageContent() {
               unfreezeLabel={t.table_columns_unfreeze}
               frozenNoteLabel={t.table_columns_frozen}
             />
-            <DensityToggle
-              value={density}
-              onChange={setDensity}
-              ariaLabel={t.table_density}
-              labels={{
-                comfortable: t.table_density_comfortable,
-                compact: t.table_density_compact,
-                condensed: t.table_density_condensed,
-              }}
-            />
+          </div>
+
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+              {visibleRows.length === items.length
+                ? `${items.length}`
+                : `${visibleRows.length} / ${items.length}`}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              title={t.common_refresh}
+              aria-label={t.common_refresh}
+              onClick={() => dispatchStaffServicesState({ type: "bump-version" })}
+            >
+              <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
+            </Button>
           </div>
         </div>
-      </div>
 
-      {items.length === 0 ? (
-        <EmptyCell>
-          {t.staff_services_empty}
-        </EmptyCell>
-      ) : (
-        <DataTable
-          rows={visibleRows}
-          columns={columns}
-          hiddenColumns={hiddenColumns}
-          sort={sortStack}
-          onSortChange={setSortStack}
-          onColumnFreezeChange={handleColumnFreezeChange}
-          isColumnFreezeDisabled={(column, nextFrozen) =>
-            nextFrozen &&
-            !frozenColumns.includes(column.id) &&
-            frozenColumns.length >= MAX_FROZEN_COLUMNS
-          }
-          density={density}
-          rowId={(row) => row.id}
-          activeRowId={selectedServiceId}
-          onRowClick={openServiceDetail}
-          className="min-h-[480px]"
-        />
-      )}
+        {items.length === 0 ? (
+          <div className="p-6">
+            <EmptyCell>{t.staff_services_empty}</EmptyCell>
+          </div>
+        ) : (
+          <DataTable
+            rows={visibleRows}
+            columns={columns}
+            hiddenColumns={hiddenColumns}
+            sort={sortStack}
+            onSortChange={setSortStack}
+            onColumnFreezeChange={handleColumnFreezeChange}
+            isColumnFreezeDisabled={(column, nextFrozen) =>
+              nextFrozen &&
+              !frozenColumns.includes(column.id) &&
+              frozenColumns.length >= MAX_FROZEN_COLUMNS
+            }
+            density={density}
+            rowId={(row) => row.id}
+            activeRowId={selectedServiceId}
+            onRowClick={openServiceDetail}
+            className="min-h-[480px] rounded-none border-0 shadow-none"
+          />
+        )}
+      </div>
 
       <Sheet open={Boolean(selectedService)} onOpenChange={(open) => (!open ? closeServiceDetail() : undefined)}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">

@@ -14,7 +14,6 @@ import {
 import { useSearchParams } from "react-router-dom";
 import {
   ArrowUpRight,
-  CalendarClock,
   Download,
   FileText,
   Pencil,
@@ -22,12 +21,10 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Wallet,
   X,
 } from "lucide-react";
 
 import {
-  AdminInlineMetric,
   AdminSheetScaffold,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
@@ -84,7 +81,6 @@ import {
 } from "./data/invoice-api";
 import {
   DEFAULT_FILTERS,
-  EMPTY_ACCOUNTING_SUMMARY,
   INVOICE_STATUSES,
   INVOICE_TYPES,
   blankCreateForm,
@@ -728,13 +724,6 @@ function useStaffInvoicesPageContent() {
     });
   }, [filters.orderId, filters.patientId, quotes]);
   const selectedCreateQuote = useMemo(() => quotes.find((quote) => quote.id === createForm.quoteId) ?? null, [quotes, createForm.quoteId]);
-  const stats = useMemo(() => {
-    const paid = invoices.filter((invoice) => invoice.status === "paid").length;
-    const sent = invoices.filter((invoice) => invoice.status === "sent").length;
-    const gross = invoices.reduce((sum, invoice) => sum + Number(invoice.total_gross ?? 0), 0);
-    const balance = invoices.reduce((sum, invoice) => sum + Number(invoice.balance_due ?? 0), 0);
-    return { total: invoiceTotal, paid, sent, gross, balance };
-  }, [invoiceTotal, invoices]);
   const anyQuickFilterActive =
     filters.search.trim() !== "" ||
     filters.patientId !== "" ||
@@ -1133,7 +1122,6 @@ function useStaffInvoicesPageContent() {
     },
   ];
   const nextDunning = useMemo(() => nextDunningLevel(dunningEvents), [dunningEvents]);
-  const accountingSummary = accountingLedger?.summary ?? EMPTY_ACCOUNTING_SUMMARY;
   const accountingEntries = Array.isArray(accountingLedger?.entries) ? accountingLedger.entries : [];
   const accountingMonthly = Array.isArray(accountingLedger?.monthly) ? accountingLedger.monthly : [];
   const applyLoadedInvoiceDetail = useCallback((data: NonNullable<typeof detail>, dunning: typeof dunningEvents) => {
@@ -1450,140 +1438,83 @@ function useStaffInvoicesPageContent() {
           )}
         />
 
-        <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
-          <AdminInlineMetric
-            icon={Wallet}
-            label={t.invoices_title}
-            value={String(stats.total)}
-            description={`${stats.sent} ${text.statsSentWord} / ${stats.paid} ${text.statsPaidWord}`}
-            tone="sky"
-          />
-          <AdminInlineMetric
-            icon={CalendarClock}
-            label={text.grossTotal}
-            value={formatMoney(stats.gross)}
-            description={text.grossTotalDescription}
-            tone="emerald"
-          />
-          <AdminInlineMetric
-            icon={Wallet}
-            label={text.openBalance}
-            value={formatMoney(stats.balance)}
-            description={text.openBalanceDescription}
-            tone="amber"
-          />
-          <AdminInlineMetric
-            icon={Plus}
-            label={text.quotesReady}
-            value={String(filteredQuotes.length)}
-            description={text.quotesReadyDescription}
-            tone="slate"
-          />
-        </div>
-
         {access.canAccounting ? (
           <>
-            <SectionCard
-              title={text.accountingTitle}
-              action={
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <Input
-                    type="number"
-                    min="2020"
-                    max="2100"
-                    value={accountingYear}
-                    onChange={(event) => setAccountingYear(event.target.value || currentYear)}
-                    className={cn(shellInputClassName, "h-8 w-24 rounded-lg bg-background text-[13px]")}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon-sm"
-                    title={text.refreshLedger}
-                    aria-label={text.refreshLedger}
-                    onClick={() => setReloadToken((current) => current + 1)}
-                  >
-                    <RefreshCw className={cn("size-3.5", accountingBusy && "animate-spin")} />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      void downloadAccountingLedgerExport(accountingYear).catch((error) =>
-                        setAccountingError(
-                          error instanceof Error ? error.message : t.common_error,
-                        ),
-                      )
-                    }
-                  >
-                    <Download className="size-3.5" />
-                    {text.exportCsv}
-                  </Button>
-                </div>
-              }
-            >
-              {accountingBusy ? (
-                <LoadingState label={t.common_loading} />
-              ) : accountingError ? (
+            <div className="space-y-2">
+              {accountingError ? (
                 <ShellBanner tone="error">{accountingError}</ShellBanner>
-              ) : accountingLedger ? (
-                <div className="space-y-4">
-                  <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-4">
-                    <MiniMetric
-                      label={text.cashIncome}
-                      value={formatMoney(accountingSummary.income_gross)}
-                    />
-                    <MiniMetric
-                      label={text.cashExpense}
-                      value={formatMoney(accountingSummary.expense_gross)}
-                    />
-                    <MiniMetric
-                      label={text.euerSurplus}
-                      value={formatMoney(accountingSummary.net_surplus)}
-                    />
-                    <MiniMetric
-                      label={text.costPassthroughRevenue}
-                      value={formatMoney(accountingSummary.cost_passthrough_revenue_gross)}
-                    />
-                  </div>
-                  <div className="flex items-center gap-2" aria-hidden>
-                    <span className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border" />
-                    <span className="size-1.5 rounded-full bg-orange-400" />
-                    <span className="size-1.5 rounded-full bg-orange-300" />
-                    <span className="size-1.5 rounded-full bg-orange-200" />
-                    <span className="h-px flex-1 bg-gradient-to-r from-border via-border to-transparent" />
-                  </div>
-                  <DataTableSurface
-                    rows={accountingEntries}
-                    columns={accountingTableColumns}
-                    rowId={(row) => row.id}
-                    defaultDensity="comfortable"
-                    defaultFrozenColumns={ACCOUNTING_DEFAULT_FROZEN_COLUMNS}
-                    dictionary={t as unknown as Record<string, string>}
-                    groupLabels={accountingColumnGroups}
-                    maxFrozenColumns={ACCOUNTING_MAX_FROZEN_COLUMNS}
-                    toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
-                    rowAccent={(row) => (row.direction === "income" ? "bg-emerald-500" : "bg-rose-500")}
-                    emptyState={
-                      <EmptyState
-                        title={text.noAccountingEntries}
-                        description={text.noAccountingEntriesDescription}
-                      />
-                    }
-                  />
-                </div>
               ) : null}
-            </SectionCard>
+              {accountingLedger || accountingBusy ? (
+                <DataTableSurface
+                  loading={accountingBusy}
+                  rows={accountingEntries}
+                  columns={accountingTableColumns}
+                  rowId={(row) => row.id}
+                  defaultDensity="comfortable"
+                  defaultFrozenColumns={ACCOUNTING_DEFAULT_FROZEN_COLUMNS}
+                  dictionary={t as unknown as Record<string, string>}
+                  groupLabels={accountingColumnGroups}
+                  maxFrozenColumns={ACCOUNTING_MAX_FROZEN_COLUMNS}
+                  toolbarStart={
+                    <>
+                      <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
+                        {text.accountingTitle}
+                      </span>
+                      <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
+                      <Input
+                        type="number"
+                        min="2020"
+                        max="2100"
+                        value={accountingYear}
+                        onChange={(event) => setAccountingYear(event.target.value || currentYear)}
+                        aria-label={text.accountingTitle}
+                        className={cn(shellInputClassName, "h-8 w-24 shrink-0 rounded-lg bg-background text-[13px]")}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon-sm"
+                        title={text.refreshLedger}
+                        aria-label={text.refreshLedger}
+                        onClick={() => setReloadToken((current) => current + 1)}
+                      >
+                        <RefreshCw className={cn("size-3.5", accountingBusy && "animate-spin")} />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          void downloadAccountingLedgerExport(accountingYear).catch((error) =>
+                            setAccountingError(
+                              error instanceof Error ? error.message : t.common_error,
+                            ),
+                          )
+                        }
+                      >
+                        <Download className="size-3.5" />
+                        {text.exportCsv}
+                      </Button>
+                    </>
+                  }
+                  rowAccent={(row) => (row.direction === "income" ? "bg-emerald-500" : "bg-rose-500")}
+                  emptyState={
+                    <EmptyState
+                      title={text.noAccountingEntries}
+                      description={text.noAccountingEntriesDescription}
+                    />
+                  }
+                />
+              ) : null}
+            </div>
             {!accountingBusy && !accountingError && accountingLedger ? (
-              <section className="rounded-xl border border-border bg-card p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.monthlyEuer)}</h2>
-                  </div>
-                </div>
-                <div className="mt-5">
+              <section>
                   <DataTableSurface
+                    toolbarStart={
+                      <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
+                        {text.monthlyEuer}
+                      </span>
+                    }
                     rows={accountingMonthly}
                     columns={accountingMonthlyTableColumns}
                     rowId={(row) => row.period}
@@ -1606,7 +1537,6 @@ function useStaffInvoicesPageContent() {
                       />
                     }
                   />
-                </div>
               </section>
             ) : null}
           </>
