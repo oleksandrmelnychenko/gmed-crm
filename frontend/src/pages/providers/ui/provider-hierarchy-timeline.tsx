@@ -1,7 +1,8 @@
 import { Fragment, useMemo, useState } from "react";
-import { Building2, ChevronRight, Stethoscope } from "lucide-react";
+import { Building2, ChevronLeft, ChevronRight, Stethoscope } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -37,6 +38,7 @@ const LEVEL_ORDER: Record<ProviderOrganizationLevel, number> = {
 };
 const CONNECTOR_STEP = 34;
 const CONNECTOR_CENTER = 14;
+const TIMELINE_ROOTS_PAGE_SIZE = 10;
 const LEVEL_BY_DEPTH: ProviderOrganizationLevel[] = ["organization", "clinic", "department", "unit"];
 
 function levelLabel(level: ProviderOrganizationLevel, tr: Record<string, string>) {
@@ -253,10 +255,18 @@ export function ProviderHierarchyTimeline({
   tr,
 }: ProviderHierarchyTimelineProps) {
   const [collapsedRootIds, setCollapsedRootIds] = useState<Set<string>>(() => new Set());
+  const [pageIndex, setPageIndex] = useState(0);
   const tree = useMemo(() => buildProviderTimelineTree(providers), [providers]);
+  const totalPages = Math.max(1, Math.ceil(tree.length / TIMELINE_ROOTS_PAGE_SIZE));
+  const safePageIndex = Math.min(pageIndex, totalPages - 1);
+  const pageStart = safePageIndex * TIMELINE_ROOTS_PAGE_SIZE;
+  const pagedTree = useMemo(
+    () => tree.slice(pageStart, pageStart + TIMELINE_ROOTS_PAGE_SIZE),
+    [pageStart, tree],
+  );
   const timelineItems = useMemo(
-    () => flattenProviderTimelineTree(tree, { collapsedRootIds }),
-    [collapsedRootIds, tree],
+    () => flattenProviderTimelineTree(pagedTree, { collapsedRootIds }),
+    [collapsedRootIds, pagedTree],
   );
   const toggleRootCollapsed = (providerId: string) => {
     setCollapsedRootIds((current) => {
@@ -344,6 +354,40 @@ export function ProviderHierarchyTimeline({
           </div>
         </div>
       )}
+      {totalPages > 1 ? (
+        <div className="flex items-center justify-between gap-2 border-t border-border/60 bg-muted/15 px-4 py-2">
+          <span className="font-mono text-xs tabular-nums text-muted-foreground">
+            {pageStart + 1}-{Math.min(pageStart + TIMELINE_ROOTS_PAGE_SIZE, tree.length)} / {tree.length}
+          </span>
+          <div className="flex items-center gap-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              className="size-7 rounded-md"
+              disabled={safePageIndex === 0}
+              aria-label={tr.pagination_previous ?? "Previous"}
+              onClick={() => setPageIndex(Math.max(0, safePageIndex - 1))}
+            >
+              <ChevronLeft className="size-3.5" />
+            </Button>
+            <span className="min-w-12 text-center font-mono text-xs font-medium tabular-nums text-foreground">
+              {safePageIndex + 1} / {totalPages}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              className="size-7 rounded-md"
+              disabled={safePageIndex >= totalPages - 1}
+              aria-label={tr.pagination_next ?? "Next"}
+              onClick={() => setPageIndex(Math.min(totalPages - 1, safePageIndex + 1))}
+            >
+              <ChevronRight className="size-3.5" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
