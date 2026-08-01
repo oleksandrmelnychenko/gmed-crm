@@ -40,6 +40,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { countryNameForDisplay } from "@/components/ui/country-select";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { LanguageMultiSelect, languageLabel } from "@/components/ui/language-multi-select";
@@ -120,7 +121,6 @@ import {
   parseWeeklyAvailability,
   patientLabel,
   personGenderLabel,
-  providerMeta,
   providerLoadErrorMessage,
   providerOrganizationLevelLabel,
   providerPermissions,
@@ -4699,7 +4699,10 @@ function ProviderDoctorDetailSheet({
             {isMedicalProvider ? (
               <Section title={l("providers_license")}>
                 <ReadOnlyLine label={l("providers_license_number")} value={licenseNumber || t.common_not_set} />
-                <ReadOnlyLine label={l("providers_licensing_country")} value={licensingCountry || t.common_not_set} />
+                <ReadOnlyLine
+                  label={l("providers_licensing_country")}
+                  value={countryNameForDisplay(licensingCountry, lang) || t.common_not_set}
+                />
                 <ReadOnlyLine label={l("providers_license_valid_until")} value={compactDate(licensingValidUntil, t.common_not_set)} />
               </Section>
             ) : null}
@@ -4759,9 +4762,16 @@ function patientProfileHref(patientId: string) {
   return `/patients/${encodeURIComponent(patientId)}`;
 }
 
-function linkedPatientAddress(patient: Pick<LinkedPatient, "address_street" | "address_city" | "address_zip" | "address_country">) {
+function linkedPatientAddress(
+  patient: Pick<LinkedPatient, "address_street" | "address_city" | "address_zip" | "address_country">,
+  lang: "de" | "ru",
+) {
   const cityLine = [patient.address_zip, patient.address_city].filter(Boolean).join(" ");
-  return [patient.address_street, cityLine, patient.address_country].filter(Boolean).join(", ");
+  return [
+    patient.address_street,
+    cityLine,
+    countryNameForDisplay(patient.address_country, lang),
+  ].filter(Boolean).join(", ");
 }
 
 function PatientProfileLink({
@@ -4797,9 +4807,9 @@ function LinkedPatientCard({
   patient: LinkedPatient;
   className?: string;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
-  const address = linkedPatientAddress(patient);
+  const address = linkedPatientAddress(patient, lang);
 
   return (
     <div className={cn("rounded-lg border border-border/70 bg-card px-3 py-2.5", className)}>
@@ -5280,7 +5290,7 @@ function ProviderDoctorRelationshipFormSheet({
   onChange: (patch: Partial<DoctorRelationshipFormState>) => void;
   onTargetProviderChange: (providerId: string) => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   const sourceDoctor = sourceDoctors.find((doctor) => doctor.id === form.sourceDoctorId);
   const availableTargetDoctors = targetDoctors.filter(
@@ -5346,7 +5356,11 @@ function ProviderDoctorRelationshipFormSheet({
                       taxonomySelectClassName={formSelectClassName}
                       providerSelectClassName={formSelectClassName}
                       providerLabel={(provider) =>
-                        [provider.name, provider.address_city, provider.address_country]
+                        [
+                          provider.name,
+                          provider.address_city,
+                          countryNameForDisplay(provider.address_country, lang),
+                        ]
                           .filter(Boolean)
                           .join(" - ")
                       }
@@ -6257,11 +6271,21 @@ function HeroAvailabilityTable({
   return <WeeklyAvailabilityBadgeList value={value} className="max-w-md gap-x-1.5 gap-y-1.5" />;
 }
 
-function providerFullAddressLine(detail: ProviderDetail) {
+function localizedProviderMeta(
+  provider: Pick<ProviderDetail, "address_city" | "address_country">,
+  lang: "de" | "ru",
+) {
+  return [
+    provider.address_city,
+    countryNameForDisplay(provider.address_country, lang),
+  ].filter(Boolean).join(", ");
+}
+
+function providerFullAddressLine(detail: ProviderDetail, lang: "de" | "ru") {
   const cityLine = [detail.address_zip, detail.address_city]
     .filter(Boolean)
     .join(" ");
-  return [detail.address_street, cityLine, detail.address_country]
+  return [detail.address_street, cityLine, countryNameForDisplay(detail.address_country, lang)]
     .filter(Boolean)
     .join(", ");
 }
@@ -6287,10 +6311,10 @@ function ProviderSheetHero({
   const tr = t as unknown as Record<string, string>;
   const l = (key: string) => t.uiText[key] ?? key;
   const isMedical = detail.provider_type === "medical";
-  const addressLine = providerFullAddressLine(detail);
+  const addressLine = providerFullAddressLine(detail, lang);
   const metaLine = [
     detail.legal_name && detail.legal_name !== detail.name ? detail.legal_name : null,
-    providerMeta(detail),
+    localizedProviderMeta(detail, lang),
   ].filter(Boolean).join(" - ");
   const insuranceTypeLine = insuranceTypeText(detail.insurance_providers, t);
   const specializationLine = specializationText(detail.specializations, detail.fachbereich, lang);
@@ -6366,7 +6390,7 @@ function ProviderSheetHero({
           </div>
           <div className="mt-5 grid overflow-hidden rounded-lg border border-border/70 bg-card md:grid-cols-2">
             <HeroInfoTableRow icon={MapPin} label={l("patients_address")}>
-              {addressLine || providerMeta(detail) || t.common_not_set}
+              {addressLine || localizedProviderMeta(detail, lang) || t.common_not_set}
             </HeroInfoTableRow>
             <HeroInfoTableRow icon={Phone} label={t.field_phone}>
               {detail.phone || t.common_not_set}
@@ -8247,7 +8271,11 @@ function ProviderProfileFields({
             <option value="">{l("providers_no_parent")}</option>
             {parentOptions.map((provider) => (
               <option key={provider.id} value={provider.id}>
-                {[provider.name, provider.address_city, provider.address_country]
+                {[
+                  provider.name,
+                  provider.address_city,
+                  countryNameForDisplay(provider.address_country, lang),
+                ]
                   .filter(Boolean)
                   .join(" - ")}
               </option>

@@ -1,6 +1,7 @@
 import { ArrowUpRight, Building2, MapPin } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { countryNameForDisplay } from "@/components/ui/country-select";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -60,7 +61,10 @@ export function ProviderChildrenSection({
       ) : (
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {providerChildren.map((child) => {
-            const location = [child.address_city, child.address_country].filter(Boolean).join(", ");
+            const location = [
+              child.address_city,
+              countryNameForDisplay(child.address_country, lang),
+            ].filter(Boolean).join(", ");
 
             return (
               <button

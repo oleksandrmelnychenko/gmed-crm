@@ -49,6 +49,17 @@ function countryCodeFromStoredValue(value: string | null | undefined) {
   const upper = trimmed.toUpperCase();
   if (COUNTRY_CODE_SET.has(upper)) return upper;
 
+  const legacyCode = ({
+    "cape verde": "CV",
+    "czech republic": "CZ",
+    "east timor": "TL",
+    "ivory coast": "CI",
+    swaziland: "SZ",
+    turkey: "TR",
+    "vatican city": "VA",
+  } as Record<string, string>)[countryNameKey(trimmed)];
+  if (legacyCode) return legacyCode;
+
   if (!countryCodeByLocalizedName) {
     countryCodeByLocalizedName = new Map<string, string>();
     for (const locale of ["de", "en", "ru"]) {
@@ -73,6 +84,18 @@ export function countryNameForGermanDocument(value: string | null | undefined) {
 
   const code = normalized.toUpperCase();
   return COUNTRY_CODE_SET.has(code) ? countryLabel(code, "de") : normalized;
+}
+
+/** Localized display label for either a stored ISO code or a legacy country name. */
+export function countryNameForDisplay(
+  value: string | null | undefined,
+  lang: string,
+) {
+  const normalized = countryCodeFromStoredValue(value);
+  if (!normalized) return "";
+
+  const code = normalized.toUpperCase();
+  return COUNTRY_CODE_SET.has(code) ? countryLabel(code, lang) : normalized;
 }
 
 /** Localized human-readable country name for an ISO alpha-2 code. */

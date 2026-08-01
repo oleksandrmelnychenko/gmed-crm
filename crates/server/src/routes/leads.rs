@@ -646,6 +646,14 @@ fn lead_requires_enhanced_due_diligence(country: Option<&str>, wizard_state: &Va
             .get("registration_country")
             .and_then(Value::as_str)
             .is_some_and(is_enhanced_due_diligence_country)
+        || wizard_state
+            .pointer("/aml_enhanced_due_diligence/pepContractPartner")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        || wizard_state
+            .pointer("/aml_enhanced_due_diligence/pepBeneficialOwner")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
 }
 
 #[derive(Default)]
@@ -5016,6 +5024,14 @@ mod lead_conversion_readiness_tests {
         assert!(lead_requires_enhanced_due_diligence(
             Some("Russische Föderation"),
             &json!({}),
+        ));
+        assert!(lead_requires_enhanced_due_diligence(
+            Some("DE"),
+            &json!({
+                "aml_enhanced_due_diligence": {
+                    "pepContractPartner": true
+                }
+            }),
         ));
         assert!(!lead_requires_enhanced_due_diligence(
             Some("DE"),

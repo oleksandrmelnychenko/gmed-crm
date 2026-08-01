@@ -1,6 +1,7 @@
 import { ChevronRight } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { countryNameForDisplay } from "@/components/ui/country-select";
 import type { ColumnDef, FilterOption } from "@/components/data-table/types";
 import { cn } from "@/lib/utils";
 
@@ -57,12 +58,14 @@ function deriveDynamicOptions(
   lang: "de" | "ru",
 ): ProviderDynamicOptions {
   const cities = new Set<string>();
-  const countries = new Set<string>();
+  const countries = new Map<string, string>();
   const fachbereiche = new Map<string, string>();
 
   for (const row of rows) {
     if (row.address_city) cities.add(row.address_city);
-    if (row.address_country) countries.add(row.address_country);
+    if (row.address_country) {
+      countries.set(row.address_country, countryNameForDisplay(row.address_country, lang));
+    }
     if (row.fachbereich) {
       fachbereiche.set(row.fachbereich, providerSpecializationLabel(row, lang, row.fachbereich));
     }
@@ -70,7 +73,7 @@ function deriveDynamicOptions(
 
   return {
     cities: optionsFrom(cities),
-    countries: optionsFrom(countries),
+    countries: optionsFromMap(countries),
     fachbereiche: optionsFromMap(fachbereiche),
   };
 }
@@ -387,7 +390,7 @@ export function buildProviderColumns(
       group: "registry",
       render: (provider) => (
         <span className="truncate text-xs text-muted-foreground">
-          {provider.address_country || notSet}
+          {countryNameForDisplay(provider.address_country, lang) || notSet}
         </span>
       ),
     },

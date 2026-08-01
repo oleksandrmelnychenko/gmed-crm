@@ -12907,19 +12907,30 @@ async fn generate_document(
             };
             let required_text_fields = [
                 aml.risk_reason.as_deref(),
+                aml.manager_approval_name.as_deref(),
+                aml.continuous_monitoring.as_deref(),
+                aml.reviewer_name.as_deref(),
+            ];
+            let country_risk = matches!(aml.risk_tier.as_deref(), Some("blacklist" | "high_risk"))
+                || !aml.triggered_countries.is_empty();
+            let pep_risk = aml.pep_contract_partner || aml.pep_beneficial_owner;
+            let country_required_fields = [
                 aml.affected_third_country.as_deref(),
                 aml.additional_contract_partner_info.as_deref(),
                 aml.intended_business_relationship_info.as_deref(),
                 aml.contract_partner_asset_info.as_deref(),
                 aml.transaction_reasons.as_deref(),
                 aml.planned_asset_use.as_deref(),
-                aml.manager_approval_name.as_deref(),
-                aml.continuous_monitoring.as_deref(),
-                aml.reviewer_name.as_deref(),
             ];
-            if required_text_fields
-                .iter()
-                .any(|value| value.map(str::trim).is_none_or(|value| value.is_empty()))
+            let pep_required_fields = [
+                aml.pep_office_function.as_deref(),
+                aml.pep_asset_origin.as_deref(),
+            ];
+            let missing_text =
+                |value: &Option<&str>| value.map(str::trim).is_none_or(|value| value.is_empty());
+            if required_text_fields.iter().any(missing_text)
+                || (country_risk && country_required_fields.iter().any(missing_text))
+                || (pep_risk && pep_required_fields.iter().any(missing_text))
                 || aml.review_date.is_none()
             {
                 return err(
@@ -15989,6 +16000,7 @@ fn build_enhanced_due_diligence_pdf(
         .join(", ");
     let risk_tier = match aml.risk_tier.as_deref() {
         Some("blacklist") => "Blacklist / besonders hohes Risiko",
+        Some("pep") => "Politisch exponierte Person (PeP)",
         _ => "Drittstaat mit hohem Risiko",
     };
     let review_date = aml

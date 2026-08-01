@@ -2,6 +2,7 @@ import { Fragment, useMemo, useState } from "react";
 import { Building2, ChevronRight, Stethoscope } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { countryNameForDisplay } from "@/components/ui/country-select";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -383,7 +384,10 @@ function TimelineNode({
   const hasChildren = children.length > 0;
   const tone = levelTone(provider.organization_level);
   const active = selectedProviderId === provider.id;
-  const locationText = [provider.address_city, provider.address_country].filter(Boolean).join(", ");
+  const locationText = [
+    provider.address_city,
+    countryNameForDisplay(provider.address_country, lang),
+  ].filter(Boolean).join(", ");
   const specializationText = providerSpecializationText(provider, lang);
   const connectorWidth = (depth + 1) * CONNECTOR_STEP;
   const currentCenter = depth * CONNECTOR_STEP + CONNECTOR_CENTER;
