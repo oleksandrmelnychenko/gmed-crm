@@ -478,8 +478,16 @@ export function SpecializationsPage() {
                         <span className="block truncate text-sm font-semibold">
                           {specializationName(item, lang)}
                         </span>
-                        <span className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground">
-                          {item.code}
+                        <span className="mt-1 flex min-w-0 items-center gap-1.5">
+                          <span className="inline-flex max-w-full items-center truncate rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-mono text-[10px] font-medium text-sky-700">
+                            {item.code}
+                          </span>
+                          <span
+                            className="inline-flex shrink-0 items-center rounded-full border border-border/60 bg-background px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums text-foreground"
+                            title={tx("Количество видов работ", "Anzahl der Leistungsarten")}
+                          >
+                            {item.work_type_count ?? 0}
+                          </span>
                         </span>
                       </span>
                       {!item.is_active ? (

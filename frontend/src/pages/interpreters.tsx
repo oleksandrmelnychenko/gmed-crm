@@ -21,6 +21,7 @@ import { useParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui-shell";
 import { apiFetch, downloadApiFile } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import {
@@ -1204,34 +1205,32 @@ export function InterpretersPage() {
   }
 
   return (
-    <main className="min-h-[calc(100vh-3rem)] bg-background">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-5 py-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-foreground">
-              {copy.title}
-            </h1>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setCreateAccountOpen(true)}
-	            >
-	              <Plus className="size-4" />
-	              {copy.newInternalEmployee}
-	            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void loadItems()}
-              disabled={loading}
-	            >
-	              <RefreshCcw className="size-4" />
-	              {copy.refresh}
-	            </Button>
-          </div>
-        </div>
+    <div className="space-y-4">
+      <div className="flex w-full flex-col gap-4">
+        <PageHeader
+          title={copy.title}
+          actions={
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setCreateAccountOpen(true)}
+              >
+                <Plus className="size-4" />
+                {copy.newInternalEmployee}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void loadItems()}
+                disabled={loading}
+              >
+                <RefreshCcw className="size-4" />
+                {copy.refresh}
+              </Button>
+            </>
+          }
+        />
 
         {error ? (
           <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -1450,7 +1449,7 @@ export function InterpretersPage() {
                       : "border-border bg-card hover:border-primary/40"
                   }`}
                 >
-                  <span className="block text-sm font-medium text-foreground">
+                  <span className="block truncate font-mono text-xs font-medium text-foreground">
                     {item.name}
                   </span>
                   <span className="mt-1 block text-xs text-muted-foreground">
@@ -2404,6 +2403,6 @@ export function InterpretersPage() {
           ) : null}
         </div>
       </div>
-    </main>
+    </div>
   );
 }

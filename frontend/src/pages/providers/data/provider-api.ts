@@ -33,6 +33,9 @@ function normalizeSpecializationItem<T extends SpecializationItem>(item: T): T {
     ...item,
     is_active: item.is_active ?? true,
     sort_order: item.sort_order ?? 1000,
+    work_type_count: Number.isFinite(Number(item.work_type_count))
+      ? Number(item.work_type_count)
+      : 0,
   };
 }
 

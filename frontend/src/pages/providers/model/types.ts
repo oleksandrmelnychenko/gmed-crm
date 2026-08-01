@@ -19,6 +19,7 @@ export type SpecializationItem = {
   name_es?: string | null;
   is_active: boolean;
   sort_order: number;
+  work_type_count?: number;
   created_at?: string;
   updated_at?: string;
   is_primary?: boolean;

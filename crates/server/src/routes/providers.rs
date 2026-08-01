@@ -6417,11 +6417,30 @@ async fn load_specializations_json(
     include_inactive: bool,
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
     let rows = sqlx::query(
-        r#"SELECT id, code, name_en, name_de, name_ru, name_es, is_active, sort_order, created_at, updated_at
-           FROM medical_specializations
-           WHERE deleted_at IS NULL
-             AND ($1 OR is_active = TRUE)
-           ORDER BY is_active DESC, sort_order, COALESCE(name_de, name_en), name_en"#,
+        r#"SELECT ms.id,
+                  ms.code,
+                  ms.name_en,
+                  ms.name_de,
+                  ms.name_ru,
+                  ms.name_es,
+                  ms.is_active,
+                  ms.sort_order,
+                  ms.created_at,
+                  ms.updated_at,
+                  COUNT(DISTINCT wt.id) AS work_type_count
+           FROM medical_specializations ms
+           LEFT JOIN medical_specialization_work_type_assignments assignment
+             ON assignment.specialization_id = ms.id
+           LEFT JOIN medical_specialization_work_types wt
+             ON wt.id = assignment.work_type_id
+            AND wt.deleted_at IS NULL
+           WHERE ms.deleted_at IS NULL
+             AND ($1 OR ms.is_active = TRUE)
+           GROUP BY ms.id
+           ORDER BY ms.is_active DESC,
+                    ms.sort_order,
+                    COALESCE(ms.name_de, ms.name_en),
+                    ms.name_en"#,
     )
     .bind(include_inactive)
     .fetch_all(&state.db)
@@ -6446,6 +6465,7 @@ async fn load_specializations_json(
                 "name_es": row.try_get::<Option<String>, _>("name_es").unwrap_or_default(),
                 "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
                 "sort_order": row.try_get::<i32, _>("sort_order").unwrap_or_default(),
+                "work_type_count": row.try_get::<i64, _>("work_type_count").unwrap_or_default(),
                 "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                 "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
             })
