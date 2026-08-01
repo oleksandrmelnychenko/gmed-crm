@@ -208,6 +208,17 @@ const STAFF_INVOICE_REALTIME_EVENTS = [
   "document.payment_proof_uploaded",
 ] as const;
 
+function quoteOptionLabel(quote: QuoteOption) {
+  return [
+    quote.quote_number,
+    quote.patient_name,
+    quote.order_number,
+    quote.patient_pid,
+  ]
+    .filter((value) => value.trim().length > 0)
+    .join(" | ");
+}
+
 function openPdfBlobPreview(blob: Blob, popupMessage: string) {
   const url = URL.createObjectURL(blob);
   const previewWindow = window.open(url, "_blank", "noopener,noreferrer");
@@ -814,7 +825,7 @@ function useStaffInvoicesPageContent() {
       },
       {
         id: "quote_number",
-        label: t.contracts_type,
+        label: text.createQuoteSection,
         accessor: (row) => row.quote_number ?? "",
         filterType: "text",
         group: "context",
@@ -1709,7 +1720,7 @@ function useStaffInvoicesPageContent() {
               <option value="__all__">{text.allQuotes}</option>
               {filteredQuotes.map((quote) => (
                 <option key={quote.id} value={quote.id}>
-                  {`${quote.quote_number} | ${quote.order_number} | ${quote.patient_pid}`}
+                  {quoteOptionLabel(quote)}
                 </option>
               ))}
             </NativeComboboxSelect>
@@ -1865,7 +1876,7 @@ function useStaffInvoicesPageContent() {
                 <section className="rounded-xl border border-border bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.createQuoteSection)}</h2>
                   <div className="mt-5 space-y-4">
-                    <Field label={t.contracts_type}>
+                    <Field label={text.createQuoteSection}>
                       <NativeComboboxSelect
                         value={createForm.quoteId || "__empty__"}
                         onChange={(event) =>
@@ -1882,7 +1893,7 @@ function useStaffInvoicesPageContent() {
                         <option value="__empty__">{text.chooseQuote}</option>
                         {filteredQuotes.map((quote) => (
                           <option key={quote.id} value={quote.id}>
-                            {`${quote.quote_number} | ${quote.order_number} | ${quote.patient_pid}`}
+                            {quoteOptionLabel(quote)}
                           </option>
                         ))}
                       </NativeComboboxSelect>
@@ -1890,7 +1901,7 @@ function useStaffInvoicesPageContent() {
                     <Field label={text.selectedQuoteSnapshot}>
                       <div className={cn("rounded-xl px-3 py-2 text-sm text-foreground", tokens.surface.mutedCard)}>
                         {selectedCreateQuote
-                          ? `${selectedCreateQuote.quote_number} | ${selectedCreateQuote.order_number} | ${formatMoney(selectedCreateQuote.total_gross)}`
+                          ? `${quoteOptionLabel(selectedCreateQuote)} | ${formatMoney(selectedCreateQuote.total_gross)}`
                           : text.chooseQuote}
                       </div>
                     </Field>
@@ -2067,7 +2078,7 @@ function useStaffInvoicesPageContent() {
                     <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
                       <SummaryLine label={t.invoices_patient} value={detail.patient_pid} />
                       <SummaryLine label={t.orders_title} value={detail.order_number} />
-                      <SummaryLine label={t.contracts_type} value={detail.quote_number ?? t.common_not_set} />
+                      <SummaryLine label={text.createQuoteSection} value={detail.quote_number ?? t.common_not_set} />
                       <SummaryLine label={t.invoices_issued_at} value={formatDateTime(detail.issued_at, locale, t.common_not_set)} />
                       <SummaryLine label={t.invoices_due_at} value={formatDate(detail.due_date, locale, t.common_not_set)} />
                       <SummaryLine label={t.invoices_paid_at} value={formatDateTime(detail.paid_at, locale, t.common_not_set)} />

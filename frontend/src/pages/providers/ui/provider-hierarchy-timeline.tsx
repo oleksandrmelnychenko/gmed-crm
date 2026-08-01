@@ -8,7 +8,6 @@ import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { ProviderCategoryIcon } from "./provider-category-icon";
-import { ProviderStatusPill } from "./provider-status-pill";
 import { providerTypeLabel } from "../model/list-model";
 import { specializationLabelForItem, specializationLabelForValue } from "../model/specialization-labels";
 import type { ProviderOrganizationLevel, ProviderSummary, SpecializationItem } from "../model/types";
@@ -38,7 +37,7 @@ const LEVEL_ORDER: Record<ProviderOrganizationLevel, number> = {
 };
 const CONNECTOR_STEP = 34;
 const CONNECTOR_CENTER = 14;
-const TIMELINE_ROOTS_PAGE_SIZE = 10;
+const TIMELINE_ROOTS_PAGE_SIZE = 50;
 const LEVEL_BY_DEPTH: ProviderOrganizationLevel[] = ["organization", "clinic", "department", "unit"];
 
 function levelLabel(level: ProviderOrganizationLevel, tr: Record<string, string>) {
@@ -240,6 +239,7 @@ export function flattenProviderTimelineTree(
 }
 
 type ProviderHierarchyTimelineProps = {
+  className?: string;
   lang: Lang;
   onProviderClick: (providerId: string) => void;
   providers: readonly ProviderSummary[];
@@ -248,6 +248,7 @@ type ProviderHierarchyTimelineProps = {
 };
 
 export function ProviderHierarchyTimeline({
+  className,
   lang,
   onProviderClick,
   providers,
@@ -279,57 +280,25 @@ export function ProviderHierarchyTimeline({
       return next;
     });
   };
-  const organizationDividerIds = useMemo(() => {
-    const ids = new Set<string>();
-    let hasRootOrganization = false;
-
-    for (const item of timelineItems) {
-      if (item.depth !== 0 || item.node.provider.organization_level !== "organization") {
-        continue;
-      }
-
-      if (hasRootOrganization) {
-        ids.add(item.node.provider.id);
-      }
-      hasRootOrganization = true;
-    }
-
-    return ids;
-  }, [timelineItems]);
-  const childCount = providers.filter((provider) => provider.parent_provider_id).length;
 
   if (providers.length === 0) return null;
 
   return (
     <section
       data-testid="provider-hierarchy-timeline"
-      className="rounded-lg border border-border/70 bg-card shadow-sm"
+      className={cn("rounded-lg border border-border/70 bg-card shadow-sm", className)}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
-        <div className="min-w-0">
-          <h2 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
-            {tr.providers_hierarchy_timeline_title ?? tr.providers_children ?? tr.providers_title}
-          </h2>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-            <span className="tabular-nums">{providers.length}</span>
-            <span>{tr.providers_title?.toLowerCase() ?? "providers"}</span>
-            <span className="text-border">/</span>
-            <span className="tabular-nums">{childCount}</span>
-            <span>{tr.providers_children?.toLowerCase() ?? "children"}</span>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {(["organization", "clinic", "department", "unit"] as const).map((level) => (
-            <Badge
-              key={level}
-              variant="outline"
-              className={cn("rounded-full text-[10px]", levelTone(level).badge)}
-            >
-              {levelLabel(level, tr)}
-            </Badge>
-          ))}
-        </div>
-      </div>
+      {totalPages > 1 ? (
+        <TimelinePager
+          className="border-b border-border/60"
+          pageStart={pageStart}
+          safePageIndex={safePageIndex}
+          totalPages={totalPages}
+          totalRoots={tree.length}
+          tr={tr}
+          onPageChange={setPageIndex}
+        />
+      ) : null}
       {tree.length === 0 ? (
         <div className="px-4 py-6 text-sm text-muted-foreground">
           {tr.providers_hierarchy_timeline_empty ?? tr.common_no_results}
@@ -339,7 +308,6 @@ export function ProviderHierarchyTimeline({
           <div className="space-y-1.5">
             {timelineItems.map((item) => (
               <Fragment key={item.node.provider.id}>
-                {organizationDividerIds.has(item.node.provider.id) ? <OrganizationDivider /> : null}
                 <TimelineNode
                   item={item}
                   isCollapsed={item.depth === 0 && collapsedRootIds.has(item.node.provider.id)}
@@ -355,51 +323,69 @@ export function ProviderHierarchyTimeline({
         </div>
       )}
       {totalPages > 1 ? (
-        <div className="flex items-center justify-between gap-2 border-t border-border/60 bg-muted/15 px-4 py-2">
-          <span className="font-mono text-xs tabular-nums text-muted-foreground">
-            {pageStart + 1}-{Math.min(pageStart + TIMELINE_ROOTS_PAGE_SIZE, tree.length)} / {tree.length}
-          </span>
-          <div className="flex items-center gap-1.5">
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              className="size-7 rounded-md"
-              disabled={safePageIndex === 0}
-              aria-label={tr.pagination_previous ?? "Previous"}
-              onClick={() => setPageIndex(Math.max(0, safePageIndex - 1))}
-            >
-              <ChevronLeft className="size-3.5" />
-            </Button>
-            <span className="min-w-12 text-center font-mono text-xs font-medium tabular-nums text-foreground">
-              {safePageIndex + 1} / {totalPages}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              className="size-7 rounded-md"
-              disabled={safePageIndex >= totalPages - 1}
-              aria-label={tr.pagination_next ?? "Next"}
-              onClick={() => setPageIndex(Math.min(totalPages - 1, safePageIndex + 1))}
-            >
-              <ChevronRight className="size-3.5" />
-            </Button>
-          </div>
-        </div>
+        <TimelinePager
+          className="border-t border-border/60 bg-muted/15"
+          pageStart={pageStart}
+          safePageIndex={safePageIndex}
+          totalPages={totalPages}
+          totalRoots={tree.length}
+          tr={tr}
+          onPageChange={setPageIndex}
+        />
       ) : null}
     </section>
   );
 }
 
-function OrganizationDivider() {
+function TimelinePager({
+  className,
+  pageStart,
+  safePageIndex,
+  totalPages,
+  totalRoots,
+  tr,
+  onPageChange,
+}: {
+  className?: string;
+  pageStart: number;
+  safePageIndex: number;
+  totalPages: number;
+  totalRoots: number;
+  tr: Record<string, string>;
+  onPageChange: (pageIndex: number) => void;
+}) {
   return (
-    <div className="flex items-center gap-2 py-2" aria-hidden>
-      <span className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border" />
-      <span className="size-1.5 rounded-full bg-orange-400" />
-      <span className="size-1.5 rounded-full bg-orange-300" />
-      <span className="size-1.5 rounded-full bg-orange-200" />
-      <span className="h-px flex-1 bg-gradient-to-r from-border via-border to-transparent" />
+    <div className={cn("flex items-center justify-between gap-2 px-4 py-2", className)}>
+      <span className="font-mono text-xs tabular-nums text-muted-foreground">
+        {pageStart + 1}-{Math.min(pageStart + TIMELINE_ROOTS_PAGE_SIZE, totalRoots)} / {totalRoots}
+      </span>
+      <div className="flex items-center gap-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className="size-7 rounded-md"
+          disabled={safePageIndex === 0}
+          aria-label={tr.pagination_previous ?? "Previous"}
+          onClick={() => onPageChange(Math.max(0, safePageIndex - 1))}
+        >
+          <ChevronLeft className="size-3.5" />
+        </Button>
+        <span className="min-w-12 text-center font-mono text-xs font-medium tabular-nums text-foreground">
+          {safePageIndex + 1} / {totalPages}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className="size-7 rounded-md"
+          disabled={safePageIndex >= totalPages - 1}
+          aria-label={tr.pagination_next ?? "Next"}
+          onClick={() => onPageChange(Math.min(totalPages - 1, safePageIndex + 1))}
+        >
+          <ChevronRight className="size-3.5" />
+        </Button>
+      </div>
     </div>
   );
 }
@@ -413,6 +399,25 @@ type TimelineNodeProps = {
   selectedProviderId?: string | null;
   tr: Record<string, string>;
 };
+
+const LOCATION_CHIP_TONES = [
+  "border-sky-200 bg-sky-50 text-sky-700",
+  "border-emerald-200 bg-emerald-50 text-emerald-700",
+  "border-amber-200 bg-amber-50 text-amber-700",
+  "border-violet-200 bg-violet-50 text-violet-700",
+  "border-rose-200 bg-rose-50 text-rose-700",
+  "border-teal-200 bg-teal-50 text-teal-700",
+  "border-indigo-200 bg-indigo-50 text-indigo-700",
+  "border-orange-200 bg-orange-50 text-orange-700",
+] as const;
+
+function locationChipTone(text: string) {
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) | 0;
+  }
+  return LOCATION_CHIP_TONES[Math.abs(hash) % LOCATION_CHIP_TONES.length];
+}
 
 function TimelineNode({
   isCollapsed,
@@ -435,11 +440,7 @@ function TimelineNode({
   const specializationText = providerSpecializationText(provider, lang);
   const connectorWidth = (depth + 1) * CONNECTOR_STEP;
   const currentCenter = depth * CONNECTOR_STEP + CONNECTOR_CENTER;
-  const isRootOrganization = depth === 0 && provider.organization_level === "organization";
   const canToggleRoot = depth === 0 && hasChildren;
-  const showCurrentConnector = !isRootOrganization;
-  const connectParentAbove = showCurrentConnector && depth > 0;
-  const connectBelow = showCurrentConnector && depth > 0 && !isLast;
 
   return (
     <div className="relative flex min-w-0 items-stretch">
@@ -447,52 +448,46 @@ function TimelineNode({
         {item.ancestorHasNext.map((hasNext, levelDepth) => {
           if (!hasNext || levelDepth === 0 || levelDepth >= depth) return null;
 
+          // Pass-through rail for an ancestor level that continues below.
+          // The -6px top bridges the 6px gap between rows, keeping the
+          // line continuous without poking outside the list container.
           return (
             <span
               key={levelDepth}
               aria-hidden="true"
-              className={cn("absolute inset-y-[-10px] w-px rounded-full", railClassForDepth(levelDepth))}
-              style={{ left: levelDepth * CONNECTOR_STEP + CONNECTOR_CENTER }}
+              className={cn("absolute w-px", railClassForDepth(levelDepth))}
+              style={{
+                left: levelDepth * CONNECTOR_STEP + CONNECTOR_CENTER,
+                top: -6,
+                bottom: 0,
+              }}
             />
           );
         })}
-        {connectParentAbove ? (
-          <span
-            aria-hidden="true"
-            className={cn("absolute top-[-10px] w-px rounded-full", tone.rail)}
-            style={{
-              left: currentCenter,
-              height: "calc(50% - 4px)",
-            }}
-          />
+        {depth > 0 ? (
+          <>
+            {/* Own rail: elbow for the last sibling, tee otherwise. */}
+            <span
+              aria-hidden="true"
+              className={cn("absolute w-px", tone.rail)}
+              style={
+                isLast
+                  ? { left: currentCenter, top: -6, height: "calc(50% + 6px)" }
+                  : { left: currentCenter, top: -6, bottom: 0 }
+              }
+            />
+            {/* Horizontal stub from the rail to the row card. */}
+            <span
+              aria-hidden="true"
+              className={cn("absolute h-px", tone.rail)}
+              style={{
+                left: currentCenter,
+                top: "50%",
+                width: connectorWidth - currentCenter - 4,
+              }}
+            />
+          </>
         ) : null}
-        {connectBelow ? (
-          <span
-            aria-hidden="true"
-            className={cn("absolute bottom-[-10px] w-px rounded-full", tone.rail)}
-            style={{
-              left: currentCenter,
-              top: "calc(50% + 14px)",
-            }}
-          />
-        ) : null}
-        <span
-          className={cn(
-            "absolute z-10 flex size-7 items-center justify-center rounded-full border bg-background shadow-sm ring-4 ring-card",
-            tone.dot,
-          )}
-          style={{
-            left: currentCenter - CONNECTOR_CENTER,
-            top: "50%",
-            transform: "translateY(-50%)",
-          }}
-        >
-          <ProviderCategoryIcon
-            providerType={provider.provider_type}
-            categoryKey={provider.taxonomy_node?.code ?? null}
-            className="size-3.5"
-          />
-        </span>
       </div>
       <div
         className={cn(
@@ -500,38 +495,69 @@ function TimelineNode({
           active && "border-primary/55 bg-white shadow-[inset_3px_0_0_var(--primary),0_1px_3px_rgba(15,23,42,0.08)]",
         )}
       >
-        {depth === 0 ? (
-          canToggleRoot ? (
-            <button
-              type="button"
-              aria-expanded={!isCollapsed}
-              aria-label={
-                isCollapsed
-                  ? (tr.providers_tree_expand ?? provider.name)
-                  : (tr.providers_tree_collapse ?? provider.name)
-              }
-              title={
-                isCollapsed
-                  ? (tr.providers_tree_expand ?? provider.name)
-                  : (tr.providers_tree_collapse ?? provider.name)
-              }
-              className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-              onClick={() => onToggleRootCollapsed(provider.id)}
-            >
-              <ChevronRight className={cn("size-4 transition-transform", !isCollapsed && "rotate-90")} />
-            </button>
-          ) : (
-            <span className="size-7 shrink-0" aria-hidden="true" />
-          )
-        ) : null}
+        {canToggleRoot ? (
+          <button
+            type="button"
+            aria-expanded={!isCollapsed}
+            aria-label={
+              isCollapsed
+                ? (tr.providers_tree_expand ?? provider.name)
+                : (tr.providers_tree_collapse ?? provider.name)
+            }
+            title={
+              isCollapsed
+                ? (tr.providers_tree_expand ?? provider.name)
+                : (tr.providers_tree_collapse ?? provider.name)
+            }
+            className={cn(
+              "relative flex size-7 shrink-0 items-center justify-center rounded-full border bg-background transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
+              tone.dot,
+            )}
+            onClick={() => onToggleRootCollapsed(provider.id)}
+          >
+            <ProviderCategoryIcon
+              providerType={provider.provider_type}
+              categoryKey={provider.taxonomy_node?.code ?? null}
+              className="size-3.5"
+            />
+            <span className="absolute -bottom-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-full border border-border/60 bg-card shadow-sm">
+              <ChevronRight
+                className={cn("size-2.5 text-muted-foreground transition-transform", !isCollapsed && "rotate-90")}
+              />
+            </span>
+          </button>
+        ) : (
+          <span
+            className={cn(
+              "flex size-7 shrink-0 items-center justify-center rounded-full border bg-background",
+              tone.dot,
+            )}
+            aria-hidden="true"
+          >
+            <ProviderCategoryIcon
+              providerType={provider.provider_type}
+              categoryKey={provider.taxonomy_node?.code ?? null}
+              className="size-3.5"
+            />
+          </span>
+        )}
         <button
           type="button"
           onClick={() => onProviderClick(provider.id)}
           className="flex min-w-0 flex-1 items-start justify-between gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         >
           <span className="min-w-0 flex-1">
-            <span className="block min-w-0 truncate text-xs font-semibold text-foreground" title={provider.name}>
-              {provider.name}
+            <span className="flex min-w-0 items-start gap-1">
+              <span className="min-w-0 truncate text-xs font-semibold text-foreground" title={provider.name}>
+                {provider.name}
+              </span>
+              <span
+                className={cn(
+                  "mt-[3px] size-1.5 shrink-0 rounded-full",
+                  provider.is_active ? "bg-emerald-500" : "bg-zinc-300",
+                )}
+                title={provider.is_active ? (tr.common_active ?? "Active") : (tr.common_inactive ?? "Inactive")}
+              />
             </span>
             <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
               <Badge
@@ -546,7 +572,6 @@ function TimelineNode({
               >
                 {providerTypeLabel(provider.provider_type, tr)}
               </Badge>
-              <ProviderStatusPill active={provider.is_active} labels={tr} />
               <Badge
                 variant="outline"
                 className={cn("rounded-full text-[10px]", contractTone(provider))}
@@ -555,23 +580,26 @@ function TimelineNode({
               </Badge>
             </span>
             <span className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-              {locationText ? (
-                <span className="min-w-0 max-w-full break-words">
-                  <span className="font-medium text-foreground/70">
-                    {tr.providers_city} / {tr.providers_country}:{" "}
-                  </span>
-                  {locationText}
-                </span>
-              ) : null}
               {specializationText ? (
-                <span className="min-w-0 max-w-full break-words">
-                  <span className="font-medium text-foreground/70">{tr.providers_fachbereich}: </span>
+                <span className="min-w-0 max-w-full break-words font-mono text-foreground">
+                  <span className="font-medium">{tr.providers_fachbereich}: </span>
                   {specializationText}
                 </span>
               ) : null}
             </span>
           </span>
           <span className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 text-[11px] text-muted-foreground">
+            {locationText ? (
+              <span
+                title={`${tr.providers_city} / ${tr.providers_country}`}
+                className={cn(
+                  "max-w-[220px] truncate rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-medium",
+                  locationChipTone(locationText),
+                )}
+              >
+                {locationText}
+              </span>
+            ) : null}
             {hasChildren ? (
               <TimelineMetric
                 icon="children"

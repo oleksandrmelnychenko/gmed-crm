@@ -247,19 +247,16 @@
     transition: opacity 140ms ease;
   }
 
-  .data-table-row:hover,
-  .data-table-row:focus-within {
+  .data-table-row:hover {
     --dt-current-row-bg: var(--dt-row-hover-bg);
     box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--foreground) 8%, transparent);
   }
 
-  .data-table-row:hover .data-table-cell,
-  .data-table-row:focus-within .data-table-cell {
+  .data-table-row:hover .data-table-cell {
     background-color: var(--dt-row-hover-bg);
   }
 
-  .data-table-row:hover::before,
-  .data-table-row:focus-within::before {
+  .data-table-row:hover::before {
     opacity: 1;
   }
 

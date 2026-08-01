@@ -610,7 +610,32 @@ export function SpecializationsPage() {
                     {workTypes.map((item) => (
                       <div
                         key={item.id}
-                        className="grid grid-cols-[minmax(220px,1.5fr)_190px_110px_96px_80px] items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/25"
+                        role={canManage ? "button" : undefined}
+                        tabIndex={canManage ? 0 : undefined}
+                        aria-label={
+                          canManage
+                            ? tx("Редактировать вид работы", "Leistungsart bearbeiten")
+                            : undefined
+                        }
+                        onClick={() => {
+                          if (canManage) setWorkTypeSheet({ item });
+                        }}
+                        onKeyDown={(event) => {
+                          if (
+                            !canManage ||
+                            event.target !== event.currentTarget ||
+                            (event.key !== "Enter" && event.key !== " ")
+                          ) {
+                            return;
+                          }
+                          event.preventDefault();
+                          setWorkTypeSheet({ item });
+                        }}
+                        className={cn(
+                          "grid grid-cols-[minmax(220px,1.5fr)_190px_110px_96px_80px] items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/25",
+                          canManage &&
+                            "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)] focus-visible:ring-inset",
+                        )}
                       >
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-foreground">
@@ -650,7 +675,10 @@ export function SpecializationsPage() {
                                 size="icon-sm"
                                 title={tx("Редактировать", "Bearbeiten")}
                                 aria-label={tx("Редактировать вид работы", "Leistungsart bearbeiten")}
-                                onClick={() => setWorkTypeSheet({ item })}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setWorkTypeSheet({ item });
+                                }}
                               >
                                 <Pencil />
                               </Button>
@@ -662,7 +690,10 @@ export function SpecializationsPage() {
                                 title={tx("Удалить", "Löschen")}
                                 aria-label={tx("Удалить вид работы", "Leistungsart löschen")}
                                 disabled={busyAction === `work-type-delete-${item.id}`}
-                                onClick={() => void removeWorkType(item)}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void removeWorkType(item);
+                                }}
                               >
                                 {busyAction === `work-type-delete-${item.id}` ? (
                                   <LoaderCircle className="animate-spin" />

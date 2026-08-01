@@ -926,7 +926,7 @@ async fn list_providers(
                 ELSE 20
               END,
               p.name
-            LIMIT 200"#,
+            LIMIT 1000"#,
     )
     .bind(active_only)
     .bind(provider_type)
@@ -962,68 +962,297 @@ async fn list_providers(
         }
     };
 
+    // The per-provider enrichment used to issue 4+ queries per row, which
+    // multiplies network latency by the provider count (30s+ against a
+    // remote/tunneled database). Everything is now prefetched in a handful of
+    // set-based queries and joined in memory.
+    let provider_ids: Vec<Uuid> = rows
+        .iter()
+        .filter_map(|row| row.try_get::<Uuid, _>("id").ok())
+        .collect();
+    let enrichment = match load_providers_enrichment(&state, &provider_ids).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
     let mut providers = Vec::with_capacity(rows.len());
     for row in rows {
-        let id: Uuid = match row.try_get("id") {
-            Ok(value) => value,
-            Err(_) => {
-                return err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to decode provider",
-                );
-            }
-        };
-        let name: String = match row.try_get("name") {
-            Ok(value) => value,
-            Err(_) => {
-                return err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to decode provider",
-                );
-            }
-        };
-        let provider_type: String = match row.try_get("provider_type") {
-            Ok(value) => value,
-            Err(_) => {
-                return err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to decode provider",
-                );
-            }
-        };
-        let doctor_count: i64 = match row.try_get("doctor_count") {
-            Ok(value) => value,
-            Err(_) => {
-                return err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to decode provider",
-                );
-            }
-        };
-        let (specializations, taxonomy, insurance_providers, doctor_insurance_providers) = tokio::join!(
-            load_provider_specializations_json(&state, id),
-            load_provider_taxonomy_json(&state, id),
-            load_provider_insurances_json(&state, id),
-            load_provider_doctor_insurances_json(&state, id),
-        );
-        let specializations = match specializations {
-            Ok(items) => items,
+        match provider_row_json(row, &enrichment) {
+            Ok(value) => providers.push(value),
             Err(resp) => return resp,
-        };
-        let taxonomy = match taxonomy {
-            Ok(items) => items,
-            Err(resp) => return resp,
-        };
-        let insurance_providers = match insurance_providers {
-            Ok(items) => items,
-            Err(resp) => return resp,
-        };
-        let doctor_insurance_providers = match doctor_insurance_providers {
-            Ok(items) => items,
-            Err(resp) => return resp,
-        };
+        }
+    }
 
-        providers.push(json!({
+    Json(providers).into_response()
+}
+
+#[derive(Default)]
+struct ProvidersEnrichment {
+    specializations: HashMap<Uuid, Vec<Value>>,
+    insurances: HashMap<Uuid, Vec<Value>>,
+    doctor_insurances: HashMap<Uuid, Vec<Value>>,
+    taxonomy: HashMap<Uuid, Value>,
+}
+
+fn empty_taxonomy_json() -> Value {
+    json!({
+        "taxonomy_node_id": Value::Null,
+        "taxonomy_node": Value::Null,
+        "taxonomy_path": [],
+        "taxonomy_node_ids": [],
+        "taxonomy_filter_ids": [],
+    })
+}
+
+/// Prefetches all list-endpoint enrichment data with one set-based query per
+/// source table (plus the whole ~44-row taxonomy tree), instead of 4+ queries
+/// per provider.
+async fn load_providers_enrichment(
+    state: &AppState,
+    provider_ids: &[Uuid],
+) -> Result<ProvidersEnrichment, axum::response::Response> {
+    if provider_ids.is_empty() {
+        return Ok(ProvidersEnrichment::default());
+    }
+    let load_err = |e: sqlx::Error, what: &'static str| {
+        tracing::error!(error = %e, what, "Failed to load provider enrichment");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to list providers",
+        )
+    };
+
+    let (spec_rows, insurance_rows, doctor_insurance_rows, assignment_rows, tree_rows) = tokio::join!(
+        sqlx::query(
+            r#"SELECT ps.provider_id, ms.id, ms.code, ms.name_en, ms.name_de, ms.name_ru,
+                      ms.is_active, ms.sort_order, ps.is_primary
+               FROM provider_specializations ps
+               JOIN medical_specializations ms ON ms.id = ps.specialization_id
+               WHERE ps.provider_id = ANY($1)
+               ORDER BY ps.provider_id, ps.is_primary DESC, ms.sort_order,
+                        COALESCE(ms.name_de, ms.name_en), ms.name_en"#,
+        )
+        .bind(provider_ids)
+        .fetch_all(&state.db),
+        sqlx::query(
+            r#"SELECT pi.provider_id, ip.id, ip.name, ip.is_active
+               FROM provider_insurances pi
+               JOIN insurance_providers ip ON ip.id = pi.insurance_provider_id
+               WHERE pi.provider_id = ANY($1)
+               ORDER BY pi.provider_id, ip.name"#,
+        )
+        .bind(provider_ids)
+        .fetch_all(&state.db),
+        sqlx::query(
+            r#"SELECT DISTINCT l.provider_id, ip.id, ip.name, ip.is_active
+               FROM provider_doctor_links l
+               JOIN provider_doctor_insurances di ON di.doctor_id = l.doctor_id
+               JOIN insurance_providers ip ON ip.id = di.insurance_provider_id
+               WHERE l.provider_id = ANY($1)
+               ORDER BY l.provider_id, ip.name"#,
+        )
+        .bind(provider_ids)
+        .fetch_all(&state.db),
+        sqlx::query(
+            r#"SELECT pta.provider_id, pta.taxonomy_node_id, pta.is_primary
+               FROM provider_taxonomy_assignments pta
+               JOIN provider_taxonomy_nodes ptn ON ptn.id = pta.taxonomy_node_id
+               WHERE pta.provider_id = ANY($1)
+               ORDER BY pta.provider_id, pta.is_primary DESC, ptn.sort_order, ptn.name_de"#,
+        )
+        .bind(provider_ids)
+        .fetch_all(&state.db),
+        sqlx::query(
+            r#"SELECT id, parent_id, code, level, provider_kind, name_de, name_ru, description,
+                      filter_keys, is_active, sort_order, created_at, updated_at,
+                      NOT EXISTS (
+                        SELECT 1
+                        FROM provider_taxonomy_nodes child
+                        WHERE child.parent_id = provider_taxonomy_nodes.id
+                          AND child.is_active = true
+                      ) AS is_leaf
+               FROM provider_taxonomy_nodes"#,
+        )
+        .fetch_all(&state.db),
+    );
+    let spec_rows = spec_rows.map_err(|e| load_err(e, "specializations"))?;
+    let insurance_rows = insurance_rows.map_err(|e| load_err(e, "insurances"))?;
+    let doctor_insurance_rows =
+        doctor_insurance_rows.map_err(|e| load_err(e, "doctor insurances"))?;
+    let assignment_rows = assignment_rows.map_err(|e| load_err(e, "taxonomy assignments"))?;
+    let tree_rows = tree_rows.map_err(|e| load_err(e, "taxonomy tree"))?;
+
+    let mut enrichment = ProvidersEnrichment::default();
+
+    for row in &spec_rows {
+        let Ok(provider_id) = row.try_get::<Uuid, _>("provider_id") else {
+            continue;
+        };
+        enrichment
+            .specializations
+            .entry(provider_id)
+            .or_default()
+            .push(json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "code": row.try_get::<String, _>("code").unwrap_or_default(),
+                "name_en": row.try_get::<String, _>("name_en").unwrap_or_default(),
+                "name_de": row.try_get::<Option<String>, _>("name_de").unwrap_or_default(),
+                "name_ru": row.try_get::<Option<String>, _>("name_ru").unwrap_or_default(),
+                "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+                "sort_order": row.try_get::<i32, _>("sort_order").unwrap_or_default(),
+                "is_primary": row.try_get::<bool, _>("is_primary").unwrap_or(false),
+            }));
+    }
+
+    let insurance_json = |row: &PgRow| {
+        json!({
+            "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+            "name": row.try_get::<String, _>("name").unwrap_or_default(),
+            "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+        })
+    };
+    for row in &insurance_rows {
+        let Ok(provider_id) = row.try_get::<Uuid, _>("provider_id") else {
+            continue;
+        };
+        enrichment
+            .insurances
+            .entry(provider_id)
+            .or_default()
+            .push(insurance_json(row));
+    }
+    for row in &doctor_insurance_rows {
+        let Ok(provider_id) = row.try_get::<Uuid, _>("provider_id") else {
+            continue;
+        };
+        enrichment
+            .doctor_insurances
+            .entry(provider_id)
+            .or_default()
+            .push(insurance_json(row));
+    }
+
+    // In-memory taxonomy tree: node payloads + parent pointers. The tree is
+    // tiny, so ancestor paths / filter sets are computed here instead of via
+    // per-provider recursive CTEs.
+    let mut node_json_by_id: HashMap<Uuid, Value> = HashMap::new();
+    let mut parent_by_id: HashMap<Uuid, Option<Uuid>> = HashMap::new();
+    for row in &tree_rows {
+        let Ok(node_id) = row.try_get::<Uuid, _>("id") else {
+            continue;
+        };
+        node_json_by_id.insert(node_id, taxonomy_node_json(row, None));
+        parent_by_id.insert(
+            node_id,
+            row.try_get::<Option<Uuid>, _>("parent_id").unwrap_or_default(),
+        );
+    }
+    let ancestor_chain = |start: Uuid| {
+        // Node itself first, root last; guards against accidental cycles.
+        let mut chain = Vec::new();
+        let mut seen = HashSet::new();
+        let mut cursor = Some(start);
+        while let Some(node_id) = cursor {
+            if !seen.insert(node_id) {
+                break;
+            }
+            chain.push(node_id);
+            cursor = parent_by_id.get(&node_id).copied().flatten();
+        }
+        chain
+    };
+
+    let mut assignments_by_provider: HashMap<Uuid, Vec<(Uuid, bool)>> = HashMap::new();
+    for row in &assignment_rows {
+        let (Ok(provider_id), Ok(node_id)) = (
+            row.try_get::<Uuid, _>("provider_id"),
+            row.try_get::<Uuid, _>("taxonomy_node_id"),
+        ) else {
+            continue;
+        };
+        assignments_by_provider
+            .entry(provider_id)
+            .or_default()
+            .push((node_id, row.try_get::<bool, _>("is_primary").unwrap_or(false)));
+    }
+
+    for (provider_id, assignments) in assignments_by_provider {
+        let node_ids: Vec<Uuid> = assignments.iter().map(|(node_id, _)| *node_id).collect();
+        let primary = assignments
+            .iter()
+            .find(|(_, is_primary)| *is_primary)
+            .or_else(|| assignments.first());
+        let primary_id = primary.map(|(node_id, _)| *node_id);
+        let primary_node = primary.and_then(|(node_id, is_primary)| {
+            let mut node = node_json_by_id.get(node_id)?.clone();
+            if let Value::Object(map) = &mut node {
+                map.insert("is_primary".to_string(), json!(*is_primary));
+            }
+            Some(node)
+        });
+        let taxonomy_path: Vec<Value> = primary_id
+            .map(|start| {
+                let mut chain = ancestor_chain(start);
+                chain.reverse(); // root first, matching the recursive CTE ordering
+                chain
+                    .into_iter()
+                    .filter_map(|node_id| node_json_by_id.get(&node_id).cloned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut filter_ids: HashSet<Uuid> = HashSet::new();
+        for node_id in &node_ids {
+            filter_ids.extend(ancestor_chain(*node_id));
+        }
+        let filter_ids: Vec<Uuid> = filter_ids.into_iter().collect();
+
+        enrichment.taxonomy.insert(
+            provider_id,
+            json!({
+                "taxonomy_node_id": primary_id,
+                "taxonomy_node": primary_node,
+                "taxonomy_path": taxonomy_path,
+                "taxonomy_node_ids": node_ids,
+                "taxonomy_filter_ids": filter_ids,
+            }),
+        );
+    }
+
+    Ok(enrichment)
+}
+
+fn provider_row_json(
+    row: PgRow,
+    enrichment: &ProvidersEnrichment,
+) -> Result<Value, axum::response::Response> {
+    let decode_err = || {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to decode provider",
+        )
+    };
+    let id: Uuid = row.try_get("id").map_err(|_| decode_err())?;
+    let name: String = row.try_get("name").map_err(|_| decode_err())?;
+    let provider_type: String = row.try_get("provider_type").map_err(|_| decode_err())?;
+    let doctor_count: i64 = row.try_get("doctor_count").map_err(|_| decode_err())?;
+    let specializations = enrichment
+        .specializations
+        .get(&id)
+        .cloned()
+        .unwrap_or_default();
+    let insurance_providers = enrichment.insurances.get(&id).cloned().unwrap_or_default();
+    let doctor_insurance_providers = enrichment
+        .doctor_insurances
+        .get(&id)
+        .cloned()
+        .unwrap_or_default();
+    let taxonomy = enrichment
+        .taxonomy
+        .get(&id)
+        .cloned()
+        .unwrap_or_else(empty_taxonomy_json);
+
+    Ok(json!({
             "id": id,
             "name": name,
             "provider_type": provider_type,
@@ -1062,10 +1291,7 @@ async fn list_providers(
             "internal_rating": internal_rating_json(row.try_get::<Option<f64>, _>("internal_rating").unwrap_or_default()),
             "internal_rating_note": row.try_get::<Option<String>, _>("internal_rating_note").unwrap_or_default(),
             "last_interaction_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_interaction_at").unwrap_or_default().map(|v| v.to_rfc3339()),
-        }));
-    }
-
-    Json(providers).into_response()
+    }))
 }
 
 async fn list_providers_by_specializations(
@@ -7149,41 +7375,6 @@ async fn load_provider_insurances_json(
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to load provider insurance providers",
-        )
-    })?;
-
-    Ok(rows
-        .into_iter()
-        .map(|row| {
-            json!({
-                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
-                "name": row.try_get::<String, _>("name").unwrap_or_default(),
-                "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
-            })
-        })
-        .collect())
-}
-
-async fn load_provider_doctor_insurances_json(
-    state: &AppState,
-    provider_id: Uuid,
-) -> Result<Vec<serde_json::Value>, axum::response::Response> {
-    let rows = sqlx::query(
-        r#"SELECT DISTINCT ip.id, ip.name, ip.is_active
-           FROM provider_doctor_links l
-           JOIN provider_doctor_insurances di ON di.doctor_id = l.doctor_id
-           JOIN insurance_providers ip ON ip.id = di.insurance_provider_id
-           WHERE l.provider_id = $1
-           ORDER BY ip.name"#,
-    )
-    .bind(provider_id)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, provider_id = %provider_id, "Failed to load provider doctor insurance providers");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to load provider doctor insurance providers",
         )
     })?;
 

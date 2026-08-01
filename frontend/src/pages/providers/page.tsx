@@ -14,7 +14,6 @@ import {
 import { useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowUpRight,
-  Building2,
   CalendarClock,
   ChevronDown,
   ChevronLeft,
@@ -28,7 +27,6 @@ import {
   Plus,
   Search,
   ShieldCheck,
-  SlidersHorizontal,
   Star,
   Stethoscope,
   Trash2,
@@ -46,7 +44,6 @@ import { Input } from "@/components/ui/input";
 import { LanguageMultiSelect, languageLabel } from "@/components/ui/language-multi-select";
 import { StatusActionPill } from "@/components/status-action-pill";
 import {
-  AdminInlineMetric,
   AdminSheetScaffold,
   SheetActionsFooter,
   SheetFormFooter,
@@ -222,19 +219,6 @@ const contactAddButtonClassName =
 const textareaClassName = shellTextareaClass;
 const DEFAULT_PROVIDER_SORT: SortStack = [{ field: "provider", dir: "asc" }];
 const LEGACY_PROVIDER_TABLE_QUERY_KEYS = ["filters", "sort", "density", "hide"] as const;
-
-function countAdvancedProviderFilters(filters: ProviderFilters, forceNonMedical: boolean) {
-  let count = 0;
-  if (!forceNonMedical && filters.providerType) count += 1;
-  if (filters.activeOnly !== DEFAULT_FILTERS.activeOnly) count += 1;
-  if (filters.hasContract !== DEFAULT_FILTERS.hasContract) count += 1;
-  if (filters.internalRatingGte.trim()) count += 1;
-  if (filters.specializations.trim()) count += 1;
-  if (filters.insuranceProvider.trim()) count += 1;
-  if (filters.taxonomyNodeId.trim()) count += 1;
-  if (filters.taxonomyAttributeKey.trim() || filters.taxonomyAttributeValue.trim()) count += 1;
-  return count;
-}
 
 const PROVIDER_REALTIME_EVENTS = [
   "provider.created",
@@ -1827,9 +1811,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       insuranceProvider: insuranceProvider ?? base.insuranceProvider,
     };
   });
-  const [providerFiltersOpen, setProviderFiltersOpen] = useState(
-    () => countAdvancedProviderFilters(filters, permissions.forceNonMedical) > 0,
-  );
   const setFilters: typeof setFiltersState = useCallback(
     (value) => {
       setFiltersState((prev) => {
@@ -2164,7 +2145,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     return [currentProvider, ...withDoctors];
   }, [detail, parentProviderOptions]);
 
-  const { metrics, sortedAndFilteredProviders } = useProvidersListTableModel({
+  const { sortedAndFilteredProviders } = useProvidersListTableModel({
     deferredSearch: "",
     lang,
     providers,
@@ -2183,11 +2164,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       ),
     [attributeOptionProviders, filters.taxonomyAttributeKey],
   );
-  const advancedProviderFilterCount = useMemo(
-    () => countAdvancedProviderFilters(filters, permissions.forceNonMedical),
-    [filters, permissions.forceNonMedical],
-  );
-
   function setSearch(value: string) {
     setFilters((current) => ({ ...current, search: value }));
     const params = stripLegacyProviderTableQuery(
@@ -3678,30 +3654,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           }
         />
 
-        {/* KPI inline stats */}
-        <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
-          <AdminInlineMetric icon={Building2} label={providerPageCopy.title} value={metrics.total} tone="sky" />
-          <AdminInlineMetric
-            icon={UsersRound}
-            label={permissions.forceNonMedical ? l("appointments_services") : t.providers_doctors}
-            value={permissions.forceNonMedical ? metrics.services : metrics.doctors}
-            tone="emerald"
-          />
-          <AdminInlineMetric
-            icon={Stethoscope}
-            label={t.providers_linked_patients}
-            value={metrics.patients}
-            tone="amber"
-          />
-          <AdminInlineMetric
-            icon={CalendarClock}
-            label={permissions.forceNonMedical ? l("providers_open_requests") : t.providers_appointments}
-            value={permissions.forceNonMedical ? metrics.openConciergeRequests : metrics.appointments}
-            tone="slate"
-          />
-        </div>
-
-        <div className="inline-flex w-fit rounded-lg border border-border bg-card p-1">
+        <div className="mx-auto flex w-fit rounded-lg border border-border bg-card p-1">
           <Button
             type="button"
             variant={catalogMode === "providers" ? "default" : "ghost"}
@@ -3724,9 +3677,9 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
         {catalogMode === "providers" ? (
           <>
-        <div className="relative z-30 flex flex-col gap-2">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <div className="relative min-w-[260px] flex-1">
+        <div className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
+        <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
+            <div className="relative w-[220px] shrink-0">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={filters.search}
@@ -3741,27 +3694,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                 className="h-8 w-full rounded-lg bg-card pl-8 text-[13px]"
               />
             </div>
-
-            <Button
-              type="button"
-              variant={providerFiltersOpen ? "default" : "outline"}
-              size="sm"
-              className="h-8 gap-1.5 rounded-lg px-2.5"
-              aria-expanded={providerFiltersOpen}
-              onClick={() => setProviderFiltersOpen((current) => !current)}
-            >
-              <SlidersHorizontal className="size-3.5" />
-              <span>{t.table_filter}</span>
-              {advancedProviderFilterCount > 0 ? (
-                <span className="rounded-full bg-background/80 px-1.5 text-[11px] tabular-nums text-foreground">
-                  {advancedProviderFilterCount}
-                </span>
-              ) : null}
-            </Button>
-          </div>
-
-          {providerFiltersOpen ? (
-            <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border/70 bg-card/70 p-2">
               <NativeComboboxSelect
                 value={filters.providerType}
                 onChange={(event) => {
@@ -3921,7 +3853,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   onChange={(nextValue) => setServerFilter("specializations", nextValue, "specializations")}
                 />
               </div>
-              <div className="w-[180px]">
+              <div className="w-[180px] shrink-0">
                 <InsuranceProviderMultiSelect
                   value={filters.insuranceProvider}
                   items={insuranceProviders}
@@ -3930,37 +3862,36 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   onChange={(nextValue) => setServerFilter("insuranceProvider", nextValue, "insurance")}
                 />
               </div>
-            </div>
-          ) : null}
         </div>
 
-        {/* Error banner */}
-        {listError ? <Banner tone="error">{listError}</Banner> : null}
+        {listError ? (
+          <div className="border-b border-border/60 px-3 py-2">
+            <Banner tone="error">{listError}</Banner>
+          </div>
+        ) : null}
 
         {listBusy && providers.length === 0 ? (
-          <div className="flex min-h-[360px] items-center justify-center rounded-lg border border-border/70 bg-card text-sm text-muted-foreground">
+          <div className="flex min-h-[360px] items-center justify-center text-sm text-muted-foreground">
             <span className="inline-flex items-center gap-2">
               <LoaderCircle className="size-4 animate-spin" />
               {t.common_loading}
             </span>
           </div>
+        ) : sortedAndFilteredProviders.length > 0 ? (
+          <ProviderHierarchyTimeline
+            className="rounded-none border-0 shadow-none"
+            lang={lang}
+            providers={sortedAndFilteredProviders}
+            selectedProviderId={selectedId}
+            tr={tr}
+            onProviderClick={openProvider}
+          />
         ) : (
-          <>
-            {sortedAndFilteredProviders.length > 0 ? (
-              <ProviderHierarchyTimeline
-                lang={lang}
-                providers={sortedAndFilteredProviders}
-                selectedProviderId={selectedId}
-                tr={tr}
-                onProviderClick={openProvider}
-              />
-            ) : (
-              <div className="flex min-h-[260px] items-center justify-center rounded-lg border border-dashed border-border/70 bg-card text-sm text-muted-foreground">
-                {t.patients_no_match}
-              </div>
-            )}
-          </>
+          <div className="flex min-h-[260px] items-center justify-center text-sm text-muted-foreground">
+            {t.patients_no_match}
+          </div>
         )}
+        </div>
           </>
         ) : (
           <ProviderPeopleCatalog

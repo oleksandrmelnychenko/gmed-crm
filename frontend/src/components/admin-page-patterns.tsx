@@ -119,18 +119,13 @@ export function AdminInlineMetric({
   return (
     <article
       className={cn(
-        "relative min-w-[190px] flex-1 px-3 py-1",
-        hasTwoLabels ? "min-h-[68px]" : "min-h-[44px]",
+        "relative min-w-[130px] flex-1 px-2.5 py-0.5",
+        hasTwoLabels ? "min-h-[52px]" : "min-h-[36px]",
       )}
     >
-      <span className="admin-inline-metric-separator absolute right-0 top-1/2 hidden -translate-y-1/2 space-y-1">
-        <span className="block h-1.5 w-px bg-border" />
-        <span className="block h-1.5 w-px bg-border" />
-        <span className="block h-1.5 w-px bg-border" />
-      </span>
-      <div className="flex items-baseline gap-2">
-        <Icon className="size-4.5 shrink-0 text-muted-foreground/55" />
-        <p className="text-2xl font-semibold leading-[0.75] text-foreground">
+      <div className="flex items-baseline gap-1.5">
+        <Icon className="size-4 shrink-0 text-muted-foreground/55" />
+        <p className="font-mono text-lg font-semibold leading-none tabular-nums text-foreground">
           {displayValue}
         </p>
       </div>
