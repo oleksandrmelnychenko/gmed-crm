@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { CommandPalette } from "@/components/command-palette";
 import { Toaster } from "@/components/ui/toast";
 import { useLang } from "@/lib/i18n";
 import { useNavState } from "@/lib/nav-state";
@@ -52,6 +53,7 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
           </main>
         </div>
       </div>
+      <CommandPalette />
       <Toaster />
     </div>
   );
