@@ -21,6 +21,10 @@ import {
   AdminSheetScaffold,
   SheetActionsFooter,
 } from "@/components/admin-page-patterns";
+import {
+  DataTablePager,
+  useDataTablePagination,
+} from "@/components/data-table/data-table-pager";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
@@ -586,6 +590,14 @@ function useAdminSettingsPageContent() {
       ),
     [editValues, settingsMap, tr],
   );
+  const settingsPagination = useDataTablePagination(
+    settingsTableRows,
+    "system-settings",
+  );
+  const sessionsPagination = useDataTablePagination(
+    sessions,
+    String(sessions.length),
+  );
   const settingsTableColumns = useMemo<ColumnDef<SettingsTableRow>[]>(
     () => [
       {
@@ -615,7 +627,7 @@ function useAdminSettingsPageContent() {
         required: true,
         width: 300,
         render: (row) => (
-          <span className="truncate text-xs font-medium text-foreground">{row.label}</span>
+          <span className="truncate text-xs text-foreground">{row.label}</span>
         ),
       },
       {
@@ -644,8 +656,8 @@ function useAdminSettingsPageContent() {
       width: 220,
       render: (entry) => (
         <div className="min-w-0">
-          <div className="text-xs font-medium text-foreground">{entry.user_name}</div>
-          <div className="text-[11px] text-muted-foreground">{roleLabel(entry.role)}</div>
+          <div className="text-xs text-foreground">{entry.user_name}</div>
+          <div className="text-xs text-foreground">{roleLabel(entry.role)}</div>
         </div>
       ),
     },
@@ -656,7 +668,7 @@ function useAdminSettingsPageContent() {
       sortable: true,
       width: 230,
       render: (entry) => (
-        <span className="font-mono text-xs text-muted-foreground">{entry.user_email}</span>
+        <span className="font-mono text-xs text-foreground">{entry.user_email}</span>
       ),
     },
     {
@@ -666,7 +678,7 @@ function useAdminSettingsPageContent() {
       sortable: true,
       width: 140,
       render: (entry) => (
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="font-mono text-xs text-foreground">
           {entry.ip_address ?? "-"}
         </span>
       ),
@@ -678,7 +690,7 @@ function useAdminSettingsPageContent() {
       sortable: true,
       width: 260,
       render: (entry) => (
-        <span className="truncate text-xs text-muted-foreground" title={entry.user_agent ?? ""}>
+        <span className="truncate text-xs text-foreground" title={entry.user_agent ?? ""}>
           {shortAdminUserAgent(entry.user_agent)}
         </span>
       ),
@@ -690,7 +702,7 @@ function useAdminSettingsPageContent() {
       sortable: true,
       width: 180,
       render: (entry) => (
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="font-mono text-xs text-foreground">
           {formatAdminDateTime(entry.created_at, lang)}
         </span>
       ),
@@ -760,7 +772,7 @@ function useAdminSettingsPageContent() {
       sortable: true,
       width: 190,
       render: (session) => (
-        <span className="text-xs font-medium text-foreground">{session.user_name}</span>
+        <span className="text-xs text-foreground">{session.user_name}</span>
       ),
     },
     {
@@ -770,7 +782,7 @@ function useAdminSettingsPageContent() {
       sortable: true,
       width: 230,
       render: (session) => (
-        <span className="font-mono text-xs text-muted-foreground">{session.user_email}</span>
+        <span className="font-mono text-xs text-foreground">{session.user_email}</span>
       ),
     },
     {
@@ -788,7 +800,7 @@ function useAdminSettingsPageContent() {
       sortable: true,
       width: 140,
       render: (session) => (
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="font-mono text-xs text-foreground">
           {session.ip_address ?? "-"}
         </span>
       ),
@@ -800,7 +812,7 @@ function useAdminSettingsPageContent() {
       sortable: true,
       width: 260,
       render: (session) => (
-        <span className="truncate text-xs text-muted-foreground" title={session.user_agent ?? ""}>
+        <span className="truncate text-xs text-foreground" title={session.user_agent ?? ""}>
           {shortAdminUserAgent(session.user_agent)}
         </span>
       ),
@@ -812,7 +824,7 @@ function useAdminSettingsPageContent() {
       sortable: true,
       width: 180,
       render: (session) => (
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="font-mono text-xs text-foreground">
           {formatAdminDateTime(session.last_activity_at, lang)}
         </span>
       ),
@@ -905,7 +917,7 @@ function useAdminSettingsPageContent() {
         {!loading && !error ? (
           <>
             <DataTableSurface
-              rows={settingsTableRows}
+              rows={settingsPagination.pagedRows}
               columns={settingsTableColumns}
               defaultDensity="comfortable"
               dictionary={t as unknown as Record<string, string>}
@@ -918,6 +930,17 @@ function useAdminSettingsPageContent() {
                   </span>
                   <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
                 </>
+              }
+              toolbarAfter={
+                <DataTablePager
+                  pageIndex={settingsPagination.pageIndex}
+                  pageSize={settingsPagination.pageSize}
+                  totalPages={settingsPagination.totalPages}
+                  totalRows={settingsPagination.totalRows}
+                  previousLabel={t.pagination_previous}
+                  nextLabel={t.pagination_next}
+                  onPageChange={settingsPagination.onPageChange}
+                />
               }
               rowActions={(row) => (
                 <Button
@@ -953,7 +976,7 @@ function useAdminSettingsPageContent() {
             />
 
             <DataTableSurface
-              rows={sessions}
+              rows={sessionsPagination.pagedRows}
               columns={sessionColumns}
               defaultDensity="comfortable"
               defaultSort={[{ field: "last_activity_at", dir: "desc" }]}
@@ -981,6 +1004,17 @@ function useAdminSettingsPageContent() {
                     {t.settings_logout_all}
                   </Button>
                 </>
+              }
+              toolbarAfter={
+                <DataTablePager
+                  pageIndex={sessionsPagination.pageIndex}
+                  pageSize={sessionsPagination.pageSize}
+                  totalPages={sessionsPagination.totalPages}
+                  totalRows={sessionsPagination.totalRows}
+                  previousLabel={t.pagination_previous}
+                  nextLabel={t.pagination_next}
+                  onPageChange={sessionsPagination.onPageChange}
+                />
               }
             />
           </>
@@ -1049,7 +1083,7 @@ function useAdminSettingsPageContent() {
                       const inputClassName = cn(
                         field.inputType === "textarea"
                           ? textareaClass
-                          : "h-9 rounded-lg bg-card",
+                          : "h-9 rounded-lg bg-field",
                         changed && "border-[var(--brand)] ring-2 ring-[var(--brand)]/10",
                       );
                       return (

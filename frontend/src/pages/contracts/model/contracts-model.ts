@@ -17,6 +17,7 @@ import type {
   QuoteStatusFormState,
 } from "./types";
 import { formatEnumLabel, type Translations } from "@/lib/i18n";
+import { formatMoneyAmount } from "@/lib/money";
 
 type EnumLabelTranslations = Pick<
   Translations,
@@ -323,13 +324,6 @@ const contractDateFormatters: Record<string, Intl.DateTimeFormat> = {
   "en-GB": new Intl.DateTimeFormat("en-GB", CONTRACT_DATE_FORMAT_OPTIONS),
 };
 
-const contractCurrencyFormatter = new Intl.NumberFormat("de-DE", {
-  style: "currency",
-  currency: "EUR",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
 function contractDateTimeFormatter(locale: string) {
   return contractDateTimeFormatters[locale] ?? contractDateTimeFormatters["en-GB"];
 }
@@ -373,9 +367,7 @@ export function enumLabel(
 }
 
 export function formatCurrency(value: unknown) {
-  const numeric = typeof value === "number" ? value : Number(value ?? 0);
-  if (!Number.isFinite(numeric)) return contractCurrencyFormatter.format(0);
-  return contractCurrencyFormatter.format(numeric);
+  return formatMoneyAmount(value);
 }
 
 export function patientOptionLabel(patient: PatientOption) {

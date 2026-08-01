@@ -1,4 +1,5 @@
 import { apiFetchFile } from "@/lib/api";
+import { formatMoneyAmount } from "@/lib/money";
 import {
   formatEnumLabelFromKeys,
   getLang,
@@ -477,27 +478,6 @@ const PORTAL_DATE_FORMATTERS: Record<PortalLocale, Intl.DateTimeFormat> = {
   }),
 };
 
-const PORTAL_CURRENCY_FORMATTERS: Record<PortalLocale, Intl.NumberFormat> = {
-  "de-DE": new Intl.NumberFormat("de-DE", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }),
-  "en-GB": new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }),
-  "ru-RU": new Intl.NumberFormat("ru-RU", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }),
-};
-
 function portalTranslations() {
   return translateCatalog(getLang());
 }
@@ -765,10 +745,7 @@ export function formatPortalFileSize(value?: number | null) {
 
 export function formatPortalCurrency(value: unknown) {
   if (value === null || value === undefined) return portalNotSetLabel();
-  const numeric = typeof value === "number" ? value : Number(value ?? 0);
-  const formatter = PORTAL_CURRENCY_FORMATTERS[portalLocale()];
-  if (!Number.isFinite(numeric)) return formatter.format(0);
-  return formatter.format(numeric);
+  return formatMoneyAmount(value);
 }
 
 export function privacyRequestLabel(value: string) {

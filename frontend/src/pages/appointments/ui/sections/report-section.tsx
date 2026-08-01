@@ -1,6 +1,7 @@
 import {
   memo,
   useEffect,
+  useMemo,
   useReducer,
   type FormEvent,
 } from "react";
@@ -8,13 +9,14 @@ import {
 import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Input } from "@/components/ui/input";
 import {
   Banner,
   CountBadge,
   EmptyCell,
   Section,
-  StatCard,
   StatusBadge,
   tokens,
 } from "@/components/ui-shell";
@@ -230,6 +232,91 @@ function useAppointmentReportSectionContent({
       : detailReport?.approval_status === "rejected"
         ? "error"
         : "warning";
+
+  const reportColumns = useMemo<ColumnDef<ReportSummary>[]>(
+    () => [
+      {
+        id: "interpreter",
+        label: appointmentText("appointments_interpreter"),
+        accessor: (report) => report.interpreter_name,
+        required: true,
+        width: 220,
+        render: (report) => (
+          <span className="block truncate font-mono text-xs text-foreground">
+            {report.interpreter_name || appointmentText("appointments_not_set")}
+          </span>
+        ),
+      },
+      {
+        id: "hours",
+        label: t.appointments_time,
+        accessor: (report) => Number(report.hours) || 0,
+        width: 110,
+        render: (report) => (
+          <span className="block text-right font-mono text-xs tabular-nums text-foreground">
+            {appointmentText("appointments_report_hours_value", { hours: report.hours })}
+          </span>
+        ),
+      },
+      {
+        id: "status",
+        label: tr.users_status,
+        accessor: (report) => reportApprovalLabel(report.approval_status),
+        width: 170,
+        render: (report) => (
+          <span
+            className={cn(
+              "inline-flex rounded-full border px-2 py-0.5 font-mono text-[10px] font-medium",
+              report.approval_status === "approved"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : report.approval_status === "rejected"
+                  ? "border-rose-200 bg-rose-50 text-rose-700"
+                  : "border-amber-200 bg-amber-50 text-amber-700",
+            )}
+          >
+            {reportApprovalLabel(report.approval_status)}
+          </span>
+        ),
+      },
+      {
+        id: "submitted_at",
+        label: t.appointments_report_submitted_prefix,
+        accessor: (report) => report.created_at,
+        width: 170,
+        render: (report) => (
+          <span className="font-mono text-xs tabular-nums text-foreground">
+            {formatDateTimeLabel(report.created_at)}
+          </span>
+        ),
+      },
+      {
+        id: "reviewer",
+        label: tr.patients_notes,
+        accessor: (report) =>
+          report.approved_by_name ??
+          (report.approval_status === "pending"
+            ? t.common_pending
+            : t.appointments_report_no_reviewer_recorded),
+        width: 260,
+        render: (report) => {
+          const value =
+            report.approved_by_name ??
+            (report.approval_status === "pending"
+              ? t.common_pending
+              : t.appointments_report_no_reviewer_recorded);
+          const meta =
+            reportReviewMeta ||
+            appointmentText("appointments_no_review_metadata_recorded_yet");
+          return (
+            <span className="block truncate text-xs text-foreground" title={`${value} · ${meta}`}>
+              {value} · {meta}
+            </span>
+          );
+        },
+      },
+    ],
+    [reportReviewMeta, t, tr],
+  );
   const canOpenReportEditor = canSubmitInterpreterReport || showReportReviewActions;
   const reportEditorTitle = showReportReviewActions
     ? appointmentText("appointments_review_decision")
@@ -274,45 +361,12 @@ function useAppointmentReportSectionContent({
 
         {detailReport ? (
           <>
-            <div className="grid gap-3 xl:grid-cols-3">
-              <StatCard
-                label={appointmentText("appointments_interpreter")}
-                value={
-                  detailReport.interpreter_name ??
-                  appointmentText("appointments_not_set")
-                }
-                description={`${t.appointments_report_submitted_prefix} ${formatDateTimeLabel(detailReport.created_at)}`}
-              />
-              <StatCard
-                label={t.appointments_time}
-                value={appointmentText("appointments_report_hours_value", {
-                  hours: detailReport.hours,
-                })}
-                description={
-                  detailReport.approval_status === "approved"
-                    ? interpreterReportBillingSyncLabel(
-                        detailReport.billing_sync_status,
-                        t,
-                      )
-                    : detailReport.approval_status === "rejected"
-                      ? t.appointments_report_needs_interpreter_revision
-                      : t.appointments_report_waiting_teamlead_review
-                }
-              />
-              <StatCard
-                label={tr.patients_notes}
-                value={
-                  detailReport.approved_by_name ??
-                  (detailReport.approval_status === "pending"
-                    ? t.common_pending
-                    : t.appointments_report_no_reviewer_recorded)
-                }
-                description={
-                  reportReviewMeta ||
-                  appointmentText("appointments_no_review_metadata_recorded_yet")
-                }
-              />
-            </div>
+            <DataTableSurface
+              rows={[detailReport]}
+              columns={reportColumns}
+              rowId={() => detailReport.id ?? "report"}
+              dictionary={tr}
+            />
 
             {detailReport.notes ? (
               <Banner

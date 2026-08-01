@@ -257,7 +257,7 @@ function AdminCustomFieldCreateSheet({
                 <div className="space-y-1.5">
                   <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_entity_type}</Label>
                   <NativeComboboxSelect value={fEntity}
-                    onChange={(event) => onEntityChange(event.target.value ?? ENTITY_TYPES[0] ?? "patient")} className="h-9 w-full rounded-lg bg-card">
+                    onChange={(event) => onEntityChange(event.target.value ?? ENTITY_TYPES[0] ?? "patient")} className="h-9 w-full rounded-lg bg-field">
                       {ENTITY_TYPES.map((et) => (
                         <option key={et} value={et}>
                           {entityTypeLabel(et)}
@@ -272,7 +272,7 @@ function AdminCustomFieldCreateSheet({
                     placeholder={t.cf_field_key_placeholder}
                     value={fKey}
                     onChange={(event) => onKeyChange(event.target.value)}
-                    className="h-9 rounded-lg bg-card"
+                    className="h-9 rounded-lg bg-field"
                   />
                 </div>
               </div>
@@ -283,13 +283,13 @@ function AdminCustomFieldCreateSheet({
                     required
                     value={fLabel}
                     onChange={(event) => onLabelChange(event.target.value)}
-                    className="h-9 rounded-lg bg-card"
+                    className="h-9 rounded-lg bg-field"
                   />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.cf_field_type}</Label>
                   <NativeComboboxSelect value={fType}
-                    onChange={(event) => onTypeChange(event.target.value ?? FIELD_TYPES[0] ?? "text")} className="h-9 w-full rounded-lg bg-card">
+                    onChange={(event) => onTypeChange(event.target.value ?? FIELD_TYPES[0] ?? "text")} className="h-9 w-full rounded-lg bg-field">
                       {FIELD_TYPES.map((ft) => (
                         <option key={ft} value={ft}>
                           {fieldTypeLabel(ft)}
@@ -305,7 +305,7 @@ function AdminCustomFieldCreateSheet({
                     type="number"
                     value={fSort}
                     onChange={(event) => onSortChange(event.target.value)}
-                    className="h-9 rounded-lg bg-card"
+                    className="h-9 rounded-lg bg-field"
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -314,7 +314,7 @@ function AdminCustomFieldCreateSheet({
                     placeholder={t.cf_options_placeholder}
                     value={fOptions}
                     onChange={(event) => onOptionsChange(event.target.value)}
-                    className="h-9 rounded-lg bg-card"
+                    className="h-9 rounded-lg bg-field"
                   />
                 </div>
               </div>
@@ -342,7 +342,7 @@ function AdminCustomFieldsToolbarSection({
   return (
     <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
       <NativeComboboxSelect value={filterEntity}
-        onChange={(event) => onFilterEntityChange(event.target.value ?? "")} className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
+        onChange={(event) => onFilterEntityChange(event.target.value ?? "")} className="h-8 w-[240px] rounded-lg bg-field text-[13px]">
           <option value="">{t.providers_all}</option>
           {ENTITY_TYPES.map((et) => (
             <option key={et} value={et}>
@@ -591,7 +591,7 @@ export function AdminCustomFieldsPage() {
       accessor: (field) => field.field_label,
       sortable: true,
       width: 220,
-      render: (field) => <span className="font-medium">{field.field_label}</span>,
+      render: (field) => <span className="">{field.field_label}</span>,
     },
     {
       id: "field_type",

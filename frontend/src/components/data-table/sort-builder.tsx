@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { MAX_SORT_STACK } from "./sort-logic";
 import type { ColumnDef, SortDir, SortKey, SortStack } from "./types";
 import { useOutsideClose } from "./use-outside-close";
+import { fixedDropdownStyle, useFixedDropdownPosition } from "./use-fixed-dropdown-position";
 
 export type SortBuilderTranslations = {
   buttonLabel?: string;
@@ -54,6 +55,8 @@ export function SortBuilder<T>({
   };
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const panelPosition = useFixedDropdownPosition(menuRef, panelRef, open);
   useOutsideClose(menuRef, () => setOpen(false), { enabled: open });
 
   const sortable = useMemo(() => columns.filter((c) => c.sortable), [columns]);
@@ -126,9 +129,11 @@ export function SortBuilder<T>({
       </Button>
       {open ? (
         <div
+          ref={panelRef}
           role="menu"
           data-table-sort-menu
-          className="absolute left-0 z-[110] mt-1 flex w-96 max-w-[calc(100vw-2rem)] flex-col rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
+          className="fixed z-[110] flex w-96 max-w-[calc(100vw-2rem)] flex-col rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
+          style={fixedDropdownStyle(panelPosition)}
         >
           {value.length === 0 ? (
             <div className="px-3 py-4 text-center text-xs text-muted-foreground">
@@ -232,7 +237,7 @@ function SortRow<T>({
       <NativeComboboxSelect
         value={sortKey.field}
         onChange={(e) => onUpdate({ field: e.target.value })}
-        className="h-7 flex-1 rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+        className="h-7 flex-1 rounded-md border border-input bg-field px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
       >
         <option value={sortKey.field}>
           {columns.find((c) => c.id === sortKey.field)?.label ?? translations?.unknownValue}
@@ -250,7 +255,7 @@ function SortRow<T>({
         onClick={toggleDir}
         aria-label={dirLabel}
         title={dirLabel}
-        className="inline-flex h-7 w-10 items-center justify-center gap-0.5 rounded-md border border-input bg-background text-xs hover:bg-muted"
+        className="inline-flex h-7 w-10 items-center justify-center gap-0.5 rounded-md border border-input bg-field text-xs hover:bg-muted"
       >
         {sortKey.dir === "asc" ? (
           <ArrowUp className="size-3" />

@@ -3,7 +3,12 @@ import { startTransition, useEffect, useReducer } from "react";
 import { apiFetch } from "@/lib/api";
 import { uiText } from "@/lib/i18n";
 
-import type { PatientTimelineItem, PatientTimelineRangeFilter } from "../model/detail-model";
+import type {
+  PatientTimelineFacet,
+  PatientTimelineItem,
+  PatientTimelineRangeFilter,
+  PatientTimelineSummary,
+} from "../model/detail-model";
 import type {
   AppointmentItem,
   CaseItem,
@@ -49,6 +54,9 @@ type TabState = {
   relations: RelationItem[];
   servicePackages: PatientServicePackageItem[];
   timeline: PatientTimelineItem[];
+  timelineCategoryFacets: PatientTimelineFacet[];
+  timelineSourceFacets: PatientTimelineFacet[];
+  timelineSummary: PatientTimelineSummary;
   timelineTotal: number;
   workflowChecklist: WorkflowChecklistResponse | null;
 };
@@ -86,6 +94,14 @@ const EMPTY_TAB_STATE: TabState = {
   relations: [],
   servicePackages: [],
   timeline: [],
+  timelineCategoryFacets: [],
+  timelineSourceFacets: [],
+  timelineSummary: {
+    total: 0,
+    open: 0,
+    recent: 0,
+    entityCounts: [],
+  },
   timelineTotal: 0,
   workflowChecklist: null,
 };
@@ -329,6 +345,16 @@ export function usePatientDetailTabData({
               limit: number;
               offset: number;
               has_more: boolean;
+              summary?: {
+                total: number;
+                open: number;
+                recent: number;
+                entity_counts: Array<{ entity_type: string; count: number }>;
+              };
+              facets?: {
+                categories: PatientTimelineFacet[];
+                sources: PatientTimelineFacet[];
+              };
             }>(`/patients/${id}/timeline?${params.toString()}`, { signal });
             if (signal.aborted) return;
             startTransition(() => {
@@ -338,6 +364,17 @@ export function usePatientDetailTabData({
                 update: (current) => ({
                   ...current,
                   timeline: result.items ?? [],
+                  timelineCategoryFacets: result.facets?.categories ?? [],
+                  timelineSourceFacets: result.facets?.sources ?? [],
+                  timelineSummary: {
+                    total: result.summary?.total ?? result.total ?? 0,
+                    open: result.summary?.open ?? 0,
+                    recent: result.summary?.recent ?? 0,
+                    entityCounts: (result.summary?.entity_counts ?? []).map((entry) => ({
+                      entityType: entry.entity_type,
+                      count: entry.count,
+                    })),
+                  },
                   timelineTotal: result.total ?? 0,
                 }),
               });
@@ -380,7 +417,19 @@ export function usePatientDetailTabData({
                 case "workflow":
                   return { ...current, workflowChecklist: null };
                 case "timeline":
-                  return { ...current, timeline: [], timelineTotal: 0 };
+                  return {
+                    ...current,
+                    timeline: [],
+                    timelineCategoryFacets: [],
+                    timelineSourceFacets: [],
+                    timelineSummary: {
+                      total: 0,
+                      open: 0,
+                      recent: 0,
+                      entityCounts: [],
+                    },
+                    timelineTotal: 0,
+                  };
                 default:
                   return current;
               }

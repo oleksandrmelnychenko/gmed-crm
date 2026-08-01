@@ -16,6 +16,8 @@ export type OrderSummary = {
   order_number: string;
   patient_id: string | null;
   lead_id?: string | null;
+  case_id?: string | null;
+  case_code?: string | null;
   patient_name: string;
   patient_pid: string;
   phase: OrderPhase | string;
@@ -91,6 +93,8 @@ export type OrderDetail = {
   lead_id?: string | null;
   source_lead_id?: string | null;
   contract_id?: string | null;
+  case_id?: string | null;
+  case_code?: string | null;
   patient_name: string;
   patient_pid: string | null;
   phase: OrderPhase | string;
@@ -511,6 +515,7 @@ export type OrderDebtQueueItem = {
   resolved_at: string | null;
   updated_at: string | null;
   overdue_invoice_count: number;
+  overdue_balance: string;
   outstanding_balance: string;
 };
 

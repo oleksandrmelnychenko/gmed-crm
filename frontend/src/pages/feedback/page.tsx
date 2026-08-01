@@ -1410,7 +1410,7 @@ function useStaffFeedbackWorkspaceContent() {
         width: 220,
         pinned: "left",
         render: (row) => (
-          <span className="text-sm font-medium text-foreground">
+          <span className="text-xs text-foreground">
             {row.patient_name || t.feedback_patient}
           </span>
         ),

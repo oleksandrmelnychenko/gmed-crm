@@ -360,7 +360,22 @@ const ATTENTION_LEGACY_COUNT_REASON_PATTERNS: Array<{
   },
 ];
 
+const PLURALIZED_ATTENTION_REASON_KEYS = new Set([
+  "appointments_attention_reason_preparation_checklist_open_count",
+  "appointments_attention_reason_open_tasks_count",
+  "appointments_attention_reason_visit_processing_checklist_open_count",
+  "appointments_attention_reason_open_communication_threads_count",
+]);
+
 function knownAttentionReasonLabel(key: string, values?: Record<string, string | number | boolean | null | undefined> | null) {
+  const count = Number(values?.count);
+  if (PLURALIZED_ATTENTION_REASON_KEYS.has(key) && Number.isFinite(count)) {
+    const category = new Intl.PluralRules(getLang()).select(count);
+    const pluralKey = `${key}_${category}`;
+    const pluralized = appointmentText(pluralKey, values ?? undefined);
+    if (pluralized !== pluralKey) return pluralized;
+  }
+
   const translated = appointmentText(key, values ?? undefined);
   return translated === key ? "" : translated;
 }
@@ -398,6 +413,7 @@ export function reportApprovalLabel(status: string) {
       return appointmentText("appointments_approved");
     case "rejected":
       return appointmentText("appointments_rejected");
+    case "pending":
     case "pending_review":
       return appointmentText("appointments_pending_review");
     case "needs_interpreter_revision":

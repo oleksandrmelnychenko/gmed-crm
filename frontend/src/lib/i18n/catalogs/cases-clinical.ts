@@ -467,18 +467,18 @@ export const casesClinicalRu: CasesClinicalTranslations = {
     "{received} строк получено - {valid} валидных строк предпросмотра - {issues} с замечаниями",
   cases_medications_no_substances: "Нет действующих веществ",
   cases_medications_issues: "замечания",
-  cases_medications_equivalents_title: "Найти немецкий эквивалент",
+  cases_medications_equivalents_title: "Немецкие эквиваленты",
   cases_medications_equivalents_description:
     "Справочная информация для команды по немецким эквивалентам. Это не назначение.",
   cases_medications_equivalents_count_label: "кандидатов",
   cases_medications_equivalents_find: "Найти",
   cases_medications_equivalents_warning:
-    "Немецкие эквиваленты являются только справочной информацией для команды, не назначением. Непроверенные кандидаты нельзя показывать пациенту.",
+    "Только для внутренней проверки команды. Это не назначение; непроверенные варианты пациенту не показываются.",
   cases_medications_equivalents_active_substance: "Действующее вещество",
   cases_medications_equivalents_include_unverified:
     "Включить непроверенные кандидаты только для команды",
   cases_medications_equivalents_empty:
-    "Немецкие эквиваленты пока не найдены.",
+    "В справочнике нет подтверждённых немецких эквивалентов.",
   cases_medications_equivalents_confidence: "Уверенность",
   cases_medications_equivalents_unverified_warning:
     "Непроверенный кандидат: только для команды, не показывать пациенту.",
@@ -744,18 +744,18 @@ export const casesClinicalDe: CasesClinicalTranslations = {
     "{received} Zeilen empfangen - {valid} gültige Vorschauzeilen - {issues} mit Hinweisen",
   cases_medications_no_substances: "Keine Wirkstoffe",
   cases_medications_issues: "Hinweise",
-  cases_medications_equivalents_title: "Deutsches Äquivalent finden",
+  cases_medications_equivalents_title: "Deutsche Äquivalente",
   cases_medications_equivalents_description:
     "Team-Referenz für deutsche Medikationsäquivalente. Keine Verordnung.",
   cases_medications_equivalents_count_label: "Kandidaten",
   cases_medications_equivalents_find: "Finden",
   cases_medications_equivalents_warning:
-    "Deutsche Äquivalente sind nur Team-Referenzinformationen, keine Verordnung. Ungeprüfte Kandidaten dürfen nicht patientenseitig angezeigt werden.",
+    "Nur zur internen Prüfung durch das Team. Keine Verordnung; ungeprüfte Varianten werden Patienten nicht angezeigt.",
   cases_medications_equivalents_active_substance: "Wirkstoff",
   cases_medications_equivalents_include_unverified:
     "Ungeprüfte Team-Kandidaten einschließen",
   cases_medications_equivalents_empty:
-    "Noch keine deutschen Äquivalente gefunden.",
+    "Im Verzeichnis wurden keine bestätigten deutschen Äquivalente gefunden.",
   cases_medications_equivalents_confidence: "Trefferquote",
   cases_medications_equivalents_unverified_warning:
     "Ungeprüfter Kandidat: nur für das Team, nicht patientenseitig.",
@@ -863,6 +863,7 @@ export const CASE_WORKSPACE_SECTION_LABEL_KEYS = {
   pain: "cases_clinical_section_pain",
   symptoms: "cases_clinical_section_symptoms",
   vegetative: "cases_clinical_section_vegetative",
+  impfstatus: "cases_vaccination",
   cardiology: "cases_clinical_section_cardiology",
   gastroenterology: "cases_clinical_section_gastroenterology",
   orthopedics: "cases_clinical_section_orthopedics",

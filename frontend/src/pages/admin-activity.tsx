@@ -24,6 +24,7 @@ import {
   AdminToolbar,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
+import { DataTablePager } from "@/components/data-table/data-table-pager";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
@@ -581,7 +582,7 @@ function AdminActivityToolbarSection({
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
           placeholder={t.search_placeholder}
-          className="h-8 w-[240px] rounded-lg bg-card pl-8 text-[13px]"
+          className="h-8 w-[240px] rounded-lg bg-field pl-8 text-[13px]"
         />
       </div>
 
@@ -594,7 +595,7 @@ function AdminActivityToolbarSection({
               : "",
           )
         }
-        className="h-8 w-[240px] rounded-lg bg-card text-[13px]"
+        className="h-8 w-[240px] rounded-lg bg-field text-[13px]"
       >
         <option value="__all__">{t.providers_all}</option>
         {actionOptions.map((value) => (
@@ -612,7 +613,7 @@ function AdminActivityToolbarSection({
           type="date"
           value={dateFrom}
           onChange={(event) => onDateFromChange(event.target.value)}
-          className="h-8 w-[150px] rounded-lg bg-card text-[13px]"
+          className="h-8 w-[150px] rounded-lg bg-field text-[13px]"
         />
       </div>
 
@@ -624,7 +625,7 @@ function AdminActivityToolbarSection({
           type="date"
           value={dateTo}
           onChange={(event) => onDateToChange(event.target.value)}
-          className="h-8 w-[150px] rounded-lg bg-card text-[13px]"
+          className="h-8 w-[150px] rounded-lg bg-field text-[13px]"
         />
       </div>
 
@@ -635,7 +636,7 @@ function AdminActivityToolbarSection({
         <NativeComboboxSelect
           value={String(pageSize)}
           onChange={(event) => onPageSizeChange(Number(event.target.value))}
-          className="h-8 w-[110px] rounded-lg bg-card text-[13px]"
+          className="h-8 w-[110px] rounded-lg bg-field text-[13px]"
         >
           {[25, 50, 100, 200].map((value) => (
             <option key={value} value={value}>
@@ -726,7 +727,6 @@ export function AdminActivityPage() {
     detailOpen,
     error,
     filterAction,
-    hasMore,
     loading,
     offset,
     pageSize,
@@ -910,7 +910,7 @@ export function AdminActivityPage() {
       accessor: (activity) => activity.created_at,
       width: 170,
       render: (activity) => (
-        <span className="font-mono text-xs text-muted-foreground whitespace-nowrap">
+        <span className="font-mono text-xs text-foreground whitespace-nowrap">
           {formatAdminDateTime(activity.created_at, lang)}
         </span>
       ),
@@ -929,7 +929,7 @@ export function AdminActivityPage() {
             <div className="truncate text-xs font-medium text-foreground">
               {activity.user_name}
             </div>
-            <div className="truncate text-[11px] text-muted-foreground">
+            <div className="truncate text-[11px] text-foreground">
               {activity.user_email}
             </div>
           </div>
@@ -953,7 +953,7 @@ export function AdminActivityPage() {
       accessor: (activity) => entityTechnicalValue(activity.entity_type, activity.entity_id),
       width: 180,
       render: (activity) => (
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="font-mono text-xs text-foreground">
           {entityDisplay(activity.entity_type, activity.entity_id, t)}
         </span>
       ),
@@ -966,7 +966,7 @@ export function AdminActivityPage() {
       render: (activity) => {
         const details = contextSummary(activity.context);
         return (
-          <span className="truncate text-xs text-muted-foreground" title={details}>
+          <span className="truncate text-xs text-foreground" title={details}>
             {details}
           </span>
         );
@@ -979,10 +979,8 @@ export function AdminActivityPage() {
 
   const anyFilterActive =
     search.trim() !== "" || filterAction !== "" || dateFrom !== "" || dateTo !== "";
-  const pageNumber = Math.floor(offset / pageSize) + 1;
+  const pageIndex = Math.floor(offset / pageSize);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const pageStart = total === 0 ? 0 : offset + 1;
-  const pageEnd = Math.min(offset + activities.length, total);
   const countLabel = search.trim() ? `${filtered.length}/${total}` : total;
 
   return (
@@ -1046,6 +1044,23 @@ export function AdminActivityPage() {
           onSearchChange={setSearch}
         />
 
+        <DataTablePager
+          className="rounded-lg border border-border/60"
+          pageIndex={pageIndex}
+          pageSize={pageSize}
+          totalPages={totalPages}
+          totalRows={total}
+          previousLabel={t.pagination_previous}
+          nextLabel={t.pagination_next}
+          onPageChange={(nextPageIndex) =>
+            dispatchActivityState({
+              detailOpen: false,
+              offset: nextPageIndex * pageSize,
+              selectedIndex: null,
+            })
+          }
+        />
+
         <AdminActivityMetrics metrics={metrics} t={t} />
 
         {loading ? <TabLoader /> : null}
@@ -1079,48 +1094,6 @@ export function AdminActivityPage() {
                 tableClassName="min-h-[360px]"
               />
             )}
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground">
-              <span>
-                {pageStart}-{pageEnd} / {total}
-              </span>
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 rounded-lg"
-                  disabled={loading || offset <= 0}
-                  onClick={() =>
-                    dispatchActivityState({
-                      detailOpen: false,
-                      offset: Math.max(0, offset - pageSize),
-                      selectedIndex: null,
-                    })
-                  }
-                >
-                  {t.pagination_previous}
-                </Button>
-                <span className="min-w-16 text-center">
-                  {pageNumber} / {totalPages}
-                </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 rounded-lg"
-                  disabled={loading || !hasMore}
-                  onClick={() =>
-                    dispatchActivityState({
-                      detailOpen: false,
-                      offset: offset + pageSize,
-                      selectedIndex: null,
-                    })
-                  }
-                >
-                  {t.pagination_next}
-                </Button>
-              </div>
-            </div>
           </AdminTableCard>
         ) : null}
       </div>

@@ -1430,24 +1430,6 @@ async fn convert_appointment_request(
         );
     }
 
-    if let Some(interpreter_id) = body.interpreter_id
-        && let Err(resp) = create_reminder_record(
-            &state,
-            appointment_id,
-            interpreter_id,
-            chrono::Utc::now(),
-            format!("New assignment: {title}"),
-            Some(format!("Appointment on {date}")),
-        )
-        .await
-    {
-        tracing::error!(
-            request_id = %id,
-            appointment_id = %appointment_id,
-            status = ?resp.status(),
-            "post-conversion interpreter reminder failed"
-        );
-    }
     if request_type == "non_medical"
         && let Err(resp) = bootstrap_non_medical_artifacts(
             &state,
@@ -2201,6 +2183,7 @@ async fn list_staff(
                 'teamlead_interpreter',
                 'interpreter',
                 'concierge',
+                'billing',
                 'it_admin'
              )
            ORDER BY role, name"#,
@@ -2573,18 +2556,6 @@ async fn create_appointment(
     }
 
     for (appointment_id, occurrence_date) in &created_appointments {
-        if let Some(interpreter_id) = interpreter_id {
-            let _ = create_reminder_record(
-                &state,
-                *appointment_id,
-                interpreter_id,
-                chrono::Utc::now(),
-                format!("New assignment: {title}"),
-                Some(format!("Appointment on {}", occurrence_date)),
-            )
-            .await;
-        }
-
         if appointment_type == "non_medical"
             && let Err(resp) = bootstrap_non_medical_artifacts(
                 &state,
@@ -5015,7 +4986,7 @@ async fn update_appointment(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 
-    for (target_id, target_patient_id, interpreter_id, target_date) in reminder_targets {
+    for (_target_id, target_patient_id, interpreter_id, _target_date) in reminder_targets {
         let _ = sqlx::query!(
             "INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
              VALUES ($1, $2, $3)
@@ -5025,18 +4996,6 @@ async fn update_appointment(
             auth.user_id
         )
         .execute(&state.db)
-        .await;
-
-        let reminder_title = format!("Appointment updated: {title}");
-        let reminder_description = Some(build_schedule_summary(target_date, time_start, time_end));
-        let _ = create_reminder_record(
-            &state,
-            target_id,
-            interpreter_id,
-            chrono::Utc::now(),
-            reminder_title,
-            reminder_description,
-        )
         .await;
     }
     if appointment_type == "non_medical" {
@@ -5602,7 +5561,7 @@ async fn assign_interpreter(
         Err(resp) => return resp,
     }
 
-    let interpreter_role = match load_active_interpreter_role(&state, body.interpreter_id).await {
+    let _interpreter_role = match load_active_interpreter_role(&state, body.interpreter_id).await {
         Ok(Some(role)) => role,
         Ok(None) => {
             return err(
@@ -5621,7 +5580,7 @@ async fn assign_interpreter(
         }
     };
     let appointment_ctx = match sqlx::query(
-        r#"SELECT patient_id, doctor_id, title, date, time_start, time_end,
+        r#"SELECT patient_id, doctor_id, date, time_start, time_end,
                   interpreter_id, status
            FROM appointments
            WHERE id = $1
@@ -5757,32 +5716,6 @@ async fn assign_interpreter(
             appointment_id = %apt_id,
             interpreter_id = %body.interpreter_id,
             "post-assignment patient access update failed"
-        );
-    }
-
-    let title = appointment_ctx
-        .try_get::<String, _>("title")
-        .unwrap_or_else(|_| "Appointment assignment".to_string());
-    let formatted_time = time_start
-        .map(|value| value.format("%H:%M").to_string())
-        .unwrap_or_default();
-    if let Err(resp) = create_reminder_record(
-        &state,
-        apt_id,
-        body.interpreter_id,
-        chrono::Utc::now(),
-        format!("New assignment: {title}"),
-        Some(format!(
-            "Appointment on {date} {formatted_time}. Assigned as {interpreter_role}."
-        )),
-    )
-    .await
-    {
-        tracing::error!(
-            appointment_id = %apt_id,
-            interpreter_id = %body.interpreter_id,
-            status = ?resp.status(),
-            "post-assignment reminder failed"
         );
     }
 
@@ -8640,25 +8573,6 @@ fn validate_appointment_time_range(
         return Err("time_end must be later than time_start");
     }
     Ok(())
-}
-
-fn build_schedule_summary(
-    date: chrono::NaiveDate,
-    time_start: Option<chrono::NaiveTime>,
-    time_end: Option<chrono::NaiveTime>,
-) -> String {
-    match (time_start, time_end) {
-        (Some(time_start), Some(time_end)) => format!(
-            "Appointment on {} from {} to {}",
-            date,
-            time_start.format("%H:%M"),
-            time_end.format("%H:%M")
-        ),
-        (Some(time_start), None) => {
-            format!("Appointment on {} at {}", date, time_start.format("%H:%M"))
-        }
-        _ => format!("Appointment on {date}"),
-    }
 }
 
 fn overlaps(

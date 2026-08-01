@@ -1010,7 +1010,7 @@ function useStaffAppointmentsPageContent() {
         ? formatUiText(t.appointments_report_returned_at, {
             date: formatDateTimeLabel(detailReport.approved_at),
           })
-        : tr.mfa_pending;
+        : appointmentText("appointments_report_submitted_pending_review");
   const timelineLabels = useMemo(
     () => ({
       appointments_timeline_appointment_created:

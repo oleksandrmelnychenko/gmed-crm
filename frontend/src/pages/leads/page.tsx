@@ -15,6 +15,8 @@ import {
 import { useSearchParams } from "react-router-dom";
 import {
   ArrowRight,
+  ChevronLeft,
+  ChevronRight,
   ClipboardCheck,
   FileCheck2,
   LoaderCircle,
@@ -46,6 +48,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { ToolbarField } from "@/components/data-table/toolbar-field";
 import {
   Sheet,
   SheetContent,
@@ -139,6 +142,7 @@ const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
 const LEAD_DEFAULT_FROZEN_COLUMNS = ["lead"];
 const LEAD_MAX_FROZEN_COLUMNS = 2;
+const LEAD_PAGE_SIZE = 50;
 const FAILED_OUTCOME_OPTIONS = ["archived", "delete_anonymized"] as const;
 const ACTIVE_WIZARD_LEAD_STATUSES = new Set(["new", "in_progress", "qualified"]);
 let leadWizardModulePromise: Promise<typeof import("./ui/lead-wizard")> | null = null;
@@ -227,6 +231,63 @@ function Banner({
     return <SuccessBanner>{children}</SuccessBanner>;
   }
   return <ShellBanner tone={tone}>{children}</ShellBanner>;
+}
+
+function LeadsPager({
+  pageIndex,
+  totalPages,
+  totalRows,
+  previousLabel,
+  nextLabel,
+  onPageChange,
+}: {
+  nextLabel: string;
+  onPageChange: (pageIndex: number) => void;
+  pageIndex: number;
+  previousLabel: string;
+  totalPages: number;
+  totalRows: number;
+}) {
+  const pageStart = pageIndex * LEAD_PAGE_SIZE;
+
+  return (
+    <div className="flex min-h-8 items-center justify-between gap-2 border-b border-border/60 bg-field px-4 py-0.5">
+      <span className="font-mono text-xs tabular-nums text-foreground">
+        {totalRows === 0
+          ? "0 / 0"
+          : `${pageStart + 1}-${Math.min(pageStart + LEAD_PAGE_SIZE, totalRows)} / ${totalRows}`}
+      </span>
+      <div className="flex items-center gap-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className="size-7 rounded-md"
+          disabled={pageIndex === 0}
+          aria-label={previousLabel}
+          title={previousLabel}
+          onClick={() => onPageChange(Math.max(0, pageIndex - 1))}
+        >
+          <ChevronLeft className="size-3.5" />
+        </Button>
+        <span className="min-w-12 text-center font-mono text-xs font-medium tabular-nums text-foreground">
+          {pageIndex + 1} / {totalPages}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className="size-7 rounded-md"
+          disabled={pageIndex >= totalPages - 1}
+          aria-label={nextLabel}
+          title={nextLabel}
+          onClick={() => onPageChange(Math.min(totalPages - 1, pageIndex + 1))}
+        >
+          <ChevronRight className="size-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 type LeadsListState = {
@@ -540,6 +601,27 @@ function useLeadsPageContent() {
     () => filterLeadsByContact(leads, { email: filters.email, phone: filters.phone }),
     [filters.email, filters.phone, leads]
   );
+  const leadPaginationResetKey = JSON.stringify(filters);
+  const [leadPaginationState, setLeadPaginationState] = useState(() => ({
+    pageIndex: 0,
+    resetKey: leadPaginationResetKey,
+  }));
+  const leadPageIndex = leadPaginationState.resetKey === leadPaginationResetKey
+    ? leadPaginationState.pageIndex
+    : 0;
+  const leadTotalPages = Math.max(1, Math.ceil(filteredLeads.length / LEAD_PAGE_SIZE));
+  const safeLeadPageIndex = Math.min(leadPageIndex, leadTotalPages - 1);
+  const pagedLeads = useMemo(() => {
+    const start = safeLeadPageIndex * LEAD_PAGE_SIZE;
+    return filteredLeads.slice(start, start + LEAD_PAGE_SIZE);
+  }, [filteredLeads, safeLeadPageIndex]);
+
+  function handleLeadPageChange(pageIndex: number) {
+    setLeadPaginationState({
+      pageIndex,
+      resetKey: leadPaginationResetKey,
+    });
+  }
   const leadColumns = useMemo<ColumnDef<LeadListItem>[]>(
     () => [
       {
@@ -552,7 +634,7 @@ function useLeadsPageContent() {
         width: 260,
         pinned: "left",
         render: (row) => (
-          <span className="truncate font-mono text-xs font-medium text-foreground">
+          <span className="truncate font-mono text-xs text-foreground">
             {`${row.first_name} ${row.last_name}`.trim()}
           </span>
         ),
@@ -611,7 +693,7 @@ function useLeadsPageContent() {
               {daysInStatusLabel(days, lang)}
             </span>
           ) : (
-            <span className="text-xs text-muted-foreground">—</span>
+            <span className="text-xs text-foreground">—</span>
           );
         },
       },
@@ -702,7 +784,7 @@ function useLeadsPageContent() {
               {failedOutcomeLabel(row.failed_outcome.status, t)}
             </StatusBadge>
           ) : (
-            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+            <span className="text-xs text-foreground">{t.common_not_set}</span>
           ),
       },
     ],
@@ -2422,7 +2504,7 @@ function useLeadsPageContent() {
 
         <AdminTableCard>
           <DataTableSurface
-            rows={filteredLeads}
+            rows={pagedLeads}
             columns={leadColumns}
             rowId={(row) => row.id}
             defaultDensity="comfortable"
@@ -2433,10 +2515,11 @@ function useLeadsPageContent() {
             maxFrozenColumns={LEAD_MAX_FROZEN_COLUMNS}
             toolbarStart={
               <>
-            <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+            <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
+            <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
-                className={cn(shellInputClassName, "h-8 rounded-lg bg-background pl-8 text-[13px]")}
+                className={cn(shellInputClassName, "h-8 rounded-md bg-field pl-8 text-xs")}
                 placeholder={t.common_search}
                 value={filters.search}
                 onChange={(event) =>
@@ -2450,7 +2533,9 @@ function useLeadsPageContent() {
                 }}
               />
             </div>
+            </ToolbarField>
 
+            <ToolbarField label={t.users_status}>
             <NativeComboboxSelect
               value={filters.status || "__all__"}
               onChange={(event) => {
@@ -2461,7 +2546,7 @@ function useLeadsPageContent() {
                   includeArchived: status === "archived" ? "true" : current.includeArchived,
                 }));
               }}
-              className={cn(selectClassName, "h-8 w-[190px] bg-background text-[13px]")}
+              className={cn(selectClassName, "h-8 rounded-md w-[190px] bg-field text-xs")}
             >
               <option value="__all__">{t.users_status}</option>
               {STATUS_OPTIONS.map((status) => (
@@ -2470,14 +2555,16 @@ function useLeadsPageContent() {
                 </option>
               ))}
             </NativeComboboxSelect>
+            </ToolbarField>
 
+            <ToolbarField label={t.lead_type}>
             <NativeComboboxSelect
               value={filters.leadType || "__all__"}
               onChange={(event) => {
                 const leadType = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
                 setFilters((current) => ({ ...current, leadType }));
               }}
-              className={cn(selectClassName, "h-8 w-[170px] bg-background text-[13px]")}
+              className={cn(selectClassName, "h-8 rounded-md w-[170px] bg-field text-xs")}
             >
               <option value="__all__">{t.lead_type}</option>
               {LEAD_TYPE_OPTIONS.map((type) => (
@@ -2486,7 +2573,9 @@ function useLeadsPageContent() {
                 </option>
               ))}
             </NativeComboboxSelect>
+            </ToolbarField>
 
+            <ToolbarField label={t.common_archive}>
             <NativeComboboxSelect
               value={filters.includeArchived || "false"}
               onChange={(event) => {
@@ -2500,7 +2589,7 @@ function useLeadsPageContent() {
                       : current.status,
                 }));
               }}
-              className={cn(selectClassName, "h-8 w-[170px] bg-background text-[13px]")}
+              className={cn(selectClassName, "h-8 rounded-md w-[170px] bg-field text-xs")}
             >
               <option value="false">
                 {t.lead_filter_active_leads}
@@ -2509,6 +2598,7 @@ function useLeadsPageContent() {
                 {t.lead_filter_with_archive}
               </option>
             </NativeComboboxSelect>
+            </ToolbarField>
 
             <div className="ml-auto flex items-center gap-1">
               <Button
@@ -2534,6 +2624,16 @@ function useLeadsPageContent() {
               ) : null}
             </div>
               </>
+            }
+            toolbarAfter={
+              <LeadsPager
+                pageIndex={safeLeadPageIndex}
+                totalPages={leadTotalPages}
+                totalRows={filteredLeads.length}
+                previousLabel={t.pagination_previous}
+                nextLabel={t.pagination_next}
+                onPageChange={handleLeadPageChange}
+              />
             }
             activeRowId={wizardLeadId || selectedLeadId || null}
             onRowClick={openLeadFromRow}

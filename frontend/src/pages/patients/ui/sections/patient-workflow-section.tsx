@@ -1,28 +1,20 @@
 import { useMemo, useState, type FormEvent } from "react";
-import {
-  CalendarClock,
-  CheckCircle2,
-  ChevronDown,
-  ClipboardList,
-  Clock3,
-  ListChecks,
-  Plus,
-  UserRound,
-} from "lucide-react";
+import { CheckCircle2, Plus } from "lucide-react";
 
-import { AdminInlineMetric } from "@/components/admin-page-patterns";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { TabsContent } from "@/components/ui/tabs";
 import {
-  CountBadge,
   EmptyCell,
   Field,
   TabLoader,
   inputClass as formInputClassName,
 } from "@/components/ui-shell";
+import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { localizeWorkflowItemText } from "@/lib/workflow-labels";
 
@@ -32,7 +24,6 @@ import type {
 } from "../../model/detail-tab-types";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 import { FormSection } from "../shared/patient-form-primitives";
-import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
 
 type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
@@ -132,50 +123,6 @@ type WorkflowContentProps = WorkflowChecklistRenderProps & {
   overdueCount: number;
   ownerCount: number;
   onCreateItemClick: () => void;
-};
-
-type WorkflowIntroProps = {
-  l: LocalizeFn;
-  workflowItemCount: number;
-  canManageWorkflowChecklist: boolean;
-  onCreateItemClick: () => void;
-};
-
-type WorkflowEmptyStateProps = {
-  l: LocalizeFn;
-  workflowItemCount: number;
-};
-
-type WorkflowOverviewProps = {
-  l: LocalizeFn;
-  workflowChecklist: WorkflowChecklistResponse;
-  workflowChecklistGroups: WorkflowGroup[];
-  overdueCount: number;
-  ownerCount: number;
-};
-
-type WorkflowChecklistSectionProps = WorkflowChecklistRenderProps & {
-  workflowChecklistGroups: WorkflowGroup[];
-};
-
-type WorkflowChecklistGroupProps = WorkflowChecklistRenderProps & {
-  group: WorkflowGroup;
-};
-
-type WorkflowGroupSummaryProps = {
-  l: LocalizeFn;
-  group: WorkflowGroup;
-  openItems: number;
-  completedItems: number;
-  groupIsActive: boolean;
-};
-
-type WorkflowChecklistItemsProps = WorkflowChecklistRenderProps & {
-  items: WorkflowChecklistItem[];
-};
-
-type WorkflowChecklistItemCardProps = WorkflowChecklistRenderProps & {
-  item: WorkflowChecklistItem;
 };
 
 function isWorkflowItemOverdue(item: WorkflowChecklistItem) {
@@ -343,15 +290,17 @@ function WorkflowCreateSheet({
   );
 }
 
+type WorkflowTaskRow = {
+  item: WorkflowChecklistItem;
+  groupLabel: string;
+};
+
 function WorkflowContent({
   l,
   commonNotSet,
   workflowChecklist,
   workflowChecklistGroups,
-  workflowItemCount,
   canManageWorkflowChecklist,
-  overdueCount,
-  ownerCount,
   workflowBusy,
   statusColors,
   statusLabel,
@@ -362,349 +311,171 @@ function WorkflowContent({
   onCompleteWorkflowItem,
   onCreateItemClick,
 }: WorkflowContentProps) {
-  return (
-    <>
-      <WorkflowIntro
-        l={l}
-        workflowItemCount={workflowItemCount}
-        canManageWorkflowChecklist={canManageWorkflowChecklist}
-        onCreateItemClick={onCreateItemClick}
-      />
-
-      {!workflowChecklist || workflowChecklist.items.length === 0 ? (
-        <WorkflowEmptyState l={l} workflowItemCount={workflowItemCount} />
-      ) : (
-        <>
-          <WorkflowOverview
-            l={l}
-            workflowChecklist={workflowChecklist}
-            workflowChecklistGroups={workflowChecklistGroups}
-            overdueCount={overdueCount}
-            ownerCount={ownerCount}
-          />
-
-          <WorkflowChecklistSection
-            l={l}
-            commonNotSet={commonNotSet}
-            workflowChecklistGroups={workflowChecklistGroups}
-            workflowBusy={workflowBusy}
-            statusColors={statusColors}
-            statusLabel={statusLabel}
-            formatDateTime={formatDateTime}
-            roleLabel={roleLabel}
-            priorityLabel={priorityLabel}
-            priorityBadgeClass={priorityBadgeClass}
-            onCompleteWorkflowItem={onCompleteWorkflowItem}
-          />
-        </>
-      )}
-    </>
+  const { t } = useLang();
+  const rows = useMemo<WorkflowTaskRow[]>(
+    () =>
+      workflowChecklistGroups.flatMap((group) =>
+        group.items.map((item) => ({ item, groupLabel: group.label })),
+      ),
+    [workflowChecklistGroups],
   );
-}
-
-function WorkflowIntro({
-  l,
-  workflowItemCount,
-  canManageWorkflowChecklist,
-  onCreateItemClick,
-}: WorkflowIntroProps) {
-  return (
-    <WorkspaceSectionIntro
-      title={l("patients_workflow_cockpit")}
-      description={l("patients_operational_follow_through_ownership_and_patient_bound_t")}
-      accessory={
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <CountBadge>{workflowItemCount}</CountBadge>
-          {canManageWorkflowChecklist ? (
-            <Button type="button" size="sm" className="h-8 rounded-lg gap-1.5" onClick={onCreateItemClick}>
-              <Plus className="size-3.5" />
-              {l("patients_add_item")}
-            </Button>
-          ) : null}
-        </div>
-      }
-    />
-  );
-}
-
-function WorkflowEmptyState({ l, workflowItemCount }: WorkflowEmptyStateProps) {
-  return (
-    <FormSection
-      title={l("patients_live_checklist")}
-      accessory={<CountBadge>{workflowItemCount}</CountBadge>}
-    >
-      <EmptyCell>
-        {l("patients_no_patient_workflow_checklist_yet")}
-      </EmptyCell>
-    </FormSection>
-  );
-}
-
-function WorkflowOverview({
-  l,
-  workflowChecklist,
-  workflowChecklistGroups,
-  overdueCount,
-  ownerCount,
-}: WorkflowOverviewProps) {
-  return (
-    <FormSection
-      title={l("patients_operational_overview")}
-      accessory={
-        <CountBadge>
-          {workflowChecklistGroups.length} {l("patients_groups")}
-        </CountBadge>
-      }
-    >
-      <div className="grid gap-y-3 overflow-hidden rounded-xl border border-border px-3 pb-4 pt-4 md:grid-cols-2 xl:grid-cols-4 [&>article:not(:last-child):not(:nth-child(4n))_.admin-inline-metric-separator]:xl:block">
-        <AdminInlineMetric
-          icon={ListChecks}
-          label={l("patients_open_items")}
-          value={workflowChecklist.open_count}
-          description={l("patients_active_tasks")}
-          tone="sky"
-        />
-        <AdminInlineMetric
-          icon={CheckCircle2}
-          label={l("patients_completed")}
-          value={workflowChecklist.completed_count}
-          description={l("patients_closed_items")}
-          tone="emerald"
-        />
-        <AdminInlineMetric
-          icon={Clock3}
-          label={l("patients_overdue")}
-          value={overdueCount}
-          description={l("patients_due_open_tasks")}
-          tone="amber"
-        />
-        <AdminInlineMetric
-          icon={UserRound}
-          label={l("patients_owners")}
-          value={ownerCount}
-          description={l("patients_active_roles_or_users")}
-          tone="slate"
-        />
-      </div>
-    </FormSection>
-  );
-}
-
-function WorkflowChecklistSection({
-  l,
-  workflowChecklistGroups,
-  ...checklistProps
-}: WorkflowChecklistSectionProps) {
-  return (
-    <FormSection
-      title={l("patients_live_checklist")}
-      accessory={
-        <CountBadge>
-          {workflowChecklistGroups.length} {l("patients_groups")}
-        </CountBadge>
-      }
-    >
-      <div className="space-y-0">
-        {workflowChecklistGroups.map((group) => (
-          <WorkflowChecklistGroup key={group.key} l={l} group={group} {...checklistProps} />
-        ))}
-      </div>
-    </FormSection>
-  );
-}
-
-function WorkflowChecklistGroup({ l, group, ...checklistProps }: WorkflowChecklistGroupProps) {
-  const openItems = group.items.filter((item) => !item.is_completed).length;
-  const completedItems = group.items.length - openItems;
-  const groupIsActive = openItems > 0;
-
-  return (
-    <details className="group relative pl-9">
-      <WorkflowGroupSummary
-        l={l}
-        group={group}
-        openItems={openItems}
-        completedItems={completedItems}
-        groupIsActive={groupIsActive}
-      />
-      <WorkflowGroupConnector />
-      <WorkflowChecklistItems items={group.items} l={l} {...checklistProps} />
-    </details>
-  );
-}
-
-function WorkflowGroupSummary({
-  l,
-  group,
-  openItems,
-  completedItems,
-  groupIsActive,
-}: WorkflowGroupSummaryProps) {
-  return (
-    <summary className="relative grid cursor-pointer list-none gap-2 rounded-lg p-3 transition hover:bg-[#f9fdff] group-open:bg-[#f9fdff] group-open:ring-1 group-open:ring-border/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-      <div className="absolute -left-9 bottom-0 top-0 flex w-8 items-start justify-center pt-3">
-        <span
-          className={cn(
-            "inline-flex size-7 shrink-0 items-center justify-center rounded-full transition-colors",
-            groupIsActive
-              ? "bg-sky-50 text-sky-700 ring-1 ring-sky-200"
-              : "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
-          )}
-        >
-          <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
-        </span>
-      </div>
-
-      <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
-        <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <p className="min-w-0 max-w-full break-words text-[15px] font-semibold leading-5 text-foreground">{group.label}</p>
-            <span className="size-1 rounded-full bg-muted-foreground/35" />
-            <span className="text-xs tabular-nums text-muted-foreground">
-              {openItems} {l("patients_open_2")} / {group.items.length}{" "}
-              {l("patients_total")}
-            </span>
-          </div>
-          <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1">
-              <ClipboardList className="size-3.5 shrink-0 text-muted-foreground/65" />
-              {group.items.length} {l("patients_items")}
-            </span>
-            {completedItems > 0 ? (
-              <>
-                <span className="size-1 rounded-full bg-muted-foreground/35" />
-                <span>
-                  {completedItems} {l("patients_completed_2")}
-                </span>
-              </>
-            ) : null}
-          </div>
-        </div>
-        <div className="flex min-w-0 flex-wrap justify-start gap-1.5 lg:justify-end">
+  const columns = useMemo<ColumnDef<WorkflowTaskRow>[]>(
+    () => [
+      {
+        id: "task",
+        label: l("patients_task"),
+        accessor: (row) => localizeWorkflowItemText(row.item.item_key, row.item.item_text, l),
+        sortable: true,
+        searchable: true,
+        required: true,
+        width: 340,
+        render: (row) => (
+          <span
+            className={cn(
+              "block truncate text-xs font-medium text-foreground",
+              row.item.is_completed && "text-muted-foreground line-through",
+            )}
+          >
+            {localizeWorkflowItemText(row.item.item_key, row.item.item_text, l)}
+          </span>
+        ),
+      },
+      {
+        id: "group",
+        label: l("patients_groups"),
+        accessor: (row) => row.groupLabel,
+        sortable: true,
+        width: 220,
+        render: (row) => (
+          <Badge variant="outline" className="rounded-full font-mono text-[10px]">
+            {row.groupLabel}
+          </Badge>
+        ),
+      },
+      {
+        id: "priority",
+        label: l("patients_priority"),
+        accessor: (row) => priorityLabel(row.item.priority),
+        sortable: true,
+        width: 130,
+        render: (row) => (
           <Badge
             variant="outline"
             className={cn(
-              "rounded-full text-[10px]",
-              groupIsActive
-                ? "border-sky-200 bg-sky-50 text-sky-700"
-                : "border-emerald-200 bg-emerald-50 text-emerald-700",
+              "rounded-full font-mono text-[10px]",
+              priorityBadgeClass(row.item.priority),
             )}
           >
-            {groupIsActive ? l("patients_in_progress") : l("patients_done")}
+            {priorityLabel(row.item.priority)}
           </Badge>
-          <Badge
-            variant="outline"
-            className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
-          >
-            {l("patients_open_3")}:{" "}
-            <span className="ml-1 font-semibold text-foreground">{openItems}</span>
-          </Badge>
-        </div>
-      </div>
-    </summary>
-  );
-}
-
-function WorkflowGroupConnector() {
-  return (
-    <div aria-hidden="true" className="ml-20 flex h-3 items-center px-3">
-      <span className="h-px w-12 bg-gradient-to-r from-transparent via-border/70 to-border/70" />
-      <span className="size-1.5 rounded-full bg-border" />
-      <span className="h-px flex-1 bg-gradient-to-r from-border/70 to-transparent" />
-    </div>
-  );
-}
-
-function WorkflowChecklistItems({ items, ...checklistProps }: WorkflowChecklistItemsProps) {
-  return (
-    <div className="mb-2 ml-20 overflow-hidden rounded-lg bg-[#fbfdff] p-2 shadow-sm">
-      <div className="grid gap-1.5">
-        {items.map((item) => (
-          <WorkflowChecklistItemCard key={item.id} item={item} {...checklistProps} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function WorkflowChecklistItemCard({
-  l,
-  commonNotSet,
-  workflowBusy,
-  statusColors,
-  statusLabel,
-  formatDateTime,
-  roleLabel,
-  priorityLabel,
-  priorityBadgeClass,
-  onCompleteWorkflowItem,
-  item,
-}: WorkflowChecklistItemCardProps) {
-  const itemStatus = workflowItemStatus(item);
-  const itemStatusClass = statusColors[itemStatus] ?? "border-border/60 bg-muted/25 text-muted-foreground";
-
-  return (
-    <article
-      className={cn(
-        "rounded-md bg-white px-3 py-2 text-xs shadow-sm ring-1 ring-border/40",
-        item.is_completed && "opacity-75",
-      )}
-    >
-      <div className="flex flex-col gap-1.5 md:flex-row md:items-start md:justify-between">
-        <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <p className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
-              {localizeWorkflowItemText(item.item_key, item.item_text, l)}
-            </p>
-            <Badge variant="outline" className={cn("rounded-full text-[10px]", priorityBadgeClass(item.priority))}>
-              {priorityLabel(item.priority)}
-            </Badge>
-            <Badge variant="outline" className={cn("rounded-full text-[10px]", itemStatusClass)}>
+        ),
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (row) => statusLabel(workflowItemStatus(row.item)),
+        sortable: true,
+        width: 150,
+        render: (row) => {
+          const itemStatus = workflowItemStatus(row.item);
+          return (
+            <Badge
+              variant="outline"
+              className={cn(
+                "rounded-full font-mono text-[10px]",
+                statusColors[itemStatus] ?? "border-border/60 bg-muted/25 text-muted-foreground",
+              )}
+            >
               {statusLabel(itemStatus)}
             </Badge>
-          </div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-            <span className="inline-flex items-center gap-1">
-              <UserRound className="size-3.5 shrink-0 text-muted-foreground/65" />
-              {item.owner_name
-                ? `${item.owner_name} · ${roleLabel(item.owner_user_role ?? item.owner_role)}`
-                : roleLabel(item.owner_role)}
-            </span>
-            <span className="size-1 rounded-full bg-muted-foreground/35" />
-            <span className="inline-flex items-center gap-1">
-              <CalendarClock className="size-3.5 shrink-0 text-muted-foreground/65" />
-              {formatDateTime(item.due_date, commonNotSet)}
-            </span>
-            <span className="size-1 rounded-full bg-muted-foreground/35" />
-            <span>
-              {l("patients_created")}: {formatDateTime(item.created_at, commonNotSet)}
-            </span>
-            {item.completed_at ? (
-              <>
-                <span className="size-1 rounded-full bg-muted-foreground/35" />
-                <span>
-                  {l("patients_completed")}:{" "}
-                  {formatDateTime(item.completed_at, commonNotSet)}
-                </span>
-              </>
-            ) : null}
-          </div>
-        </div>
-        {!item.is_completed ? (
+          );
+        },
+      },
+      {
+        id: "owner",
+        label: l("patients_owner"),
+        accessor: (row) =>
+          row.item.owner_name
+            ? `${row.item.owner_name} · ${roleLabel(row.item.owner_user_role ?? row.item.owner_role)}`
+            : roleLabel(row.item.owner_role),
+        sortable: true,
+        searchable: true,
+        width: 230,
+        render: (row) => (
+          <span className="block truncate font-mono text-xs text-foreground">
+            {row.item.owner_name
+              ? `${row.item.owner_name} · ${roleLabel(row.item.owner_user_role ?? row.item.owner_role)}`
+              : roleLabel(row.item.owner_role)}
+          </span>
+        ),
+      },
+      {
+        id: "due_date",
+        label: l("patients_due_date"),
+        accessor: (row) => row.item.due_date ?? "",
+        sortable: true,
+        filterType: "date",
+        width: 170,
+        render: (row) => (
+          <span
+            className={cn(
+              "font-mono text-xs tabular-nums",
+              isWorkflowItemOverdue(row.item) ? "font-medium text-rose-600" : "text-foreground",
+            )}
+          >
+            {formatDateTime(row.item.due_date, commonNotSet)}
+          </span>
+        ),
+      },
+    ],
+    [commonNotSet, formatDateTime, l, priorityBadgeClass, priorityLabel, roleLabel, statusColors, statusLabel, t],
+  );
+
+  if (!workflowChecklist || workflowChecklist.items.length === 0) {
+    return <EmptyCell>{l("patients_no_patient_workflow_checklist_yet")}</EmptyCell>;
+  }
+
+  return (
+    <DataTableSurface
+      rows={rows}
+      columns={columns}
+      rowId={(row) => row.item.id}
+      dictionary={t as unknown as Record<string, string>}
+      emptyState={<EmptyCell>{l("patients_no_patient_workflow_checklist_yet")}</EmptyCell>}
+      toolbarStart={
+        canManageWorkflowChecklist ? (
+          <>
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 shrink-0 rounded-lg gap-1.5"
+              onClick={onCreateItemClick}
+            >
+              <Plus className="size-3.5" />
+              {l("patients_add_item")}
+            </Button>
+            <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+          </>
+        ) : undefined
+      }
+      rowActions={(row) =>
+        !row.item.is_completed ? (
           <Button
             type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 shrink-0 rounded-lg gap-1.5 px-2 text-xs"
+            variant="ghost"
+            size="icon-sm"
+            className="size-7 rounded-full text-muted-foreground hover:bg-emerald-50 hover:text-emerald-700"
             disabled={workflowBusy}
-            onClick={() => void onCompleteWorkflowItem(item.id)}
+            onClick={() => void onCompleteWorkflowItem(row.item.id)}
+            aria-label={l("patients_complete")}
+            title={l("patients_complete")}
           >
             <CheckCircle2 className="size-3.5" />
-            {l("patients_complete")}
           </Button>
-        ) : null}
-      </div>
-    </article>
+        ) : null
+      }
+      rowActionsWidth={70}
+    />
   );
 }
 

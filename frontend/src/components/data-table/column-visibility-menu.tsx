@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 
 import type { ColumnDef } from "./types";
 import { useOutsideClose } from "./use-outside-close";
+import { fixedDropdownStyle, useFixedDropdownPosition } from "./use-fixed-dropdown-position";
 
 const EMPTY_STRING_ARRAY: readonly string[] = [];
 const EMPTY_GROUP_LABELS: Record<string, string> = {};
@@ -71,6 +72,8 @@ export function ColumnVisibilityMenu<T>({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const panelPosition = useFixedDropdownPosition(menuRef, panelRef, open, "end");
   useOutsideClose(menuRef, () => setOpen(false), { enabled: open });
 
   const hiddenSet = useMemo(() => new Set(hiddenColumns), [hiddenColumns]);
@@ -174,8 +177,10 @@ export function ColumnVisibilityMenu<T>({
       </Button>
       {open ? (
         <div
+          ref={panelRef}
           role="menu"
-          className="animate-menu-in absolute right-0 z-[110] mt-1 flex w-80 flex-col rounded-lg border border-border bg-popover text-popover-foreground shadow-xl"
+          className="animate-menu-in fixed z-[110] flex w-80 flex-col rounded-lg border border-border bg-popover text-popover-foreground shadow-xl"
+          style={fixedDropdownStyle(panelPosition)}
         >
           <div className="flex items-center gap-2 border-b border-border p-2">
             <Search className="size-3.5 text-muted-foreground" />

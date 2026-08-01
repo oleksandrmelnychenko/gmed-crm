@@ -15,7 +15,13 @@ function AppointmentAttentionSection({
 }) {
   const title = appointmentText("appointments_operational_follow_up_open");
   const subtitle = appointmentText("appointments_this_appointment_still_has_unresolved_operational_follow");
-  const nextCheckpointLabel = appointmentText("appointments_next_due_checkpoint");
+  const hasOverdueReminder =
+    attention.reason_details?.some(
+      (reason) => reason.key === "appointments_attention_reason_overdue_reminders_count",
+    ) || attention.reasons.some((reason) => /reminder\(s\) are overdue$/.test(reason));
+  const nextCheckpointLabel = hasOverdueReminder
+    ? appointmentText("appointments_earliest_overdue_checkpoint")
+    : appointmentText("appointments_next_due_checkpoint");
 
   return (
     <section className="space-y-3 rounded-xl p-3.5 border border-border/50 bg-card/40">

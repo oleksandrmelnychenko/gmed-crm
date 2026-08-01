@@ -11,23 +11,22 @@ import { LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Banner, checkboxClass } from "@/components/ui-shell";
-import { useLang } from "@/lib/i18n";
+import { getLang, useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
 import {
   appointmentElevatedSectionCardClassName,
   appointmentMetaPillClassName,
-  appointmentMiniPillClassName,
   appointmentSelectControlClassName,
   appointmentSlateInputClassName,
   appointmentSlateTextareaControlClassName,
-  appointmentSoftPanelClassName,
-  appointmentWhiteRowClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
-import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
+import {
+  shiftLocalDateTime,
+  toDateTimeLocalInput,
+} from "@/pages/appointments/model/date-time";
 import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import {
-  formatAppointmentDateTimeLabel as formatDateTimeLabel,
   formatAppointmentSlotLabel as slotLabel,
 } from "@/pages/appointments/model/runtime-formatters";
 import { blankBillingHandoffForm } from "@/pages/appointments/model/form-factories";
@@ -37,7 +36,6 @@ import {
   reportApprovalLabel,
   roleLabel,
   taskPriorityLabel,
-  taskStatusLabel,
 } from "@/pages/appointments/model/labels";
 import {
   appointmentAnchorDateTime,
@@ -59,9 +57,11 @@ import {
 } from "@/pages/appointments/model/constants";
 import { ContextCard } from "@/pages/appointments/ui/shared/context-card";
 import {
-  AppointmentDotLabel,
+  AppointmentRemindersTable,
+  AppointmentTasksTable,
+} from "@/pages/appointments/ui/shared/follow-up-tables";
+import {
   AppointmentSectionHeading,
-  EmptyState,
   Field,
 } from "@/pages/appointments/ui/shared/workspace-primitives";
 
@@ -91,6 +91,26 @@ const textareaClassName = appointmentSlateTextareaControlClassName;
 
 function withEllipsis(text: string) {
   return text.trim().endsWith("...") ? text : `${text.trim()}...`;
+}
+
+function defaultBillingHandoffDueAt(
+  detail: AppointmentDetail,
+  earliestDueAt: string,
+) {
+  const appointmentDueAt = shiftLocalDateTime(
+    appointmentAnchorDateTime(detail),
+    { days: 1 },
+  );
+  const nextDay = shiftLocalDateTime(earliestDueAt, { days: 1 });
+  return appointmentDueAt > nextDay ? appointmentDueAt : nextDay;
+}
+
+function countLabel(
+  key: "appointments_open_tasks_count" | "appointments_reminders_linked_count",
+  count: number,
+) {
+  const category = new Intl.PluralRules(getLang()).select(count);
+  return appointmentTextBase(`${key}_${category}`, { count });
 }
 
 function AppointmentBillingHandoffSection(props: AppointmentBillingHandoffSectionProps) {
@@ -131,13 +151,14 @@ function useAppointmentBillingHandoffSectionContentContent({
   const tr = t as unknown as Record<string, string>;
   const appointmentText = appointmentTextBase;
   const { staffGo } = useStaffNavigate();
+  const [earliestDueAt] = useState(() =>
+    toDateTimeLocalInput(new Date().toISOString()),
+  );
 
   const buildDefaultForm = useCallback(
     (
       defaultAssignee = billingStaff[0]?.id ?? "",
-      defaultDueAt = shiftLocalDateTime(appointmentAnchorDateTime(detail), {
-        days: 1,
-      }),
+      defaultDueAt = defaultBillingHandoffDueAt(detail, earliestDueAt),
       defaultKind: BillingHandoffKind =
         detail.type === "non_medical"
           ? "concierge_settlement"
@@ -145,7 +166,7 @@ function useAppointmentBillingHandoffSectionContentContent({
             ? "interpreter_hours"
             : "patient_invoice",
     ) => blankBillingHandoffForm(defaultAssignee, defaultDueAt, defaultKind),
-    [billingStaff, detail],
+    [billingStaff, detail, earliestDueAt],
   );
 
   const [form, setForm] = useState<BillingHandoffFormState>(() =>
@@ -282,12 +303,13 @@ function useAppointmentBillingHandoffSectionContentContent({
   }
 
   const noBillingStaff = billingStaff.length === 0;
-  const handoffBlockedReason = noBillingStaff
-    ? appointmentText("appointments_billing_handoff_blocked_no_staff")
-    : !form.assigneeId
+  const dueAtIsPast = Boolean(form.dueAt && form.dueAt < earliestDueAt);
+  const handoffBlockedReason = !form.assigneeId
       ? appointmentText("appointments_billing_handoff_blocked_no_assignee")
       : !form.dueAt
         ? appointmentText("appointments_billing_handoff_blocked_no_due")
+        : dueAtIsPast
+          ? appointmentText("appointments_billing_handoff_blocked_past_due")
         : null;
 
   return (
@@ -305,7 +327,7 @@ function useAppointmentBillingHandoffSectionContentContent({
 
       <div className="mt-4 grid gap-3 xl:grid-cols-3">
         <ContextCard
-          label={tr.role_interpreter}
+          label={appointmentText("appointments_interpreter")}
           value={
             detail.interpreter_id
               ? interpreterReportReady && detailReport
@@ -343,12 +365,11 @@ function useAppointmentBillingHandoffSectionContentContent({
         />
         <ContextCard
           label={tr.role_billing}
-          value={appointmentText("appointments_open_tasks_count", {
-            count: openTasks.length,
-          })}
-          meta={appointmentText("appointments_reminders_linked_count", {
-            count: reminders.length,
-          })}
+          value={countLabel("appointments_open_tasks_count", openTasks.length)}
+          meta={countLabel(
+            "appointments_reminders_linked_count",
+            reminders.length,
+          )}
         />
       </div>
 
@@ -362,86 +383,22 @@ function useAppointmentBillingHandoffSectionContentContent({
         </div>
       ) : null}
 
-      <div className="mt-5 grid gap-4 xl:grid-cols-2">
-        <div className={appointmentSoftPanelClassName}>
-          <div className="flex items-center justify-between gap-3">
-            <AppointmentDotLabel>
-              {appointmentText("appointments_billing_reminders")}
-            </AppointmentDotLabel>
-            <span className="text-xs text-slate-500">
-              {reminders.length} {appointmentText("appointments_linked")}
-            </span>
-          </div>
-          <div className="mt-3 space-y-3">
-            {reminders.length === 0 ? (
-              <EmptyState text={tr.common_not_set} />
-            ) : (
-              reminders.map((item) => (
-                <div
-                  key={item.id}
-                  className={appointmentWhiteRowClassName}
-                >
-                  <p className="text-sm font-medium text-slate-900">{item.title}</p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {item.user_name} · {formatDateTimeLabel(item.remind_at)}
-                  </p>
-                  {item.description ? (
-                    <p className="mt-2 text-sm text-slate-600">{item.description}</p>
-                  ) : null}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        <div className={appointmentSoftPanelClassName}>
-          <div className="flex items-center justify-between gap-3">
-            <AppointmentDotLabel>
-              {appointmentText("appointments_billing_tasks")}
-            </AppointmentDotLabel>
-            <span className="text-xs text-slate-500">
-              {tasks.length} {appointmentText("appointments_linked")}
-            </span>
-          </div>
-          <div className="mt-3 space-y-3">
-            {tasks.length === 0 ? (
-              <EmptyState text={tr.common_not_set} />
-            ) : (
-              tasks.map((task) => (
-                <div
-                  key={task.id}
-                  className={appointmentWhiteRowClassName}
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-medium text-slate-900">{task.title}</p>
-                    <span className={appointmentMiniPillClassName}>
-                      {taskStatusLabel(task.status)}
-                    </span>
-                    <span className={appointmentMiniPillClassName}>
-                      {taskPriorityLabel(task.priority)}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {task.assigned_to_name} · {roleLabel(task.assigned_to_role)}
-                    {task.due_date
-                      ? appointmentText("appointments_due_date_suffix", {
-                          date: formatDateTimeLabel(task.due_date),
-                        })
-                      : ""}
-                  </p>
-                  {task.description ? (
-                    <p className="mt-2 text-sm text-slate-600">{task.description}</p>
-                  ) : null}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+      <div className="mt-5 space-y-4">
+        <AppointmentRemindersTable
+          reminders={reminders}
+          title={appointmentText("appointments_billing_reminders")}
+          emptyText={tr.common_not_set}
+        />
+        <AppointmentTasksTable
+          tasks={tasks}
+          title={appointmentText("appointments_billing_tasks")}
+          emptyText={tr.common_not_set}
+        />
       </div>
 
-      {canManageConciergeBilling ? (
+      {canManageConciergeBilling && !noBillingStaff ? (
         <form onSubmit={handleSubmit} className="mt-5 grid gap-4 md:grid-cols-2">
-          <Field label={tr.role_billing}>
+          <Field label={appointmentText("appointments_billing_handoff_type")}>
             <NativeComboboxSelect
               value={form.kind}
               onChange={(event) =>
@@ -469,7 +426,7 @@ function useAppointmentBillingHandoffSectionContentContent({
               ))}
             </NativeComboboxSelect>
           </Field>
-          <Field label={tr.role_billing}>
+          <Field label={appointmentText("appointments_billing_assignee")}>
             <NativeComboboxSelect
               value={form.assigneeId}
               onChange={(event) =>
@@ -492,7 +449,7 @@ function useAppointmentBillingHandoffSectionContentContent({
               ))}
             </NativeComboboxSelect>
           </Field>
-          <Field label={tr.invoices_due_at}>
+          <Field label={appointmentText("appointments_billing_handoff_due_at")}>
             <Input
               type="datetime-local"
               value={form.dueAt}
@@ -503,11 +460,12 @@ function useAppointmentBillingHandoffSectionContentContent({
                 }))
               }
               className={inputClassName}
+              min={earliestDueAt}
               required
               disabled={noBillingStaff}
             />
           </Field>
-          <Field label={tr.appointments_title_col}>
+          <Field label={appointmentText("appointments_task_priority")}>
             <NativeComboboxSelect
               value={form.taskPriority}
               onChange={(event) =>
@@ -586,6 +544,7 @@ function useAppointmentBillingHandoffSectionContentContent({
                   submitBusy ||
                   !form.assigneeId ||
                   !form.dueAt ||
+                  dueAtIsPast ||
                   billingStaff.length === 0
                 }
               >

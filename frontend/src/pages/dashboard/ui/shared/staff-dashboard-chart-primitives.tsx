@@ -431,7 +431,7 @@ export function TopProvidersTable({
       accessor: (row) => row.rank,
       width: 48,
       render: (row) => (
-        <span className="font-mono text-[12px] text-muted-foreground">
+        <span className="font-mono text-[12px] text-foreground">
           {row.rank}
         </span>
       ),
@@ -444,7 +444,7 @@ export function TopProvidersTable({
       pinned: "left",
       width: 220,
       render: (row) => (
-        <span className="truncate font-medium text-foreground">{row.name}</span>
+        <span className="truncate text-foreground">{row.name}</span>
       ),
     },
     {

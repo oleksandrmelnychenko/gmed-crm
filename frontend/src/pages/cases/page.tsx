@@ -10,14 +10,11 @@ import {
   type SetStateAction,
 } from "react";
 import {
-  CalendarClock,
-  ClipboardList,
   LoaderCircle,
+  NotebookPen,
   Plus,
   RefreshCw,
   Search,
-  Stethoscope,
-  UserRound,
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
@@ -26,6 +23,10 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import type { CaseRosterItem } from "@/components/cases-roster-section";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import {
+  DataTablePager,
+  useDataTablePagination,
+} from "@/components/data-table/data-table-pager";
 import type { ColumnDef } from "@/components/data-table/types";
 import {
   AdminSheetScaffold,
@@ -39,6 +40,7 @@ import {
   textareaClass as shellTextareaClass,
 } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
+import { ToolbarField } from "@/components/data-table/toolbar-field";
 import {
   Sheet,
   SheetContent,
@@ -54,9 +56,6 @@ import {
   useLang,
 } from "@/lib/i18n";
 import {
-  CASE_HISTORY_SECTION_LABEL_KEYS,
-  CASE_MEDICATION_TYPE_LABEL_KEYS,
-  CASE_MEDICATION_TYPE_VALUES,
   CASE_SNIPPET_CATEGORY_LABEL_KEYS,
   CASE_SNIPPET_CATEGORY_VALUES,
   CASE_STATUS_LABEL_KEYS,
@@ -64,85 +63,35 @@ import {
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
-import { DARREICHUNGSFORM_OPTIONS } from "@/pages/patients/data/medication-options";
+import {
+  daysInStatus,
+  daysInStatusLabel,
+} from "@/pages/leads/appearance/status-appearance";
 import { doctorSpecialtyLabel, type SpecializationLabelLang } from "@/pages/providers/model/specialization-labels";
-import type { SpecializationItem } from "@/pages/providers/model/types";
-import { CaseClinicalEditorSection } from "@/pages/cases/ui/case-clinical-editor-section";
 import {
   CASE_TEXT_SNIPPET_PLACEHOLDERS,
-  appendSnippetToNarrative,
   renderCaseTextSnippet,
 } from "../cases.snippets";
 import { statusBadgeClass } from "./appearance/status-appearance";
 import {
-  confirmMedicationExpiry,
   createCase,
-  fetchCaseDetail,
   fetchCaseLookups,
   fetchCaseTextSnippets,
   fetchCases,
-  saveCaseAllergien,
-  saveCaseCardiology,
-  saveCaseGastroenterology,
-  saveCaseImpfstatus,
-  saveCaseMedikamente,
-  saveCaseNeurology,
-  saveCaseOperationen,
-  saveCaseOrthopedics,
-  saveCaseOverview,
-  saveCasePain,
-  saveCasePulmonology,
-  saveCaseSymptome,
   saveCaseTextSnippet,
-  saveCaseUrology,
-  saveCaseVegetative,
-  saveCaseVorerkrankungen,
 } from "./data/case-api";
+import type {
+  CaseTextSnippet,
+  DoctorOption,
+  PatientOption,
+} from "./model/types";
 
 type CaseStatus = "open" | "in_progress" | "closed";
 
-type VorerkrankungItem = {
-  erkrankung: string;
-  erstdiagnose?: string | null;
-  notiz?: string | null;
-};
-
-type AllergieItem = {
-  allergie: string;
-  reaktion?: string | null;
-};
-
-type OperationItem = {
-  datum?: string | null;
-  grund: string;
-  arzt_id?: string | null;
-  arzt?: string | null;
-  arzt_registry_name?: string | null;
-  arzt_provider_name?: string | null;
-  notiz?: string | null;
-};
-
-type CaseHistoryEntry = {
-  id: number;
-  section: string;
-  old_value?: unknown;
-  new_value?: unknown;
-  created_at: string;
-  changed_by: string;
-  changed_by_name: string;
-  changed_by_role: string;
-};
-
-type CaseTextSnippet = {
-  id: string;
-  label: string;
-  category: string;
-  body: string;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-  created_by_name?: string | null;
-  updated_by_name?: string | null;
+type CaseListItem = CaseRosterItem & {
+  closed_reason?: string | null;
+  closed_at?: string | null;
+  status_changed_at?: string | null;
 };
 
 type CaseTextSnippetFormState = {
@@ -151,218 +100,6 @@ type CaseTextSnippetFormState = {
   category: string;
   body: string;
   is_active: boolean;
-};
-
-type ClientRowIdentity = {
-  cid?: string | null;
-};
-
-type MedikamentItem = ClientRowIdentity & {
-  id?: string | null;
-  handelsname: string;
-  wirkstoff?: string | null;
-  dosis?: string | null;
-  dosis_einheit?: string | null;
-  einnahmeschema?: string | null;
-  darreichungsform?: string | null;
-  einheit?: string | null;
-  anmerkung?: string | null;
-  grund?: string | null;
-  seit?: string | null;
-  verordnender_arzt_id?: string | null;
-  verordnender_arzt?: string | null;
-  verordnender_arzt_registry_name?: string | null;
-  verordnender_arzt_provider_name?: string | null;
-  med_typ?: string | null;
-  expiry_date?: string | null;
-  is_expired?: boolean;
-  pending_expiry_confirmation?: boolean;
-  pending_expiry_notification_sent_at?: string | null;
-};
-
-type PainItem = ClientRowIdentity & {
-  lokalisierung: string;
-  seit_wann?: string | null;
-  ursache?: string | null;
-  qualitaet?: string | null;
-  kontinuitaet?: string | null;
-  entwicklung?: string | null;
-  nrs_aktuell?: number | null;
-  nrs_anfang?: number | null;
-  dauer_anfang?: string | null;
-  dauer_aktuell?: string | null;
-  ausstrahlung?: string | null;
-  auftreten?: string | null;
-};
-
-type SymptomItem = {
-  beschreibung: string;
-  fachrichtung?: string | null;
-};
-
-type VegetativeState = {
-  appetit_durst: string;
-  koerpergroesse: string;
-  gewicht: string;
-  gewichtsveraenderung: string;
-  grund: string;
-};
-
-type CardiologyAssessment = {
-  is_relevant: boolean;
-  chest_pain: boolean;
-  dyspnea: boolean;
-  palpitations: boolean;
-  syncope: boolean;
-  edema: boolean;
-  known_diagnosis: string;
-  prior_cardiac_workup: string;
-  cardiovascular_risk_factors: string;
-  anticoagulation: string;
-  family_history: string;
-  red_flags: string;
-  notes: string;
-};
-
-type GastroenterologyAssessment = {
-  is_relevant: boolean;
-  abdominal_pain: boolean;
-  reflux: boolean;
-  nausea: boolean;
-  diarrhea: boolean;
-  constipation: boolean;
-  gi_bleeding: boolean;
-  prior_endoscopy: string;
-  bowel_habits: string;
-  liver_history: string;
-  food_intolerance: string;
-  red_flags: string;
-  notes: string;
-};
-
-type OrthopedicsAssessment = {
-  is_relevant: boolean;
-  joint_pain: boolean;
-  back_pain: boolean;
-  mobility_limitation: boolean;
-  trauma_history: boolean;
-  prior_imaging: string;
-  assistive_devices: string;
-  physiotherapy_history: string;
-  pain_triggers: string;
-  red_flags: string;
-  notes: string;
-};
-
-type NeurologyAssessment = {
-  is_relevant: boolean;
-  headache: boolean;
-  dizziness: boolean;
-  sensory_changes: boolean;
-  weakness: boolean;
-  seizure_history: boolean;
-  gait_balance_issues: boolean;
-  prior_neuro_imaging: string;
-  prior_neurology_workup: string;
-  cognitive_changes: string;
-  red_flags: string;
-  notes: string;
-};
-
-type PulmonologyAssessment = {
-  is_relevant: boolean;
-  chronic_cough: boolean;
-  dyspnea: boolean;
-  wheezing: boolean;
-  chest_tightness: boolean;
-  hemoptysis: boolean;
-  smoking_history: string;
-  prior_chest_imaging: string;
-  inhaler_therapy: string;
-  sleep_apnea_history: string;
-  red_flags: string;
-  notes: string;
-};
-
-type UrologyAssessment = {
-  is_relevant: boolean;
-  dysuria: boolean;
-  hematuria: boolean;
-  flank_pain: boolean;
-  urinary_frequency: boolean;
-  urinary_retention: boolean;
-  incontinence: boolean;
-  prior_urology_workup: string;
-  catheter_history: string;
-  stone_history: string;
-  red_flags: string;
-  notes: string;
-};
-
-type CaseDetail = {
-  id: string;
-  case_uuid?: string;
-  case_id: string;
-  patient_id: string;
-  onboarding_order_id?: string | null;
-  manager_id: string;
-  status: CaseStatus | string;
-  hauptanfragegrund: string | null;
-  aktuelle_anamnese: string | null;
-  zuweiser_doctor_id?: string | null;
-  zuweiser: string | null;
-  zuweiser_registry_name?: string | null;
-  zuweiser_provider_name?: string | null;
-  notes: string | null;
-  created_at: string;
-  updated_at: string;
-  retention_until?: string | null;
-  last_clinical_update_at?: string | null;
-  version_count?: number;
-  vorerkrankungen: VorerkrankungItem[];
-  allergien: AllergieItem[];
-  operationen: OperationItem[];
-  medikamente: MedikamentItem[];
-  pain_records: PainItem[];
-  symptome: SymptomItem[];
-  cardiology_recommended?: boolean;
-  cardiology?: Partial<CardiologyAssessment> | null;
-  gastroenterology_recommended?: boolean;
-  gastroenterology?: Partial<GastroenterologyAssessment> | null;
-  orthopedics_recommended?: boolean;
-  orthopedics?: Partial<OrthopedicsAssessment> | null;
-  neurology_recommended?: boolean;
-  neurology?: Partial<NeurologyAssessment> | null;
-  pulmonology_recommended?: boolean;
-  pulmonology?: Partial<PulmonologyAssessment> | null;
-  urology_recommended?: boolean;
-  urology?: Partial<UrologyAssessment> | null;
-  vegetative_anamnese?: {
-    appetit_durst?: string | null;
-    koerpergroesse?: number | string | null;
-    gewicht?: number | string | null;
-    gewichtsveraenderung?: string | null;
-    grund?: string | null;
-  } | null;
-  impfstatus?: string | null;
-  history?: CaseHistoryEntry[];
-};
-
-type PatientOption = {
-  id: string;
-  patient_id: string;
-  first_name?: string;
-  last_name?: string;
-};
-
-type DoctorOption = {
-  id: string;
-  provider_id: string;
-  provider_name: string;
-  name: string;
-  title?: string | null;
-  fachbereich?: string | null;
-  specializations?: SpecializationItem[];
 };
 
 type CaseFilters = {
@@ -379,41 +116,10 @@ type CaseCreateFormState = {
   zuweiser: string;
 };
 
-type CaseOverviewFormState = {
-  hauptanfragegrund: string;
-  aktuelle_anamnese: string;
-  zuweiser_doctor_id: string;
-  zuweiser: string;
-};
-
 type CasePermissions = {
   canViewPage: boolean;
   canCreate: boolean;
   canEdit: boolean;
-};
-
-type SectionStatusKey =
-  | "overview"
-  | "vorerkrankungen"
-  | "allergien"
-  | "operationen"
-  | "medikamente"
-  | "pain"
-  | "symptome"
-  | "cardiology"
-  | "gastroenterology"
-  | "orthopedics"
-  | "neurology"
-  | "pulmonology"
-  | "urology"
-  | "vegetative"
-  | "impfstatus";
-
-type MetricCardProps = {
-  label: string;
-  value: string;
-  description: string;
-  icon: ReactNode;
 };
 
 type PanelProps = {
@@ -422,8 +128,6 @@ type PanelProps = {
   action?: ReactNode;
   children: ReactNode;
   className?: string;
-  accent?: boolean;
-  tone?: "default" | "clinical" | "subtle";
 };
 
 type FieldProps = {
@@ -439,36 +143,10 @@ type BannerProps = {
   children: ReactNode;
 };
 
-type CasesPageProps = {
-  embedded?: boolean;
-  embeddedPatientId?: string | null;
-  embeddedCaseId?: string | null;
-  embeddedSheetClassName?: string;
-  embeddedSheetModal?: boolean | "trap-focus";
-  embeddedSheetShowOverlay?: boolean;
-  embeddedSheetSide?: "left" | "right";
-  onCloseCaseSheet?: () => void;
-};
-
 type EmptyPanelProps = {
   title: string;
   text: string;
   action?: ReactNode;
-};
-
-type ItemEditorSectionProps = {
-  title: string;
-  description: string;
-  count: number;
-  addLabel: string;
-  emptyTitle: string;
-  emptyText: string;
-  busy: boolean;
-  error: string;
-  canEdit: boolean;
-  onAdd: () => void;
-  onSave: (event: FormEvent<HTMLFormElement>) => void;
-  children: ReactNode;
 };
 
 const CASE_STATUSES: CaseStatus[] = ["open", "in_progress", "closed"];
@@ -478,12 +156,6 @@ const DEFAULT_CREATE_FORM: CaseCreateFormState = {
   hauptanfragegrund: "",
   aktuelleAnamnese: "",
   zuweiserDoctorId: "",
-  zuweiser: "",
-};
-const DEFAULT_OVERVIEW_FORM: CaseOverviewFormState = {
-  hauptanfragegrund: "",
-  aktuelle_anamnese: "",
-  zuweiser_doctor_id: "",
   zuweiser: "",
 };
 const DEFAULT_CASE_TEXT_SNIPPET_FORM: CaseTextSnippetFormState = {
@@ -526,237 +198,6 @@ function caseStatusLabel(
   return formatEnumLabelFromKeys(status, CASE_STATUS_LABEL_KEYS, tr);
 }
 
-let caseClinicalRowSequence = 0;
-
-function createCaseClinicalRowId(prefix: "medication" | "pain") {
-  caseClinicalRowSequence += 1;
-  const randomId = globalThis.crypto?.randomUUID?.();
-  return `${prefix}-${randomId ?? caseClinicalRowSequence.toString(36)}`;
-}
-
-function existingClientRowId(item: ClientRowIdentity) {
-  return item.cid?.trim() || "";
-}
-
-function existingServerRowId(item: { id?: string | null }) {
-  return item.id?.trim() || "";
-}
-
-function withClientRowId<T extends ClientRowIdentity>(
-  item: T,
-  prefix: "medication" | "pain",
-): T {
-  if (existingClientRowId(item)) return item;
-  return { ...item, cid: createCaseClinicalRowId(prefix) };
-}
-
-function ensureMedikamentClientRowIds(items: MedikamentItem[]) {
-  return items.map((item) =>
-    existingServerRowId(item) ? item : withClientRowId(item, "medication"),
-  );
-}
-
-function ensurePainClientRowIds(items: PainItem[]) {
-  return items.map((item) => withClientRowId(item, "pain"));
-}
-
-function blankVorerkrankung(): VorerkrankungItem {
-  return { erkrankung: "", erstdiagnose: "", notiz: "" };
-}
-
-function blankAllergie(): AllergieItem {
-  return { allergie: "", reaktion: "" };
-}
-
-function blankOperation(): OperationItem {
-  return { datum: "", grund: "", arzt_id: "", arzt: "", notiz: "" };
-}
-
-function blankMedikament(): MedikamentItem {
-  return {
-    cid: createCaseClinicalRowId("medication"),
-    handelsname: "",
-    wirkstoff: "",
-    dosis: "",
-    dosis_einheit: "",
-    einnahmeschema: "",
-    darreichungsform: "",
-    einheit: "",
-    anmerkung: "",
-    grund: "",
-    seit: "",
-    verordnender_arzt_id: "",
-    verordnender_arzt: "",
-    med_typ: "permanent",
-    expiry_date: "",
-  };
-}
-
-function blankPainItem(): PainItem {
-  return {
-    cid: createCaseClinicalRowId("pain"),
-    lokalisierung: "",
-    seit_wann: "",
-    ursache: "",
-    qualitaet: "",
-    kontinuitaet: "",
-    entwicklung: "",
-    nrs_aktuell: null,
-    nrs_anfang: null,
-    dauer_anfang: "",
-    dauer_aktuell: "",
-    ausstrahlung: "",
-    auftreten: "",
-  };
-}
-
-function blankSymptom(): SymptomItem {
-  return { beschreibung: "", fachrichtung: "" };
-}
-
-function vorerkrankungItemKey(item: VorerkrankungItem) {
-  return [item.erkrankung, item.erstdiagnose ?? "", item.notiz ?? ""].join("|");
-}
-
-function allergieItemKey(item: AllergieItem) {
-  return [item.allergie, item.reaktion ?? ""].join("|");
-}
-
-function operationItemKey(item: OperationItem) {
-  return [
-    item.datum ?? "",
-    item.grund,
-    item.arzt_id ?? "",
-    item.arzt ?? "",
-    item.notiz ?? "",
-  ].join("|");
-}
-
-function medikamentItemKey(item: MedikamentItem, index: number) {
-  return existingServerRowId(item) || existingClientRowId(item) || `medikament-${index}`;
-}
-
-function painItemKey(item: PainItem, index: number) {
-  return existingClientRowId(item) || `pain-${index}`;
-}
-
-function symptomItemKey(item: SymptomItem) {
-  return [item.beschreibung, item.fachrichtung ?? ""].join("|");
-}
-
-function blankVegetative(): VegetativeState {
-  return {
-    appetit_durst: "",
-    koerpergroesse: "",
-    gewicht: "",
-    gewichtsveraenderung: "",
-    grund: "",
-  };
-}
-
-function blankCardiology(): CardiologyAssessment {
-  return {
-    is_relevant: false,
-    chest_pain: false,
-    dyspnea: false,
-    palpitations: false,
-    syncope: false,
-    edema: false,
-    known_diagnosis: "",
-    prior_cardiac_workup: "",
-    cardiovascular_risk_factors: "",
-    anticoagulation: "",
-    family_history: "",
-    red_flags: "",
-    notes: "",
-  };
-}
-
-function blankGastroenterology(): GastroenterologyAssessment {
-  return {
-    is_relevant: false,
-    abdominal_pain: false,
-    reflux: false,
-    nausea: false,
-    diarrhea: false,
-    constipation: false,
-    gi_bleeding: false,
-    prior_endoscopy: "",
-    bowel_habits: "",
-    liver_history: "",
-    food_intolerance: "",
-    red_flags: "",
-    notes: "",
-  };
-}
-
-function blankOrthopedics(): OrthopedicsAssessment {
-  return {
-    is_relevant: false,
-    joint_pain: false,
-    back_pain: false,
-    mobility_limitation: false,
-    trauma_history: false,
-    prior_imaging: "",
-    assistive_devices: "",
-    physiotherapy_history: "",
-    pain_triggers: "",
-    red_flags: "",
-    notes: "",
-  };
-}
-
-function blankNeurology(): NeurologyAssessment {
-  return {
-    is_relevant: false,
-    headache: false,
-    dizziness: false,
-    sensory_changes: false,
-    weakness: false,
-    seizure_history: false,
-    gait_balance_issues: false,
-    prior_neuro_imaging: "",
-    prior_neurology_workup: "",
-    cognitive_changes: "",
-    red_flags: "",
-    notes: "",
-  };
-}
-
-function blankPulmonology(): PulmonologyAssessment {
-  return {
-    is_relevant: false,
-    chronic_cough: false,
-    dyspnea: false,
-    wheezing: false,
-    chest_tightness: false,
-    hemoptysis: false,
-    smoking_history: "",
-    prior_chest_imaging: "",
-    inhaler_therapy: "",
-    sleep_apnea_history: "",
-    red_flags: "",
-    notes: "",
-  };
-}
-
-function blankUrology(): UrologyAssessment {
-  return {
-    is_relevant: false,
-    dysuria: false,
-    hematuria: false,
-    flank_pain: false,
-    urinary_frequency: false,
-    urinary_retention: false,
-    incontinence: false,
-    prior_urology_workup: "",
-    catheter_history: "",
-    stone_history: "",
-    red_flags: "",
-    notes: "",
-  };
-}
-
 function buildCasesPath(filters: CaseFilters) {
   const params = new URLSearchParams();
   if (filters.search.trim()) params.set("search", filters.search.trim());
@@ -785,11 +226,8 @@ function caseText(key: string) {
   return runtimeTranslations().uiText[key] ?? key;
 }
 
-function formatCatalogMessage(
-  template: string,
-  values: Record<string, string>,
-) {
-  return template.replace(/\{(\w+)\}/g, (_, key: string) => values[key] ?? "");
+function closeReasonLabel(reason: string) {
+  return caseText(`case_ws_close_reason_${reason}`);
 }
 
 function patientLabel(patient: PatientOption) {
@@ -813,12 +251,6 @@ function doctorOptionSearchText(doctor: DoctorOption, lang: SpecializationLabelL
     .join(" · ");
 }
 
-const CASE_DATE_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
-  "de-DE": new Intl.DateTimeFormat("de-DE", { dateStyle: "medium" }),
-  "ru-RU": new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium" }),
-  "en-GB": new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }),
-};
-
 const CASE_DATE_TIME_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
   "de-DE": new Intl.DateTimeFormat("de-DE", {
     dateStyle: "medium",
@@ -834,35 +266,11 @@ const CASE_DATE_TIME_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
   }),
 };
 
-function formatDate(value: string | null | undefined) {
-  if (!value) return runtimeTranslations().common_not_set;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return (CASE_DATE_FORMATTERS[runtimeLocale()] ?? CASE_DATE_FORMATTERS["en-GB"]).format(date);
-}
-
 function formatDateTime(value: string | null | undefined) {
   if (!value) return runtimeTranslations().common_not_set;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return (CASE_DATE_TIME_FORMATTERS[runtimeLocale()] ?? CASE_DATE_TIME_FORMATTERS["en-GB"]).format(date);
-}
-
-function historyValuePreview(value: unknown) {
-  const empty = runtimeTranslations().cases_clinical_history_value_empty;
-  if (value == null) return empty;
-  if (typeof value === "string") return value || empty;
-  const serialized = JSON.stringify(value);
-  if (!serialized) return empty;
-  return serialized.length > 180 ? `${serialized.slice(0, 177)}...` : serialized;
-}
-
-function historySectionLabel(section: string) {
-  return formatEnumLabelFromKeys(
-    section,
-    CASE_HISTORY_SECTION_LABEL_KEYS,
-    runtimeTranslations(),
-  );
 }
 
 function snippetCategoryLabel(category: string) {
@@ -873,27 +281,8 @@ function snippetCategoryLabel(category: string) {
   );
 }
 
-function medicationTypeLabel(type: string | null | undefined) {
-  return formatEnumLabelFromKeys(
-    type,
-    CASE_MEDICATION_TYPE_LABEL_KEYS,
-    runtimeTranslations(),
-  );
-}
-
 function isKnownSnippetCategory(value: string) {
   return (CASE_SNIPPET_CATEGORY_VALUES as readonly string[]).includes(value);
-}
-
-function isKnownMedicationType(value: string) {
-  return (CASE_MEDICATION_TYPE_VALUES as readonly string[]).includes(value);
-}
-
-function numericInputToValue(value: string) {
-  const trimmed = value.trim().replace(",", ".");
-  if (!trimmed) return null;
-  const parsed = Number(trimmed);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function toOptionalText(value: string) {
@@ -901,135 +290,8 @@ function toOptionalText(value: string) {
   return trimmed ? trimmed : null;
 }
 
-function parsePainNumber(value: string | number | null | undefined) {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) return null;
-    const parsed = Number(trimmed);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
-function painNrsValidationMessage(items: PainItem[]) {
-  const invalid = items.some((item) =>
-    [item.nrs_aktuell, item.nrs_anfang].some((value) => {
-      if (value == null) return false;
-      return !Number.isInteger(value) || value < 0 || value > 10;
-    }),
-  );
-
-  if (!invalid) return "";
-
-  return getLang() === "de"
-    ? "NRS-Werte müssen ganze Zahlen von 0 bis 10 sein."
-    : "Значения NRS должны быть целыми числами от 0 до 10.";
-}
-
-function requiredClinicalItemMessage(section: "medikamente" | "pain") {
-  const lang = getLang();
-  if (section === "medikamente") {
-    return lang === "de"
-      ? "Bitte geben Sie für jede Medikamentenzeile einen Wirkstoff ein oder entfernen Sie leere Zeilen."
-      : "Укажите действующее вещество в каждой строке медикаментов или удалите пустые строки.";
-  }
-
-  return lang === "de"
-    ? "Bitte geben Sie für jede Schmerzzeile eine Lokalisation ein oder entfernen Sie leere Zeilen."
-    : "Укажите локализацию в каждой строке боли или удалите пустые строки.";
-}
-
-function requiredClinicalFieldMessage() {
-  return getLang() === "de" ? "Pflichtfeld." : "Обязательное поле.";
-}
-
-function medicationRequiredValidationMessage(items: MedikamentItem[]) {
-  return items.some((item) => !(item.wirkstoff ?? "").trim())
-    ? requiredClinicalItemMessage("medikamente")
-    : "";
-}
-
-function painRequiredValidationMessage(items: PainItem[]) {
-  return items.some((item) => !item.lokalisierung.trim())
-    ? requiredClinicalItemMessage("pain")
-    : "";
-}
-
-function painValidationMessage(items: PainItem[]) {
-  return painRequiredValidationMessage(items) || painNrsValidationMessage(items);
-}
-
-function medicationRequiredFieldError(
-  item: MedikamentItem,
-  sectionError: string | undefined,
-) {
-  return sectionError && !(item.wirkstoff ?? "").trim() ? requiredClinicalFieldMessage() : "";
-}
-
-function painRequiredFieldError(
-  item: PainItem,
-  sectionError: string | undefined,
-) {
-  return sectionError && !item.lokalisierung.trim() ? requiredClinicalFieldMessage() : "";
-}
-
-function requiredInputClassName(error: string) {
-  return cn(
-    "h-10 rounded-xl bg-white",
-    error ? "border-rose-300 focus:border-rose-400 focus:ring-rose-200" : "",
-  );
-}
-
-function countFilled(items: Array<{ [key: string]: unknown }>, key: string) {
-  return items.filter((item) => {
-    const value = item[key];
-    return typeof value === "string" ? value.trim().length > 0 : Boolean(value);
-  }).length;
-}
-
-function updateItemAtIndex<T>(
-  items: T[],
-  index: number,
-  patch: Partial<T>,
-): T[] {
-  return items.map((item, currentIndex) =>
-    currentIndex === index ? { ...item, ...patch } : item,
-  );
-}
-
-function removeItemAtIndex<T>(items: T[], index: number) {
-  return items.filter((_, currentIndex) => currentIndex !== index);
-}
-
 function bannerText(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
-}
-
-function sectionSaveErrorText(error: unknown, fallback: string) {
-  const message = bannerText(error, fallback);
-  const normalized = message.toLowerCase();
-  const lang = getLang();
-
-  if (normalized.includes("doctor not found")) {
-    return lang === "de"
-      ? "Der ausgewählte Arzt ist nicht mehr verfügbar. Bitte wählen Sie den Arzt erneut aus."
-      : "Выбранный врач больше недоступен. Выберите врача ещё раз.";
-  }
-
-  if (normalized.includes("invalid date")) {
-    return lang === "de"
-      ? "Bitte prüfen Sie das Datum. Erwartetes Format: JJJJ-MM-TT."
-      : "Проверьте дату. Ожидаемый формат: ГГГГ-ММ-ДД.";
-  }
-
-  if (normalized.includes("nrs")) {
-    return lang === "de"
-      ? "NRS-Werte müssen ganze Zahlen von 0 bis 10 sein."
-      : "Значения NRS должны быть целыми числами от 0 до 10.";
-  }
-
-  return message;
 }
 
 const CASE_DOCTOR_OPTION_SEPARATOR = "::provider::";
@@ -1092,207 +354,11 @@ function caseDoctorPayloadId(value: string | null | undefined, doctors: DoctorOp
   return doctorId;
 }
 
-function sanitizeVorerkrankungen(items: VorerkrankungItem[]) {
-  return items.flatMap((item) => {
-    const erkrankung = item.erkrankung.trim();
-    if (!erkrankung) return [];
-    return [{
-      erkrankung,
-      erstdiagnose: toOptionalText(item.erstdiagnose ?? ""),
-      notiz: toOptionalText(item.notiz ?? ""),
-    }];
-  });
-}
-
-function sanitizeAllergien(items: AllergieItem[]) {
-  return items.flatMap((item) => {
-    const allergie = item.allergie.trim();
-    if (!allergie) return [];
-    return [{
-      allergie,
-      reaktion: toOptionalText(item.reaktion ?? ""),
-    }];
-  });
-}
-
-function sanitizeOperationen(items: OperationItem[], doctors: DoctorOption[]) {
-  return items.flatMap((item) => {
-    const grund = item.grund.trim();
-    if (!grund) return [];
-    return [{
-      datum: toOptionalText(item.datum ?? ""),
-      grund,
-      arzt_id: caseDoctorPayloadId(item.arzt_id ?? "", doctors),
-      arzt: toOptionalText(item.arzt ?? ""),
-      notiz: toOptionalText(item.notiz ?? ""),
-    }];
-  });
-}
-
-function sanitizeMedikamente(items: MedikamentItem[], doctors: DoctorOption[]) {
-  return items.flatMap((item) => {
-    const handelsname = item.handelsname.trim();
-    const wirkstoff = (item.wirkstoff ?? "").trim();
-    if (!wirkstoff) return [];
-    return [{
-      handelsname,
-      wirkstoff,
-      dosis: toOptionalText(item.dosis ?? ""),
-      dosis_einheit: toOptionalText(item.dosis_einheit ?? ""),
-      einnahmeschema: toOptionalText(item.einnahmeschema ?? ""),
-      darreichungsform: toOptionalText(item.darreichungsform ?? ""),
-      einheit: toOptionalText(item.einheit ?? ""),
-      anmerkung: toOptionalText(item.anmerkung ?? ""),
-      grund: toOptionalText(item.grund ?? ""),
-      seit: toOptionalText(item.seit ?? ""),
-      verordnender_arzt_id: caseDoctorPayloadId(item.verordnender_arzt_id ?? "", doctors),
-      verordnender_arzt: toOptionalText(item.verordnender_arzt ?? ""),
-      med_typ: toOptionalText(item.med_typ ?? "") ?? "permanent",
-      expiry_date: toOptionalText(item.expiry_date ?? ""),
-    }];
-  });
-}
-
-function sanitizePainRecords(items: PainItem[]) {
-  return items.flatMap((item) => {
-    const lokalisierung = item.lokalisierung.trim();
-    if (!lokalisierung) return [];
-    return [{
-      lokalisierung,
-      seit_wann: toOptionalText(item.seit_wann ?? ""),
-      ursache: toOptionalText(item.ursache ?? ""),
-      qualitaet: toOptionalText(item.qualitaet ?? ""),
-      kontinuitaet: toOptionalText(item.kontinuitaet ?? ""),
-      entwicklung: toOptionalText(item.entwicklung ?? ""),
-      nrs_aktuell: parsePainNumber(item.nrs_aktuell),
-      nrs_anfang: parsePainNumber(item.nrs_anfang),
-      dauer_anfang: toOptionalText(item.dauer_anfang ?? ""),
-      dauer_aktuell: toOptionalText(item.dauer_aktuell ?? ""),
-      ausstrahlung: toOptionalText(item.ausstrahlung ?? ""),
-      auftreten: toOptionalText(item.auftreten ?? ""),
-    }];
-  });
-}
-
-function sanitizeSymptome(items: SymptomItem[]) {
-  return items.flatMap((item) => {
-    const beschreibung = item.beschreibung.trim();
-    if (!beschreibung) return [];
-    return [{
-      beschreibung,
-      fachrichtung: toOptionalText(item.fachrichtung ?? ""),
-    }];
-  });
-}
-
-function cardiologyToPayload(cardiology: CardiologyAssessment) {
-  return {
-    is_relevant: cardiology.is_relevant,
-    chest_pain: cardiology.chest_pain,
-    dyspnea: cardiology.dyspnea,
-    palpitations: cardiology.palpitations,
-    syncope: cardiology.syncope,
-    edema: cardiology.edema,
-    known_diagnosis: toOptionalText(cardiology.known_diagnosis),
-    prior_cardiac_workup: toOptionalText(cardiology.prior_cardiac_workup),
-    cardiovascular_risk_factors: toOptionalText(cardiology.cardiovascular_risk_factors),
-    anticoagulation: toOptionalText(cardiology.anticoagulation),
-    family_history: toOptionalText(cardiology.family_history),
-    red_flags: toOptionalText(cardiology.red_flags),
-    notes: toOptionalText(cardiology.notes),
-  };
-}
-
-function gastroenterologyToPayload(gastroenterology: GastroenterologyAssessment) {
-  return {
-    is_relevant: gastroenterology.is_relevant,
-    abdominal_pain: gastroenterology.abdominal_pain,
-    reflux: gastroenterology.reflux,
-    nausea: gastroenterology.nausea,
-    diarrhea: gastroenterology.diarrhea,
-    constipation: gastroenterology.constipation,
-    gi_bleeding: gastroenterology.gi_bleeding,
-    prior_endoscopy: toOptionalText(gastroenterology.prior_endoscopy),
-    bowel_habits: toOptionalText(gastroenterology.bowel_habits),
-    liver_history: toOptionalText(gastroenterology.liver_history),
-    food_intolerance: toOptionalText(gastroenterology.food_intolerance),
-    red_flags: toOptionalText(gastroenterology.red_flags),
-    notes: toOptionalText(gastroenterology.notes),
-  };
-}
-
-function orthopedicsToPayload(orthopedics: OrthopedicsAssessment) {
-  return {
-    is_relevant: orthopedics.is_relevant,
-    joint_pain: orthopedics.joint_pain,
-    back_pain: orthopedics.back_pain,
-    mobility_limitation: orthopedics.mobility_limitation,
-    trauma_history: orthopedics.trauma_history,
-    prior_imaging: toOptionalText(orthopedics.prior_imaging),
-    assistive_devices: toOptionalText(orthopedics.assistive_devices),
-    physiotherapy_history: toOptionalText(orthopedics.physiotherapy_history),
-    pain_triggers: toOptionalText(orthopedics.pain_triggers),
-    red_flags: toOptionalText(orthopedics.red_flags),
-    notes: toOptionalText(orthopedics.notes),
-  };
-}
-
-function neurologyToPayload(neurology: NeurologyAssessment) {
-  return {
-    is_relevant: neurology.is_relevant,
-    headache: neurology.headache,
-    dizziness: neurology.dizziness,
-    sensory_changes: neurology.sensory_changes,
-    weakness: neurology.weakness,
-    seizure_history: neurology.seizure_history,
-    gait_balance_issues: neurology.gait_balance_issues,
-    prior_neuro_imaging: toOptionalText(neurology.prior_neuro_imaging),
-    prior_neurology_workup: toOptionalText(neurology.prior_neurology_workup),
-    cognitive_changes: toOptionalText(neurology.cognitive_changes),
-    red_flags: toOptionalText(neurology.red_flags),
-    notes: toOptionalText(neurology.notes),
-  };
-}
-
-function pulmonologyToPayload(pulmonology: PulmonologyAssessment) {
-  return {
-    is_relevant: pulmonology.is_relevant,
-    chronic_cough: pulmonology.chronic_cough,
-    dyspnea: pulmonology.dyspnea,
-    wheezing: pulmonology.wheezing,
-    chest_tightness: pulmonology.chest_tightness,
-    hemoptysis: pulmonology.hemoptysis,
-    smoking_history: toOptionalText(pulmonology.smoking_history),
-    prior_chest_imaging: toOptionalText(pulmonology.prior_chest_imaging),
-    inhaler_therapy: toOptionalText(pulmonology.inhaler_therapy),
-    sleep_apnea_history: toOptionalText(pulmonology.sleep_apnea_history),
-    red_flags: toOptionalText(pulmonology.red_flags),
-    notes: toOptionalText(pulmonology.notes),
-  };
-}
-
-function urologyToPayload(urology: UrologyAssessment) {
-  return {
-    is_relevant: urology.is_relevant,
-    dysuria: urology.dysuria,
-    hematuria: urology.hematuria,
-    flank_pain: urology.flank_pain,
-    urinary_frequency: urology.urinary_frequency,
-    urinary_retention: urology.urinary_retention,
-    incontinence: urology.incontinence,
-    prior_urology_workup: toOptionalText(urology.prior_urology_workup),
-    catheter_history: toOptionalText(urology.catheter_history),
-    stone_history: toOptionalText(urology.stone_history),
-    red_flags: toOptionalText(urology.red_flags),
-    notes: toOptionalText(urology.notes),
-  };
-}
-
 type CasesPageState = {
   filters: CaseFilters;
   patients: PatientOption[];
   doctors: DoctorOption[];
-  cases: CaseRosterItem[];
+  cases: CaseListItem[];
   listBusy: boolean;
   listError: string;
   listVersion: number;
@@ -1300,29 +366,6 @@ type CasesPageState = {
   createBusy: boolean;
   createError: string;
   createForm: CaseCreateFormState;
-  detailOpen: boolean;
-  selectedId: string;
-  detail: CaseDetail | null;
-  detailBusy: boolean;
-  detailError: string;
-  detailVersion: number;
-  overviewForm: CaseOverviewFormState;
-  vorerkrankungen: VorerkrankungItem[];
-  allergien: AllergieItem[];
-  operationen: OperationItem[];
-  medikamente: MedikamentItem[];
-  painRecords: PainItem[];
-  symptome: SymptomItem[];
-  cardiology: CardiologyAssessment;
-  gastroenterology: GastroenterologyAssessment;
-  orthopedics: OrthopedicsAssessment;
-  neurology: NeurologyAssessment;
-  pulmonology: PulmonologyAssessment;
-  urology: UrologyAssessment;
-  vegetative: VegetativeState;
-  impfstatus: string;
-  sectionBusy: SectionStatusKey | "";
-  sectionErrors: Record<string, string>;
   snippets: CaseTextSnippet[];
   snippetsBusy: boolean;
   snippetsError: string;
@@ -1365,16 +408,7 @@ function createCasesPageFieldPatch<K extends keyof CasesPageState>(
   } as Partial<CasesPageState>);
 }
 
-function useCasesPageContent({
-  embedded = false,
-  embeddedPatientId = null,
-  embeddedCaseId = null,
-  embeddedSheetClassName,
-  embeddedSheetModal = false,
-  embeddedSheetShowOverlay = false,
-  embeddedSheetSide = "right",
-  onCloseCaseSheet,
-}: CasesPageProps = {}) {
+function useCasesPageContent() {
   const { t, lang } = useLang();
   const { user } = useAuth();
   const { staffGo } = useStaffNavigate();
@@ -1413,29 +447,6 @@ function useCasesPageContent({
       createBusy: false,
       createError: "",
       createForm: DEFAULT_CREATE_FORM,
-      detailOpen: false,
-      selectedId: "",
-      detail: null,
-      detailBusy: false,
-      detailError: "",
-      detailVersion: 0,
-      overviewForm: DEFAULT_OVERVIEW_FORM,
-      vorerkrankungen: [],
-      allergien: [],
-      operationen: [],
-      medikamente: [],
-      painRecords: [],
-      symptome: [],
-      cardiology: blankCardiology(),
-      gastroenterology: blankGastroenterology(),
-      orthopedics: blankOrthopedics(),
-      neurology: blankNeurology(),
-      pulmonology: blankPulmonology(),
-      urology: blankUrology(),
-      vegetative: blankVegetative(),
-      impfstatus: "",
-      sectionBusy: "",
-      sectionErrors: {},
       snippets: [],
       snippetsBusy: false,
       snippetsError: "",
@@ -1447,35 +458,17 @@ function useCasesPageContent({
     }),
   );
   const {
-    allergien,
-    cardiology,
     cases,
     createBusy,
     createError,
     createForm,
     createOpen,
-    detail,
-    detailBusy,
-    detailError,
-    detailOpen,
-    detailVersion,
     doctors,
     filters,
-    gastroenterology,
-    impfstatus,
     listBusy,
     listError,
     listVersion,
-    medikamente,
-    neurology,
-    operationen,
-    orthopedics,
-    painRecords,
     patients,
-    pulmonology,
-    sectionBusy,
-    sectionErrors,
-    selectedId,
     snippetDialogOpen,
     snippetForm,
     snippetSaveBusy,
@@ -1484,12 +477,11 @@ function useCasesPageContent({
     snippetsBusy,
     snippetsError,
     snippetVersion,
-    symptome,
-    urology,
-    vegetative,
-    vorerkrankungen,
-    overviewForm,
   } = casesPageState;
+  const casesPagination = useDataTablePagination(
+    cases,
+    `${filters.search} ${filters.status} ${filters.patientId}`,
+  );
   const setCasesPageField = <K extends keyof CasesPageState>(
     field: K,
     nextValue: SetStateAction<CasesPageState[K]>,
@@ -1512,7 +504,7 @@ function useCasesPageContent({
     setCasesPageField("patients", nextValue);
   const setDoctors = (nextValue: SetStateAction<DoctorOption[]>) =>
     setCasesPageField("doctors", nextValue);
-  const setCases = (nextValue: SetStateAction<CaseRosterItem[]>) =>
+  const setCases = (nextValue: SetStateAction<CaseListItem[]>) =>
     setCasesPageField("cases", nextValue);
   const setListBusy = (nextValue: SetStateAction<boolean>) =>
     setCasesPageField("listBusy", nextValue);
@@ -1528,59 +520,6 @@ function useCasesPageContent({
     setCasesPageField("createError", nextValue);
   const setCreateForm = (nextValue: SetStateAction<CaseCreateFormState>) =>
     setCasesPageField("createForm", nextValue);
-  const setDetailOpen = (nextValue: SetStateAction<boolean>) =>
-    setCasesPageField("detailOpen", nextValue);
-  const setSelectedId = (nextValue: SetStateAction<string>) =>
-    setCasesPageField("selectedId", nextValue);
-  const setDetail = (nextValue: SetStateAction<CaseDetail | null>) =>
-    setCasesPageField("detail", nextValue);
-  const setDetailBusy = (nextValue: SetStateAction<boolean>) =>
-    setCasesPageField("detailBusy", nextValue);
-  const setDetailError = (nextValue: SetStateAction<string>) =>
-    setCasesPageField("detailError", nextValue);
-  const setDetailVersion = (nextValue: SetStateAction<number>) =>
-    setCasesPageField("detailVersion", nextValue);
-  const setOverviewForm = (
-    nextValue: SetStateAction<CaseOverviewFormState>,
-  ) => setCasesPageField("overviewForm", nextValue);
-  const setVorerkrankungen = (
-    nextValue: SetStateAction<VorerkrankungItem[]>,
-  ) => setCasesPageField("vorerkrankungen", nextValue);
-  const setAllergien = (nextValue: SetStateAction<AllergieItem[]>) =>
-    setCasesPageField("allergien", nextValue);
-  const setOperationen = (nextValue: SetStateAction<OperationItem[]>) =>
-    setCasesPageField("operationen", nextValue);
-  const setMedikamente = (nextValue: SetStateAction<MedikamentItem[]>) =>
-    setCasesPageField("medikamente", nextValue);
-  const setPainRecords = (nextValue: SetStateAction<PainItem[]>) =>
-    setCasesPageField("painRecords", nextValue);
-  const setSymptome = (nextValue: SetStateAction<SymptomItem[]>) =>
-    setCasesPageField("symptome", nextValue);
-  const setCardiology = (nextValue: SetStateAction<CardiologyAssessment>) =>
-    setCasesPageField("cardiology", nextValue);
-  const setGastroenterology = (
-    nextValue: SetStateAction<GastroenterologyAssessment>,
-  ) => setCasesPageField("gastroenterology", nextValue);
-  const setOrthopedics = (
-    nextValue: SetStateAction<OrthopedicsAssessment>,
-  ) => setCasesPageField("orthopedics", nextValue);
-  const setNeurology = (nextValue: SetStateAction<NeurologyAssessment>) =>
-    setCasesPageField("neurology", nextValue);
-  const setPulmonology = (
-    nextValue: SetStateAction<PulmonologyAssessment>,
-  ) => setCasesPageField("pulmonology", nextValue);
-  const setUrology = (nextValue: SetStateAction<UrologyAssessment>) =>
-    setCasesPageField("urology", nextValue);
-  const setVegetative = (nextValue: SetStateAction<VegetativeState>) =>
-    setCasesPageField("vegetative", nextValue);
-  const setImpfstatus = (nextValue: SetStateAction<string>) =>
-    setCasesPageField("impfstatus", nextValue);
-  const setSectionBusy = (
-    nextValue: SetStateAction<SectionStatusKey | "">,
-  ) => setCasesPageField("sectionBusy", nextValue);
-  const setSectionErrors = (
-    nextValue: SetStateAction<Record<string, string>>,
-  ) => setCasesPageField("sectionErrors", nextValue);
   const setSnippets = (nextValue: SetStateAction<CaseTextSnippet[]>) =>
     setCasesPageField("snippets", nextValue);
   const setSnippetsBusy = (nextValue: SetStateAction<boolean>) =>
@@ -1604,58 +543,35 @@ function useCasesPageContent({
     [deferredSearch, filters],
   );
   const casesPath = useMemo(() => buildCasesPath(effectiveFilters), [effectiveFilters]);
-  const selectedSummary = useMemo(
-    () => cases.find((item) => item.id === selectedId) ?? null,
-    [cases, selectedId],
-  );
-  const selectedPatient = useMemo(
-    () => patients.find((patient) => patient.id === (detail?.patient_id ?? selectedSummary?.patient_id)),
-    [detail?.patient_id, patients, selectedSummary?.patient_id],
-  );
 
   useDebouncedRealtimeSubscription(CASE_REALTIME_EVENTS, (_event, events) => {
     if (!permissions.canViewPage) return;
     clearApiCache("/cases");
-    const selectedWasUpdated = events.some((event) => event.entity_id === selectedId);
     for (const event of events) {
       if (event.entity_type === "case" && event.entity_id) {
         clearApiCache(`/cases/${event.entity_id}`);
         clearApiCache(`/cases/${event.entity_id}/history`);
       }
     }
-    if (selectedId) {
-      clearApiCache(`/cases/${selectedId}`);
-      clearApiCache(`/cases/${selectedId}/history`);
-    }
     startTransition(() => {
       setListVersion((current) => current + 1);
-      if (!selectedId || selectedWasUpdated) {
-        setDetailVersion((current) => current + 1);
-      }
     });
   }, 250);
-  const snippetContext = useMemo(
+
+  const snippetPreviewContext = useMemo(
     () => ({
-      patientName:
-        selectedSummary?.patient_name ??
-        [selectedPatient?.first_name, selectedPatient?.last_name]
-          .filter(Boolean)
-          .join(" ")
-          .trim(),
-      patientPid: selectedSummary?.patient_pid ?? selectedPatient?.patient_id ?? "",
-      caseId: detail?.case_id ?? selectedSummary?.case_id ?? "",
-      caseUuid: detail?.case_uuid ?? detail?.id ?? "",
-      hauptanfragegrund: overviewForm.hauptanfragegrund.trim(),
-      zuweiser: overviewForm.zuweiser.trim(),
+      patientName: "",
+      patientPid: "",
+      caseId: "",
+      caseUuid: "",
+      hauptanfragegrund: "",
+      zuweiser: "",
       today: new Date().toISOString().slice(0, 10),
     }),
-    [detail?.case_id, detail?.case_uuid, detail?.id, overviewForm.hauptanfragegrund, overviewForm.zuweiser, selectedPatient?.first_name, selectedPatient?.last_name, selectedPatient?.patient_id, selectedSummary?.case_id, selectedSummary?.patient_name, selectedSummary?.patient_pid],
+    [],
   );
-  const activeSnippets = useMemo(
-    () => snippets.filter((snippet) => snippet.is_active),
-    [snippets],
-  );
-  const caseTableColumns = useMemo<ColumnDef<CaseRosterItem>[]>(
+
+  const caseTableColumns = useMemo<ColumnDef<CaseListItem>[]>(
     () => [
       {
         id: "case_id",
@@ -1673,25 +589,7 @@ function useCasesPageContent({
         sortable: true,
         required: true,
         width: 260,
-      },
-      {
-        id: "patient_pid",
-        label: t.cases_clinical_patient_id,
-        accessor: (row) => row.patient_pid,
-        sortable: true,
-        width: 180,
-      },
-      {
-        id: "status",
-        label: t.users_status,
-        accessor: (row) => row.status,
-        sortable: true,
-        width: 160,
-        render: (row) => (
-          <Badge variant="outline" className={cn("rounded-full", statusBadgeClass(row.status))}>
-            {caseStatusLabel(row.status, t)}
-          </Badge>
-        ),
+        render: (row) => <span className="font-mono text-xs">{row.patient_name}</span>,
       },
       {
         id: "reason",
@@ -1699,10 +597,46 @@ function useCasesPageContent({
         accessor: (row) => row.hauptanfragegrund ?? "",
         width: 280,
         render: (row) => (
-          <span className="block max-w-[280px] truncate text-sm text-foreground">
+          <span className="block max-w-[280px] truncate text-xs text-foreground">
             {row.hauptanfragegrund?.trim() || t.common_not_set}
           </span>
         ),
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (row) => row.status,
+        sortable: true,
+        width: 180,
+        render: (row) => (
+          <span className="inline-flex items-center gap-1.5">
+            <Badge variant="outline" className={cn("rounded-full", statusBadgeClass(row.status))}>
+              {caseStatusLabel(row.status, t)}
+            </Badge>
+            {row.status === "closed" && row.closed_reason ? (
+              <span className="text-[11px] text-muted-foreground">
+                {closeReasonLabel(row.closed_reason)}
+              </span>
+            ) : null}
+          </span>
+        ),
+      },
+      {
+        id: "days_in_status",
+        label: lang === "de" ? "Tage im Status" : "Дней в статусе",
+        accessor: (row) => daysInStatus(row.status_changed_at) ?? 0,
+        sortable: true,
+        width: 130,
+        render: (row) => {
+          const days = daysInStatus(row.status_changed_at);
+          return days != null ? (
+            <span className="whitespace-nowrap font-mono text-xs tabular-nums text-foreground">
+              {daysInStatusLabel(days, lang)}
+            </span>
+          ) : (
+            <span className="text-xs text-foreground">—</span>
+          );
+        },
       },
       {
         id: "created",
@@ -1710,91 +644,10 @@ function useCasesPageContent({
         accessor: (row) => row.created_at,
         sortable: true,
         width: 180,
-        render: (row) => <span className="text-xs text-muted-foreground">{formatDateTime(row.created_at)}</span>,
+        render: (row) => <span className="text-xs text-foreground">{formatDateTime(row.created_at)}</span>,
       },
     ],
-    [t],
-  );
-  const cardiologyTriggered = useMemo(
-    () =>
-      cardiology.is_relevant ||
-      Boolean(detail?.cardiology_recommended) ||
-      symptome.some((item) => {
-        const fachrichtung = (item.fachrichtung ?? "").trim().toLowerCase();
-        return fachrichtung.includes("cardio") || fachrichtung.includes("kardio");
-      }),
-    [cardiology.is_relevant, detail?.cardiology_recommended, symptome],
-  );
-  const gastroenterologyTriggered = useMemo(
-    () =>
-      gastroenterology.is_relevant ||
-      Boolean(detail?.gastroenterology_recommended) ||
-      symptome.some((item) => {
-        const fachrichtung = (item.fachrichtung ?? "").trim().toLowerCase();
-        return (
-          fachrichtung.includes("gastro") ||
-          fachrichtung.includes("kolo") ||
-          fachrichtung.includes("colo")
-        );
-      }),
-    [gastroenterology.is_relevant, detail?.gastroenterology_recommended, symptome],
-  );
-  const orthopedicsTriggered = useMemo(
-    () =>
-      orthopedics.is_relevant ||
-      Boolean(detail?.orthopedics_recommended) ||
-      symptome.some((item) => {
-        const fachrichtung = (item.fachrichtung ?? "").trim().toLowerCase();
-        return (
-          fachrichtung.includes("ortho") ||
-          fachrichtung.includes("orthop") ||
-          fachrichtung.includes("trauma") ||
-          fachrichtung.includes("bewegung")
-        );
-      }),
-    [detail?.orthopedics_recommended, orthopedics.is_relevant, symptome],
-  );
-  const neurologyTriggered = useMemo(
-    () =>
-      neurology.is_relevant ||
-      Boolean(detail?.neurology_recommended) ||
-      symptome.some((item) => {
-        const fachrichtung = (item.fachrichtung ?? "").trim().toLowerCase();
-        return fachrichtung.includes("neuro") || fachrichtung.includes("neurol");
-      }),
-    [detail?.neurology_recommended, neurology.is_relevant, symptome],
-  );
-  const pulmonologyTriggered = useMemo(
-    () =>
-      pulmonology.is_relevant ||
-      Boolean(detail?.pulmonology_recommended) ||
-      symptome.some((item) => {
-        const fachrichtung = (item.fachrichtung ?? "").trim().toLowerCase();
-        return (
-          fachrichtung.includes("pulmo") ||
-          fachrichtung.includes("pneumo") ||
-          fachrichtung.includes("respir") ||
-          fachrichtung.includes("asthma") ||
-          fachrichtung.includes("lung")
-        );
-      }),
-    [detail?.pulmonology_recommended, pulmonology.is_relevant, symptome],
-  );
-  const urologyTriggered = useMemo(
-    () =>
-      urology.is_relevant ||
-      Boolean(detail?.urology_recommended) ||
-      symptome.some((item) => {
-        const fachrichtung = (item.fachrichtung ?? "").trim().toLowerCase();
-        return (
-          fachrichtung.includes("uro") ||
-          fachrichtung.includes("renal") ||
-          fachrichtung.includes("kidney") ||
-          fachrichtung.includes("bladder") ||
-          fachrichtung.includes("prostat")
-        );
-      }),
-    [detail?.urology_recommended, symptome, urology.is_relevant],
+    [lang, t],
   );
 
   const applyCaseLookups = useCallback(
@@ -1816,10 +669,6 @@ function useCasesPageContent({
     [setFilters],
   );
 
-  const openCaseFromRoute = useCallback((caseId: string) => {
-    setSelectedId(caseId);
-    setDetailOpen(true);
-  }, []);
   const openCreateCaseFromRoute = useCallback(
     (patientParam: string, currentSearchParams: URLSearchParams) => {
       setCreateError("");
@@ -1910,33 +759,26 @@ function useCasesPageContent({
   ]);
 
   useEffect(() => {
-    const patientParam = embedded
-      ? embeddedPatientId ?? ""
-      : searchParams.get("patient") ?? "";
-    const caseParam = embedded
-      ? embeddedCaseId ?? ""
-      : searchParams.get("case") ?? "";
-    const createParam = embedded ? "" : searchParams.get("create") ?? "";
+    const patientParam = searchParams.get("patient") ?? "";
+    const caseParam = searchParams.get("case") ?? "";
+    const createParam = searchParams.get("create") ?? "";
 
     hydratePatientFilterFromRoute(patientParam);
 
-    if (caseParam && caseParam !== selectedId) {
-      openCaseFromRoute(caseParam);
+    if (caseParam) {
+      staffGo(`/cases/${caseParam}`);
+      return;
     }
 
-    if (createParam && permissions.canCreate && !embedded) {
+    if (createParam && permissions.canCreate) {
       openCreateCaseFromRoute(patientParam, searchParams);
     }
   }, [
-    embedded,
-    embeddedPatientId,
-    embeddedCaseId,
     hydratePatientFilterFromRoute,
-    openCaseFromRoute,
     openCreateCaseFromRoute,
     permissions.canCreate,
     searchParams,
-    selectedId,
+    staffGo,
   ]);
 
   const startCaseListLoad = useCallback(() => {
@@ -1944,7 +786,7 @@ function useCasesPageContent({
     setListError("");
   }, []);
 
-  const applyCases = useCallback((items: CaseRosterItem[]) => {
+  const applyCases = useCallback((items: CaseListItem[]) => {
     setCases(items);
   }, []);
 
@@ -1960,7 +802,7 @@ function useCasesPageContent({
     void fetchCases(casesPath)
       .then((items) => {
         if (!cancelled) {
-          startTransition(() => applyCases(items));
+          startTransition(() => applyCases(items as CaseListItem[]));
         }
       })
       .catch((error: unknown) => {
@@ -1984,183 +826,11 @@ function useCasesPageContent({
     };
   }, [applyCases, casesPath, finishCaseListLoad, permissions.canViewPage, listVersion, startCaseListLoad]);
 
-  const startCaseDetailLoad = useCallback(() => {
-    setDetailBusy(true);
-    setDetailError("");
-  }, []);
-
-  const applyCaseDetail = useCallback((item: Awaited<ReturnType<typeof fetchCaseDetail>>) => {
-    setDetail(item);
-    setOverviewForm({
-      hauptanfragegrund: item.hauptanfragegrund ?? "",
-      aktuelle_anamnese: item.aktuelle_anamnese ?? "",
-      zuweiser_doctor_id: item.zuweiser_doctor_id ?? "",
-      zuweiser: item.zuweiser ?? "",
-    });
-    setVorerkrankungen(item.vorerkrankungen);
-    setAllergien(item.allergien);
-    setOperationen(item.operationen);
-    setMedikamente(ensureMedikamentClientRowIds(item.medikamente));
-    setPainRecords(ensurePainClientRowIds(item.pain_records));
-    setSymptome(item.symptome);
-    setCardiology({
-      ...blankCardiology(),
-      is_relevant: item.cardiology?.is_relevant ?? item.cardiology_recommended ?? false,
-      chest_pain: item.cardiology?.chest_pain ?? false,
-      dyspnea: item.cardiology?.dyspnea ?? false,
-      palpitations: item.cardiology?.palpitations ?? false,
-      syncope: item.cardiology?.syncope ?? false,
-      edema: item.cardiology?.edema ?? false,
-      known_diagnosis: item.cardiology?.known_diagnosis ?? "",
-      prior_cardiac_workup: item.cardiology?.prior_cardiac_workup ?? "",
-      cardiovascular_risk_factors: item.cardiology?.cardiovascular_risk_factors ?? "",
-      anticoagulation: item.cardiology?.anticoagulation ?? "",
-      family_history: item.cardiology?.family_history ?? "",
-      red_flags: item.cardiology?.red_flags ?? "",
-      notes: item.cardiology?.notes ?? "",
-    });
-    setGastroenterology({
-      ...blankGastroenterology(),
-      is_relevant:
-        item.gastroenterology?.is_relevant ??
-        item.gastroenterology_recommended ??
-        false,
-      abdominal_pain: item.gastroenterology?.abdominal_pain ?? false,
-      reflux: item.gastroenterology?.reflux ?? false,
-      nausea: item.gastroenterology?.nausea ?? false,
-      diarrhea: item.gastroenterology?.diarrhea ?? false,
-      constipation: item.gastroenterology?.constipation ?? false,
-      gi_bleeding: item.gastroenterology?.gi_bleeding ?? false,
-      prior_endoscopy: item.gastroenterology?.prior_endoscopy ?? "",
-      bowel_habits: item.gastroenterology?.bowel_habits ?? "",
-      liver_history: item.gastroenterology?.liver_history ?? "",
-      food_intolerance: item.gastroenterology?.food_intolerance ?? "",
-      red_flags: item.gastroenterology?.red_flags ?? "",
-      notes: item.gastroenterology?.notes ?? "",
-    });
-    setOrthopedics({
-      ...blankOrthopedics(),
-      is_relevant: item.orthopedics?.is_relevant ?? item.orthopedics_recommended ?? false,
-      joint_pain: item.orthopedics?.joint_pain ?? false,
-      back_pain: item.orthopedics?.back_pain ?? false,
-      mobility_limitation: item.orthopedics?.mobility_limitation ?? false,
-      trauma_history: item.orthopedics?.trauma_history ?? false,
-      prior_imaging: item.orthopedics?.prior_imaging ?? "",
-      assistive_devices: item.orthopedics?.assistive_devices ?? "",
-      physiotherapy_history: item.orthopedics?.physiotherapy_history ?? "",
-      pain_triggers: item.orthopedics?.pain_triggers ?? "",
-      red_flags: item.orthopedics?.red_flags ?? "",
-      notes: item.orthopedics?.notes ?? "",
-    });
-    setNeurology({
-      ...blankNeurology(),
-      is_relevant: item.neurology?.is_relevant ?? item.neurology_recommended ?? false,
-      headache: item.neurology?.headache ?? false,
-      dizziness: item.neurology?.dizziness ?? false,
-      sensory_changes: item.neurology?.sensory_changes ?? false,
-      weakness: item.neurology?.weakness ?? false,
-      seizure_history: item.neurology?.seizure_history ?? false,
-      gait_balance_issues: item.neurology?.gait_balance_issues ?? false,
-      prior_neuro_imaging: item.neurology?.prior_neuro_imaging ?? "",
-      prior_neurology_workup: item.neurology?.prior_neurology_workup ?? "",
-      cognitive_changes: item.neurology?.cognitive_changes ?? "",
-      red_flags: item.neurology?.red_flags ?? "",
-      notes: item.neurology?.notes ?? "",
-    });
-    setPulmonology({
-      ...blankPulmonology(),
-      is_relevant: item.pulmonology?.is_relevant ?? item.pulmonology_recommended ?? false,
-      chronic_cough: item.pulmonology?.chronic_cough ?? false,
-      dyspnea: item.pulmonology?.dyspnea ?? false,
-      wheezing: item.pulmonology?.wheezing ?? false,
-      chest_tightness: item.pulmonology?.chest_tightness ?? false,
-      hemoptysis: item.pulmonology?.hemoptysis ?? false,
-      smoking_history: item.pulmonology?.smoking_history ?? "",
-      prior_chest_imaging: item.pulmonology?.prior_chest_imaging ?? "",
-      inhaler_therapy: item.pulmonology?.inhaler_therapy ?? "",
-      sleep_apnea_history: item.pulmonology?.sleep_apnea_history ?? "",
-      red_flags: item.pulmonology?.red_flags ?? "",
-      notes: item.pulmonology?.notes ?? "",
-    });
-    setUrology({
-      ...blankUrology(),
-      is_relevant: item.urology?.is_relevant ?? item.urology_recommended ?? false,
-      dysuria: item.urology?.dysuria ?? false,
-      hematuria: item.urology?.hematuria ?? false,
-      flank_pain: item.urology?.flank_pain ?? false,
-      urinary_frequency: item.urology?.urinary_frequency ?? false,
-      urinary_retention: item.urology?.urinary_retention ?? false,
-      incontinence: item.urology?.incontinence ?? false,
-      prior_urology_workup: item.urology?.prior_urology_workup ?? "",
-      catheter_history: item.urology?.catheter_history ?? "",
-      stone_history: item.urology?.stone_history ?? "",
-      red_flags: item.urology?.red_flags ?? "",
-      notes: item.urology?.notes ?? "",
-    });
-    setVegetative({
-      appetit_durst: item.vegetative_anamnese?.appetit_durst ?? "",
-      koerpergroesse:
-        item.vegetative_anamnese?.koerpergroesse != null
-          ? String(item.vegetative_anamnese.koerpergroesse)
-          : "",
-      gewicht:
-        item.vegetative_anamnese?.gewicht != null
-          ? String(item.vegetative_anamnese.gewicht)
-          : "",
-      gewichtsveraenderung:
-        item.vegetative_anamnese?.gewichtsveraenderung ?? "",
-      grund: item.vegetative_anamnese?.grund ?? "",
-    });
-    setImpfstatus(item.impfstatus ?? "");
-  }, []);
-
-  const finishCaseDetailLoad = useCallback(() => {
-    setDetailBusy(false);
-  }, []);
-
-  useEffect(() => {
-    if (!detailOpen || !selectedId) return;
-    let cancelled = false;
-    startCaseDetailLoad();
-
-    void fetchCaseDetail(selectedId)
-      .then((item) => {
-        if (cancelled) return;
-        startTransition(() => {
-          applyCaseDetail(item);
-        });
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setDetailError(
-            bannerText(
-              error,
-              caseText("cases_failed_to_load_case"),
-            ),
-          );
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          finishCaseDetailLoad();
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [applyCaseDetail, detailOpen, detailVersion, finishCaseDetailLoad, selectedId, startCaseDetailLoad]);
-
   function refreshList() {
     setListVersion((current) => current + 1);
   }
 
-  function refreshDetail() {
-    setDetailVersion((current) => current + 1);
-  }
-
   function updateQuery(next: Record<string, string | null>) {
-    if (embedded) return;
     const params = new URLSearchParams(searchParams);
     Object.entries(next).forEach(([key, value]) => {
       if (value) {
@@ -2173,33 +843,7 @@ function useCasesPageContent({
   }
 
   function openCase(caseId: string) {
-    if (embedded) {
-      setSelectedId(caseId);
-      setDetailOpen(true);
-      return;
-    }
     staffGo(`/cases/${caseId}`);
-  }
-
-  async function runSectionSave(
-    key: SectionStatusKey,
-    action: () => Promise<unknown>,
-    fallbackMessage: string,
-  ) {
-    setSectionBusy(key);
-    setSectionErrors((current) => ({ ...current, [key]: "" }));
-    try {
-      await action();
-      refreshList();
-      refreshDetail();
-    } catch (error) {
-      setSectionErrors((current) => ({
-        ...current,
-        [key]: sectionSaveErrorText(error, fallbackMessage),
-      }));
-    } finally {
-      setSectionBusy("");
-    }
   }
 
   async function handleCreateCase(event: FormEvent<HTMLFormElement>) {
@@ -2219,7 +863,6 @@ function useCasesPageContent({
       setCreateForm(DEFAULT_CREATE_FORM);
       refreshList();
       openCase(created.id);
-      refreshDetail();
     } catch (error) {
       setCreateError(
         bannerText(
@@ -2232,33 +875,19 @@ function useCasesPageContent({
     }
   }
 
-  function openPatientWorkspace() {
-    if (!detail) return;
-    staffGo(`/patients?patient=${detail.patient_id}`);
-  }
-
-  function openOrdersWorkspace() {
-    if (!detail) return;
-    staffGo(
-      detail.onboarding_order_id
-        ? `/orders/${detail.onboarding_order_id}`
-        : `/orders?patient=${detail.patient_id}`,
-    );
-  }
-
-  function openAppointmentsWorkspace() {
-    if (!detail) return;
-    staffGo(`/appointments?patient=${detail.patient_id}`);
-  }
-
   function refreshSnippetLibrary() {
     setSnippetVersion((current) => current + 1);
+  }
+
+  function openSnippetLibrary() {
+    setSnippetSaveError("");
+    setSnippetForm(DEFAULT_CASE_TEXT_SNIPPET_FORM);
+    setSnippetDialogOpen(true);
   }
 
   function openNewSnippetDialog() {
     setSnippetSaveError("");
     setSnippetForm(DEFAULT_CASE_TEXT_SNIPPET_FORM);
-    setSnippetDialogOpen(true);
   }
 
   function openEditSnippetDialog(snippet: CaseTextSnippet) {
@@ -2270,18 +899,6 @@ function useCasesPageContent({
       body: snippet.body,
       is_active: snippet.is_active,
     });
-    setSnippetDialogOpen(true);
-  }
-
-  function insertSnippetIntoNarrative(snippet: CaseTextSnippet) {
-    const rendered = renderCaseTextSnippet(snippet.body, snippetContext);
-    setOverviewForm((current) => ({
-      ...current,
-      aktuelle_anamnese: appendSnippetToNarrative(
-        current.aktuelle_anamnese,
-        rendered,
-      ),
-    }));
   }
 
   async function handleSaveSnippet(event: FormEvent<HTMLFormElement>) {
@@ -2296,7 +913,6 @@ function useCasesPageContent({
         body: snippetForm.body,
         is_active: snippetForm.is_active,
       });
-      setSnippetDialogOpen(false);
       setSnippetForm(DEFAULT_CASE_TEXT_SNIPPET_FORM);
       refreshSnippetLibrary();
     } catch (error) {
@@ -2309,203 +925,6 @@ function useCasesPageContent({
     } finally {
       setSnippetSaveBusy(false);
     }
-  }
-
-  async function handleSaveOverview(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    await runSectionSave(
-      "overview",
-      () =>
-        saveCaseOverview(detail.id, {
-          hauptanfragegrund: toOptionalText(overviewForm.hauptanfragegrund),
-          aktuelle_anamnese: toOptionalText(overviewForm.aktuelle_anamnese),
-          zuweiser_doctor_id: caseDoctorPayloadId(overviewForm.zuweiser_doctor_id, doctors),
-          zuweiser: toOptionalText(overviewForm.zuweiser),
-        }),
-      t.common_failed_update,
-    );
-  }
-
-  async function handleSaveVorerkrankungen(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    await runSectionSave(
-      "vorerkrankungen",
-      () =>
-        saveCaseVorerkrankungen(detail.id, {
-          items: sanitizeVorerkrankungen(vorerkrankungen),
-        }),
-      t.common_failed_update,
-    );
-  }
-
-  async function handleSaveAllergien(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    await runSectionSave(
-      "allergien",
-      () =>
-        saveCaseAllergien(detail.id, { items: sanitizeAllergien(allergien) }),
-      t.common_failed_update,
-    );
-  }
-
-  async function handleSaveOperationen(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    await runSectionSave(
-      "operationen",
-      () =>
-        saveCaseOperationen(detail.id, { items: sanitizeOperationen(operationen, doctors) }),
-      t.common_failed_update,
-    );
-  }
-
-  async function handleSaveMedikamente(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    const validationError = medicationRequiredValidationMessage(medikamente);
-    if (validationError) {
-      setSectionErrors((current) => ({ ...current, medikamente: validationError }));
-      return;
-    }
-    await runSectionSave(
-      "medikamente",
-      () =>
-        saveCaseMedikamente(detail.id, { items: sanitizeMedikamente(medikamente, doctors) }),
-      t.common_failed_update,
-    );
-  }
-
-  async function handleConfirmMedicationExpiry(medicationId: string) {
-    if (!detail) return;
-    await runSectionSave(
-      "medikamente",
-      () => confirmMedicationExpiry(detail.id, medicationId),
-      caseText("cases_failed_to_confirm_medication_expiry_review"),
-    );
-  }
-
-  async function handleSavePain(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    const validationError = painValidationMessage(painRecords);
-    if (validationError) {
-      setSectionErrors((current) => ({ ...current, pain: validationError }));
-      return;
-    }
-    await runSectionSave(
-      "pain",
-      () =>
-        saveCasePain(detail.id, { items: sanitizePainRecords(painRecords) }),
-      t.common_failed_update,
-    );
-  }
-
-  async function handleSaveSymptome(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    await runSectionSave(
-      "symptome",
-      () =>
-        saveCaseSymptome(detail.id, { items: sanitizeSymptome(symptome) }),
-      t.common_failed_update,
-    );
-  }
-
-  async function handleSaveCardiology(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    await runSectionSave(
-      "cardiology",
-      () => saveCaseCardiology(detail.id, cardiologyToPayload(cardiology)),
-      t.common_failed_update,
-    );
-  }
-
-  async function handleSaveGastroenterology(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    await runSectionSave(
-      "gastroenterology",
-      () =>
-        saveCaseGastroenterology(
-          detail.id,
-          gastroenterologyToPayload(gastroenterology),
-        ),
-      t.common_failed_update,
-    );
-  }
-
-  async function handleSaveOrthopedics(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    await runSectionSave(
-      "orthopedics",
-      () => saveCaseOrthopedics(detail.id, orthopedicsToPayload(orthopedics)),
-      t.common_failed_update,
-    );
-  }
-
-  async function handleSaveNeurology(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    await runSectionSave(
-      "neurology",
-      () => saveCaseNeurology(detail.id, neurologyToPayload(neurology)),
-      t.common_failed_update,
-    );
-  }
-
-  async function handleSavePulmonology(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    await runSectionSave(
-      "pulmonology",
-      () => saveCasePulmonology(detail.id, pulmonologyToPayload(pulmonology)),
-      t.common_failed_update,
-    );
-  }
-
-  async function handleSaveUrology(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    await runSectionSave(
-      "urology",
-      () => saveCaseUrology(detail.id, urologyToPayload(urology)),
-      t.common_failed_update,
-    );
-  }
-
-  async function handleSaveVegetative(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    await runSectionSave(
-      "vegetative",
-      () =>
-        saveCaseVegetative(detail.id, {
-          appetit_durst: toOptionalText(vegetative.appetit_durst),
-          koerpergroesse: numericInputToValue(vegetative.koerpergroesse),
-          gewicht: numericInputToValue(vegetative.gewicht),
-          gewichtsveraenderung: toOptionalText(vegetative.gewichtsveraenderung),
-          grund: toOptionalText(vegetative.grund),
-        }),
-      t.common_failed_update,
-    );
-  }
-
-  async function handleSaveImpfstatus(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!detail) return;
-    await runSectionSave(
-      "impfstatus",
-      () =>
-        saveCaseImpfstatus(detail.id, {
-          status_text: toOptionalText(impfstatus),
-        }),
-      t.common_failed_update,
-    );
   }
 
   if (!permissions.canViewPage) {
@@ -2525,1906 +944,452 @@ function useCasesPageContent({
 
   return (
     <>
-      {embedded ? null : (
-        <div className="space-y-4">
-          <PageHeader
-            title={t.cases_title}
-            description={t.cases_subtitle}
-            actions={(
-              <>
+      <div className="space-y-4">
+        <PageHeader
+          title={t.cases_title}
+          description={t.cases_subtitle}
+          actions={(
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
+                onClick={refreshList}
+              >
+                <RefreshCw className="size-3.5" />
+                {t.common_refresh}
+              </Button>
+              {permissions.canEdit ? (
                 <Button
                   type="button"
                   variant="outline"
                   className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
-                  onClick={refreshList}
+                  onClick={openSnippetLibrary}
                 >
-                  <RefreshCw className="size-3.5" />
-                  {t.common_refresh}
+                  <NotebookPen className="size-3.5" />
+                  {t.cases_snippets_title}
                 </Button>
-                {permissions.canCreate ? (
-                  <Button
-                    type="button"
-                    className="h-9 rounded-lg gap-1.5 px-3.5"
-                    onClick={() => {
-                      setCreateError("");
-                      setCreateForm(DEFAULT_CREATE_FORM);
-                      setCreateOpen(true);
-                    }}
-                  >
-                    <Plus className="size-3.5" />
-                    {t.cases_new}
-                  </Button>
-                ) : null}
-              </>
-            )}
-          />
-
-          {listError ? (
-            <div className="mb-3">
-              <Banner tone="error">{listError}</Banner>
-            </div>
-          ) : null}
-          <DataTableSurface
-            rows={cases}
-            columns={caseTableColumns}
-            rowId={(item) => item.id}
-            defaultDensity="comfortable"
-            dictionary={t as unknown as Record<string, string>}
-            activeRowId={selectedId || undefined}
-            onRowClick={(item) => openCase(item.id)}
-            loading={listBusy}
-            tableClassName="min-h-[440px]"
-            toolbarStart={
-              <>
-            <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-              <Input
-                value={filters.search}
-                onChange={(event) =>
-                  setFilters((current) => ({ ...current, search: event.target.value }))}
-                placeholder={t.search_placeholder}
-                className="h-8 w-[260px] rounded-lg bg-card pl-8 text-[13px]"
-              />
-            </div>
-
-            <NativeComboboxSelect
-              value={filters.status || "__all__"}
-
-
-              onChange={(event) => setFilters((current) => ({
-                  ...current,
-                  status: event.target.value && event.target.value !== "__all__" ? event.target.value : "",
-                }))} className={cn(selectClassName, "h-8 w-[220px] bg-card text-[13px]")}>
-                <option value="__all__">{t.providers_all}</option>
-                {CASE_STATUSES.map((status) => (
-                  <option key={status} value={status}>
-                    {caseStatusLabel(status, t)}
-                  </option>
-                ))}
-              </NativeComboboxSelect>
-
-            <NativeComboboxSelect
-              value={filters.patientId || "__all__"}
-
-
-              onChange={(event) => {
-                const patientId = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
-                setFilters((current) => ({ ...current, patientId }));
-                updateQuery({ patient: patientId || null });
-              }} className={cn(selectClassName, "h-8 w-[260px] bg-card text-[13px]")}>
-                <option value="__all__">{t.providers_all}</option>
-                {patients.map((patient) => (
-                  <option key={patient.id} value={patient.id}>
-                    {patientLabel(patient)}
-                  </option>
-                ))}
-              </NativeComboboxSelect>
-
-            {filters.search.trim() || filters.status || filters.patientId ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 rounded-lg gap-1 text-[12.5px] text-muted-foreground"
-                onClick={() => {
-                  setFilters(DEFAULT_FILTERS);
-                  updateQuery({ patient: null, case: null });
-                }}
-              >
-                {t.common_reset}
-              </Button>
-            ) : null}
-              </>
-            }
-            emptyState={(
-                  <EmptyPanel
-                    title={t.cases_no_match}
-                    text={t.cases_no_match}
-                    action={
-                      permissions.canCreate ? (
-                        <Button
-                          type="button"
-                          className="h-9 rounded-lg px-3.5"
-                          onClick={() => {
-                            setCreateError("");
-                            setCreateForm(DEFAULT_CREATE_FORM);
-                            setCreateOpen(true);
-                          }}
-                        >
-                          <Plus className="size-4" />
-                          {t.cases_new}
-                        </Button>
-                      ) : undefined
-                    }
-                  />
-            )}
-            footer={({ filteredCount, totalCount }) => (
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span className="tabular-nums">
-                  {filteredCount === totalCount
-                    ? `${totalCount}`
-                    : `${filteredCount} / ${totalCount}`}
-                </span>
-                <span>{t.patients_records}</span>
-              </div>
-            )}
-          />
-        </div>
-      )}
-
-      {embedded ? null : (
-        <Sheet open={createOpen} onOpenChange={setCreateOpen}>
-          <SheetContent side="right" className="w-full overflow-y-auto border-l border-border p-0 sm:max-w-[640px]">
-            <form onSubmit={handleCreateCase} className="flex min-h-0 flex-1 flex-col">
-              <AdminSheetScaffold
-                title={t.cases_new}
-                description={t.cases_subtitle}
-                footer={(
-                  <SheetFormFooter
-                    cancelLabel={t.common_cancel}
-                    submitLabel={t.cases_new}
-                    submittingLabel={t.patients_creating}
-                    submitting={createBusy}
-                    submitDisabled={!createForm.patientId}
-                    onCancel={() => setCreateOpen(false)}
-                  />
-                )}
-            >
-              {createError ? <Banner tone="error">{createError}</Banner> : null}
-                <Panel title={t.patients_profile}>
-                  <Field label={t.cases_patient} required>
-                    <NativeComboboxSelect
-                      value={createForm.patientId || "__none__"}
-
-
-                      onChange={(event) => {
-                        const patientId = event.target.value && event.target.value !== "__none__" ? event.target.value : "";
-                        setCreateForm((current) => ({ ...current, patientId }));
-                      }} className={selectClassName}>
-                        <option value="__none__">{t.cases_patient}</option>
-                        {patients.map((patient) => (
-                          <option key={patient.id} value={patient.id}>
-                            {patientLabel(patient)}
-                          </option>
-                        ))}
-                      </NativeComboboxSelect>
-                  </Field>
-                </Panel>
-
-                <Panel title={t.cases_core_anamnesis}>
-                  <Field label={t.cases_reason} required>
-                    <Input
-                      value={createForm.hauptanfragegrund}
-                      onChange={(event) =>
-                        setCreateForm((current) => ({
-                          ...current,
-                          hauptanfragegrund: event.target.value,
-                        }))}
-                      required
-                      className={inputClassName}
-                    />
-                  </Field>
-
-                  <Field label={t.cases_anamnesis} required>
-                    <textarea
-                      value={createForm.aktuelleAnamnese}
-                      onChange={(event) =>
-                        setCreateForm((current) => ({
-                          ...current,
-                          aktuelleAnamnese: event.target.value,
-                        }))}
-                      required
-                      className={textareaClassName}
-                      rows={4}
-                    />
-                  </Field>
-                </Panel>
-
-                <Panel title={t.common_doctor}>
-                  <Field label={t.cases_referrer}>
-                    <NativeComboboxSelect
-                      value={caseDoctorSelectValue(createForm.zuweiserDoctorId, null, doctors)}
-
-
-                      onChange={(event) => {
-                        const selectedDoctor = findCaseDoctorBySelection(event.target.value, doctors);
-                        setCreateForm((current) => ({
-                          ...current,
-                          zuweiserDoctorId: selectedDoctor ? caseDoctorOptionValue(selectedDoctor) : "",
-                          zuweiser: selectedDoctor
-                            ? doctorOptionLabel(selectedDoctor, lang)
-                            : current.zuweiser,
-                        }));
-                      }} className={selectClassName}>
-                        <option value="__none__">{t.common_not_set}</option>
-                        {doctors.map((doctor) => {
-                          const value = caseDoctorOptionValue(doctor);
-                          const label = doctorOptionLabel(doctor, lang);
-                          return (
-                            <option key={value} value={value} data-search-text={doctorOptionSearchText(doctor, lang)}>
-                              {label}
-                            </option>
-                          );
-                        })}
-                      </NativeComboboxSelect>
-                  </Field>
-
-                  <Field
-                    label={t.cases_clinical_referrer_label}
-                  >
-                    <Input
-                      value={createForm.zuweiser}
-                      onChange={(event) =>
-                        setCreateForm((current) => ({ ...current, zuweiser: event.target.value }))}
-                      className={inputClassName}
-                    />
-                  </Field>
-                </Panel>
-              </AdminSheetScaffold>
-            </form>
-          </SheetContent>
-        </Sheet>
-      )}
-
-      <Sheet
-        open={detailOpen}
-        modal={embedded ? embeddedSheetModal : undefined}
-        onOpenChange={(open) => {
-          setDetailOpen(open);
-          if (!open) {
-            setSelectedId("");
-            setDetail(null);
-            setCardiology(blankCardiology());
-            setGastroenterology(blankGastroenterology());
-            setOrthopedics(blankOrthopedics());
-            setNeurology(blankNeurology());
-            setPulmonology(blankPulmonology());
-            setUrology(blankUrology());
-            setDetailError("");
-            updateQuery({ case: null });
-            onCloseCaseSheet?.();
-          }
-        }}
-      >
-        <SheetContent
-          side={embedded ? embeddedSheetSide : "right"}
-          showOverlay={embedded ? embeddedSheetShowOverlay : true}
-          className={cn(
-            "w-full overflow-y-auto p-0",
-            embedded && embeddedSheetSide === "left"
-              ? "border-r border-border"
-              : "border-l border-border",
-            embedded ? "z-[60] sm:max-w-[48vw] xl:max-w-[760px]" : "sm:max-w-[980px]",
-            embeddedSheetClassName,
+              ) : null}
+              {permissions.canCreate ? (
+                <Button
+                  type="button"
+                  className="h-9 rounded-lg gap-1.5 px-3.5"
+                  onClick={() => {
+                    setCreateError("");
+                    setCreateForm(DEFAULT_CREATE_FORM);
+                    setCreateOpen(true);
+                  }}
+                >
+                  <Plus className="size-3.5" />
+                  {t.cases_new}
+                </Button>
+              ) : null}
+            </>
           )}
-        >
-          <AdminSheetScaffold
-            title={detail?.case_id ?? selectedSummary?.case_id ?? t.cases_title}
-            description={caseText("cases_full_narrative_and_structured_anamnesis_editor_for_the_s")}
-            className="h-full"
-          >
-            {detailBusy ? (
-              <div className="flex min-h-[320px] items-center justify-center text-sm text-muted-foreground">
-                <LoaderCircle className="mr-2 size-4 animate-spin" />
-                {t.cases_clinical_loading_case}
-              </div>
-            ) : detailError ? (
-              <Banner tone="error">{detailError}</Banner>
-            ) : detail ? (
-              <>
-                <section className={cardClass("p-4")}>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge
-                      variant="outline"
-                      className={cn("rounded-full", statusBadgeClass(detail.status))}
-                    >
-                      {caseStatusLabel(detail.status, t)}
-                    </Badge>
-                    <Badge
-                      variant="outline"
-                      className="rounded-full border-border bg-background text-foreground"
-                    >
-                      {selectedPatient ? patientLabel(selectedPatient) : detail.patient_id}
-                    </Badge>
-                  </div>
+        />
 
-                  <div className="mt-4 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                    <div>
-                      <h2 className="text-xl font-semibold text-foreground md:text-2xl">{detail.case_id}</h2>
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        {selectedSummary?.patient_name
-                          ? `${selectedSummary.patient_name} (${selectedSummary.patient_pid})`
-                          : selectedPatient
-                            ? patientLabel(selectedPatient)
-                            : detail.patient_id}
-                      </p>
-                      <div className="mt-4 grid gap-2.5 md:grid-cols-2 xl:grid-cols-4">
-                        <div className="rounded-xl border border-border bg-muted/20 px-4 py-2.5">
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                            {t.cases_clinical_reference_code}
-                          </div>
-                          <div className="mt-1.5 font-mono text-sm text-foreground">{detail.case_id}</div>
-                        </div>
-                        <div className="rounded-xl border border-border bg-muted/20 px-4 py-2.5">
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                            {t.cases_clinical_system_case_uuid}
-                          </div>
-                          <div className="mt-1.5 break-all font-mono text-xs text-foreground">
-                            {detail.case_uuid ?? detail.id}
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-border bg-muted/20 px-4 py-2.5">
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                            {t.cases_clinical_retention_until}
-                          </div>
-                          <div className="mt-1.5 text-sm text-foreground">
-                            {formatDate(detail.retention_until)}
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-border bg-muted/20 px-4 py-2.5">
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                            {t.cases_clinical_last_clinical_update}
-                          </div>
-                          <div className="mt-1.5 text-sm text-foreground">
-                            {formatDateTime(detail.last_clinical_update_at ?? detail.updated_at)}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={openPatientWorkspace}>
-                        <UserRound className="size-4" />
-                        {t.cases_clinical_patient_fallback}
-                      </Button>
-                      <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={openOrdersWorkspace}>
-                        <ClipboardList className="size-4" />
-                        {t.cases_clinical_orders}
-                      </Button>
-                      <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={openAppointmentsWorkspace}>
-                        <CalendarClock className="size-4" />
-                        {t.cases_clinical_appointments}
-                      </Button>
-                    </div>
-                  </div>
+        {listError ? (
+          <div className="mb-3">
+            <Banner tone="error">{listError}</Banner>
+          </div>
+        ) : null}
+        <DataTableSurface
+          rows={casesPagination.pagedRows}
+          columns={caseTableColumns}
+          rowId={(item) => item.id}
+          defaultDensity="comfortable"
+          dictionary={t as unknown as Record<string, string>}
+          onRowClick={(item) => openCase(item.id)}
+          loading={listBusy}
+          tableClassName="min-h-[440px]"
+          toolbarStart={
+            <>
+          <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+            <Input
+              value={filters.search}
+              onChange={(event) =>
+                setFilters((current) => ({ ...current, search: event.target.value }))}
+              placeholder={t.search_placeholder}
+              className="h-8 w-[260px] rounded-md bg-field pl-8 text-xs"
+            />
+          </div>
+          </ToolbarField>
 
-                  <div className="mt-5 grid gap-2.5 md:grid-cols-2 xl:grid-cols-5">
-                    <MetricCard label={t.cases_preconditions} value={detail.vorerkrankungen.length.toString()} description={t.cases_subtitle} icon={<Stethoscope className="size-4" />} />
-                    <MetricCard label={t.cases_allergies} value={detail.allergien.length.toString()} description={t.cases_subtitle} icon={<Plus className="size-4" />} />
-                    <MetricCard label={t.cases_medication} value={detail.medikamente.length.toString()} description={t.cases_subtitle} icon={<ClipboardList className="size-4" />} />
-                    <MetricCard label={t.cases_symptoms} value={detail.symptome.length.toString()} description={t.cases_subtitle} icon={<Search className="size-4" />} />
-                    <MetricCard
-                      label={t.cases_clinical_revisions_metric}
-                      value={String(detail.version_count ?? detail.history?.length ?? 0)}
-                      description={t.cases_clinical_revisions_metric_hint}
-                      icon={<RefreshCw className="size-4" />}
-                    />
-                  </div>
-                </section>
+          <ToolbarField label={t.users_status}>
+          <NativeComboboxSelect
+            value={filters.status || "__all__"}
 
-                <Panel
-                  title={t.cases_core_anamnesis}
-                  description={t.cases_subtitle}
+
+            onChange={(event) => setFilters((current) => ({
+                ...current,
+                status: event.target.value && event.target.value !== "__all__" ? event.target.value : "",
+              }))} className={cn(selectClassName, "h-8 rounded-md w-[220px] bg-field text-xs")}>
+              <option value="__all__">{t.providers_all}</option>
+              {CASE_STATUSES.map((status) => (
+                <option key={status} value={status}>
+                  {caseStatusLabel(status, t)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </ToolbarField>
+
+          <ToolbarField label={t.orders_patient}>
+          <NativeComboboxSelect
+            value={filters.patientId || "__all__"}
+
+
+            onChange={(event) => {
+              const patientId = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
+              setFilters((current) => ({ ...current, patientId }));
+              updateQuery({ patient: patientId || null });
+            }} className={cn(selectClassName, "h-8 rounded-md w-[260px] bg-field text-xs")}>
+              <option value="__all__">{t.providers_all}</option>
+              {patients.map((patient) => (
+                <option key={patient.id} value={patient.id}>
+                  {patientLabel(patient)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </ToolbarField>
+
+          {filters.search.trim() || filters.status || filters.patientId ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-lg gap-1 text-[12.5px] text-muted-foreground"
+              onClick={() => {
+                setFilters(DEFAULT_FILTERS);
+                updateQuery({ patient: null, case: null });
+              }}
+            >
+              {t.common_reset}
+            </Button>
+          ) : null}
+            </>
+          }
+          toolbarAfter={(
+            <DataTablePager
+              pageIndex={casesPagination.pageIndex}
+              pageSize={casesPagination.pageSize}
+              totalPages={casesPagination.totalPages}
+              totalRows={casesPagination.totalRows}
+              previousLabel={t.pagination_previous}
+              nextLabel={t.pagination_next}
+              onPageChange={casesPagination.onPageChange}
+            />
+          )}
+          emptyState={(
+                <EmptyPanel
+                  title={t.cases_no_match}
+                  text={t.cases_no_match}
                   action={
-                    permissions.canEdit ? (
+                    permissions.canCreate ? (
                       <Button
                         type="button"
-                        variant="outline"
                         className="h-9 rounded-lg px-3.5"
-                        onClick={openNewSnippetDialog}
+                        onClick={() => {
+                          setCreateError("");
+                          setCreateForm(DEFAULT_CREATE_FORM);
+                          setCreateOpen(true);
+                        }}
                       >
-                        {t.cases_snippets_manage}
+                        <Plus className="size-4" />
+                        {t.cases_new}
                       </Button>
-                    ) : null
+                    ) : undefined
                   }
+                />
+          )}
+        />
+      </div>
+
+      <Sheet open={createOpen} onOpenChange={setCreateOpen}>
+        <SheetContent side="right" className="w-full overflow-y-auto border-l border-border p-0 sm:max-w-[640px]">
+          <form onSubmit={handleCreateCase} className="flex min-h-0 flex-1 flex-col">
+            <AdminSheetScaffold
+              title={t.cases_new}
+              description={t.cases_subtitle}
+              footer={(
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={t.cases_new}
+                  submittingLabel={t.patients_creating}
+                  submitting={createBusy}
+                  submitDisabled={!createForm.patientId}
+                  onCancel={() => setCreateOpen(false)}
+                />
+              )}
+          >
+            {createError ? <Banner tone="error">{createError}</Banner> : null}
+              <Panel title={t.patients_profile}>
+                <Field label={t.cases_patient} required>
+                  <NativeComboboxSelect
+                    value={createForm.patientId || "__none__"}
+
+
+                    onChange={(event) => {
+                      const patientId = event.target.value && event.target.value !== "__none__" ? event.target.value : "";
+                      setCreateForm((current) => ({ ...current, patientId }));
+                    }} className={selectClassName}>
+                      <option value="__none__">{t.cases_patient}</option>
+                      {patients.map((patient) => (
+                        <option key={patient.id} value={patient.id}>
+                          {patientLabel(patient)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                </Field>
+              </Panel>
+
+              <Panel title={t.cases_core_anamnesis}>
+                <Field label={t.cases_reason} required>
+                  <Input
+                    value={createForm.hauptanfragegrund}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({
+                        ...current,
+                        hauptanfragegrund: event.target.value,
+                      }))}
+                    required
+                    className={inputClassName}
+                  />
+                </Field>
+
+                <Field label={t.cases_anamnesis} required>
+                  <textarea
+                    value={createForm.aktuelleAnamnese}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({
+                        ...current,
+                        aktuelleAnamnese: event.target.value,
+                      }))}
+                    required
+                    className={textareaClassName}
+                    rows={4}
+                  />
+                </Field>
+              </Panel>
+
+              <Panel title={t.common_doctor}>
+                <Field label={t.cases_referrer}>
+                  <NativeComboboxSelect
+                    value={caseDoctorSelectValue(createForm.zuweiserDoctorId, null, doctors)}
+
+
+                    onChange={(event) => {
+                      const selectedDoctor = findCaseDoctorBySelection(event.target.value, doctors);
+                      setCreateForm((current) => ({
+                        ...current,
+                        zuweiserDoctorId: selectedDoctor ? caseDoctorOptionValue(selectedDoctor) : "",
+                        zuweiser: selectedDoctor
+                          ? doctorOptionLabel(selectedDoctor, lang)
+                          : current.zuweiser,
+                      }));
+                    }} className={selectClassName}>
+                      <option value="__none__">{t.common_not_set}</option>
+                      {doctors.map((doctor) => {
+                        const value = caseDoctorOptionValue(doctor);
+                        const label = doctorOptionLabel(doctor, lang);
+                        return (
+                          <option key={value} value={value} data-search-text={doctorOptionSearchText(doctor, lang)}>
+                            {label}
+                          </option>
+                        );
+                      })}
+                    </NativeComboboxSelect>
+                </Field>
+
+                <Field
+                  label={t.cases_clinical_referrer_label}
                 >
-                  <form onSubmit={handleSaveOverview} className="space-y-4">
-                    {sectionErrors.overview ? <Banner tone="error">{sectionErrors.overview}</Banner> : null}
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <Field label={t.cases_reason} required>
-                        <Input
-                          value={overviewForm.hauptanfragegrund}
-                          onChange={(event) =>
-                            setOverviewForm((current) => ({
-                              ...current,
-                              hauptanfragegrund: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={t.cases_referrer}>
-                        <NativeComboboxSelect
-                          value={caseDoctorSelectValue(overviewForm.zuweiser_doctor_id, null, doctors)}
+                  <Input
+                    value={createForm.zuweiser}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({ ...current, zuweiser: event.target.value }))}
+                    className={inputClassName}
+                  />
+                </Field>
+              </Panel>
+            </AdminSheetScaffold>
+          </form>
+        </SheetContent>
+      </Sheet>
 
-
-                          onChange={(event) => {
-                            const selectedDoctor = findCaseDoctorBySelection(event.target.value, doctors);
-                            setOverviewForm((current) => ({
-                              ...current,
-                              zuweiser_doctor_id: selectedDoctor ? caseDoctorOptionValue(selectedDoctor) : "",
-                              zuweiser: selectedDoctor
-                                ? doctorOptionLabel(selectedDoctor, lang)
-                                : current.zuweiser,
-                            }));
-                          }} className={selectClassName}>
-                            <option value="__none__">{t.common_not_set}</option>
-                            {doctors.map((doctor) => {
-                              const value = caseDoctorOptionValue(doctor);
-                              const label = doctorOptionLabel(doctor, lang);
-                              return (
-                                <option key={value} value={value} data-search-text={doctorOptionSearchText(doctor, lang)}>
-                                  {label}
-                                </option>
-                              );
-                            })}
-                          </NativeComboboxSelect>
-                      </Field>
-                      <Field label={t.cases_clinical_referrer_label}>
-                        <Input
-                          value={overviewForm.zuweiser}
-                          onChange={(event) =>
-                            setOverviewForm((current) => ({
-                              ...current,
-                              zuweiser: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                    </div>
-                    <Field label={t.cases_narrative} required>
-                      <textarea
-                        value={overviewForm.aktuelle_anamnese}
-                        onChange={(event) =>
-                          setOverviewForm((current) => ({
-                            ...current,
-                            aktuelle_anamnese: event.target.value,
-                          }))
-                        }
-                        className={textareaClassName}
-                        rows={5}
-                      />
-                    </Field>
-                    <div className="rounded-xl border border-border bg-muted/20 p-4">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-foreground">
-                            {t.cases_snippets_title}
-                          </p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {t.cases_snippets_description}
-                          </p>
+      <Sheet open={snippetDialogOpen} onOpenChange={setSnippetDialogOpen}>
+        <SheetContent side="right" className="w-full overflow-y-auto border-l border-border p-0 sm:max-w-[960px]">
+          <AdminSheetScaffold
+            title={t.cases_snippets_title}
+            description={t.cases_snippets_description}
+            className="h-full"
+          >
+            {snippetsError ? <Banner tone="error">{snippetsError}</Banner> : null}
+            <div className="grid gap-6 lg:grid-cols-[1.15fr,0.85fr]">
+              <Panel
+                title={t.cases_snippets_title}
+                action={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-lg"
+                    onClick={openNewSnippetDialog}
+                  >
+                    {t.cases_snippets_new}
+                  </Button>
+                }
+              >
+                {snippetsBusy ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <LoaderCircle className="size-4 animate-spin" />
+                    {t.common_loading}
+                  </div>
+                ) : snippets.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    {t.cases_snippets_empty}
+                  </p>
+                ) : (
+                  <div className="max-h-[26rem] space-y-3 overflow-y-auto pr-1">
+                    {snippets.map((snippet) => (
+                      <button
+                        key={snippet.id}
+                        type="button"
+                        className={cn(
+                          "w-full rounded-xl border p-4 text-left transition",
+                          snippetForm.id === snippet.id
+                            ? "border-sky-300 bg-sky-50"
+                            : "border-border bg-white hover:border-border",
+                        )}
+                        onClick={() => openEditSnippetDialog(snippet)}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-foreground">
+                              {snippet.label}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {snippetCategoryLabel(snippet.category)}
+                            </p>
+                          </div>
+                          <Badge
+                            variant="secondary"
+                            className={snippet.is_active ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}
+                          >
+                            {snippet.is_active ? t.common_active : t.common_inactive}
+                          </Badge>
                         </div>
-                        <code className="rounded-xl bg-white px-3 py-1 text-[11px] text-muted-foreground">
-                          {CASE_TEXT_SNIPPET_PLACEHOLDERS.join(" · ")}
-                        </code>
-                      </div>
-                      {snippetsError ? (
-                        <Banner tone="error">{snippetsError}</Banner>
-                      ) : null}
-                      {snippetsBusy ? (
-                        <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-                          <LoaderCircle className="size-4 animate-spin" />
-                          {t.common_loading}
-                        </div>
-                      ) : activeSnippets.length === 0 ? (
-                        <p className="mt-3 text-sm text-muted-foreground">
-                          {t.cases_snippets_empty}
+                        <p className="mt-2 whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                          {snippet.body}
                         </p>
-                      ) : (
-                        <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                          {activeSnippets.map((snippet) => {
-                            const rendered = renderCaseTextSnippet(
-                              snippet.body,
-                              snippetContext,
-                            );
-                            return (
-                              <div
-                                key={snippet.id}
-                                className="rounded-lg border border-border/70 bg-card p-4"
-                              >
-                                <div className="flex items-start justify-between gap-3">
-                                  <div>
-                                    <p className="text-sm font-semibold text-foreground">
-                                      {snippet.label}
-                                    </p>
-                                    <p className="text-xs text-muted-foreground">
-                                      {snippetCategoryLabel(snippet.category)}
-                                    </p>
-                                  </div>
-                                  {permissions.canEdit ? (
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="sm"
-                                      className="rounded-lg"
-                                      onClick={() => openEditSnippetDialog(snippet)}
-                                    >
-                                      {t.common_edit}
-                                    </Button>
-                                  ) : null}
-                                </div>
-                                <p className="mt-3 whitespace-pre-wrap text-sm text-foreground">
-                                  {rendered}
-                                </p>
-                                <div className="mt-3 flex justify-end">
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    className="rounded-lg"
-                                    onClick={() => insertSnippetIntoNarrative(snippet)}
-                                  >
-                                    {t.cases_snippets_insert}
-                                  </Button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex justify-end border-t border-border/70 pt-4">
-                      <Button type="submit" className="h-9 rounded-lg px-3.5" disabled={sectionBusy === "overview" || !permissions.canEdit}>
-                        {sectionBusy === "overview" ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                        {t.cases_clinical_save_overview}
-                      </Button>
-                    </div>
-                  </form>
-                </Panel>
-                <Sheet open={snippetDialogOpen} onOpenChange={setSnippetDialogOpen}>
-                  <SheetContent side="right" className="w-full overflow-y-auto border-l border-border p-0 sm:max-w-[960px]">
-                    <AdminSheetScaffold
-                      title={t.cases_snippets_title}
-                      description={t.cases_snippets_description}
-                      className="h-full"
-                    >
-                      <div className="grid gap-6 lg:grid-cols-[1.15fr,0.85fr]">
-                        <Panel
-                          title={t.cases_snippets_title}
-                          action={
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="rounded-lg"
-                              onClick={openNewSnippetDialog}
-                            >
-                              {t.cases_snippets_new}
-                            </Button>
-                          }
-                        >
-                          <div className="max-h-[26rem] space-y-3 overflow-y-auto pr-1">
-                            {snippets.map((snippet) => (
-                              <button
-                                key={snippet.id}
-                                type="button"
-                                className={cn(
-                                  "w-full rounded-xl border p-4 text-left transition",
-                                  snippetForm.id === snippet.id
-                                    ? "border-sky-300 bg-sky-50"
-                                    : "border-border bg-white hover:border-border",
-                                )}
-                                onClick={() => openEditSnippetDialog(snippet)}
-                              >
-                                <div className="flex items-start justify-between gap-3">
-                                  <div>
-                                    <p className="text-sm font-semibold text-foreground">
-                                      {snippet.label}
-                                    </p>
-                                    <p className="text-xs text-muted-foreground">
-                                      {snippetCategoryLabel(snippet.category)}
-                                    </p>
-                                  </div>
-                                  <Badge
-                                    variant="secondary"
-                                    className={snippet.is_active ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}
-                                  >
-                                    {snippet.is_active ? t.common_active : t.common_inactive}
-                                  </Badge>
-                                </div>
-                                <p className="mt-2 whitespace-pre-wrap break-words text-xs text-muted-foreground">
-                                  {snippet.body}
-                                </p>
-                              </button>
-                            ))}
-                          </div>
-                        </Panel>
-                        <Panel title={snippetForm.id ? t.common_edit : t.cases_snippets_new}>
-                        <form onSubmit={handleSaveSnippet} className="space-y-4">
-                          {snippetSaveError ? (
-                            <Banner tone="error">{snippetSaveError}</Banner>
-                          ) : null}
-                          <Field label={t.cases_snippets_label} required>
-                            <Input
-                              value={snippetForm.label}
-                              onChange={(event) =>
-                                setSnippetForm((current) => ({
-                                  ...current,
-                                  label: event.target.value,
-                                }))}
-                              className="h-10 rounded-xl bg-white"
-                            />
-                          </Field>
-                          <Field label={t.cases_snippets_category}>
-                            <NativeComboboxSelect
-                              value={snippetForm.category || "general"}
-                              onChange={(event) =>
-                                setSnippetForm((current) => ({
-                                  ...current,
-                                  category: event.target.value,
-                                }))}
-                              className={selectClassName}
-                            >
-                              {CASE_SNIPPET_CATEGORY_VALUES.map((category) => (
-                                <option key={category} value={category}>
-                                  {snippetCategoryLabel(category)}
-                                </option>
-                              ))}
-                              {snippetForm.category &&
-                              !isKnownSnippetCategory(snippetForm.category) ? (
-                                <option value={snippetForm.category}>
-                                  {snippetCategoryLabel(snippetForm.category)}
-                                </option>
-                              ) : null}
-                            </NativeComboboxSelect>
-                          </Field>
-                          <Field label={t.cases_snippets_body} required>
-                            <textarea
-                              value={snippetForm.body}
-                              onChange={(event) =>
-                                setSnippetForm((current) => ({
-                                  ...current,
-                                  body: event.target.value,
-                                }))}
-                              className={textareaClassName}
-                              rows={8}
-                            />
-                          </Field>
-                          <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-3 py-2 text-sm text-foreground">
-                            <input
-                              type="checkbox"
-                              className={checkboxClass}
-                              checked={snippetForm.is_active}
-                              onChange={(event) =>
-                                setSnippetForm((current) => ({
-                                  ...current,
-                                  is_active: event.target.checked,
-                                }))}
-                            />
-                            {t.cases_snippets_active}
-                          </label>
-                          <div className="rounded-xl border border-dashed border-border bg-white p-3">
-                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                              {t.cases_snippets_preview}
-                            </p>
-                            <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">
-                              {renderCaseTextSnippet(snippetForm.body, snippetContext) || t.cases_snippets_empty}
-                            </p>
-                          </div>
-                          <code className="block rounded-xl bg-white px-3 py-2 text-[11px] text-muted-foreground">
-                            {CASE_TEXT_SNIPPET_PLACEHOLDERS.join(" · ")}
-                          </code>
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="rounded-lg"
-                              onClick={() => {
-                                setSnippetDialogOpen(false);
-                                setSnippetForm(DEFAULT_CASE_TEXT_SNIPPET_FORM);
-                                setSnippetSaveError("");
-                              }}
-                            >
-                              {t.common_cancel}
-                            </Button>
-                            <Button
-                              type="submit"
-                              className="h-9 rounded-lg px-3.5"
-                              disabled={snippetSaveBusy}
-                            >
-                              {snippetSaveBusy ? (
-                                <LoaderCircle className="size-4 animate-spin" />
-                              ) : null}
-                              {t.cases_snippets_save}
-                            </Button>
-                          </div>
-                        </form>
-                        </Panel>
-                      </div>
-                    </AdminSheetScaffold>
-                  </SheetContent>
-                </Sheet>
-
-                <ItemEditorSection title={t.cases_preconditions} description={t.cases_subtitle} count={countFilled(vorerkrankungen, "erkrankung")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "vorerkrankungen"} error={sectionErrors.vorerkrankungen ?? ""} canEdit={permissions.canEdit} onAdd={() => setVorerkrankungen((current) => [...current, blankVorerkrankung()])} onSave={handleSaveVorerkrankungen}>
-                  {vorerkrankungen.map((item, index) => (
-                    <div key={vorerkrankungItemKey(item)} className="rounded-xl border border-border bg-muted/20 p-4">
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <Field label={t.cases_preconditions} required><Input value={item.erkrankung} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { erkrankung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_preconditions}><Input value={item.erstdiagnose ?? ""} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { erstdiagnose: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                      </div>
-                      <Field label={t.cases_note}>
-                        <textarea value={item.notiz ?? ""} onChange={(event) => setVorerkrankungen((current) => updateItemAtIndex(current, index, { notiz: event.target.value }))} className="mt-2 min-h-[90px] w-full rounded-xl border border-input px-3 py-2 text-sm outline-none transition focus:border-ring focus:ring-2 focus:ring-ring/30" />
-                      </Field>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setVorerkrankungen((current) => removeItemAtIndex(current, index))}>{t.cases_clinical_remove}</Button></div>
-                    </div>
-                  ))}
-                </ItemEditorSection>
-
-                <ItemEditorSection title={t.cases_allergies} description={t.cases_subtitle} count={countFilled(allergien, "allergie")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "allergien"} error={sectionErrors.allergien ?? ""} canEdit={permissions.canEdit} onAdd={() => setAllergien((current) => [...current, blankAllergie()])} onSave={handleSaveAllergien}>
-                  {allergien.map((item, index) => (
-                    <div key={allergieItemKey(item)} className="rounded-xl border border-border bg-muted/20 p-4">
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <Field label={t.cases_allergies} required><Input value={item.allergie} onChange={(event) => setAllergien((current) => updateItemAtIndex(current, index, { allergie: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_subtitle}><Input value={item.reaktion ?? ""} onChange={(event) => setAllergien((current) => updateItemAtIndex(current, index, { reaktion: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                      </div>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setAllergien((current) => removeItemAtIndex(current, index))}>{t.cases_clinical_remove}</Button></div>
-                    </div>
-                  ))}
-                </ItemEditorSection>
-
-                <ItemEditorSection title={t.cases_operations} description={t.cases_subtitle} count={countFilled(operationen, "grund")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "operationen"} error={sectionErrors.operationen ?? ""} canEdit={permissions.canEdit} onAdd={() => setOperationen((current) => [...current, blankOperation()])} onSave={handleSaveOperationen}>
-                  {operationen.map((item, index) => (
-                    <div key={operationItemKey(item)} className="rounded-xl border border-border bg-muted/20 p-4">
-                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                        <Field label={t.appointments_date}><Input type="date" value={item.datum ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { datum: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_reason} required><Input value={item.grund} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_clinical_doctor_registry}>
-                          <NativeComboboxSelect
-                            value={caseDoctorSelectValue(
-                              item.arzt_id,
-                              [item.arzt_provider_name, item.arzt].filter(Boolean).join(" "),
-                              doctors,
-                            )}
-
-
-                            onChange={(event) => {
-                              const selectedDoctor = findCaseDoctorBySelection(event.target.value, doctors);
-                              setOperationen((current) =>
-                                updateItemAtIndex(current, index, {
-                                  arzt_id: selectedDoctor ? caseDoctorOptionValue(selectedDoctor) : "",
-                                  arzt_provider_name: selectedDoctor?.provider_name ?? null,
-                                  arzt: selectedDoctor
-                                    ? doctorOptionLabel(selectedDoctor, lang)
-                                    : (current[index]?.arzt ?? ""),
-                                }),
-                              );
-                            }} className={selectClassName}>
-                              <option value="__none__">{t.common_not_set}</option>
-                              {doctors.map((doctor) => {
-                                const value = caseDoctorOptionValue(doctor);
-                                const label = doctorOptionLabel(doctor, lang);
-                                return (
-                                  <option key={value} value={value} data-search-text={doctorOptionSearchText(doctor, lang)}>
-                                    {label}
-                                  </option>
-                                );
-                              })}
-                            </NativeComboboxSelect>
-                        </Field>
-                        <Field label={t.cases_clinical_doctor_label}><Input value={item.arzt ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder={t.cases_clinical_legacy_manual_fallback} /></Field>
-                        <Field label={t.cases_note}><Input value={item.notiz ?? ""} onChange={(event) => setOperationen((current) => updateItemAtIndex(current, index, { notiz: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                      </div>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setOperationen((current) => removeItemAtIndex(current, index))}>{t.cases_clinical_remove}</Button></div>
-                    </div>
-                  ))}
-                </ItemEditorSection>
-
-                <ItemEditorSection title={t.cases_medication} description={t.cases_subtitle} count={countFilled(medikamente, "wirkstoff")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "medikamente"} error={sectionErrors.medikamente ?? ""} canEdit={permissions.canEdit} onAdd={() => setMedikamente((current) => [...current, blankMedikament()])} onSave={handleSaveMedikamente}>
-                  {medikamente.map((item, index) => {
-                    const wirkstoffError = medicationRequiredFieldError(item, sectionErrors.medikamente);
-                    return (
-                    <div key={medikamentItemKey(item, index)} className="rounded-xl border border-border bg-muted/20 p-4">
-                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                        <Field label={t.cases_medications_brand_name}><Input value={item.handelsname} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { handelsname: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_medications_active_ingredient} required error={wirkstoffError}><Input required value={item.wirkstoff ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { wirkstoff: event.target.value }))} className={requiredInputClassName(wirkstoffError)} aria-invalid={Boolean(wirkstoffError)} /></Field>
-                        <Field label={t.documents_category}>
-                          <NativeComboboxSelect
-                            value={item.med_typ || "permanent"}
-                            onChange={(event) =>
-                              setMedikamente((current) =>
-                                updateItemAtIndex(current, index, { med_typ: event.target.value }),
-                              )}
-                            className={selectClassName}
-                          >
-                            {CASE_MEDICATION_TYPE_VALUES.map((type) => (
-                              <option key={type} value={type}>
-                                {medicationTypeLabel(type)}
-                              </option>
-                            ))}
-                            {item.med_typ && !isKnownMedicationType(item.med_typ) ? (
-                              <option value={item.med_typ}>
-                                {medicationTypeLabel(item.med_typ)}
-                              </option>
-                            ) : null}
-                          </NativeComboboxSelect>
-                        </Field>
-                        <Field label={t.cases_clinical_valid_until}>
-                          <Input
-                            type="date"
-                            value={item.expiry_date ?? ""}
-                            onChange={(event) =>
-                              setMedikamente((current) =>
-                                updateItemAtIndex(current, index, {
-                                  expiry_date: event.target.value,
-                                }),
-                              )
-                            }
-                            className="h-10 rounded-xl bg-white"
-                          />
-                        </Field>
-                        <Field label={t.cases_medications}><Input value={item.dosis ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { dosis: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_medications}><Input value={item.dosis_einheit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { dosis_einheit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_medications}><Input value={item.einnahmeschema ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { einnahmeschema: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_medications_form}>
-                          <NativeComboboxSelect
-                            value={item.darreichungsform ?? ""}
-                            onChange={(event) =>
-                              setMedikamente((current) =>
-                                updateItemAtIndex(current, index, {
-                                  darreichungsform: event.target.value,
-                                }),
-                              )
-                            }
-                            className={selectClassName}
-                          >
-                            <option value="">{t.common_not_set}</option>
-                            {DARREICHUNGSFORM_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                            {item.darreichungsform &&
-                            !DARREICHUNGSFORM_OPTIONS.some(
-                              (option) => option.value === item.darreichungsform,
-                            ) ? (
-                              <option value={item.darreichungsform}>
-                                {item.darreichungsform}
-                              </option>
-                            ) : null}
-                          </NativeComboboxSelect>
-                        </Field>
-                        <Field label={t.cases_medications}><Input value={item.einheit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { einheit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.providers_service_valid_from}><Input value={item.seit ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { seit: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_reason}><Input value={item.grund ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { grund: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_clinical_doctor_registry}>
-                          <NativeComboboxSelect
-                            value={caseDoctorSelectValue(
-                              item.verordnender_arzt_id,
-                              [item.verordnender_arzt_provider_name, item.verordnender_arzt]
-                                .filter(Boolean)
-                                .join(" "),
-                              doctors,
-                            )}
-
-
-                            onChange={(event) => {
-                              const selectedDoctor = findCaseDoctorBySelection(event.target.value, doctors);
-                              setMedikamente((current) =>
-                                updateItemAtIndex(current, index, {
-                                  verordnender_arzt_id: selectedDoctor ? caseDoctorOptionValue(selectedDoctor) : "",
-                                  verordnender_arzt_provider_name: selectedDoctor?.provider_name ?? null,
-                                  verordnender_arzt: selectedDoctor
-                                    ? doctorOptionLabel(selectedDoctor, lang)
-                                    : (current[index]?.verordnender_arzt ?? ""),
-                                }),
-                              );
-                            }} className={selectClassName}>
-                              <option value="__none__">{t.common_not_set}</option>
-                              {doctors.map((doctor) => {
-                                const value = caseDoctorOptionValue(doctor);
-                                const label = doctorOptionLabel(doctor, lang);
-                                return (
-                                  <option key={value} value={value} data-search-text={doctorOptionSearchText(doctor, lang)}>
-                                    {label}
-                                  </option>
-                                );
-                              })}
-                            </NativeComboboxSelect>
-                        </Field>
-                        <Field label={t.cases_clinical_doctor_label}><Input value={item.verordnender_arzt ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { verordnender_arzt: event.target.value }))} className="h-10 rounded-xl bg-white" placeholder={t.cases_clinical_legacy_manual_fallback} /></Field>
-                        <Field label={t.patients_notes}><Input value={item.anmerkung ?? ""} onChange={(event) => setMedikamente((current) => updateItemAtIndex(current, index, { anmerkung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                      </div>
-                      {item.is_expired ? (
-                        <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant="outline" className="rounded-full border-amber-300 bg-white text-amber-700">
-                              {t.cases_clinical_medication_expired}
-                            </Badge>
-                            {item.pending_expiry_confirmation ? (
-                              <Badge variant="outline" className="rounded-full border-rose-300 bg-white text-rose-700">
-                                {t.cases_clinical_medication_confirmation_required}
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="rounded-full border-emerald-300 bg-white text-emerald-700">
-                                {t.cases_clinical_medication_review_confirmed}
-                              </Badge>
-                            )}
-                            <span>
-                              {formatCatalogMessage(
-                                t.cases_clinical_medication_validity_ended,
-                                { date: formatDate(item.expiry_date) },
-                              )}
-                            </span>
-                          </div>
-                          {item.pending_expiry_notification_sent_at ? (
-                            <p className="mt-2 text-xs text-amber-700">
-                              {formatCatalogMessage(
-                                t.cases_clinical_medication_notification_sent,
-                                {
-                                  date: formatDateTime(
-                                    item.pending_expiry_notification_sent_at,
-                                  ),
-                                },
-                              )}
-                            </p>
-                          ) : null}
-                        </div>
-                      ) : null}
-                      <div className="mt-3 flex flex-wrap justify-end gap-2">
-                        {item.pending_expiry_confirmation && item.id ? (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="rounded-lg"
-                            onClick={() => {
-                              if (item.id) {
-                                void handleConfirmMedicationExpiry(item.id);
-                              }
-                            }}
-                            disabled={sectionBusy === "medikamente"}
-                          >
-                            {t.cases_clinical_medication_confirm_expiry_review}
-                          </Button>
-                        ) : null}
-                        <Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setMedikamente((current) => removeItemAtIndex(current, index))}>{t.cases_clinical_remove}</Button>
-                      </div>
-                    </div>
-                    );
-                  })}
-                </ItemEditorSection>
-
-                <ItemEditorSection title={t.cases_pain} description={t.cases_subtitle} count={countFilled(painRecords, "lokalisierung")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "pain"} error={sectionErrors.pain ?? ""} canEdit={permissions.canEdit} onAdd={() => setPainRecords((current) => [...current, blankPainItem()])} onSave={handleSavePain}>
-                  {painRecords.map((item, index) => {
-                    const lokalisierungError = painRequiredFieldError(item, sectionErrors.pain);
-                    return (
-                    <div key={painItemKey(item, index)} className="rounded-xl border border-border bg-muted/20 p-4">
-                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        <Field label={t.appointments_location} required error={lokalisierungError}><Input value={item.lokalisierung} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { lokalisierung: event.target.value }))} className={requiredInputClassName(lokalisierungError)} aria-invalid={Boolean(lokalisierungError)} /></Field>
-                        <Field label={t.providers_service_valid_from}><Input value={item.seit_wann ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { seit_wann: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_preconditions}><Input value={item.ursache ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { ursache: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_symptoms}><Input value={item.qualitaet ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { qualitaet: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_symptoms}><Input value={item.kontinuitaet ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { kontinuitaet: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_symptoms}><Input value={item.entwicklung ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { entwicklung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={lang === "de" ? "NRS aktuell (0-10)" : "NRS сейчас (0-10)"}><Input type="number" min={0} max={10} step={1} value={item.nrs_aktuell == null ? "" : String(item.nrs_aktuell)} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { nrs_aktuell: parsePainNumber(event.target.value) }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={lang === "de" ? "NRS zu Beginn (0-10)" : "NRS в начале (0-10)"}><Input type="number" min={0} max={10} step={1} value={item.nrs_anfang == null ? "" : String(item.nrs_anfang)} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { nrs_anfang: parsePainNumber(event.target.value) }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_pain}><Input value={item.dauer_anfang ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { dauer_anfang: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_pain}><Input value={item.dauer_aktuell ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { dauer_aktuell: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_pain}><Input value={item.ausstrahlung ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { ausstrahlung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_pain}><Input value={item.auftreten ?? ""} onChange={(event) => setPainRecords((current) => updateItemAtIndex(current, index, { auftreten: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                      </div>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setPainRecords((current) => removeItemAtIndex(current, index))}>{t.cases_clinical_remove}</Button></div>
-                    </div>
-                    );
-                  })}
-                </ItemEditorSection>
-
-                <ItemEditorSection title={t.cases_symptoms} description={t.cases_subtitle} count={countFilled(symptome, "beschreibung")} addLabel={t.providers_add_service} emptyTitle={t.common_not_set} emptyText={t.cases_subtitle} busy={sectionBusy === "symptome"} error={sectionErrors.symptome ?? ""} canEdit={permissions.canEdit} onAdd={() => setSymptome((current) => [...current, blankSymptom()])} onSave={handleSaveSymptome}>
-                  {symptome.map((item, index) => (
-                    <div key={symptomItemKey(item)} className="rounded-xl border border-border bg-muted/20 p-4">
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <Field label={t.patients_notes} required><Input value={item.beschreibung} onChange={(event) => setSymptome((current) => updateItemAtIndex(current, index, { beschreibung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                        <Field label={t.cases_title}><Input value={item.fachrichtung ?? ""} onChange={(event) => setSymptome((current) => updateItemAtIndex(current, index, { fachrichtung: event.target.value }))} className="h-10 rounded-xl bg-white" /></Field>
-                      </div>
-                      <div className="mt-3 flex justify-end"><Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={() => setSymptome((current) => removeItemAtIndex(current, index))}>{t.cases_clinical_remove}</Button></div>
-                    </div>
-                  ))}
-                </ItemEditorSection>
-
-                <Panel
-                  title={t.cases_specialty_cardiology_subflow_title}
-                  description={
-                    cardiologyTriggered
-                      ? t.cases_specialty_cardiology_active_description
-                      : t.cases_specialty_cardiology_inactive_description
-                  }
-                >
-                  <form onSubmit={handleSaveCardiology} className="space-y-4">
-                    {sectionErrors.cardiology ? <Banner tone="error">{sectionErrors.cardiology}</Banner> : null}
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
-                        <input
-                          type="checkbox"
-                          className={checkboxClass}
-                          checked={cardiology.is_relevant}
-                          onChange={(event) =>
-                            setCardiology((current) => ({
-                              ...current,
-                              is_relevant: event.target.checked,
-                            }))
-                          }
-                        />
-                        {t.cases_specialty_cardiology_relevant}
-                      </label>
-                      {[
-                        ["chest_pain", t.cases_specialty_chest_pain],
-                        ["dyspnea", t.cases_specialty_dyspnea],
-                        ["palpitations", t.cases_specialty_palpitations],
-                        ["syncope", t.cases_specialty_syncope],
-                        ["edema", t.cases_specialty_edema],
-                      ].map(([key, label]) => (
-                        <label
-                          key={key}
-                          className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground"
-                        >
-                          <input
-                            type="checkbox"
-                            className={checkboxClass}
-                            checked={Boolean(cardiology[key as keyof CardiologyAssessment])}
-                            onChange={(event) =>
-                              setCardiology((current) => ({
-                                ...current,
-                                [key]: event.target.checked,
-                              }))
-                            }
-                          />
-                          {label}
-                        </label>
-                      ))}
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label={t.cases_specialty_known_diagnosis}>
-                        <Input value={cardiology.known_diagnosis} onChange={(event) => setCardiology((current) => ({ ...current, known_diagnosis: event.target.value }))} className="h-10 rounded-xl bg-muted/20" />
-                      </Field>
-                      <Field label={t.cases_specialty_prior_cardiac_workup}>
-                        <Input value={cardiology.prior_cardiac_workup} onChange={(event) => setCardiology((current) => ({ ...current, prior_cardiac_workup: event.target.value }))} className="h-10 rounded-xl bg-muted/20" />
-                      </Field>
-                      <Field label={t.cases_specialty_anticoagulation}>
-                        <Input value={cardiology.anticoagulation} onChange={(event) => setCardiology((current) => ({ ...current, anticoagulation: event.target.value }))} className="h-10 rounded-xl bg-muted/20" />
-                      </Field>
-                      <Field label={t.cases_specialty_cv_risk_factors}>
-                        <Input value={cardiology.cardiovascular_risk_factors} onChange={(event) => setCardiology((current) => ({ ...current, cardiovascular_risk_factors: event.target.value }))} className="h-10 rounded-xl bg-muted/20" />
-                      </Field>
-                      <Field label={t.cases_specialty_family_history}>
-                        <Input value={cardiology.family_history} onChange={(event) => setCardiology((current) => ({ ...current, family_history: event.target.value }))} className="h-10 rounded-xl bg-muted/20" />
-                      </Field>
-                      <Field label={t.cases_specialty_red_flags}>
-                        <Input value={cardiology.red_flags} onChange={(event) => setCardiology((current) => ({ ...current, red_flags: event.target.value }))} className="h-10 rounded-xl bg-muted/20" />
-                      </Field>
-                    </div>
-                    <Field label={t.cases_specialty_cardiology_notes}>
-                      <textarea
-                        value={cardiology.notes}
-                        onChange={(event) =>
-                          setCardiology((current) => ({ ...current, notes: event.target.value }))
-                        }
-                        className={textareaClassName}
-                        rows={4}
-                      />
-                    </Field>
-                    <div className="flex justify-end border-t border-border/70 pt-4">
-                      <Button type="submit" className="h-9 rounded-lg px-3.5" disabled={sectionBusy === "cardiology" || !permissions.canEdit}>
-                        {sectionBusy === "cardiology" ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                        {t.cases_specialty_cardiology_save}
-                      </Button>
-                    </div>
-                  </form>
-                </Panel>
-
-                <Panel
-                  title={caseText("cases_gastroenterology_sub_flow")}
-                  description={
-                    gastroenterologyTriggered
-                      ? caseText("cases_specialty_branch_for_gastroenterology_related_symptoms_b")
-                      : caseText("cases_enable_when_symptoms_or_referral_indicate_gastroenterolo")
-                  }
-                >
-                  <form onSubmit={handleSaveGastroenterology} className="space-y-4">
-                    {sectionErrors.gastroenterology ? (
-                      <Banner tone="error">{sectionErrors.gastroenterology}</Banner>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </Panel>
+              <Panel title={snippetForm.id ? t.common_edit : t.cases_snippets_new}>
+              <form onSubmit={handleSaveSnippet} className="space-y-4">
+                {snippetSaveError ? (
+                  <Banner tone="error">{snippetSaveError}</Banner>
+                ) : null}
+                <Field label={t.cases_snippets_label} required>
+                  <Input
+                    value={snippetForm.label}
+                    onChange={(event) =>
+                      setSnippetForm((current) => ({
+                        ...current,
+                        label: event.target.value,
+                      }))}
+                    className="h-10 rounded-xl bg-field"
+                  />
+                </Field>
+                <Field label={t.cases_snippets_category}>
+                  <NativeComboboxSelect
+                    value={snippetForm.category || "general"}
+                    onChange={(event) =>
+                      setSnippetForm((current) => ({
+                        ...current,
+                        category: event.target.value,
+                      }))}
+                    className={selectClassName}
+                  >
+                    {CASE_SNIPPET_CATEGORY_VALUES.map((category) => (
+                      <option key={category} value={category}>
+                        {snippetCategoryLabel(category)}
+                      </option>
+                    ))}
+                    {snippetForm.category &&
+                    !isKnownSnippetCategory(snippetForm.category) ? (
+                      <option value={snippetForm.category}>
+                        {snippetCategoryLabel(snippetForm.category)}
+                      </option>
                     ) : null}
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
-                        <input
-                          type="checkbox"
-                          className={checkboxClass}
-                          checked={gastroenterology.is_relevant}
-                          onChange={(event) =>
-                            setGastroenterology((current) => ({
-                              ...current,
-                              is_relevant: event.target.checked,
-                            }))
-                          }
-                        />
-                        {caseText("cases_gastroenterology_relevant")}
-                      </label>
-                      {[
-                        ["abdominal_pain", caseText("cases_abdominal_pain")],
-                        ["reflux", caseText("cases_reflux")],
-                        ["nausea", caseText("cases_nausea")],
-                        ["diarrhea", caseText("cases_diarrhea")],
-                        ["constipation", caseText("cases_constipation")],
-                        ["gi_bleeding", caseText("cases_gi_bleeding")],
-                      ].map(([key, label]) => (
-                        <label
-                          key={key}
-                          className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground"
-                        >
-                          <input
-                            type="checkbox"
-                            className={checkboxClass}
-                            checked={Boolean(
-                              gastroenterology[key as keyof GastroenterologyAssessment],
-                            )}
-                            onChange={(event) =>
-                              setGastroenterology((current) => ({
-                                ...current,
-                                [key]: event.target.checked,
-                              }))
-                            }
-                          />
-                          {label}
-                        </label>
-                      ))}
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label={caseText("cases_prior_endoscopy_colonoscopy")}>
-                        <Input
-                          value={gastroenterology.prior_endoscopy}
-                          onChange={(event) =>
-                            setGastroenterology((current) => ({
-                              ...current,
-                              prior_endoscopy: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={caseText("cases_bowel_habit_changes")}>
-                        <Input
-                          value={gastroenterology.bowel_habits}
-                          onChange={(event) =>
-                            setGastroenterology((current) => ({
-                              ...current,
-                              bowel_habits: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={caseText("cases_liver_hepatobiliary_history")}>
-                        <Input
-                          value={gastroenterology.liver_history}
-                          onChange={(event) =>
-                            setGastroenterology((current) => ({
-                              ...current,
-                              liver_history: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={caseText("cases_food_intolerance_triggers")}>
-                        <Input
-                          value={gastroenterology.food_intolerance}
-                          onChange={(event) =>
-                            setGastroenterology((current) => ({
-                              ...current,
-                              food_intolerance: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={caseText("cases_red_flags")}>
-                        <Input
-                          value={gastroenterology.red_flags}
-                          onChange={(event) =>
-                            setGastroenterology((current) => ({
-                              ...current,
-                              red_flags: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                    </div>
-                    <Field label={caseText("cases_gastroenterology_notes")}>
-                      <textarea
-                        value={gastroenterology.notes}
-                        onChange={(event) =>
-                          setGastroenterology((current) => ({
-                            ...current,
-                            notes: event.target.value,
-                          }))
-                        }
-                        className={textareaClassName}
-                        rows={4}
-                      />
-                    </Field>
-                    <div className="flex justify-end border-t border-border/70 pt-4">
-                      <Button
-                        type="submit"
-                        className="h-9 rounded-lg px-3.5"
-                        disabled={
-                          sectionBusy === "gastroenterology" || !permissions.canEdit
-                        }
-                      >
-                        {sectionBusy === "gastroenterology" ? (
-                          <LoaderCircle className="size-4 animate-spin" />
-                        ) : null}
-                        {caseText("cases_save_gastroenterology")}
-                      </Button>
-                    </div>
-                  </form>
-                </Panel>
-
-                <Panel
-                  title={caseText("cases_orthopedics_sub_flow")}
-                  description={
-                    orthopedicsTriggered
-                      ? caseText("cases_specialty_branch_for_musculoskeletal_pain_mobility_issue")
-                      : caseText("cases_enable_when_symptoms_or_referral_indicate_orthopedics")
-                  }
-                >
-                  <form onSubmit={handleSaveOrthopedics} className="space-y-4">
-                    {sectionErrors.orthopedics ? (
-                      <Banner tone="error">{sectionErrors.orthopedics}</Banner>
+                  </NativeComboboxSelect>
+                </Field>
+                <Field label={t.cases_snippets_body} required>
+                  <textarea
+                    value={snippetForm.body}
+                    onChange={(event) =>
+                      setSnippetForm((current) => ({
+                        ...current,
+                        body: event.target.value,
+                      }))}
+                    className={textareaClassName}
+                    rows={8}
+                  />
+                </Field>
+                <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-3 py-2 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    className={checkboxClass}
+                    checked={snippetForm.is_active}
+                    onChange={(event) =>
+                      setSnippetForm((current) => ({
+                        ...current,
+                        is_active: event.target.checked,
+                      }))}
+                  />
+                  {t.cases_snippets_active}
+                </label>
+                <div className="rounded-xl border border-dashed border-border bg-white p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    {t.cases_snippets_preview}
+                  </p>
+                  <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">
+                    {renderCaseTextSnippet(snippetForm.body, snippetPreviewContext) || t.cases_snippets_empty}
+                  </p>
+                </div>
+                <code className="block rounded-xl bg-white px-3 py-2 text-[11px] text-muted-foreground">
+                  {CASE_TEXT_SNIPPET_PLACEHOLDERS.join(" · ")}
+                </code>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-lg"
+                    onClick={() => {
+                      setSnippetDialogOpen(false);
+                      setSnippetForm(DEFAULT_CASE_TEXT_SNIPPET_FORM);
+                      setSnippetSaveError("");
+                    }}
+                  >
+                    {t.common_cancel}
+                  </Button>
+                  <Button
+                    type="submit"
+                    className="h-9 rounded-lg px-3.5"
+                    disabled={snippetSaveBusy}
+                  >
+                    {snippetSaveBusy ? (
+                      <LoaderCircle className="size-4 animate-spin" />
                     ) : null}
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
-                        <input
-                          type="checkbox"
-                          className={checkboxClass}
-                          checked={orthopedics.is_relevant}
-                          onChange={(event) =>
-                            setOrthopedics((current) => ({
-                              ...current,
-                              is_relevant: event.target.checked,
-                            }))
-                          }
-                        />
-                        {caseText("cases_orthopedics_relevant")}
-                      </label>
-                      {[
-                        ["joint_pain", caseText("cases_joint_pain")],
-                        ["back_pain", caseText("cases_back_spine_pain")],
-                        ["mobility_limitation", caseText("cases_mobility_limitation")],
-                        ["trauma_history", caseText("cases_trauma_history")],
-                      ].map(([key, label]) => (
-                        <label
-                          key={key}
-                          className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground"
-                        >
-                          <input
-                            type="checkbox"
-                            className={checkboxClass}
-                            checked={Boolean(orthopedics[key as keyof OrthopedicsAssessment])}
-                            onChange={(event) =>
-                              setOrthopedics((current) => ({
-                                ...current,
-                                [key]: event.target.checked,
-                              }))
-                            }
-                          />
-                          {label}
-                        </label>
-                      ))}
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label={caseText("cases_prior_imaging")}>
-                        <Input
-                          value={orthopedics.prior_imaging}
-                          onChange={(event) =>
-                            setOrthopedics((current) => ({
-                              ...current,
-                              prior_imaging: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={caseText("cases_assistive_devices_implants")}>
-                        <Input
-                          value={orthopedics.assistive_devices}
-                          onChange={(event) =>
-                            setOrthopedics((current) => ({
-                              ...current,
-                              assistive_devices: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={caseText("cases_physiotherapy_rehab_history")}>
-                        <Input
-                          value={orthopedics.physiotherapy_history}
-                          onChange={(event) =>
-                            setOrthopedics((current) => ({
-                              ...current,
-                              physiotherapy_history: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={caseText("cases_pain_triggers_load_pattern")}>
-                        <Input
-                          value={orthopedics.pain_triggers}
-                          onChange={(event) =>
-                            setOrthopedics((current) => ({
-                              ...current,
-                              pain_triggers: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={caseText("cases_red_flags")}>
-                        <Input
-                          value={orthopedics.red_flags}
-                          onChange={(event) =>
-                            setOrthopedics((current) => ({
-                              ...current,
-                              red_flags: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                    </div>
-                    <Field label={caseText("cases_orthopedics_notes")}>
-                      <textarea
-                        value={orthopedics.notes}
-                        onChange={(event) =>
-                          setOrthopedics((current) => ({
-                            ...current,
-                            notes: event.target.value,
-                          }))
-                        }
-                        className={textareaClassName}
-                        rows={4}
-                      />
-                    </Field>
-                    <div className="flex justify-end border-t border-border/70 pt-4">
-                      <Button
-                        type="submit"
-                        className="h-9 rounded-lg px-3.5"
-                        disabled={sectionBusy === "orthopedics" || !permissions.canEdit}
-                      >
-                        {sectionBusy === "orthopedics" ? (
-                          <LoaderCircle className="size-4 animate-spin" />
-                        ) : null}
-                        {caseText("cases_save_orthopedics")}
-                      </Button>
-                    </div>
-                  </form>
-                </Panel>
-
-                <Panel
-                  title={caseText("cases_neurology_sub_flow")}
-                  description={
-                    neurologyTriggered
-                      ? caseText("cases_specialty_branch_for_headache_dizziness_neurologic_defic")
-                      : caseText("cases_enable_when_symptoms_or_referral_indicate_neurology")
-                  }
-                >
-                  <form onSubmit={handleSaveNeurology} className="space-y-4">
-                    {sectionErrors.neurology ? (
-                      <Banner tone="error">{sectionErrors.neurology}</Banner>
-                    ) : null}
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
-                        <input
-                          type="checkbox"
-                          className={checkboxClass}
-                          checked={neurology.is_relevant}
-                          onChange={(event) =>
-                            setNeurology((current) => ({
-                              ...current,
-                              is_relevant: event.target.checked,
-                            }))
-                          }
-                        />
-                        {caseText("cases_neurology_relevant")}
-                      </label>
-                      {[
-                        ["headache", caseText("cases_headache")],
-                        ["dizziness", caseText("cases_dizziness_vertigo")],
-                        ["sensory_changes", caseText("cases_sensory_changes")],
-                        ["weakness", caseText("cases_weakness")],
-                        ["seizure_history", caseText("cases_seizure_history")],
-                        ["gait_balance_issues", caseText("cases_gait_balance_issues")],
-                      ].map(([key, label]) => (
-                        <label
-                          key={key}
-                          className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground"
-                        >
-                          <input
-                            type="checkbox"
-                            className={checkboxClass}
-                            checked={Boolean(neurology[key as keyof NeurologyAssessment])}
-                            onChange={(event) =>
-                              setNeurology((current) => ({
-                                ...current,
-                                [key]: event.target.checked,
-                              }))
-                            }
-                          />
-                          {label}
-                        </label>
-                      ))}
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label={caseText("cases_prior_neuro_imaging")}>
-                        <Input
-                          value={neurology.prior_neuro_imaging}
-                          onChange={(event) =>
-                            setNeurology((current) => ({
-                              ...current,
-                              prior_neuro_imaging: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={caseText("cases_prior_neurology_workup")}>
-                        <Input
-                          value={neurology.prior_neurology_workup}
-                          onChange={(event) =>
-                            setNeurology((current) => ({
-                              ...current,
-                              prior_neurology_workup: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={caseText("cases_cognitive_speech_changes")}>
-                        <Input
-                          value={neurology.cognitive_changes}
-                          onChange={(event) =>
-                            setNeurology((current) => ({
-                              ...current,
-                              cognitive_changes: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={caseText("cases_red_flags")}>
-                        <Input
-                          value={neurology.red_flags}
-                          onChange={(event) =>
-                            setNeurology((current) => ({
-                              ...current,
-                              red_flags: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                    </div>
-                    <Field label={caseText("cases_neurology_notes")}>
-                      <textarea
-                        value={neurology.notes}
-                        onChange={(event) =>
-                          setNeurology((current) => ({
-                            ...current,
-                            notes: event.target.value,
-                          }))
-                        }
-                        className={textareaClassName}
-                        rows={4}
-                      />
-                    </Field>
-                    <div className="flex justify-end border-t border-border/70 pt-4">
-                      <Button
-                        type="submit"
-                        className="h-9 rounded-lg px-3.5"
-                        disabled={sectionBusy === "neurology" || !permissions.canEdit}
-                      >
-                        {sectionBusy === "neurology" ? (
-                          <LoaderCircle className="size-4 animate-spin" />
-                        ) : null}
-                        {caseText("cases_save_neurology")}
-                      </Button>
-                    </div>
-                  </form>
-                </Panel>
-
-                <Panel
-                  title={caseText("cases_pulmonology_sub_flow")}
-                  description={
-                    pulmonologyTriggered
-                      ? caseText("cases_specialty_branch_for_respiratory_symptoms_chronic_cough")
-                      : caseText("cases_enable_when_symptoms_or_referral_indicate_pulmonology")
-                  }
-                >
-                  <form onSubmit={handleSavePulmonology} className="space-y-4">
-                    {sectionErrors.pulmonology ? (
-                      <Banner tone="error">{sectionErrors.pulmonology}</Banner>
-                    ) : null}
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
-                        <input
-                          type="checkbox"
-                          className={checkboxClass}
-                          checked={pulmonology.is_relevant}
-                          onChange={(event) =>
-                            setPulmonology((current) => ({
-                              ...current,
-                              is_relevant: event.target.checked,
-                            }))
-                          }
-                        />
-                        {caseText("cases_pulmonology_relevant")}
-                      </label>
-                      {[
-                        ["chronic_cough", caseText("cases_chronic_cough")],
-                        ["dyspnea", caseText("cases_dyspnea_shortness_of_breath")],
-                        ["wheezing", caseText("cases_wheezing")],
-                        ["chest_tightness", caseText("cases_chest_tightness")],
-                        ["hemoptysis", caseText("cases_hemoptysis")],
-                      ].map(([key, label]) => (
-                        <label
-                          key={key}
-                          className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground"
-                        >
-                          <input
-                            type="checkbox"
-                            className={checkboxClass}
-                            checked={Boolean(pulmonology[key as keyof PulmonologyAssessment])}
-                            onChange={(event) =>
-                              setPulmonology((current) => ({
-                                ...current,
-                                [key]: event.target.checked,
-                              }))
-                            }
-                          />
-                          {label}
-                        </label>
-                      ))}
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label={caseText("cases_smoking_history_pack_years")}>
-                        <Input
-                          value={pulmonology.smoking_history}
-                          onChange={(event) =>
-                            setPulmonology((current) => ({
-                              ...current,
-                              smoking_history: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={caseText("cases_prior_chest_imaging")}>
-                        <Input
-                          value={pulmonology.prior_chest_imaging}
-                          onChange={(event) =>
-                            setPulmonology((current) => ({
-                              ...current,
-                              prior_chest_imaging: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={caseText("cases_inhaler_respiratory_therapy")}>
-                        <Input
-                          value={pulmonology.inhaler_therapy}
-                          onChange={(event) =>
-                            setPulmonology((current) => ({
-                              ...current,
-                              inhaler_therapy: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={caseText("cases_sleep_apnea_cpap_history")}>
-                        <Input
-                          value={pulmonology.sleep_apnea_history}
-                          onChange={(event) =>
-                            setPulmonology((current) => ({
-                              ...current,
-                              sleep_apnea_history: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={caseText("cases_red_flags")}>
-                        <Input
-                          value={pulmonology.red_flags}
-                          onChange={(event) =>
-                            setPulmonology((current) => ({
-                              ...current,
-                              red_flags: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                    </div>
-                    <Field label={caseText("cases_pulmonology_notes")}>
-                      <textarea
-                        value={pulmonology.notes}
-                        onChange={(event) =>
-                          setPulmonology((current) => ({
-                            ...current,
-                            notes: event.target.value,
-                          }))
-                        }
-                        className={textareaClassName}
-                        rows={4}
-                      />
-                    </Field>
-                    <div className="flex justify-end border-t border-border/70 pt-4">
-                      <Button
-                        type="submit"
-                        className="h-9 rounded-lg px-3.5"
-                        disabled={sectionBusy === "pulmonology" || !permissions.canEdit}
-                      >
-                        {sectionBusy === "pulmonology" ? (
-                          <LoaderCircle className="size-4 animate-spin" />
-                        ) : null}
-                        {caseText("cases_save_pulmonology")}
-                      </Button>
-                    </div>
-                  </form>
-                </Panel>
-
-                <Panel
-                  title={caseText("cases_urology_sub_flow")}
-                  description={
-                    urologyTriggered
-                      ? caseText("cases_specialty_branch_for_urinary_symptoms_retention_and_prio")
-                      : caseText("cases_enable_when_symptoms_or_referral_indicate_urology")
-                  }
-                >
-                  <form onSubmit={handleSaveUrology} className="space-y-4">
-                    {sectionErrors.urology ? (
-                      <Banner tone="error">{sectionErrors.urology}</Banner>
-                    ) : null}
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
-                        <input
-                          type="checkbox"
-                          className={checkboxClass}
-                          checked={urology.is_relevant}
-                          onChange={(event) =>
-                            setUrology((current) => ({
-                              ...current,
-                              is_relevant: event.target.checked,
-                            }))
-                          }
-                        />
-                        {caseText("cases_urology_relevant")}
-                      </label>
-                      {[
-                        ["dysuria", caseText("cases_dysuria_burning")],
-                        ["hematuria", caseText("cases_hematuria")],
-                        ["flank_pain", caseText("cases_flank_pain")],
-                        ["urinary_frequency", caseText("cases_urinary_frequency")],
-                        ["urinary_retention", caseText("cases_urinary_retention")],
-                        ["incontinence", caseText("cases_incontinence")],
-                      ].map(([key, label]) => (
-                        <label
-                          key={key}
-                          className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground"
-                        >
-                          <input
-                            type="checkbox"
-                            className={checkboxClass}
-                            checked={Boolean(urology[key as keyof UrologyAssessment])}
-                            onChange={(event) =>
-                              setUrology((current) => ({
-                                ...current,
-                                [key]: event.target.checked,
-                              }))
-                            }
-                          />
-                          {label}
-                        </label>
-                      ))}
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label={caseText("cases_prior_urology_workup")}>
-                        <Input
-                          value={urology.prior_urology_workup}
-                          onChange={(event) =>
-                            setUrology((current) => ({
-                              ...current,
-                              prior_urology_workup: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={caseText("cases_catheter_instrumentation_history")}>
-                        <Input
-                          value={urology.catheter_history}
-                          onChange={(event) =>
-                            setUrology((current) => ({
-                              ...current,
-                              catheter_history: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={caseText("cases_stone_renal_colic_history")}>
-                        <Input
-                          value={urology.stone_history}
-                          onChange={(event) =>
-                            setUrology((current) => ({
-                              ...current,
-                              stone_history: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                      <Field label={caseText("cases_red_flags")}>
-                        <Input
-                          value={urology.red_flags}
-                          onChange={(event) =>
-                            setUrology((current) => ({
-                              ...current,
-                              red_flags: event.target.value,
-                            }))
-                          }
-                          className="h-10 rounded-xl bg-muted/20"
-                        />
-                      </Field>
-                    </div>
-                    <Field label={caseText("cases_urology_notes")}>
-                      <textarea
-                        value={urology.notes}
-                        onChange={(event) =>
-                          setUrology((current) => ({
-                            ...current,
-                            notes: event.target.value,
-                          }))
-                        }
-                        className={textareaClassName}
-                        rows={4}
-                      />
-                    </Field>
-                    <div className="flex justify-end border-t border-border/70 pt-4">
-                      <Button
-                        type="submit"
-                        className="h-9 rounded-lg px-3.5"
-                        disabled={sectionBusy === "urology" || !permissions.canEdit}
-                      >
-                        {sectionBusy === "urology" ? (
-                          <LoaderCircle className="size-4 animate-spin" />
-                        ) : null}
-                        {caseText("cases_save_urology")}
-                      </Button>
-                    </div>
-                  </form>
-                </Panel>
-
-                <Panel title={t.cases_vegetative} description={t.cases_subtitle}>
-                  <form onSubmit={handleSaveVegetative} className="space-y-4">
-                    {sectionErrors.vegetative ? <Banner tone="error">{sectionErrors.vegetative}</Banner> : null}
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Field label={caseText("case_ws_appetite_thirst")}><Input value={vegetative.appetit_durst} onChange={(event) => setVegetative((current) => ({ ...current, appetit_durst: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
-                      <Field label={caseText("case_ws_height_cm")}><Input value={vegetative.koerpergroesse} onChange={(event) => setVegetative((current) => ({ ...current, koerpergroesse: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
-                      <Field label={caseText("case_ws_weight_kg")}><Input value={vegetative.gewicht} onChange={(event) => setVegetative((current) => ({ ...current, gewicht: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
-                      <Field label={caseText("case_ws_weight_change")}><Input value={vegetative.gewichtsveraenderung} onChange={(event) => setVegetative((current) => ({ ...current, gewichtsveraenderung: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
-                      <Field label={caseText("case_ws_reason_context")}><Input value={vegetative.grund} onChange={(event) => setVegetative((current) => ({ ...current, grund: event.target.value }))} className="h-10 rounded-xl bg-muted/20" /></Field>
-                    </div>
-                    <div className="flex justify-end border-t border-border/70 pt-4">
-                      <Button type="submit" className="h-9 rounded-lg px-3.5" disabled={sectionBusy === "vegetative" || !permissions.canEdit}>
-                        {sectionBusy === "vegetative" ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                        {caseText("cases_save_vegetative")}
-                      </Button>
-                    </div>
-                  </form>
-                </Panel>
-
-                <Panel title={t.cases_vaccination} description={t.cases_subtitle}>
-                  <form onSubmit={handleSaveImpfstatus} className="space-y-4">
-                    {sectionErrors.impfstatus ? <Banner tone="error">{sectionErrors.impfstatus}</Banner> : null}
-                    <Field label={t.cases_status}>
-                      <textarea value={impfstatus} onChange={(event) => setImpfstatus(event.target.value)} className={textareaClassName} rows={3} />
-                    </Field>
-                    <div className="flex justify-end border-t border-border/70 pt-4">
-                      <Button type="submit" className="h-9 rounded-lg px-3.5" disabled={sectionBusy === "impfstatus" || !permissions.canEdit}>
-                        {sectionBusy === "impfstatus" ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                        {caseText("cases_save_vaccination")}
-                      </Button>
-                    </div>
-                  </form>
-                </Panel>
-
-                <Panel
-                  title={caseText("cases_clinical_history")}
-                  description={caseText("cases_append_only_section_history_with_retention_metadata_for")}
-                >
-                  {detail.history?.length ? (
-                    <div className="space-y-2.5">
-                      {detail.history.map((entry) => (
-                        <article
-                          key={entry.id}
-                          className="rounded-xl border border-border bg-muted/20 p-3.5"
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div>
-                              <h4 className="text-sm font-semibold text-foreground">
-                                {historySectionLabel(entry.section)}
-                              </h4>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                {entry.changed_by_name} · {entry.changed_by_role} ·{" "}
-                                {formatDateTime(entry.created_at)}
-                              </p>
-                            </div>
-                            <Badge
-                              variant="outline"
-                              className="rounded-full border-border bg-background text-foreground"
-                            >
-                              #{entry.id}
-                            </Badge>
-                          </div>
-                          <div className="mt-2.5 grid gap-2.5 md:grid-cols-2">
-                            <div className="rounded-xl border border-border bg-white p-3">
-                              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                {caseText("cases_previous")}
-                              </div>
-                              <p className="mt-1.5 break-words font-mono text-xs text-foreground">
-                                {historyValuePreview(entry.old_value)}
-                              </p>
-                            </div>
-                            <div className="rounded-xl border border-border bg-white p-3">
-                              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                {caseText("cases_new")}
-                              </div>
-                              <p className="mt-1.5 break-words font-mono text-xs text-foreground">
-                                {historyValuePreview(entry.new_value)}
-                              </p>
-                            </div>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  ) : (
-                    <EmptyPanel
-                      title={caseText("cases_no_clinical_revisions_yet")}
-                      text={caseText("cases_the_case_has_no_persisted_section_history_at_the_moment")}
-                    />
-                  )}
-                </Panel>
-              </>
-            ) : (
-              <div className="flex min-h-[320px] items-center justify-center text-sm text-muted-foreground">
-                {caseText("cases_select_a_case_from_the_roster")}
-              </div>
-            )}
+                    {t.cases_snippets_save}
+                  </Button>
+                </div>
+              </form>
+              </Panel>
+            </div>
           </AdminSheetScaffold>
         </SheetContent>
       </Sheet>
@@ -4432,57 +1397,20 @@ function useCasesPageContent({
   );
 }
 
-export function CasesPage(...args: Parameters<typeof useCasesPageContent>) {
-  return useCasesPageContent(...args);
+export function CasesPage() {
+  return useCasesPageContent();
 }
 
-export const casesClinicalEditorTestUtils = {
-  blankMedikament,
-  blankPainItem,
-  ensureMedikamentClientRowIds,
-  ensurePainClientRowIds,
-  medicationRequiredValidationMessage,
-  painValidationMessage,
-  sanitizeMedikamente,
-  sanitizePainRecords,
-  medikamentItemKey,
-  painItemKey,
-};
-
-function MetricCard({ label, value, description, icon }: MetricCardProps) {
+function Panel({ title, description, action, children, className }: PanelProps) {
   return (
-    <div className="rounded-lg border border-border/70 bg-card p-3.5">
-      <div className="flex items-center justify-between gap-3">
-        <span className="inline-flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-          <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
-          {label}
-        </span>
-        <span className="rounded-lg bg-muted p-2 text-muted-foreground">{icon}</span>
-      </div>
-      <p className="mt-4 text-2xl font-semibold tracking-tight text-foreground">{value}</p>
-      <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{description}</p>
-    </div>
-  );
-}
-
-function Panel({ title, description, action, children, className, accent = true, tone = "default" }: PanelProps) {
-  const toneClass =
-    tone === "clinical"
-      ? "border-amber-200/70 bg-amber-50/40"
-      : tone === "subtle"
-        ? "bg-muted/20"
-        : "";
-  return (
-    <section className={cardClass(cn("p-6", toneClass, className))}>
+    <section className={cardClass(cn("p-6", className))}>
       <header className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            {accent ? (
-              <span
-                aria-hidden
-                className="size-2 shrink-0 rounded-full bg-[var(--brand)]"
-              />
-            ) : null}
+            <span
+              aria-hidden
+              className="size-2 shrink-0 rounded-full bg-[var(--brand)]"
+            />
             <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
               {title}
             </h3>
@@ -4541,40 +1469,5 @@ function EmptyPanel({ title, text, action }: EmptyPanelProps) {
         {action ? <div className="mt-4 flex justify-center">{action}</div> : null}
       </div>
     </div>
-  );
-}
-
-function ItemEditorSection({
-  title,
-  description,
-  count,
-  addLabel,
-  emptyTitle,
-  emptyText,
-  busy,
-  error,
-  canEdit,
-  onAdd,
-  onSave,
-  children,
-}: ItemEditorSectionProps) {
-  return (
-    <CaseClinicalEditorSection
-      title={title}
-      description={description}
-      count={count}
-      itemsLabel={caseText("cases_items")}
-      addLabel={addLabel}
-      emptyTitle={emptyTitle}
-      emptyText={emptyText}
-      busy={busy}
-      error={error}
-      canEdit={canEdit}
-      saveLabel={caseText("cases_save_section")}
-      onAdd={onAdd}
-      onSave={onSave}
-    >
-      {children}
-    </CaseClinicalEditorSection>
   );
 }

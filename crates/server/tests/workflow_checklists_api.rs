@@ -101,7 +101,7 @@ async fn create_order(app: &axum::Router, bearer: &str, patient_id: Uuid) -> Uui
 }
 
 #[tokio::test]
-async fn patient_and_order_creation_seed_default_workflow_checklists_and_tasks() {
+async fn patient_workflow_starts_empty_while_order_workflow_uses_phase_templates() {
     let Some((app, pool, _admin_id)) = test_context().await else {
         return;
     };
@@ -122,14 +122,8 @@ async fn patient_and_order_creation_seed_default_workflow_checklists_and_tasks()
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(patient_workflow["scope_type"], "patient");
-    assert!(patient_workflow["open_count"].as_u64().unwrap() >= 4);
-    assert!(
-        patient_workflow["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|item| item["linked_task_id"].as_str().is_some())
-    );
+    assert_eq!(patient_workflow["open_count"], 0);
+    assert!(patient_workflow["items"].as_array().unwrap().is_empty());
 
     let (status, patient_tasks) = json_request(
         &app,
@@ -140,7 +134,7 @@ async fn patient_and_order_creation_seed_default_workflow_checklists_and_tasks()
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(patient_tasks.as_array().unwrap().iter().any(|item| {
+    assert!(!patient_tasks.as_array().unwrap().iter().any(|item| {
         item["title"]
             .as_str()
             .unwrap_or_default()
@@ -288,6 +282,21 @@ async fn completing_workflow_item_closes_task_and_writes_patient_timeline_event(
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
     let patient_id = create_patient(&app, &pm_bearer, &tag).await;
 
+    let (status, created_item) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/workflow-checklist"),
+        &pm_bearer,
+        Some(json!({
+            "item_text": "Call patient after consultation",
+            "priority": "normal"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let item_id = created_item["id"].as_str().unwrap();
+    let task_id = created_item["task_id"].as_str().unwrap();
+
     let (status, checklist_body) = json_request(
         &app,
         "GET",
@@ -297,9 +306,7 @@ async fn completing_workflow_item_closes_task_and_writes_patient_timeline_event(
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let item = checklist_body["items"].as_array().unwrap()[0].clone();
-    let item_id = item["id"].as_str().unwrap();
-    let task_id = item["linked_task_id"].as_str().unwrap();
+    assert_eq!(checklist_body["items"].as_array().unwrap().len(), 1);
 
     let (status, _) = json_request(
         &app,

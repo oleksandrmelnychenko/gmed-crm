@@ -236,9 +236,11 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
         containerClassName,
       )}
     >
+      {/* No space-y here: the combobox renders a hidden fixed input after the
+          trigger, which space-y would count as a sibling and pad the trigger. */}
       {taxonomyLabel ? (
-        <div className="space-y-1.5">
-          <label htmlFor={taxonomySelectId} className={cn(tokens.text.label, "block")}>
+        <div>
+          <label htmlFor={taxonomySelectId} className={cn(tokens.text.label, "mb-1.5 block")}>
             {taxonomyLabel}
           </label>
           {taxonomyControl}
@@ -248,8 +250,8 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
       )}
       {insuranceControl ? (
         insuranceLabel ? (
-          <div className="space-y-1.5">
-            <label htmlFor={insuranceSelectId} className={cn(tokens.text.label, "block")}>
+          <div>
+            <label htmlFor={insuranceSelectId} className={cn(tokens.text.label, "mb-1.5 block")}>
               {insuranceLabel}
             </label>
             {insuranceControl}
@@ -259,20 +261,24 @@ export function ProviderSelectWithTaxonomyFilter<TProvider extends ProviderTaxon
         )
       ) : null}
       {providerSelectLabel ? (
-        <div className="space-y-1.5">
-          <label htmlFor={providerSelectId} className={cn(tokens.text.label, "block")}>
+        <div>
+          <label htmlFor={providerSelectId} className={cn(tokens.text.label, "mb-1.5 block")}>
             {providerSelectLabel}
           </label>
           {providerControl}
           {showNoProvidersHint ? (
-            <p className="text-[11px] leading-tight text-muted-foreground">{noProvidersLabel}</p>
+            <p className="mt-1.5 text-[11px] leading-tight text-muted-foreground">
+              {noProvidersLabel}
+            </p>
           ) : null}
         </div>
       ) : (
-        <div className="space-y-1.5">
+        <div>
           {providerControl}
           {showNoProvidersHint ? (
-            <p className="text-[11px] leading-tight text-muted-foreground">{noProvidersLabel}</p>
+            <p className="mt-1.5 text-[11px] leading-tight text-muted-foreground">
+              {noProvidersLabel}
+            </p>
           ) : null}
         </div>
       )}

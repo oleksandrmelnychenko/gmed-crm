@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { CountBadge } from "@/components/ui-shell";
 import type { GermanEquivalent } from "@/lib/api/clinical";
 import { useLang, type Translations } from "@/lib/i18n";
+import { Search } from "lucide-react";
 
 import { Panel } from "./primitives";
 
@@ -11,6 +12,7 @@ type MedicationEquivalentsPanelProps = {
   medicationSubstance?: string | null;
   candidates: GermanEquivalent[];
   includeCandidates?: boolean;
+  searchCompleted?: boolean;
   loading?: boolean;
   error?: string;
   verifyingEquivalentId?: string | null;
@@ -38,6 +40,7 @@ export function MedicationEquivalentsPanel({
   medicationSubstance,
   candidates,
   includeCandidates = false,
+  searchCompleted = false,
   loading = false,
   error,
   verifyingEquivalentId = null,
@@ -50,12 +53,13 @@ export function MedicationEquivalentsPanel({
   return (
     <Panel
       title={t.cases_medications_equivalents_title}
-      description={t.cases_medications_equivalents_description}
       action={
         <>
-          <CountBadge>
-            {candidates.length} {t.cases_medications_equivalents_count_label}
-          </CountBadge>
+          {candidates.length > 0 ? (
+            <CountBadge>
+              {candidates.length} {t.cases_medications_equivalents_count_label}
+            </CountBadge>
+          ) : null}
           {onFind ? (
             <Button
               type="button"
@@ -65,6 +69,7 @@ export function MedicationEquivalentsPanel({
               onClick={onFind}
               disabled={loading}
             >
+              <Search className="size-3.5" />
               {loading
                 ? t.cases_medications_searching
                 : t.cases_medications_equivalents_find}
@@ -104,11 +109,11 @@ export function MedicationEquivalentsPanel({
         </label>
       ) : null}
 
-      {candidates.length === 0 ? (
+      {searchCompleted && candidates.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-8 text-center text-sm text-muted-foreground">
           {t.cases_medications_equivalents_empty}
         </div>
-      ) : (
+      ) : candidates.length > 0 ? (
         <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-3">
           {candidates.map((candidate) => (
             <article
@@ -179,7 +184,7 @@ export function MedicationEquivalentsPanel({
             </article>
           ))}
         </div>
-      )}
+      ) : null}
     </Panel>
   );
 }

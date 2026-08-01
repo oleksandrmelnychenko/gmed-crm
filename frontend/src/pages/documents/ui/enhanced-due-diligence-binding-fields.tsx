@@ -12,10 +12,10 @@ import {
 } from "@/pages/documents/model/document-bindings";
 
 const inputClassName =
-  "h-9 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
+  "h-9 w-full rounded-md border border-border bg-field px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
 const textareaClassName = cn(
   inputClassName,
-  "min-h-24 resize-y bg-white py-2 text-slate-900",
+  "min-h-24 resize-y py-2 text-slate-900",
 );
 
 type EnhancedDueDiligenceBindingFieldsProps = {

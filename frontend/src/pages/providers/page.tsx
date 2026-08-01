@@ -58,6 +58,7 @@ import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import type { SortStack } from "@/components/data-table/types";
 import { readDataTableState, writeDataTableState } from "@/components/data-table/url-state";
+import { ToolbarField } from "@/components/data-table/toolbar-field";
 
 import {
   createProviderStaffRole,
@@ -520,7 +521,7 @@ function SpecializationMultiSelect({
         <NativeComboboxSelect
           value=""
           onChange={(event) => toggleSpecialization(event.target.value)}
-          className={cn(formSelectClassName, "h-8 min-w-0 flex-1 bg-card text-[13px]")}
+          className={cn(formSelectClassName, "h-8 min-w-0 flex-1 rounded-md bg-field text-xs")}
           disabled={disabled || options.length === 0}
           selectedValues={compactSelectedOptionValues}
           showValueIndicator={false}
@@ -692,7 +693,7 @@ function InsuranceProviderMultiSelect({
         <NativeComboboxSelect
           value=""
           onChange={(event) => toggleInsuranceProvider(event.target.value)}
-          className={cn(formSelectClassName, "h-8 min-w-0 flex-1 bg-card text-[13px]")}
+          className={cn(formSelectClassName, "h-8 min-w-0 flex-1 rounded-md bg-field text-xs")}
           disabled={disabled || options.length === 0}
           selectedValues={compactSelectedOptionValues}
           showValueIndicator={false}
@@ -1210,7 +1211,7 @@ function WeeklyAvailabilityEditor({
                         updateInterval(row.day, intervalIndex, "comment", event.target.value)
                       }
                       onBlur={commitCurrentDraft}
-                      className="h-8 w-full rounded-lg bg-background px-2 text-xs"
+                      className="h-8 w-full rounded-lg bg-field px-2 text-xs"
                       disabled={disabled}
                       placeholder={commentLabel}
                       aria-label={`${weeklyAvailabilityDayLabel(row.day, lang)} ${commentLabel}`}
@@ -3679,8 +3680,9 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         {catalogMode === "providers" ? (
           <>
         <div className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
-        <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
-            <div className="relative w-[220px] shrink-0">
+        <div className="relative z-30 flex flex-nowrap items-end gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
+            <ToolbarField label={t.common_search} className="w-[220px]">
+            <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={filters.search}
@@ -3692,9 +3694,11 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   }
                 }}
                 placeholder={t.common_search}
-                className="h-8 w-full rounded-lg bg-card pl-8 text-[13px]"
+                className="h-8 w-full rounded-md bg-field pl-8 text-xs"
               />
             </div>
+            </ToolbarField>
+              <ToolbarField label={t.providers_type}>
               <NativeComboboxSelect
                 value={filters.providerType}
                 onChange={(event) => {
@@ -3718,14 +3722,16 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   });
                 }}
                 disabled={permissions.forceNonMedical}
-                className={cn(selectClassName, "h-8 w-[170px] bg-card text-[13px]")}
+                className={cn(selectClassName, "h-8 rounded-md w-[170px] bg-field text-xs")}
               >
                 <option value="">{t.providers_all}</option>
                 <option value="medical">{t.providers_type_medical}</option>
                 <option value="non_medical">{t.providers_type_non_medical}</option>
               </NativeComboboxSelect>
+              </ToolbarField>
 
-              <div className="w-[200px]">
+              <ToolbarField label={t.providers_category} className="w-[200px]">
+              <div>
                 <ProviderTaxonomyCascadeSelect
                   value={filters.taxonomyNodeId}
                   nodes={taxonomyNodes}
@@ -3740,7 +3746,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   placeholder={t.providers_category}
                   allLabel={t.providers_all}
                   containerClassName="w-full"
-                  selectClassName={cn(selectClassName, "h-8 w-full bg-card text-[13px]")}
+                  selectClassName={cn(selectClassName, "h-8 rounded-md w-full bg-field text-xs")}
                   onChange={(nextValue) => {
                     setFilters((current) => ({
                       ...current,
@@ -3756,9 +3762,11 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   }}
                 />
               </div>
+              </ToolbarField>
 
               {filterAttributeKeys.length > 0 ? (
                 <>
+                  <ToolbarField label={t.table_filter}>
                   <NativeComboboxSelect
                     value={filters.taxonomyAttributeKey}
                     onChange={(event) => {
@@ -3773,7 +3781,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                         attr_value: null,
                       });
                     }}
-                    className={cn(selectClassName, "h-8 w-[168px] bg-card text-[13px]")}
+                    className={cn(selectClassName, "h-8 rounded-md w-[168px] bg-field text-xs")}
                   >
                     <option value="">{t.table_filter}</option>
                     {filterAttributeKeys.map((key) => (
@@ -3782,14 +3790,16 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                       </option>
                     ))}
                   </NativeComboboxSelect>
+                  </ToolbarField>
                   {filterAttributeValueOptions.length > 0 ? (
+                    <ToolbarField label={t.common_value}>
                     <NativeComboboxSelect
                       value={filters.taxonomyAttributeValue}
                       onChange={(event) =>
                         setServerFilter("taxonomyAttributeValue", event.target.value, "attr_value")
                       }
                       disabled={!filters.taxonomyAttributeKey}
-                      className={cn(selectClassName, "h-8 w-[190px] bg-card text-[13px]")}
+                      className={cn(selectClassName, "h-8 rounded-md w-[190px] bg-field text-xs")}
                     >
                       <option value="">{t.providers_all}</option>
                       {filterAttributeValueOptions.map((value) => (
@@ -3798,7 +3808,9 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                         </option>
                       ))}
                     </NativeComboboxSelect>
+                    </ToolbarField>
                   ) : (
+                    <ToolbarField label={t.common_value}>
                     <Input
                       value={filters.taxonomyAttributeValue}
                       onChange={(event) =>
@@ -3806,36 +3818,42 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                       }
                       disabled={!filters.taxonomyAttributeKey}
                       placeholder={t.common_value}
-                      className="h-8 w-[160px] rounded-lg bg-card text-[13px]"
+                      className="h-8 w-[160px] rounded-md bg-field text-xs"
                     />
+                    </ToolbarField>
                   )}
                 </>
               ) : null}
 
+              <ToolbarField label={t.users_status}>
               <NativeComboboxSelect
                 value={filters.activeOnly}
                 onChange={(event) => setServerFilter("activeOnly", event.target.value, "active")}
-                className={cn(selectClassName, "h-8 w-[140px] bg-card text-[13px]")}
+                className={cn(selectClassName, "h-8 rounded-md w-[140px] bg-field text-xs")}
               >
                 <option value="">{t.providers_all}</option>
                 <option value="true">{t.common_active}</option>
                 <option value="false">{t.common_inactive}</option>
               </NativeComboboxSelect>
+              </ToolbarField>
 
+              <ToolbarField label={t.providers_contract}>
               <NativeComboboxSelect
                 value={filters.hasContract}
                 onChange={(event) => setServerFilter("hasContract", event.target.value, "contract")}
-                className={cn(selectClassName, "h-8 w-[160px] bg-card text-[13px]")}
+                className={cn(selectClassName, "h-8 rounded-md w-[160px] bg-field text-xs")}
               >
                 <option value="">{t.providers_contract}</option>
                 <option value="true">{t.providers_contract_with}</option>
                 <option value="false">{t.providers_contract_without}</option>
               </NativeComboboxSelect>
+              </ToolbarField>
 
+              <ToolbarField label={t.providers_internal_rating}>
               <NativeComboboxSelect
                 value={filters.internalRatingGte}
                 onChange={(event) => setServerFilter("internalRatingGte", event.target.value, "internal_rating")}
-                className={cn(selectClassName, "h-8 w-[148px] bg-card text-[13px]")}
+                className={cn(selectClassName, "h-8 rounded-md w-[148px] bg-field text-xs")}
               >
                 <option value="">{t.providers_internal_rating}</option>
                 <option value="5">5+</option>
@@ -3843,8 +3861,10 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                 <option value="3">3+</option>
                 <option value="2">2+</option>
               </NativeComboboxSelect>
+              </ToolbarField>
 
-              <div className="w-[180px]">
+              <ToolbarField label={t.providers_fachbereich} className="w-[180px]">
+              <div>
                 <SpecializationMultiSelect
                   value={filters.specializations}
                   items={specializations}
@@ -3854,7 +3874,9 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   onChange={(nextValue) => setServerFilter("specializations", nextValue, "specializations")}
                 />
               </div>
-              <div className="w-[180px] shrink-0">
+              </ToolbarField>
+              <ToolbarField label={t.patients_insurance_type} className="w-[180px]">
+              <div>
                 <InsuranceProviderMultiSelect
                   value={filters.insuranceProvider}
                   items={insuranceProviders}
@@ -3863,6 +3885,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   onChange={(nextValue) => setServerFilter("insuranceProvider", nextValue, "insurance")}
                 />
               </div>
+              </ToolbarField>
         </div>
 
         {listError ? (

@@ -443,7 +443,7 @@ export function SpecializationsPage() {
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                className="h-9 rounded-lg bg-background pl-9"
+                className="h-9 rounded-lg bg-field pl-9"
                 placeholder={tx("Поиск специализации", "Spezialisierung suchen")}
                 aria-label={tx("Поиск специализации", "Spezialisierung suchen")}
               />
@@ -1227,7 +1227,7 @@ function WorkTypeSheet({
                             },
                       );
                     }}
-                    className="h-9 w-full rounded-lg bg-card"
+                    className="h-9 w-full rounded-lg bg-field"
                   >
                     <option value="">
                       {tx("Добавить специализацию", "Spezialisierung hinzufügen")}
@@ -1400,7 +1400,7 @@ function WorkTypeSheet({
                       durationHours: event.target.value,
                     }))
                   }
-                  className="h-9 w-full rounded-lg bg-card"
+                  className="h-9 w-full rounded-lg bg-field"
                   required
                 >
                   {Array.from({ length: 100 }, (_, index) => index + 1).map(
@@ -1482,7 +1482,7 @@ function WorkTypeSheet({
                                 languageCode: event.target.value,
                               })
                             }
-                            className="h-9 rounded-lg bg-card"
+                            className="h-9 rounded-lg bg-field"
                             aria-label={tx("Язык описания", "Beschreibungssprache")}
                           >
                             <option value="de">Deutsch</option>

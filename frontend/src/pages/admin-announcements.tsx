@@ -8,6 +8,10 @@ import {
   SheetFormFooter,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
+import {
+  DataTablePager,
+  useDataTablePagination,
+} from "@/components/data-table/data-table-pager";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import {
@@ -183,12 +187,12 @@ function AdminAnnouncementCreateSheet({
                     required
                     value={fTitle}
                     onChange={(event) => onTitleChange(event.target.value)}
-                    className="h-9 rounded-lg bg-card"
+                    className="h-9 rounded-lg bg-field"
                   />
                 </Field>
                 <Field label={t.ann_variant} htmlFor="announcement-variant">
                   <NativeComboboxSelect value={fVariant}
-                    onChange={(event) => onVariantChange(event.target.value ?? "info")} id="announcement-variant" className="!h-9 w-full rounded-lg bg-card">
+                    onChange={(event) => onVariantChange(event.target.value ?? "info")} id="announcement-variant" className="!h-9 w-full rounded-lg bg-field">
                       <option value="info">{t.ann_info}</option>
                       <option value="warning">{t.ann_warning}</option>
                       <option value="error">{t.common_error}</option>
@@ -202,7 +206,7 @@ function AdminAnnouncementCreateSheet({
                   required
                   value={fMsg}
                   onChange={(event) => onMessageChange(event.target.value)}
-                  className="h-9 rounded-lg bg-card"
+                  className="h-9 rounded-lg bg-field"
                 />
               </Field>
               <Field label={t.ann_ends} htmlFor="announcement-ends">
@@ -212,7 +216,7 @@ function AdminAnnouncementCreateSheet({
                   value={fEnds}
                   onChange={(event) => onEndsChange(event.target.value)}
                   min={minAnnouncementEndsAt}
-                  className="h-9 rounded-lg bg-card"
+                  className="h-9 rounded-lg bg-field"
                 />
               </Field>
             </section>
@@ -269,6 +273,8 @@ function AdminAnnouncementsTable({
   items,
   t,
 }: AdminAnnouncementsTableProps) {
+  const pagination = useDataTablePagination(items, String(items.length));
+
   return (
     <AdminTableCard
       title={t.ann_title}
@@ -276,13 +282,24 @@ function AdminAnnouncementsTable({
       count={items.length}
     >
       <DataTableSurface
-        rows={items}
+        rows={pagination.pagedRows}
         columns={columns}
         defaultDensity="comfortable"
         dictionary={t as unknown as Record<string, string>}
         rowId={(announcement) => announcement.id}
         emptyState={<EmptyCell>{t.ann_no_announcements}</EmptyCell>}
         tableClassName="min-h-[320px]"
+        toolbarAfter={(
+          <DataTablePager
+            pageIndex={pagination.pageIndex}
+            pageSize={pagination.pageSize}
+            totalPages={pagination.totalPages}
+            totalRows={pagination.totalRows}
+            previousLabel={t.pagination_previous}
+            nextLabel={t.pagination_next}
+            onPageChange={pagination.onPageChange}
+          />
+        )}
       />
     </AdminTableCard>
   );
@@ -437,7 +454,7 @@ function useAdminAnnouncementsController(t: AdminAnnouncementsTranslations) {
       sortable: true,
       width: 220,
       render: (announcement) => (
-        <span className="font-medium text-foreground">{announcement.title}</span>
+        <span className="text-foreground">{announcement.title}</span>
       ),
     },
     {
@@ -447,7 +464,7 @@ function useAdminAnnouncementsController(t: AdminAnnouncementsTranslations) {
       sortable: true,
       width: 300,
       render: (announcement) => (
-        <span className="truncate text-xs text-muted-foreground" title={announcement.message}>
+        <span className="truncate text-xs text-foreground" title={announcement.message}>
           {announcement.message}
         </span>
       ),
@@ -493,7 +510,7 @@ function useAdminAnnouncementsController(t: AdminAnnouncementsTranslations) {
       sortable: true,
       width: 150,
       render: (announcement) => (
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="font-mono text-xs text-foreground">
           {compactDt(announcement.starts_at)}
         </span>
       ),
@@ -505,7 +522,7 @@ function useAdminAnnouncementsController(t: AdminAnnouncementsTranslations) {
       sortable: true,
       width: 150,
       render: (announcement) => (
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="font-mono text-xs text-foreground">
           {compactDt(announcement.ends_at)}
         </span>
       ),

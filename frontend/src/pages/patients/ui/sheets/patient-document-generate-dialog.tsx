@@ -45,7 +45,7 @@ import { DocumentTemplateBindingFields } from "@/pages/documents/ui/document-tem
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 const fieldInputClass =
-  "h-9 w-full rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
+  "h-9 w-full rounded-lg border border-border bg-field px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
 
 type PatientDocumentGenerateDialogProps = {
   open: boolean;

@@ -254,20 +254,18 @@ export function Field({
 
 export function AppointmentSectionHeading({
   title,
-  description,
 }: {
   title: ReactNode;
+  // Descriptive sub-texts were dropped app-wide; the prop stays so call
+  // sites don't need to change.
   description?: ReactNode;
 }) {
   return (
-    <div className="min-w-0 space-y-1">
+    <div className="min-w-0">
       <div className="flex min-w-0 items-center gap-2">
         <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
         <h3 className={cn(tokens.text.sectionTitle, "min-w-0 break-words")}>{title}</h3>
       </div>
-      {description ? (
-        <p className={cn(tokens.text.muted, "max-w-3xl")}>{description}</p>
-      ) : null}
     </div>
   );
 }

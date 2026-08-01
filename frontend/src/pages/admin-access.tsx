@@ -433,7 +433,7 @@ function useAdminAccessPageContent() {
           }}
         >
           <div className="truncate font-medium text-foreground">{row.label}</div>
-          <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+          <div className="mt-0.5 truncate text-xs text-foreground">
             {t.admin_system_field_workspace}
           </div>
         </button>

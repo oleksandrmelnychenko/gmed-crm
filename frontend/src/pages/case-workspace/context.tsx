@@ -189,6 +189,9 @@ export type CaseWorkspaceDetail = {
   case_uuid?: string;
   case_id: string;
   status: string;
+  closed_reason?: string | null;
+  closed_at?: string | null;
+  status_changed_at?: string | null;
   patient_id: string;
   hauptanfragegrund: string | null;
   aktuelle_anamnese: string | null;
@@ -217,6 +220,7 @@ export type CaseWorkspaceDetail = {
   neurology?: Partial<NeurologyAssessment> | null;
   pulmonology?: Partial<PulmonologyAssessment> | null;
   urology?: Partial<UrologyAssessment> | null;
+  impfstatus?: string | null;
   history?: CaseHistoryEntry[];
 };
 
@@ -266,7 +270,9 @@ type SectionBusyKey =
   | "orthopedics"
   | "neurology"
   | "pulmonology"
-  | "urology";
+  | "urology"
+  | "impfstatus"
+  | "status";
 
 type CaseWorkspaceContextValue = {
   caseId: string;
@@ -293,6 +299,8 @@ type CaseWorkspaceContextValue = {
   saveNeurology: (form: NeurologyAssessment) => Promise<boolean>;
   savePulmonology: (form: PulmonologyAssessment) => Promise<boolean>;
   saveUrology: (form: UrologyAssessment) => Promise<boolean>;
+  saveImpfstatus: (statusText: string) => Promise<boolean>;
+  updateStatus: (status: string, reason?: string) => Promise<boolean>;
 };
 
 type CaseWorkspaceState = {
@@ -749,6 +757,23 @@ function useCaseWorkspaceProviderContent({
     [runFormSave],
   );
 
+  const saveImpfstatus = useCallback(
+    (statusText: string) =>
+      runFormSave("impfstatus", "impfstatus", {
+        status_text: toOptionalText(statusText),
+      }),
+    [runFormSave],
+  );
+
+  const updateStatus = useCallback(
+    (status: string, reason?: string) =>
+      runFormSave("status", "status", {
+        status,
+        reason: toOptionalText(reason ?? ""),
+      }),
+    [runFormSave],
+  );
+
   const value = useMemo<CaseWorkspaceContextValue>(
     () => ({
       caseId,
@@ -775,6 +800,8 @@ function useCaseWorkspaceProviderContent({
       saveNeurology,
       savePulmonology,
       saveUrology,
+      saveImpfstatus,
+      updateStatus,
     }),
     [
       caseId,
@@ -787,6 +814,7 @@ function useCaseWorkspaceProviderContent({
       saveAllergies,
       saveCardiology,
       saveGastroenterology,
+      saveImpfstatus,
       saveMedications,
       saveNeurology,
       saveOrthopedics,
@@ -801,6 +829,7 @@ function useCaseWorkspaceProviderContent({
       sectionBusy,
       sectionError,
       snippets,
+      updateStatus,
     ],
   );
 

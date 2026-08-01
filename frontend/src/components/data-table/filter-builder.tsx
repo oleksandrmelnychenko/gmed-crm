@@ -25,6 +25,7 @@ import type {
   FilterValue,
 } from "./types";
 import { useOutsideClose } from "./use-outside-close";
+import { fixedDropdownStyle, useFixedDropdownPosition } from "./use-fixed-dropdown-position";
 
 function generatePredicateId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -174,6 +175,8 @@ export function FilterBuilder<T>({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
   const pickerRef = useRef<HTMLDivElement | null>(null);
+  const pickerMenuRef = useRef<HTMLDivElement | null>(null);
+  const pickerPosition = useFixedDropdownPosition(pickerRef, pickerMenuRef, pickerOpen);
   useOutsideClose(pickerRef, () => setPickerOpen(false), { enabled: pickerOpen });
 
   const [editing, setEditing] = useState<string | null>(null);
@@ -269,19 +272,21 @@ export function FilterBuilder<T>({
         <Button
           type="button"
           variant="outline"
-          size="xs"
+          size="sm"
           aria-expanded={pickerOpen}
           aria-haspopup="menu"
           onClick={() => setPickerOpen((v) => !v)}
         >
-          <Plus className="size-3" />
+          <Plus className="size-3.5" />
           <span>{addFilter}</span>
         </Button>
         {pickerOpen ? (
           <div
+            ref={pickerMenuRef}
             role="menu"
             data-table-filter-picker
-            className="absolute left-0 z-[110] mt-1 flex w-64 flex-col rounded-lg border border-border bg-popover text-popover-foreground shadow-xl"
+            className="fixed z-[110] flex w-64 flex-col rounded-lg border border-border bg-popover text-popover-foreground shadow-xl"
+            style={fixedDropdownStyle(pickerPosition)}
           >
             <div className="flex items-center gap-1.5 border-b border-border p-2">
               <Search className="size-3.5 text-muted-foreground" />
@@ -350,6 +355,8 @@ function FilterChip<T>({
   translations,
 }: ChipProps<T>) {
   const chipRef = useRef<HTMLDivElement | null>(null);
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const editorPosition = useFixedDropdownPosition(chipRef, editorRef, isEditing);
   useOutsideClose(chipRef, onClose, { enabled: isEditing });
 
   const options = resolveOptions(column, rows);
@@ -403,13 +410,15 @@ function FilterChip<T>({
       </div>
       {isEditing ? (
         <div
+          ref={editorRef}
           data-table-filter-editor
-          className="absolute left-0 top-full z-[120] mt-1 flex items-center gap-1.5 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
+          className="fixed z-[120] flex items-center gap-1.5 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
+          style={fixedDropdownStyle(editorPosition)}
         >
           <NativeComboboxSelect
             value={predicate.operator}
             onChange={(e) => changeOperator(e.target.value as FilterOperator)}
-            className="h-7 rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+            className="h-7 rounded-md border border-input bg-field px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
           >
             {operators.map((op) => (
               <option key={op} value={op}>

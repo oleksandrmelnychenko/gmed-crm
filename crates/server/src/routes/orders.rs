@@ -89,6 +89,7 @@ struct CreateOrderRequest {
     contract_id: Option<Uuid>,
     needs_description: Option<String>,
     source_lead_id: Option<Uuid>,
+    case_id: Option<Uuid>,
     date_from: Option<String>,
     date_to: Option<String>,
 }
@@ -315,12 +316,14 @@ async fn list_orders(
         r#"SELECT o.id, o.order_number, o.patient_id, o.source_lead_id, o.phase, o.status,
                   o.total_estimated, o.signed_patient, o.signed_agency,
                   o.prepayment_required, o.prepayment_amount, o.date_from, o.date_to, o.created_at,
+                  o.case_id, cs.case_id AS case_code,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
                   COALESCE(p.last_name, l.last_name) AS subject_last_name,
                   p.patient_id AS p_pid
            FROM orders o
            LEFT JOIN patients p ON p.id = o.patient_id
            LEFT JOIN leads l ON l.id = o.source_lead_id
+           LEFT JOIN cases cs ON cs.id = o.case_id
            WHERE ($1::text = '%%'
                   OR de_normalize(concat_ws(' ',
                        o.order_number, o.needs_description,
@@ -419,6 +422,8 @@ async fn list_orders(
                     "order_number": r.try_get::<String, _>("order_number").unwrap_or_default(),
                     "patient_id": patient_id,
                     "lead_id": lead_id,
+                    "case_id": r.try_get::<Option<Uuid>, _>("case_id").unwrap_or_default(),
+                    "case_code": r.try_get::<Option<String>, _>("case_code").unwrap_or_default(),
                     "patient_name": format!(
                         "{} {}",
                         r.try_get::<String, _>("subject_first_name").unwrap_or_default(),
@@ -500,6 +505,13 @@ async fn list_debt_management_queue(
                       AND i.status = 'overdue'
                       AND i.total_gross > COALESCE(i.paid_amount, 0)
                   ), 0) AS overdue_invoice_count,
+                  COALESCE((
+                    SELECT SUM(GREATEST(i.total_gross - COALESCE(i.paid_amount, 0), 0))
+                    FROM invoices i
+                    WHERE i.order_id = o.id
+                      AND i.status = 'overdue'
+                      AND i.total_gross > COALESCE(i.paid_amount, 0)
+                  ), 0) AS overdue_balance,
                   COALESCE((
                     SELECT SUM(
                         CASE
@@ -584,6 +596,9 @@ async fn list_debt_management_queue(
                 let outstanding_balance = row
                     .try_get::<rust_decimal::Decimal, _>("outstanding_balance")
                     .unwrap_or(rust_decimal::Decimal::ZERO);
+                let overdue_balance = row
+                    .try_get::<rust_decimal::Decimal, _>("overdue_balance")
+                    .unwrap_or(rust_decimal::Decimal::ZERO);
                 let status: String = row
                     .try_get("status")
                     .unwrap_or_else(|_| "not_required".to_string());
@@ -621,6 +636,7 @@ async fn list_debt_management_queue(
                     "resolved_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("resolved_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                     "updated_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                     "overdue_invoice_count": overdue_invoice_count,
+                    "overdue_balance": overdue_balance.round_dp(2).normalize().to_string(),
                     "outstanding_balance": outstanding_balance.round_dp(2).normalize().to_string(),
                 }));
             }
@@ -1223,14 +1239,14 @@ async fn load_order_planning_readiness(
         blocking_reasons
             .push("Required non-medical services still need a confirmed booking".to_string());
     }
-    if !interpreter_assignment_ready {
-        blocking_reasons.push("Interpreter is required but not assigned yet".to_string());
-    }
-    if !interpreter_confirmation_ready {
-        blocking_reasons.push("Assigned interpreter has not confirmed yet".to_string());
-    }
-    if !interpreter_briefing_ready {
-        blocking_reasons.push("Interpreter briefing is still pending".to_string());
+    if interpreter_required {
+        if !interpreter_assignment_ready {
+            blocking_reasons.push("Interpreter is required but not assigned yet".to_string());
+        } else if !interpreter_confirmation_ready {
+            blocking_reasons.push("Assigned interpreter has not confirmed yet".to_string());
+        } else if !interpreter_briefing_ready {
+            blocking_reasons.push("Interpreter briefing is still pending".to_string());
+        }
     }
     if !preparation_documents_ready {
         blocking_reasons.push("Preparation documents still need to be sent".to_string());
@@ -1472,7 +1488,7 @@ async fn load_order_execution_readiness(
         .unwrap_or_else(|_| "not_required".to_string());
     let issue_status: String = execution_row
         .try_get("issue_status")
-        .unwrap_or_else(|_| "pending".to_string());
+        .unwrap_or_else(|_| "not_required".to_string());
     let deviation_note: Option<String> =
         execution_row.try_get("deviation_note").unwrap_or_default();
     let execution_summary: Option<String> = execution_row
@@ -1829,26 +1845,16 @@ async fn load_order_followup_readiness(
         .unwrap_or_default();
     let package_end_tasks: i64 = task_row.try_get("package_end_tasks").unwrap_or_default();
 
-    let doctor_followup_ready = match doctor_followup_status.as_str() {
-        "not_required" | "completed" => true,
-        "scheduled" => doctor_followup_visits + doctor_followup_tasks > 0,
-        _ => false,
-    };
-    let followup_1w_ready = match followup_1w_status.as_str() {
-        "not_required" | "completed" => true,
-        "scheduled" => followup_1w_visits + followup_1w_reminders > 0,
-        _ => false,
-    };
-    let followup_1m_ready = match followup_1m_status.as_str() {
-        "not_required" | "completed" => true,
-        "scheduled" => followup_1m_visits + followup_1m_reminders > 0,
-        _ => false,
-    };
-    let followup_6m_ready = match followup_6m_status.as_str() {
-        "not_required" | "completed" => true,
-        "scheduled" => followup_6m_visits + followup_6m_reminders > 0,
-        _ => false,
-    };
+    let doctor_followup_ready = matches!(
+        doctor_followup_status.as_str(),
+        "not_required" | "completed"
+    ) || doctor_followup_visits + doctor_followup_tasks > 0;
+    let followup_1w_ready = matches!(followup_1w_status.as_str(), "not_required" | "completed")
+        || followup_1w_visits + followup_1w_reminders > 0;
+    let followup_1m_ready = matches!(followup_1m_status.as_str(), "not_required" | "completed")
+        || followup_1m_visits + followup_1m_reminders > 0;
+    let followup_6m_ready = matches!(followup_6m_status.as_str(), "not_required" | "completed")
+        || followup_6m_visits + followup_6m_reminders > 0;
 
     let effective_package_end_date = package_end_date.or(suggested_package_end_date);
     let package_end_required = effective_package_end_date.is_some();
@@ -1864,14 +1870,20 @@ async fn load_order_followup_readiness(
     let results_handoff_ready = matches!(
         results_handoff_status.as_str(),
         "completed" | "not_required"
-    );
-    let followup_activity_ready = followup_appointments_total > 0
+    ) || results_portal_shares > 0;
+    let followup_activity_present = followup_appointments_total > 0
         || doctor_followup_tasks > 0
         || package_end_tasks > 0
         || followup_1w_reminders > 0
         || followup_1m_reminders > 0
         || followup_6m_reminders > 0
         || package_end_reminders > 0;
+    let followup_activity_required = doctor_followup_status != "not_required"
+        || followup_1w_status != "not_required"
+        || followup_1m_status != "not_required"
+        || followup_6m_status != "not_required"
+        || (package_end_required && package_end_status != "not_required");
+    let followup_activity_ready = !followup_activity_required || followup_activity_present;
 
     let recommended_followup_1w_at =
         closure_anchor_at.map(|value| value + chrono::Duration::days(7));
@@ -1905,7 +1917,13 @@ async fn load_order_followup_readiness(
         blocking_reasons
             .push("Package-end follow-up is required but not scheduled yet".to_string());
     }
-    if !followup_activity_ready {
+    if !followup_activity_ready
+        && doctor_followup_ready
+        && followup_1w_ready
+        && followup_1m_ready
+        && followup_6m_ready
+        && package_end_ready
+    {
         blocking_reasons
             .push("No follow-up reminder, task or appointment has been launched yet".to_string());
     }
@@ -2058,6 +2076,59 @@ async fn initialize_order_planning_from_lead(
     Ok(())
 }
 
+/// Resolve the clinical episode an order belongs to (RFC D8). An explicit
+/// `case_id` must belong to the order's subject; otherwise the lead's case is
+/// used when there is one.
+async fn resolve_order_case(
+    state: &AppState,
+    case_id: Option<Uuid>,
+    patient_id: Option<Uuid>,
+    source_lead_id: Option<Uuid>,
+) -> Result<Option<Uuid>, axum::response::Response> {
+    if let Some(case_id) = case_id {
+        let row = match sqlx::query("SELECT patient_id, lead_id FROM cases WHERE id = $1")
+            .bind(case_id)
+            .fetch_optional(&state.db)
+            .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(error = %error, case_id = %case_id, "validate order case");
+                return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"));
+            }
+        };
+        let Some(row) = row else {
+            return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Case not found"));
+        };
+        let case_patient_id = row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default();
+        let case_lead_id = row.try_get::<Option<Uuid>, _>("lead_id").unwrap_or_default();
+        let matches_patient = patient_id.is_some() && case_patient_id == patient_id;
+        let matches_lead = source_lead_id.is_some() && case_lead_id == source_lead_id;
+        if !matches_patient && !matches_lead {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Case does not belong to the order subject",
+            ));
+        }
+        return Ok(Some(case_id));
+    }
+
+    let Some(source_lead_id) = source_lead_id else {
+        return Ok(None);
+    };
+    match sqlx::query_scalar::<_, Uuid>("SELECT id FROM cases WHERE lead_id = $1")
+        .bind(source_lead_id)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            tracing::error!(error = %error, source_lead_id = %source_lead_id, "resolve lead case for order");
+            Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"))
+        }
+    }
+}
+
 async fn create_order(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -2072,6 +2143,7 @@ async fn create_order(
         contract_id,
         needs_description,
         source_lead_id,
+        case_id,
         date_from,
         date_to,
     } = body;
@@ -2268,6 +2340,11 @@ async fn create_order(
         }
     }
 
+    let case_id = match resolve_order_case(&state, case_id, patient_id, source_lead_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
     let seq: i64 = match sqlx::query_scalar!("SELECT nextval('order_number_seq') AS \"v!\"")
         .fetch_one(&state.db)
         .await
@@ -2288,11 +2365,12 @@ async fn create_order(
                contract_id,
                needs_description,
                source_lead_id,
+               case_id,
                date_from,
                date_to,
                created_by
            )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
            ON CONFLICT (source_lead_id) WHERE source_lead_id IS NOT NULL DO NOTHING
            RETURNING id, order_number, created_at"#,
     )
@@ -2301,6 +2379,7 @@ async fn create_order(
     .bind(contract_id)
     .bind(needs_description)
     .bind(source_lead_id)
+    .bind(case_id)
     .bind(date_from)
     .bind(date_to)
     .bind(auth.user_id)
@@ -2371,6 +2450,7 @@ async fn create_order(
                     "order_number": order_number,
                     "patient_id": patient_id,
                     "lead_id": source_lead_id,
+                    "case_id": case_id,
                     "date_from": date_from.map(|value| value.to_string()),
                     "date_to": date_to.map(|value| value.to_string()),
                     "created_at": r.created_at,
@@ -2439,6 +2519,7 @@ async fn get_order(
         r#"SELECT o.id, o.order_number,
                   COALESCE(o.patient_id, l.converted_patient_id) AS patient_id,
                   o.source_lead_id, o.contract_id,
+                  o.case_id, cs.case_id AS case_code,
                   o.phase, o.status, o.needs_description, o.signed_patient,
                   o.signed_agency, o.total_estimated, o.total_actual,
                   o.created_at, o.updated_at,
@@ -2448,6 +2529,7 @@ async fn get_order(
            FROM orders o
            LEFT JOIN leads l ON l.id = o.source_lead_id
            LEFT JOIN patients p ON p.id = COALESCE(o.patient_id, l.converted_patient_id)
+           LEFT JOIN cases cs ON cs.id = o.case_id
            WHERE o.id = $1"#,
     )
     .bind(order_id)
@@ -2474,6 +2556,10 @@ async fn get_order(
         .unwrap_or_default();
     let contract_id = order
         .try_get::<Option<Uuid>, _>("contract_id")
+        .unwrap_or_default();
+    let case_id = order.try_get::<Option<Uuid>, _>("case_id").unwrap_or_default();
+    let case_code = order
+        .try_get::<Option<String>, _>("case_code")
         .unwrap_or_default();
     let phase = order.try_get::<String, _>("phase").unwrap_or_default();
     let status = order.try_get::<String, _>("status").unwrap_or_default();
@@ -2710,6 +2796,8 @@ async fn get_order(
         "lead_id": source_lead_id,
         "source_lead_id": source_lead_id,
         "contract_id": contract_id,
+        "case_id": case_id,
+        "case_code": case_code,
         "patient_name": patient_name,
         "patient_pid": patient_pid,
         "phase": phase, "status": status,
@@ -5764,12 +5852,18 @@ async fn group_order(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    if let Err(e) =
-        sqlx::query("UPDATE orders SET order_role = 'sub', head_order_id = $2, updated_at = now() WHERE id = $1")
-            .bind(order_id)
-            .bind(body.head_order_id)
-            .execute(&mut *tx)
-            .await
+    if let Err(e) = sqlx::query(
+        r#"UPDATE orders
+           SET order_role = 'sub',
+               head_order_id = $2,
+               case_id = COALESCE(case_id, (SELECT h.case_id FROM orders h WHERE h.id = $2)),
+               updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(order_id)
+    .bind(body.head_order_id)
+    .execute(&mut *tx)
+    .await
     {
         tracing::error!(error = %e, "group sub order");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");

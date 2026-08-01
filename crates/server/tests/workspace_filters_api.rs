@@ -12179,6 +12179,28 @@ async fn patient_timeline_supports_entity_type_category_source_and_range_filters
             .any(|item| item["entity_type"] == "appointment")
     );
     assert!(items.iter().any(|item| item["entity_type"] == "case"));
+    assert_eq!(body["summary"]["total"], body["total"]);
+    let entity_counts = body["summary"]["entity_counts"]
+        .as_array()
+        .expect("timeline entity facets");
+    assert!(
+        entity_counts
+            .iter()
+            .any(|entry| entry["entity_type"] == "appointment")
+    );
+    assert!(
+        entity_counts
+            .iter()
+            .any(|entry| entry["entity_type"] == "case")
+    );
+    let category_facets = body["facets"]["categories"]
+        .as_array()
+        .expect("timeline category facets");
+    assert!(
+        category_facets
+            .iter()
+            .any(|entry| entry["value"] == "medical")
+    );
 
     // entity_type filter — only appointments remain.
     let (status, body) = json_request(
@@ -12196,6 +12218,14 @@ async fn patient_timeline_supports_entity_type_category_source_and_range_filters
         items
             .iter()
             .all(|item| item["entity_type"] == "appointment")
+    );
+    assert!(
+        body["summary"]["entity_counts"]
+            .as_array()
+            .expect("entity facets ignore their own filter")
+            .iter()
+            .any(|entry| entry["entity_type"] == "case"),
+        "entity facets must remain navigable while an entity filter is active"
     );
 
     // category filter (appointment category = medical) still yields rows.

@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { ArrowUpRight } from "lucide-react";
 
-import { CountBadge, Section } from "@/components/ui-shell";
+import { Section } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { appointmentText } from "@/pages/appointments/model/labels";
 import type {
@@ -30,13 +30,10 @@ function AppointmentLinksSection({
   const clinicLabel = appointmentText("appointments_clinic");
   const documentsLabel = appointmentText("appointments_documents");
   const casesLabel = appointmentText("appointments_cases");
-  const linkedCount =
-    3 + Number(Boolean(detail.order_id)) + Number(Boolean(detail.provider_id));
 
   return (
     <Section
       title={t.compliance_col_linked_records}
-      accessory={<CountBadge>{linkedCount}</CountBadge>}
     >
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-5">
         <LinkedRecordTile

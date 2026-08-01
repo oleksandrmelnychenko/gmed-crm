@@ -1,7 +1,7 @@
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { ColumnVisibilityMenu } from "@/components/data-table/column-visibility-menu";
+import { DataTablePager } from "@/components/data-table/data-table-pager";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import { applyFilters } from "@/components/data-table/filter-logic";
@@ -14,7 +14,6 @@ import type {
   SortStack,
 } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { uiText, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -241,6 +240,32 @@ function PaginatedDocumentsTable({
           maxFrozenColumns={3}
         />
       </div>
+      <DataTablePager
+        pageIndex={page.pageIndex}
+        pageSize={pageSize}
+        totalPages={page.totalPages}
+        totalRows={visibleRows.length}
+        previousLabel={t.pagination_previous}
+        nextLabel={t.pagination_next}
+        onPageChange={setPageIndex}
+        controlsStart={
+          <label className="mr-1 flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
+            <span>{t.pagination_per_page}</span>
+            <NativeComboboxSelect
+              value={String(pageSize)}
+              onChange={(event) => setPageSize(Number(event.target.value))}
+              className="h-7 w-[76px] rounded-md bg-field text-xs"
+              aria-label={t.pagination_per_page}
+            >
+              {DOCUMENT_PAGE_SIZE_OPTIONS.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </label>
+        }
+      />
       <DataTable
         rows={page.rows}
         columns={enhancedColumns}
@@ -260,58 +285,7 @@ function PaginatedDocumentsTable({
         onSelectedIdsChange={updatePageSelection}
         onRowClick={(document) => onOpenDocument(document.id)}
         className="min-h-[360px] rounded-none border-0 shadow-none"
-        footer={
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="tabular-nums">
-              {page.start}-{page.end} / {visibleRows.length}{" "}
-              {filenameLabel.toLowerCase()}
-            </span>
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="flex items-center gap-1.5 whitespace-nowrap">
-                <span>{t.pagination_per_page}</span>
-                <NativeComboboxSelect
-                  value={String(pageSize)}
-                  onChange={(event) => {
-                    setPageSize(Number(event.target.value));
-                  }}
-                  className="h-7 w-[76px] rounded-lg bg-background text-xs"
-                  aria-label={t.pagination_per_page}
-                >
-                  {DOCUMENT_PAGE_SIZE_OPTIONS.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </label>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7"
-                disabled={page.pageIndex === 0}
-                onClick={() => setPageIndex(page.pageIndex - 1)}
-              >
-                <ChevronLeft className="size-3.5" />
-                {t.pagination_previous}
-              </Button>
-              <span className="min-w-14 text-center tabular-nums">
-                {page.pageIndex + 1} / {page.totalPages}
-              </span>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7"
-                disabled={page.pageIndex >= page.totalPages - 1}
-                onClick={() => setPageIndex(page.pageIndex + 1)}
-              >
-                {t.pagination_next}
-                <ChevronRight className="size-3.5" />
-              </Button>
-            </div>
-          </div>
-        }
+        footer={`${visibleRows.length} ${filenameLabel.toLowerCase()}`}
       />
     </div>
   );
@@ -398,7 +372,7 @@ export function DocumentsGrid({
             {item.patient_name}
           </span>
         ) : (
-          <span className="text-xs text-muted-foreground">{notSet}</span>
+          <span className="text-xs text-foreground">{notSet}</span>
         ),
     },
     {
@@ -468,7 +442,7 @@ export function DocumentsGrid({
       sortable: true,
       width: 110,
       render: (item) => (
-        <span className="block text-right tabular-nums text-muted-foreground">
+        <span className="block text-right tabular-nums text-foreground">
           {formatFileSize(item.file_size)}
         </span>
       ),
@@ -485,7 +459,7 @@ export function DocumentsGrid({
           <span className="truncate text-xs text-foreground">
             {item.uploaded_by_name || unknownUploader}
           </span>
-          <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+          <span className="shrink-0 font-mono text-xs tabular-nums text-foreground">
             {formatDateTime(item.updated_at)}
           </span>
         </div>

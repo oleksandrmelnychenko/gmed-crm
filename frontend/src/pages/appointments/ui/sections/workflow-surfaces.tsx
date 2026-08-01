@@ -9,22 +9,19 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  Clock3,
-  Languages,
-  LoaderCircle,
-  Plus,
-} from "lucide-react";
+import { LoaderCircle, Plus } from "lucide-react";
 
-import { AdminInlineMetric } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
+import {
+  AppointmentRemindersTable,
+  AppointmentTasksTable,
+} from "@/pages/appointments/ui/shared/follow-up-tables";
 import { CONFIRMED_DISMISS_REASON } from "@/components/ui/dismissal-guard";
 import { Input } from "@/components/ui/input";
 import {
   Banner,
-  CountBadge,
   Section,
   tokens,
 } from "@/components/ui-shell";
@@ -48,6 +45,7 @@ import {
 } from "@/pages/appointments/appearance/surface-appearance";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
 import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
+import { appointmentStatusBadgeClassName } from "@/pages/appointments/appearance/status-appearance";
 import {
   blankChecklistForm,
   blankReminderForm,
@@ -112,8 +110,6 @@ import {
 
 const selectClassName = appointmentSelectControlClassName;
 const textareaClassName = appointmentTextareaControlClassName;
-const workflowInlineBadgeClassName =
-  "inline-flex h-6 shrink-0 items-center rounded-full border border-border/60 bg-muted/25 px-2.5 text-[11px] font-medium text-foreground";
 
 function withEllipsis(value: string | null | undefined) {
   const normalized = String(value ?? "").trim();
@@ -155,37 +151,6 @@ function isConfirmedDismiss(
   );
 }
 
-function WorkflowSectionAccessory({
-  count,
-  actionLabel,
-  onAction,
-  disabled,
-}: {
-  count?: ReactNode;
-  actionLabel?: ReactNode;
-  onAction?: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="flex flex-wrap items-center justify-end gap-2">
-      {count ? <CountBadge>{count}</CountBadge> : null}
-      {actionLabel && onAction ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-8 rounded-lg gap-1.5"
-          disabled={disabled}
-          onClick={onAction}
-        >
-          <Plus className="size-3.5" />
-          {actionLabel}
-        </Button>
-      ) : null}
-    </div>
-  );
-}
-
 function WorkflowSheetBody({ children }: { children: ReactNode }) {
   return <div className="space-y-4 rounded-xl">{children}</div>;
 }
@@ -205,25 +170,6 @@ function WorkflowSheetSection({
       </h3>
       {children}
     </section>
-  );
-}
-
-function WorkflowMiniMetric({
-  label,
-  value,
-}: {
-  label: ReactNode;
-  value: ReactNode;
-}) {
-  return (
-    <div className="flex min-w-[210px] flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-4 py-2">
-      <span className="min-w-0 max-w-full break-words text-xs font-medium text-muted-foreground">
-        {label}
-      </span>
-      <span className="shrink-0 text-sm font-semibold leading-none text-foreground">
-        {value}
-      </span>
-    </div>
   );
 }
 
@@ -280,61 +226,20 @@ type AppointmentWorkflowOverviewSectionProps = {
 };
 
 function AppointmentWorkflowOverviewSection({
-  checklistProgressValue,
   completionWarnings,
-  interpreterGateDescription,
-  interpreterGateValue,
-  workflowSummary,
 }: AppointmentWorkflowOverviewSectionProps) {
+  if (completionWarnings.length === 0) return null;
   return (
-    <Section
-      title={appointmentText("appointments_operational_overview")}
-      accessory={<CountBadge>{workflowSummary.openIssueCount}</CountBadge>}
-    >
-      <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
-        <AdminInlineMetric
-          icon={AlertTriangle}
-          label={appointmentText("appointments_open_issues_2")}
-          value={workflowSummary.openIssueCount}
-          description={appointmentText("appointments_checklist_reminder_and_task_items_still_requiring_follow")}
-          tone="amber"
-        />
-        <AdminInlineMetric
-          icon={CheckCircle2}
-          label={appointmentText("appointments_checklist_progress")}
-          value={checklistProgressValue}
-          description={appointmentText("appointments_completed_versus_total_appointment_bound_workflow_steps")}
-          tone="emerald"
-        />
-        <AdminInlineMetric
-          icon={Clock3}
-          label={appointmentText("appointments_follow_up_queue")}
-          value={workflowSummary.followUpQueueCount}
-          description={appointmentText("appointments_open_tasks_plus_pending_reminders")}
-          tone="sky"
-        />
-        <AdminInlineMetric
-          icon={Languages}
-          label={appointmentText("appointments_interpreter_gate")}
-          value={interpreterGateValue}
-          description={interpreterGateDescription}
-          tone="slate"
-        />
+    <Banner tone="warning" withIcon>
+      <div className="space-y-1">
+        <p className="font-medium">
+          {appointmentText("appointments_operational_blockers_remain_before_closure")}
+        </p>
+        {completionWarnings.map((warning) => (
+          <p key={warning}>{warning}</p>
+        ))}
       </div>
-
-      {completionWarnings.length > 0 ? (
-        <Banner tone="warning" withIcon>
-          <div className="space-y-1">
-            <p className="font-medium">
-              {appointmentText("appointments_operational_blockers_remain_before_closure")}
-            </p>
-            {completionWarnings.map((warning) => (
-              <p key={warning}>{warning}</p>
-            ))}
-          </div>
-        </Banner>
-      ) : null}
-    </Section>
+    </Banner>
   );
 }
 
@@ -892,33 +797,75 @@ function InterpreterAssignmentManagement({
 }) {
   const { t } = useLang();
 
+  const interpreterAssignmentColumns = useMemo<ColumnDef<AppointmentDetail>[]>(
+    () => [
+      {
+        id: "interpreter",
+        label: t.role_interpreter,
+        accessor: (row) => row.interpreter_name ?? "",
+        required: true,
+        width: 260,
+        render: (row) => (
+          <span className="block truncate font-mono text-xs font-medium text-foreground">
+            {row.interpreter_name ?? t.common_not_set}
+          </span>
+        ),
+      },
+      {
+        id: "role",
+        label: t.users_role,
+        accessor: () => t.role_interpreter,
+        width: 170,
+        render: () => (
+          <span className="inline-flex rounded-full border border-border/60 bg-muted/25 px-2 py-0.5 font-mono text-[10px] font-medium text-foreground">
+            {t.role_interpreter}
+          </span>
+        ),
+      },
+      {
+        id: "response",
+        label: t.users_status,
+        accessor: (row) => responseLabel(row.interpreter_response ?? "pending"),
+        width: 170,
+        render: (row) => (
+          <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 font-mono text-[10px] font-medium text-sky-700">
+            {responseLabel(row.interpreter_response ?? "pending")}
+          </span>
+        ),
+      },
+    ],
+    [t],
+  );
+
   return (
-    <Section
-      title={appointmentText("appointments_interpreter_assignment")}
-      accessory={
-        <WorkflowSectionAccessory
-          count={detail.interpreter_id ? 1 : 0}
-          actionLabel={appointmentText("appointments_assign_interpreter")}
-          onAction={() => onOpenChange(true)}
-        />
-      }
-    >
-      {detail.interpreter_id ? (
-        <div className="grid gap-1.5 md:grid-cols-2">
-          <WorkflowMiniMetric
-            label={t.role_interpreter}
-            value={detail.interpreter_name ?? t.common_not_set}
+    <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
+      <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
+        <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
+          {appointmentText("appointments_interpreter_assignment")}
+        </span>
+        <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
+        <Button
+          type="button"
+          size="sm"
+          className="h-8 shrink-0 rounded-lg gap-1.5"
+          onClick={() => onOpenChange(true)}
+        >
+          <Plus className="size-3.5" />
+          {appointmentText("appointments_assign_interpreter")}
+        </Button>
+      </div>
+      <DataTableSurface
+        rows={detail.interpreter_id ? [detail] : []}
+        columns={interpreterAssignmentColumns}
+        rowId={(row) => row.interpreter_id ?? "interpreter"}
+        dictionary={t as unknown as Record<string, string>}
+        emptyState={
+          <WorkflowEmptyState
+            title={appointmentText("appointments_no_interpreter_linked_to_this_appointment")}
           />
-          <WorkflowMiniMetric
-            label={t.users_status}
-            value={responseLabel(detail.interpreter_response ?? "pending")}
-          />
-        </div>
-      ) : (
-        <WorkflowEmptyState
-          title={appointmentText("appointments_no_interpreter_linked_to_this_appointment")}
-        />
-      )}
+        }
+        surfaceClassName="rounded-none border-0 shadow-none"
+      />
 
       <AppointmentEditorSheet
         open={assignmentSheetOpen}
@@ -986,7 +933,7 @@ function InterpreterAssignmentManagement({
           />
         </WorkflowSheetBody>
       </AppointmentEditorSheet>
-    </Section>
+    </section>
   );
 }
 
@@ -1181,88 +1128,127 @@ function AppointmentChecklistSection({
     }
   }
 
+  const workflowChecklistColumns = useMemo<ColumnDef<ChecklistItem>[]>(
+    () => [
+      {
+        id: "item",
+        label: appointmentText("appointments_checklist"),
+        accessor: (item) => item.item_text,
+        filterType: "text",
+        sortable: true,
+        required: true,
+        width: 420,
+        render: (item) => (
+          <span
+            className={cn(
+              "block truncate text-xs font-medium",
+              item.is_completed
+                ? "text-muted-foreground line-through"
+                : "text-foreground",
+            )}
+            title={item.item_text}
+          >
+            {item.item_text}
+          </span>
+        ),
+      },
+      {
+        id: "phase",
+        label: tr.orders_phase,
+        accessor: (item) => checklistPhaseLabel(item.phase),
+        filterType: "enum",
+        filterOptions: (rows) =>
+          [...new Set(rows.map((item) => checklistPhaseLabel(item.phase)))].map(
+            (label) => ({ value: label, label }),
+          ),
+        sortable: true,
+        width: 150,
+        render: (item) => (
+          <span className="inline-flex rounded-full border border-border/60 bg-muted/25 px-2 py-0.5 font-mono text-[10px] font-medium text-foreground">
+            {checklistPhaseLabel(item.phase)}
+          </span>
+        ),
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (item) =>
+          item.is_completed ? t.common_completed : appointmentText("appointments_open"),
+        filterType: "enum",
+        filterOptions: (rows) =>
+          [
+            ...new Set(
+              rows.map((item) =>
+                item.is_completed
+                  ? t.common_completed
+                  : appointmentText("appointments_open"),
+              ),
+            ),
+          ].map((label) => ({ value: label, label })),
+        sortable: true,
+        width: 220,
+        render: (item) =>
+          item.is_completed ? (
+            <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-mono text-[10px] font-medium text-emerald-700">
+              {t.common_completed} {formatDateTimeLabel(item.completed_at)}
+            </span>
+          ) : (
+            <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-mono text-[10px] font-medium text-amber-700">
+              {appointmentText("appointments_open")}
+            </span>
+          ),
+      },
+    ],
+    [t, tr],
+  );
+
   return (
     <>
-    <Section
-      title={appointmentText("appointments_checklist")}
-      accessory={
-        <WorkflowSectionAccessory
-          count={items.length}
-          actionLabel={appointmentText("appointments_add_checklist_item")}
-          onAction={() => setSheetOpen(true)}
+    <DataTableSurface
+      rows={items}
+      columns={workflowChecklistColumns}
+      rowId={(item) => item.id}
+      dictionary={tr}
+      emptyState={
+        <WorkflowEmptyState
+          title={appointmentText("appointments_no_workflow_steps_exist_for_this_appointment_yet")}
         />
       }
-    >
-      <div className="space-y-2.5">
-        {items.length === 0 ? (
-          <WorkflowEmptyState
-            title={appointmentText("appointments_no_workflow_steps_exist_for_this_appointment_yet")}
-          />
-        ) : (
-          items.map((item, index) => (
-            <article
-              key={item.id}
-              className="overflow-hidden rounded-2xl border border-border bg-card"
-            >
-              <div className="grid lg:grid-cols-[minmax(0,1fr)_112px]">
-                <div className="p-3.5">
-                  <div className="flex items-start gap-3">
-                    <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
-                      {index + 1}
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="text-sm font-semibold leading-snug text-foreground">
-                        {item.item_text}
-                      </h3>
-                      <div className="mt-1.5 flex flex-wrap gap-1">
-                        <span className={workflowInlineBadgeClassName}>
-                          {checklistPhaseLabel(item.phase)}
-                        </span>
-                        <span
-                          className={cn(
-                            workflowInlineBadgeClassName,
-                            item.is_completed ? "text-emerald-700" : "text-amber-700",
-                          )}
-                        >
-                          {item.is_completed
-                            ? t.common_completed
-                            : appointmentText("appointments_open")}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="relative flex items-center justify-end border-t border-border p-3 lg:border-t-0 lg:pl-4 lg:before:absolute lg:before:bottom-4 lg:before:left-0 lg:before:top-4 lg:before:border-l lg:before:border-dashed lg:before:border-border">
-                {item.is_completed ? (
-                  <span
-                    className={cn(
-                      workflowInlineBadgeClassName,
-                      "text-emerald-700",
-                    )}
-                  >
-                    {t.common_completed} {formatDateTimeLabel(item.completed_at)}
-                  </span>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 rounded-lg px-2.5"
-                    disabled={Boolean(completingId)}
-                    onClick={() => void handleComplete(item.id)}
-                  >
-                    {completingId === item.id ? (
-                      <LoaderCircle className="size-4 animate-spin" />
-                    ) : null}
-                    {appointmentText("appointments_mark_complete").replace(/\s+\S+$/u, "")}
-                  </Button>
-                )}
-              </div>
-              </div>
-            </article>
-          ))
-        )}
-      </div>
-    </Section>
+      toolbarStart={
+        <>
+          <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+            {appointmentText("appointments_checklist")}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            className="h-8 shrink-0 rounded-lg gap-1.5"
+            onClick={() => setSheetOpen(true)}
+          >
+            <Plus className="size-3.5" />
+            {appointmentText("appointments_add_checklist_item")}
+          </Button>
+          <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+        </>
+      }
+      rowActions={(item) =>
+        item.is_completed ? null : (
+          <Button
+            variant="outline"
+            size="xs"
+            className="shrink-0"
+            disabled={Boolean(completingId)}
+            onClick={() => void handleComplete(item.id)}
+          >
+            {completingId === item.id ? (
+              <LoaderCircle className="size-3.5 animate-spin" />
+            ) : null}
+            {appointmentText("appointments_mark_complete").replace(/\s+\S+$/u, "")}
+          </Button>
+        )
+      }
+      rowActionsWidth={120}
+    />
 
     <AppointmentEditorSheet
       open={sheetOpen}
@@ -1444,95 +1430,41 @@ function AppointmentRemindersSection({
 
   return (
     <>
-    <Section
+    <AppointmentRemindersTable
+      reminders={reminders}
       title={appointmentText("appointments_reminders_2")}
-      accessory={
-        <WorkflowSectionAccessory
-          count={reminders.length}
-          actionLabel={
-            canManageReminders ? t.appointments_add_reminder : undefined
-          }
-          onAction={canManageReminders ? () => setSheetOpen(true) : undefined}
-        />
+      emptyText={appointmentText("appointments_no_reminders_exist_for_this_appointment_yet")}
+      toolbarExtra={
+        canManageReminders ? (
+          <Button
+            type="button"
+            size="sm"
+            className="h-8 shrink-0 rounded-lg gap-1.5"
+            onClick={() => setSheetOpen(true)}
+          >
+            <Plus className="size-3.5" />
+            {t.appointments_add_reminder}
+          </Button>
+        ) : undefined
       }
-    >
-      <div className="space-y-2.5">
-        {reminders.length === 0 ? (
-          <WorkflowEmptyState
-            title={appointmentText("appointments_no_reminders_exist_for_this_appointment_yet")}
-          />
-        ) : (
-          <div className="space-y-2.5 pl-6">
-          {reminders.map((item, index) => (
-            <div
-              key={item.id}
-              className={cn(
-                "relative",
-                index < reminders.length - 1 &&
-                  "before:absolute before:-bottom-5 before:-left-4 before:top-3 before:w-px before:bg-border",
-              )}
-            >
-              <span
-                className={cn(
-                  "absolute -left-[1.125rem] top-1.5 z-10 size-2 rounded-full ring-4 ring-background",
-                  item.is_completed ? "bg-emerald-500" : "bg-orange-400",
-                )}
-              />
-              <div className="flex flex-wrap items-center gap-1.5">
-                <div className={tokens.text.sectionTitle}>{item.title}</div>
-                <span className="text-xs text-muted-foreground">
-                  {formatDateTimeLabel(item.remind_at)}
-                </span>
-              </div>
-              <div className="mt-1.5 overflow-hidden rounded-2xl border border-border bg-card">
-                <div className="grid gap-0 sm:grid-cols-[minmax(0,1fr)_112px]">
-                <div className="px-4 py-2.5">
-                  <div className="text-xs text-muted-foreground">
-                    {t.patients_assign_owner}
-                  </div>
-                  <p className="mt-1 text-sm font-semibold text-foreground">
-                  {item.user_name} · {formatDateTimeLabel(item.remind_at)}
-                  </p>
-                  {item.description ? (
-                    <p className="mt-1.5 text-sm text-muted-foreground">
-                      {item.description}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="relative flex items-center justify-end border-t border-border p-3 sm:border-t-0 sm:pl-4 sm:before:absolute sm:before:bottom-3 sm:before:left-0 sm:before:top-3 sm:before:border-l sm:before:border-dashed sm:before:border-border">
-                {item.is_completed ? (
-                  <span
-                    className={cn(
-                      workflowInlineBadgeClassName,
-                      "text-emerald-700",
-                    )}
-                  >
-                    {appointmentText("appointments_completed")}{" "}
-                    {formatDateTimeLabel(item.completed_at)}
-                  </span>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 rounded-lg px-2.5"
-                    disabled={Boolean(completingId)}
-                    onClick={() => void handleComplete(item.id)}
-                  >
-                    {completingId === item.id ? (
-                      <LoaderCircle className="size-4 animate-spin" />
-                    ) : null}
-                    {t.appointments_external_handoff_cancel}
-                  </Button>
-                )}
-                </div>
-                </div>
-              </div>
-            </div>
-          ))}
-          </div>
-        )}
-      </div>
-    </Section>
+      rowActions={(item) =>
+        item.is_completed ? null : (
+          <Button
+            variant="outline"
+            size="xs"
+            className="shrink-0"
+            disabled={Boolean(completingId)}
+            onClick={() => void handleComplete(item.id)}
+          >
+            {completingId === item.id ? (
+              <LoaderCircle className="size-3.5 animate-spin" />
+            ) : null}
+            {t.appointments_external_handoff_cancel}
+          </Button>
+        )
+      }
+      rowActionsWidth={120}
+    />
 
     {canManageReminders ? (
       <AppointmentEditorSheet
@@ -1644,99 +1576,6 @@ function AppointmentRemindersSection({
   );
 }
 
-type AppointmentCompletionReadinessGridProps = {
-  casesStatusLabel: string;
-  detail: AppointmentDetail;
-  detailReport: ReportSummary | null;
-  interpreterLabel: string;
-  interpreterReportReady: boolean;
-  openChecklistCount: number;
-  openTaskCount: number;
-  pendingReminderCount: number;
-};
-
-function AppointmentCompletionReadinessGrid({
-  casesStatusLabel,
-  detail,
-  detailReport,
-  interpreterLabel,
-  interpreterReportReady,
-  openChecklistCount,
-  openTaskCount,
-  pendingReminderCount,
-}: AppointmentCompletionReadinessGridProps) {
-  return (
-    <div className="mt-4 grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
-      <AdminInlineMetric
-        icon={CheckCircle2}
-        label={casesStatusLabel}
-        value={
-          openChecklistCount === 0
-            ? appointmentText("appointments_ready")
-            : appointmentText("appointments_open_count", {
-                count: openChecklistCount,
-              })
-        }
-        description={
-          openChecklistCount === 0
-            ? appointmentText("appointments_no_pending_checklist_items")
-            : appointmentText("appointments_finish_outstanding_preparation_or_follow_up_steps")
-        }
-        tone={openChecklistCount === 0 ? "emerald" : "amber"}
-      />
-      <AdminInlineMetric
-        icon={AlertTriangle}
-        label={appointmentText("appointments_tasks")}
-        value={
-          openTaskCount === 0
-            ? appointmentText("appointments_ready")
-            : appointmentText("appointments_open_count", {
-                count: openTaskCount,
-              })
-        }
-        description={
-          openTaskCount === 0
-            ? appointmentText("appointments_no_open_operational_tasks")
-            : appointmentText("appointments_resolve_active_pm_interpreter_or_concierge_tasks")
-        }
-        tone={openTaskCount === 0 ? "emerald" : "amber"}
-      />
-      <AdminInlineMetric
-        icon={Clock3}
-        label={appointmentText("appointments_reminders_2")}
-        value={appointmentText("appointments_pending_reminders_count", {
-          count: pendingReminderCount,
-        })}
-        description={
-          pendingReminderCount === 0
-            ? appointmentText("appointments_no_outstanding_reminders")
-            : appointmentText("appointments_pending_reminders_stay_active_after_closure")
-        }
-        tone={pendingReminderCount === 0 ? "emerald" : "amber"}
-      />
-      <AdminInlineMetric
-        icon={Languages}
-        label={interpreterLabel}
-        value={
-          !detail.interpreter_id
-            ? appointmentText("appointments_not_required")
-            : interpreterReportReady
-              ? appointmentText("appointments_approved")
-              : appointmentText("appointments_pending_2")
-        }
-        description={
-          !detail.interpreter_id
-            ? appointmentText("appointments_no_interpreter_linked")
-            : detailReport
-              ? detailReport.approval_status
-              : appointmentText("appointments_no_report_submitted_yet")
-        }
-        tone={!detail.interpreter_id || interpreterReportReady ? "emerald" : "amber"}
-      />
-    </div>
-  );
-}
-
 type AppointmentCompletionSectionProps = {
   detail: AppointmentDetail;
   detailReport: ReportSummary | null;
@@ -1764,12 +1603,8 @@ function AppointmentCompletionSection(props: AppointmentCompletionSectionProps) 
 
 function AppointmentCompletionSectionContent({
   detail,
-  detailReport,
   handoffStakeholders,
   openChecklistCount,
-  openTaskCount,
-  pendingReminderCount,
-  interpreterReportReady,
   followUpAssigneeId,
   setFollowUpAssigneeId,
   showStatusToggle = false,
@@ -1880,44 +1715,29 @@ function AppointmentCompletionSectionContent({
 
   return (
     <>
-    <Section
-      title={appointmentText("appointments_completion_readiness")}
-      accessory={
-        <WorkflowSectionAccessory
-          actionLabel={
-            canCompleteAppointment ? t.appointments_complete_and_schedule : undefined
-          }
-          onAction={
-            canCompleteAppointment
-              ? () => setCompletionSheetOpen(true)
-              : undefined
-          }
-          disabled={Boolean(busyAction)}
-        />
-      }
-    >
-      <AppointmentCompletionReadinessGrid
-        casesStatusLabel={t.cases_status}
-        detail={detail}
-        detailReport={detailReport}
-        interpreterLabel={tr.role_interpreter}
-        interpreterReportReady={interpreterReportReady}
-        openChecklistCount={openChecklistCount}
-        openTaskCount={openTaskCount}
-        pendingReminderCount={pendingReminderCount}
-      />
+    <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
+      <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
+        <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
+          {appointmentText("appointments_completion_readiness")}
+        </span>
+        {canCompleteAppointment ? (
+          <>
+            <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 shrink-0 rounded-lg gap-1.5"
+              disabled={Boolean(busyAction)}
+              onClick={() => setCompletionSheetOpen(true)}
+            >
+              <Plus className="size-3.5" />
+              {t.appointments_complete_and_schedule}
+            </Button>
+          </>
+        ) : null}
+      </div>
       {showStatusToggle ? (
-        <div className="mt-4">
-          <div className="mb-4 flex items-center gap-2" aria-hidden>
-            <span className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border" />
-            <span className="size-1.5 rounded-full bg-orange-400" />
-            <span className="size-1.5 rounded-full bg-orange-300" />
-            <span className="size-1.5 rounded-full bg-orange-200" />
-            <span className="h-px flex-1 bg-gradient-to-r from-border via-border to-transparent" />
-          </div>
-          <div className="mb-2 text-xs font-semibold text-muted-foreground">
-            {t.users_status}
-          </div>
+        <div className="p-3">
           <AppointmentStatusToggleControl
             detail={detail}
             openChecklistCount={openChecklistCount}
@@ -1999,7 +1819,7 @@ function AppointmentCompletionSectionContent({
           </div>
         </AppointmentEditorSheet>
       ) : null}
-    </Section>
+    </section>
     </>
   );
 }
@@ -2119,7 +1939,7 @@ function AppointmentStatusToggleControl({
       ) : null}
       <div className="pb-1">
         <div
-          className="grid w-full grid-cols-5 gap-1 rounded-full border border-border/60 bg-muted/30 p-1"
+          className="flex w-full flex-wrap gap-1.5"
           role="group"
           aria-label={t.users_status}
         >
@@ -2146,10 +1966,15 @@ function AppointmentStatusToggleControl({
                 disabled={Boolean(busyAction)}
                 onClick={() => handleStatusChange(status, recurrenceScope)}
                 className={cn(
-                  "relative inline-flex h-10 min-w-0 items-center justify-center rounded-full px-2 text-[13px] font-semibold transition-[background-color,color,box-shadow] duration-150 disabled:cursor-not-allowed disabled:opacity-70",
+                  "relative inline-flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-full border px-3 font-mono text-xs font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-70",
                   active
-                    ? "bg-orange-500 text-white shadow-sm"
-                    : "text-foreground hover:bg-card",
+                    ? cn(
+                        "font-semibold",
+                        status === "cancelled"
+                          ? "border-rose-200 bg-rose-50 text-rose-700"
+                          : appointmentStatusBadgeClassName(status),
+                      )
+                    : "border-border/60 bg-card text-muted-foreground hover:bg-muted/30 hover:text-foreground",
                 )}
               >
                 {busyAction === nextBusyAction ? (
@@ -2251,7 +2076,6 @@ function AppointmentTasksSectionContent({
   onError,
 }: AppointmentTasksSectionProps) {
   const { t } = useLang();
-  const tr = t as unknown as Record<string, string>;
   const [form, setForm] = useState<TaskFormState>(() =>
     blankTaskForm(
       detail.interpreter_id ?? detail.owner_user_id ?? assignableStaff[0]?.id ?? "",
@@ -2348,29 +2172,46 @@ function AppointmentTasksSectionContent({
 
   return (
     <>
-    <Section
+    <AppointmentTasksTable
+      tasks={tasks}
       title={appointmentText("appointments_operational_tasks")}
-      accessory={
-        <WorkflowSectionAccessory
-          count={tasks.length}
-          actionLabel={
-            canCreateTasks ? t.appointments_workflow_add_task : undefined
-          }
-          onAction={canCreateTasks ? () => setSheetOpen(true) : undefined}
-        />
+      emptyText={appointmentText("appointments_no_operational_tasks_exist_for_this_appointment_yet")}
+      toolbarExtra={
+        canCreateTasks ? (
+          <Button
+            type="button"
+            size="sm"
+            className="h-8 shrink-0 rounded-lg gap-1.5"
+            onClick={() => setSheetOpen(true)}
+          >
+            <Plus className="size-3.5" />
+            {t.appointments_workflow_add_task}
+          </Button>
+        ) : undefined
       }
-    >
-      <p className={tokens.text.muted}>
-        {appointmentText("appointments_appointment_linked_follow_up_for_pm_teamlead_interpreter")}
-      </p>
-      <AppointmentTaskList
-        actionBusy={actionBusy}
-        notSetLabel={tr.common_not_set}
-        statusGroupLabel={t.users_status}
-        tasks={tasks}
-        onTaskStatus={handleTaskStatus}
-      />
-    </Section>
+      rowActions={(task) => (
+        <NativeComboboxSelect
+          value={task.status}
+          aria-label={t.users_status}
+          disabled={Boolean(actionBusy)}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => {
+            const nextStatus = event.target.value;
+            if (nextStatus && nextStatus !== task.status) {
+              void handleTaskStatus(task.id, nextStatus);
+            }
+          }}
+          className="h-7 w-[150px] rounded-md bg-field text-xs"
+        >
+          {TASK_STATUS_OPTIONS.map((status) => (
+            <option key={status} value={status}>
+              {taskStatusLabel(status)}
+            </option>
+          ))}
+        </NativeComboboxSelect>
+      )}
+      rowActionsWidth={170}
+    />
 
     {canCreateTasks ? (
       <AppointmentTaskEditorSheet
@@ -2385,99 +2226,6 @@ function AppointmentTasksSectionContent({
       />
     ) : null}
     </>
-  );
-}
-
-function AppointmentTaskList({
-  actionBusy,
-  notSetLabel,
-  statusGroupLabel,
-  tasks,
-  onTaskStatus,
-}: {
-  actionBusy: string;
-  notSetLabel: string;
-  statusGroupLabel: string;
-  tasks: TaskEntry[];
-  onTaskStatus: (taskId: string, status: string) => void | Promise<void>;
-}) {
-  return (
-    <div className="space-y-2.5">
-      {tasks.length === 0 ? (
-        <WorkflowEmptyState
-          title={appointmentText("appointments_no_operational_tasks_exist_for_this_appointment_yet")}
-        />
-      ) : (
-        tasks.map((task, index) => (
-          <article
-            key={task.id}
-            className="overflow-hidden rounded-2xl border border-border bg-card"
-          >
-            <div className="grid xl:grid-cols-[minmax(0,1fr)_340px]">
-              <div className="p-3.5">
-                <div className="flex items-start gap-3">
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
-                    {index + 1}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <p className="text-sm font-semibold text-foreground">
-                        {task.title}
-                      </p>
-                      <span className={workflowInlineBadgeClassName}>
-                        {taskPriorityLabel(task.priority)}
-                      </span>
-                    </div>
-                    <p className={cn("mt-1", tokens.text.muted)}>
-                      {task.assigned_to_name} В· {roleLabel(task.assigned_to_role)}
-                    </p>
-                    {task.description ? (
-                      <p className="mt-2.5 text-sm leading-6 text-muted-foreground">
-                        {task.description}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-              <div className="relative border-t border-border p-3 xl:border-t-0 xl:pl-4 xl:before:absolute xl:before:bottom-4 xl:before:left-0 xl:before:top-4 xl:before:border-l xl:before:border-dashed xl:before:border-border">
-                <div
-                  className="grid w-full grid-cols-4 gap-0.5 rounded-lg border border-border bg-muted/25 p-0.5"
-                  role="radiogroup"
-                  aria-label={statusGroupLabel}
-                >
-                  {TASK_STATUS_OPTIONS.map((status) => (
-                    <button
-                      key={status}
-                      type="button"
-                      disabled={Boolean(actionBusy) || task.status === status}
-                      onClick={() => void onTaskStatus(task.id, status)}
-                      role="radio"
-                      aria-checked={task.status === status}
-                      className={cn(
-                        "relative inline-flex h-7 min-w-0 items-center justify-center rounded-md px-1.5 text-[10.5px] font-semibold transition-[background-color,color,border-color,box-shadow] duration-150 disabled:cursor-not-allowed disabled:opacity-70",
-                        task.status === status
-                          ? "bg-orange-500 text-white shadow-sm"
-                          : "text-foreground hover:bg-card",
-                      )}
-                    >
-                      {actionBusy === `task:${task.id}:${status}` ? (
-                        <LoaderCircle className="absolute left-1 size-3 animate-spin" />
-                      ) : null}
-                      <span className="min-w-0 truncate">
-                        {taskStatusLabel(status)}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                <div className="mt-1.5 text-right text-xs font-medium text-muted-foreground">
-                  {task.due_date ? formatDateTimeLabel(task.due_date) : notSetLabel}
-                </div>
-              </div>
-            </div>
-          </article>
-        ))
-      )}
-    </div>
   );
 }
 

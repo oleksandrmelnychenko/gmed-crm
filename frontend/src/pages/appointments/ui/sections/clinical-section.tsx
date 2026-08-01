@@ -1,9 +1,8 @@
 import { memo } from "react";
 
-import { CountBadge, EmptyCell, Section, StatCard } from "@/components/ui-shell";
+import { EmptyCell, Section } from "@/components/ui-shell";
 import {
   appointmentText,
-  reportApprovalLabel,
 } from "@/pages/appointments/model/labels";
 import type {
   AppointmentDetail,
@@ -19,7 +18,6 @@ import {
   MemoizedAppointmentIncomingDataSection,
 } from "@/pages/appointments/ui/sections/clinical-follow-up-sections";
 import { MemoizedAppointmentReportSection } from "@/pages/appointments/ui/sections/report-section";
-import { AppointmentWorkspaceSectionIntro } from "@/pages/appointments/ui/shared/workspace-primitives";
 
 type AppointmentClinicalSectionProps = {
   detail: AppointmentDetail;
@@ -73,71 +71,11 @@ function AppointmentClinicalSection({
     showClinicalIncomingSection ||
     showClinicalFindingsSection ||
     showClinicalReportSection;
-  const clinicalSurfaceItemCount =
-    Number(showClinicalIncomingSection) +
-    Number(showClinicalFindingsSection) +
-    Number(showClinicalReportSection);
-  const incomingDataOpenCount = incomingDataChecklist.filter(
-    (item) => !item.is_completed,
-  ).length;
-  const findingsOpenCount = findingsChecklist.filter(
-    (item) => !item.is_completed,
-  ).length;
-  const clinicalOpenCount = incomingDataOpenCount + findingsOpenCount;
-  const clinicalFollowUpCount =
-    incomingDataReminders.length +
-    incomingDataTasks.length +
-    findingsReminders.length +
-    findingsTasks.length;
 
   return (
     <>
-      <AppointmentWorkspaceSectionIntro
-        title={appointmentText("appointments_clinical_surface")}
-        description={appointmentText("appointments_incoming_medical_data_findings_and_interpreter_reporting")}
-        accessory={<CountBadge>{clinicalSurfaceItemCount}</CountBadge>}
-      />
-
       {hasClinicalContent ? (
         <>
-          <Section
-            title={appointmentText("appointments_clinical_summary")}
-            accessory={<CountBadge>{clinicalOpenCount}</CountBadge>}
-          >
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <StatCard
-                label={appointmentText("appointments_open_intake")}
-                value={incomingDataOpenCount}
-                description={appointmentText("appointments_checklist_items_for_incoming_data")}
-              />
-              <StatCard
-                label={appointmentText("appointments_open_findings")}
-                value={findingsOpenCount}
-                description={appointmentText("appointments_items_related_to_arztbrief_and_findings")}
-              />
-              <StatCard
-                label={appointmentText("appointments_follow_up_load")}
-                value={clinicalFollowUpCount}
-                description={appointmentText("appointments_reminders_and_tasks_in_the_clinical_flow")}
-              />
-              <StatCard
-                label={appointmentText("appointments_report")}
-                value={
-                  detailReport
-                    ? reportApprovalLabel(detailReport.approval_status)
-                    : appointmentText("appointments_pending")
-                }
-                description={
-                  detailReport
-                    ? appointmentText("appointments_report_hours_value", {
-                        hours: detailReport.hours,
-                      })
-                    : appointmentText("appointments_not_submitted_yet")
-                }
-              />
-            </div>
-          </Section>
-
           {showClinicalIncomingSection ? (
             <MemoizedAppointmentIncomingDataSection
               detail={detail}

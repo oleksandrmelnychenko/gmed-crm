@@ -264,7 +264,14 @@ pub async fn load_medication_german_equivalents(
             .filter(|value| !value.is_empty())
             .unwrap_or(medication_name.trim());
         for product in search_drug_products(pool, query, None, include_candidates).await? {
-            candidates.extend(load_german_equivalents(pool, product.id, include_candidates).await?);
+            if product.country_code == "DE" {
+                if let Some(candidate) = german_product_candidate(product, include_candidates) {
+                    candidates.push(candidate);
+                }
+            } else {
+                candidates
+                    .extend(load_german_equivalents(pool, product.id, include_candidates).await?);
+            }
         }
     }
 
@@ -276,6 +283,40 @@ pub async fn load_medication_german_equivalents(
         medication_substance,
         candidates,
     }))
+}
+
+fn german_product_candidate(
+    product: DrugProductSearchResult,
+    include_candidates: bool,
+) -> Option<GermanEquivalentResult> {
+    let is_verified = product.verification_status == "verified";
+    if !is_verified && !include_candidates {
+        return None;
+    }
+
+    Some(GermanEquivalentResult {
+        equivalent_id: product.id,
+        relationship_id: None,
+        brand_name: product.brand_name,
+        country_code: product.country_code,
+        atc_code: product.atc_code,
+        form: product.form,
+        strength: product.strength,
+        manufacturer: product.manufacturer,
+        confidence: "0.7".to_string(),
+        verification_status: if is_verified {
+            "verified".to_string()
+        } else {
+            "candidate".to_string()
+        },
+        substances: product.substances,
+        note: Some(ACTIVE_SUBSTANCE_MATCH_NOTE_RU.to_string()),
+        note_ru: Some(ACTIVE_SUBSTANCE_MATCH_NOTE_RU.to_string()),
+        note_de: Some(ACTIVE_SUBSTANCE_MATCH_NOTE_DE.to_string()),
+        staff_warning: STAFF_WARNING_RU.to_string(),
+        staff_warning_ru: STAFF_WARNING_RU.to_string(),
+        staff_warning_de: STAFF_WARNING_DE.to_string(),
+    })
 }
 
 fn product_from_row(row: sqlx::postgres::PgRow) -> DrugProductSearchResult {

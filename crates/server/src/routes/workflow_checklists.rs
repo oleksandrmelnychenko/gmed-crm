@@ -51,49 +51,6 @@ struct WorkflowTemplateItem {
     phase: Option<&'static str>,
 }
 
-const PATIENT_WORKFLOW_TEMPLATE: [WorkflowTemplateItem; 4] = [
-    WorkflowTemplateItem {
-        checklist_key: "patient_intake",
-        item_key: "profile_verification",
-        item_text: "Verify contact, insurance and emergency data",
-        owner_role: "patient_manager",
-        priority: "high",
-        due_days: 2,
-        sort_order: 1,
-        phase: None,
-    },
-    WorkflowTemplateItem {
-        checklist_key: "patient_intake",
-        item_key: "compliance_readiness",
-        item_text: "Review DSGVO, contract readiness and legal status",
-        owner_role: "patient_manager",
-        priority: "high",
-        due_days: 2,
-        sort_order: 2,
-        phase: None,
-    },
-    WorkflowTemplateItem {
-        checklist_key: "patient_intake",
-        item_key: "document_pack_review",
-        item_text: "Audit required patient documents and current upload gaps",
-        owner_role: "patient_manager",
-        priority: "normal",
-        due_days: 3,
-        sort_order: 3,
-        phase: None,
-    },
-    WorkflowTemplateItem {
-        checklist_key: "patient_intake",
-        item_key: "language_support_needs",
-        item_text: "Confirm language, travel and concierge support needs",
-        owner_role: "concierge",
-        priority: "normal",
-        due_days: 4,
-        sort_order: 4,
-        phase: None,
-    },
-];
-
 const ORDER_WORKFLOW_TEMPLATE: [WorkflowTemplateItem; 10] = [
     WorkflowTemplateItem {
         checklist_key: "order_discovery",
@@ -235,26 +192,6 @@ struct WorkflowTaskDraft<'a> {
     due_date: Option<chrono::DateTime<Utc>>,
 }
 
-pub(crate) async fn ensure_default_patient_workflow(
-    state: &AppState,
-    patient_id: Uuid,
-    fallback_user_id: Option<Uuid>,
-) -> Result<(), axum::response::Response> {
-    let context = load_patient_scope_context(state, patient_id).await?;
-    for item in PATIENT_WORKFLOW_TEMPLATE {
-        ensure_template_item(
-            state,
-            WorkflowScope::Patient,
-            patient_id,
-            &context,
-            item,
-            fallback_user_id,
-        )
-        .await?;
-    }
-    Ok(())
-}
-
 pub(crate) async fn ensure_default_order_workflow(
     state: &AppState,
     order_id: Uuid,
@@ -292,10 +229,6 @@ async fn list_patient_workflow_checklist(
         return resp;
     }
     if let Err(resp) = ensure_patient_scope_visible(&state, &auth, patient_id).await {
-        return resp;
-    }
-    if let Err(resp) = ensure_default_patient_workflow(&state, patient_id, Some(auth.user_id)).await
-    {
         return resp;
     }
     list_workflow_scope(&state, WorkflowScope::Patient, patient_id).await

@@ -48,7 +48,7 @@ type HoldEditor = {
 };
 
 const inputClass =
-  "h-9 w-full rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
+  "h-9 w-full rounded-lg border border-border bg-field px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
 
 function blankToNull(value: string): string | null {
   return value === "" ? null : value;

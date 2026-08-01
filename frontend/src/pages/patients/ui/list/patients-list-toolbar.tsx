@@ -12,6 +12,7 @@ import type {
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
+import { ToolbarField } from "@/components/data-table/toolbar-field";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
 
@@ -53,7 +54,6 @@ type PatientsListToolbarProps = {
   groupLabels: Record<string, string>;
   hiddenColumns: string[];
   insuranceOptions: string[];
-  lastUpdatedText: string | null;
   maxFrozenColumns: number;
   onActiveFilterChange: (value: string) => void;
   onClearAll: () => void;
@@ -88,7 +88,6 @@ export function PatientsListToolbar({
   groupLabels,
   hiddenColumns,
   insuranceOptions,
-  lastUpdatedText,
   maxFrozenColumns,
   onActiveFilterChange,
   onClearAll,
@@ -130,8 +129,9 @@ export function PatientsListToolbar({
 
   return (
     <div className="relative z-30 border-b border-border/70 bg-card px-3 py-2">
-      <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto">
-        <div className="relative min-w-[170px] flex-1 sm:max-w-[220px]">
+      <div className="flex flex-nowrap items-end gap-1.5 overflow-x-auto">
+        <ToolbarField label={t.common_search} className="min-w-[170px] flex-1 sm:max-w-[220px]">
+        <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
           <Input
             ref={searchInputRef}
@@ -143,10 +143,12 @@ export function PatientsListToolbar({
               }
             }}
             placeholder={deferredSearchPlaceholder}
-            className="h-8 w-full rounded-lg bg-background pl-8 text-[13px]"
+            className="h-8 w-full rounded-md bg-field pl-8 text-xs"
           />
         </div>
+        </ToolbarField>
 
+        <ToolbarField label={`${t.common_provider} / ${t.providers_category}`}>
         <ProviderSelectWithTaxonomyFilter
           value={filters.providerId}
           providers={providers}
@@ -154,21 +156,23 @@ export function PatientsListToolbar({
           providerPlaceholder={t.providers_all}
           taxonomyPlaceholder={t.providers_category}
           taxonomyAllLabel={t.providers_all}
-          containerClassName="sm:grid-cols-[160px_160px]"
-          taxonomySelectClassName="h-8 bg-background text-[13px]"
-          providerSelectClassName="h-8 bg-background text-[13px]"
+          containerClassName="grid w-[320px] shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1.5"
+          taxonomySelectClassName="h-8 min-w-0 rounded-md bg-field text-xs"
+          providerSelectClassName="h-8 min-w-0 rounded-md bg-field text-xs"
           providerLabel={(provider) =>
             provider.address_city ? `${provider.name} - ${provider.address_city}` : provider.name
           }
           onChange={onProviderFilterChange}
         />
+        </ToolbarField>
 
+        <ToolbarField label={t.orders_filter_doctor}>
         <NativeComboboxSelect
           value={filters.doctorId}
 
           disabled={!filters.providerId}
 
-          onChange={(event) => onDoctorFilterChange(event.target.value ?? "")} className="h-8 w-[150px] bg-background text-[13px]">
+          onChange={(event) => onDoctorFilterChange(event.target.value ?? "")} className="h-8 w-[150px] shrink-0 rounded-md bg-field text-xs">
             <option value="">{t.providers_all}</option>
             {doctors.map((doctor) => (
               <option key={doctor.id} value={doctor.id}>
@@ -176,19 +180,23 @@ export function PatientsListToolbar({
               </option>
             ))}
           </NativeComboboxSelect>
+        </ToolbarField>
 
+        <ToolbarField label={t.users_status}>
         <NativeComboboxSelect value={filters.activeOnly}
-          onChange={(event) => onActiveFilterChange(event.target.value ?? "")} className="h-8 w-[140px] bg-background text-[13px]">
+          onChange={(event) => onActiveFilterChange(event.target.value ?? "")} className="h-8 w-[140px] shrink-0 rounded-md bg-field text-xs">
             <option value="">{t.providers_all}</option>
             <option value="true">{t.common_active}</option>
             <option value="false">{t.common_inactive}</option>
           </NativeComboboxSelect>
+        </ToolbarField>
 
         {insuranceOptions.length > 0 ? (
+          <ToolbarField label={t.patients_insurance_type}>
           <NativeComboboxSelect
             value={filters.insuranceProvider}
             onChange={(event) => onInsuranceFilterChange(event.target.value ?? "")}
-            className="h-8 w-[170px] bg-background text-[13px]"
+            className="h-8 w-[170px] shrink-0 rounded-md bg-field text-xs"
           >
             <option value="">{t.patients_insurance_type}</option>
             {insuranceOptions.map((type) => (
@@ -197,14 +205,10 @@ export function PatientsListToolbar({
               </option>
             ))}
           </NativeComboboxSelect>
+          </ToolbarField>
         ) : null}
 
-        <div className="ml-auto flex items-center gap-1">
-          {lastUpdatedText ? (
-            <span className="text-[11px] tabular-nums text-muted-foreground">
-              {lastUpdatedText}
-            </span>
-          ) : null}
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           <Button
             type="button"
             variant="outline"
@@ -221,10 +225,6 @@ export function PatientsListToolbar({
               {t.common_reset}
             </Button>
           ) : null}
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-1.5 border-t border-border/70 pt-2">
         <FilterBuilder
           columns={columns}
           rows={rows}
@@ -280,6 +280,7 @@ export function PatientsListToolbar({
           unfreezeLabel={t.table_columns_unfreeze}
           frozenNoteLabel={t.table_columns_frozen}
         />
+        </div>
       </div>
     </div>
   );

@@ -6,11 +6,15 @@ import {
   type FormEvent,
 } from "react";
 
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { checkboxClass } from "@/components/ui-shell";
+import {
+  AppointmentRemindersTable,
+  AppointmentTasksTable,
+} from "@/pages/appointments/ui/shared/follow-up-tables";
 import { useLang } from "@/lib/i18n";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -24,7 +28,6 @@ import {
   appointmentTextareaControlClassName,
   appointmentToggleCardClassName,
   appointmentWhiteInputClassName,
-  appointmentWhiteRowClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
 import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
@@ -61,7 +64,7 @@ import {
   TASK_PRIORITY_OPTIONS,
 } from "@/pages/appointments/model/constants";
 import {
-  AppointmentDotLabel,
+  AppointmentEditorSheet,
   AppointmentSectionHeading,
   EmptyState,
   Field,
@@ -145,6 +148,7 @@ function AppointmentDoctorFollowUpSectionContent({
     buildDefaultForm(),
   );
   const [submitBusy, setSubmitBusy] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -211,6 +215,7 @@ function AppointmentDoctorFollowUpSectionContent({
           shiftLocalDateTime(form.dueAt, { days: 7 }),
         ),
       );
+      setSheetOpen(false);
       onRefresh();
     } catch (error) {
       onError(appointmentActionErrorMessage(error, tr.common_failed_create));
@@ -220,26 +225,50 @@ function AppointmentDoctorFollowUpSectionContent({
   }
 
   return (
-    <section className={sectionCardClass}>
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <AppointmentSectionHeading
-          title={t.appointments_doctor_directed_followup_title}
-          description={t.appointments_doctor_directed_followup_subtitle}
-        />
-        <span className={appointmentMetaPillClassName}>
-          {reminders.length + tasks.length}{" "}
-          {reminders.length + tasks.length === 1
-            ? t.appointments_directed_item_singular
-            : t.appointments_directed_item_plural}
+    <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
+      <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
+        <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
+          {t.appointments_doctor_directed_followup_title}
         </span>
+        {canManageReminders ? (
+          <>
+            <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 shrink-0 rounded-lg gap-1.5"
+              onClick={() => setSheetOpen(true)}
+            >
+              <Plus className="size-3.5" />
+              {t.appointments_doctor_follow_up_create}
+            </Button>
+          </>
+        ) : null}
       </div>
-      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+      <div className="space-y-4 p-4">
         <DoctorFollowUpTrailColumn
           reminders={reminders}
           tasks={tasks}
           emptyText={tr.common_not_set}
         />
-        {canManageReminders ? (
+      </div>
+      {canManageReminders ? (
+        <AppointmentEditorSheet
+          open={sheetOpen}
+          onOpenChange={setSheetOpen}
+          title={t.appointments_doctor_directed_followup_title}
+          footer={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={() => setSheetOpen(false)}
+            >
+              {tr.common_cancel}
+            </Button>
+          }
+        >
           <DoctorFollowUpCreateForm
             assignees={assignees}
             form={form}
@@ -247,12 +276,8 @@ function AppointmentDoctorFollowUpSectionContent({
             setForm={setForm}
             onSubmit={handleSubmit}
           />
-        ) : (
-          <div className={appointmentSoftPanelClassName}>
-            <EmptyState text={tr.common_not_set} />
-          </div>
-        )}
-      </div>
+        </AppointmentEditorSheet>
+      ) : null}
     </section>
   );
 }
@@ -270,77 +295,16 @@ function DoctorFollowUpTrailColumn({
 
   return (
     <div className="space-y-4">
-      <div className={appointmentSoftPanelClassName}>
-        <AppointmentDotLabel>{t.common_search}</AppointmentDotLabel>
-        <div className="mt-3 space-y-3">
-          {reminders.length === 0 ? (
-            <EmptyState text={emptyText} />
-          ) : (
-            reminders.map((item) => (
-              <div key={item.id} className={appointmentWhiteRowClassName}>
-                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-slate-900">
-                      {item.title.replace(`${DOCTOR_FOLLOW_UP_PREFIX} `, "")}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {item.user_name} В· {formatDateTimeLabel(item.remind_at)}
-                    </p>
-                  </div>
-                  {item.is_completed ? (
-                    <span className="text-xs font-medium text-emerald-700">
-                      {t.common_completed} {formatDateTimeLabel(item.completed_at)}
-                    </span>
-                  ) : (
-                    <span className="text-xs font-medium text-amber-700">
-                      {t.common_pending}
-                    </span>
-                  )}
-                </div>
-                {item.description ? (
-                  <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                    {item.description}
-                  </p>
-                ) : null}
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-      <div className={appointmentSoftPanelClassName}>
-        <AppointmentDotLabel>{t.appointments_task_trail}</AppointmentDotLabel>
-        <div className="mt-3 space-y-3">
-          {tasks.length === 0 ? (
-            <EmptyState text={emptyText} />
-          ) : (
-            tasks.map((task) => (
-              <div key={task.id} className={appointmentWhiteRowClassName}>
-                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-slate-900">
-                      {task.title.replace(`${DOCTOR_FOLLOW_UP_PREFIX} `, "")}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {task.assigned_to_name} В· {taskStatusLabel(task.status)} В·{" "}
-                      {taskPriorityLabel(task.priority)}
-                    </p>
-                  </div>
-                  <span className="text-xs text-slate-500">
-                    {task.due_date
-                      ? formatDateTimeLabel(task.due_date)
-                      : t.common_not_set}
-                  </span>
-                </div>
-                {task.description ? (
-                  <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                    {task.description}
-                  </p>
-                ) : null}
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+      <AppointmentRemindersTable
+        reminders={reminders}
+        title={t.appointments_reminder_trail}
+        emptyText={emptyText}
+      />
+      <AppointmentTasksTable
+        tasks={tasks}
+        title={t.appointments_task_trail}
+        emptyText={emptyText}
+      />
     </div>
   );
 }

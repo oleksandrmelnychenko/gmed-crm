@@ -139,7 +139,7 @@ export function FilterValueInput<T>({
       <NativeComboboxSelect
         value={selected}
         onChange={(e) => onChange(e.target.value)}
-        className="h-7 rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+        className="h-7 rounded-md border border-input bg-field px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
       >
         <option value="">{resolvedTranslations.notSet}</option>
         {options.map((opt) => (
@@ -154,7 +154,7 @@ export function FilterValueInput<T>({
   if (fieldType === "boolean") {
     const current = value === true || value === "true";
     return (
-      <div className="inline-flex rounded-md border border-input bg-background p-0.5">
+      <div className="inline-flex rounded-md border border-input bg-field p-0.5">
         <button
           type="button"
           onClick={() => onChange(true)}
@@ -215,7 +215,7 @@ function MultiSelect({ options, selected, onChange, translations }: MultiSelectP
   };
 
   return (
-    <div className="flex flex-col rounded-md border border-input bg-background">
+    <div className="flex flex-col rounded-md border border-input bg-field">
       <div className="flex items-center gap-1 border-b border-border px-2 py-1">
         <Input
           value={query}

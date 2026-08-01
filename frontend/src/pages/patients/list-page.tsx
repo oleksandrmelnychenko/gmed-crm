@@ -2,12 +2,14 @@ import {
   lazy,
   Suspense,
   useMemo,
+  useState,
 } from "react";
 import {
+  ChevronLeft,
+  ChevronRight,
   Plus,
 } from "lucide-react";
 
-import { formatRelativeTime } from "@/components/data-table/relative-time";
 import {
   DEFAULT_PATIENT_FROZEN_COLUMNS,
   DEFAULT_PATIENT_HIDDEN_COLUMNS,
@@ -61,6 +63,8 @@ const PATIENT_REALTIME_EVENTS = [
   "patient.deactivated",
 ] as const;
 
+const PATIENT_PAGE_SIZE = 50;
+
 type PatientsPageHeaderProps = {
   canCreate: boolean;
   createLabel: string;
@@ -86,6 +90,63 @@ function PatientsPageHeader({
         ) : null
       }
     />
+  );
+}
+
+function PatientsPager({
+  pageIndex,
+  totalPages,
+  totalRows,
+  previousLabel,
+  nextLabel,
+  onPageChange,
+}: {
+  nextLabel: string;
+  onPageChange: (pageIndex: number) => void;
+  pageIndex: number;
+  previousLabel: string;
+  totalPages: number;
+  totalRows: number;
+}) {
+  const pageStart = pageIndex * PATIENT_PAGE_SIZE;
+
+  return (
+    <div className="flex min-h-8 items-center justify-between gap-2 border-b border-border/60 bg-field px-4 py-0.5">
+      <span className="font-mono text-xs tabular-nums text-foreground">
+        {totalRows === 0
+          ? "0 / 0"
+          : `${pageStart + 1}-${Math.min(pageStart + PATIENT_PAGE_SIZE, totalRows)} / ${totalRows}`}
+      </span>
+      <div className="flex items-center gap-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className="size-7 rounded-md"
+          disabled={pageIndex === 0}
+          aria-label={previousLabel}
+          title={previousLabel}
+          onClick={() => onPageChange(Math.max(0, pageIndex - 1))}
+        >
+          <ChevronLeft className="size-3.5" />
+        </Button>
+        <span className="min-w-12 text-center font-mono text-xs font-medium tabular-nums text-foreground">
+          {pageIndex + 1} / {totalPages}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className="size-7 rounded-md"
+          disabled={pageIndex >= totalPages - 1}
+          aria-label={nextLabel}
+          title={nextLabel}
+          onClick={() => onPageChange(Math.min(totalPages - 1, pageIndex + 1))}
+        >
+          <ChevronRight className="size-3.5" />
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -180,7 +241,6 @@ export function PatientsPage() {
   const commonFailedLoad = t.common_failed_load;
   const {
     doctors,
-    lastUpdated,
     listBusy,
     listError,
     patients,
@@ -227,6 +287,34 @@ export function PatientsPage() {
     () => filterPatientsByInsuranceType(sortedAndFilteredPatients, filters.insuranceProvider),
     [sortedAndFilteredPatients, filters.insuranceProvider],
   );
+  const patientPaginationResetKey = JSON.stringify({
+    filterPredicates,
+    filters,
+    sortStack,
+  });
+  const [patientPaginationState, setPatientPaginationState] = useState(() => ({
+    pageIndex: 0,
+    resetKey: patientPaginationResetKey,
+  }));
+  const patientPageIndex = patientPaginationState.resetKey === patientPaginationResetKey
+    ? patientPaginationState.pageIndex
+    : 0;
+  const patientTotalPages = Math.max(
+    1,
+    Math.ceil(displayedPatients.length / PATIENT_PAGE_SIZE),
+  );
+  const safePatientPageIndex = Math.min(patientPageIndex, patientTotalPages - 1);
+  const pagedPatients = useMemo(() => {
+    const start = safePatientPageIndex * PATIENT_PAGE_SIZE;
+    return displayedPatients.slice(start, start + PATIENT_PAGE_SIZE);
+  }, [displayedPatients, safePatientPageIndex]);
+
+  function handlePatientPageChange(pageIndex: number) {
+    setPatientPaginationState({
+      pageIndex,
+      resetKey: patientPaginationResetKey,
+    });
+  }
   const {
     assignmentBusy,
     assignmentError,
@@ -321,7 +409,6 @@ export function PatientsPage() {
           groupLabels={groupLabels}
           hiddenColumns={hiddenColumns}
           insuranceOptions={insuranceOptions}
-          lastUpdatedText={lastUpdated ? formatRelativeTime(lastUpdated) : null}
           maxFrozenColumns={MAX_PATIENT_FROZEN_COLUMNS}
           onActiveFilterChange={(value) => {
             setFilters((current) => ({ ...current, activeOnly: value }));
@@ -359,6 +446,15 @@ export function PatientsPage() {
           sortStack={sortStack}
           taxonomyNodes={taxonomyNodes}
           t={tr}
+        />
+
+        <PatientsPager
+          pageIndex={safePatientPageIndex}
+          totalPages={patientTotalPages}
+          totalRows={displayedPatients.length}
+          previousLabel={t.pagination_previous}
+          nextLabel={t.pagination_next}
+          onPageChange={handlePatientPageChange}
         />
 
         {listError ? (
@@ -408,7 +504,7 @@ export function PatientsPage() {
           onOpenPatient={handleOpenPatient}
           onFrozenColumnsChange={setFrozenColumns}
           onSortChange={setSortStack}
-          rows={displayedPatients}
+          rows={pagedPatients}
           selectedId={selectedId}
           sortStack={sortStack}
           t={tr}

@@ -1,6 +1,12 @@
-import { CasesPage } from "@/pages/cases";
-import { useLang } from "@/lib/i18n";
+import { useEffect } from "react";
 
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
+
+/**
+ * Opens the case workspace for the given case. The former embedded case sheet
+ * was removed with the roster inline editor (single case UI); this component
+ * keeps the modal-style API for callers and redirects to `/cases/{id}`.
+ */
 export function CaseWorkspaceModal({
   open,
   caseId,
@@ -12,27 +18,16 @@ export function CaseWorkspaceModal({
   patientId?: string | null;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { t } = useLang();
+  const { staffGo } = useStaffNavigate();
 
-  if (!open) return null;
+  useEffect(() => {
+    if (!open || !caseId) return;
+    const params = new URLSearchParams();
+    if (patientId) params.set("patient", patientId);
+    const query = params.toString();
+    staffGo(`/cases/${caseId}${query ? `?${query}` : ""}`);
+    onOpenChange(false);
+  }, [caseId, onOpenChange, open, patientId, staffGo]);
 
-  if (!caseId) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 text-sm text-white">
-        {t.common_failed_load}
-      </div>
-    );
-  }
-
-  return (
-    <CasesPage
-      embedded
-      embeddedPatientId={patientId}
-      embeddedCaseId={caseId}
-      embeddedSheetModal={false}
-      embeddedSheetShowOverlay={false}
-      embeddedSheetSide="right"
-      onCloseCaseSheet={() => onOpenChange(false)}
-    />
-  );
+  return null;
 }

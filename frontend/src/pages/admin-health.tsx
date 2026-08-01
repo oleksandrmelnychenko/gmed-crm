@@ -20,6 +20,10 @@ import {
   AdminInlineMetric,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
+import {
+  DataTablePager,
+  useDataTablePagination,
+} from "@/components/data-table/data-table-pager";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
@@ -300,6 +304,11 @@ export function AdminHealthPage() {
     }),
   );
   const { data, loading, error, refreshedAt, detailPanel } = adminHealthState;
+  const databaseTables = useMemo(() => data?.database.tables ?? [], [data]);
+  const databaseTablesPagination = useDataTablePagination(
+    databaseTables,
+    String(databaseTables.length),
+  );
   const setAdminHealthField = <K extends keyof AdminHealthState>(
     field: K,
     nextValue: SetStateAction<AdminHealthState[K]>,
@@ -325,7 +334,7 @@ export function AdminHealthPage() {
       sortable: true,
       width: 260,
       render: (table) => (
-        <span className="font-medium text-foreground">{table.table}</span>
+        <span className="text-foreground">{table.table}</span>
       ),
     },
     {
@@ -335,7 +344,7 @@ export function AdminHealthPage() {
       sortable: true,
       width: 180,
       render: (table) => (
-        <span className="font-mono text-xs text-muted-foreground">{table.size}</span>
+        <span className="font-mono text-xs text-foreground">{table.size}</span>
       ),
     },
   ], [t.health_col_size, t.health_col_table]);
@@ -443,7 +452,7 @@ export function AdminHealthPage() {
             <Button
               type="button"
               variant="outline"
-              className="h-8 rounded-lg bg-card px-3 text-[12px]"
+              className="h-8 rounded-lg bg-field px-3 text-[12px]"
               onClick={() => setDetailPanel("database")}
             >
               {t.health_section_database}
@@ -451,7 +460,7 @@ export function AdminHealthPage() {
             <Button
               type="button"
               variant="outline"
-              className="h-8 rounded-lg bg-card px-3 text-[12px]"
+              className="h-8 rounded-lg bg-field px-3 text-[12px]"
               onClick={() => setDetailPanel("access")}
             >
               {t.health_section_access}
@@ -459,7 +468,7 @@ export function AdminHealthPage() {
             <Button
               type="button"
               variant="outline"
-              className="h-8 rounded-lg bg-card px-3 text-[12px]"
+              className="h-8 rounded-lg bg-field px-3 text-[12px]"
               onClick={() => setDetailPanel("data")}
             >
               {t.health_section_data}
@@ -507,12 +516,23 @@ export function AdminHealthPage() {
                 </div>
               ) : (
                 <DataTableSurface
-                  rows={data.database.tables}
+                  rows={databaseTablesPagination.pagedRows}
                   columns={databaseTableColumns}
                   defaultDensity="comfortable"
                   dictionary={t as unknown as Record<string, string>}
                   rowId={(table) => table.table}
                   tableClassName="min-h-[280px]"
+                  toolbarAfter={(
+                    <DataTablePager
+                      pageIndex={databaseTablesPagination.pageIndex}
+                      pageSize={databaseTablesPagination.pageSize}
+                      totalPages={databaseTablesPagination.totalPages}
+                      totalRows={databaseTablesPagination.totalRows}
+                      previousLabel={t.pagination_previous}
+                      nextLabel={t.pagination_next}
+                      onPageChange={databaseTablesPagination.onPageChange}
+                    />
+                  )}
                 />
               )}
             </AdminTableCard>

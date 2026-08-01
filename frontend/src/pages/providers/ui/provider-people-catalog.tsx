@@ -3,6 +3,8 @@ import {
   ArrowUpRight,
   Building2,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CornerDownRight,
   Mail,
   Phone,
@@ -84,6 +86,7 @@ function catalogRowIdentity(row: ProviderPeopleRow) {
 
 const DEFAULT_HIDDEN_COLUMNS = ["gender", "contacts", "last_interaction_at"];
 const DEFAULT_FROZEN_COLUMNS = ["person"];
+const PROVIDER_PEOPLE_PAGE_SIZE = 50;
 const EMPTY_PATIENT_OPTIONS: readonly ProviderPeoplePatientOption[] = [];
 const EMPTY_PROVIDER_OPTIONS: readonly ProviderSummary[] = [];
 const EMPTY_SPECIALIZATION_OPTIONS: readonly SpecializationItem[] = [];
@@ -268,12 +271,6 @@ function providerCatalogLabel(
   return forceNonMedical
     ? localizedFallback(lang, "Servicepartner", "Сервисные партнёры")
     : labels.providers_title ?? localizedFallback(lang, "Provider", "Провайдер");
-}
-
-function peopleCatalogTitle(lang: Lang, forceNonMedical: boolean) {
-  return forceNonMedical
-    ? localizedFallback(lang, "Kontakte und Personal", "Контакты и персонал")
-    : localizedFallback(lang, "Ärzte und Personal", "Врачи и персонал");
 }
 
 function staffRoleSelectLabel(
@@ -740,7 +737,7 @@ function buildPeopleColumns(
       width: 120,
       group: "identity",
       render: (row) => (
-        <span className="truncate text-xs text-muted-foreground">
+        <span className="truncate text-xs text-foreground">
           {genderLabel(row.gender, labels)}
         </span>
       ),
@@ -755,7 +752,7 @@ function buildPeopleColumns(
       width: 180,
       group: "clinical",
       render: (row) => (
-        <span className="truncate text-xs text-muted-foreground">
+        <span className="truncate text-xs text-foreground">
           {specializationSummary(row, lang, notSet)}
         </span>
       ),
@@ -770,7 +767,7 @@ function buildPeopleColumns(
       width: 220,
       group: "clinical",
       render: (row) => (
-        <span className="truncate text-xs text-muted-foreground">
+        <span className="truncate text-xs text-foreground">
           {specializationSummary(row, lang, notSet)}
         </span>
       ),
@@ -788,10 +785,10 @@ function buildPeopleColumns(
         const phone = primaryContactValue(row, "phone");
         const email = primaryContactValue(row, "email");
         if (!phone && !email) {
-          return <span className="text-xs text-muted-foreground">{notSet}</span>;
+          return <span className="text-xs text-foreground">{notSet}</span>;
         }
         return (
-          <div className="flex min-w-0 items-center gap-2.5 text-xs text-muted-foreground">
+          <div className="flex min-w-0 items-center gap-2.5 text-xs text-foreground">
             {phone ? <ContactLine icon="phone" value={phone} /> : null}
             {email ? <ContactLine icon="email" value={email} /> : null}
           </div>
@@ -817,7 +814,7 @@ function buildPeopleColumns(
       width: 160,
       group: "activity",
       render: (row) => (
-        <span className="truncate text-xs text-muted-foreground">
+        <span className="truncate text-xs text-foreground">
           {compactDateTime(row.last_interaction_at, notSet)}
         </span>
       ),
@@ -838,24 +835,28 @@ function FieldLabel({ children }: { children: ReactNode }) {
 function SelectField({
   children,
   disabled,
+  toolbar = false,
   label,
   value,
   onChange,
 }: {
   children: ReactNode;
   disabled?: boolean;
+  toolbar?: boolean;
   label: string;
   value: string;
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="min-w-0">
+    <label className={toolbar ? "w-full min-w-0" : "min-w-0"}>
       <FieldLabel>{label}</FieldLabel>
       <NativeComboboxSelect
         value={value}
         onChange={(event) => onChange(event.target.value)}
         disabled={disabled}
-        className="h-8 w-full min-w-0 rounded-md border border-input bg-background px-2 py-1 text-xs text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25"
+        title={label}
+        aria-label={label}
+        className="h-8 w-full min-w-0 rounded-md border border-input bg-field px-2 py-1 text-xs text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25"
       >
         {children}
       </NativeComboboxSelect>
@@ -864,24 +865,27 @@ function SelectField({
 }
 
 function TextFilterField({
+  toolbar = false,
   label,
   placeholder,
   value,
   onChange,
 }: {
+  toolbar?: boolean;
   label: string;
   placeholder: string;
   value: string;
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="min-w-0">
+    <label className={toolbar ? "w-full min-w-0" : "min-w-0"}>
       <FieldLabel>{label}</FieldLabel>
       <Input
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="h-8 rounded-md bg-background text-xs"
+        aria-label={label}
+        className="h-8 rounded-md bg-field text-xs"
       />
     </label>
   );
@@ -970,6 +974,7 @@ function FiltersBar({
   uiText,
   onFiltersChange,
   onResetFilters,
+  variant = "grid",
 }: {
   forceNonMedical?: boolean;
   filters: ProviderPeopleFilters;
@@ -983,6 +988,7 @@ function FiltersBar({
   specializations: readonly SpecializationItem[];
   staffRoles: readonly ProviderStaffRoleItem[];
   uiText: Record<string, string>;
+  variant?: "grid" | "toolbar";
   onFiltersChange: (filters: ProviderPeopleFilters) => void;
   onResetFilters?: () => void;
 }) {
@@ -1119,9 +1125,16 @@ function FiltersBar({
     });
   };
 
+  const isToolbar = variant === "toolbar";
   return (
-    <div>
-      <div className="grid gap-x-2 gap-y-1.5 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-6">
+    <div className={isToolbar ? "min-w-[1040px] flex-1" : undefined}>
+      <div
+        className={
+          isToolbar
+            ? "grid min-w-[1040px] grid-cols-[220px_repeat(5,minmax(150px,1fr))] items-end gap-x-1.5 gap-y-2"
+            : "grid gap-x-2 gap-y-1.5 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-6"
+        }
+      >
         <label className="min-w-0">
           <FieldLabel>{labels.common_search ?? localizedFallback(lang, "Suchen", "Поиск")}</FieldLabel>
           <div className="relative">
@@ -1139,6 +1152,7 @@ function FiltersBar({
         </label>
 
         <SelectField
+          toolbar={isToolbar}
           label={uiLabel(uiText, "providers_people_type", localizedFallback(lang, "Personentyp", "Тип человека"))}
           value={filters.personType}
           onChange={(value) => setPersonType(value as ProviderPeopleFilters["personType"])}
@@ -1167,6 +1181,7 @@ function FiltersBar({
         </label>
 
         <SelectField
+          toolbar={isToolbar}
           label={providerLabel}
           value={filters.providerId}
           onChange={(value) => setFilter("providerId", value)}
@@ -1180,6 +1195,7 @@ function FiltersBar({
         </SelectField>
 
         <SelectField
+          toolbar={isToolbar}
           label={labels.providers_type ?? localizedFallback(lang, "Providertyp", "Тип провайдера")}
           value={effectiveProviderType}
           disabled={forceNonMedical}
@@ -1191,6 +1207,7 @@ function FiltersBar({
         </SelectField>
 
         <SelectField
+          toolbar={isToolbar}
           label={localizedFallback(lang, "Status", "Статус")}
           value={filters.activeOnly ? "true" : "false"}
           onChange={(value) => setFilter("activeOnly", value === "true")}
@@ -1206,12 +1223,14 @@ function FiltersBar({
         {showClinicalFilters ? (
           <>
             <TextFilterField
+              toolbar={isToolbar}
               label={labels.providers_fachbereich ?? localizedFallback(lang, "Fachbereich", "Специализация")}
               placeholder={labels.providers_fachbereich ?? localizedFallback(lang, "Fachbereich", "Специализация")}
               value={filters.fachbereich}
               onChange={(value) => setFilter("fachbereich", value)}
             />
             <SelectField
+              toolbar={isToolbar}
               label={uiLabel(uiText, "providers_doctor_specializations", localizedFallback(lang, "Spezialisierungen", "Специализации"))}
               value={filters.specialization}
               onChange={(value) => setFilter("specialization", value)}
@@ -1224,6 +1243,7 @@ function FiltersBar({
               ))}
             </SelectField>
             <SelectField
+              toolbar={isToolbar}
               label={localizedFallback(lang, "Versicherungen", "Страховые")}
               value={filters.insuranceProvider}
               onChange={(value) => setFilter("insuranceProvider", value)}
@@ -1238,6 +1258,7 @@ function FiltersBar({
           </>
         ) : null}
         <SelectField
+          toolbar={isToolbar}
           label={uiLabel(uiText, "providers_people_role", localizedFallback(lang, "Funktion", "Должность"))}
           value={filters.role}
           onChange={(value) => setFilter("role", value)}
@@ -1251,6 +1272,7 @@ function FiltersBar({
         </SelectField>
         {showPatientFilter ? (
           <SelectField
+            toolbar={isToolbar}
             label={labels.patients_title ?? localizedFallback(lang, "Patienten", "Пациенты")}
             value={filters.patientId}
             onChange={(value) => setFilter("patientId", value)}
@@ -1264,9 +1286,11 @@ function FiltersBar({
           </SelectField>
         ) : null}
         <div className="min-w-0 self-end">
-          <FieldLabel>
-            <span aria-hidden="true">&nbsp;</span>
-          </FieldLabel>
+          {isToolbar ? null : (
+            <FieldLabel>
+              <span aria-hidden="true">&nbsp;</span>
+            </FieldLabel>
+          )}
           <Button
             type="button"
             variant="outline"
@@ -1308,6 +1332,58 @@ function ErrorBanner({
           {labels.common_retry ?? localizedFallback(lang, "Erneut versuchen", "Повторить")}
         </Button>
       ) : null}
+    </div>
+  );
+}
+
+function PeoplePager({
+  pageIndex,
+  totalPages,
+  totalRows,
+  labels,
+  onPageChange,
+}: {
+  labels: Record<string, string>;
+  onPageChange: (pageIndex: number) => void;
+  pageIndex: number;
+  totalPages: number;
+  totalRows: number;
+}) {
+  const pageStart = pageIndex * PROVIDER_PEOPLE_PAGE_SIZE;
+  return (
+    <div className="flex min-h-8 items-center justify-between gap-2 border-b border-border/60 bg-field px-4 py-0.5">
+      <span className="font-mono text-xs tabular-nums text-foreground">
+        {pageStart + 1}-{Math.min(pageStart + PROVIDER_PEOPLE_PAGE_SIZE, totalRows)} / {totalRows}
+      </span>
+      <div className="flex items-center gap-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className="size-7 rounded-md"
+          disabled={pageIndex === 0}
+          aria-label={labels.pagination_previous ?? "Previous"}
+          title={labels.pagination_previous ?? "Previous"}
+          onClick={() => onPageChange(Math.max(0, pageIndex - 1))}
+        >
+          <ChevronLeft className="size-3.5" />
+        </Button>
+        <span className="min-w-12 text-center font-mono text-xs font-medium tabular-nums text-foreground">
+          {pageIndex + 1} / {totalPages}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className="size-7 rounded-md"
+          disabled={pageIndex >= totalPages - 1}
+          aria-label={labels.pagination_next ?? "Next"}
+          title={labels.pagination_next ?? "Next"}
+          onClick={() => onPageChange(Math.min(totalPages - 1, pageIndex + 1))}
+        >
+          <ChevronRight className="size-3.5" />
+        </Button>
+      </div>
     </div>
   );
 }
@@ -1506,6 +1582,25 @@ export function ProviderPeopleCatalog({
     return options.length > 0 ? options : deriveProviderOptions(rows);
   }, [providers, rows]);
   const [expandedDoctors, setExpandedDoctors] = useState<ReadonlySet<string>>(() => new Set());
+  const paginationResetKey = JSON.stringify(filters);
+  const [paginationState, setPaginationState] = useState(() => ({
+    pageIndex: 0,
+    resetKey: paginationResetKey,
+  }));
+  const pageIndex =
+    paginationState.resetKey === paginationResetKey
+      ? paginationState.pageIndex
+      : 0;
+  const totalPages = Math.max(1, Math.ceil(groupedRows.length / PROVIDER_PEOPLE_PAGE_SIZE));
+  const safePageIndex = Math.min(pageIndex, totalPages - 1);
+  const pageStart = safePageIndex * PROVIDER_PEOPLE_PAGE_SIZE;
+  const pagedRows = useMemo(
+    () => groupedRows.slice(pageStart, pageStart + PROVIDER_PEOPLE_PAGE_SIZE),
+    [groupedRows, pageStart],
+  );
+  const handlePageChange = (nextPageIndex: number) => {
+    setPaginationState({ pageIndex: nextPageIndex, resetKey: paginationResetKey });
+  };
   const toggleExpandedDoctor = useCallback((row: ProviderPeopleCatalogRow) => {
     const identity = catalogRowIdentity(row);
     setExpandedDoctors((current) => {
@@ -1544,46 +1639,77 @@ export function ProviderPeopleCatalog({
     ),
     [expandedDoctors, forceNonMedical, labels, lang, onOpenProvider, toggleExpandedDoctor, uiText],
   );
-  const title = forceNonMedical
-    ? peopleCatalogTitle(lang, true)
-    : uiLabel(uiText, "providers_people_catalog", peopleCatalogTitle(lang, false));
   const countLabelText = uiLabel(uiText, "providers_people_count", localizedFallback(lang, "Personen", "людей"));
 
   return (
     <section className={cn("space-y-3", className)}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-          <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
-          <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
-            {groupedRows.length}
-          </span>
-        </div>
+      <div className="md:hidden">
+        <FiltersBar
+          forceNonMedical={forceNonMedical}
+          filters={filters}
+          insuranceProviders={insuranceProviders}
+          lang={lang}
+          labels={labels}
+          patients={patients}
+          providerOptions={providerOptions}
+          providers={providers}
+          taxonomyNodes={taxonomyNodes}
+          specializations={specializations}
+          staffRoles={staffRoles}
+          uiText={uiText}
+          onFiltersChange={onFiltersChange}
+          onResetFilters={onResetFilters}
+        />
       </div>
-
-      <FiltersBar
-        forceNonMedical={forceNonMedical}
-        filters={filters}
-        insuranceProviders={insuranceProviders}
-        lang={lang}
-        labels={labels}
-        patients={patients}
-        providerOptions={providerOptions}
-        providers={providers}
-        taxonomyNodes={taxonomyNodes}
-        specializations={specializations}
-        staffRoles={staffRoles}
-        uiText={uiText}
-        onFiltersChange={onFiltersChange}
-        onResetFilters={onResetFilters}
-      />
 
       {error && !loading ? <ErrorBanner error={error} lang={lang} labels={labels} onRetry={onRetry} /> : null}
 
-      <div className="hidden md:block">
+      {groupedRows.length > PROVIDER_PEOPLE_PAGE_SIZE ? (
+        <div className="overflow-hidden rounded-lg border border-border/70 shadow-sm md:hidden">
+          <PeoplePager
+            pageIndex={safePageIndex}
+            totalPages={totalPages}
+            totalRows={groupedRows.length}
+            labels={labels}
+            onPageChange={handlePageChange}
+          />
+        </div>
+      ) : null}
+
+      <div className="hidden overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm md:block">
         <DataTableSurface
-          rows={groupedRows}
+          rows={pagedRows}
           columns={columns}
+          toolbarStart={
+            <FiltersBar
+              variant="toolbar"
+              forceNonMedical={forceNonMedical}
+              filters={filters}
+              insuranceProviders={insuranceProviders}
+              lang={lang}
+              labels={labels}
+              patients={patients}
+              providerOptions={providerOptions}
+              providers={providers}
+              taxonomyNodes={taxonomyNodes}
+              specializations={specializations}
+              staffRoles={staffRoles}
+              uiText={uiText}
+              onFiltersChange={onFiltersChange}
+              onResetFilters={onResetFilters}
+            />
+          }
+          toolbarAfter={
+            groupedRows.length > PROVIDER_PEOPLE_PAGE_SIZE ? (
+              <PeoplePager
+                pageIndex={safePageIndex}
+                totalPages={totalPages}
+                totalRows={groupedRows.length}
+                labels={labels}
+                onPageChange={handlePageChange}
+              />
+            ) : null
+          }
           defaultDensity="comfortable"
           defaultFrozenColumns={DEFAULT_FROZEN_COLUMNS}
           defaultHiddenColumns={DEFAULT_HIDDEN_COLUMNS}
@@ -1620,6 +1746,7 @@ export function ProviderPeopleCatalog({
               : `${row.person_type}:${row.shared_identity_id ?? row.person_id}`
           }
           storageKey="provider-people-catalog"
+          surfaceClassName="rounded-none border-0 shadow-none"
           tableClassName="min-h-[360px]"
         />
       </div>
@@ -1629,7 +1756,7 @@ export function ProviderPeopleCatalog({
         labels={labels}
         lang={lang}
         loading={loading}
-        rows={groupedRows}
+        rows={pagedRows}
         uiText={uiText}
         onOpenPerson={onOpenPerson}
         onOpenProvider={onOpenProvider}

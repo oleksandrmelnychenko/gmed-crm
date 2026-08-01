@@ -18,6 +18,10 @@ import {
 } from "lucide-react";
 
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import {
+  DataTablePager,
+  useDataTablePagination,
+} from "@/components/data-table/data-table-pager";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +32,7 @@ import {
 } from "@/components/admin-page-patterns";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { ToolbarField } from "@/components/data-table/toolbar-field";
 import {
   Banner,
   CountBadge,
@@ -63,6 +68,7 @@ import type {
   AgencyServiceItem,
 } from "@/pages/contracts/model/types";
 import { cn } from "@/lib/utils";
+import { formatMoneyAmount } from "@/lib/money";
 
 type TaxProfile = {
   id: string;
@@ -258,20 +264,6 @@ const VAT_SOURCE_LABEL_KEYS = {
 const createButtonClassName =
   "h-9 rounded-lg px-3.5";
 
-const financeMoneyFormatters = new Map<string, Intl.NumberFormat>();
-
-function financeMoneyFormatter(currency: string) {
-  const cached = financeMoneyFormatters.get(currency);
-  if (cached) return cached;
-  const formatter = Intl.NumberFormat("de-DE", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2,
-  });
-  financeMoneyFormatters.set(currency, formatter);
-  return formatter;
-}
-
 function numberValue(value: string | null | undefined) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : 0;
@@ -279,7 +271,7 @@ function numberValue(value: string | null | undefined) {
 
 function formatMoney(value: string | number | null | undefined, currency = "EUR") {
   const numeric = typeof value === "number" ? value : numberValue(value);
-  return financeMoneyFormatter(currency).format(numeric);
+  return formatMoneyAmount(numeric, currency);
 }
 
 export function packageItemVatRate(item: ServicePackageItem, servicePackage: ServicePackage) {
@@ -675,6 +667,74 @@ function useFinanceCatalogPageContent() {
         .includes(query),
     );
   }, [agencyServicePackageUsages, agencyServices, catalogSearch, t]);
+  const agencyServicesPagination = useDataTablePagination(
+    filteredAgencyServices,
+    catalogSearch,
+  );
+  const vatMappingPagination = useDataTablePagination(
+    catalogRows,
+    "agency-service-vat-mapping",
+  );
+  const vatMappingColumns = useMemo<ColumnDef<CatalogTaxProfile>[]>(
+    () => [
+      {
+        id: "service",
+        label: t.finance_catalog_service,
+        accessor: (row) => agencyServiceNameLabel(row.service_key, row.service_name, t),
+        filterType: "text",
+        sortable: true,
+        searchable: true,
+        required: true,
+        width: 280,
+        render: (row) => (
+          <span className="truncate text-xs text-foreground">
+            {agencyServiceNameLabel(row.service_key, row.service_name, t)}
+          </span>
+        ),
+      },
+      {
+        id: "vat_rate",
+        label: t.finance_catalog_vat_label,
+        accessor: (row) => Number(row.vat_rate) || 0,
+        filterType: "number",
+        sortable: true,
+        width: 110,
+        render: (row) => (
+          <span className="block text-right font-mono text-xs tabular-nums text-foreground">
+            {row.vat_rate}%
+          </span>
+        ),
+      },
+      {
+        id: "vat_source",
+        label: t.finance_catalog_source,
+        accessor: (row) => vatSourceLabel(row.vat_source),
+        filterType: "enum",
+        sortable: true,
+        width: 160,
+        render: (row) => (
+          <Badge variant="outline" className="rounded-full font-mono text-[10px]">
+            {vatSourceLabel(row.vat_source)}
+          </Badge>
+        ),
+      },
+      {
+        id: "tax_profile",
+        label: t.finance_catalog_tax_profile_prefix,
+        accessor: (row) => taxProfileLabel(row.tax_profile_name, row.tax_profile_key),
+        filterType: "text",
+        sortable: true,
+        searchable: true,
+        width: 240,
+        render: (row) => (
+          <span className="truncate text-xs text-foreground">
+            {taxProfileLabel(row.tax_profile_name, row.tax_profile_key)}
+          </span>
+        ),
+      },
+    ],
+    [t, vatSourceLabel, taxProfileLabel],
+  );
   const taxProfileColumns = useMemo<ColumnDef<TaxProfile>[]>(
     () => [
       {
@@ -688,7 +748,7 @@ function useFinanceCatalogPageContent() {
         width: 260,
         render: (profile) => (
           <div className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate font-mono text-xs font-medium text-foreground">
+            <span className="truncate font-mono text-xs text-foreground">
               {profile.name}
             </span>
             {profile.is_default ? (
@@ -707,7 +767,7 @@ function useFinanceCatalogPageContent() {
         sortable: true,
         width: 100,
         render: (profile) => (
-          <span className="font-medium tabular-nums text-foreground">{profile.vat_rate}%</span>
+          <span className="tabular-nums text-foreground">{profile.vat_rate}%</span>
         ),
       },
       {
@@ -719,7 +779,7 @@ function useFinanceCatalogPageContent() {
         searchable: true,
         width: 220,
         render: (profile) => (
-          <span className="truncate text-muted-foreground">
+          <span className="truncate text-foreground">
             {vatCategoryLabel(profile.vat_category)}
           </span>
         ),
@@ -732,7 +792,7 @@ function useFinanceCatalogPageContent() {
         searchable: true,
         width: 320,
         render: (profile) => (
-          <span className="truncate text-muted-foreground" title={profile.description ?? undefined}>
+          <span className="truncate text-foreground" title={profile.description ?? undefined}>
             {profile.description || "—"}
           </span>
         ),
@@ -852,8 +912,8 @@ function useFinanceCatalogPageContent() {
               className="flex min-w-0 items-center gap-1.5 pl-7"
               title={row.description || undefined}
             >
-              <CornerDownRight className="size-3 shrink-0 text-muted-foreground/60" />
-              <span className="truncate font-mono text-xs text-muted-foreground">
+              <CornerDownRight className="size-3 shrink-0 text-foreground/60" />
+              <span className="truncate font-mono text-xs text-foreground">
                 {row.name}
               </span>
             </div>
@@ -890,7 +950,7 @@ function useFinanceCatalogPageContent() {
         width: 110,
         render: (row) =>
           row.kind === "item" ? (
-            <span className="tabular-nums text-muted-foreground">
+            <span className="tabular-nums text-foreground">
               {row.quantity}
               {row.unitLabel ? ` ${row.unitLabel}` : ""}
             </span>
@@ -906,7 +966,7 @@ function useFinanceCatalogPageContent() {
         sortable: true,
         width: 130,
         render: (row) => (
-          <span className={cn("tabular-nums", row.kind === "item" ? "text-muted-foreground" : "font-medium text-foreground")}>
+          <span className={cn("tabular-nums", row.kind === "item" ? "text-muted-foreground" : "text-foreground")}>
             {row.net ? formatMoney(String(row.net), row.currency) : "—"}
           </span>
         ),
@@ -934,7 +994,7 @@ function useFinanceCatalogPageContent() {
         width: 140,
         render: (row) =>
           row.kind === "item" ? null : (
-            <span className="font-semibold tabular-nums text-foreground">
+            <span className="tabular-nums text-foreground">
               {formatMoney(String(row.gross), row.currency)}
             </span>
           ),
@@ -982,7 +1042,7 @@ function useFinanceCatalogPageContent() {
         width: 260,
         render: (item) => (
           <span
-            className="truncate font-medium text-foreground"
+            className="truncate font-mono text-xs text-foreground"
             title={
               item.description
                 ? agencyServiceDescriptionLabel(item.service_key, item.description, t)
@@ -1001,7 +1061,7 @@ function useFinanceCatalogPageContent() {
         sortable: true,
         width: 120,
         render: (item) => (
-          <span className="font-medium tabular-nums text-foreground">
+          <span className="tabular-nums text-foreground">
             {formatMoney(item.unit_price as string | number, item.currency)}
           </span>
         ),
@@ -1014,7 +1074,7 @@ function useFinanceCatalogPageContent() {
         sortable: true,
         width: 120,
         render: (item) => (
-          <span className="font-medium tabular-nums text-foreground">
+          <span className="tabular-nums text-foreground">
             {formatMoney(agencyServiceGrossAmount(item), item.currency)}
           </span>
         ),
@@ -1027,7 +1087,7 @@ function useFinanceCatalogPageContent() {
         sortable: true,
         width: 110,
         render: (item) => (
-          <span className="truncate text-muted-foreground">
+          <span className="truncate text-foreground">
             {agencyServiceUnitLabel(item.unit_label, t)}
           </span>
         ),
@@ -1054,7 +1114,7 @@ function useFinanceCatalogPageContent() {
         render: (item) => {
           const packageUsages = agencyServicePackageUsages.get(item.id) ?? [];
           if (packageUsages.length === 0) {
-            return <span className="text-muted-foreground">-</span>;
+            return <span className="text-foreground">-</span>;
           }
           return (
             <div className="flex min-w-0 items-center gap-1 overflow-hidden">
@@ -1518,7 +1578,6 @@ function useFinanceCatalogPageContent() {
         title={t.finance_catalog_tax_profiles}
         accessory={
           <div className="flex items-center gap-2">
-            <CountBadge>{taxProfiles.length}</CountBadge>
             {canManageTaxProfiles ? (
               <Button
                 type="button"
@@ -1586,7 +1645,7 @@ function useFinanceCatalogPageContent() {
         ) : (
           <DataTableSurface
             loading={loading}
-            rows={filteredAgencyServices}
+            rows={agencyServicesPagination.pagedRows}
             columns={agencyServiceColumns}
             dictionary={t as unknown as Record<string, string>}
             rowId={(item) => item.id}
@@ -1594,7 +1653,8 @@ function useFinanceCatalogPageContent() {
             tableClassName="max-h-[560px]"
             toolbarStart={
               <>
-                <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+                <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
+                <div className="relative">
                   <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     type="search"
@@ -1606,11 +1666,12 @@ function useFinanceCatalogPageContent() {
                         (event.target as HTMLInputElement).blur();
                       }
                     }}
-                    className={cn(inputClass, "h-8 rounded-lg bg-background pl-8 text-[13px]")}
+                    className={cn(inputClass, "h-8 rounded-md bg-field pl-8 text-xs")}
                     placeholder={t.common_search}
                     aria-label={t.common_search}
                   />
                 </div>
+                </ToolbarField>
                 {catalogSearch ? (
                   <Button
                     type="button"
@@ -1623,6 +1684,17 @@ function useFinanceCatalogPageContent() {
                   </Button>
                 ) : null}
               </>
+            }
+            toolbarAfter={
+              <DataTablePager
+                pageIndex={agencyServicesPagination.pageIndex}
+                pageSize={agencyServicesPagination.pageSize}
+                totalPages={agencyServicesPagination.totalPages}
+                totalRows={agencyServicesPagination.totalRows}
+                previousLabel={t.pagination_previous}
+                nextLabel={t.pagination_next}
+                onPageChange={agencyServicesPagination.onPageChange}
+              />
             }
             rowActions={
               canManageTaxProfiles
@@ -1700,38 +1772,29 @@ function useFinanceCatalogPageContent() {
         title={t.finance_catalog_agency_service_vat_mapping}
         accessory={<CountBadge>{catalogRows.length}</CountBadge>}
       >
-        {loading ? (
-          <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-8 text-center text-sm text-muted-foreground">
-            {t.finance_catalog_loading_mapping}
-          </div>
-        ) : catalogRows.length === 0 ? (
+        {!loading && catalogRows.length === 0 ? (
           <EmptyCell>{t.finance_catalog_empty_mapping}</EmptyCell>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-border/50 bg-card">
-            <div className="grid grid-cols-[minmax(0,1.2fr)_120px_120px_minmax(0,1fr)] gap-3 border-b border-border/50 px-4 py-2 text-xs font-medium text-muted-foreground">
-              <span>{t.finance_catalog_service}</span>
-              <span>{t.finance_catalog_vat_label}</span>
-              <span>{t.finance_catalog_source}</span>
-              <span>{t.finance_catalog_tax_profile_prefix}</span>
-            </div>
-            {catalogRows.map((row) => (
-              <div
-                key={row.catalog_id}
-                className="grid grid-cols-[minmax(0,1.2fr)_120px_120px_minmax(0,1fr)] gap-3 border-b border-border/40 px-4 py-3 text-sm last:border-b-0"
-              >
-                <div className="min-w-0">
-                  <p className="truncate font-medium text-foreground">
-                    {agencyServiceNameLabel(row.service_key, row.service_name, t)}
-                  </p>
-                </div>
-                <span className="font-mono tabular-nums text-foreground">{row.vat_rate}%</span>
-                <span className="text-muted-foreground">{vatSourceLabel(row.vat_source)}</span>
-                <span className="truncate text-muted-foreground">
-                  {taxProfileLabel(row.tax_profile_name, row.tax_profile_key)}
-                </span>
-              </div>
-            ))}
-          </div>
+          <DataTableSurface
+            loading={loading}
+            rows={vatMappingPagination.pagedRows}
+            columns={vatMappingColumns}
+            dictionary={t as unknown as Record<string, string>}
+            rowId={(row) => row.catalog_id}
+            emptyState={<EmptyCell>{t.finance_catalog_empty_mapping}</EmptyCell>}
+            tableClassName="max-h-[560px]"
+            toolbarAfter={
+              <DataTablePager
+                pageIndex={vatMappingPagination.pageIndex}
+                pageSize={vatMappingPagination.pageSize}
+                totalPages={vatMappingPagination.totalPages}
+                totalRows={vatMappingPagination.totalRows}
+                previousLabel={t.pagination_previous}
+                nextLabel={t.pagination_next}
+                onPageChange={vatMappingPagination.onPageChange}
+              />
+            }
+          />
         )}
       </Section>
       <Sheet

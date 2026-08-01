@@ -3,9 +3,9 @@ import { cn } from "@/lib/utils";
 export const appointmentSchedulerToolbarShellClassName =
   "appointments-scheduler-divider relative z-30 w-full border-b border-border/70 bg-card px-3 py-2";
 export const appointmentSchedulerToolbarRowClassName =
-  "appointments-scheduler-toolbar flex w-full flex-nowrap items-center gap-1.5 overflow-x-auto";
+  "appointments-scheduler-toolbar flex w-full flex-nowrap items-end gap-1.5 overflow-x-auto";
 export const appointmentSchedulerToolbarGroupClassName =
-  "appointments-scheduler-search flex w-full items-center gap-1.5";
+  "appointments-scheduler-search flex w-full items-end gap-1.5";
 export const appointmentSchedulerToolbarIconButtonClassName =
   "size-8 shrink-0 rounded-lg";
 export const appointmentSchedulerToolbarSearchButtonClassName =
@@ -15,7 +15,7 @@ export const appointmentSchedulerToolbarQueueButtonClassName =
 export const appointmentMobileAgendaCardClassName =
   "rounded-lg border border-slate-200/80 bg-slate-50/85 p-4 shadow-sm";
 export const appointmentMobileAgendaSearchInputClassName =
-  "h-10 rounded-xl bg-slate-50";
+  "h-10 rounded-xl bg-field";
 export const appointmentMobileAgendaInfoBadgeClassName =
   "rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700";
 export const appointmentMobileAgendaNeutralBadgeClassName =

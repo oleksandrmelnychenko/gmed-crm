@@ -71,6 +71,27 @@ function linkedRecordsReducer(
   };
 }
 
+async function resolveOrderCaseId(orderId: string | null): Promise<string | null> {
+  if (!orderId) return null;
+  try {
+    const order = await apiFetch<{ case_id?: string | null }>(`/orders/${orderId}`);
+    return order.case_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function narrowToOrderCase(
+  items: CaseRosterItem[],
+  orderCaseId: string | null,
+): CaseRosterItem[] {
+  if (!orderCaseId) return items;
+  const matched = items.filter(
+    (item) => item.id === orderCaseId || item.case_uuid === orderCaseId,
+  );
+  return matched.length > 0 ? matched : items;
+}
+
 export function useAppointmentLinkedRecords({
   detail,
   linkedPreviewOpen,
@@ -140,7 +161,20 @@ export function useAppointmentLinkedRecords({
         } else if (linkedPreviewKind === "documents") {
           endpoint = `/documents?appointment_id=${currentDetail.id}&patient_id=${currentDetail.patient_id}`;
         } else {
-          endpoint = `/cases?patient_id=${currentDetail.patient_id}`;
+          const orderCaseId = await resolveOrderCaseId(
+            currentDetail.order_id ?? null,
+          );
+          const cases = await apiFetch<CaseRosterItem[]>(
+            `/cases?patient_id=${currentDetail.patient_id}`,
+          );
+          if (!active) return;
+          dispatchLinkedRecordsState({
+            linkedPreviewPayload: normalizeLinkedPreviewPayload(
+              narrowToOrderCase(cases, orderCaseId),
+            ),
+            linkedPreviewLoading: false,
+          });
+          return;
         }
 
         const payload = await apiFetch<unknown>(endpoint);
@@ -224,30 +258,37 @@ export function useAppointmentLinkedRecords({
       linkedCasesError: "",
     });
 
-    void apiFetch<CaseRosterItem[]>(`/cases?patient_id=${detail.patient_id}`)
-      .then((items) => {
-        if (!active) return;
-        dispatchLinkedRecordsState({
-          linkedCasesItems: items,
-          linkedCasesLoading: false,
-        });
-      })
-      .catch((error) => {
-        if (!active) return;
-        dispatchLinkedRecordsState({
-          linkedCasesItems: [],
-          linkedCasesError: appointmentActionErrorMessage(
-            error,
-            failedLoadMessage,
-          ),
-          linkedCasesLoading: false,
-        });
+    const orderId = detail.order_id ?? null;
+    const patientId = detail.patient_id;
+
+    async function loadLinkedCases() {
+      const orderCaseId = await resolveOrderCaseId(orderId);
+      const items = await apiFetch<CaseRosterItem[]>(
+        `/cases?patient_id=${patientId}`,
+      );
+      if (!active) return;
+      dispatchLinkedRecordsState({
+        linkedCasesItems: narrowToOrderCase(items, orderCaseId),
+        linkedCasesLoading: false,
       });
+    }
+
+    loadLinkedCases().catch((error) => {
+      if (!active) return;
+      dispatchLinkedRecordsState({
+        linkedCasesItems: [],
+        linkedCasesError: appointmentActionErrorMessage(
+          error,
+          failedLoadMessage,
+        ),
+        linkedCasesLoading: false,
+      });
+    });
 
     return () => {
       active = false;
     };
-  }, [detail?.patient_id, failedLoadMessage, linkedCasesOpen]);
+  }, [detail?.order_id, detail?.patient_id, failedLoadMessage, linkedCasesOpen]);
 
   useEffect(() => {
     if (!linkedDocumentsOpen || !detail?.id || !detail.patient_id) {

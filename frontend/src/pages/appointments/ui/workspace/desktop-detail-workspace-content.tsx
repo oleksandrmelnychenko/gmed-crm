@@ -30,6 +30,7 @@ import { MemoizedAppointmentLinksSection } from "@/pages/appointments/ui/section
 import { MemoizedAppointmentOverviewSection } from "@/pages/appointments/ui/sections/overview-section";
 import { MemoizedAppointmentSnapshotSection } from "@/pages/appointments/ui/sections/snapshot-section";
 import { MemoizedAppointmentTimelineSection } from "@/pages/appointments/ui/sections/timeline-section";
+import { MemoizedAppointmentWorkflowTab } from "@/pages/appointments/ui/sections/workflow-surfaces";
 import { EmptyState } from "@/pages/appointments/ui/shared/workspace-primitives";
 
 const loadClinicalSection = () =>
@@ -42,9 +43,6 @@ const loadNotesSection = () =>
   import("@/pages/appointments/ui/sections/notes-section");
 const loadServicesSection = () =>
   import("@/pages/appointments/ui/sections/services-section");
-const loadWorkflowSurfaces = () =>
-  import("@/pages/appointments/ui/sections/workflow-surfaces");
-
 const LazyClinicalSection = lazy(async () => {
   const mod = await loadClinicalSection();
   return { default: mod.MemoizedAppointmentClinicalSection };
@@ -68,11 +66,6 @@ const LazyNotesSection = lazy(async () => {
 const LazyServicesSection = lazy(async () => {
   const mod = await loadServicesSection();
   return { default: mod.MemoizedAppointmentServicesSection };
-});
-
-const LazyWorkflowTab = lazy(async () => {
-  const mod = await loadWorkflowSurfaces();
-  return { default: mod.MemoizedAppointmentWorkflowTab };
 });
 
 function loadingSection(title: string, text: string) {
@@ -441,13 +434,7 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
       {showWorkflowTab ? (
         hasWorkflowContent ? (
           extendedResourcesReady ? (
-            <Suspense
-              fallback={loadingSection(
-                appointmentText("appointments_workflow_cockpit"),
-                appointmentText("appointments_loading_workflow_surface"),
-              )}
-            >
-              <LazyWorkflowTab
+              <MemoizedAppointmentWorkflowTab
                 detail={detail}
                 detailReport={detailReport}
                 staff={staff}
@@ -486,7 +473,6 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
                 onError={onError}
                 onNotice={onNotice}
               />
-            </Suspense>
           ) : (
             loadingSection(
               appointmentText("appointments_workflow_cockpit"),

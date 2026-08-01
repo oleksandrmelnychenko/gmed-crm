@@ -290,7 +290,7 @@ export function ProviderHierarchyTimeline({
     >
       {totalPages > 1 ? (
         <TimelinePager
-          className="border-b border-border/60"
+          className="border-b border-border/60 bg-field"
           pageStart={pageStart}
           safePageIndex={safePageIndex}
           totalPages={totalPages}
@@ -324,7 +324,7 @@ export function ProviderHierarchyTimeline({
       )}
       {totalPages > 1 ? (
         <TimelinePager
-          className="border-t border-border/60 bg-muted/15"
+          className="border-t border-border/60 bg-field"
           pageStart={pageStart}
           safePageIndex={safePageIndex}
           totalPages={totalPages}
@@ -355,8 +355,8 @@ function TimelinePager({
   onPageChange: (pageIndex: number) => void;
 }) {
   return (
-    <div className={cn("flex items-center justify-between gap-2 px-4 py-2", className)}>
-      <span className="font-mono text-xs tabular-nums text-muted-foreground">
+    <div className={cn("flex min-h-8 items-center justify-between gap-2 px-4 py-0.5", className)}>
+      <span className="font-mono text-xs tabular-nums text-foreground">
         {pageStart + 1}-{Math.min(pageStart + TIMELINE_ROOTS_PAGE_SIZE, totalRoots)} / {totalRoots}
       </span>
       <div className="flex items-center gap-1.5">

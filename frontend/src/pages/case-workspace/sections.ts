@@ -12,6 +12,7 @@ import {
   Scan,
   Scissors,
   Stethoscope,
+  Syringe,
   Thermometer,
   Wind,
   Zap,
@@ -36,6 +37,7 @@ export type CaseSectionKey =
   | "pain"
   | "symptoms"
   | "vegetative"
+  | "impfstatus"
   | "cardiology"
   | "gastroenterology"
   | "orthopedics"
@@ -92,6 +94,11 @@ export const CASE_WORKSPACE_SECTIONS: readonly CaseSectionDefinition[] = [
     key: "vegetative",
     group: "clinical",
     icon: Thermometer,
+  },
+  {
+    key: "impfstatus",
+    group: "clinical",
+    icon: Syringe,
   },
   {
     key: "cardiology",

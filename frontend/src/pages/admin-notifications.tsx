@@ -30,6 +30,10 @@ import {
   AdminToolbar,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
+import {
+  DataTablePager,
+  useDataTablePagination,
+} from "@/components/data-table/data-table-pager";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
@@ -262,6 +266,10 @@ function useAdminNotificationsPageContent() {
       return matchesNotificationSearch(channel, deferredSearch);
     });
   }, [channels, deferredSearch, statusFilter, typeFilter]);
+  const channelsPagination = useDataTablePagination(
+    filteredChannels,
+    `${deferredSearch}\u0000${typeFilter}\u0000${statusFilter}`,
+  );
 
   const selectedChannel = useMemo(
     () => channels.find((channel) => channel.id === selectedChannelId) ?? null,
@@ -394,10 +402,10 @@ function useAdminNotificationsPageContent() {
       width: 260,
       render: (channel) => (
         <div className="min-w-0">
-          <div className="truncate text-xs font-medium text-foreground">
+          <div className="truncate text-xs text-foreground">
             {channel.name}
           </div>
-          <div className="mt-1 truncate text-[11px] text-muted-foreground">
+          <div className="mt-1 truncate text-xs text-foreground">
             {channel.id}
           </div>
         </div>
@@ -424,7 +432,7 @@ function useAdminNotificationsPageContent() {
       render: (channel) => {
         const full = prettyNotificationConfig(channel.config);
         return (
-          <span className="truncate font-mono text-xs text-muted-foreground" title={full}>
+          <span className="truncate font-mono text-xs text-foreground" title={full}>
             {compactNotificationConfig(channel.config) || "-"}
           </span>
         );
@@ -535,12 +543,12 @@ function useAdminNotificationsPageContent() {
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder={t.common_search}
-              className="h-8 w-[240px] rounded-lg bg-card pl-8 text-[13px]"
+              className="h-8 w-[240px] rounded-lg bg-field pl-8 text-[13px]"
             />
           </div>
 
           <NativeComboboxSelect value={typeFilter}
-            onChange={(event) => setTypeFilter(event.target.value ?? "")} className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
+            onChange={(event) => setTypeFilter(event.target.value ?? "")} className="h-8 w-[240px] rounded-lg bg-field text-[13px]">
               <option value="">{t.providers_all}</option>
               <option value="smtp">{t.notif_smtp}</option>
               <option value="webhook">{t.notif_webhook}</option>
@@ -550,7 +558,7 @@ function useAdminNotificationsPageContent() {
             value={statusFilter}
 
 
-            onChange={(event) => setStatusFilter(event.target.value ?? "")} className="h-8 w-[240px] rounded-lg bg-card text-[13px]">
+            onChange={(event) => setStatusFilter(event.target.value ?? "")} className="h-8 w-[240px] rounded-lg bg-field text-[13px]">
               <option value="">{t.providers_all}</option>
               <option value="active">{t.common_active}</option>
               <option value="inactive">{t.common_inactive}</option>
@@ -624,7 +632,7 @@ function useAdminNotificationsPageContent() {
             <TabLoader />
           ) : (
             <DataTableSurface
-              rows={filteredChannels}
+              rows={channelsPagination.pagedRows}
               columns={columns}
               defaultDensity="comfortable"
               dictionary={t as unknown as Record<string, string>}
@@ -636,6 +644,17 @@ function useAdminNotificationsPageContent() {
               }}
               emptyState={<EmptyCell>{t.notif_no_channels}</EmptyCell>}
               tableClassName="min-h-[360px]"
+              toolbarAfter={(
+                <DataTablePager
+                  pageIndex={channelsPagination.pageIndex}
+                  pageSize={channelsPagination.pageSize}
+                  totalPages={channelsPagination.totalPages}
+                  totalRows={channelsPagination.totalRows}
+                  previousLabel={t.pagination_previous}
+                  nextLabel={t.pagination_next}
+                  onPageChange={channelsPagination.onPageChange}
+                />
+              )}
             />
           )}
         </AdminTableCard>
@@ -667,14 +686,14 @@ function useAdminNotificationsPageContent() {
                       required
                       value={formName}
                       onChange={(event) => setFormName(event.target.value)}
-                      className="h-9 rounded-lg bg-card"
+                      className="h-9 rounded-lg bg-field"
                     />
                   </Field>
                   <Field label={t.notif_type} htmlFor="channel-type">
                     <NativeComboboxSelect value={formType}
                       onChange={(event) => setFormType(event.target.value ?? "smtp")}
                         id="channel-type"
-                        className="!h-9 w-full rounded-lg bg-card"
+                        className="!h-9 w-full rounded-lg bg-field"
                       >
                         <option value="smtp">{t.notif_smtp}</option>
                         <option value="webhook">{t.notif_webhook}</option>

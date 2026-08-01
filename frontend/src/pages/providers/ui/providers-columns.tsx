@@ -357,7 +357,7 @@ export function buildProviderColumns(
       width: 240,
       group: "registry",
       render: (provider) => (
-        <span className="line-clamp-2 text-xs leading-snug text-muted-foreground">
+        <span className="line-clamp-2 text-xs leading-snug text-foreground">
           {taxonomyProviderLabel(provider, lang, notSet)}
         </span>
       ),
@@ -373,7 +373,7 @@ export function buildProviderColumns(
       width: 150,
       group: "registry",
       render: (provider) => (
-        <span className="truncate text-xs text-muted-foreground">
+        <span className="truncate text-xs text-foreground">
           {provider.address_city || notSet}
         </span>
       ),
@@ -389,7 +389,7 @@ export function buildProviderColumns(
       width: 150,
       group: "registry",
       render: (provider) => (
-        <span className="truncate text-xs text-muted-foreground">
+        <span className="truncate text-xs text-foreground">
           {countryNameForDisplay(provider.address_country, lang) || notSet}
         </span>
       ),
@@ -405,7 +405,7 @@ export function buildProviderColumns(
       width: 180,
       group: "registry",
       render: (provider) => (
-        <span className="truncate text-xs text-muted-foreground">
+        <span className="truncate text-xs text-foreground">
           {providerSpecializationLabel(provider, lang, notSet)}
         </span>
       ),
@@ -491,10 +491,10 @@ export function buildProviderColumns(
       width: 96,
       group: "activity",
       render: (provider) => (
-        <span className="tabular-nums text-xs text-muted-foreground">
+        <span className="tabular-nums text-xs text-foreground">
           {formatRating(provider.avg_rating, notSet)}
           {provider.rating_count > 0 ? (
-            <span className="ml-1 text-[10px]">({provider.rating_count})</span>
+            <span className="ml-1 text-xs">({provider.rating_count})</span>
           ) : null}
         </span>
       ),
@@ -508,7 +508,7 @@ export function buildProviderColumns(
       width: 120,
       group: "activity",
       render: (provider) => (
-        <span className="tabular-nums text-xs text-muted-foreground">
+        <span className="tabular-nums text-xs text-foreground">
           {formatRating(provider.internal_rating ?? null, notSet)}
         </span>
       ),
@@ -523,7 +523,7 @@ export function buildProviderColumns(
       width: 170,
       group: "contact",
       render: (provider) => (
-        <span className="truncate text-xs text-muted-foreground">{provider.phone || notSet}</span>
+        <span className="truncate text-xs text-foreground">{provider.phone || notSet}</span>
       ),
     },
     {
@@ -536,7 +536,7 @@ export function buildProviderColumns(
       width: 220,
       group: "contact",
       render: (provider) => (
-        <span className="truncate text-xs text-muted-foreground">{provider.email || notSet}</span>
+        <span className="truncate text-xs text-foreground">{provider.email || notSet}</span>
       ),
     },
     {
@@ -549,7 +549,7 @@ export function buildProviderColumns(
       width: 160,
       group: "registry",
       render: (provider) => (
-        <span className="truncate text-xs text-muted-foreground">{provider.tax_id || notSet}</span>
+        <span className="truncate text-xs text-foreground">{provider.tax_id || notSet}</span>
       ),
     },
     {
@@ -561,7 +561,7 @@ export function buildProviderColumns(
       width: 150,
       group: "audit",
       render: (provider) => (
-        <span className="truncate text-xs text-muted-foreground">
+        <span className="truncate text-xs text-foreground">
           {compactDateTime(provider.last_interaction_at, notSet)}
         </span>
       ),
@@ -575,7 +575,7 @@ export function buildProviderColumns(
       width: 150,
       group: "audit",
       render: (provider) => (
-        <span className="truncate text-xs text-muted-foreground">
+        <span className="truncate text-xs text-foreground">
           {compactDateTime(provider.created_at, notSet)}
         </span>
       ),

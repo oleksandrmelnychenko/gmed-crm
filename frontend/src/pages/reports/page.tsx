@@ -877,7 +877,7 @@ function useReportsPageContent() {
         width: 240,
         pinned: "left",
         sortable: true,
-        render: (row) => <span className="text-sm font-medium text-foreground">{row.name}</span>,
+        render: (row) => <span className="text-xs text-foreground">{row.name}</span>,
       },
       {
         id: "location",
@@ -973,7 +973,7 @@ function useReportsPageContent() {
         width: 260,
         pinned: "left",
         render: (row) => (
-          <span className="text-sm font-medium text-foreground">
+          <span className="text-xs text-foreground">
             {serviceTypeLabel(row.service_type, text.serviceTypes, formatUnknownValue(row.service_type, t))}
           </span>
         ),
@@ -1022,7 +1022,7 @@ function useReportsPageContent() {
         width: 240,
         pinned: "left",
         sortable: true,
-        render: (row) => <span className="text-sm font-medium text-foreground">{row.name}</span>,
+        render: (row) => <span className="text-xs text-foreground">{row.name}</span>,
       },
       {
         id: "location",
@@ -1113,7 +1113,7 @@ function useReportsPageContent() {
         pinned: "left",
         sortable: true,
         render: (row) => (
-          <span className="text-sm font-medium text-foreground">
+          <span className="text-xs text-foreground">
             {reportBackendLabel(row.service_label, text, t)}
           </span>
         ),
@@ -1212,7 +1212,7 @@ function useReportsPageContent() {
         width: 240,
         pinned: "left",
         sortable: true,
-        render: (row) => <span className="text-sm font-medium text-foreground">{row.name}</span>,
+        render: (row) => <span className="text-xs text-foreground">{row.name}</span>,
       },
       {
         id: "location",
@@ -1354,7 +1354,7 @@ function useReportsPageContent() {
         pinned: "left",
         sortable: true,
         render: (row) => (
-          <span className="text-sm font-medium text-foreground">
+          <span className="text-xs text-foreground">
             {[row.title, row.name].filter(Boolean).join(" ")}
           </span>
         ),
@@ -1491,7 +1491,7 @@ function useReportsPageContent() {
         pinned: "left",
         sortable: true,
         render: (row) => (
-          <span className="text-sm font-medium text-foreground">
+          <span className="text-xs text-foreground">
             {quoteStatusLabel(row.status)}
           </span>
         ),
@@ -1544,7 +1544,7 @@ function useReportsPageContent() {
         width: 220,
         pinned: "left",
         sortable: true,
-        render: (row) => <span className="text-sm font-medium text-foreground">{row.name}</span>,
+        render: (row) => <span className="text-xs text-foreground">{row.name}</span>,
       },
       {
         id: "location",

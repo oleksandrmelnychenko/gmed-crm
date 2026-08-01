@@ -1758,13 +1758,6 @@ async fn create_patient(
     .await
     .ok();
 
-    crate::routes::workflow_checklists::ensure_default_patient_workflow(
-        &state,
-        row.id,
-        Some(auth.user_id),
-    )
-    .await?;
-
     state.audit_sender.try_send(audit::domain_event(
         "create_patient",
         Some(auth.user_id),
@@ -4058,10 +4051,12 @@ async fn list_patient_cases(
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
     let rows = sqlx::query(
-        r#"SELECT id, case_id, status, hauptanfragegrund, created_at
-           FROM cases
-           WHERE patient_id = $1
-           ORDER BY created_at DESC"#,
+        r#"SELECT c.id, c.case_id, c.status, c.hauptanfragegrund, c.created_at,
+                  c.updated_at, c.zuweiser, m.name AS manager_name
+           FROM cases c
+           LEFT JOIN users m ON m.id = c.manager_id
+           WHERE c.patient_id = $1
+           ORDER BY c.created_at DESC"#,
     )
     .bind(patient_uuid)
     .fetch_all(&state.db)
@@ -4083,6 +4078,9 @@ async fn list_patient_cases(
                 "status": row.try_get::<String, _>("status").unwrap_or_default(),
                 "hauptanfragegrund": row.try_get::<Option<String>, _>("hauptanfragegrund").unwrap_or_default(),
                 "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).ok(),
+                "zuweiser": row.try_get::<Option<String>, _>("zuweiser").unwrap_or_default(),
+                "manager_name": row.try_get::<Option<String>, _>("manager_name").unwrap_or_default(),
             })
         })
         .collect::<Vec<_>>();
@@ -4106,7 +4104,9 @@ async fn list_patient_orders(
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
     let rows = sqlx::query(
-        r#"SELECT id, order_number, phase, status, needs_description, created_at
+        r#"SELECT id, order_number, phase, status, needs_description, created_at,
+                  total_estimated, total_actual, currency, date_from, date_to,
+                  signed_patient, signed_agency, signed_at
            FROM orders
            WHERE patient_id = $1
            ORDER BY created_at DESC"#,
@@ -4132,6 +4132,14 @@ async fn list_patient_orders(
                 "status": row.try_get::<String, _>("status").unwrap_or_default(),
                 "needs_description": row.try_get::<Option<String>, _>("needs_description").unwrap_or_default(),
                 "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                "total_estimated": row.try_get::<Option<rust_decimal::Decimal>, _>("total_estimated").unwrap_or_default(),
+                "total_actual": row.try_get::<Option<rust_decimal::Decimal>, _>("total_actual").unwrap_or_default(),
+                "currency": row.try_get::<Option<String>, _>("currency").unwrap_or_default(),
+                "date_from": row.try_get::<Option<chrono::NaiveDate>, _>("date_from").unwrap_or_default(),
+                "date_to": row.try_get::<Option<chrono::NaiveDate>, _>("date_to").unwrap_or_default(),
+                "signed_patient": row.try_get::<bool, _>("signed_patient").unwrap_or(false),
+                "signed_agency": row.try_get::<bool, _>("signed_agency").unwrap_or(false),
+                "signed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
             })
         })
         .collect::<Vec<_>>();
@@ -5725,12 +5733,25 @@ async fn get_patient_timeline(
     };
 
     let events_cte_static = r#"WITH events AS (
+            SELECT 'patient'::text AS entity_type,
+                   p.id AS entity_id,
+                   concat_ws(' ', p.patient_id, p.first_name, p.last_name) AS title,
+                   'intake'::text AS category,
+                   CASE WHEN p.is_active THEN 'active' ELSE 'inactive' END AS status,
+                   p.created_at AS happened_at,
+                   creator.name AS source_label
+            FROM patients p
+            LEFT JOIN users creator ON creator.id = p.created_by
+            WHERE p.id = $1
+
+            UNION ALL
+
             SELECT 'appointment'::text AS entity_type,
                    a.id AS entity_id,
                    a.title AS title,
                    COALESCE(a.appointment_type, 'medical') AS category,
                    a.status AS status,
-                   ((a.date::timestamp + COALESCE(a.time_start, time '00:00')) AT TIME ZONE 'UTC') AS happened_at,
+                   ((a.date::timestamp + COALESCE(a.time_start, time '00:00')) AT TIME ZONE 'Europe/Berlin') AS happened_at,
                    concat_ws(' · ', p.name, d.name) AS source_label
             FROM appointments a
             LEFT JOIN providers p ON p.id = a.provider_id
@@ -5747,7 +5768,109 @@ async fn get_patient_timeline(
                    c.created_at AS happened_at,
                    c.case_id AS source_label
             FROM cases c
-            WHERE c.patient_id = $1
+            LEFT JOIN leads source_lead ON source_lead.id = c.lead_id
+            WHERE COALESCE(c.patient_id, source_lead.converted_patient_id) = $1
+
+            UNION ALL
+
+            SELECT 'task'::text AS entity_type,
+                   t.id AS entity_id,
+                   t.title AS title,
+                   'workflow'::text AS category,
+                   t.status AS status,
+                   COALESCE(t.completed_at, t.due_date, t.created_at) AS happened_at,
+                   assignee.name AS source_label
+            FROM tasks t
+            LEFT JOIN users assignee ON assignee.id = t.assigned_to
+            LEFT JOIN orders task_order ON task_order.id = t.order_id
+            LEFT JOIN leads task_lead ON task_lead.id = task_order.source_lead_id
+            LEFT JOIN appointments task_appointment ON task_appointment.id = t.appointment_id
+            WHERE COALESCE(
+                      t.patient_id,
+                      task_order.patient_id,
+                      task_lead.converted_patient_id,
+                      task_appointment.patient_id
+                  ) = $1
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM workflow_checklist_items checklist
+                  WHERE checklist.linked_task_id = t.id
+              )
+              AND NOT (
+                  t.status = 'cancelled'
+                  AND t.order_id IS NULL
+                  AND t.appointment_id IS NULL
+                  AND t.title LIKE 'Patient checklist:%'
+              )
+
+            UNION ALL
+
+            SELECT 'workflow_task'::text AS entity_type,
+                   checklist.id AS entity_id,
+                   checklist.item_text AS title,
+                   checklist.checklist_key AS category,
+                   CASE WHEN checklist.is_completed THEN 'completed' ELSE 'open' END AS status,
+                   COALESCE(checklist.completed_at, checklist.due_date, checklist.created_at) AS happened_at,
+                   concat_ws(' · ', owner.name, checklist.owner_role) AS source_label
+            FROM workflow_checklist_items checklist
+            LEFT JOIN users owner ON owner.id = checklist.owner_user_id
+            WHERE checklist.patient_id = $1
+
+            UNION ALL
+
+            SELECT 'communication'::text AS entity_type,
+                   communication.id AS entity_id,
+                   COALESCE(
+                       NULLIF(communication.subject, ''),
+                       NULLIF(left(communication.message, 120), ''),
+                       'Communication'
+                   ) AS title,
+                   'communication'::text AS category,
+                   communication.status AS status,
+                   COALESCE(
+                       communication.closed_at,
+                       communication.responded_at,
+                       communication.due_at,
+                       communication.created_at
+                   ) AS happened_at,
+                   concat_ws(' · ', communication.contact_name, provider.name, doctor.name) AS source_label
+            FROM appointment_communications communication
+            LEFT JOIN appointments communication_appointment
+                   ON communication_appointment.id = communication.appointment_id
+            LEFT JOIN providers provider ON provider.id = communication.provider_id
+            LEFT JOIN provider_doctors doctor ON doctor.id = communication.doctor_id
+            WHERE COALESCE(communication.patient_id, communication_appointment.patient_id) = $1
+
+            UNION ALL
+
+            SELECT 'reminder'::text AS entity_type,
+                   reminder.id AS entity_id,
+                   reminder.title AS title,
+                   'scheduling'::text AS category,
+                   CASE WHEN reminder.is_completed THEN 'completed' ELSE 'open' END AS status,
+                   COALESCE(reminder.completed_at, reminder.remind_at, reminder.created_at) AS happened_at,
+                   reminder_user.name AS source_label
+            FROM reminders reminder
+            JOIN appointments reminder_appointment ON reminder_appointment.id = reminder.appointment_id
+            LEFT JOIN users reminder_user ON reminder_user.id = reminder.user_id
+            WHERE reminder_appointment.patient_id = $1
+
+            UNION ALL
+
+            SELECT 'relation'::text AS entity_type,
+                   relation.id AS entity_id,
+                   COALESCE(
+                       NULLIF(concat_ws(' ', related_patient.first_name, related_patient.last_name), ''),
+                       relation.related_name,
+                       'Related person'
+                   ) AS title,
+                   'care'::text AS category,
+                   'active'::text AS status,
+                   relation.created_at AS happened_at,
+                   relation.relation_type AS source_label
+            FROM patient_relations relation
+            LEFT JOIN patients related_patient ON related_patient.id = relation.related_patient_id
+            WHERE relation.patient_id = $1
 
             UNION ALL
 
@@ -5759,7 +5882,8 @@ async fn get_patient_timeline(
                    o.created_at AS happened_at,
                    COALESCE(o.needs_description, o.order_number) AS source_label
             FROM orders o
-            WHERE o.patient_id = $1
+            LEFT JOIN leads source_lead ON source_lead.id = o.source_lead_id
+            WHERE COALESCE(o.patient_id, source_lead.converted_patient_id) = $1
 
             UNION ALL
 
@@ -5768,13 +5892,14 @@ async fn get_patient_timeline(
                    ol.description AS title,
                    'leistung'::text AS category,
                    ol.status AS status,
-                   COALESCE(ol.approved_at, ol.delivered_at, ol.created_at) AS happened_at,
+                   COALESCE(ol.delivered_at, ol.approved_at, ol.created_at) AS happened_at,
                    concat_ws(' · ', o.order_number, p.name, d.name) AS source_label
             FROM order_leistungen ol
             JOIN orders o ON o.id = ol.order_id
+            LEFT JOIN leads source_lead ON source_lead.id = o.source_lead_id
             LEFT JOIN providers p ON p.id = ol.provider_id
             LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
-            WHERE o.patient_id = $1
+            WHERE COALESCE(o.patient_id, source_lead.converted_patient_id) = $1
 
             UNION ALL
 
@@ -5786,7 +5911,8 @@ async fn get_patient_timeline(
                    d.created_at AS happened_at,
                    d.visibility AS source_label
             FROM documents d
-            WHERE d.patient_id = $1
+            LEFT JOIN leads source_lead ON source_lead.id = d.lead_id
+            WHERE COALESCE(d.patient_id, source_lead.converted_patient_id) = $1
 
             UNION ALL
 
@@ -5798,7 +5924,24 @@ async fn get_patient_timeline(
                    COALESCE(fc.signed_at, fc.created_at) AS happened_at,
                    NULL::text AS source_label
             FROM framework_contracts fc
-            WHERE fc.patient_id = $1
+            LEFT JOIN leads source_lead ON source_lead.id = fc.lead_id
+            WHERE COALESCE(fc.patient_id, source_lead.converted_patient_id) = $1
+              AND $7::boolean
+
+            UNION ALL
+
+            SELECT 'quote'::text AS entity_type,
+                   q.id AS entity_id,
+                   q.quote_number AS title,
+                   'financial'::text AS category,
+                   q.status AS status,
+                   COALESCE(q.paid_at, q.created_at) AS happened_at,
+                   o.order_number AS source_label
+            FROM quotes q
+            JOIN orders o ON o.id = q.order_id
+            LEFT JOIN leads source_lead ON source_lead.id = o.source_lead_id
+            WHERE COALESCE(o.patient_id, source_lead.converted_patient_id) = $1
+              AND $7::boolean
 
             UNION ALL
 
@@ -5811,6 +5954,22 @@ async fn get_patient_timeline(
                    NULL::text AS source_label
             FROM invoices i
             WHERE i.patient_id = $1
+              AND $7::boolean
+
+            UNION ALL
+
+            SELECT 'dunning'::text AS entity_type,
+                   dunning.id AS entity_id,
+                   concat('Dunning ', dunning.level, ': ', invoice.invoice_number) AS title,
+                   'billing'::text AS category,
+                   'sent'::text AS status,
+                   COALESCE(dunning.sent_at, dunning.created_at) AS happened_at,
+                   dunning_user.name AS source_label
+            FROM invoice_dunning_events dunning
+            JOIN invoices invoice ON invoice.id = dunning.invoice_id
+            LEFT JOIN users dunning_user ON dunning_user.id = dunning.created_by
+            WHERE invoice.patient_id = $1
+              AND $7::boolean
 
             UNION ALL
 
@@ -5824,13 +5983,14 @@ async fn get_patient_timeline(
                        ELSE 'visible'
                    END AS status,
                    al.created_at AS happened_at,
-                   concat_ws(' В· ', u.name, al.context->>'visibility_note') AS source_label
+                   concat_ws(' · ', u.name, al.context->>'visibility_note') AS source_label
             FROM audit_log al
             JOIN invoices i ON i.id = al.entity_id
             LEFT JOIN users u ON u.id = al.user_id
             WHERE al.entity_type = 'invoice'
               AND al.action = 'invoice_visibility_changed'
               AND i.patient_id = $1
+              AND $7::boolean
 
             UNION ALL
 
@@ -5872,6 +6032,7 @@ async fn get_patient_timeline(
             JOIN service_packages sp ON sp.id = psp.package_id
             LEFT JOIN orders o ON o.id = psp.order_id
             WHERE psp.patient_id = $1
+              AND $7::boolean
 
             UNION ALL
 
@@ -5888,6 +6049,7 @@ async fn get_patient_timeline(
             LEFT JOIN service_package_items spi ON spi.id = spc.package_item_id
             LEFT JOIN orders o ON o.id = spc.order_id
             WHERE psp.patient_id = $1
+              AND $7::boolean
 
             UNION ALL
 
@@ -5902,19 +6064,22 @@ async fn get_patient_timeline(
             LEFT JOIN patient_service_packages psp ON psp.id = al.entity_id
             LEFT JOIN service_packages sp ON sp.id = psp.package_id
             LEFT JOIN users u ON u.id = al.user_id
-            WHERE (
-                    al.entity_type = 'patient_service_package'
-                    AND psp.patient_id = $1
-                  )
-               OR (
-                    al.entity_type = 'patient'
-                    AND al.entity_id = $1
-                    AND al.action LIKE 'patient_service_package_%'
-                  )
-               OR (
-                    al.context->>'patient_id' = $1::text
-                    AND al.action LIKE 'patient_service_package_%'
-                  )
+            WHERE $7::boolean
+              AND (
+                    (
+                        al.entity_type = 'patient_service_package'
+                        AND psp.patient_id = $1
+                    )
+                    OR (
+                        al.entity_type = 'patient'
+                        AND al.entity_id = $1
+                        AND al.action LIKE 'patient_service_package_%'
+                    )
+                    OR (
+                        al.context->>'patient_id' = $1::text
+                        AND al.action LIKE 'patient_service_package_%'
+                    )
+              )
 
             UNION ALL
 
@@ -5923,11 +6088,12 @@ async fn get_patient_timeline(
                    osg.group_title AS title,
                    'service_group'::text AS category,
                    osg.status AS status,
-                   COALESCE((osg.service_date::timestamp AT TIME ZONE 'UTC'), osg.created_at) AS happened_at,
+                   COALESCE((osg.service_date::timestamp AT TIME ZONE 'Europe/Berlin'), osg.created_at) AS happened_at,
                    o.order_number AS source_label
             FROM order_service_groups osg
             JOIN orders o ON o.id = osg.order_id
-            WHERE o.patient_id = $1
+            LEFT JOIN leads source_lead ON source_lead.id = o.source_lead_id
+            WHERE COALESCE(o.patient_id, source_lead.converted_patient_id) = $1
 
             UNION ALL
 
@@ -5975,7 +6141,7 @@ async fn get_patient_timeline(
                    'drug_verification'::text AS category,
                    COALESCE(al.context->>'verification_status', 'verified') AS status,
                    al.created_at AS happened_at,
-                   concat_ws(' В· ', actor.name, dp.brand_name) AS source_label
+                   concat_ws(' · ', actor.name, dp.brand_name) AS source_label
             FROM audit_log al
             JOIN cases c ON c.id = al.entity_id
             LEFT JOIN users actor ON actor.id = al.user_id
@@ -6039,6 +6205,22 @@ async fn get_patient_timeline(
             UNION ALL
 
             SELECT 'compliance'::text AS entity_type,
+                   consent.id AS entity_id,
+                   concat('Consent: ', consent.consent_type) AS title,
+                   'consent'::text AS category,
+                   CASE
+                       WHEN consent.revoked_at IS NOT NULL OR NOT consent.granted THEN 'revoked'
+                       ELSE 'granted'
+                   END AS status,
+                   COALESCE(consent.revoked_at, consent.granted_at, consent.created_at) AS happened_at,
+                   consent_user.name AS source_label
+            FROM consent_records consent
+            LEFT JOIN users consent_user ON consent_user.id = consent.user_id
+            WHERE consent.patient_id = $1
+
+            UNION ALL
+
+            SELECT 'compliance'::text AS entity_type,
                    COALESCE(al.entity_id, $1) AS entity_id,
                    CASE
                        WHEN al.action = 'dsgvo_data_export' THEN 'DSGVO data export'
@@ -6067,7 +6249,15 @@ async fn get_patient_timeline(
                        WHEN al.action LIKE 'workflow_checklist_item_%' THEN 'workflow'
                        ELSE 'legal_status'
                    END AS category,
-                   'completed'::text AS status,
+                   CASE
+                       WHEN al.action IN (
+                           'privacy_request_created',
+                           'feedback_submitted',
+                           'workflow_checklist_item_created'
+                       ) THEN 'open'
+                       WHEN al.action IN ('privacy_request_reviewed') THEN 'in_progress'
+                       ELSE 'completed'
+                   END AS status,
                    al.created_at AS happened_at,
                    concat_ws(' · ', u.name, COALESCE(al.context->>'consent_type', al.context->>'request_type', al.context->>'review_action', al.context->>'article')) AS source_label
             FROM audit_log al
@@ -6112,6 +6302,10 @@ async fn get_patient_timeline(
     // for the roles that can actually open the clinical profile, so it is never
     // surfaced to billing / interpreter / concierge who cannot see clinical data.
     let can_view_clinical = matches!(auth.role, Role::Ceo | Role::PatientManager | Role::ItAdmin);
+    let can_view_financial = matches!(
+        auth.role,
+        Role::Ceo | Role::PatientManager | Role::Billing | Role::ItAdmin
+    );
     const CLINICAL_TIMELINE_BRANCH: &str = r#"
             UNION ALL
 
@@ -6129,7 +6323,7 @@ async fn get_patient_timeline(
                        ELSE 'Klinisches Profil aktualisiert'
                    END AS title,
                    'clinical'::text AS category,
-                   NULL::text AS status,
+                   'recorded'::text AS status,
                    al.created_at AS happened_at,
                    u.name AS source_label
             FROM audit_log al
@@ -6142,6 +6336,265 @@ async fn get_patient_timeline(
                   'save_patient_clinical_warnings', 'save_patient_narrative',
                   'delete_patient_narrative', 'save_patient_verlauf'
               )
+
+            UNION ALL
+
+            SELECT 'clinical'::text AS entity_type,
+                   diagnosis.id AS entity_id,
+                   concat_ws(' · ', diagnosis.label, diagnosis.icd_code) AS title,
+                   'diagnosis'::text AS category,
+                   COALESCE(NULLIF(diagnosis.status, ''), 'recorded') AS status,
+                   diagnosis.created_at AS happened_at,
+                   concat_ws(' · ', provider.name, doctor.name) AS source_label
+            FROM patient_diagnoses diagnosis
+            LEFT JOIN providers provider ON provider.id = diagnosis.provider_id
+            LEFT JOIN provider_doctors doctor ON doctor.id = diagnosis.doctor_id
+            WHERE diagnosis.patient_id = $1
+
+            UNION ALL
+
+            SELECT 'clinical'::text AS entity_type,
+                   medication.id AS entity_id,
+                   concat_ws(
+                       ' · ',
+                       COALESCE(medication.handelsname, medication.wirkstoff, 'Medication'),
+                       medication.staerke,
+                       medication.form
+                   ) AS title,
+                   'medication'::text AS category,
+                   CASE
+                       WHEN medication.on_hold THEN 'on_hold'
+                       WHEN LOWER(COALESCE(medication.status, '')) IN ('aktiv', 'active') THEN 'active'
+                       WHEN LOWER(COALESCE(medication.status, '')) IN ('abgesetzt', 'discontinued', 'stopped') THEN 'discontinued'
+                       ELSE COALESCE(NULLIF(medication.status, ''), 'recorded')
+                   END AS status,
+                   medication.created_at AS happened_at,
+                   concat_ws(' · ', provider.name, doctor.name) AS source_label
+            FROM patient_medications medication
+            LEFT JOIN providers provider ON provider.id = medication.provider_id
+            LEFT JOIN provider_doctors doctor ON doctor.id = medication.doctor_id
+            WHERE medication.patient_id = $1
+
+            UNION ALL
+
+            SELECT 'clinical'::text AS entity_type,
+                   examination.id AS entity_id,
+                   examination.title AS title,
+                   'examination'::text AS category,
+                   COALESCE(NULLIF(examination.status, ''), 'recorded') AS status,
+                   examination.created_at AS happened_at,
+                   concat_ws(' · ', provider.name, doctor.name) AS source_label
+            FROM patient_examinations examination
+            LEFT JOIN providers provider ON provider.id = examination.provider_id
+            LEFT JOIN provider_doctors doctor ON doctor.id = examination.doctor_id
+            WHERE examination.patient_id = $1
+
+            UNION ALL
+
+            SELECT 'clinical'::text AS entity_type,
+                   procedure.id AS entity_id,
+                   concat_ws(' · ', procedure.label, procedure.ops_code) AS title,
+                   'procedure'::text AS category,
+                   'recorded'::text AS status,
+                   procedure.created_at AS happened_at,
+                   concat_ws(' · ', provider.name, doctor.name) AS source_label
+            FROM patient_procedures procedure
+            LEFT JOIN providers provider ON provider.id = procedure.provider_id
+            LEFT JOIN provider_doctors doctor ON doctor.id = procedure.doctor_id
+            WHERE procedure.patient_id = $1
+
+            UNION ALL
+
+            SELECT 'clinical'::text AS entity_type,
+                   warning.id AS entity_id,
+                   concat_ws(' · ', warning.label, warning.reaction) AS title,
+                   'allergy'::text AS category,
+                   COALESCE(NULLIF(warning.severity, ''), 'active') AS status,
+                   warning.created_at AS happened_at,
+                   warning.kind AS source_label
+            FROM patient_clinical_warnings warning
+            WHERE warning.patient_id = $1
+
+            UNION ALL
+
+            SELECT 'clinical'::text AS entity_type,
+                   narrative.id AS entity_id,
+                   CASE
+                       WHEN NULLIF(
+                           COALESCE(
+                               narrative.anamnese_aktuelle,
+                               narrative.anamnese_vorgeschichte,
+                               narrative.anamnese_vegetative,
+                               narrative.anamnese_sozial
+                           ),
+                           ''
+                       ) IS NULL THEN 'Anamnese'
+                       ELSE concat(
+                           'Anamnese: ',
+                           left(
+                               COALESCE(
+                                   narrative.anamnese_aktuelle,
+                                   narrative.anamnese_vorgeschichte,
+                                   narrative.anamnese_vegetative,
+                                   narrative.anamnese_sozial
+                               ),
+                               120
+                           )
+                       )
+                   END AS title,
+                   'anamnesis'::text AS category,
+                   CASE WHEN narrative.is_active THEN 'active' ELSE 'inactive' END AS status,
+                   COALESCE(narrative.anamnese_at, narrative.updated_at, narrative.created_at) AS happened_at,
+                   NULL::text AS source_label
+            FROM patient_clinical_narrative narrative
+            WHERE narrative.patient_id = $1
+
+            UNION ALL
+
+            SELECT 'clinical'::text AS entity_type,
+                   course.id AS entity_id,
+                   CASE
+                       WHEN length(course.note) > 120 THEN left(course.note, 117) || '...'
+                       ELSE course.note
+                   END AS title,
+                   'course'::text AS category,
+                   'recorded'::text AS status,
+                   COALESCE(
+                       course.occurred_on::timestamp AT TIME ZONE 'Europe/Berlin',
+                       course.created_at
+                   ) AS happened_at,
+                   concat_ws(' · ', provider.name, doctor.name) AS source_label
+            FROM patient_clinical_verlauf course
+            LEFT JOIN providers provider ON provider.id = course.provider_id
+            LEFT JOIN provider_doctors doctor ON doctor.id = course.doctor_id
+            WHERE course.patient_id = $1
+
+            UNION ALL
+
+            SELECT 'clinical'::text AS entity_type,
+                   legacy_medication.id AS entity_id,
+                   concat_ws(
+                       ' · ',
+                       COALESCE(legacy_medication.handelsname, legacy_medication.wirkstoff, 'Medication'),
+                       legacy_medication.dosis,
+                       legacy_medication.dosis_einheit
+                   ) AS title,
+                   'medication'::text AS category,
+                   'recorded'::text AS status,
+                   legacy_medication.created_at AS happened_at,
+                   legacy_medication.verordnender_arzt AS source_label
+            FROM medikamente legacy_medication
+            JOIN cases legacy_case ON legacy_case.id = legacy_medication.case_id
+            LEFT JOIN leads legacy_lead ON legacy_lead.id = legacy_case.lead_id
+            WHERE COALESCE(legacy_case.patient_id, legacy_lead.converted_patient_id) = $1
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM patient_medications medication
+                  WHERE medication.patient_id = $1
+                    AND LOWER(BTRIM(COALESCE(medication.handelsname, medication.wirkstoff, ''))) =
+                        LOWER(BTRIM(COALESCE(legacy_medication.handelsname, legacy_medication.wirkstoff, '')))
+              )
+
+            UNION ALL
+
+            SELECT 'clinical'::text AS entity_type,
+                   legacy_diagnosis.id AS entity_id,
+                   legacy_diagnosis.erkrankung AS title,
+                   'diagnosis'::text AS category,
+                   'recorded'::text AS status,
+                   legacy_diagnosis.created_at AS happened_at,
+                   legacy_case.case_id AS source_label
+            FROM vorerkrankungen legacy_diagnosis
+            JOIN cases legacy_case ON legacy_case.id = legacy_diagnosis.case_id
+            LEFT JOIN leads legacy_lead ON legacy_lead.id = legacy_case.lead_id
+            WHERE COALESCE(legacy_case.patient_id, legacy_lead.converted_patient_id) = $1
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM patient_diagnoses diagnosis
+                  WHERE diagnosis.patient_id = $1
+                    AND LOWER(BTRIM(diagnosis.label)) = LOWER(BTRIM(legacy_diagnosis.erkrankung))
+              )
+
+            UNION ALL
+
+            SELECT 'clinical'::text AS entity_type,
+                   legacy_allergy.id AS entity_id,
+                   concat_ws(' · ', legacy_allergy.allergie, legacy_allergy.reaktion) AS title,
+                   'allergy'::text AS category,
+                   'active'::text AS status,
+                   legacy_allergy.created_at AS happened_at,
+                   legacy_case.case_id AS source_label
+            FROM allergien legacy_allergy
+            JOIN cases legacy_case ON legacy_case.id = legacy_allergy.case_id
+            LEFT JOIN leads legacy_lead ON legacy_lead.id = legacy_case.lead_id
+            WHERE COALESCE(legacy_case.patient_id, legacy_lead.converted_patient_id) = $1
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM patient_clinical_warnings warning
+                  WHERE warning.patient_id = $1
+                    AND LOWER(BTRIM(warning.label)) = LOWER(BTRIM(legacy_allergy.allergie))
+              )
+
+            UNION ALL
+
+            SELECT 'clinical'::text AS entity_type,
+                   symptom.id AS entity_id,
+                   symptom.beschreibung AS title,
+                   'symptom'::text AS category,
+                   'recorded'::text AS status,
+                   symptom.created_at AS happened_at,
+                   concat_ws(' · ', legacy_case.case_id, symptom.fachrichtung) AS source_label
+            FROM symptome symptom
+            JOIN cases legacy_case ON legacy_case.id = symptom.case_id
+            LEFT JOIN leads legacy_lead ON legacy_lead.id = legacy_case.lead_id
+            WHERE COALESCE(legacy_case.patient_id, legacy_lead.converted_patient_id) = $1
+
+            UNION ALL
+
+            SELECT 'clinical'::text AS entity_type,
+                   legacy_procedure.id AS entity_id,
+                   legacy_procedure.grund AS title,
+                   'procedure'::text AS category,
+                   'recorded'::text AS status,
+                   legacy_procedure.created_at AS happened_at,
+                   legacy_procedure.arzt AS source_label
+            FROM operationen legacy_procedure
+            JOIN cases legacy_case ON legacy_case.id = legacy_procedure.case_id
+            LEFT JOIN leads legacy_lead ON legacy_lead.id = legacy_case.lead_id
+            WHERE COALESCE(legacy_case.patient_id, legacy_lead.converted_patient_id) = $1
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM patient_procedures procedure
+                  WHERE procedure.patient_id = $1
+                    AND LOWER(BTRIM(procedure.label)) = LOWER(BTRIM(legacy_procedure.grund))
+              )
+
+            UNION ALL
+
+            SELECT 'vital'::text AS entity_type,
+                   vital.id AS entity_id,
+                   concat_ws(
+                       ' · ',
+                       CASE
+                           WHEN vital.bp_systolic IS NOT NULL OR vital.bp_diastolic IS NOT NULL
+                           THEN concat(
+                               'BP ',
+                               COALESCE(trim(to_char(vital.bp_systolic, 'FM999990.##')), '—'),
+                               '/',
+                               COALESCE(trim(to_char(vital.bp_diastolic, 'FM999990.##')), '—')
+                           )
+                       END,
+                       CASE WHEN vital.heart_rate IS NOT NULL THEN concat('HR ', vital.heart_rate) END,
+                       CASE WHEN vital.weight_kg IS NOT NULL THEN concat(trim(to_char(vital.weight_kg, 'FM999990.##')), ' kg') END,
+                       CASE WHEN vital.bmi IS NOT NULL THEN concat('BMI ', trim(to_char(vital.bmi, 'FM999990.##'))) END
+                   ) AS title,
+                   'clinical'::text AS category,
+                   'recorded'::text AS status,
+                   vital.measured_at AS happened_at,
+                   recorder.name AS source_label
+            FROM patient_vital_measurements vital
+            LEFT JOIN users recorder ON recorder.id = vital.recorded_by
+            WHERE vital.patient_id = $1
         "#;
     let events_cte = if can_view_clinical {
         let mut cte = events_cte_static.to_string();
@@ -6153,59 +6606,194 @@ async fn get_patient_timeline(
         events_cte_static.to_string()
     };
 
-    let rows_sql = format!(
-        "{events_cte}
-         SELECT entity_type, entity_id, title, category, status, happened_at, source_label,
-                COUNT(*) OVER() AS total
-         FROM events
-         {filter_clause}
-         ORDER BY happened_at DESC, entity_type, entity_id
-         LIMIT $7 OFFSET $8"
-    );
-    let rows = sqlx::query(&rows_sql)
-    .bind(patient_uuid)
-    .bind(entity_type)
-    .bind(category)
-    .bind(source)
-    .bind(&search_pattern)
-    .bind(range_cutoff)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to load patient timeline");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to load patient timeline",
+    let payload_sql = format!(
+        r#"{events_cte},
+        filtered_events AS (
+            SELECT entity_type, entity_id, title, category, status, happened_at, source_label
+            FROM events
+            {filter_clause}
+        ),
+        paged_events AS (
+            SELECT entity_type, entity_id, title, category, status, happened_at, source_label
+            FROM filtered_events
+            ORDER BY happened_at DESC, entity_type, entity_id
+            LIMIT $8 OFFSET $9
+        ),
+        entity_facets AS (
+            SELECT entity_type AS value, COUNT(*) AS count
+            FROM events
+            WHERE ($3::text IS NULL OR category = $3)
+              AND ($4::text IS NULL OR LOWER(COALESCE(source_label, '')) = LOWER($4))
+              AND ($5::text = '%%'
+                    OR title ILIKE $5
+                    OR category ILIKE $5
+                    OR status ILIKE $5
+                    OR entity_type ILIKE $5
+                    OR COALESCE(source_label, '') ILIKE $5)
+              AND ($6::timestamptz IS NULL OR happened_at >= $6)
+            GROUP BY entity_type
+        ),
+        category_facets AS (
+            SELECT category AS value, COUNT(*) AS count
+            FROM events
+            WHERE ($2::text IS NULL OR entity_type = $2)
+              AND ($4::text IS NULL OR LOWER(COALESCE(source_label, '')) = LOWER($4))
+              AND ($5::text = '%%'
+                    OR title ILIKE $5
+                    OR category ILIKE $5
+                    OR status ILIKE $5
+                    OR entity_type ILIKE $5
+                    OR COALESCE(source_label, '') ILIKE $5)
+              AND ($6::timestamptz IS NULL OR happened_at >= $6)
+            GROUP BY category
+        ),
+        source_facets AS (
+            SELECT source_label AS value, COUNT(*) AS count
+            FROM events
+            WHERE source_label IS NOT NULL
+              AND BTRIM(source_label) <> ''
+              AND ($2::text IS NULL OR entity_type = $2)
+              AND ($3::text IS NULL OR category = $3)
+              AND ($5::text = '%%'
+                    OR title ILIKE $5
+                    OR category ILIKE $5
+                    OR status ILIKE $5
+                    OR entity_type ILIKE $5
+                    OR COALESCE(source_label, '') ILIKE $5)
+              AND ($6::timestamptz IS NULL OR happened_at >= $6)
+            GROUP BY source_label
         )
-    })?;
+        SELECT
+            COALESCE(
+                (
+                    SELECT jsonb_agg(
+                        jsonb_build_object(
+                            'entity_type', entity_type,
+                            'entity_id', entity_id,
+                            'title', title,
+                            'category', category,
+                            'status', status,
+                            'happened_at', happened_at,
+                            'source_label', source_label
+                        )
+                        ORDER BY happened_at DESC, entity_type, entity_id
+                    )
+                    FROM paged_events
+                ),
+                '[]'::jsonb
+            ) AS items,
+            (SELECT COUNT(*) FROM filtered_events) AS total,
+            (
+                SELECT COUNT(*)
+                FROM filtered_events
+                WHERE CASE
+                    WHEN entity_type IN (
+                        'appointment', 'case', 'order', 'service', 'service_group',
+                        'task', 'workflow_task', 'communication', 'reminder',
+                        'recommendation', 'translation_request', 'medical_order'
+                    ) THEN LOWER(COALESCE(status, '')) NOT IN (
+                        'archived', 'cancelled', 'closed', 'completed', 'expired',
+                        'invoiced', 'paid', 'rejected', 'revoked', 'signed', 'terminated'
+                    )
+                    WHEN entity_type = 'document' THEN LOWER(COALESCE(status, '')) = 'draft'
+                    WHEN entity_type = 'contract' THEN LOWER(COALESCE(status, '')) IN ('draft', 'sent', 'pending')
+                    WHEN entity_type = 'invoice' THEN LOWER(COALESCE(status, '')) IN ('draft', 'sent', 'overdue', 'partially_paid')
+                    WHEN entity_type = 'quote' THEN LOWER(COALESCE(status, '')) IN ('draft', 'sent')
+                    WHEN entity_type = 'service_package_consumption' THEN LOWER(COALESCE(status, '')) = 'pending'
+                    WHEN entity_type = 'compliance' THEN LOWER(COALESCE(status, '')) IN ('open', 'in_progress')
+                    ELSE false
+                END
+            ) AS open,
+            (
+                SELECT COUNT(*)
+                FROM filtered_events
+                WHERE happened_at >= now() - interval '30 days'
+                  AND happened_at <= now()
+            ) AS recent,
+            COALESCE(
+                (
+                    SELECT jsonb_agg(
+                        jsonb_build_object('entity_type', value, 'count', count)
+                        ORDER BY count DESC, value
+                    )
+                    FROM entity_facets
+                ),
+                '[]'::jsonb
+            ) AS entity_counts,
+            COALESCE(
+                (
+                    SELECT jsonb_agg(
+                        jsonb_build_object('value', value, 'count', count)
+                        ORDER BY value
+                    )
+                    FROM category_facets
+                ),
+                '[]'::jsonb
+            ) AS category_facets,
+            COALESCE(
+                (
+                    SELECT jsonb_agg(
+                        jsonb_build_object('value', value, 'count', count)
+                        ORDER BY value
+                    )
+                    FROM source_facets
+                ),
+                '[]'::jsonb
+            ) AS source_facets"#
+    );
+    let payload = sqlx::query(&payload_sql)
+        .bind(patient_uuid)
+        .bind(entity_type)
+        .bind(category)
+        .bind(source)
+        .bind(&search_pattern)
+        .bind(range_cutoff)
+        .bind(can_view_financial)
+        .bind(limit)
+        .bind(offset)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to load patient timeline");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load patient timeline",
+            )
+        })?;
 
-    let total = rows
-        .first()
-        .and_then(|row| row.try_get::<i64, _>("total").ok())
-        .unwrap_or(0);
-    let items = rows
-        .into_iter()
-        .map(|row| {
-            serde_json::json!({
-                "entity_type": row.try_get::<String, _>("entity_type").unwrap_or_default(),
-                "entity_id": row.try_get::<Uuid, _>("entity_id").unwrap_or_else(|_| Uuid::nil()),
-                "title": row.try_get::<String, _>("title").unwrap_or_default(),
-                "category": row.try_get::<String, _>("category").unwrap_or_default(),
-                "status": row.try_get::<String, _>("status").unwrap_or_default(),
-                "happened_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("happened_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-                "source_label": row.try_get::<Option<String>, _>("source_label").unwrap_or_default(),
-            })
-        })
-        .collect::<Vec<_>>();
+    let items = payload
+        .try_get::<Value, _>("items")
+        .unwrap_or_else(|_| serde_json::json!([]));
+    let total = payload.try_get::<i64, _>("total").unwrap_or(0);
+    let open = payload.try_get::<i64, _>("open").unwrap_or(0);
+    let recent = payload.try_get::<i64, _>("recent").unwrap_or(0);
+    let entity_counts = payload
+        .try_get::<Value, _>("entity_counts")
+        .unwrap_or_else(|_| serde_json::json!([]));
+    let category_facets = payload
+        .try_get::<Value, _>("category_facets")
+        .unwrap_or_else(|_| serde_json::json!([]));
+    let source_facets = payload
+        .try_get::<Value, _>("source_facets")
+        .unwrap_or_else(|_| serde_json::json!([]));
+    let item_count = items.as_array().map_or(0, Vec::len) as i64;
 
     Ok(Json(serde_json::json!({
         "items": items,
         "total": total,
         "limit": limit,
         "offset": offset,
-        "has_more": offset + (items.len() as i64) < total,
+        "has_more": offset + item_count < total,
+        "summary": {
+            "total": total,
+            "open": open,
+            "recent": recent,
+            "entity_counts": entity_counts,
+        },
+        "facets": {
+            "categories": category_facets,
+            "sources": source_facets,
+        },
     })))
 }
 
@@ -8149,6 +8737,132 @@ async fn list_all_doctors(
     Ok::<_, axum::response::Response>(Json(json!(doctors)))
 }
 
+#[derive(Clone, Copy)]
+enum PatientClinicalSection {
+    Diagnoses,
+    Medications,
+    Examinations,
+    Narrative,
+    Verlauf,
+    Procedures,
+    ClinicalWarnings,
+}
+
+impl PatientClinicalSection {
+    fn key(self) -> &'static str {
+        match self {
+            PatientClinicalSection::Diagnoses => "diagnoses",
+            PatientClinicalSection::Medications => "medications",
+            PatientClinicalSection::Examinations => "examinations",
+            PatientClinicalSection::Narrative => "narrative",
+            PatientClinicalSection::Verlauf => "verlauf",
+            PatientClinicalSection::Procedures => "procedures",
+            PatientClinicalSection::ClinicalWarnings => "clinical_warnings",
+        }
+    }
+
+    /// Full stored row state of the section as ordered JSONB (row shape as
+    /// persisted, minus the redundant patient_id), for the version trail.
+    fn snapshot_sql(self) -> &'static str {
+        match self {
+            PatientClinicalSection::Diagnoses => {
+                r#"SELECT COALESCE(jsonb_agg((to_jsonb(t) - 'patient_id') ORDER BY t.sort_order, t.created_at), '[]'::jsonb) AS value
+                   FROM patient_diagnoses t WHERE t.patient_id = $1"#
+            }
+            PatientClinicalSection::Medications => {
+                r#"SELECT COALESCE(jsonb_agg((to_jsonb(t) - 'patient_id') ORDER BY t.sort_order, t.created_at), '[]'::jsonb) AS value
+                   FROM patient_medications t WHERE t.patient_id = $1"#
+            }
+            PatientClinicalSection::Examinations => {
+                r#"SELECT COALESCE(jsonb_agg((to_jsonb(t) - 'patient_id') ORDER BY t.sort_order, t.created_at), '[]'::jsonb) AS value
+                   FROM patient_examinations t WHERE t.patient_id = $1"#
+            }
+            PatientClinicalSection::Narrative => {
+                r#"SELECT COALESCE(jsonb_agg((to_jsonb(t) - 'patient_id') ORDER BY t.anamnese_at DESC, t.updated_at DESC), '[]'::jsonb) AS value
+                   FROM patient_clinical_narrative t WHERE t.patient_id = $1"#
+            }
+            PatientClinicalSection::Verlauf => {
+                r#"SELECT COALESCE(jsonb_agg((to_jsonb(t) - 'patient_id') ORDER BY t.occurred_on ASC NULLS LAST, t.created_at, t.sort_order), '[]'::jsonb) AS value
+                   FROM patient_clinical_verlauf t WHERE t.patient_id = $1"#
+            }
+            PatientClinicalSection::Procedures => {
+                r#"SELECT COALESCE(jsonb_agg((to_jsonb(t) - 'patient_id') ORDER BY t.sort_order, t.created_at), '[]'::jsonb) AS value
+                   FROM patient_procedures t WHERE t.patient_id = $1"#
+            }
+            PatientClinicalSection::ClinicalWarnings => {
+                r#"SELECT COALESCE(jsonb_agg((to_jsonb(t) - 'patient_id') ORDER BY t.kind, t.sort_order, t.created_at), '[]'::jsonb) AS value
+                   FROM patient_clinical_warnings t WHERE t.patient_id = $1"#
+            }
+        }
+    }
+}
+
+async fn load_patient_section_snapshot(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_uuid: Uuid,
+    section: PatientClinicalSection,
+) -> Result<serde_json::Value, sqlx::Error> {
+    let row = sqlx::query(section.snapshot_sql())
+        .bind(patient_uuid)
+        .fetch_one(&mut **tx)
+        .await?;
+    Ok(row.get::<serde_json::Value, _>("value"))
+}
+
+async fn load_patient_clinical_retention_years(state: &AppState, default: i64) -> i64 {
+    match sqlx::query(r#"SELECT value::TEXT AS value_text FROM system_settings WHERE key = $1"#)
+        .bind("clinical_case_retention_years")
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(row)) => row
+            .try_get::<String, _>("value_text")
+            .ok()
+            .and_then(|value| value.trim_matches('"').parse::<i64>().ok())
+            .unwrap_or(default),
+        _ => default,
+    }
+}
+
+/// Transactional twin of cases.rs::version_log for the patient clinical record:
+/// the version row commits (or rolls back) together with the section save, so
+/// the trail can never claim a change that was not persisted.
+async fn patient_version_log(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_uuid: Uuid,
+    user_id: Uuid,
+    section: PatientClinicalSection,
+    retention_years: i64,
+    old_value: serde_json::Value,
+    new_value: serde_json::Value,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO patient_clinical_versions (patient_id, changed_by, section, old_value, new_value)
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(patient_uuid)
+    .bind(user_id)
+    .bind(section.key())
+    .bind(old_value)
+    .bind(new_value)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "UPDATE patients
+         SET last_clinical_update_at = now(),
+             clinical_retention_until = GREATEST(
+                 COALESCE(clinical_retention_until, now()),
+                 now() + ($2 * interval '1 year')
+             )
+         WHERE id = $1",
+    )
+    .bind(patient_uuid)
+    .bind(retention_years.max(1))
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 async fn save_patient_diagnoses(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -8163,10 +8877,24 @@ async fn save_patient_diagnoses(
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
     }
+    let retention_years = load_patient_clinical_retention_years(&state, 30).await;
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "begin patient diagnoses tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let old_value = match load_patient_section_snapshot(
+        &mut tx,
+        patient_uuid,
+        PatientClinicalSection::Diagnoses,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "snapshot patient diagnoses");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
@@ -8313,6 +9041,33 @@ async fn save_patient_diagnoses(
         }
         saved += 1;
     }
+    let new_value = match load_patient_section_snapshot(
+        &mut tx,
+        patient_uuid,
+        PatientClinicalSection::Diagnoses,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "resnapshot patient diagnoses");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(e) = patient_version_log(
+        &mut tx,
+        patient_uuid,
+        auth.user_id,
+        PatientClinicalSection::Diagnoses,
+        retention_years,
+        old_value,
+        new_value,
+    )
+    .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "log patient diagnoses version");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient diagnoses");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
@@ -8361,10 +9116,24 @@ async fn save_patient_medications(
         );
     }
 
+    let retention_years = load_patient_clinical_retention_years(&state, 30).await;
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "begin patient medications tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let old_value = match load_patient_section_snapshot(
+        &mut tx,
+        patient_uuid,
+        PatientClinicalSection::Medications,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "snapshot patient medications");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
@@ -8483,6 +9252,33 @@ async fn save_patient_medications(
         }
         saved += 1;
     }
+    let new_value = match load_patient_section_snapshot(
+        &mut tx,
+        patient_uuid,
+        PatientClinicalSection::Medications,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "resnapshot patient medications");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(e) = patient_version_log(
+        &mut tx,
+        patient_uuid,
+        auth.user_id,
+        PatientClinicalSection::Medications,
+        retention_years,
+        old_value,
+        new_value,
+    )
+    .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "log patient medications version");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient medications");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
@@ -8524,10 +9320,24 @@ async fn save_patient_examinations(
         Err(resp) => return resp,
     }
 
+    let retention_years = load_patient_clinical_retention_years(&state, 30).await;
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "begin patient examinations tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let old_value = match load_patient_section_snapshot(
+        &mut tx,
+        patient_uuid,
+        PatientClinicalSection::Examinations,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "snapshot patient examinations");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
@@ -8585,6 +9395,33 @@ async fn save_patient_examinations(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
         saved += 1;
+    }
+    let new_value = match load_patient_section_snapshot(
+        &mut tx,
+        patient_uuid,
+        PatientClinicalSection::Examinations,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "resnapshot patient examinations");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(e) = patient_version_log(
+        &mut tx,
+        patient_uuid,
+        auth.user_id,
+        PatientClinicalSection::Examinations,
+        retention_years,
+        old_value,
+        new_value,
+    )
+    .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "log patient examinations version");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient examinations");
@@ -8670,6 +9507,7 @@ async fn save_patient_narrative(
     let sozial = clinical_opt_text(body.anamnese_sozial);
     let beurteilung = clinical_opt_text(body.beurteilung);
 
+    let retention_years = load_patient_clinical_retention_years(&state, 30).await;
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -8690,6 +9528,20 @@ async fn save_patient_narrative(
         tracing::error!(error = %e, patient_id = %patient_uuid, "lock patient narrative");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+
+    let old_value = match load_patient_section_snapshot(
+        &mut tx,
+        patient_uuid,
+        PatientClinicalSection::Narrative,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "snapshot patient narrative");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
 
     // At most one active version per patient: deactivate the rest first.
     if want_active
@@ -8788,6 +9640,34 @@ async fn save_patient_narrative(
     };
     let saved = narrative_version_json(&saved_row);
 
+    let new_value = match load_patient_section_snapshot(
+        &mut tx,
+        patient_uuid,
+        PatientClinicalSection::Narrative,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "resnapshot patient narrative");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(e) = patient_version_log(
+        &mut tx,
+        patient_uuid,
+        auth.user_id,
+        PatientClinicalSection::Narrative,
+        retention_years,
+        old_value,
+        new_value,
+    )
+    .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "log patient narrative version");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient narrative");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
@@ -8866,6 +9746,7 @@ async fn delete_patient_narrative(
         Err(resp) => return resp,
     }
 
+    let retention_years = load_patient_clinical_retention_years(&state, 30).await;
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -8882,6 +9763,20 @@ async fn delete_patient_narrative(
         tracing::error!(error = %e, patient_id = %patient_uuid, "lock patient narrative delete");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+
+    let old_value = match load_patient_section_snapshot(
+        &mut tx,
+        patient_uuid,
+        PatientClinicalSection::Narrative,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "snapshot patient narrative before delete");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
 
     let deleted = match sqlx::query(
         "DELETE FROM patient_clinical_narrative WHERE id = $1 AND patient_id = $2 RETURNING id, anamnese_at",
@@ -8953,6 +9848,34 @@ async fn delete_patient_narrative(
 
     let active = active_row.as_ref().map(narrative_version_json);
 
+    let new_value = match load_patient_section_snapshot(
+        &mut tx,
+        patient_uuid,
+        PatientClinicalSection::Narrative,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "resnapshot patient narrative after delete");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(e) = patient_version_log(
+        &mut tx,
+        patient_uuid,
+        auth.user_id,
+        PatientClinicalSection::Narrative,
+        retention_years,
+        old_value,
+        new_value,
+    )
+    .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "log patient narrative delete version");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient narrative delete");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
@@ -9011,6 +9934,7 @@ async fn save_patient_verlauf(
         Err(resp) => return resp,
     }
 
+    let retention_years = load_patient_clinical_retention_years(&state, 30).await;
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -9019,6 +9943,19 @@ async fn save_patient_verlauf(
         }
     };
 
+    let old_value = match load_patient_section_snapshot(
+        &mut tx,
+        patient_uuid,
+        PatientClinicalSection::Verlauf,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "snapshot patient verlauf");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
     if let Err(e) = sqlx::query("DELETE FROM patient_clinical_verlauf WHERE patient_id = $1")
         .bind(patient_uuid)
         .execute(&mut *tx)
@@ -9061,6 +9998,34 @@ async fn save_patient_verlauf(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
         saved += 1;
+    }
+
+    let new_value = match load_patient_section_snapshot(
+        &mut tx,
+        patient_uuid,
+        PatientClinicalSection::Verlauf,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "resnapshot patient verlauf");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(e) = patient_version_log(
+        &mut tx,
+        patient_uuid,
+        auth.user_id,
+        PatientClinicalSection::Verlauf,
+        retention_years,
+        old_value,
+        new_value,
+    )
+    .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "log patient verlauf version");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 
     if let Err(e) = tx.commit().await {
@@ -9142,10 +10107,24 @@ async fn save_patient_procedures(
         Err(resp) => return resp,
     }
 
+    let retention_years = load_patient_clinical_retention_years(&state, 30).await;
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "begin patient procedures tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let old_value = match load_patient_section_snapshot(
+        &mut tx,
+        patient_uuid,
+        PatientClinicalSection::Procedures,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "snapshot patient procedures");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
@@ -9186,6 +10165,33 @@ async fn save_patient_procedures(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
         saved += 1;
+    }
+    let new_value = match load_patient_section_snapshot(
+        &mut tx,
+        patient_uuid,
+        PatientClinicalSection::Procedures,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "resnapshot patient procedures");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(e) = patient_version_log(
+        &mut tx,
+        patient_uuid,
+        auth.user_id,
+        PatientClinicalSection::Procedures,
+        retention_years,
+        old_value,
+        new_value,
+    )
+    .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "log patient procedures version");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient procedures");
@@ -9233,10 +10239,24 @@ async fn save_patient_clinical_warnings(
     };
     let is_allergie = kind == "allergie";
 
+    let retention_years = load_patient_clinical_retention_years(&state, 30).await;
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             tracing::error!(error = %e, "begin patient clinical warnings tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let old_value = match load_patient_section_snapshot(
+        &mut tx,
+        patient_uuid,
+        PatientClinicalSection::ClinicalWarnings,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "snapshot patient clinical warnings");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
@@ -9284,6 +10304,33 @@ async fn save_patient_clinical_warnings(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
         saved += 1;
+    }
+    let new_value = match load_patient_section_snapshot(
+        &mut tx,
+        patient_uuid,
+        PatientClinicalSection::ClinicalWarnings,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "resnapshot patient clinical warnings");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(e) = patient_version_log(
+        &mut tx,
+        patient_uuid,
+        auth.user_id,
+        PatientClinicalSection::ClinicalWarnings,
+        retention_years,
+        old_value,
+        new_value,
+    )
+    .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "log patient clinical warnings version");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient clinical warnings");

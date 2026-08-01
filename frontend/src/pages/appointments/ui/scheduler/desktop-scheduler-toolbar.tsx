@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { ToolbarField } from "@/components/data-table/toolbar-field";
 import {
   appointmentSchedulerToolbarGroupClassName,
   appointmentSchedulerToolbarIconButtonClassName,
@@ -70,6 +71,7 @@ export function DesktopSchedulerToolbar({
           >
             {searchPlaceholder}
           </Button>
+          <ToolbarField label={patientFilterLabel}>
           <NativeComboboxSelect
             value={patientFilterValue || "__all__"}
             onChange={(event) =>
@@ -81,7 +83,7 @@ export function DesktopSchedulerToolbar({
             }
             aria-label={patientFilterLabel}
             title={patientFilterLabel}
-            className="h-8 w-[220px] shrink-0 rounded-lg border-border bg-background px-3 text-[13px]"
+            className="h-8 w-[220px] shrink-0 rounded-md border-border bg-field px-3 text-xs"
           >
             <option value="__all__">{patientFilterLabel}</option>
             {patientOptions.map((option) => (
@@ -90,6 +92,7 @@ export function DesktopSchedulerToolbar({
               </option>
             ))}
           </NativeComboboxSelect>
+          </ToolbarField>
           <Button
             variant="outline"
             size="sm"

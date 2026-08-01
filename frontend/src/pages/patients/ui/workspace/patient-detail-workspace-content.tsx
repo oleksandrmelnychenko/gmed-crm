@@ -228,9 +228,7 @@ type PatientDetailWorkspaceContentProps = {
   contractPendingCount: number;
   contractSignedCount: number;
   contracts: ContractItem[];
-  contractsPreviewOpen: boolean;
   detail: PatientDetail;
-  docsPreviewOpen: boolean;
   documentAlerts: DocumentAlerts | null;
   documentCategoryFilter: string;
   documentCategoryOptions: string[];
@@ -269,7 +267,6 @@ type PatientDetailWorkspaceContentProps = {
   invoicePaidAmountTotal: number;
   invoiceTypeLabel: (value: string) => string;
   invoices: InvoiceItem[];
-  invoicesPreviewOpen: boolean;
   isContractExpiringSoon: (contract: ContractItem) => boolean;
   l: LocalizeFn;
   legalStatus: PatientLegalStatus;
@@ -285,17 +282,14 @@ type PatientDetailWorkspaceContentProps = {
   notesSheetOpen: boolean;
   onAppointmentSheetOpenChange: (open: boolean) => void;
   onAssign: () => void;
-  onContractsPreviewOpenChange: (open: boolean) => void;
   onCreateContract: () => void;
   onCreateRelation: () => void;
   onDeleteRelation: (relationId: string) => void;
-  onDocsPreviewOpenChange: (open: boolean) => void;
   onDocumentCategoryFilterChange: (value: string) => void;
   onDocumentStatusFilterChange: (value: string) => void;
   onDocumentGenerated: () => void;
   onEditContractStatus: (contract: ContractItem) => void;
   onEditRelation: (relation: RelationItem) => void;
-  onInvoicesPreviewOpenChange: (open: boolean) => void;
   onLegalStatusSheetOpenChange: (open: boolean) => void;
   onManageInvoice: (invoice: InvoiceItem) => void;
   onNotesSheetOpenChange: (open: boolean) => void;
@@ -335,7 +329,6 @@ type PatientDetailWorkspaceContentProps = {
   relationTypeLabel: (value: string) => string;
   relations: RelationItem[];
   reload: () => void;
-  requiredDocumentFulfilledCount: number;
   roleColors: Record<string, string>;
   roleLabel: (value: string | null | undefined, tr: PatientsDictionary) => string;
   selectedAssignee: string;
@@ -402,9 +395,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     contractPendingCount,
     contractSignedCount,
     contracts,
-    contractsPreviewOpen,
     detail,
-    docsPreviewOpen,
     documentAlerts,
     documentCategoryFilter,
     documentCategoryOptions,
@@ -443,7 +434,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     invoicePaidAmountTotal,
     invoiceTypeLabel,
     invoices,
-    invoicesPreviewOpen,
     isContractExpiringSoon,
     l,
     legalStatus,
@@ -455,17 +445,14 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     notesSheetOpen,
     onAppointmentSheetOpenChange,
     onAssign,
-    onContractsPreviewOpenChange,
     onCreateContract,
     onCreateRelation,
     onDeleteRelation,
-    onDocsPreviewOpenChange,
     onDocumentCategoryFilterChange,
     onDocumentGenerated,
     onDocumentStatusFilterChange,
     onEditContractStatus,
     onEditRelation,
-    onInvoicesPreviewOpenChange,
     onLegalStatusSheetOpenChange,
     onManageInvoice,
     onNotesSheetOpenChange,
@@ -505,7 +492,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     relationTypeLabel,
     relations,
     reload,
-    requiredDocumentFulfilledCount,
     roleColors,
     roleLabel,
     selectedAssignee,
@@ -583,7 +569,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             onChange={(event) => {
               if (!event.target.value) return;
               onPrintPatientLabel(event.target.value as PatientLabelFormatId);
-            }} className="h-9 rounded-lg bg-card text-[13px] gap-1.5 w-auto">
+            }} className="h-9 rounded-lg bg-field text-[13px] gap-1.5 w-auto">
               {PATIENT_LABEL_FORMAT_OPTIONS.map((option) => (
                 <option key={option.id} value={option.id}>
                   {patientLabelFormatLabel(option)}
@@ -638,27 +624,22 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
                 canViewInvoices,
               }}
               complianceExportBusy={complianceExportBusy}
-              contractsPreviewOpen={contractsPreviewOpen}
               detail={detail}
-              docsPreviewOpen={docsPreviewOpen}
               fieldValue={fieldValue}
               formatDate={formatDate}
               genderLabel={genderLabel}
               handleExportPatientCompliance={handleExportPatientCompliance}
               id={id}
               insuranceLabel={insuranceLabel}
-              invoicesPreviewOpen={invoicesPreviewOpen}
               l={l}
               legalStatus={legalStatus}
               legalStatusChecklist={legalStatusChecklist}
               legalStatusCompletion={legalStatusCompletion}
               legalStatusSheetOpen={legalStatusSheetOpen}
               notesSheetOpen={notesSheetOpen}
-              onContractsPreviewOpenChange={onContractsPreviewOpenChange}
-              onDocsPreviewOpenChange={onDocsPreviewOpenChange}
-              onInvoicesPreviewOpenChange={onInvoicesPreviewOpenChange}
               onLegalStatusSheetOpenChange={onLegalStatusSheetOpenChange}
               onNotesSheetOpenChange={onNotesSheetOpenChange}
+              onOpenTab={handleWorkspaceTabChange}
               openProfileEditor={onOpenProfileEditor}
               patientDetailStatusLabel={patientDetailStatusLabel}
               reload={reload}
@@ -771,7 +752,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               documents={documents}
               filteredDocuments={filteredDocuments}
               documentAlerts={documentAlerts}
-              requiredDocumentFulfilledCount={requiredDocumentFulfilledCount}
               documentCategoryOptions={documentCategoryOptions}
               documentStatusOptions={documentStatusOptions}
               hasDocumentFilters={hasDocumentFilters}

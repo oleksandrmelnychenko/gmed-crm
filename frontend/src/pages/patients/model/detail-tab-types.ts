@@ -4,6 +4,9 @@ export type CaseItem = {
   status: string;
   hauptanfragegrund?: string | null;
   created_at: string;
+  updated_at?: string | null;
+  zuweiser?: string | null;
+  manager_name?: string | null;
 };
 
 export type OrderItem = {
@@ -13,6 +16,14 @@ export type OrderItem = {
   status: string;
   needs_description?: string | null;
   created_at: string;
+  total_estimated?: string | number | null;
+  total_actual?: string | number | null;
+  currency?: string | null;
+  date_from?: string | null;
+  date_to?: string | null;
+  signed_patient?: boolean;
+  signed_agency?: boolean;
+  signed_at?: string | null;
 };
 
 export type AppointmentItem = {
@@ -194,7 +205,7 @@ export type PatientFinancialSummary = {
   issues: string[];
 };
 
-type PatientFinancialLedgerEntry = {
+export type PatientFinancialLedgerEntry = {
   id: string;
   entry_date: string;
   direction: string;

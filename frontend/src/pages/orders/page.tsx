@@ -6,6 +6,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useState,
   type FormEvent,
   type ReactNode,
   type SetStateAction,
@@ -15,6 +16,7 @@ import {
   ArrowUpRight,
   CalendarClock,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   ClipboardList,
   LoaderCircle,
@@ -35,6 +37,7 @@ import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ToolbarField } from "@/components/data-table/toolbar-field";
 import {
   Sheet,
   SheetContent,
@@ -156,6 +159,7 @@ import type {
   OrderDetail,
   OrderExecutionFormState,
   OrderFollowupFormState,
+  OrderPhase,
   OrderPlanningFormState,
   OrderProcessGateFormState,
   OrdersFilters,
@@ -214,6 +218,7 @@ const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
 const ORDER_DEFAULT_FROZEN_COLUMNS = ["order_number", "patient"];
 const ORDER_MAX_FROZEN_COLUMNS = 3;
+const ORDER_PAGE_SIZE = 50;
 const ORDER_TASK_STATUS_LABEL_KEYS = {
   open: "orders_task_status_open",
   in_progress: "orders_task_status_in_progress",
@@ -389,6 +394,62 @@ function EmptyState({ title, description, action }: EmptyStateProps) {
           <p className="mt-2 text-sm text-muted-foreground">{description}</p>
         </div>
         {action}
+      </div>
+    </div>
+  );
+}
+
+function OrdersPager({
+  pageIndex,
+  totalPages,
+  totalRows,
+  previousLabel,
+  nextLabel,
+  onPageChange,
+}: {
+  nextLabel: string;
+  onPageChange: (pageIndex: number) => void;
+  pageIndex: number;
+  previousLabel: string;
+  totalPages: number;
+  totalRows: number;
+}) {
+  const pageStart = pageIndex * ORDER_PAGE_SIZE;
+  return (
+    <div className="flex min-h-8 items-center justify-between gap-2 border-b border-border/60 bg-field px-4 py-0.5">
+      <span className="font-mono text-xs tabular-nums text-foreground">
+        {totalRows === 0
+          ? "0 / 0"
+          : `${pageStart + 1}-${Math.min(pageStart + ORDER_PAGE_SIZE, totalRows)} / ${totalRows}`}
+      </span>
+      <div className="flex items-center gap-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className="size-7 rounded-md"
+          disabled={pageIndex === 0}
+          aria-label={previousLabel}
+          title={previousLabel}
+          onClick={() => onPageChange(Math.max(0, pageIndex - 1))}
+        >
+          <ChevronLeft className="size-3.5" />
+        </Button>
+        <span className="min-w-12 text-center font-mono text-xs font-medium tabular-nums text-foreground">
+          {pageIndex + 1} / {totalPages}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className="size-7 rounded-md"
+          disabled={pageIndex >= totalPages - 1}
+          aria-label={nextLabel}
+          title={nextLabel}
+          onClick={() => onPageChange(Math.min(totalPages - 1, pageIndex + 1))}
+        >
+          <ChevronRight className="size-3.5" />
+        </Button>
       </div>
     </div>
   );
@@ -750,9 +811,68 @@ function useOrdersPageContent() {
       phase_change: l("orders_phasenwechsel"),
     });
   const roleLabel = (value: string) => labelFor(value, roleLabels);
+  const debtBlockingReasonLabel = (status: string, overdueInvoiceCount: number) => {
+    if (overdueInvoiceCount > 0) {
+      const key =
+        status === "payment_plan"
+          ? "orders_debt_reason_payment_plan_overdue"
+          : status === "awaiting_payment"
+            ? "orders_debt_reason_awaiting_payment_overdue"
+            : status === "escalated"
+              ? "orders_debt_reason_escalated_overdue"
+              : "orders_debt_reason_review_overdue";
+      return l(key, { count: overdueInvoiceCount });
+    }
+
+    const key =
+      status === "payment_plan"
+        ? "orders_debt_reason_payment_plan_open"
+        : status === "awaiting_payment"
+          ? "orders_debt_reason_awaiting_payment_open"
+          : status === "escalated"
+            ? "orders_debt_reason_escalated_open"
+            : "orders_debt_reason_review_open";
+    return l(key);
+  };
   const localizedBlockingReason = (reason: string) => {
     const exactKey = ORDER_BLOCKING_REASON_LABEL_KEYS[reason];
     if (exactKey) return l(exactKey);
+
+    const patientDebtHoldMatch = reason.match(
+      /^(\d+) overdue invoice\(s\) keep the patient in debt-management hold$/,
+    );
+    if (patientDebtHoldMatch) {
+      return l("orders_debt_reason_patient_hold", {
+        count: Number(patientDebtHoldMatch[1]),
+      });
+    }
+
+    const debtReasonMatch = reason.match(
+      /^(\d+) overdue invoice\(s\) (require debt-management review|are in payment-plan handling|are awaiting payment confirmation|are in escalated debt-management)(?:; next review .+)?$/,
+    );
+    if (debtReasonMatch) {
+      const statusByReason: Record<string, string> = {
+        "require debt-management review": "review_required",
+        "are in payment-plan handling": "payment_plan",
+        "are awaiting payment confirmation": "awaiting_payment",
+        "are in escalated debt-management": "escalated",
+      };
+      return debtBlockingReasonLabel(
+        statusByReason[debtReasonMatch[2]] ?? "review_required",
+        Number(debtReasonMatch[1]),
+      );
+    }
+
+    const openDebtStatusByReason: Record<string, string> = {
+      "Debt-management review is still open": "review_required",
+      "Debt-management payment plan is still open": "payment_plan",
+      "Debt-management is still awaiting payment confirmation": "awaiting_payment",
+      "Debt-management escalation is still open": "escalated",
+    };
+    const normalizedDebtReason = reason.replace(/; next review .+$/, "");
+    if (openDebtStatusByReason[normalizedDebtReason]) {
+      return debtBlockingReasonLabel(openDebtStatusByReason[normalizedDebtReason], 0);
+    }
 
     const executionChecklistMatch = reason.match(
       /^(\d+) execution checklist item\(s\) remain open$/,
@@ -912,6 +1032,28 @@ function useOrdersPageContent() {
   const setFilters = (nextValue: SetStateAction<OrdersFilters>) =>
     setOrdersPageField("filters", nextValue);
   const deferredSearch = useDeferredValue(filters.search);
+  const orderPaginationResetKey = JSON.stringify(filters);
+  const [orderPaginationState, setOrderPaginationState] = useState(() => ({
+    pageIndex: 0,
+    resetKey: orderPaginationResetKey,
+  }));
+  const orderPageIndex =
+    orderPaginationState.resetKey === orderPaginationResetKey
+      ? orderPaginationState.pageIndex
+      : 0;
+  const orderTotalPages = Math.max(1, Math.ceil(orders.length / ORDER_PAGE_SIZE));
+  const safeOrderPageIndex = Math.min(orderPageIndex, orderTotalPages - 1);
+  const orderPageStart = safeOrderPageIndex * ORDER_PAGE_SIZE;
+  const pagedOrders = useMemo(
+    () => orders.slice(orderPageStart, orderPageStart + ORDER_PAGE_SIZE),
+    [orderPageStart, orders],
+  );
+  const handleOrderPageChange = (nextPageIndex: number) => {
+    setOrderPaginationState({
+      pageIndex: nextPageIndex,
+      resetKey: orderPaginationResetKey,
+    });
+  };
   const setOrders = (nextValue: SetStateAction<OrderSummary[]>) =>
     setOrdersPageField("orders", nextValue);
   const setLoading = (nextValue: SetStateAction<boolean>) =>
@@ -1092,7 +1234,7 @@ function useOrdersPageContent() {
       pinned: "left",
       width: 160,
       render: (row) => (
-        <span className="font-mono text-xs font-semibold tracking-[0.12em] text-foreground">
+        <span className="font-mono text-xs tracking-[0.12em] text-foreground">
           {row.order_number}
         </span>
       ),
@@ -1109,19 +1251,24 @@ function useOrdersPageContent() {
       pinned: "left",
       width: 220,
       render: (row) => (
-        <span className="text-sm font-medium text-foreground">{row.patient_name}</span>
+        <span className="truncate font-mono text-xs text-foreground">
+          {row.patient_name}
+        </span>
       ),
     },
     {
-      id: "patient_pid",
-      label: l("documents_pid_fallback"),
-      accessor: (row) => row.patient_pid,
-      filterType: "text",
-      group: "identity",
+      id: "total_estimated",
+      label: l("orders_geschaftsvolumen"),
+      accessor: (row) => numberFromUnknown(row.total_estimated) ?? 0,
+      filterType: "number",
+      group: "finance",
       sortable: true,
-      searchable: true,
-      width: 140,
-      render: (row) => <span className="text-xs text-foreground">{row.patient_pid}</span>,
+      width: 170,
+      render: (row) => (
+        <span className="block text-right font-mono text-xs tabular-nums text-foreground">
+          {formatMoney(row.total_estimated)}
+        </span>
+      ),
     },
     {
       id: "phase",
@@ -1168,22 +1315,8 @@ function useOrdersPageContent() {
       sortable: true,
       width: 160,
       render: (row) => (
-        <span className="text-sm text-foreground">
+        <span className="text-xs text-foreground">
           {formatDateOnlyLabel(row.created_at)}
-        </span>
-      ),
-    },
-    {
-      id: "total_estimated",
-      label: l("orders_geschaftsvolumen"),
-      accessor: (row) => numberFromUnknown(row.total_estimated) ?? 0,
-      filterType: "number",
-      group: "finance",
-      sortable: true,
-      width: 170,
-      render: (row) => (
-        <span className="block text-right text-sm font-medium tabular-nums text-foreground">
-          {formatMoney(row.total_estimated)}
         </span>
       ),
     },
@@ -1265,6 +1398,15 @@ function useOrdersPageContent() {
     () => orderDetail?.lifecycle?.allowed_transitions?.[0] ?? null,
     [orderDetail?.lifecycle],
   );
+  const currentOrderPhaseIndex = orderDetail
+    ? ORDER_PHASES.indexOf(orderDetail.phase as OrderPhase)
+    : -1;
+  const planningReadinessApplicable =
+    currentOrderPhaseIndex >= ORDER_PHASES.indexOf("intake");
+  const executionReadinessApplicable =
+    currentOrderPhaseIndex >= ORDER_PHASES.indexOf("execution");
+  const followupReadinessApplicable =
+    currentOrderPhaseIndex >= ORDER_PHASES.indexOf("closure");
   const activeWorkflowAssignments = useMemo(
     () =>
       workflowAssignments.filter(
@@ -2595,6 +2737,15 @@ function useOrdersPageContent() {
   const detailProvidersHref = detailPatientId
     ? `/providers?patient=${encodeURIComponent(detailPatientId)}`
     : "/providers";
+  const detailCaseId = orderDetail?.case_id ?? null;
+  const detailCaseCode = orderDetail?.case_code?.trim() || "";
+  const detailCaseHref = detailCaseId
+    ? `/cases/${encodeURIComponent(detailCaseId)}${
+        detailPatientId ? `?patient=${encodeURIComponent(detailPatientId)}` : ""
+      }`
+    : detailPatientId
+      ? `/patients/${detailPatientId}?tab=cases`
+      : "";
   const detailRequiresPatient = Boolean(
     orderDetail && !detailPatientId && detailLeadId,
   );
@@ -2612,13 +2763,19 @@ function useOrdersPageContent() {
               href: detailSubjectHref,
             }]
           : []),
-        ...(detailPatientId
+        ...(detailCaseHref
           ? [
               {
                 label: l("orders_falle"),
-                description: l("orders_fallkontext_dieses_patienten_offnen"),
-                href: `/patients/${detailPatientId}?tab=cases`,
+                description: detailCaseCode
+                  ? detailCaseCode
+                  : l("orders_fallkontext_dieses_patienten_offnen"),
+                href: detailCaseHref,
               },
+            ]
+          : []),
+        ...(detailPatientId
+          ? [
               {
                 label: l("orders_termine"),
                 description: l("orders_termine_dieses_patienten_anzeigen"),
@@ -2680,11 +2837,6 @@ function useOrdersPageContent() {
                 {l("orders_auftrage_die_durch_uberfallige_forderungen_oder_einen_of")}
               </p>
             </div>
-            {!debtQueueLoading && !debtQueueError ? (
-              <Badge variant="outline" className="rounded-full">
-                {debtQueue.length}
-              </Badge>
-            ) : null}
           </div>
 
           <div className="mt-5">
@@ -2716,9 +2868,11 @@ function useOrdersPageContent() {
                       <span className="text-sm font-medium text-foreground">
                         {item.patient_name}
                       </span>
-                      <span className="text-xs text-muted-foreground">
-                        {formatDateTimeLabel(item.updated_at ?? item.next_review_at)}
-                      </span>
+                      {item.updated_at ? (
+                        <span className="text-xs text-muted-foreground">
+                          {l("orders_aktualisiert")}: {formatDateTimeLabel(item.updated_at)}
+                        </span>
+                      ) : null}
                       <Badge
                         variant="outline"
                         className={cn(
@@ -2738,9 +2892,10 @@ function useOrdersPageContent() {
                       <div className="grid gap-0 sm:grid-cols-[minmax(0,1fr)_220px]">
                         <div className="px-4 py-3">
                           <div className="max-w-xl text-xs leading-snug text-muted-foreground">
-                            {item.blocking_reason
-                              ? localizedBlockingReason(item.blocking_reason)
-                              : l("orders_offener_debt_workflow")}
+                            {debtBlockingReasonLabel(
+                              item.effective_status,
+                              item.overdue_invoice_count,
+                            )}
                           </div>
                           {item.note ? (
                             <div className="mt-2 max-w-xl text-xs leading-snug text-muted-foreground">
@@ -2761,9 +2916,11 @@ function useOrdersPageContent() {
                               </span>
                             </span>
                             <span>
-                              {l("orders_review")}:{" "}
+                              {l("orders_next_review")}:{" "}
                               <span className="font-medium text-foreground">
-                                {formatDateTimeLabel(item.next_review_at)}
+                                {item.next_review_at
+                                  ? formatDateTimeLabel(item.next_review_at)
+                                  : l("orders_not_scheduled")}
                               </span>
                             </span>
                           </div>
@@ -2773,10 +2930,18 @@ function useOrdersPageContent() {
                           <div className="space-y-2 text-xs leading-tight">
                             <div>
                               <div className="text-muted-foreground">
-                                {l("orders_saldo")}
+                                {l("orders_open_balance")}
                               </div>
                               <div className="mt-1 text-2xl font-semibold leading-none text-foreground">
                                 {formatMoney(item.outstanding_balance)}
+                              </div>
+                            </div>
+                            <div className="border-t border-border/70 pt-2">
+                              <div className="text-muted-foreground">
+                                {l("orders_overdue_balance")}
+                              </div>
+                              <div className="mt-1 font-mono text-sm font-semibold tabular-nums text-rose-600">
+                                {formatMoney(item.overdue_balance)}
                               </div>
                             </div>
                           </div>
@@ -2798,7 +2963,7 @@ function useOrdersPageContent() {
           </div>
         ) : null}
         <DataTableSurface
-          rows={orders}
+          rows={pagedOrders}
           columns={orderTableColumns}
           rowId={(row) => row.id}
           defaultDensity="comfortable"
@@ -2807,178 +2972,203 @@ function useOrdersPageContent() {
           groupLabels={orderColumnGroupLabels}
           loading={loading}
           maxFrozenColumns={ORDER_MAX_FROZEN_COLUMNS}
+          toolbarClassName="items-end gap-2.5 bg-muted/[0.14] px-4 py-3"
           toolbarStart={
-            <>
-          <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              id="orders-search"
-              value={filters.search}
-              onChange={(event) =>
-                startTransition(() =>
-                  setFilters((current) => ({
-                    ...current,
-                    search: event.target.value,
-                  })),
-                )
-              }
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  setFilters((current) => ({ ...current, search: "" }));
-                  (event.target as HTMLInputElement).blur();
-                }
-              }}
-              placeholder={t.search_placeholder}
-              className={cn(shellInputClassName, "h-8 rounded-lg bg-background pl-8 text-[13px]")}
-            />
-          </div>
+            <div className="grid min-w-[960px] flex-1 grid-cols-12 items-end gap-x-2 gap-y-2.5">
+              <ToolbarField label={t.common_search} className="col-span-4 w-full">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="orders-search"
+                    value={filters.search}
+                    onChange={(event) =>
+                      startTransition(() =>
+                        setFilters((current) => ({
+                          ...current,
+                          search: event.target.value,
+                        })),
+                      )
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        setFilters((current) => ({ ...current, search: "" }));
+                        (event.target as HTMLInputElement).blur();
+                      }
+                    }}
+                    placeholder={t.search_placeholder}
+                    className={cn(shellInputClassName, "h-8 rounded-md bg-field pl-8 text-xs")}
+                  />
+                </div>
+              </ToolbarField>
 
-          <NativeComboboxSelect
-            value={filters.phase || "__all__"}
-            onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
-                phase:
-                  event.target.value && event.target.value !== "__all__"
-                    ? event.target.value
-                    : "",
-              }))
-            }
-            className={cn(selectClassName, "h-8 w-[170px] bg-background text-[13px]")}
-          >
-            <option value="__all__">{t.orders_phase}</option>
-            {ORDER_PHASES.map((phase) => (
-              <option key={phase} value={phase}>
-                {phaseLabel(phase)}
-              </option>
-            ))}
-          </NativeComboboxSelect>
+              <ToolbarField label={t.orders_patient} className="col-span-4 w-full">
+                <NativeComboboxSelect
+                  value={filters.patientId || "__all__"}
+                  onChange={(event) => {
+                    const patientId = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
+                    setFilters((current) => ({ ...current, patientId }));
+                    syncQuery({ patient: patientId || null });
+                  }}
+                  className={cn(selectClassName, "h-8 rounded-md w-full bg-field text-xs")}
+                >
+                  <option value="__all__">{t.orders_all_patients}</option>
+                  {patients.map((patient) => (
+                    <option key={patient.id} value={patient.id}>
+                      {patientLabel(patient, t.orders_patient_fallback)}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </ToolbarField>
 
-          <NativeComboboxSelect
-            value={filters.status || "__all__"}
-            onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
-                status:
-                  event.target.value && event.target.value !== "__all__"
-                    ? event.target.value
-                    : "",
-              }))
-            }
-            className={cn(selectClassName, "h-8 w-[160px] bg-background text-[13px]")}
-          >
-            <option value="__all__">{t.users_status}</option>
-            {ORDER_STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {orderStatusLabel(status)}
-              </option>
-            ))}
-          </NativeComboboxSelect>
+              <ToolbarField label={t.orders_phase} className="col-span-2 w-full">
+                <NativeComboboxSelect
+                  value={filters.phase || "__all__"}
+                  onChange={(event) =>
+                    setFilters((current) => ({
+                      ...current,
+                      phase:
+                        event.target.value && event.target.value !== "__all__"
+                          ? event.target.value
+                          : "",
+                    }))
+                  }
+                  className={cn(selectClassName, "h-8 rounded-md w-full bg-field text-xs")}
+                >
+                  <option value="__all__">{t.orders_phase}</option>
+                  {ORDER_PHASES.map((phase) => (
+                    <option key={phase} value={phase}>
+                      {phaseLabel(phase)}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </ToolbarField>
 
-          <NativeComboboxSelect
-            value={filters.patientId || "__all__"}
-            onChange={(event) => {
-              const patientId = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
-              setFilters((current) => ({ ...current, patientId }));
-              syncQuery({ patient: patientId || null });
-            }}
-            className={cn(selectClassName, "h-8 w-[210px] bg-background text-[13px]")}
-          >
-            <option value="__all__">
-              {t.orders_all_patients}
-            </option>
-            {patients.map((patient) => (
-              <option key={patient.id} value={patient.id}>
-                {patientLabel(patient, t.orders_patient_fallback)}
-              </option>
-            ))}
-          </NativeComboboxSelect>
+              <ToolbarField label={t.users_status} className="col-span-2 w-full">
+                <NativeComboboxSelect
+                  value={filters.status || "__all__"}
+                  onChange={(event) =>
+                    setFilters((current) => ({
+                      ...current,
+                      status:
+                        event.target.value && event.target.value !== "__all__"
+                          ? event.target.value
+                          : "",
+                    }))
+                  }
+                  className={cn(selectClassName, "h-8 rounded-md w-full bg-field text-xs")}
+                >
+                  <option value="__all__">{t.users_status}</option>
+                  {ORDER_STATUSES.map((status) => (
+                    <option key={status} value={status}>
+                      {orderStatusLabel(status)}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </ToolbarField>
 
-          <ProviderSelectWithTaxonomyFilter
-            value={filters.providerId}
-            providers={providers}
-            taxonomyNodes={taxonomyNodes}
-            taxonomyValue={filters.providerTaxonomyNodeId}
-            providerPlaceholder={t.common_provider}
-            taxonomyPlaceholder={t.providers_category}
-            taxonomyAllLabel={t.providers_category}
-            containerClassName="grid w-[420px] shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1.5"
-            taxonomySelectClassName={cn(selectClassName, "h-8 min-w-0 bg-background text-[13px]")}
-            providerSelectClassName={cn(selectClassName, "h-8 min-w-0 bg-background text-[13px]")}
-            providerLabel={(provider) =>
-              `${provider.name}${provider.address_city ? ` (${provider.address_city})` : ""}`
-            }
-            onTaxonomyChange={(providerTaxonomyNodeId) => {
-              setFilters((current) => ({
-                ...current,
-                providerTaxonomyNodeId,
-              }));
-              syncQuery({
-                taxonomy: providerTaxonomyNodeId || null,
-              });
-            }}
-            onChange={(providerId) => {
-              setFilters((current) => ({
-                ...current,
-                providerId,
-                doctorId: "",
-              }));
-              syncQuery({ provider: providerId || null, doctor: null });
-            }}
-          />
-
-          <NativeComboboxSelect
-            value={filters.doctorId || "__all__"}
-            onChange={(event) => {
-              const doctorId = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
-              setFilters((current) => ({ ...current, doctorId }));
-              syncQuery({ doctor: doctorId || null });
-            }}
-            disabled={!filters.providerId}
-            className={cn(selectClassName, "h-8 w-[190px] bg-background text-[13px]")}
-          >
-            <option value="__all__">{t.orders_filter_doctor}</option>
-            {filterDoctorOptions.map((doctor) => (
-              <option key={doctor.id} value={doctor.id}>
-                {doctor.name}
-                {doctorSpecialtyLabel(doctor, lang) ? ` (${doctorSpecialtyLabel(doctor, lang)})` : ""}
-              </option>
-            ))}
-          </NativeComboboxSelect>
-
-          <div className="ml-auto flex items-center gap-1">
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              title={t.orders_refresh}
-              aria-label={t.orders_refresh}
-              onClick={triggerReload}
-            >
-              <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
-            </Button>
-            {anyQuickFilterActive ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setFilters(DEFAULT_FILTERS);
-                  syncQuery({
-                    patient: null,
-                    taxonomy: null,
-                    provider: null,
-                    doctor: null,
-                    order: null,
-                  });
-                }}
+              <ToolbarField
+                label={`${t.common_provider} / ${t.providers_category}`}
+                className="col-span-6 w-full"
               >
-                <X className="size-3.5" />
-                {t.common_reset}
-              </Button>
-            ) : null}
-          </div>
-            </>
+                <ProviderSelectWithTaxonomyFilter
+                  value={filters.providerId}
+                  providers={providers}
+                  taxonomyNodes={taxonomyNodes}
+                  taxonomyValue={filters.providerTaxonomyNodeId}
+                  providerPlaceholder={t.common_provider}
+                  taxonomyPlaceholder={t.providers_category}
+                  taxonomyAllLabel={t.providers_category}
+                  containerClassName="grid w-full grid-cols-2 gap-2"
+                  taxonomySelectClassName={cn(selectClassName, "h-8 rounded-md min-w-0 bg-field text-xs")}
+                  providerSelectClassName={cn(selectClassName, "h-8 rounded-md min-w-0 bg-field text-xs")}
+                  providerLabel={(provider) =>
+                    `${provider.name}${provider.address_city ? ` (${provider.address_city})` : ""}`
+                  }
+                  onTaxonomyChange={(providerTaxonomyNodeId) => {
+                    setFilters((current) => ({
+                      ...current,
+                      providerTaxonomyNodeId,
+                    }));
+                    syncQuery({ taxonomy: providerTaxonomyNodeId || null });
+                  }}
+                  onChange={(providerId) => {
+                    setFilters((current) => ({
+                      ...current,
+                      providerId,
+                      doctorId: "",
+                    }));
+                    syncQuery({ provider: providerId || null, doctor: null });
+                  }}
+                />
+              </ToolbarField>
+
+              <ToolbarField label={t.orders_filter_doctor} className="col-span-3 w-full">
+                <NativeComboboxSelect
+                  value={filters.doctorId || "__all__"}
+                  onChange={(event) => {
+                    const doctorId = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
+                    setFilters((current) => ({ ...current, doctorId }));
+                    syncQuery({ doctor: doctorId || null });
+                  }}
+                  disabled={!filters.providerId}
+                  className={cn(selectClassName, "h-8 rounded-md w-full bg-field text-xs")}
+                >
+                  <option value="__all__">{t.orders_filter_doctor}</option>
+                  {filterDoctorOptions.map((doctor) => (
+                    <option key={doctor.id} value={doctor.id}>
+                      {doctor.name}
+                      {doctorSpecialtyLabel(doctor, lang) ? ` (${doctorSpecialtyLabel(doctor, lang)})` : ""}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </ToolbarField>
+
+              <ToolbarField label={t.table_actions} className="col-span-3 w-full">
+                <div className="flex h-8 items-center justify-end gap-1.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    className="size-8 shrink-0 rounded-md bg-field"
+                    title={t.orders_refresh}
+                    aria-label={t.orders_refresh}
+                    onClick={triggerReload}
+                  >
+                    <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 min-w-0 flex-1 justify-center rounded-md bg-field px-2.5"
+                    disabled={!anyQuickFilterActive}
+                    onClick={() => {
+                      setFilters(DEFAULT_FILTERS);
+                      syncQuery({
+                        patient: null,
+                        taxonomy: null,
+                        provider: null,
+                        doctor: null,
+                        order: null,
+                      });
+                    }}
+                  >
+                    <X className="size-3.5" />
+                    {t.common_reset}
+                  </Button>
+                </div>
+              </ToolbarField>
+            </div>
+          }
+          toolbarAfter={
+            <OrdersPager
+              pageIndex={safeOrderPageIndex}
+              totalPages={orderTotalPages}
+              totalRows={orders.length}
+              previousLabel={t.pagination_previous}
+              nextLabel={t.pagination_next}
+              onPageChange={handleOrderPageChange}
+            />
           }
           activeRowId={selectedOrderId}
           onRowClick={(row) => openOrder(row.id, row.patient_id)}
@@ -3654,14 +3844,18 @@ function useOrdersPageContent() {
                               variant="outline"
                               className={cn(
                                 "rounded-full",
-                                orderDetail.planning_preparation.planning_ready
-                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                  : "border-amber-200 bg-amber-50 text-amber-700",
+                                !planningReadinessApplicable
+                                  ? "border-border bg-muted/50 text-muted-foreground"
+                                  : orderDetail.planning_preparation.planning_ready
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                    : "border-amber-200 bg-amber-50 text-amber-700",
                               )}
                             >
-                              {orderDetail.planning_preparation.planning_ready
-                                ? l("orders_bereit")
-                                : l("orders_blockiert")}
+                              {!planningReadinessApplicable
+                                ? l("orders_nicht_verfugbar")
+                                : orderDetail.planning_preparation.planning_ready
+                                  ? l("orders_bereit")
+                                  : l("orders_blockiert")}
                             </Badge>
                           }
                         />
@@ -3746,8 +3940,9 @@ function useOrdersPageContent() {
                         />
                       </div>
 
-                      {orderDetail.planning_preparation.blocking_reasons
-                        .length > 0 ? (
+                      {planningReadinessApplicable ? (
+                        orderDetail.planning_preparation.blocking_reasons
+                          .length > 0 ? (
                         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                           <div className="font-medium">
                             {l("orders_blocker_aus_der_planung")}
@@ -3764,7 +3959,8 @@ function useOrdersPageContent() {
                         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
                           {l("orders_planung_und_vorbereitung_sind_fur_die_durchfuhrung_volls")}
                         </div>
-                      )}
+                        )
+                      ) : null}
 
                       {planningError ? (
                         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -3995,14 +4191,18 @@ function useOrdersPageContent() {
                               variant="outline"
                               className={cn(
                                 "rounded-full",
-                                orderDetail.execution_flow.closure_ready
-                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                  : "border-amber-200 bg-amber-50 text-amber-700",
+                                !executionReadinessApplicable
+                                  ? "border-border bg-muted/50 text-muted-foreground"
+                                  : orderDetail.execution_flow.closure_ready
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                    : "border-amber-200 bg-amber-50 text-amber-700",
                               )}
                             >
-                              {orderDetail.execution_flow.closure_ready
-                                ? l("orders_bereit")
-                                : l("orders_blockiert")}
+                              {!executionReadinessApplicable
+                                ? l("orders_nicht_verfugbar")
+                                : orderDetail.execution_flow.closure_ready
+                                  ? l("orders_bereit")
+                                  : l("orders_blockiert")}
                             </Badge>
                           }
                         />
@@ -4080,8 +4280,9 @@ function useOrdersPageContent() {
                         />
                       </div>
 
-                      {orderDetail.execution_flow.blocking_reasons.length >
-                      0 ? (
+                      {executionReadinessApplicable ? (
+                        orderDetail.execution_flow.blocking_reasons.length >
+                        0 ? (
                         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                           <div className="font-medium">
                             {l("orders_blocker_aus_der_durchfuhrung")}
@@ -4098,7 +4299,8 @@ function useOrdersPageContent() {
                         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
                           {l("orders_durchfuhrungsnachweise_und_operative_ubergabe_sind_fur_d")}
                         </div>
-                      )}
+                        )
+                      ) : null}
 
                       {executionError ? (
                         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -4365,14 +4567,18 @@ function useOrdersPageContent() {
                               variant="outline"
                               className={cn(
                                 "rounded-full",
-                                orderDetail.followup_flow.followup_ready
-                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                  : "border-amber-200 bg-amber-50 text-amber-700",
+                                !followupReadinessApplicable
+                                  ? "border-border bg-muted/50 text-muted-foreground"
+                                  : orderDetail.followup_flow.followup_ready
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                    : "border-amber-200 bg-amber-50 text-amber-700",
                               )}
                             >
-                              {orderDetail.followup_flow.followup_ready
-                                ? l("orders_bereit")
-                                : l("orders_blockiert")}
+                              {!followupReadinessApplicable
+                                ? l("orders_nicht_verfugbar")
+                                : orderDetail.followup_flow.followup_ready
+                                  ? l("orders_bereit")
+                                  : l("orders_blockiert")}
                             </Badge>
                           }
                         />
@@ -4435,7 +4641,8 @@ function useOrdersPageContent() {
                         />
                       </div>
 
-                      {orderDetail.followup_flow.blocking_reasons.length > 0 ? (
+                      {followupReadinessApplicable ? (
+                        orderDetail.followup_flow.blocking_reasons.length > 0 ? (
                         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                           <div className="font-medium">
                             {l("orders_blocker_fur_den_start_der_nachsorge")}
@@ -4452,7 +4659,8 @@ function useOrdersPageContent() {
                         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
                           {l("orders_nachsorge_meilensteine_und_ubergabe_sind_fur_die_post_ca")}
                         </div>
-                      )}
+                        )
+                      ) : null}
 
                       {followupError ? (
                         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">

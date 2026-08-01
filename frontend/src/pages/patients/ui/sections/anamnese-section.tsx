@@ -12,7 +12,7 @@ import type { ClinicalNarrative } from "@/pages/patients/data/patient-clinical";
 type Bilingual = (ru: string, de: string) => string;
 
 const inputClass =
-  "h-9 w-full rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
+  "h-9 w-full rounded-lg border border-border bg-field px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
 const datePillClass =
   "inline-flex items-center rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700";
 

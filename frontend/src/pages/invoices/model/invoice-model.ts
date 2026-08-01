@@ -1,3 +1,5 @@
+import { formatMoneyAmount } from "@/lib/money";
+
 import type {
   AccountingLedgerPayload,
   CreateForm,
@@ -32,7 +34,7 @@ export const DEFAULT_FILTERS: Filters = {
   invoiceType: "",
 };
 
-const DEFAULT_INVOICE_PAGE_SIZE = 12;
+export const DEFAULT_INVOICE_PAGE_SIZE = 50;
 
 const INVOICE_DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
   day: "2-digit",
@@ -43,12 +45,6 @@ const INVOICE_DATE_TIME_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
   ...INVOICE_DATE_FORMAT_OPTIONS,
   hour: "2-digit",
   minute: "2-digit",
-};
-const INVOICE_CURRENCY_FORMAT_OPTIONS: Intl.NumberFormatOptions = {
-  style: "currency",
-  currency: "EUR",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
 };
 
 const dateFormatters = new Map<string, Intl.DateTimeFormat>([
@@ -61,11 +57,6 @@ const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>([
   ["ru-RU", new Intl.DateTimeFormat("ru-RU", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
   ["en-GB", new Intl.DateTimeFormat("en-GB", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
 ]);
-const currencyFormatters = new Map<string, Intl.NumberFormat>([
-  ["de-DE", new Intl.NumberFormat("de-DE", INVOICE_CURRENCY_FORMAT_OPTIONS)],
-  ["ru-RU", new Intl.NumberFormat("ru-RU", INVOICE_CURRENCY_FORMAT_OPTIONS)],
-  ["en-GB", new Intl.NumberFormat("en-GB", INVOICE_CURRENCY_FORMAT_OPTIONS)],
-]);
 
 function invoiceDateFormatter(locale: string) {
   return dateFormatters.get(locale) ?? dateFormatters.get("en-GB")!;
@@ -73,10 +64,6 @@ function invoiceDateFormatter(locale: string) {
 
 function invoiceDateTimeFormatter(locale: string) {
   return dateTimeFormatters.get(locale) ?? dateTimeFormatters.get("en-GB")!;
-}
-
-function invoiceCurrencyFormatter(locale: string) {
-  return currencyFormatters.get(locale) ?? currencyFormatters.get("en-GB")!;
 }
 
 export const EMPTY_ACCOUNTING_SUMMARY: AccountingLedgerPayload["summary"] = {
@@ -193,9 +180,9 @@ export function formatDateTime(
   }
 }
 
-export function formatCurrency(value: unknown, locale = "de-DE") {
-  const numeric = typeof value === "number" ? value : Number(value ?? 0);
-  return invoiceCurrencyFormatter(locale).format(Number.isFinite(numeric) ? numeric : 0);
+export function formatCurrency(value: unknown, _locale = "de-DE") {
+  void _locale;
+  return formatMoneyAmount(value);
 }
 
 export function nextDunningLevel(events: DunningEvent[]) {

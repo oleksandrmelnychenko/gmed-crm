@@ -3,6 +3,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useMemo,
   useReducer,
   type FormEvent,
   type SetStateAction,
@@ -11,6 +12,12 @@ import {
 import { LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
+import {
+  AppointmentRemindersTable,
+  AppointmentTasksTable,
+} from "@/pages/appointments/ui/shared/follow-up-tables";
 import { CONFIRMED_DISMISS_REASON } from "@/components/ui/dismissal-guard";
 import { Input } from "@/components/ui/input";
 import {
@@ -18,7 +25,6 @@ import {
   EmptyCell,
   Section,
   StatCard,
-  StatusBadge,
 } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
@@ -26,7 +32,6 @@ import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import {
   appointmentFilterControlClassName,
-  appointmentPreviewInfoCardClassName,
   appointmentSelectControlClassName,
   appointmentSoftPanelClassName,
   appointmentTextareaControlClassName,
@@ -52,7 +57,6 @@ import {
   incomingDataSourceLabel,
   roleLabel,
   taskPriorityLabel,
-  taskStatusLabel,
 } from "@/pages/appointments/model/labels";
 import {
   formatAppointmentDateTimeLabel as formatDateTimeLabel,
@@ -261,7 +265,6 @@ function useAppointmentIncomingDataSectionContent({
       : appointmentText("appointments_open_count", {
           count: openChecklistCount,
         });
-  const followUpItemCount = reminders.length + tasks.length;
   const caseUpdateLabel = appointmentText("appointments_case_update_required");
   const patientFollowUpLabel = appointmentText("appointments_patient_follow_up_required");
   const intakeComposerTitle = appointmentText("appointments_create_intake_follow_up");
@@ -307,6 +310,77 @@ function useAppointmentIncomingDataSectionContent({
       resetIncomingComposerForm();
     }
   }
+
+  const intakeChecklistColumns = useMemo<ColumnDef<ChecklistItem>[]>(
+    () => [
+      {
+        id: "item",
+        label: appointmentText("appointments_checklist"),
+        accessor: (item) =>
+          item.item_text.replace(`${INCOMING_DATA_CHECKLIST_PREFIX} `, ""),
+        filterType: "text",
+        sortable: true,
+        required: true,
+        width: 380,
+        render: (item) => (
+          <span
+            className={cn(
+              "block truncate text-xs font-medium text-foreground",
+              item.is_completed && "text-muted-foreground line-through",
+            )}
+            title={item.item_text.replace(`${INCOMING_DATA_CHECKLIST_PREFIX} `, "")}
+          >
+            {item.item_text.replace(`${INCOMING_DATA_CHECKLIST_PREFIX} `, "")}
+          </span>
+        ),
+      },
+      {
+        id: "phase",
+        label: tr.orders_phase,
+        accessor: (item) => checklistPhaseLabel(item.phase),
+        filterType: "enum",
+        filterOptions: (rows) =>
+          [...new Set(rows.map((item) => checklistPhaseLabel(item.phase)))].map(
+            (label) => ({ value: label, label }),
+          ),
+        sortable: true,
+        width: 160,
+        render: (item) => (
+          <span className="inline-flex rounded-full border border-border/60 bg-muted/25 px-2 py-0.5 font-mono text-[10px] text-foreground">
+            {checklistPhaseLabel(item.phase)}
+          </span>
+        ),
+      },
+      {
+        id: "status",
+        label: tr.users_status,
+        accessor: (item) =>
+          item.is_completed ? tr.common_completed : tr.common_pending,
+        filterType: "enum",
+        filterOptions: [
+          { value: tr.common_completed, label: tr.common_completed },
+          { value: tr.common_pending, label: tr.common_pending },
+        ],
+        sortable: true,
+        width: 220,
+        render: (item) => (
+          <span
+            className={cn(
+              "inline-flex rounded-full border px-2 py-0.5 font-mono text-[10px] font-medium",
+              item.is_completed
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-amber-200 bg-amber-50 text-amber-700",
+            )}
+          >
+            {item.is_completed
+              ? `${tr.common_completed} ${formatDateTimeLabel(item.completed_at)}`
+              : tr.common_pending}
+          </span>
+        ),
+      },
+    ],
+    [tr],
+  );
 
   async function completeChecklistItem(itemId: string) {
     setActionBusy(`check:${itemId}`);
@@ -474,166 +548,70 @@ function useAppointmentIncomingDataSectionContent({
         <p className="text-sm text-muted-foreground">
           {appointmentText("appointments_capture_new_medical_updates_from_patients_doctors_interp")}
         </p>
-        <div className="grid gap-3 md:grid-cols-3">
-          <StatCard
-            label={appointmentText("appointments_checklist")}
-            value={checklist.length}
-            description={
-              checklist.length === 0
-                ? appointmentText("appointments_not_started_yet")
-                : intakeStateLabel
-            }
-          />
-          <StatCard
-            label={appointmentText("appointments_reminders")}
-            value={reminders.length}
-            description={appointmentText("appointments_timing_for_triage_and_processing")}
-          />
-          <StatCard
-            label={appointmentText("appointments_tasks")}
-            value={tasks.length}
-            description={appointmentText("appointments_operational_ownership_for_categorization_and_case_update")}
-          />
-        </div>
       </Section>
 
       <div className="space-y-4">
-        <Section
-          title={appointmentText("appointments_intake_checklist")}
-          accessory={<CountBadge>{checklist.length}</CountBadge>}
-        >
-          {checklist.length === 0 ? (
+        <DataTableSurface
+          rows={checklist}
+          columns={intakeChecklistColumns}
+          rowId={(item) => item.id}
+          dictionary={tr}
+          emptyState={
             <EmptyCell>
               {appointmentText("appointments_no_intake_checklist_has_been_created_for_this_appointmen")}
             </EmptyCell>
-          ) : (
-            <div className="space-y-2">
-              {checklist.map((item) => (
-                <div
-                  key={item.id}
-                  className={cn(
-                    "flex flex-col gap-3 md:flex-row md:items-start md:justify-between",
-                    appointmentPreviewInfoCardClassName,
-                  )}
-                >
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-foreground">
-                      {item.item_text.replace(
-                        `${INCOMING_DATA_CHECKLIST_PREFIX} `,
-                        "",
-                      )}
-                    </p>
-                    <p className="text-[11.5px] uppercase tracking-[0.12em] text-muted-foreground">
-                      {checklistPhaseLabel(item.phase)}
-                    </p>
-                  </div>
-                  {item.is_completed ? (
-                    <StatusBadge tone="success">
-                      {appointmentText("appointments_completed")}{" "}
-                      {formatDateTimeLabel(item.completed_at)}
-                    </StatusBadge>
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 rounded-lg gap-1.5"
-                      disabled={Boolean(actionBusy)}
-                      onClick={() => void completeChecklistItem(item.id)}
-                    >
-                      {actionBusy === `check:${item.id}` ? (
-                        <LoaderCircle className="size-4 animate-spin" />
-                      ) : null}
-                      {appointmentText("appointments_complete")}
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </Section>
-
-        <Section
-          title={appointmentText("appointments_reminders_and_tasks")}
-          accessory={
-            <div className="flex items-center gap-2">
-              <CountBadge>{followUpItemCount}</CountBadge>
+          }
+          toolbarStart={
+            <>
+              <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                {appointmentText("appointments_intake_checklist")}
+              </span>
+              <CountBadge>{checklist.length}</CountBadge>
+              <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+            </>
+          }
+          rowActions={(item) =>
+            item.is_completed ? null : (
               <Button
                 type="button"
-                size="sm"
-                className="h-8 rounded-lg gap-1.5"
-                onClick={() => setComposerOpen(true)}
+                variant="outline"
+                size="xs"
+                className="shrink-0"
+                disabled={Boolean(actionBusy)}
+                onClick={() => void completeChecklistItem(item.id)}
               >
-                {intakeComposerTitle}
+                {actionBusy === `check:${item.id}` ? (
+                  <LoaderCircle className="size-3.5 animate-spin" />
+                ) : null}
+                {appointmentText("appointments_complete")}
               </Button>
-            </div>
+            )
           }
-        >
-          {followUpItemCount === 0 ? (
-            <EmptyCell>
-              {appointmentText("appointments_no_reminders_or_tasks_exist_in_this_intake_flow_yet")}
-            </EmptyCell>
-          ) : (
-            <div className="space-y-2">
-              {reminders.map((item) => (
-                <div
-                  key={item.id}
-                  className={cn("space-y-2.5", appointmentPreviewInfoCardClassName)}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-foreground">
-                        {item.title.replace(`${INCOMING_DATA_PREFIX} `, "")}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {item.user_name} · {formatDateTimeLabel(item.remind_at)}
-                      </p>
-                    </div>
-                    <CountBadge>
-                      {appointmentText("appointments_reminder")}
-                    </CountBadge>
-                  </div>
-                  {item.description ? (
-                    <p className="whitespace-pre-line text-sm text-muted-foreground">
-                      {item.description}
-                    </p>
-                  ) : null}
-                </div>
-              ))}
-              {tasks.map((task) => (
-                <div
-                  key={task.id}
-                  className={cn("space-y-2.5", appointmentPreviewInfoCardClassName)}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-foreground">
-                        {task.title.replace(`${INCOMING_DATA_PREFIX} `, "")}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {task.assigned_to_name}
-                        {task.due_date
-                          ? ` · ${formatDateTimeLabel(task.due_date)}`
-                          : ""}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StatusBadge status={task.status}>
-                        {taskStatusLabel(task.status)}
-                      </StatusBadge>
-                      <CountBadge>{taskPriorityLabel(task.priority)}</CountBadge>
-                    </div>
-                  </div>
-                  {task.description ? (
-                    <p className="whitespace-pre-line text-sm text-muted-foreground">
-                      {task.description}
-                    </p>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          )}
-        </Section>
+          rowActionsWidth={130}
+        />
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-end">
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 rounded-lg gap-1.5"
+              onClick={() => setComposerOpen(true)}
+            >
+              {intakeComposerTitle}
+            </Button>
+          </div>
+          <AppointmentRemindersTable
+            reminders={reminders}
+            title={appointmentText("appointments_reminders")}
+            emptyText={appointmentText("appointments_no_reminders_or_tasks_exist_in_this_intake_flow_yet")}
+          />
+          <AppointmentTasksTable
+            tasks={tasks}
+            title={appointmentText("appointments_tasks")}
+            emptyText={appointmentText("appointments_no_reminders_or_tasks_exist_in_this_intake_flow_yet")}
+          />
+        </div>
       </div>
 
       <AppointmentEditorSheet
@@ -943,7 +921,6 @@ function useAppointmentFindingsSectionContent({
       : appointmentText("appointments_open_count", {
           count: openChecklistCount,
         });
-  const followUpItemCount = reminders.length + tasks.length;
   const translationRequiredLabel = appointmentText("appointments_written_translation_required");
   const sendToPatientLabel = appointmentText("appointments_send_package_to_patient");
   const findingsComposerTitle = appointmentText("appointments_create_findings_follow_up");
@@ -1009,6 +986,77 @@ function useAppointmentFindingsSectionContent({
       setActionBusy("");
     }
   }
+
+  const findingsChecklistColumns = useMemo<ColumnDef<ChecklistItem>[]>(
+    () => [
+      {
+        id: "item",
+        label: appointmentText("appointments_checklist"),
+        accessor: (item) =>
+          item.item_text.replace(`${FINDINGS_CHECKLIST_PREFIX} `, ""),
+        filterType: "text",
+        sortable: true,
+        required: true,
+        width: 380,
+        render: (item) => (
+          <span
+            className={cn(
+              "block truncate text-xs font-medium text-foreground",
+              item.is_completed && "text-muted-foreground line-through",
+            )}
+            title={item.item_text.replace(`${FINDINGS_CHECKLIST_PREFIX} `, "")}
+          >
+            {item.item_text.replace(`${FINDINGS_CHECKLIST_PREFIX} `, "")}
+          </span>
+        ),
+      },
+      {
+        id: "phase",
+        label: tr.orders_phase,
+        accessor: (item) => checklistPhaseLabel(item.phase),
+        filterType: "enum",
+        filterOptions: (rows) =>
+          [...new Set(rows.map((item) => checklistPhaseLabel(item.phase)))].map(
+            (label) => ({ value: label, label }),
+          ),
+        sortable: true,
+        width: 160,
+        render: (item) => (
+          <span className="inline-flex rounded-full border border-border/60 bg-muted/25 px-2 py-0.5 font-mono text-[10px] text-foreground">
+            {checklistPhaseLabel(item.phase)}
+          </span>
+        ),
+      },
+      {
+        id: "status",
+        label: tr.users_status,
+        accessor: (item) =>
+          item.is_completed ? tr.common_completed : tr.common_pending,
+        filterType: "enum",
+        filterOptions: [
+          { value: tr.common_completed, label: tr.common_completed },
+          { value: tr.common_pending, label: tr.common_pending },
+        ],
+        sortable: true,
+        width: 220,
+        render: (item) => (
+          <span
+            className={cn(
+              "inline-flex rounded-full border px-2 py-0.5 font-mono text-[10px] font-medium",
+              item.is_completed
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-amber-200 bg-amber-50 text-amber-700",
+            )}
+          >
+            {item.is_completed
+              ? `${tr.common_completed} ${formatDateTimeLabel(item.completed_at)}`
+              : tr.common_pending}
+          </span>
+        ),
+      },
+    ],
+    [tr],
+  );
 
   function openChatDraft() {
     if (!form.assigneeId) return;
@@ -1180,142 +1228,66 @@ function useAppointmentFindingsSectionContent({
         </div>
       </Section>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)]">
-        <div className="space-y-4">
-          <Section
-            title={appointmentText("appointments_follow_up_checklist")}
-            accessory={<CountBadge>{checklist.length}</CountBadge>}
-          >
-            {checklist.length === 0 ? (
-              <EmptyCell>
-                {appointmentText("appointments_no_findings_checklist_has_been_created_for_this_appointm")}
-              </EmptyCell>
-            ) : (
-              <div className="space-y-2">
-                {checklist.map((item) => (
-                  <div
-                    key={item.id}
-                    className={cn(
-                      "flex flex-col gap-3 md:flex-row md:items-start md:justify-between",
-                      appointmentPreviewInfoCardClassName,
-                    )}
-                  >
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-foreground">
-                        {item.item_text.replace(`${FINDINGS_CHECKLIST_PREFIX} `, "")}
-                      </p>
-                      <p className="text-[11.5px] uppercase tracking-[0.12em] text-muted-foreground">
-                        {checklistPhaseLabel(item.phase)}
-                      </p>
-                    </div>
-                    {item.is_completed ? (
-                      <StatusBadge tone="success">
-                        {appointmentText("appointments_completed")}{" "}
-                        {formatDateTimeLabel(item.completed_at)}
-                      </StatusBadge>
-                    ) : (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 rounded-lg gap-1.5"
-                        disabled={Boolean(actionBusy)}
-                        onClick={() => void completeChecklistItem(item.id)}
-                      >
-                        {actionBusy === `check:${item.id}` ? (
-                          <LoaderCircle className="size-4 animate-spin" />
-                        ) : null}
-                        {appointmentText("appointments_complete")}
-                      </Button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </Section>
+      <div className="space-y-4">
+        <DataTableSurface
+          rows={checklist}
+          columns={findingsChecklistColumns}
+          rowId={(item) => item.id}
+          dictionary={tr}
+          emptyState={
+            <EmptyCell>
+              {appointmentText("appointments_no_findings_checklist_has_been_created_for_this_appointm")}
+            </EmptyCell>
+          }
+          toolbarStart={
+            <>
+              <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                {appointmentText("appointments_follow_up_checklist")}
+              </span>
+              <CountBadge>{checklist.length}</CountBadge>
+              <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+            </>
+          }
+          rowActions={(item) =>
+            item.is_completed ? null : (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                className="shrink-0"
+                disabled={Boolean(actionBusy)}
+                onClick={() => void completeChecklistItem(item.id)}
+              >
+                {actionBusy === `check:${item.id}` ? (
+                  <LoaderCircle className="size-3.5 animate-spin" />
+                ) : null}
+                {appointmentText("appointments_complete")}
+              </Button>
+            )
+          }
+          rowActionsWidth={130}
+        />
 
-          <Section
-            title={appointmentText("appointments_reminders_and_tasks")}
-            accessory={
-              <div className="flex items-center gap-2">
-                <CountBadge>{followUpItemCount}</CountBadge>
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-8 rounded-lg gap-1.5"
-                  onClick={() => setComposerOpen(true)}
-                >
-                  {findingsComposerTitle}
-                </Button>
-              </div>
-            }
+        <div className="flex items-center justify-end">
+          <Button
+            type="button"
+            size="sm"
+            className="h-8 rounded-lg gap-1.5"
+            onClick={() => setComposerOpen(true)}
           >
-            {followUpItemCount === 0 ? (
-              <EmptyCell>
-                {appointmentText("appointments_no_reminders_or_tasks_exist_in_this_findings_follow_up_y")}
-              </EmptyCell>
-            ) : (
-              <div className="space-y-2">
-                {reminders.map((item) => (
-                  <div
-                    key={item.id}
-                    className={cn("space-y-2.5", appointmentPreviewInfoCardClassName)}
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-foreground">
-                          {item.title.replace(`${FINDINGS_FOLLOW_UP_PREFIX} `, "")}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {item.user_name} · {formatDateTimeLabel(item.remind_at)}
-                        </p>
-                      </div>
-                      <CountBadge>
-                        {appointmentText("appointments_reminder")}
-                      </CountBadge>
-                    </div>
-                    {item.description ? (
-                      <p className="whitespace-pre-line text-sm text-muted-foreground">
-                        {item.description}
-                      </p>
-                    ) : null}
-                  </div>
-                ))}
-                {tasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className={cn("space-y-2.5", appointmentPreviewInfoCardClassName)}
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-foreground">
-                          {task.title.replace(`${FINDINGS_FOLLOW_UP_PREFIX} `, "")}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {task.assigned_to_name}
-                          {task.due_date
-                            ? ` · ${formatDateTimeLabel(task.due_date)}`
-                            : ""}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <StatusBadge status={task.status}>
-                          {taskStatusLabel(task.status)}
-                        </StatusBadge>
-                        <CountBadge>{taskPriorityLabel(task.priority)}</CountBadge>
-                      </div>
-                    </div>
-                    {task.description ? (
-                      <p className="whitespace-pre-line text-sm text-muted-foreground">
-                        {task.description}
-                      </p>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            )}
-          </Section>
+            {findingsComposerTitle}
+          </Button>
         </div>
+        <AppointmentRemindersTable
+          reminders={reminders}
+          title={appointmentText("appointments_reminders")}
+          emptyText={appointmentText("appointments_no_reminders_or_tasks_exist_in_this_findings_follow_up_y")}
+        />
+        <AppointmentTasksTable
+          tasks={tasks}
+          title={appointmentText("appointments_tasks")}
+          emptyText={appointmentText("appointments_no_reminders_or_tasks_exist_in_this_findings_follow_up_y")}
+        />
       </div>
 
       <AppointmentEditorSheet

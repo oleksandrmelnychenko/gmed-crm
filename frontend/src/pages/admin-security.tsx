@@ -25,6 +25,10 @@ import {
   SheetActionsFooter,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
+import {
+  DataTablePager,
+  useDataTablePagination,
+} from "@/components/data-table/data-table-pager";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
@@ -363,6 +367,16 @@ function useAdminSecurityPageContent() {
     }),
     [auditAnalytics],
   );
+  const suspiciousEvents = useMemo(
+    () => auditAnalytics?.recent_suspicious_events ?? [],
+    [auditAnalytics],
+  );
+  const suspiciousEventsPagination = useDataTablePagination(
+    suspiciousEvents,
+    String(suspiciousEvents.length),
+  );
+  const ipRegistryPagination = useDataTablePagination(ips, String(ips.length));
+  const loginHistoryPagination = useDataTablePagination(geo, String(geo.length));
 
   function openMaintenanceSheet() {
     setMaintDraftMsg(maintMsg);
@@ -479,7 +493,7 @@ function useAdminSecurityPageContent() {
       sortable: true,
       width: 170,
       render: (event) => (
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="font-mono text-xs text-foreground">
           {formatAdminDateTime(event.created_at, lang)}
         </span>
       ),
@@ -492,10 +506,10 @@ function useAdminSecurityPageContent() {
       width: 220,
       render: (event) => (
         <div className="min-w-0">
-          <div className="text-xs font-medium text-foreground">
+          <div className="text-xs text-foreground">
             {event.user_name ?? t.security_anonymous}
           </div>
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-xs text-foreground">
             {event.user_role ? roleLabel(event.user_role) : securityActionLabel(event.action)}
           </div>
         </div>
@@ -510,7 +524,7 @@ function useAdminSecurityPageContent() {
       render: (event) => (
         <div className="min-w-0">
           <div className="truncate text-xs text-foreground">{event.reason}</div>
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-xs text-foreground">
             {securityEntityLabel(event.entity_type)} - {securityActionLabel(event.action)}
           </div>
         </div>
@@ -523,7 +537,7 @@ function useAdminSecurityPageContent() {
       sortable: true,
       width: 220,
       render: (event) => (
-        <span className="truncate text-xs text-muted-foreground">
+        <span className="truncate text-xs text-foreground">
           {event.route ?? "-"}
         </span>
       ),
@@ -535,7 +549,7 @@ function useAdminSecurityPageContent() {
       sortable: true,
       width: 140,
       render: (event) => (
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="font-mono text-xs text-foreground">
           {event.ip_hash ?? "-"}
         </span>
       ),
@@ -562,8 +576,8 @@ function useAdminSecurityPageContent() {
       width: 220,
       render: (reader) => (
         <div className="min-w-0">
-          <div className="text-xs font-medium text-foreground">{reader.user_name}</div>
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-xs text-foreground">{reader.user_name}</div>
+          <div className="text-xs text-foreground">
             {roleLabel(reader.user_role)}
           </div>
         </div>
@@ -603,7 +617,7 @@ function useAdminSecurityPageContent() {
       sortable: true,
       width: 280,
       render: (ip) => (
-        <span className="truncate text-xs text-muted-foreground">
+        <span className="truncate text-xs text-foreground">
           {ip.description || "-"}
         </span>
       ),
@@ -665,7 +679,7 @@ function useAdminSecurityPageContent() {
       sortable: true,
       width: 170,
       render: (entry) => (
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="font-mono text-xs text-foreground">
           {formatAdminDateTime(entry.created_at, lang)}
         </span>
       ),
@@ -678,8 +692,8 @@ function useAdminSecurityPageContent() {
       width: 240,
       render: (entry) => (
         <div className="min-w-0">
-          <div className="text-xs font-medium text-foreground">{entry.user_name}</div>
-          <div className="text-[11px] text-muted-foreground">{entry.user_email}</div>
+          <div className="text-xs text-foreground">{entry.user_name}</div>
+          <div className="text-xs text-foreground">{entry.user_email}</div>
         </div>
       ),
     },
@@ -690,7 +704,7 @@ function useAdminSecurityPageContent() {
       sortable: true,
       width: 140,
       render: (entry) => (
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="font-mono text-xs text-foreground">
           {entry.ip_address ?? "-"}
         </span>
       ),
@@ -702,7 +716,7 @@ function useAdminSecurityPageContent() {
       sortable: true,
       width: 260,
       render: (entry) => (
-        <span className="truncate text-xs text-muted-foreground" title={entry.user_agent ?? ""}>
+        <span className="truncate text-xs text-foreground" title={entry.user_agent ?? ""}>
           {shortAdminUserAgent(entry.user_agent)}
         </span>
       ),
@@ -829,7 +843,7 @@ function useAdminSecurityPageContent() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="h-8 rounded-lg bg-card"
+                  className="h-8 rounded-lg bg-field"
                   onClick={openMaintenanceSheet}
                 >
                   {t.common_edit}
@@ -886,17 +900,28 @@ function useAdminSecurityPageContent() {
                 <AdminTableCard
                   title={t.security_audit_recent}
                   description={t.security_audit_hint}
-                  count={auditAnalytics?.recent_suspicious_events.length ?? 0}
+                  count={suspiciousEvents.length}
                 >
-                  {auditAnalytics?.recent_suspicious_events.length ? (
+                  {suspiciousEvents.length ? (
                     <DataTableSurface
-                      rows={auditAnalytics.recent_suspicious_events}
+                      rows={suspiciousEventsPagination.pagedRows}
                       columns={suspiciousEventColumns}
                       defaultDensity="comfortable"
                       defaultSort={[{ field: "created_at", dir: "desc" }]}
                       dictionary={t as unknown as Record<string, string>}
                       rowId={(event) => String(event.id)}
                       tableClassName="min-h-[320px]"
+                      toolbarAfter={(
+                        <DataTablePager
+                          pageIndex={suspiciousEventsPagination.pageIndex}
+                          pageSize={suspiciousEventsPagination.pageSize}
+                          totalPages={suspiciousEventsPagination.totalPages}
+                          totalRows={suspiciousEventsPagination.totalRows}
+                          previousLabel={t.pagination_previous}
+                          nextLabel={t.pagination_next}
+                          onPageChange={suspiciousEventsPagination.onPageChange}
+                        />
+                      )}
                     />
                   ) : (
                     <div className="p-4">
@@ -953,12 +978,23 @@ function useAdminSecurityPageContent() {
                   </div>
                 ) : (
                   <DataTableSurface
-                    rows={ips}
+                    rows={ipRegistryPagination.pagedRows}
                     columns={ipColumns}
                     defaultDensity="comfortable"
                     dictionary={t as unknown as Record<string, string>}
                     rowId={(ip) => ip.id}
                     tableClassName="min-h-[320px]"
+                    toolbarAfter={(
+                      <DataTablePager
+                        pageIndex={ipRegistryPagination.pageIndex}
+                        pageSize={ipRegistryPagination.pageSize}
+                        totalPages={ipRegistryPagination.totalPages}
+                        totalRows={ipRegistryPagination.totalRows}
+                        previousLabel={t.pagination_previous}
+                        nextLabel={t.pagination_next}
+                        onPageChange={ipRegistryPagination.onPageChange}
+                      />
+                    )}
                   />
                 )}
               </AdminTableCard>
@@ -976,13 +1012,24 @@ function useAdminSecurityPageContent() {
                   </div>
                 ) : (
                   <DataTableSurface
-                    rows={geo}
+                    rows={loginHistoryPagination.pagedRows}
                     columns={geoColumns}
                     defaultDensity="comfortable"
                     defaultSort={[{ field: "created_at", dir: "desc" }]}
                     dictionary={t as unknown as Record<string, string>}
                     rowId={(entry) => `${entry.user_email}-${entry.created_at}-${entry.ip_address ?? ""}`}
                     tableClassName="min-h-[360px]"
+                    toolbarAfter={(
+                      <DataTablePager
+                        pageIndex={loginHistoryPagination.pageIndex}
+                        pageSize={loginHistoryPagination.pageSize}
+                        totalPages={loginHistoryPagination.totalPages}
+                        totalRows={loginHistoryPagination.totalRows}
+                        previousLabel={t.pagination_previous}
+                        nextLabel={t.pagination_next}
+                        onPageChange={loginHistoryPagination.onPageChange}
+                      />
+                    )}
                   />
                 )}
               </AdminTableCard>
@@ -1097,7 +1144,7 @@ function useAdminSecurityPageContent() {
                     placeholder={t.security_ip_cidr_placeholder}
                     value={newCidr}
                     onChange={(event) => setNewCidr(event.target.value)}
-                    className="h-9 rounded-lg bg-card"
+                    className="h-9 rounded-lg bg-field"
                   />
                 </Field>
                 <Field label={t.security_ip_desc} htmlFor="whitelist-desc">
@@ -1105,7 +1152,7 @@ function useAdminSecurityPageContent() {
                     id="whitelist-desc"
                     value={newDesc}
                     onChange={(event) => setNewDesc(event.target.value)}
-                    className="h-9 rounded-lg bg-card"
+                    className="h-9 rounded-lg bg-field"
                   />
                 </Field>
               </section>

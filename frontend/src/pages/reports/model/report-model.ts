@@ -1,15 +1,4 @@
-const EUR_MONEY_FORMATTERS = {
-  "de-DE": new Intl.NumberFormat("de-DE", {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 0,
-  }),
-  "ru-RU": new Intl.NumberFormat("ru-RU", {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 0,
-  }),
-} as const;
+import { formatMoneyAmount } from "@/lib/money";
 
 const DATE_FORMATTERS = {
   "de-DE": new Intl.DateTimeFormat("de-DE"),
@@ -20,18 +9,14 @@ function reportLocale(locale: string) {
   return locale === "ru-RU" ? "ru-RU" : "de-DE";
 }
 
-export function formatMoney(value?: string | null, locale = "de-DE") {
-  const numeric = Number(value ?? 0);
-  return EUR_MONEY_FORMATTERS[reportLocale(locale)].format(
-    Number.isFinite(numeric) ? numeric : 0,
-  );
+export function formatMoney(value?: string | null, _locale = "de-DE") {
+  void _locale;
+  return formatMoneyAmount(value);
 }
 
-export function formatMoneyMetric(value?: string | number | null, locale = "de-DE") {
-  const numeric = typeof value === "number" ? value : Number(value ?? 0);
-  return EUR_MONEY_FORMATTERS[reportLocale(locale)].format(
-    Number.isFinite(numeric) ? numeric : 0,
-  );
+export function formatMoneyMetric(value?: string | number | null, _locale = "de-DE") {
+  void _locale;
+  return formatMoneyAmount(value);
 }
 
 export function formatReportDate(

@@ -5,6 +5,7 @@ const ENTITY_TYPE_MAP: Record<string, string> = {
   patient: "timeline_entity_patient",
   case: "timeline_entity_case",
   order: "timeline_entity_order",
+  service: "timeline_entity_service",
   appointment: "timeline_entity_appointment",
   document: "timeline_entity_document",
   contract: "timeline_entity_contract",
@@ -38,6 +39,14 @@ const ENTITY_TYPE_MAP: Record<string, string> = {
 // Timeline category codes commonly used by the backend.
 const CATEGORY_MAP: Record<string, string> = {
   clinical: "timeline_category_clinical",
+  diagnosis: "timeline_category_diagnosis",
+  medication: "timeline_category_medication",
+  examination: "timeline_category_examination",
+  procedure: "timeline_category_procedure",
+  allergy: "timeline_category_allergy",
+  anamnesis: "timeline_category_anamnesis",
+  course: "timeline_category_course",
+  symptom: "timeline_category_symptom",
   administrative: "timeline_category_administrative",
   financial: "timeline_category_financial",
   billing: "timeline_category_billing",

@@ -5,6 +5,10 @@ import { cn } from "@/lib/utils";
 
 import { ColumnVisibilityMenu } from "./column-visibility-menu";
 import { DataTable, type DataTableProps } from "./data-table";
+import {
+  DataTablePager,
+  useDataTablePagination,
+} from "./data-table-pager";
 import { applyFilters } from "./filter-logic";
 import { FilterBuilder } from "./filter-builder";
 import { applySort } from "./sort-logic";
@@ -48,9 +52,16 @@ export type DataTableSurfaceProps<T> = Omit<
   expandRow?: (row: T) => readonly T[] | null;
   /** Custom controls rendered at the start of the toolbar row (before filter/sort). */
   toolbarStart?: ReactNode;
+  /** Optional content rendered directly below the toolbar and above the table. */
+  toolbarAfter?: ReactNode;
   footer?: ReactNode | ((context: DataTableSurfaceFooterContext<T>) => ReactNode);
   groupLabels?: Record<string, string>;
   maxFrozenColumns?: number;
+  pagination?: {
+    className?: string;
+    pageSize?: number;
+    resetKey?: string;
+  };
   rows: readonly T[];
   surfaceClassName?: string;
   tableClassName?: string;
@@ -107,12 +118,14 @@ export function DataTableSurface<T>({
   footer,
   groupLabels,
   maxFrozenColumns = DEFAULT_MAX_FROZEN_COLUMNS,
+  pagination,
   rowActionsLabel,
   rowActionsWidth,
   rows,
   surfaceClassName,
   tableClassName,
   toolbarClassName,
+  toolbarAfter,
   toolbarStart,
   ...tableProps
 }: DataTableSurfaceProps<T>) {
@@ -219,6 +232,16 @@ export function DataTableSurface<T>({
       : sorted;
   }, [accessors, expandRow, filters, rows, sortStack]);
 
+  const paginationResetKey = pagination
+    ? `${pagination.resetKey ?? ""}:${JSON.stringify(filters)}:${JSON.stringify(sortStack)}`
+    : "";
+  const paginationState = useDataTablePagination(
+    visibleRows,
+    paginationResetKey,
+    pagination?.pageSize ?? Math.max(visibleRows.length, 1),
+  );
+  const renderedRows = pagination ? paginationState.pagedRows : visibleRows;
+
   const handleColumnFreezeChange = (columnId: string, frozen: boolean) => {
     if (frozen) {
       if (
@@ -260,7 +283,7 @@ export function DataTableSurface<T>({
     >
       <div
         className={cn(
-          "relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2",
+          "relative z-30 flex flex-nowrap items-end gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2 [&>button]:shrink-0",
           toolbarClassName,
         )}
       >
@@ -339,9 +362,22 @@ export function DataTableSurface<T>({
           />
         </div>
       </div>
+      {toolbarAfter}
+      {pagination ? (
+        <DataTablePager
+          className={pagination.className}
+          pageIndex={paginationState.pageIndex}
+          pageSize={paginationState.pageSize}
+          totalPages={paginationState.totalPages}
+          totalRows={paginationState.totalRows}
+          previousLabel={labels.pagination_previous}
+          nextLabel={labels.pagination_next}
+          onPageChange={paginationState.onPageChange}
+        />
+      ) : null}
       <DataTable
         {...tableProps}
-        rows={visibleRows}
+        rows={renderedRows}
         columns={enhancedColumns}
         hiddenColumns={effectiveHiddenColumns}
         sort={sortStack}

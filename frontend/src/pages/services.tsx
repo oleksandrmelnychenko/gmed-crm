@@ -13,7 +13,15 @@ import {
   useReducer,
   type SetStateAction,
 } from "react";
-import { LoaderCircle, Pencil, Plus, RefreshCw, Search } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  LoaderCircle,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +34,7 @@ import { FilterBuilder } from "@/components/data-table/filter-builder";
 import { applyFilters } from "@/components/data-table/filter-logic";
 import { SortBuilder } from "@/components/data-table/sort-builder";
 import { applySort } from "@/components/data-table/sort-logic";
+import { ToolbarField } from "@/components/data-table/toolbar-field";
 import type {
   ColumnDef,
   DensityLevel,
@@ -193,6 +202,7 @@ const STAFF_SERVICES_CACHE_TTL_MS = 10_000;
 const SERVICE_LOOKUPS_CACHE_TTL_MS = 30_000;
 const DEFAULT_FROZEN_COLUMNS = ["title"];
 const MAX_FROZEN_COLUMNS = 3;
+const STAFF_SERVICES_PAGE_SIZE = 50;
 const STAFF_SERVICES_REALTIME_EVENTS = [
   "concierge_service.created",
   "concierge_service.updated",
@@ -382,6 +392,63 @@ function serviceSourceLabel(value: string, t: Translations) {
   return formatEnumLabelFromKeys(value, SERVICE_SOURCE_LABEL_KEYS, t);
 }
 
+function ServicesPager({
+  pageIndex,
+  totalPages,
+  totalRows,
+  previousLabel,
+  nextLabel,
+  onPageChange,
+}: {
+  nextLabel: string;
+  onPageChange: (pageIndex: number) => void;
+  pageIndex: number;
+  previousLabel: string;
+  totalPages: number;
+  totalRows: number;
+}) {
+  const pageStart = pageIndex * STAFF_SERVICES_PAGE_SIZE;
+
+  return (
+    <div className="flex min-h-8 items-center justify-between gap-2 border-b border-border/60 bg-field px-4 py-0.5">
+      <span className="font-mono text-xs tabular-nums text-foreground">
+        {totalRows === 0
+          ? "0 / 0"
+          : `${pageStart + 1}-${Math.min(pageStart + STAFF_SERVICES_PAGE_SIZE, totalRows)} / ${totalRows}`}
+      </span>
+      <div className="flex items-center gap-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className="size-7 rounded-md"
+          disabled={pageIndex === 0}
+          aria-label={previousLabel}
+          title={previousLabel}
+          onClick={() => onPageChange(Math.max(0, pageIndex - 1))}
+        >
+          <ChevronLeft className="size-3.5" />
+        </Button>
+        <span className="min-w-12 text-center font-mono text-xs font-medium tabular-nums text-foreground">
+          {pageIndex + 1} / {totalPages}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className="size-7 rounded-md"
+          disabled={pageIndex >= totalPages - 1}
+          aria-label={nextLabel}
+          title={nextLabel}
+          onClick={() => onPageChange(Math.min(totalPages - 1, pageIndex + 1))}
+        >
+          <ChevronRight className="size-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function serviceTaxonomyLabel(service: StaffConciergeService, lang: Lang, fallback = "") {
   if (lang === "ru") {
     return (
@@ -399,16 +466,46 @@ function serviceTaxonomyLabel(service: StaffConciergeService, lang: Lang, fallba
   );
 }
 
+const SERVICE_TAXONOMY_CHIP_TONES = [
+  "border-sky-200 bg-sky-50 text-sky-700",
+  "border-emerald-200 bg-emerald-50 text-emerald-700",
+  "border-amber-200 bg-amber-50 text-amber-700",
+  "border-violet-200 bg-violet-50 text-violet-700",
+  "border-rose-200 bg-rose-50 text-rose-700",
+  "border-teal-200 bg-teal-50 text-teal-700",
+  "border-indigo-200 bg-indigo-50 text-indigo-700",
+  "border-orange-200 bg-orange-50 text-orange-700",
+] as const;
+
+function serviceTaxonomyChipTone(text: string) {
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) | 0;
+  }
+  return SERVICE_TAXONOMY_CHIP_TONES[Math.abs(hash) % SERVICE_TAXONOMY_CHIP_TONES.length];
+}
+
 function ServiceTaxonomyBadge({
   label,
+  toneKey,
   fallback,
 }: {
   label?: string | null;
+  toneKey?: string | null;
   fallback: string;
 }) {
+  const text = label?.trim();
   return (
-    <Badge variant="outline" className="max-w-full rounded-full border-border/80 bg-muted/30">
-      <span className="truncate">{label?.trim() || fallback}</span>
+    <Badge
+      variant="outline"
+      className={cn(
+        "max-w-full rounded-full",
+        text
+          ? serviceTaxonomyChipTone(toneKey?.trim() || text)
+          : "border-border/80 bg-muted/30 text-muted-foreground",
+      )}
+    >
+      <span className="truncate">{text || fallback}</span>
     </Badge>
   );
 }
@@ -512,7 +609,7 @@ function buildServiceColumns(t: Translations, lang: Lang): ColumnDef<StaffConcie
       width: 260,
       sortable: true,
       render: (row) => (
-        <span className="truncate text-xs font-medium text-foreground">{row.title}</span>
+        <span className="truncate text-xs text-foreground">{row.title}</span>
       ),
     },
     {
@@ -556,15 +653,42 @@ function buildServiceColumns(t: Translations, lang: Lang): ColumnDef<StaffConcie
       width: 200,
       sortable: true,
       render: (row) => (
-        <div className="flex min-w-0 flex-col leading-tight">
-          <span className="truncate text-xs text-foreground">{row.patient_name}</span>
-          {row.patient_pid ? (
-            <span className="truncate font-mono text-[10px] text-muted-foreground">
-              {row.patient_pid}
-            </span>
-          ) : null}
-        </div>
+        <span className="truncate text-xs text-foreground">{row.patient_name}</span>
       ),
+    },
+    {
+      id: "schedule",
+      label: t.staff_services_column_schedule,
+      accessor: (row) => row.starts_at,
+      filterType: "date",
+      width: 400,
+      sortable: true,
+      render: (row) => {
+        const start = row.starts_at ? formatPortalDateTime(row.starts_at) : null;
+        const end = row.ends_at ? formatPortalDateTime(row.ends_at) : null;
+        if (!start && !end) {
+          return <span className="text-xs text-foreground">{t.common_not_set}</span>;
+        }
+        return (
+          <div className="flex min-w-0 items-center gap-1">
+            {start ? (
+              <span className="inline-flex shrink-0 rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 font-mono text-[11px] font-medium tabular-nums text-emerald-700">
+                {start}
+              </span>
+            ) : null}
+            {start && end ? (
+              <span aria-hidden className="text-[10px] text-muted-foreground">
+                →
+              </span>
+            ) : null}
+            {end ? (
+              <span className="inline-flex shrink-0 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 font-mono text-[11px] font-medium tabular-nums text-amber-700">
+                {end}
+              </span>
+            ) : null}
+          </div>
+        );
+      },
     },
     {
       id: "service_kind",
@@ -592,6 +716,7 @@ function buildServiceColumns(t: Translations, lang: Lang): ColumnDef<StaffConcie
       render: (row) => (
         <ServiceTaxonomyBadge
           label={serviceTaxonomyLabel(row, lang)}
+          toneKey={row.taxonomy_node_code}
           fallback={t.common_not_set}
         />
       ),
@@ -621,7 +746,7 @@ function buildServiceColumns(t: Translations, lang: Lang): ColumnDef<StaffConcie
       width: 180,
       sortable: true,
       render: (row) => (
-        <span className="truncate text-xs text-muted-foreground">
+        <span className="truncate text-xs text-foreground">
           {row.vendor_name ?? t.common_not_set}
         </span>
       ),
@@ -634,28 +759,10 @@ function buildServiceColumns(t: Translations, lang: Lang): ColumnDef<StaffConcie
       width: 140,
       sortable: true,
       render: (row) => (
-        <span className="truncate font-mono text-[11px] text-muted-foreground tabular-nums">
+        <span className="truncate font-mono text-xs text-foreground tabular-nums">
           {row.booking_reference ?? t.common_not_set}
         </span>
       ),
-    },
-    {
-      id: "schedule",
-      label: t.staff_services_column_schedule,
-      accessor: (row) => row.starts_at,
-      filterType: "date",
-      width: 230,
-      sortable: true,
-      render: (row) => {
-        const start = row.starts_at ? formatPortalDateTime(row.starts_at) : null;
-        const end = row.ends_at ? formatPortalDateTime(row.ends_at) : null;
-        const schedule = [start, end].filter(Boolean).join(" - ");
-        return (
-          <span className="truncate text-xs tabular-nums text-muted-foreground">
-            {schedule || t.common_not_set}
-          </span>
-        );
-      },
     },
     {
       id: "cost",
@@ -681,7 +788,7 @@ function buildServiceColumns(t: Translations, lang: Lang): ColumnDef<StaffConcie
       width: 170,
       sortable: true,
       render: (row) => (
-        <span className="truncate text-xs text-muted-foreground">
+        <span className="truncate text-xs text-foreground">
           {row.assigned_concierge_name ?? t.common_not_set}
         </span>
       ),
@@ -987,6 +1094,36 @@ function useStaffServicesPageContent() {
     const filtered = applyFilters(items, filterPredicates, { accessors });
     return applySort(filtered, sortStack, { accessors });
   }, [accessors, filterPredicates, items, sortStack]);
+  const servicesPaginationResetKey = JSON.stringify({
+    filterPredicates,
+    mineOnly,
+    search,
+    sortStack,
+    taxonomyNodeId,
+  });
+  const [servicesPaginationState, setServicesPaginationState] = useState(() => ({
+    pageIndex: 0,
+    resetKey: servicesPaginationResetKey,
+  }));
+  const servicesPageIndex = servicesPaginationState.resetKey === servicesPaginationResetKey
+    ? servicesPaginationState.pageIndex
+    : 0;
+  const servicesTotalPages = Math.max(
+    1,
+    Math.ceil(visibleRows.length / STAFF_SERVICES_PAGE_SIZE),
+  );
+  const safeServicesPageIndex = Math.min(servicesPageIndex, servicesTotalPages - 1);
+  const pagedVisibleRows = useMemo(() => {
+    const start = safeServicesPageIndex * STAFF_SERVICES_PAGE_SIZE;
+    return visibleRows.slice(start, start + STAFF_SERVICES_PAGE_SIZE);
+  }, [safeServicesPageIndex, visibleRows]);
+
+  function handleServicesPageChange(pageIndex: number) {
+    setServicesPaginationState({
+      pageIndex,
+      resetKey: servicesPaginationResetKey,
+    });
+  }
 
   const defaultConciergeId = useMemo(() => {
     if (user?.role === "concierge") return user.id;
@@ -1544,18 +1681,20 @@ function useStaffServicesPageContent() {
       ) : null}
 
       <div className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
-        <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
-          <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+        <div className="relative z-30 flex flex-nowrap items-end gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
+          <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
+          <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder={t.staff_services_search_placeholder}
-              className="h-8 w-full rounded-lg bg-background pl-8 text-[13px]"
+              className="h-8 w-full rounded-md bg-field pl-8 text-xs"
             />
           </div>
+          </ToolbarField>
 
-          <label className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-input bg-card px-2.5 text-[13px] text-foreground">
+          <label className="flex h-8 shrink-0 items-center gap-1.5 self-end rounded-md border border-input bg-field px-2.5 text-xs text-foreground">
             <input
               type="checkbox"
               checked={mineOnly}
@@ -1565,6 +1704,7 @@ function useStaffServicesPageContent() {
             {t.staff_services_mine}
           </label>
 
+          <ToolbarField label={t.services_category}>
           <ProviderTaxonomyCascadeSelect
             value={taxonomyNodeId}
             nodes={taxonomyNodes}
@@ -1573,11 +1713,12 @@ function useStaffServicesPageContent() {
             placeholder={t.services_category}
             allLabel={t.services_all_categories}
             containerClassName="shrink-0"
-            selectClassName="h-8 w-auto min-w-[180px] rounded-lg bg-background text-[13px]"
+            selectClassName="h-8 w-auto min-w-[180px] rounded-md bg-field text-xs"
             disabled={lookupsLoading && taxonomyNodes.length === 0}
             aria-label={t.services_category}
             onChange={setTaxonomyNodeId}
           />
+          </ToolbarField>
 
           <FilterBuilder
             columns={columns}
@@ -1637,11 +1778,6 @@ function useStaffServicesPageContent() {
           </div>
 
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-              {visibleRows.length === items.length
-                ? `${items.length}`
-                : `${visibleRows.length} / ${items.length}`}
-            </span>
             <Button
               type="button"
               variant="outline"
@@ -1655,13 +1791,22 @@ function useStaffServicesPageContent() {
           </div>
         </div>
 
+        <ServicesPager
+          pageIndex={safeServicesPageIndex}
+          totalPages={servicesTotalPages}
+          totalRows={visibleRows.length}
+          previousLabel={t.pagination_previous}
+          nextLabel={t.pagination_next}
+          onPageChange={handleServicesPageChange}
+        />
+
         {items.length === 0 ? (
           <div className="p-6">
             <EmptyCell>{t.staff_services_empty}</EmptyCell>
           </div>
         ) : (
           <DataTable
-            rows={visibleRows}
+            rows={pagedVisibleRows}
             columns={columns}
             hiddenColumns={hiddenColumns}
             sort={sortStack}
@@ -2168,6 +2313,7 @@ function useStaffServicesPageContent() {
                         value={
                           <ServiceTaxonomyBadge
                             label={serviceTaxonomyLabel(selectedService, lang)}
+                            toneKey={selectedService.taxonomy_node_code}
                             fallback={t.common_not_set}
                           />
                         }

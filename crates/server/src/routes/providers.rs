@@ -1144,7 +1144,8 @@ async fn load_providers_enrichment(
         node_json_by_id.insert(node_id, taxonomy_node_json(row, None));
         parent_by_id.insert(
             node_id,
-            row.try_get::<Option<Uuid>, _>("parent_id").unwrap_or_default(),
+            row.try_get::<Option<Uuid>, _>("parent_id")
+                .unwrap_or_default(),
         );
     }
     let ancestor_chain = |start: Uuid| {
@@ -1173,7 +1174,10 @@ async fn load_providers_enrichment(
         assignments_by_provider
             .entry(provider_id)
             .or_default()
-            .push((node_id, row.try_get::<bool, _>("is_primary").unwrap_or(false)));
+            .push((
+                node_id,
+                row.try_get::<bool, _>("is_primary").unwrap_or(false),
+            ));
     }
 
     for (provider_id, assignments) in assignments_by_provider {

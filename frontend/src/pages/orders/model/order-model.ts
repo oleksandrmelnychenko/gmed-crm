@@ -1,3 +1,5 @@
+import { formatMoneyAmount } from "@/lib/money";
+
 import type {
   CreateOrderFormState,
   ExternalInvoiceFormState,
@@ -180,7 +182,7 @@ export function blankOrderExecutionForm(): OrderExecutionFormState {
     medicalExecutionStatus: "pending",
     nonMedicalExecutionStatus: "not_required",
     interpreterServiceStatus: "not_required",
-    issueStatus: "pending",
+    issueStatus: "not_required",
     deviationNote: "",
     executionSummary: "",
   };
@@ -343,17 +345,11 @@ export function formatNumber(value: unknown, locale = "de-DE") {
   });
 }
 
-export function formatCurrency(value: unknown, currency = "EUR", locale = "de-DE") {
+export function formatCurrency(value: unknown, currency = "EUR", _locale = "de-DE") {
+  void _locale;
   const parsed = numberFromUnknown(value);
-  if (parsed == null) {
-    const fallback = typeof value === "string" && value.trim() ? value : "0";
-    return `${fallback} ${currency}`;
-  }
-  return parsed.toLocaleString(locale, {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2,
-  });
+  // Unparseable values still render in the unified money style, never "0 EUR".
+  return formatMoneyAmount(parsed ?? 0, currency);
 }
 
 export function formatDateTime(

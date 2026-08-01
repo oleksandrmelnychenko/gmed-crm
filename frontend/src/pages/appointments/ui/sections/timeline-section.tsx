@@ -1,7 +1,7 @@
 import { memo, useMemo, useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import { CountBadge, EmptyCell, Section } from "@/components/ui-shell";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { EmptyCell } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { appointmentText } from "@/pages/appointments/model/labels";
@@ -19,10 +19,18 @@ import {
   appointmentTimelineKindBadgeClassName,
   appointmentTimelineKindDotClassName,
   appointmentTimelineKindLabel,
-  appointmentTimelineSurfaceClassName,
   appointmentTimelineToneBadgeClassName,
   appointmentTimelineToneLabel,
 } from "@/pages/appointments/appearance/timeline-appearance";
+
+const TIMELINE_FILTERS = [
+  "workflow",
+  "communication",
+  "interpreter",
+  "clinical",
+  "followup",
+  "concierge",
+] as const;
 
 function AppointmentTimelineSection({
   timelineEvents,
@@ -91,142 +99,105 @@ function AppointmentTimelineSection({
     return groups;
   }, [lang, visibleTimelineEvents]);
 
-  const filters = [
-    "all",
-    "workflow",
-    "communication",
-    "interpreter",
-    "clinical",
-    "followup",
-    "concierge",
-  ] as const;
-  const matchesLabel = appointmentText("appointments_matches");
-  const eventsLabel = appointmentText("appointments_events");
-  const emptyLabel = appointmentText("appointments_no_timeline_events_have_been_recorded_for_this_appointme");
-  const noMatchesLabel = appointmentText("appointments_no_timeline_events_match_the_current_filter");
+  const emptyLabel = appointmentText(
+    "appointments_no_timeline_events_have_been_recorded_for_this_appointme",
+  );
+  const noMatchesLabel = appointmentText(
+    "appointments_no_timeline_events_match_the_current_filter",
+  );
+
+  if (timelineEvents.length === 0) {
+    return <EmptyCell>{emptyLabel}</EmptyCell>;
+  }
 
   return (
-    <Section
-      title={appointmentText("appointments_timeline_2")}
-      accessory={
-        <CountBadge>
-          {visibleTimelineEvents.length} {eventsLabel}
-        </CountBadge>
-      }
-    >
-      <div className="flex flex-wrap gap-1.5">
-        {filters.map((filter) => (
-          <Button
-            key={filter}
-            type="button"
-            size="sm"
-            variant={timelineFilter === filter ? "default" : "outline"}
-            className="h-6 rounded-full px-2.5 text-[11px]"
-            onClick={() => setTimelineFilter(filter)}
-          >
-            {filter === "all"
-              ? appointmentText("appointments_all")
-              : appointmentTimelineKindLabel(filter)}
-            <span className="text-muted-foreground/60 text-[6px] leading-none align-middle">
-              ●
-            </span>
-            {filter === "all" ? timelineEvents.length : timelineCounts[filter]}
-          </Button>
-        ))}
+    <div className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
+      <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
+        <NativeComboboxSelect
+          key={`kind-${timelineEvents.length}`}
+          value={timelineFilter}
+          onChange={(event) =>
+            setTimelineFilter(
+              (event.target.value as "all" | AppointmentTimelineKind) ?? "all",
+            )
+          }
+          className="h-8 w-[220px] shrink-0 rounded-lg bg-field text-[13px]"
+        >
+          <option value="all">
+            {appointmentText("appointments_all")} · {timelineEvents.length}
+          </option>
+          {TIMELINE_FILTERS.map((filter) => (
+            <option key={filter} value={filter}>
+              {appointmentTimelineKindLabel(filter)} · {timelineCounts[filter]}
+            </option>
+          ))}
+        </NativeComboboxSelect>
       </div>
 
-      {timelineEvents.length === 0 ? (
-        <EmptyCell>{emptyLabel}</EmptyCell>
-      ) : visibleTimelineEvents.length === 0 ? (
-        <EmptyCell>{noMatchesLabel}</EmptyCell>
+      {visibleTimelineEvents.length === 0 ? (
+        <div className="px-4 py-6">
+          <EmptyCell>{noMatchesLabel}</EmptyCell>
+        </div>
       ) : (
-        <div className="rounded-2xl border border-border/50 bg-card px-4 py-3 sm:px-5">
-          <div className="space-y-5">
-            {groupedTimeline.map((group) => (
-              <div key={group.key} className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="shrink-0 rounded-full border border-border/60 bg-muted/35 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-                    {group.label}
-                  </span>
-                  <span className="h-px flex-1 bg-border/60" />
-                </div>
-
-                <div className="space-y-0">
-                  {group.items.map((item, idx) => (
-                    <div
-                      key={item.id}
-                      className={cn(
-                        "grid grid-cols-[16px_minmax(0,1fr)] gap-3",
-                        idx < group.items.length - 1 && "pb-3",
-                      )}
-                    >
-                      <div className="relative flex justify-center">
-                        {idx < group.items.length - 1 ? (
-                          <span className="absolute top-3 bottom-[-0.75rem] w-px bg-gradient-to-b from-border/90 via-border/60 to-transparent" />
-                        ) : null}
-                        <span
-                          className={cn(
-                            "relative mt-1.5 size-2 rounded-full border border-card shadow-[0_0_0_2px_rgba(255,255,255,0.92)]",
-                            appointmentTimelineKindDotClassName(item.kind),
-                          )}
-                        />
-                      </div>
-
-                      <div
-                        className={cn(
-                          "rounded-2xl border px-4 py-3",
-                          appointmentTimelineSurfaceClassName(item.tone),
-                        )}
-                      >
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span
-                                className={cn(
-                                  "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]",
-                                  appointmentTimelineKindBadgeClassName(item.kind),
-                                )}
-                              >
-                                {appointmentTimelineKindLabel(item.kind)}
-                              </span>
-                              <span
-                                className={cn(
-                                  "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]",
-                                  appointmentTimelineToneBadgeClassName(item.tone),
-                                )}
-                              >
-                                {appointmentTimelineToneLabel(item.tone)}
-                              </span>
-                            </div>
-                            <p className="mt-2 text-sm font-semibold text-foreground">
-                              {item.title}
-                            </p>
-                            {item.detail ? (
-                              <p className="mt-2 whitespace-pre-line text-sm text-muted-foreground">
-                                {item.detail}
-                              </p>
-                            ) : null}
-                          </div>
-
-                          <div className="shrink-0">
-                            <p className="text-xs font-medium text-muted-foreground/80">
-                              {formatAppointmentDateTimeLabel(item.occurredAt)}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+        <div className="space-y-0">
+          {groupedTimeline.map((group) => (
+            <div key={group.key}>
+              <div className="flex items-center gap-2 border-b border-border/60 bg-muted/25 px-3 py-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                  {group.label}
+                </span>
               </div>
-            ))}
-          </div>
+              {group.items.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex w-full items-center gap-2.5 border-b border-border/50 px-3 py-2 last:border-b-0"
+                >
+                  <span
+                    className={cn(
+                      "size-2 shrink-0 rounded-full",
+                      appointmentTimelineKindDotClassName(item.kind),
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      "w-[110px] shrink-0 rounded-full border px-2 py-0.5 text-center font-mono text-[10px] font-medium",
+                      appointmentTimelineKindBadgeClassName(item.kind),
+                    )}
+                  >
+                    {appointmentTimelineKindLabel(item.kind)}
+                  </span>
+                  <span
+                    className={cn(
+                      "w-[110px] shrink-0 rounded-full border px-2 py-0.5 text-center font-mono text-[10px] font-medium",
+                      appointmentTimelineToneBadgeClassName(item.tone),
+                    )}
+                  >
+                    {appointmentTimelineToneLabel(item.tone)}
+                  </span>
+                  <span
+                    className="min-w-0 flex-1 truncate text-xs font-medium text-foreground"
+                    title={item.detail ?? undefined}
+                  >
+                    {item.title}
+                  </span>
+                  {item.detail ? (
+                    <span
+                      className="hidden shrink-0 truncate text-xs text-muted-foreground lg:block lg:max-w-[320px]"
+                      title={item.detail}
+                    >
+                      {item.detail}
+                    </span>
+                  ) : null}
+                  <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+                    {formatAppointmentDateTimeLabel(item.occurredAt)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
       )}
-      <p className="text-xs text-muted-foreground">
-        {visibleTimelineEvents.length} {matchesLabel}
-      </p>
-    </Section>
+    </div>
   );
 }
 

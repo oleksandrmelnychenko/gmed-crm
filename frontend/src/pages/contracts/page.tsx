@@ -12,6 +12,8 @@ import {
 import { useSearchParams } from "react-router-dom";
 import {
   ArrowUpRight,
+  ChevronLeft,
+  ChevronRight,
   FileBadge2,
   LoaderCircle,
   Plus,
@@ -44,6 +46,7 @@ import {
 } from "@/components/ui/sheet";
 import { clearApiCache } from "@/lib/api";
 import { deNormalize } from "@/components/data-table/search";
+import { ToolbarField } from "@/components/data-table/toolbar-field";
 import {
   agencyServiceDescriptionLabel,
   agencyServiceNameLabel,
@@ -128,6 +131,31 @@ const CONTRACT_REALTIME_EVENTS = [
   "quote.status_changed",
 ] as const;
 const CONTRACT_SEARCH_DEBOUNCE_MS = 220;
+const CONTRACT_TABLE_PAGE_SIZE = 50;
+
+function useContractTablePagination<T>(rows: T[], resetKey: string) {
+  const [state, setState] = useState(() => ({
+    pageIndex: 0,
+    resetKey,
+  }));
+  const pageIndex = state.resetKey === resetKey ? state.pageIndex : 0;
+  const totalPages = Math.max(1, Math.ceil(rows.length / CONTRACT_TABLE_PAGE_SIZE));
+  const safePageIndex = Math.min(pageIndex, totalPages - 1);
+  const pagedRows = useMemo(() => {
+    const start = safePageIndex * CONTRACT_TABLE_PAGE_SIZE;
+    return rows.slice(start, start + CONTRACT_TABLE_PAGE_SIZE);
+  }, [rows, safePageIndex]);
+
+  return {
+    pageIndex: safePageIndex,
+    pagedRows,
+    totalPages,
+    totalRows: rows.length,
+    onPageChange(nextPageIndex: number) {
+      setState({ pageIndex: nextPageIndex, resetKey });
+    },
+  };
+}
 
 const CONTRACT_STATUS_LABEL_KEYS = {
   draft: "revenue_contract_status_draft",
@@ -842,6 +870,18 @@ function useContractsPageContent() {
       return haystack.includes(needle);
     });
   }, [agencyServices, debouncedAgencyServiceSearch, t]);
+  const agencyServicesPagination = useContractTablePagination(
+    filteredAgencyServices,
+    JSON.stringify(agencyServiceFilters),
+  );
+  const contractsPagination = useContractTablePagination(
+    contracts,
+    JSON.stringify(contractFilters),
+  );
+  const quotesPagination = useContractTablePagination(
+    quotes,
+    JSON.stringify(quoteFilters),
+  );
 
   const selectedCreateOrder = useMemo(
     () => orders.find((order) => order.id === createQuoteForm.orderId) ?? null,
@@ -906,7 +946,7 @@ function useContractsPageContent() {
         required: true,
         width: 260,
         render: (row) => (
-          <span className="text-sm font-medium text-foreground">
+          <span className="font-mono text-xs text-foreground">
             {agencyServiceNameLabel(row.service_key, row.service_name, t)}
           </span>
         ),
@@ -918,7 +958,7 @@ function useContractsPageContent() {
         width: 460,
         render: (row) => (
           <span
-            className="block truncate text-sm text-foreground"
+            className="block truncate text-xs text-foreground"
             title={agencyServiceDescriptionLabel(row.service_key, row.description, t)}
           >
             {agencyServiceDescriptionLabel(row.service_key, row.description, t)}
@@ -933,7 +973,7 @@ function useContractsPageContent() {
         sortable: true,
         width: 140,
         render: (row) => (
-          <span className="font-medium text-foreground">{formatCurrency(row.unit_price)}</span>
+          <span className="text-foreground">{formatCurrency(row.unit_price)}</span>
         ),
       },
       {
@@ -942,7 +982,7 @@ function useContractsPageContent() {
         accessor: (row) => agencyServiceUnitLabel(row.unit_label, t),
         width: 120,
         render: (row) => (
-          <span className="text-sm text-foreground">
+          <span className="text-xs text-foreground">
             {agencyServiceUnitLabel(row.unit_label, t)}
           </span>
         ),
@@ -981,7 +1021,7 @@ function useContractsPageContent() {
         sortable: true,
         width: 180,
         render: (row) => (
-          <span className="text-xs text-muted-foreground">
+          <span className="text-xs text-foreground">
             {formatDateTime(row.updated_at, locale, t.common_not_set)}
           </span>
         ),
@@ -1008,13 +1048,7 @@ function useContractsPageContent() {
         sortable: true,
         required: true,
         width: 300,
-      },
-      {
-        id: "patient_pid",
-        label: text.patientId,
-        accessor: (row) => row.patient_pid,
-        sortable: true,
-        width: 140,
+        render: (row) => <span className="font-mono text-xs">{row.patient_name}</span>,
       },
       {
         id: "status",
@@ -1093,6 +1127,7 @@ function useContractsPageContent() {
         sortable: true,
         required: true,
         width: 280,
+        render: (row) => <span className="font-mono text-xs">{row.patient_name}</span>,
       },
       {
         id: "order_number",
@@ -1179,7 +1214,7 @@ function useContractsPageContent() {
         label: text.description,
         accessor: (row) => agencyServiceNameLabel(undefined, row.description, t),
         render: (row) => (
-          <span className="text-sm text-foreground">
+          <span className="text-xs text-foreground">
             {agencyServiceNameLabel(undefined, row.description, t)}
           </span>
         ),
@@ -1202,7 +1237,7 @@ function useContractsPageContent() {
         sortable: true,
         width: 140,
         render: (row) => (
-          <span className="font-medium text-foreground">{formatCurrency(row.unit_price)}</span>
+          <span className="text-foreground">{formatCurrency(row.unit_price)}</span>
         ),
       },
       {
@@ -1252,7 +1287,7 @@ function useContractsPageContent() {
               {t.orders_cost_pass_through_badge}
             </Badge>
           ) : (
-            <span className="text-muted-foreground">-</span>
+            <span className="text-foreground">-</span>
           ),
       },
       {
@@ -1261,7 +1296,7 @@ function useContractsPageContent() {
         accessor: (row) => row.notes ?? "",
         width: 280,
         render: (row) => (
-          <span className="block max-w-[280px] truncate text-sm text-foreground">
+          <span className="block max-w-[280px] truncate text-xs text-foreground">
             {row.notes?.trim() || t.common_not_set}
           </span>
         ),
@@ -1357,7 +1392,7 @@ function useContractsPageContent() {
         accessor: (row) => row.change_reason ?? "",
         width: 280,
         render: (row) => (
-          <span className="block max-w-[280px] truncate text-sm text-foreground">
+          <span className="block max-w-[280px] truncate text-xs text-foreground">
             {quoteVersionChangeReasonLabel(row.change_reason)}
           </span>
         ),
@@ -1367,7 +1402,7 @@ function useContractsPageContent() {
         label: t.users_created,
         accessor: (row) => row.created_by_name,
         width: 200,
-        render: (row) => <span className="text-sm text-foreground">{row.created_by_name}</span>,
+        render: (row) => <span className="text-xs text-foreground">{row.created_by_name}</span>,
       },
       {
         id: "created_by_role",
@@ -1923,7 +1958,7 @@ function useContractsPageContent() {
           ) : null}
 
           <DataTableSurface
-            rows={filteredAgencyServices}
+            rows={agencyServicesPagination.pagedRows}
             columns={agencyServiceColumns}
             rowId={(row) => row.id}
             defaultDensity="comfortable"
@@ -1933,11 +1968,12 @@ function useContractsPageContent() {
             onRowClick={permissions.canManageCatalog ? handleEditAgencyService : undefined}
             toolbarStart={
               <>
-                <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
+                <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
                   {titleWithDot(text.agencyServiceTitle)}
                 </span>
-                <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
-                <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+                <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+                <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
+                <div className="relative">
                   <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     type="search"
@@ -1949,10 +1985,12 @@ function useContractsPageContent() {
                         search: event.target.value,
                       }))
                     }
-                    className={cn(shellInputClassName, "h-8 rounded-lg bg-background pl-8 text-[13px]")}
+                    className={cn(shellInputClassName, "h-8 rounded-md bg-field pl-8 text-xs")}
                     placeholder={text.agencyServiceSearchPlaceholder}
                   />
                 </div>
+                </ToolbarField>
+                <ToolbarField label={t.users_status}>
                 <NativeComboboxSelect
                   value={agencyServiceFilters.activeOnly || "__all__"}
                   onChange={(event) =>
@@ -1964,12 +2002,13 @@ function useContractsPageContent() {
                           : "",
                     }))
                   }
-                  className={cn(selectClassName, "h-8 w-[180px] min-w-[180px] bg-background text-[13px]")}
+                  className={cn(selectClassName, "h-8 rounded-md w-[180px] min-w-[180px] bg-field text-xs")}
                 >
                   <option value="true">{text.activeOnly}</option>
                   <option value="__all__">{text.allStatuses}</option>
                   <option value="false">{text.inactiveOnly}</option>
                 </NativeComboboxSelect>
+                </ToolbarField>
                 <Button
                   type="button"
                   variant="ghost"
@@ -1980,6 +2019,16 @@ function useContractsPageContent() {
                   {t.access_reset}
                 </Button>
               </>
+            }
+            toolbarAfter={
+              <ContractsPager
+                pageIndex={agencyServicesPagination.pageIndex}
+                totalPages={agencyServicesPagination.totalPages}
+                totalRows={agencyServicesPagination.totalRows}
+                onPageChange={agencyServicesPagination.onPageChange}
+                previousLabel={t.pagination_previous}
+                nextLabel={t.pagination_next}
+              />
             }
             emptyState={
               <EmptyState
@@ -2007,7 +2056,7 @@ function useContractsPageContent() {
               ) : null}
 
               <DataTableSurface
-                rows={contracts}
+                rows={contractsPagination.pagedRows}
                 columns={contractTableColumns}
                 rowId={(row) => row.id}
                 defaultDensity="comfortable"
@@ -2017,11 +2066,12 @@ function useContractsPageContent() {
                 onRowClick={(row) => openContract(row.id)}
                 toolbarStart={
                   <>
-                    <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
+                    <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
                       {titleWithDot(text.contractsTab)}
                     </span>
-                    <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
-                    <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+                    <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+                    <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
+                    <div className="relative">
                       <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                       <Input
                         type="search"
@@ -2030,10 +2080,12 @@ function useContractsPageContent() {
                         onChange={(event) =>
                           setContractFilters((current) => ({ ...current, search: event.target.value }))
                         }
-                        className={cn(shellInputClassName, "h-8 rounded-lg bg-background pl-8 text-[13px]")}
+                        className={cn(shellInputClassName, "h-8 rounded-md bg-field pl-8 text-xs")}
                         placeholder={t.common_search}
                       />
                     </div>
+                    </ToolbarField>
+                    <ToolbarField label={t.contracts_patient}>
                     <NativeComboboxSelect
                       value={contractFilters.patientId || "__all__"}
                       onChange={(event) => {
@@ -2041,7 +2093,7 @@ function useContractsPageContent() {
                         setContractFilters((current) => ({ ...current, patientId }));
                         syncQuery({ patient: patientId || null });
                       }}
-                      className={cn(selectClassName, "h-8 w-[240px] min-w-[240px] bg-background text-[13px]")}
+                      className={cn(selectClassName, "h-8 rounded-md w-[240px] min-w-[240px] bg-field text-xs")}
                     >
                       <option value="__all__">
                         {t.revenue_filter_all_patients}
@@ -2052,6 +2104,8 @@ function useContractsPageContent() {
                         </option>
                       ))}
                     </NativeComboboxSelect>
+                    </ToolbarField>
+                    <ToolbarField label={t.users_status}>
                     <NativeComboboxSelect
                       value={contractFilters.status || "__all__"}
                       onChange={(event) =>
@@ -2063,7 +2117,7 @@ function useContractsPageContent() {
                               : "",
                         }))
                       }
-                      className={cn(selectClassName, "h-8 w-[170px] min-w-[170px] bg-background text-[13px]")}
+                      className={cn(selectClassName, "h-8 rounded-md w-[170px] min-w-[170px] bg-field text-xs")}
                     >
                       <option value="__all__">{t.providers_all}</option>
                       {CONTRACT_STATUSES.map((status) => (
@@ -2072,6 +2126,7 @@ function useContractsPageContent() {
                         </option>
                       ))}
                     </NativeComboboxSelect>
+                    </ToolbarField>
                     <Button
                       type="button"
                       variant="ghost"
@@ -2087,6 +2142,16 @@ function useContractsPageContent() {
                       {t.access_reset}
                     </Button>
                   </>
+                }
+                toolbarAfter={
+                  <ContractsPager
+                    pageIndex={contractsPagination.pageIndex}
+                    totalPages={contractsPagination.totalPages}
+                    totalRows={contractsPagination.totalRows}
+                    onPageChange={contractsPagination.onPageChange}
+                    previousLabel={t.pagination_previous}
+                    nextLabel={t.pagination_next}
+                  />
                 }
                 emptyState={
                   <EmptyState
@@ -2121,7 +2186,7 @@ function useContractsPageContent() {
               ) : null}
 
               <DataTableSurface
-                rows={quotes}
+                rows={quotesPagination.pagedRows}
                 columns={quoteTableColumns}
                 rowId={(row) => row.id}
                 defaultDensity="comfortable"
@@ -2131,11 +2196,12 @@ function useContractsPageContent() {
                 onRowClick={(row) => openQuote(row.id)}
                 toolbarStart={
                   <>
-                  <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
+                  <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
                     {titleWithDot(text.quotesTab)}
                   </span>
-                  <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
-                  <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+                  <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+                  <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
+                  <div className="relative">
                     <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       type="search"
@@ -2144,10 +2210,12 @@ function useContractsPageContent() {
                       onChange={(event) =>
                         setQuoteFilters((current) => ({ ...current, search: event.target.value }))
                       }
-                      className={cn(shellInputClassName, "h-8 rounded-lg bg-background pl-8 text-[13px]")}
+                      className={cn(shellInputClassName, "h-8 rounded-md bg-field pl-8 text-xs")}
                       placeholder={t.common_search}
                     />
                   </div>
+                  </ToolbarField>
+                  <ToolbarField label={t.contracts_patient}>
                   <NativeComboboxSelect
                     value={quoteFilters.patientId || "__all__"}
                     onChange={(event) => {
@@ -2177,6 +2245,8 @@ function useContractsPageContent() {
                       </option>
                     ))}
                   </NativeComboboxSelect>
+                  </ToolbarField>
+                  <ToolbarField label={t.orders_title}>
                   <NativeComboboxSelect
                     value={quoteFilters.orderId || "__all__"}
                     onChange={(event) => {
@@ -2195,6 +2265,8 @@ function useContractsPageContent() {
                       </option>
                     ))}
                   </NativeComboboxSelect>
+                  </ToolbarField>
+                  <ToolbarField label={t.users_status}>
                   <NativeComboboxSelect
                     value={quoteFilters.status || "__all__"}
                     onChange={(event) =>
@@ -2215,6 +2287,7 @@ function useContractsPageContent() {
                       </option>
                     ))}
                   </NativeComboboxSelect>
+                  </ToolbarField>
                   <Button
                     type="button"
                     variant="ghost"
@@ -2231,6 +2304,16 @@ function useContractsPageContent() {
                     {t.access_reset}
                   </Button>
                   </>
+                }
+                toolbarAfter={
+                  <ContractsPager
+                    pageIndex={quotesPagination.pageIndex}
+                    totalPages={quotesPagination.totalPages}
+                    totalRows={quotesPagination.totalRows}
+                    onPageChange={quotesPagination.onPageChange}
+                    previousLabel={t.pagination_previous}
+                    nextLabel={t.pagination_next}
+                  />
                 }
                 emptyState={
                   <EmptyState
@@ -3116,6 +3199,63 @@ function useContractsPageContent() {
 
 export function ContractsPage(...args: Parameters<typeof useContractsPageContent>) {
   return useContractsPageContent(...args);
+}
+
+function ContractsPager({
+  pageIndex,
+  totalPages,
+  totalRows,
+  previousLabel,
+  nextLabel,
+  onPageChange,
+}: {
+  nextLabel: string;
+  onPageChange: (pageIndex: number) => void;
+  pageIndex: number;
+  previousLabel: string;
+  totalPages: number;
+  totalRows: number;
+}) {
+  const pageStart = pageIndex * CONTRACT_TABLE_PAGE_SIZE;
+
+  return (
+    <div className="flex min-h-8 items-center justify-between gap-2 border-b border-border/60 bg-field px-4 py-0.5">
+      <span className="font-mono text-xs tabular-nums text-foreground">
+        {totalRows === 0
+          ? "0 / 0"
+          : `${pageStart + 1}-${Math.min(pageStart + CONTRACT_TABLE_PAGE_SIZE, totalRows)} / ${totalRows}`}
+      </span>
+      <div className="flex items-center gap-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className="size-7 rounded-md"
+          disabled={pageIndex === 0}
+          aria-label={previousLabel}
+          title={previousLabel}
+          onClick={() => onPageChange(Math.max(0, pageIndex - 1))}
+        >
+          <ChevronLeft className="size-3.5" />
+        </Button>
+        <span className="min-w-12 text-center font-mono text-xs font-medium tabular-nums text-foreground">
+          {pageIndex + 1} / {totalPages}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className="size-7 rounded-md"
+          disabled={pageIndex >= totalPages - 1}
+          aria-label={nextLabel}
+          title={nextLabel}
+          onClick={() => onPageChange(Math.min(totalPages - 1, pageIndex + 1))}
+        >
+          <ChevronRight className="size-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 function titleWithDot(title: ReactNode) {

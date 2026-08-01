@@ -2,26 +2,25 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
+  useState,
   type FormEvent,
   type ReactNode,
   type SetStateAction,
 } from "react";
 
 import {
-  Banknote,
-  ChevronDown,
   CircleDollarSign,
   Download,
+  ExternalLink,
+  MoreHorizontal,
   Plus,
-  ReceiptText,
   RotateCcw,
-  TrendingDown,
-  TrendingUp,
-  TriangleAlert,
-  WalletCards,
 } from "lucide-react";
 
-import { AdminInlineMetric, AdminToolbar } from "@/components/admin-page-patterns";
+import { AdminToolbar } from "@/components/admin-page-patterns";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,7 +28,6 @@ import { Input } from "@/components/ui/input";
 import { TabsContent } from "@/components/ui/tabs";
 import {
   Banner,
-  CountBadge,
   EmptyCell,
   Field,
   TabLoader,
@@ -48,17 +46,16 @@ import { cn } from "@/lib/utils";
 import type {
   InvoiceItem,
   PatientFinancialLedger,
+  PatientFinancialLedgerEntry,
   PatientFinancialSummary,
   PatientServicePackageItem,
   OrderItem,
 } from "../../model/detail-tab-types";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 import { FormSection } from "../shared/patient-form-primitives";
-import { WorkspaceSectionIntro } from "../shared/workspace-primitives";
 import {
   patientInvoiceLedgerCategoryLabel,
   patientInvoiceLedgerDirectionLabel,
-  patientInvoiceServiceTypeLabel,
 } from "../../model/portal-shared";
 
 type LocalizeFn = (key: string) => string;
@@ -255,9 +252,218 @@ function packageItemLabel(item: PatientServicePackageItem, t: ReturnType<typeof 
   );
 }
 
+type PackageActionsMenuProps = {
+  item: PatientServicePackageItem;
+  t: ReturnType<typeof useLang>["t"];
+  approvalBusyKey: string;
+  onDecision: (approvalStatus: "approved" | "declined") => void;
+  onRecordConsumption: () => void;
+};
+
+function PackageActionsMenu({
+  item,
+  t,
+  approvalBusyKey,
+  onDecision,
+  onRecordConsumption,
+}: PackageActionsMenuProps) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  const decisionBusy = (approvalStatus: "approved" | "declined") =>
+    approvalBusyKey ===
+    `${item.patient_service_package_id}:${item.package_item_id ?? "summary"}:${approvalStatus}`;
+  const hasPendingOverage = moneyNumeric(item.pending_overage_quantity) > 0;
+
+  return (
+    <div
+      ref={rootRef}
+      className="relative"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+        aria-label={t.table_actions}
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <MoreHorizontal className="size-3.5" />
+      </Button>
+      {open ? (
+        <div className="absolute right-0 top-8 z-40 w-60 rounded-lg border border-border bg-popover p-1 shadow-xl">
+          {hasPendingOverage ? (
+            <>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 w-full justify-start rounded-md px-2.5 text-xs"
+                disabled={decisionBusy("approved")}
+                onClick={() => {
+                  setOpen(false);
+                  onDecision("approved");
+                }}
+              >
+                {t.patient_invoices_approve_overage}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 w-full justify-start rounded-md px-2.5 text-xs text-rose-700 hover:bg-rose-50 hover:text-rose-700"
+                disabled={decisionBusy("declined")}
+                onClick={() => {
+                  setOpen(false);
+                  onDecision("declined");
+                }}
+              >
+                {t.patient_invoices_decline}
+              </Button>
+            </>
+          ) : null}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 w-full justify-start rounded-md px-2.5 text-xs"
+            onClick={() => {
+              setOpen(false);
+              onRecordConsumption();
+            }}
+          >
+            <Plus className="size-3.5" />
+            {t.patient_invoices_record_consumption}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function moneyNumeric(value?: string | null) {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+type RowActionsMenuItem = {
+  key: string;
+  label: ReactNode;
+  icon?: ReactNode;
+  className?: string;
+  disabled?: boolean;
+  onSelect: () => void;
+};
+
+function RowActionsMenu({
+  label,
+  items,
+}: {
+  label: string;
+  items: RowActionsMenuItem[];
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  return (
+    <div
+      ref={rootRef}
+      className="relative"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+        aria-label={label}
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <MoreHorizontal className="size-3.5" />
+      </Button>
+      {open ? (
+        <div className="absolute right-0 top-8 z-40 w-60 rounded-lg border border-border bg-popover p-1 shadow-xl">
+          {items.map((item) => (
+            <Button
+              key={item.key}
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "h-8 w-full justify-start rounded-md px-2.5 text-xs",
+                item.className,
+              )}
+              disabled={item.disabled}
+              onClick={() => {
+                setOpen(false);
+                item.onSelect();
+              }}
+            >
+              {item.icon}
+              {item.label}
+            </Button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const PACKAGE_CHIP_TONES = [
+  "border-sky-200 bg-sky-50 text-sky-700",
+  "border-emerald-200 bg-emerald-50 text-emerald-700",
+  "border-amber-200 bg-amber-50 text-amber-700",
+  "border-violet-200 bg-violet-50 text-violet-700",
+  "border-rose-200 bg-rose-50 text-rose-700",
+  "border-teal-200 bg-teal-50 text-teal-700",
+  "border-indigo-200 bg-indigo-50 text-indigo-700",
+  "border-orange-200 bg-orange-50 text-orange-700",
+] as const;
+
+function packageChipTone(text: string) {
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) | 0;
+  }
+  return PACKAGE_CHIP_TONES[Math.abs(hash) % PACKAGE_CHIP_TONES.length];
+}
+
+function ledgerCategoryChipClass(category?: string | null) {
+  switch (category) {
+    case "service_revenue":
+      return "border-violet-200 bg-violet-50 text-violet-700";
+    case "cost_passthrough_revenue":
+      return "border-sky-200 bg-sky-50 text-sky-700";
+    case "provider_expense":
+      return "border-amber-200 bg-amber-50 text-amber-700";
+    default:
+      return "border-border/60 bg-muted/25 text-foreground";
+  }
 }
 
 function invoiceAccentClass(status: string) {
@@ -280,10 +486,6 @@ function usePatientInvoicesTabContent({
   commonNotSet,
   tabLoading,
   invoices,
-  invoiceOpenCount,
-  invoiceOverdueCount,
-  invoiceOutstandingAmount,
-  invoicePaidAmountTotal,
   financialSummary,
   financialLedger,
   servicePackages,
@@ -298,7 +500,7 @@ function usePatientInvoicesTabContent({
   moneyValueNumber,
   invoiceTypeLabel,
 }: PatientInvoicesTabProps) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const patientId = financialSummary?.patient_id ?? invoices.find((item) => item.patient_id)?.patient_id ?? "";
   const [financeState, dispatchFinanceState] = useReducer(
     patientInvoicesFinanceReducer,
@@ -583,6 +785,17 @@ function usePatientInvoicesTabContent({
   }
 
   const effectiveServicePackages = refreshedServicePackages ?? servicePackages;
+  const filteredServicePackages = useMemo(
+    () =>
+      effectiveServicePackages.filter((item) => {
+        if (financeFilters.orderId && item.order_id !== financeFilters.orderId) return false;
+        if (financeFilters.packageId && item.package_id !== financeFilters.packageId) return false;
+        if (financeFilters.from && item.ends_on && item.ends_on < financeFilters.from) return false;
+        if (financeFilters.to && item.starts_on && item.starts_on > financeFilters.to) return false;
+        return true;
+      }),
+    [effectiveServicePackages, financeFilters],
+  );
   const packageGroupItems = buildPackageGroups(effectiveServicePackages);
   const consumeTargetGroup =
     packageGroupItems.find(([id]) => id === consumeTargetId)?.[1] ?? null;
@@ -592,43 +805,549 @@ function usePatientInvoicesTabContent({
   const assignablePackages = packageCatalog.filter(
     (item) => item.is_active && !assignedPackageIds.has(item.id),
   );
+  const filterPackageOptions = useMemo(() => {
+    const packagesById = new Map<string, string>();
+    for (const item of effectiveServicePackages) {
+      packagesById.set(item.package_id, item.package_name);
+    }
+    return Array.from(packagesById, ([id, name]) => ({ id, name })).sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+  }, [effectiveServicePackages]);
   const effectiveFinancialSummary = refreshedFinancialSummary ?? financialSummary;
   const effectiveFinancialLedger = refreshedFinancialLedger ?? financialLedger;
   const ledgerEntries = effectiveFinancialLedger?.entries ?? [];
-  const financialBreakdownByServiceType =
-    effectiveFinancialSummary?.breakdown_by_service_type ?? [];
-  const revenueGross =
-    effectiveFinancialSummary?.revenue_gross ??
-    String(invoiceOutstandingAmount + invoicePaidAmountTotal);
-  const openBalance =
-    effectiveFinancialSummary?.open_balance ?? String(invoiceOutstandingAmount);
-  const paidAmount =
-    effectiveFinancialSummary?.paid_amount ?? String(invoicePaidAmountTotal);
-  const overdueAmount =
-    effectiveFinancialSummary?.overdue_amount ?? String(invoiceOverdueCount);
+  const ledgerLabels = useMemo(
+    () => ({
+      documents: lang === "de" ? "Belege" : "Документы",
+      isIncome: (direction: string) =>
+        direction === "revenue" || direction === "income",
+    }),
+    [lang],
+  );
+  const hasFinanceFilters = Boolean(
+    financeFilters.from ||
+      financeFilters.to ||
+      financeFilters.orderId ||
+      financeFilters.packageId,
+  );
+  const filteredInvoices = useMemo(() => {
+    if (!hasFinanceFilters) return invoices;
+    const invoiceIds = new Set(
+      (effectiveFinancialSummary?.breakdown_by_order ?? []).map((item) => item.invoice_id),
+    );
+    return invoices.filter((invoice) => invoiceIds.has(invoice.id));
+  }, [effectiveFinancialSummary, hasFinanceFilters, invoices]);
+  const invoiceIsOverdue = (invoice: InvoiceItem) =>
+    invoice.status === "overdue" ||
+    (Boolean(invoice.due_date) &&
+      moneyValueNumber(invoice.balance_due) > 0 &&
+      new Date(invoice.due_date as string).getTime() < Date.now());
+  const invoiceColumns = useMemo<ColumnDef<InvoiceItem>[]>(
+    () => [
+      {
+        id: "invoice_number",
+        label: t.invoices_number,
+        accessor: (invoice) => invoice.invoice_number,
+        sortable: true,
+        searchable: true,
+        required: true,
+        width: 200,
+        render: (invoice) => (
+          <span className="inline-flex max-w-full truncate rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-sky-700">
+            {invoice.invoice_number}
+          </span>
+        ),
+      },
+      {
+        id: "invoice_type",
+        label: t.invoices_type,
+        accessor: (invoice) => invoiceTypeLabel(invoice.invoice_type),
+        sortable: true,
+        width: 150,
+        render: (invoice) => (
+          <Badge variant="outline" className="rounded-full font-mono text-[10px]">
+            {invoiceTypeLabel(invoice.invoice_type)}
+          </Badge>
+        ),
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (invoice) => statusLabel(invoice.status),
+        sortable: true,
+        width: 150,
+        render: (invoice) => (
+          <Badge
+            variant="outline"
+            className={cn("rounded-full font-mono text-[10px]", statusColors[invoice.status] ?? "")}
+          >
+            {statusLabel(invoice.status)}
+          </Badge>
+        ),
+      },
+      {
+        id: "issued_at",
+        label: t.invoices_issued,
+        accessor: (invoice) => invoice.issued_at,
+        sortable: true,
+        filterType: "date",
+        width: 170,
+        render: (invoice) => (
+          <span className="font-mono text-xs tabular-nums text-foreground">
+            {formatDateTime(invoice.issued_at)}
+          </span>
+        ),
+      },
+      {
+        id: "due_date",
+        label: t.patient_invoices_due,
+        accessor: (invoice) => invoice.due_date ?? "",
+        sortable: true,
+        filterType: "date",
+        width: 130,
+        render: (invoice) => (
+          <span
+            className={cn(
+              "font-mono text-xs tabular-nums",
+              invoiceIsOverdue(invoice) ? "font-medium text-rose-600" : "text-foreground",
+            )}
+          >
+            {formatDate(invoice.due_date, commonNotSet)}
+          </span>
+        ),
+      },
+      {
+        id: "order",
+        label: t.patient_invoices_order,
+        accessor: (invoice) => invoice.order_number ?? invoice.quote_number ?? "",
+        searchable: true,
+        width: 170,
+        render: (invoice) => (
+          <span className="truncate font-mono text-xs text-muted-foreground">
+            {invoice.order_number ?? invoice.quote_number ?? commonNotSet}
+          </span>
+        ),
+      },
+      {
+        id: "total_gross",
+        label: t.patient_invoices_total,
+        accessor: (invoice) => moneyValueNumber(invoice.total_gross),
+        sortable: true,
+        filterType: "number",
+        width: 130,
+        render: (invoice) => (
+          <span className="block text-right font-mono text-xs font-medium tabular-nums text-foreground">
+            {formatMoney(invoice.total_gross)}
+          </span>
+        ),
+      },
+      {
+        id: "paid_amount",
+        label: t.patient_invoices_paid,
+        accessor: (invoice) => moneyValueNumber(invoice.paid_amount),
+        sortable: true,
+        filterType: "number",
+        width: 130,
+        render: (invoice) => (
+          <span className="block text-right font-mono text-xs tabular-nums text-foreground">
+            {formatMoney(invoice.paid_amount)}
+          </span>
+        ),
+      },
+      {
+        id: "balance_due",
+        label: t.patient_invoices_open,
+        accessor: (invoice) => moneyValueNumber(invoice.balance_due),
+        sortable: true,
+        filterType: "number",
+        width: 140,
+        render: (invoice) => {
+          const balance = moneyValueNumber(invoice.balance_due);
+          return (
+            <span
+              className={cn(
+                "block text-right font-mono text-xs font-semibold tabular-nums",
+                balance > 0
+                  ? invoice.status === "overdue"
+                    ? "text-rose-600"
+                    : "text-amber-700"
+                  : "text-foreground",
+              )}
+            >
+              {formatMoney(invoice.balance_due)}
+            </span>
+          );
+        },
+      },
+      {
+        id: "patient_view",
+        label: t.patient_invoices_patient_view,
+        accessor: (invoice) =>
+          invoice.portal_visibility?.visible_to_patient
+            ? invoice.portal_visibility.amounts_visible_to_patient
+              ? t.patient_invoices_amounts_visible
+              : t.patient_invoices_amounts_hidden
+            : t.patient_invoices_hidden,
+        sortable: true,
+        width: 170,
+        render: (invoice) => {
+          const visible = invoice.portal_visibility?.visible_to_patient;
+          const amountsVisible = invoice.portal_visibility?.amounts_visible_to_patient;
+          return (
+            <Badge
+              variant="outline"
+              className={cn(
+                "rounded-full font-mono text-[10px]",
+                visible
+                  ? amountsVisible
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border-amber-200 bg-amber-50 text-amber-700"
+                  : "border-border bg-muted/40 text-muted-foreground",
+              )}
+            >
+              {visible
+                ? amountsVisible
+                  ? t.patient_invoices_amounts_visible
+                  : t.patient_invoices_amounts_hidden
+                : t.patient_invoices_hidden}
+            </Badge>
+          );
+        },
+      },
+    ],
+     
+    [commonNotSet, formatDate, formatDateTime, formatMoney, invoiceTypeLabel, moneyValueNumber, statusColors, statusLabel, t],
+  );
+  const ledgerColumns = useMemo<ColumnDef<PatientFinancialLedgerEntry>[]>(
+    () => [
+      {
+        id: "entry_date",
+        label: t.appointments_date,
+        accessor: (entry) => entry.entry_date,
+        sortable: true,
+        filterType: "date",
+        required: true,
+        width: 120,
+        render: (entry) => (
+          <span className="font-mono text-xs tabular-nums text-foreground">
+            {formatDate(entry.entry_date)}
+          </span>
+        ),
+      },
+      {
+        id: "direction",
+        label: t.appointments_type,
+        accessor: (entry) => patientInvoiceLedgerDirectionLabel(entry.direction),
+        sortable: true,
+        filterType: "enum",
+        filterOptions: [
+          ...new Set(
+            ledgerEntries.map((entry) => patientInvoiceLedgerDirectionLabel(entry.direction)),
+          ),
+        ].map((label) => ({ value: label, label })),
+        width: 130,
+        render: (entry) => (
+          <Badge
+            variant="outline"
+            className={cn(
+              "rounded-full text-[10px]",
+              ledgerLabels.isIncome(entry.direction)
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-rose-200 bg-rose-50 text-rose-700",
+            )}
+          >
+            {patientInvoiceLedgerDirectionLabel(entry.direction)}
+          </Badge>
+        ),
+      },
+      {
+        id: "category",
+        label: t.services_category,
+        accessor: (entry) => patientInvoiceLedgerCategoryLabel(entry.category),
+        sortable: true,
+        filterType: "enum",
+        filterOptions: [
+          ...new Set(
+            ledgerEntries.map((entry) => patientInvoiceLedgerCategoryLabel(entry.category)),
+          ),
+        ].map((label) => ({ value: label, label })),
+        width: 160,
+        render: (entry) => (
+          <Badge
+            variant="outline"
+            className={cn(
+              "rounded-full font-mono text-[10px]",
+              ledgerCategoryChipClass(entry.category),
+            )}
+          >
+            {patientInvoiceLedgerCategoryLabel(entry.category)}
+          </Badge>
+        ),
+      },
+      {
+        id: "description",
+        label: t.contracts_notes,
+        accessor: (entry) => entry.description,
+        filterType: "text",
+        width: 300,
+        render: (entry) => (
+          <span className="block truncate text-xs text-foreground" title={entry.description}>
+            {entry.description}
+          </span>
+        ),
+      },
+      {
+        id: "documents",
+        label: ledgerLabels.documents,
+        accessor: (entry) =>
+          [entry.order_number, entry.invoice_number, entry.external_invoice_number]
+            .filter(Boolean)
+            .join(" / "),
+        filterType: "text",
+        width: 220,
+        render: (entry) => {
+          const value = [entry.order_number, entry.invoice_number, entry.external_invoice_number]
+            .filter(Boolean)
+            .join(" / ");
+          return value ? (
+            <span className="block truncate font-mono text-xs text-foreground" title={value}>
+              {value}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">{commonNotSet}</span>
+          );
+        },
+      },
+      {
+        id: "amount",
+        label: t.invoices_amount,
+        accessor: (entry) =>
+          (ledgerLabels.isIncome(entry.direction) ? 1 : -1) * Number(entry.amount_gross || 0),
+        sortable: true,
+        filterType: "number",
+        width: 150,
+        render: (entry) => (
+          <span
+            className={cn(
+              "block text-right font-mono text-xs font-medium tabular-nums",
+              ledgerLabels.isIncome(entry.direction) ? "text-emerald-700" : "text-rose-700",
+            )}
+          >
+            {ledgerLabels.isIncome(entry.direction) ? "+" : "-"}
+            {formatMoney(entry.amount_gross, entry.currency)}
+          </span>
+        ),
+      },
+    ],
+    [commonNotSet, formatDate, formatMoney, ledgerEntries, ledgerLabels, t],
+  );
+  const servicePackageColumns = useMemo<ColumnDef<PatientServicePackageItem>[]>(
+    () => [
+      {
+        id: "package",
+        label: t.patient_invoices_package,
+        accessor: (item) => item.package_name,
+        sortable: true,
+        filterType: "text",
+        required: true,
+        width: 240,
+        render: (item) => (
+          <span className="flex min-w-0 items-center gap-1.5">
+            <Badge
+              variant="outline"
+              className={cn(
+                "max-w-full rounded-full",
+                packageChipTone(item.package_id || item.package_name),
+              )}
+            >
+              <span className="truncate" title={item.package_name}>
+                {item.package_name}
+              </span>
+            </Badge>
+          </span>
+        ),
+      },
+      {
+        id: "position",
+        label: t.revenue_agency_service_catalog_items,
+        accessor: (item) =>
+          item.package_item_id
+            ? packageItemLabel(item, t)
+            : t.patient_invoices_package_summary,
+        filterType: "text",
+        width: 260,
+        render: (item) => (
+          <span className="block truncate text-xs text-foreground">
+            {item.package_item_id
+              ? packageItemLabel(item, t)
+              : t.patient_invoices_package_summary}
+          </span>
+        ),
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (item) => statusLabel(item.status),
+        sortable: true,
+        filterType: "enum",
+        filterOptions: [
+          ...new Set(effectiveServicePackages.map((item) => statusLabel(item.status))),
+        ].map((label) => ({ value: label, label })),
+        width: 130,
+        render: (item) => (
+          <Badge
+            variant="outline"
+            className={cn("rounded-full text-[10px]", statusColors[item.status] ?? "")}
+          >
+            {statusLabel(item.status)}
+          </Badge>
+        ),
+      },
+      {
+        id: "period",
+        label: t.providers_date,
+        accessor: (item) => item.starts_on ?? "",
+        sortable: true,
+        filterType: "date",
+        width: 180,
+        render: (item) => {
+          const range = [item.starts_on, item.ends_on].filter(Boolean).join(" – ");
+          return range ? (
+            <span className="font-mono text-xs tabular-nums text-foreground">{range}</span>
+          ) : (
+            <span className="text-xs text-muted-foreground">{commonNotSet}</span>
+          );
+        },
+      },
+      {
+        id: "included",
+        label: t.patient_invoices_included,
+        accessor: (item) => moneyNumeric(item.included_quantity),
+        sortable: true,
+        filterType: "number",
+        width: 110,
+        render: (item) => (
+          <span className="block text-right font-mono text-xs tabular-nums text-foreground">
+            {item.included_quantity} {agencyServiceUnitLabel(item.unit_label, t)}
+          </span>
+        ),
+      },
+      {
+        id: "used",
+        label: t.patient_invoices_used,
+        accessor: (item) => moneyNumeric(item.used_quantity),
+        sortable: true,
+        filterType: "number",
+        width: 110,
+        render: (item) => (
+          <span className="block text-right font-mono text-xs tabular-nums text-foreground">
+            {item.used_quantity}
+          </span>
+        ),
+      },
+      {
+        id: "remaining",
+        label: t.patient_invoices_remaining,
+        accessor: (item) => moneyNumeric(item.remaining_quantity),
+        sortable: true,
+        filterType: "number",
+        width: 110,
+        render: (item) => (
+          <span className="block text-right font-mono text-xs tabular-nums text-foreground">
+            {item.remaining_quantity}
+          </span>
+        ),
+      },
+      {
+        id: "overage",
+        label: t.patient_invoices_overage,
+        accessor: (item) => moneyNumeric(item.overage_quantity),
+        sortable: true,
+        filterType: "number",
+        width: 220,
+        render: (item) => (
+          <span className="flex flex-wrap items-center gap-1">
+            {moneyValueNumber(item.overage_quantity) > 0 ? (
+              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                {t.patient_invoices_overage}: {item.overage_quantity}
+              </span>
+            ) : null}
+            {moneyNumeric(item.pending_overage_quantity) > 0 ? (
+              <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-medium text-orange-700">
+                {t.patient_invoices_pending}: {item.pending_overage_quantity}
+              </span>
+            ) : null}
+            {moneyNumeric(item.approved_overage_quantity) > 0 ? (
+              <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+                {t.patient_invoices_approved}: {item.approved_overage_quantity}
+              </span>
+            ) : null}
+            {item.requires_patient_approval ? (
+              <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-700">
+                {t.patient_invoices_patient_approval}
+              </span>
+            ) : null}
+            {moneyValueNumber(item.overage_quantity) === 0 &&
+            moneyNumeric(item.pending_overage_quantity) === 0 &&
+            moneyNumeric(item.approved_overage_quantity) === 0 &&
+            !item.requires_patient_approval ? (
+              <span className="text-xs text-muted-foreground">—</span>
+            ) : null}
+          </span>
+        ),
+      },
+      ...(canManageInvoices
+        ? [
+            {
+              id: "package_actions",
+              label: t.table_actions,
+              accessor: () => "",
+              width: 70,
+              render: (item: PatientServicePackageItem) => (
+                <PackageActionsMenu
+                  item={item}
+                  t={t}
+                  approvalBusyKey={approvalBusyKey}
+                  onDecision={(approvalStatus) =>
+                    void handleOverageDecision(
+                      item.patient_service_package_id,
+                      item.package_item_id,
+                      approvalStatus,
+                    )
+                  }
+                  onRecordConsumption={() => {
+                    setConsumeTargetId(item.patient_service_package_id);
+                    setConsumeForm(BLANK_CONSUMPTION_FORM);
+                    setConsumeError("");
+                  }}
+                />
+              ),
+            } satisfies ColumnDef<PatientServicePackageItem>,
+          ]
+        : []),
+    ],
+    [
+      approvalBusyKey,
+      canManageInvoices,
+      commonNotSet,
+      effectiveServicePackages,
+      handleOverageDecision,
+      moneyValueNumber,
+      statusColors,
+      statusLabel,
+      t,
+    ],
+  );
 
   return (
     <TabsContent value="invoices" className="mt-4 min-h-[400px] space-y-4">
-      <WorkspaceSectionIntro
-        title={t.patient_invoices_billing_cockpit}
-        description={t.patient_invoices_billing_cockpit_description}
-        accessory={<CountBadge>{invoices.length}</CountBadge>}
-      />
-
-      <FormSection
-        title={t.patient_invoices_financial_overview}
-        accessory={
-          <CountBadge>
-            {invoices.length} {t.patient_invoices_count_suffix}
-          </CountBadge>
-        }
-      >
-        {financeError ? (
-          <Banner tone="error" withIcon>
-            {financeError}
-          </Banner>
-        ) : null}
-        <AdminToolbar className="mb-4 items-start gap-2 rounded-xl bg-card/70 p-3 shadow-none">
+      {financeError ? (
+        <Banner tone="error" withIcon>
+          {financeError}
+        </Banner>
+      ) : null}
+        <AdminToolbar className="items-start gap-2 rounded-xl border border-border/60 bg-card p-3 shadow-none">
           <Field
             label={t.patient_invoices_from}
             htmlFor="profitability-from"
@@ -710,7 +1429,7 @@ function usePatientInvoicesTabContent({
               disabled={financeBusy}
             >
               <option value="__all__">{t.patient_invoices_all_packages}</option>
-              {packageCatalog.map((item) => (
+              {filterPackageOptions.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name}
                 </option>
@@ -747,89 +1466,7 @@ function usePatientInvoicesTabContent({
             </Button>
           </div>
         </AdminToolbar>
-        <div className="grid gap-y-3 overflow-hidden rounded-xl border border-border px-3 pb-4 pt-4 md:grid-cols-2 xl:grid-cols-4 [&>article:not(:last-child):not(:nth-child(4n))_.admin-inline-metric-separator]:xl:block">
-          <AdminInlineMetric
-            icon={CircleDollarSign}
-            label={t.patient_invoices_gross_revenue}
-            value={formatMoney(revenueGross)}
-            description={t.patient_invoices_gross_revenue_description}
-            tone="sky"
-          />
-          <AdminInlineMetric
-            icon={ReceiptText}
-            label={t.patient_invoices_open_invoices}
-            value={invoiceOpenCount}
-            description={t.patient_invoices_open_invoices_description}
-            tone="slate"
-          />
-          <AdminInlineMetric
-            icon={WalletCards}
-            label={t.patient_invoices_outstanding_amount}
-            value={formatMoney(openBalance)}
-            description={t.patient_invoices_outstanding_amount_description}
-            tone="amber"
-          />
-          <AdminInlineMetric
-            icon={Banknote}
-            label={t.patient_invoices_paid}
-            value={formatMoney(paidAmount)}
-            description={t.patient_invoices_paid_description}
-            tone="emerald"
-          />
-          <AdminInlineMetric
-            icon={TriangleAlert}
-            label={t.patient_invoices_overdue_amount}
-            value={formatMoney(overdueAmount)}
-            description={t.patient_invoices_overdue_amount_description}
-            tone="rose"
-          />
-          {effectiveFinancialSummary?.margin_visible ? (
-            <>
-              <AdminInlineMetric
-                icon={TrendingDown}
-                label={t.patient_invoices_gross_expenses}
-                value={formatMoney(effectiveFinancialSummary.expenses_gross)}
-                description={t.patient_invoices_visible_ceo_billing}
-                tone="slate"
-              />
-              <AdminInlineMetric
-                icon={TrendingUp}
-                label={t.patient_invoices_net_margin}
-                value={formatMoney(effectiveFinancialSummary.margin_net)}
-                description={`${effectiveFinancialSummary.margin_percent ?? "0"}%`}
-                tone="emerald"
-              />
-            </>
-          ) : (
-            <AdminInlineMetric
-              icon={TrendingUp}
-              label={t.patient_invoices_margin_hidden}
-              value={commonNotSet}
-              description={t.patient_invoices_margin_hidden_description}
-              tone="slate"
-            />
-          )}
-        </div>
 
-        {financialBreakdownByServiceType.length ? (
-          <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-3">
-            {financialBreakdownByServiceType.map((item) => (
-              <div
-                key={item.service_type}
-                className="rounded-xl border border-border/50 bg-card px-4 py-2.5"
-              >
-                <p className="text-sm font-semibold text-foreground">
-                  {patientInvoiceServiceTypeLabel(item.service_type)}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {formatMoney(item.revenue_gross)} {t.patient_invoices_money_gross} /{" "}
-                  {formatMoney(item.revenue_net)} {t.patient_invoices_money_net}
-                </p>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </FormSection>
 
       <PatientSheetScaffold
         open={assignOpen && canManageInvoices}
@@ -1146,512 +1783,114 @@ function usePatientInvoicesTabContent({
         </FormSection>
       </PatientSheetScaffold>
 
-      <FormSection
-        title={t.patient_invoices_service_packages}
-        accessory={
-          <div className="flex items-center gap-2">
-            <CountBadge>{packageGroupItems.length}</CountBadge>
-            {canManageInvoices ? (
-              <Button
-                type="button"
-                variant={assignOpen ? "default" : "outline"}
-                size="sm"
-                className="h-8 rounded-lg"
-                onClick={() => setAssignOpen(true)}
-                disabled={!patientId}
-              >
-                {t.patient_invoices_assign_package}
-              </Button>
-            ) : null}
-          </div>
-        }
-      >
-        {tabLoading ? (
-          <TabLoader />
-        ) : packageGroupItems.length === 0 ? (
-          <EmptyCell>
-            {t.patient_invoices_no_service_package}
-          </EmptyCell>
-        ) : (
-          <div className="space-y-0">
-            {packageGroupItems.map(([id, group]) => {
-              const dateRange = [group.startsOn, group.endsOn].filter(Boolean).join(" - ");
-              const payerLabel = [group.payerName, group.payerRelationship].filter(Boolean).join(" / ");
+      {tabLoading ? (
+        <TabLoader />
+      ) : (
+        <DataTableSurface
+          rows={filteredServicePackages}
+          columns={servicePackageColumns}
+          rowId={(item) =>
+            `${item.patient_service_package_id}:${item.package_item_id ?? "summary"}`
+          }
+          dictionary={t as unknown as Record<string, string>}
+          emptyState={<EmptyCell>{t.patient_invoices_no_service_package}</EmptyCell>}
+          toolbarStart={
+            <>
+              <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                {t.patient_invoices_service_packages}
+              </span>
+              {canManageInvoices ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 shrink-0 rounded-lg gap-1.5"
+                  onClick={() => setAssignOpen(true)}
+                  disabled={!patientId}
+                >
+                  <Plus className="size-3.5" />
+                  {t.patient_invoices_assign_package}
+                </Button>
+              ) : null}
+              <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+            </>
+          }
+          pagination={{
+            resetKey: filteredServicePackages
+              .map((item) => `${item.patient_service_package_id}:${item.package_item_id ?? "summary"}`)
+              .join(":"),
+          }}
+        />
+      )}
 
-              return (
-                <details key={id} className="group relative pl-9">
-                  <summary className="relative grid cursor-pointer list-none gap-2 rounded-lg p-3 pr-12 transition hover:bg-[#f9fdff] group-open:bg-[#f9fdff] group-open:ring-1 group-open:ring-border/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-                    <div className="absolute -left-9 bottom-0 top-0 flex w-8 items-start justify-center pt-3">
-                      <span
-                        className={cn(
-                          "inline-flex size-7 shrink-0 items-center justify-center rounded-full transition-colors",
-                          group.status === "active"
-                            ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-                            : "bg-slate-50 text-slate-500 ring-1 ring-slate-200",
-                        )}
-                      >
-                        <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
-                      </span>
-                    </div>
+      {tabLoading ? (
+        <TabLoader />
+      ) : (
+        <DataTableSurface
+          surfaceClassName="mt-3"
+          rows={ledgerEntries}
+          columns={ledgerColumns}
+          rowId={(entry) => entry.id}
+          dictionary={t as unknown as Record<string, string>}
+          emptyState={<EmptyCell>{t.patient_invoices_no_ledger_entries}</EmptyCell>}
+          toolbarStart={
+            <>
+              <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                {t.patient_invoices_accounting_ledger}
+              </span>
+              <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+            </>
+          }
+          pagination={{ resetKey: ledgerEntries.map((entry) => entry.id).join(":") }}
+        />
+      )}
 
-                    {canManageInvoices ? (
-                      <div
-                        role="presentation"
-                        className="absolute right-3 top-3 z-20"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                        }}
-                        onKeyDown={(event) => event.stopPropagation()}
-                      >
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          className="size-7 rounded-full bg-white text-muted-foreground shadow-sm ring-1 ring-border/60 hover:bg-[#f9fdff] hover:text-foreground"
-                          onClick={() => {
-                            setConsumeTargetId(id);
-                            setConsumeForm(BLANK_CONSUMPTION_FORM);
-                            setConsumeError("");
-                          }}
-                          aria-label={t.patient_invoices_record_consumption}
-                          title={t.patient_invoices_record_consumption}
-                        >
-                          <Plus className="size-3.5" />
-                        </Button>
-                      </div>
-                    ) : null}
-
-                    <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
-                      <div className="min-w-0">
-                        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                          <p className="min-w-0 max-w-full break-words text-[15px] font-semibold leading-5 text-foreground">
-                            {group.packageName}
-                          </p>
-                          {group.orderNumber ? (
-                            <>
-                              <span className="size-1 rounded-full bg-muted-foreground/35" />
-                              <span className="font-mono text-xs text-muted-foreground">
-                                {group.orderNumber}
-                              </span>
-                            </>
-                          ) : null}
-                          {dateRange ? (
-                            <>
-                              <span className="size-1 rounded-full bg-muted-foreground/35" />
-                              <span className="text-xs tabular-nums text-muted-foreground">
-                                {dateRange}
-                              </span>
-                            </>
-                          ) : null}
-                        </div>
-                        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                          <span>
-                            {group.items.length} {t.patient_invoices_items_suffix}
-                          </span>
-                          {payerLabel ? (
-                            <>
-                              <span className="size-1 rounded-full bg-muted-foreground/35" />
-                              <span className="min-w-0 max-w-full break-words">
-                                {t.patient_invoices_payer}:{" "}
-                                <span className="font-medium text-foreground">
-                                  {payerLabel}
-                                </span>
-                              </span>
-                            </>
-                          ) : null}
-                          {group.notes ? (
-                            <>
-                              <span className="size-1 rounded-full bg-muted-foreground/35" />
-                              <span className="min-w-0 max-w-full break-words">
-                                {group.notes}
-                              </span>
-                            </>
-                          ) : null}
-                        </div>
-                      </div>
-                      <div className="flex min-w-0 flex-wrap justify-start gap-1.5 lg:max-w-[520px] lg:justify-end lg:pr-1">
-                        <Badge
-                          variant="outline"
-                          className={cn("rounded-full text-[10px]", statusColors[group.status] ?? "")}
-                        >
-                          {statusLabel(group.status)}
-                        </Badge>
-                        <Badge
-                          variant="outline"
-                          className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
-                        >
-                          {t.patient_invoices_included}:{" "}
-                          <span className="ml-1 font-semibold text-foreground">
-                            {group.items.reduce(
-                              (sum, item) => sum + moneyNumeric(item.included_quantity),
-                              0,
-                            )}
-                          </span>
-                        </Badge>
-                        <Badge
-                          variant="outline"
-                          className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
-                        >
-                          {t.patient_invoices_used}:{" "}
-                          <span className="ml-1 font-semibold text-foreground">
-                            {group.items.reduce(
-                              (sum, item) => sum + moneyNumeric(item.used_quantity),
-                              0,
-                            )}
-                          </span>
-                        </Badge>
-                      </div>
-                    </div>
-                  </summary>
-
-                  <div aria-hidden="true" className="ml-20 flex h-3 items-center px-3">
-                    <span className="h-px w-12 bg-gradient-to-r from-transparent via-border/70 to-border/70" />
-                    <span className="size-1.5 rounded-full bg-border" />
-                    <span className="h-px flex-1 bg-gradient-to-r from-border/70 to-transparent" />
-                  </div>
-                  <div className="mb-2 ml-20 overflow-hidden rounded-lg bg-[#fbfdff] p-2 shadow-sm">
-                    <div className="grid gap-1.5 sm:grid-cols-2">
-                      {group.items.map((item) => (
-                        <div
-                          key={item.package_item_id ?? `${id}:summary`}
-                          className="rounded-md bg-white px-3 py-2 text-xs shadow-sm ring-1 ring-border/40"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <p className="min-w-0 max-w-full break-words font-medium text-foreground">
-                              {item.package_item_id
-                                ? packageItemLabel(item, t)
-                                : t.patient_invoices_package_summary}
-                            </p>
-                            <span className="shrink-0 tabular-nums text-muted-foreground">
-                              {item.included_quantity}{" "}
-                              {agencyServiceUnitLabel(item.unit_label, t)}
-                            </span>
-                          </div>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                            <span>
-                              {t.patient_invoices_used}:{" "}
-                              <span className="font-medium text-foreground">
-                                {item.used_quantity}
-                              </span>
-                            </span>
-                            <span>
-                              {t.patient_invoices_remaining}:{" "}
-                              <span className="font-medium text-foreground">
-                                {item.remaining_quantity}
-                              </span>
-                            </span>
-                            {moneyValueNumber(item.overage_quantity) > 0 ? (
-                              <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700">
-                                {t.patient_invoices_overage}: {item.overage_quantity}
-                              </span>
-                            ) : null}
-                            {moneyNumeric(item.pending_overage_quantity) > 0 ? (
-                              <span className="rounded-full bg-orange-50 px-2 py-0.5 font-medium text-orange-700">
-                                {t.patient_invoices_pending}: {item.pending_overage_quantity}
-                              </span>
-                            ) : null}
-                            {moneyNumeric(item.approved_overage_quantity) > 0 ? (
-                              <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700">
-                                {t.patient_invoices_approved}: {item.approved_overage_quantity}
-                              </span>
-                            ) : null}
-                            {item.requires_patient_approval ? (
-                              <span className="rounded-full bg-sky-50 px-2 py-0.5 font-medium text-sky-700">
-                                {t.patient_invoices_patient_approval}
-                              </span>
-                            ) : null}
-                          </div>
-                          {canManageInvoices && moneyNumeric(item.pending_overage_quantity) > 0 ? (
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-7 rounded-lg"
-                                disabled={
-                                  approvalBusyKey ===
-                                  `${item.patient_service_package_id}:${item.package_item_id ?? "summary"}:approved`
-                                }
-                                onClick={() =>
-                                  void handleOverageDecision(
-                                    item.patient_service_package_id,
-                                    item.package_item_id,
-                                    "approved",
-                                  )
-                                }
-                              >
-                                {t.patient_invoices_approve_overage}
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 rounded-lg text-rose-700"
-                                disabled={
-                                  approvalBusyKey ===
-                                  `${item.patient_service_package_id}:${item.package_item_id ?? "summary"}:declined`
-                                }
-                                onClick={() =>
-                                  void handleOverageDecision(
-                                    item.patient_service_package_id,
-                                    item.package_item_id,
-                                    "declined",
-                                  )
-                                }
-                              >
-                                {t.patient_invoices_decline}
-                              </Button>
-                            </div>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
-
-                  </div>
-                </details>
-              );
-            })}
-          </div>
-        )}
-      </FormSection>
-
-      <FormSection
-        title={t.patient_invoices_accounting_ledger}
-        accessory={<CountBadge>{ledgerEntries.length}</CountBadge>}
-      >
-        {tabLoading ? (
-          <TabLoader />
-        ) : ledgerEntries.length === 0 ? (
-          <EmptyCell>
-            {t.patient_invoices_no_ledger_entries}
-          </EmptyCell>
-        ) : (
-          <div className="space-y-1.5">
-            {ledgerEntries.slice(0, 12).map((entry) => (
-              <article
-                key={entry.id}
-                className="overflow-hidden rounded-lg border border-border/70 bg-card"
-              >
-                <div className="grid gap-2.5 px-4 py-2.5 text-sm md:grid-cols-[96px_minmax(0,1fr)_180px] md:items-center">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                      {formatDate(entry.entry_date)}
-                    </span>
-                    <span
-                      className={cn(
-                        "h-1.5 w-1.5 rounded-full",
-                        entry.direction === "revenue" || entry.direction === "income"
-                          ? "bg-emerald-500"
-                          : "bg-rose-500",
-                      )}
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "rounded-full text-[10px]",
-                          entry.direction === "revenue" || entry.direction === "income"
-                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                            : "border-rose-200 bg-rose-50 text-rose-700",
-                        )}
-                      >
-                        {patientInvoiceLedgerDirectionLabel(entry.direction)}
-                      </Badge>
-                      <Badge
-                        variant="outline"
-                        className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-                      >
-                        {patientInvoiceLedgerCategoryLabel(entry.category)}
-                      </Badge>
-                    </div>
-                    <p className="mt-2 break-words font-medium text-foreground">
-                      {entry.description}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {[entry.order_number, entry.invoice_number, entry.external_invoice_number]
-                        .filter(Boolean)
-                        .join(" / ")}
-                    </p>
-                  </div>
-                  <div className="rounded-lg bg-muted/20 px-3 py-2 text-right">
-                    <p
-                      className={cn(
-                        "text-base font-semibold tabular-nums leading-none",
-                        entry.direction === "revenue" || entry.direction === "income"
-                          ? "text-emerald-700"
-                          : "text-rose-700",
-                      )}
-                    >
-                      {entry.direction === "expense" ? "-" : "+"}
-                      {formatMoney(entry.amount_gross, entry.currency)}
-                    </p>
-                    <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                      {entry.currency}
-                    </p>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </FormSection>
-
-      <FormSection
-        title={t.patient_invoices_payment_followup}
-        accessory={<CountBadge>{invoices.length}</CountBadge>}
-      >
-        {tabLoading ? (
-          <TabLoader />
-        ) : invoices.length === 0 ? (
-          <EmptyCell>
-            {t.patient_invoices_no_invoices}
-          </EmptyCell>
-        ) : (
-          <div className="space-y-2.5">
-            {invoices.map((invoice) => (
-              <article
-                key={invoice.id}
-                className="rounded-lg border border-border/70 bg-card"
-              >
-                <div className="relative overflow-hidden p-3.5">
-                  <span
-                    className={cn(
-                      "absolute left-0 top-4 h-12 w-1 rounded-r-full",
-                      invoiceAccentClass(invoice.status),
-                    )}
-                  />
-                  <div className="grid gap-3 pl-3 md:grid-cols-[minmax(0,1fr)_190px]">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="h-px w-8 bg-border" />
-                        <Badge
-                          variant="outline"
-                          className={cn("rounded-full text-[10px]", statusColors[invoice.status] ?? "")}
-                        >
-                          {statusLabel(invoice.status)}
-                        </Badge>
-                      </div>
-
-                      <h3 className="mt-2 font-mono text-lg font-semibold leading-none text-foreground">
-                        {invoice.invoice_number}
-                      </h3>
-
-                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                        {[
-                          invoiceTypeLabel(invoice.invoice_type),
-                          formatDateTime(invoice.issued_at),
-                          `${t.patient_invoices_due}: ${formatDate(invoice.due_date, commonNotSet)}`,
-                          invoice.order_number ? `${t.patient_invoices_order}: ${invoice.order_number}` : "",
-                          invoice.quote_number ? `${t.patient_invoices_quote}: ${invoice.quote_number}` : "",
-                        ]
-                          .filter(Boolean)
-                          .join(" - ")}
-                      </p>
-
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Badge
-                          variant="outline"
-                          className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
-                        >
-                          {t.patient_invoices_total}:{" "}
-                          <span className="ml-1 font-semibold text-foreground">
-                            {formatMoney(invoice.total_gross)}
-                          </span>
-                        </Badge>
-                        <Badge
-                          variant="outline"
-                          className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
-                        >
-                          {t.patient_invoices_paid}:{" "}
-                          <span className="ml-1 font-semibold text-foreground">
-                            {formatMoney(invoice.paid_amount)}
-                          </span>
-                        </Badge>
-                        {moneyValueNumber(invoice.balance_due) > 0 ? (
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "rounded-full text-[10px]",
-                              invoice.status === "overdue"
-                                ? "border-rose-200 bg-rose-50 text-rose-700"
-                                : "border-amber-200 bg-amber-50 text-amber-700",
-                            )}
-                          >
-                            {invoice.status === "overdue"
-                              ? t.patient_invoices_needs_urgent_followup
-                              : t.patient_invoices_balance_outstanding}
-                          </Badge>
-                        ) : null}
-                        <Badge
-                          variant="outline"
-                          className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-                        >
-                          {t.patient_invoices_patient_view}:{" "}
-                          <span className="ml-1 font-semibold text-foreground">
-                            {invoice.portal_visibility?.visible_to_patient
-                              ? invoice.portal_visibility.amounts_visible_to_patient
-                                ? t.patient_invoices_amounts_visible
-                                : t.patient_invoices_amounts_hidden
-                              : t.patient_invoices_hidden}
-                          </span>
-                        </Badge>
-                      </div>
-
-                      {invoice.portal_visibility &&
-                      !invoice.portal_visibility.amounts_visible_to_patient ? (
-                        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                          {t.patient_invoices_patient_preview_hidden}
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div className="flex flex-col justify-between gap-3 border-l border-dashed border-border pl-4">
-                      <div>
-                        <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                          {t.patient_invoices_open}
-                        </span>
-                        <p className="mt-2 text-lg font-semibold leading-none text-foreground">
-                          {formatMoney(invoice.balance_due)}
-                        </p>
-                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                          {invoice.payer?.contact_name ??
-                            invoice.payer?.contact_relationship ??
-                            commonNotSet}
-                        </p>
-                      </div>
-                      <div className="flex flex-col gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="justify-center rounded-lg"
-                          onClick={() => onOpenInvoice(invoice.id)}
-                        >
-                          {t.patient_invoices_open}
-                        </Button>
-                        {canManageInvoices ? (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="justify-center rounded-lg"
-                            onClick={() => onManageInvoice(invoice)}
-                          >
-                            {t.patient_invoices_manage_billing}
-                          </Button>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </FormSection>
+      {tabLoading ? (
+        <TabLoader />
+      ) : (
+        <DataTableSurface
+          surfaceClassName="mt-3"
+          rows={filteredInvoices}
+          columns={invoiceColumns}
+          rowId={(invoice) => invoice.id}
+          dictionary={t as unknown as Record<string, string>}
+          emptyState={<EmptyCell>{t.patient_invoices_no_invoices}</EmptyCell>}
+          onRowClick={(invoice) => onOpenInvoice(invoice.id)}
+          rowAccent={(invoice) => invoiceAccentClass(invoice.status)}
+          toolbarStart={
+            <>
+              <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                {t.patient_invoices_payment_followup}
+              </span>
+              <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+            </>
+          }
+          rowActions={(invoice) => (
+            <RowActionsMenu
+              label={t.table_actions}
+              items={[
+                {
+                  key: "open",
+                  label: t.patient_invoices_open,
+                  icon: <ExternalLink className="size-3.5" />,
+                  onSelect: () => onOpenInvoice(invoice.id),
+                },
+                ...(canManageInvoices
+                  ? [
+                      {
+                        key: "billing",
+                        label: t.patient_invoices_manage_billing,
+                        icon: <CircleDollarSign className="size-3.5" />,
+                        onSelect: () => onManageInvoice(invoice),
+                      },
+                    ]
+                  : []),
+              ]}
+            />
+          )}
+          rowActionsWidth={70}
+          pagination={{ resetKey: filteredInvoices.map((invoice) => invoice.id).join(":") }}
+        />
+      )}
     </TabsContent>
   );
 }

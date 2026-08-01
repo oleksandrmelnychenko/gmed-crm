@@ -29,6 +29,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/cases/{case_id}", get(get_case_full))
         .route("/cases/{case_id}/history", get(get_case_history))
+        .route("/cases/{case_id}/status", post(update_case_status))
         .route("/cases/{case_id}/anamnesis", post(update_anamnesis))
         .route(
             "/cases/{case_id}/intake-completion",
@@ -83,6 +84,12 @@ struct UpdateIntakeCompletionRequest {
     completed: bool,
     hauptanfragegrund: Option<String>,
     aktuelle_anamnese: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateCaseStatusRequest {
+    status: String,
+    reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -357,7 +364,8 @@ async fn list_cases(
 
     match sqlx::query(
         r#"SELECT c.id, c.case_id, c.patient_id, c.lead_id, c.onboarding_order_id, c.manager_id,
-                  c.status, c.hauptanfragegrund, c.created_at,
+                  c.status, c.closed_reason, c.closed_at, c.status_changed_at,
+                  c.hauptanfragegrund, c.created_at,
                   COALESCE(p.first_name, l.first_name) AS first_name,
                   COALESCE(p.last_name, l.last_name) AS last_name,
                   p.patient_id AS p_pid
@@ -417,6 +425,9 @@ async fn list_cases(
                     ),
                     "patient_pid": r.try_get::<String, _>("p_pid").unwrap_or_default(),
                     "status": r.try_get::<String, _>("status").unwrap_or_default(),
+                    "closed_reason": r.try_get::<Option<String>, _>("closed_reason").unwrap_or_default(),
+                    "closed_at": r.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("closed_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+                    "status_changed_at": r.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("status_changed_at").unwrap_or_default().map(|v| v.to_rfc3339()),
                     "hauptanfragegrund": r.try_get::<Option<String>, _>("hauptanfragegrund").unwrap_or_default(),
                     "created_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                 }));
@@ -432,6 +443,26 @@ async fn list_cases(
 
 fn is_valid_case_status(value: &str) -> bool {
     matches!(value, "open" | "in_progress" | "closed")
+}
+
+fn is_valid_case_close_reason(value: &str) -> bool {
+    matches!(value, "abgeschlossen" | "abgebrochen" | "dublette")
+}
+
+/// Allowed case lifecycle transitions — the single source of truth for how an
+/// episode moves through its status. See docs/case-patient-unification-strategy-ua.md (D4).
+/// Closing requires a reason; reopening a closed case clears it.
+fn case_status_transition_allowed(from: &str, to: &str) -> bool {
+    if from == to {
+        return true;
+    }
+    matches!(
+        (from, to),
+        ("open", "in_progress")
+            | ("open", "closed")
+            | ("in_progress", "closed")
+            | ("closed", "in_progress")
+    )
 }
 
 async fn list_case_text_snippets(
@@ -851,6 +882,7 @@ async fn get_case_full(
 
     let case = match sqlx::query(
         r#"SELECT c.id, c.case_id, c.patient_id, c.lead_id, c.onboarding_order_id, c.manager_id, c.status,
+                  c.closed_reason, c.closed_at, c.status_changed_at,
                   c.hauptanfragegrund, c.aktuelle_anamnese, c.zuweiser_doctor_id, c.zuweiser,
                   c.notes, c.created_at, c.updated_at, c.retention_until,
                   c.last_clinical_update_at, c.version_count,
@@ -1121,6 +1153,9 @@ async fn get_case_full(
         "onboarding_order_id": case.try_get::<Option<Uuid>, _>("onboarding_order_id").unwrap_or_default(),
         "manager_id": case.try_get::<Uuid, _>("manager_id").unwrap_or_default(),
         "status": case.try_get::<String, _>("status").unwrap_or_default(),
+        "closed_reason": case.try_get::<Option<String>, _>("closed_reason").unwrap_or_default(),
+        "closed_at": case.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("closed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "status_changed_at": case.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("status_changed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "hauptanfragegrund": case.try_get::<Option<String>, _>("hauptanfragegrund").unwrap_or_default(),
         "aktuelle_anamnese": case.try_get::<Option<String>, _>("aktuelle_anamnese").unwrap_or_default(),
         "zuweiser_doctor_id": case.try_get::<Option<Uuid>, _>("zuweiser_doctor_id").unwrap_or_default(),
@@ -1509,6 +1544,132 @@ async fn update_intake_completion(
         "completed": body.completed,
         "intake_completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("intake_completed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "intake_completed_by": row.try_get::<Option<Uuid>, _>("intake_completed_by").unwrap_or_default(),
+    }))
+    .into_response()
+}
+
+async fn update_case_status(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(case_uuid): Path<Uuid>,
+    Json(body): Json<UpdateCaseStatusRequest>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin])
+    {
+        return response;
+    }
+    if !is_valid_case_status(&body.status) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status");
+    }
+    match can_access_case(&state, &auth, case_uuid, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
+    }
+
+    let current = match sqlx::query(
+        "SELECT status, closed_reason, closed_at FROM cases WHERE id = $1",
+    )
+    .bind(case_uuid)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Case not found"),
+        Err(error) => {
+            tracing::error!(error = %error, case_id = %case_uuid, "load case before status change");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    let current_status: String = current.try_get("status").unwrap_or_default();
+    let current_closed_reason: Option<String> =
+        current.try_get("closed_reason").unwrap_or_default();
+    if !case_status_transition_allowed(&current_status, &body.status) {
+        return err(StatusCode::CONFLICT, "Status transition is not allowed");
+    }
+
+    let reason = body
+        .reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if body.status == "closed" {
+        let Some(reason) = reason else {
+            return err(StatusCode::UNPROCESSABLE_ENTITY, "Close reason is required");
+        };
+        if !is_valid_case_close_reason(reason) {
+            return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid close reason");
+        }
+    }
+
+    if current_status == body.status {
+        return Json(serde_json::json!({ "ok": true, "status": current_status }))
+            .into_response();
+    }
+
+    let row = match sqlx::query(
+        r#"UPDATE cases
+           SET status = $2,
+               closed_reason = CASE WHEN $2 = 'closed' THEN $3 ELSE NULL END,
+               closed_at = CASE WHEN $2 = 'closed' THEN now() ELSE NULL END,
+               status_changed_at = now(),
+               updated_at = now()
+           WHERE id = $1
+           RETURNING status, closed_reason, closed_at, status_changed_at"#,
+    )
+    .bind(case_uuid)
+    .bind(&body.status)
+    .bind(reason)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Case not found"),
+        Err(error) => {
+            tracing::error!(error = %error, case_id = %case_uuid, "update case status");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    let audit_action = match body.status.as_str() {
+        "closed" => "close_case",
+        "in_progress" if current_status == "closed" => "reopen_case",
+        _ => "update_case_status",
+    };
+    state.audit_sender.try_send(audit::domain_event(
+        audit_action,
+        Some(auth.user_id),
+        "case",
+        Some(case_uuid),
+        serde_json::json!({
+            "from_status": current_status,
+            "status": body.status,
+            "reason": reason,
+        }),
+    ));
+    version_log(
+        &state,
+        case_uuid,
+        auth.user_id,
+        "status",
+        serde_json::json!({
+            "status": current_status,
+            "closed_reason": current_closed_reason,
+        }),
+        serde_json::json!({
+            "status": body.status,
+            "closed_reason": reason,
+        }),
+    )
+    .await;
+
+    Json(serde_json::json!({
+        "ok": true,
+        "status": row.try_get::<String, _>("status").unwrap_or_default(),
+        "closed_reason": row.try_get::<Option<String>, _>("closed_reason").unwrap_or_default(),
+        "closed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("closed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "status_changed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("status_changed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
     }))
     .into_response()
 }
@@ -2742,8 +2903,6 @@ async fn version_log(
         "UPDATE cases
          SET version_count = version_count + 1,
              last_clinical_update_at = now(),
-             intake_completed_at = NULL,
-             intake_completed_by = NULL,
              retention_until = GREATEST(
                  COALESCE(retention_until, now()),
                  now() + ($2 * interval '1 year')

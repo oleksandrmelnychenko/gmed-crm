@@ -22,6 +22,11 @@ export type PatientTimelineSummary = {
   entityCounts: Array<{ entityType: string; count: number }>;
 };
 
+export type PatientTimelineFacet = {
+  value: string;
+  count: number;
+};
+
 export type PatientLabelFormatId =
   | "compact-90x48"
   | "standard-105x74"
@@ -102,7 +107,7 @@ type PatientTimelineFilters = {
   now?: Date;
 };
 
-const TIMELINE_CLOSED_STATUSES = new Set([
+const TIMELINE_TERMINAL_STATUSES = new Set([
   "closed",
   "completed",
   "paid",
@@ -111,7 +116,50 @@ const TIMELINE_CLOSED_STATUSES = new Set([
   "cancelled",
   "expired",
   "terminated",
+  "invoiced",
+  "rejected",
+  "revoked",
 ]);
+
+const TIMELINE_OPERATIONAL_ENTITY_TYPES = new Set([
+  "appointment",
+  "case",
+  "order",
+  "service",
+  "service_group",
+  "task",
+  "workflow_task",
+  "communication",
+  "reminder",
+  "recommendation",
+  "translation_request",
+  "medical_order",
+]);
+
+function isOpenTimelineItem(item: PatientTimelineItem) {
+  const status = item.status.trim().toLowerCase();
+
+  if (TIMELINE_OPERATIONAL_ENTITY_TYPES.has(item.entity_type)) {
+    return !TIMELINE_TERMINAL_STATUSES.has(status);
+  }
+
+  switch (item.entity_type) {
+    case "document":
+      return status === "draft";
+    case "contract":
+      return status === "draft" || status === "sent" || status === "pending";
+    case "invoice":
+      return status === "draft" || status === "sent" || status === "overdue" || status === "partially_paid";
+    case "quote":
+      return status === "draft" || status === "sent";
+    case "service_package_consumption":
+      return status === "pending";
+    case "compliance":
+      return status === "open" || status === "in_progress";
+    default:
+      return false;
+  }
+}
 
 const TIMELINE_RANGE_DAYS: Record<Exclude<PatientTimelineRangeFilter, "all">, number> = {
   "30d": 30,
@@ -248,6 +296,8 @@ export function resolvePatientTimelineRoute(
   access: PatientTimelineNavigationAccess
 ) {
   switch (item.entity_type) {
+    case "patient":
+      return access.patientId ? `/patients/${access.patientId}` : null;
     case "case":
       if (access.patientId) {
         return `/cases/${item.entity_id}?patient=${access.patientId}`;
@@ -258,8 +308,14 @@ export function resolvePatientTimelineRoute(
         return `/orders/${item.entity_id}?patient=${access.patientId}`;
       }
       return `/orders?order=${item.entity_id}`;
+    case "service":
+    case "service_group":
+      return access.patientId ? `/patients/${access.patientId}?tab=orders` : null;
     case "appointment":
       return `/appointments?appointment=${item.entity_id}`;
+    case "communication":
+    case "reminder":
+      return access.patientId ? `/patients/${access.patientId}?tab=appointments` : null;
     case "document":
       return access.canOpenDocumentsWorkspace ? `/documents?document=${item.entity_id}` : null;
     case "contract":
@@ -268,10 +324,26 @@ export function resolvePatientTimelineRoute(
       return access.canViewInvoices ? `/invoices?invoice=${item.entity_id}` : null;
     case "invoice_visibility":
       return access.canViewInvoices ? `/invoices?invoice=${item.entity_id}` : null;
+    case "dunning":
+      return access.patientId && access.canViewInvoices
+        ? `/patients/${access.patientId}?tab=invoices`
+        : null;
+    case "quote":
+      return access.canViewContracts ? "/contracts" : null;
     case "clinical":
       // Only clinical-access roles ever receive clinical timeline entries (gated
       // server-side), so anyone who sees one can open the tab.
       return access.patientId ? `/patients/${access.patientId}?tab=clinical` : null;
+    case "vital":
+    case "card_entry":
+    case "medical_order":
+    case "risk_score":
+      return access.patientId ? `/patients/${access.patientId}?tab=clinical` : null;
+    case "relation":
+      return access.patientId ? `/patients/${access.patientId}?tab=relations` : null;
+    case "task":
+    case "workflow_task":
+      return access.patientId ? `/patients/${access.patientId}?tab=workflow` : null;
     case "service_package":
     case "service_package_consumption":
     case "service_package_change":
@@ -293,10 +365,6 @@ export function resolvePatientTimelineRoute(
     case "translation_request":
       return access.patientId && access.canOpenDocumentsWorkspace
         ? `/patients/${access.patientId}?tab=documents`
-        : null;
-    case "service_group":
-      return access.patientId
-        ? `/patients/${access.patientId}?tab=orders`
         : null;
     case "compliance":
       return access.canOpenComplianceWorkspace ? "/admin/compliance" : null;
@@ -374,12 +442,12 @@ export function buildPatientTimelineSummary(
   for (const item of items) {
     entityCountsMap.set(item.entity_type, (entityCountsMap.get(item.entity_type) ?? 0) + 1);
 
-    if (!TIMELINE_CLOSED_STATUSES.has(item.status)) {
+    if (isOpenTimelineItem(item)) {
       open += 1;
     }
 
     const happenedAt = Date.parse(item.happened_at);
-    if (!Number.isNaN(happenedAt) && happenedAt >= recentCutoff) {
+    if (!Number.isNaN(happenedAt) && happenedAt >= recentCutoff && happenedAt <= now.getTime()) {
       recent += 1;
     }
   }

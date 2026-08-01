@@ -154,7 +154,18 @@ async fn get_patient_financial_summary(
                     FROM patient_service_packages psp
                     WHERE psp.patient_id = invoices.patient_id
                       AND psp.package_id = $5
-                      AND (psp.order_id IS NULL OR psp.order_id = invoices.order_id)
+                      AND (
+                            psp.order_id = invoices.order_id
+                            OR EXISTS (
+                                SELECT 1
+                                FROM service_package_consumptions spc
+                                WHERE spc.patient_service_package_id = psp.id
+                                  AND (
+                                        spc.order_id = invoices.order_id
+                                        OR spc.invoice_id = invoices.id
+                                  )
+                            )
+                      )
              ))
            ORDER BY issued_at DESC, created_at DESC"#,
     )
@@ -191,7 +202,18 @@ async fn get_patient_financial_summary(
                     FROM patient_service_packages psp
                     WHERE psp.patient_id = accounting_entries.patient_id
                       AND psp.package_id = $5
-                      AND (psp.order_id IS NULL OR psp.order_id = accounting_entries.order_id)
+                      AND (
+                            psp.order_id = accounting_entries.order_id
+                            OR EXISTS (
+                                SELECT 1
+                                FROM service_package_consumptions spc
+                                WHERE spc.patient_service_package_id = psp.id
+                                  AND (
+                                        spc.order_id = accounting_entries.order_id
+                                        OR spc.invoice_id = accounting_entries.source_invoice_id
+                                  )
+                            )
+                      )
              ))
              AND ($6::boolean = true OR category <> 'cost_passthrough_revenue')"#,
     )
@@ -379,7 +401,18 @@ async fn get_patient_financial_ledger(
                     FROM patient_service_packages psp
                     WHERE psp.patient_id = ae.patient_id
                       AND psp.package_id = $5
-                      AND (psp.order_id IS NULL OR psp.order_id = ae.order_id)
+                      AND (
+                            psp.order_id = ae.order_id
+                            OR EXISTS (
+                                SELECT 1
+                                FROM service_package_consumptions spc
+                                WHERE spc.patient_service_package_id = psp.id
+                                  AND (
+                                        spc.order_id = ae.order_id
+                                        OR spc.invoice_id = ae.source_invoice_id
+                                  )
+                            )
+                      )
              ))
            ORDER BY ae.entry_date DESC, ae.created_at DESC"#,
     )
@@ -480,7 +513,18 @@ async fn export_patient_financial_ledger(
                     FROM patient_service_packages psp
                     WHERE psp.patient_id = ae.patient_id
                       AND psp.package_id = $5
-                      AND (psp.order_id IS NULL OR psp.order_id = ae.order_id)
+                      AND (
+                            psp.order_id = ae.order_id
+                            OR EXISTS (
+                                SELECT 1
+                                FROM service_package_consumptions spc
+                                WHERE spc.patient_service_package_id = psp.id
+                                  AND (
+                                        spc.order_id = ae.order_id
+                                        OR spc.invoice_id = ae.source_invoice_id
+                                  )
+                            )
+                      )
              ))
            ORDER BY ae.entry_date DESC, ae.created_at DESC"#,
     )

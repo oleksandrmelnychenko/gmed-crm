@@ -38,6 +38,10 @@ import {
   X,
 } from "lucide-react";
 
+import {
+  DataTablePager,
+  useDataTablePagination,
+} from "@/components/data-table/data-table-pager";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { DocumentsGrid } from "@/components/documents-grid";
@@ -195,7 +199,7 @@ import { DocumentTemplateBindingFields } from "./ui/document-template-binding-fi
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
 const DEFAULT_GENERATE_TEMPLATE_ID = "patient_sticker_compact";
-const documentSectionClassName = "border-border/50 bg-transparent";
+const documentSectionClassName = "border-0 bg-transparent p-0 shadow-none";
 
 function runtimeTranslations() {
   return translateCatalog(getLang());
@@ -2933,7 +2937,7 @@ function StaffDocumentsPage({
                     search: event.target.value,
                   }))
                 }
-                className="h-8 rounded-lg bg-background pl-8 text-[13px]"
+                className="h-8 rounded-lg bg-field pl-8 text-[13px]"
                 placeholder={t.common_search}
               />
             </div>
@@ -2996,7 +3000,7 @@ function StaffDocumentsPage({
                 setFilters((current) => ({ ...current, art: event.target.value }))
               }
               list="documents-art-options"
-              className="h-8 rounded-lg bg-background text-[13px]"
+              className="h-8 rounded-lg bg-field text-[13px]"
               placeholder={t.operations_document_type}
             />
           </div>
@@ -3009,7 +3013,7 @@ function StaffDocumentsPage({
                   orderId: event.target.value,
                 }))
               }
-              className="h-8 rounded-lg bg-background text-[13px]"
+              className="h-8 rounded-lg bg-field text-[13px]"
               placeholder={t.orders_title}
             />
             <Input
@@ -3020,7 +3024,7 @@ function StaffDocumentsPage({
                   appointmentId: event.target.value,
                 }))
               }
-              className="h-8 rounded-lg bg-background text-[13px]"
+              className="h-8 rounded-lg bg-field text-[13px]"
               placeholder={t.appointments_title}
             />
             <Input
@@ -3033,7 +3037,7 @@ function StaffDocumentsPage({
                 }))
               }
               aria-label={t.documents_date_from}
-              className="h-8 rounded-lg bg-background text-[13px]"
+              className="h-8 rounded-lg bg-field text-[13px]"
             />
             <Input
               type="date"
@@ -3045,7 +3049,7 @@ function StaffDocumentsPage({
                 }))
               }
               aria-label={t.documents_date_to}
-              className="h-8 rounded-lg bg-background text-[13px]"
+              className="h-8 rounded-lg bg-field text-[13px]"
             />
           </div>
           <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-4">
@@ -3074,7 +3078,7 @@ function StaffDocumentsPage({
                   klinik: event.target.value,
                 }))
               }
-              className="h-8 rounded-lg bg-background text-[13px]"
+              className="h-8 rounded-lg bg-field text-[13px]"
               placeholder={t.documents_clinic}
             />
             <Input
@@ -3085,7 +3089,7 @@ function StaffDocumentsPage({
                   ursprung: event.target.value,
                 }))
               }
-              className="h-8 rounded-lg bg-background text-[13px]"
+              className="h-8 rounded-lg bg-field text-[13px]"
               placeholder={t.documents_source}
             />
             <NativeComboboxSelect
@@ -3226,6 +3230,7 @@ function StaffDocumentsPage({
           <DocumentsGrid
             documents={documents}
             paginated
+            showSelection={false}
             paginationResetKey={documentsPath}
             selectedDocumentIds={selectedDocumentIds}
             selectedId={selectedId}
@@ -6972,6 +6977,10 @@ function DocumentIntakeQueueTable({
   t: DocumentsPageTranslations;
   text: DocumentsPageText;
 }) {
+  const intakeQueuePagination = useDataTablePagination(
+    rows,
+    String(rows.length),
+  );
   const columns = useMemo<ColumnDef<DocumentItem>[]>(
     () => [
       {
@@ -6990,7 +6999,7 @@ function DocumentIntakeQueueTable({
             title={item.original_filename ?? undefined}
           >
             {item.document_number ? (
-              <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+              <span className="shrink-0 font-mono text-xs tabular-nums text-foreground">
                 {formatBusinessDocumentNumber(item.document_number)}
               </span>
             ) : null}
@@ -7039,7 +7048,7 @@ function DocumentIntakeQueueTable({
           const suggestion = item.classification_suggestion;
           if (!suggestion) {
             return (
-              <span className="block truncate text-xs text-muted-foreground">
+              <span className="block truncate text-xs text-foreground">
                 {t.documents_no_auto_classification}
               </span>
             );
@@ -7077,7 +7086,7 @@ function DocumentIntakeQueueTable({
             >
               {t.documents_needs_review}
             </Badge>
-            <span className="truncate text-[11px] text-muted-foreground">
+            <span className="truncate text-xs text-foreground">
               {[formatDocumentStatusLabel(item.status, t), item.ursprung ? formatDocumentSourceLabel(item.ursprung, t) : null]
                 .filter(Boolean)
                 .join(" / ")}
@@ -7093,7 +7102,7 @@ function DocumentIntakeQueueTable({
         sortable: true,
         width: 180,
         render: (item) => (
-          <span className="text-xs text-muted-foreground">
+          <span className="text-xs text-foreground">
             {formatDateTime(item.updated_at)}
           </span>
         ),
@@ -7111,7 +7120,7 @@ function DocumentIntakeQueueTable({
               type="button"
               variant="outline"
               size="sm"
-              className="h-7 max-w-full overflow-hidden rounded-md px-2 text-[11px]"
+              className="h-7 max-w-full overflow-hidden rounded-md px-2 text-xs"
               disabled={actionId === item.id}
               onClick={(event) => {
                 event.stopPropagation();
@@ -7135,7 +7144,7 @@ function DocumentIntakeQueueTable({
 
   return (
     <DataTableSurface
-      rows={rows}
+      rows={intakeQueuePagination.pagedRows}
       columns={columns}
       rowId={(item) => item.id}
       activeRowId={selectedId || null}
@@ -7145,6 +7154,17 @@ function DocumentIntakeQueueTable({
       loadingState={<TabLoader />}
       emptyState={<span>{emptyText}</span>}
       tableClassName="min-h-[360px]"
+      toolbarAfter={
+        <DataTablePager
+          pageIndex={intakeQueuePagination.pageIndex}
+          pageSize={intakeQueuePagination.pageSize}
+          totalPages={intakeQueuePagination.totalPages}
+          totalRows={intakeQueuePagination.totalRows}
+          previousLabel={t.pagination_previous}
+          nextLabel={t.pagination_next}
+          onPageChange={intakeQueuePagination.onPageChange}
+        />
+      }
       onRowClick={(item) => onOpenDocument(item.id)}
       rowAccent={() => "bg-amber-500"}
       footer={({ filteredCount, totalCount }) => (
@@ -7184,6 +7204,10 @@ function DocumentTranslationRequestsTable({
   rows: TranslationRequest[];
   t: DocumentsPageTranslations;
 }) {
+  const translationRequestsPagination = useDataTablePagination(
+    rows,
+    String(rows.length),
+  );
   const columns = useMemo<ColumnDef<TranslationRequest>[]>(
     () => [
       {
@@ -7198,16 +7222,30 @@ function DocumentTranslationRequestsTable({
         width: 280,
         render: (request) => (
           <div className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate text-xs font-medium text-foreground">
+            <span className="truncate text-xs text-foreground">
               {request.document_name || request.document_id}
-            </span>
-            <span className="shrink-0 truncate text-[11px] text-muted-foreground">
-              {request.document_category
-                ? localizeDocumentCode(request.document_category, l)
-                : t.documents_unclassified}
             </span>
           </div>
         ),
+      },
+      {
+        id: "category",
+        label: t.documents_category,
+        accessor: (request) => request.document_category ?? "",
+        searchable: true,
+        sortable: true,
+        width: 200,
+        render: (request) =>
+          request.document_category ? (
+            <span
+              className="inline-flex max-w-full truncate rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-sky-700"
+              title={localizeDocumentCode(request.document_category, l)}
+            >
+              {localizeDocumentCode(request.document_category, l)}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">{t.documents_unclassified}</span>
+          ),
       },
       {
         id: "patient",
@@ -7271,7 +7309,7 @@ function DocumentTranslationRequestsTable({
             <span className="shrink-0 font-mono text-xs tabular-nums text-foreground">
               {formatDateTime(request.requested_at)}
             </span>
-            <span className="truncate text-[11px] text-muted-foreground">
+            <span className="truncate text-xs text-foreground">
               {formatDocumentSourceLabel(request.request_source, t)}
             </span>
           </div>
@@ -7301,7 +7339,7 @@ function DocumentTranslationRequestsTable({
         searchable: true,
         width: 196,
         render: (request) => (
-          <span className="block truncate text-xs text-muted-foreground">
+          <span className="block truncate text-xs text-foreground">
             {request.note || t.common_not_set}
           </span>
         ),
@@ -7357,7 +7395,7 @@ function DocumentTranslationRequestsTable({
 
   return (
     <DataTableSurface
-      rows={rows}
+      rows={translationRequestsPagination.pagedRows}
       columns={columns}
       rowId={(request) => request.id}
       defaultDensity="comfortable"
@@ -7366,6 +7404,17 @@ function DocumentTranslationRequestsTable({
       loadingState={<TabLoader />}
       emptyState={<span>{emptyText}</span>}
       tableClassName="min-h-[360px]"
+      toolbarAfter={
+        <DataTablePager
+          pageIndex={translationRequestsPagination.pageIndex}
+          pageSize={translationRequestsPagination.pageSize}
+          totalPages={translationRequestsPagination.totalPages}
+          totalRows={translationRequestsPagination.totalRows}
+          previousLabel={t.pagination_previous}
+          nextLabel={t.pagination_next}
+          onPageChange={translationRequestsPagination.onPageChange}
+        />
+      }
       onRowClick={(request) => onOpenDocument(request.document_id)}
       rowAccent={(request) => {
         if (request.status === "completed") return "bg-emerald-500";

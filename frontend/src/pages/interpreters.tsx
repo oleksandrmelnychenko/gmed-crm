@@ -9,21 +9,42 @@ import {
 } from "react";
 import {
   RefreshCcw,
-  Save,
   Search,
-  ShieldCheck,
   Plus,
   Trash2,
-  UsersRound,
   X,
 } from "lucide-react";
 import { useParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  DataTablePager,
+  useDataTablePagination,
+} from "@/components/data-table/data-table-pager";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import { ToolbarField } from "@/components/data-table/toolbar-field";
+import type { ColumnDef } from "@/components/data-table/types";
+import {
+  AdminSheetScaffold,
+  SheetFormFooter,
+} from "@/components/admin-page-patterns";
 import { Input } from "@/components/ui/input";
-import { PageHeader } from "@/components/ui-shell";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import {
+  Banner,
+  Field,
+  PageHeader,
+  Section,
+  checkboxClass,
+  inputClass,
+  selectClass,
+  textareaClass,
+} from "@/components/ui-shell";
 import { apiFetch, downloadApiFile } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 import {
   buildInterpreterLanguagesPath,
   buildInterpreterListPath,
@@ -146,12 +167,6 @@ type CreateInterpreterAccountForm = {
   createUserAccount: boolean;
 };
 
-const inputClass =
-  "h-9 rounded-lg border border-input bg-background px-3 text-sm";
-const selectClass =
-  "h-9 w-full rounded-lg border border-input bg-background px-3 text-sm";
-const textareaClass =
-  "min-h-24 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25";
 
 function asProfile(value: unknown): InterpreterProfile {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -559,6 +574,19 @@ function staffPageCopy(lang: "de" | "ru") {
   };
 }
 
+function staffRoleBadgeClass(role: string) {
+  switch (role) {
+    case "teamlead_interpreter":
+      return "border-violet-200 bg-violet-50 text-violet-700";
+    case "interpreter":
+      return "border-sky-200 bg-sky-50 text-sky-700";
+    case "external_staff":
+      return "border-amber-200 bg-amber-50 text-amber-700";
+    default:
+      return "border-border bg-muted/40 text-foreground";
+  }
+}
+
 function staffRoleLabel(role: string, copy: StaffPageCopy) {
   switch (role) {
     case "teamlead_interpreter":
@@ -572,6 +600,24 @@ function staffRoleLabel(role: string, copy: StaffPageCopy) {
     default:
       return role;
   }
+}
+
+function staffStatusLabel(status: string, copy: StaffPageCopy) {
+  return copy.statuses[status as keyof typeof copy.statuses] ?? (status || copy.noStatus);
+}
+
+function staffContractTypeLabel(contractType: string, copy: StaffPageCopy) {
+  return (
+    copy.contractTypes[contractType as keyof typeof copy.contractTypes] ??
+    (contractType || copy.notSet)
+  );
+}
+
+function staffEmploymentKindLabel(employmentKind: string, copy: StaffPageCopy) {
+  return (
+    copy.employmentKinds[employmentKind as keyof typeof copy.employmentKinds] ??
+    (employmentKind || copy.notSet)
+  );
 }
 
 function compactDate(value: unknown) {
@@ -766,38 +812,6 @@ function formToProfile(form: InterpreterProfileForm) {
   };
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <label className="grid gap-1.5">
-      <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </span>
-      {children}
-    </label>
-  );
-}
-
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="space-y-3 border-t border-border pt-5">
-      <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
 function Metric({
   label,
   value,
@@ -852,7 +866,7 @@ function OperationsList({
 }
 
 export function InterpretersPage() {
-  const { lang } = useLang();
+  const { lang, t } = useLang();
   const copy = useMemo(() => staffPageCopy(lang), [lang]);
   const profileCopy = copy.profile;
   const { interpreterId } = useParams();
@@ -886,8 +900,12 @@ export function InterpretersPage() {
     canCreateInterpreterUserAccount(createAccountForm);
 
   const selected = useMemo(
-    () => items.find((item) => item.id === selectedId) ?? items[0] ?? null,
+    () => items.find((item) => item.id === selectedId) ?? null,
     [items, selectedId],
+  );
+  const employeesPagination = useDataTablePagination(
+    items,
+    `${deferredSearch}\u0000${statusFilter}\u0000${contractFilter}`,
   );
   const [form, setForm] = useState<InterpreterProfileForm>(() =>
     profileToForm({}),
@@ -912,7 +930,7 @@ export function InterpretersPage() {
         if (data.some((item) => item.id === current)) {
           return current;
         }
-        return data[0]?.id || "";
+        return "";
       });
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : copy.loadFailed);
@@ -1208,16 +1226,129 @@ export function InterpretersPage() {
     }
   }
 
+  const employeeColumns = useMemo<ColumnDef<InterpreterRecord>[]>(
+    () => [
+      {
+        id: "name",
+        label: copy.name,
+        accessor: (employee) => employee.name,
+        sortable: true,
+        width: 260,
+        render: (employee) => (
+          <span className="block truncate font-mono text-xs text-foreground">
+            {employee.name}
+          </span>
+        ),
+      },
+      {
+        id: "email",
+        label: copy.email,
+        accessor: (employee) => employee.email,
+        sortable: true,
+        width: 240,
+        render: (employee) =>
+          employee.email ? (
+            <span className="inline-flex max-w-full truncate rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] font-medium text-foreground">
+              {employee.email}
+            </span>
+          ) : (
+            <span className="truncate text-xs text-foreground">{copy.notSet}</span>
+          ),
+      },
+      {
+        id: "role",
+        label: copy.role,
+        accessor: (employee) => employee.role,
+        sortable: true,
+        width: 190,
+        render: (employee) => (
+          <Badge
+            variant="outline"
+            className={cn(
+              "rounded-full font-mono text-[10px] font-medium",
+              staffRoleBadgeClass(employee.role),
+            )}
+          >
+            {staffRoleLabel(employee.role, copy)}
+          </Badge>
+        ),
+      },
+      {
+        id: "status",
+        label: copy.status,
+        accessor: (employee) => text(employee.profile.status),
+        sortable: true,
+        width: 150,
+        render: (employee) => {
+          const status = text(employee.profile.status);
+          return (
+            <Badge
+              variant="outline"
+              className={cn(
+                "rounded-full font-mono text-[10px] font-medium",
+                status === "active"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-border bg-muted/40 text-foreground",
+              )}
+            >
+              {staffStatusLabel(status, copy)}
+            </Badge>
+          );
+        },
+      },
+      {
+        id: "contract_type",
+        label: copy.contractType,
+        accessor: (employee) => text(employee.profile.contractType),
+        sortable: true,
+        width: 170,
+        render: (employee) => (
+          <span className="text-xs text-foreground">
+            {staffContractTypeLabel(text(employee.profile.contractType), copy)}
+          </span>
+        ),
+      },
+      {
+        id: "employment_kind",
+        label: copy.employmentKind,
+        accessor: (employee) => text(employee.profile.employmentKind),
+        sortable: true,
+        width: 180,
+        render: (employee) => (
+          <span className="text-xs text-foreground">
+            {staffEmploymentKindLabel(text(employee.profile.employmentKind), copy)}
+          </span>
+        ),
+      },
+      {
+        id: "account",
+        label: copy.userAccount,
+        accessor: (employee) => employee.profile_source ?? "user",
+        sortable: true,
+        width: 180,
+        render: (employee) => (
+          <span className="text-xs text-foreground">
+            {employee.profile_source === "standalone"
+              ? copy.noUserAccount
+              : copy.existsInUsers}
+          </span>
+        ),
+      },
+    ],
+    [copy],
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex w-full flex-col gap-4">
         <PageHeader
           title={copy.title}
+          description={copy.subtitle}
           actions={
             <>
               <Button
                 type="button"
-                variant="outline"
+                className="h-9 rounded-lg gap-1.5 px-3.5"
                 onClick={() => setCreateAccountOpen(true)}
               >
                 <Plus className="size-4" />
@@ -1226,6 +1357,7 @@ export function InterpretersPage() {
               <Button
                 type="button"
                 variant="outline"
+                className="h-9 rounded-lg gap-1.5 bg-card px-3.5"
                 onClick={() => void loadItems()}
                 disabled={loading}
               >
@@ -1237,9 +1369,9 @@ export function InterpretersPage() {
         />
 
         {error ? (
-          <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <Banner tone="error" withIcon>
             {error}
-          </div>
+          </Banner>
         ) : null}
         {notice ? (
           <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
@@ -1247,33 +1379,44 @@ export function InterpretersPage() {
           </div>
         ) : null}
 
-        {createAccountOpen ? (
-          <form
-            onSubmit={handleCreateInterpreterAccount}
-            className="space-y-4 rounded-lg border border-border bg-card p-4"
+        <Sheet
+          open={createAccountOpen}
+          onOpenChange={(open) => {
+            if (open) setCreateAccountOpen(true);
+            else closeCreateAccountForm();
+          }}
+        >
+          <SheetContent
+            side="right"
+            className="w-full border-l border-border p-0 sm:max-w-[720px]"
           >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-	              <div>
-	                <h2 className="text-sm font-semibold text-foreground">
-	                  {copy.createAccountTitle}
-	                </h2>
-	                <p className="mt-1 text-xs text-muted-foreground">
-	                  {copy.createAccountDescription}
-	                </p>
-	              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                className="h-8 px-2"
-                onClick={closeCreateAccountForm}
+            {createAccountOpen ? (
+              <form
+                onSubmit={handleCreateInterpreterAccount}
+                className="flex min-h-0 flex-1 flex-col"
               >
-                <X className="size-4" />
-              </Button>
-            </div>
+                <AdminSheetScaffold
+                  title={copy.createAccountTitle}
+                  description={copy.createAccountDescription}
+                  footer={(
+                    <SheetFormFooter
+                      cancelLabel={t.common_cancel}
+                      submitLabel={
+                        createAccountForm.createUserAccount
+                          ? copy.createAccount
+                          : copy.createStaffProfile
+                      }
+                      submittingLabel={copy.creating}
+                      submitting={createAccountSaving}
+                      onCancel={closeCreateAccountForm}
+                    />
+                  )}
+                >
+                  <div className="space-y-4">
             {createAccountError ? (
-              <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <Banner tone="error" withIcon>
                 {createAccountError}
-              </div>
+              </Banner>
             ) : null}
             <div className="grid gap-3 md:grid-cols-3">
 	              <Field label={copy.name}>
@@ -1310,7 +1453,7 @@ export function InterpretersPage() {
                 />
               </Field>
 	              <Field label={copy.role}>
-                <select
+                <NativeComboboxSelect
                   className={selectClass}
                   value={createAccountForm.role}
                   disabled={!createAccountForm.createUserAccount}
@@ -1322,10 +1465,10 @@ export function InterpretersPage() {
                 >
 	                  <option value="interpreter">{copy.roles.interpreter}</option>
 	                  <option value="teamlead_interpreter">{copy.roles.teamlead_interpreter}</option>
-	                </select>
+	                </NativeComboboxSelect>
 	              </Field>
 	              <Field label={copy.contractType}>
-                <select
+                <NativeComboboxSelect
                   className={selectClass}
                   value={createAccountForm.contractType}
                   onChange={(event) =>
@@ -1335,10 +1478,10 @@ export function InterpretersPage() {
 	                  <option value="employee">{copy.contractTypes.employee}</option>
 	                  <option value="freelancer">{copy.contractTypes.freelancer}</option>
 	                  <option value="hourly">{copy.contractTypes.hourly}</option>
-	                </select>
+	                </NativeComboboxSelect>
 	              </Field>
 	              <Field label={copy.employmentKind}>
-                <select
+                <NativeComboboxSelect
                   className={selectClass}
                   value={createAccountForm.employmentKind}
                   onChange={(event) =>
@@ -1349,13 +1492,14 @@ export function InterpretersPage() {
                 >
 	                  <option value="internal">{copy.employmentKinds.internal}</option>
 	                  <option value="external">{copy.employmentKinds.external}</option>
-	                </select>
+	                </NativeComboboxSelect>
 	              </Field>
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5">
               <label className="flex items-center gap-2 text-sm text-foreground">
                 <input
                   type="checkbox"
+                  className={checkboxClass}
                   checked={createAccountForm.createUserAccount}
                   disabled={!createUserAccountAllowed}
                   onChange={(event) =>
@@ -1371,132 +1515,153 @@ export function InterpretersPage() {
 	                  {copy.externalAccountBlocked}
 	                </p>
 	              ) : null}
-              <Button
-                type="submit"
-                disabled={createAccountSaving}
-	              >
-	                <Plus className="size-4" />
-	                {createAccountSaving
-                    ? copy.creating
-                    : createAccountForm.createUserAccount
-                      ? copy.createAccount
-                      : copy.createStaffProfile}
-	              </Button>
             </div>
-          </form>
-        ) : null}
+                  </div>
+                </AdminSheetScaffold>
+              </form>
+            ) : null}
+          </SheetContent>
+        </Sheet>
 
-        <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-	          <aside className="space-y-3">
-	            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-	              <UsersRound className="size-4 text-primary" />
-	              {copy.employees}
-	            </div>
-            <div className="space-y-2 rounded-lg border border-border bg-card p-3">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  className={`${inputClass} w-full pl-8`}
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-	                  placeholder={copy.search}
-	                />
-	              </div>
-              <select
-                className={selectClass}
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value)}
-              >
-	                <option value="">{copy.allStatuses}</option>
-	                <option value="active">{copy.statuses.active}</option>
-	                <option value="vacation">{copy.statuses.vacation}</option>
-	                <option value="sick">{copy.statuses.sick}</option>
-	                <option value="training">{copy.statuses.training}</option>
-	                <option value="blocked">{copy.statuses.blocked}</option>
-	                <option value="terminated">{copy.statuses.terminated}</option>
-	              </select>
-              <select
-                className={selectClass}
-                value={contractFilter}
-                onChange={(event) => setContractFilter(event.target.value)}
-              >
-	                <option value="">{copy.allContractTypes}</option>
-	                <option value="employee">{copy.contractTypes.employee}</option>
-	                <option value="freelancer">{copy.contractTypes.freelancer}</option>
-	                <option value="hourly">{copy.contractTypes.hourly}</option>
-	              </select>
+        <DataTableSurface
+          rows={employeesPagination.pagedRows}
+          columns={employeeColumns}
+          rowId={(employee) => employee.id}
+          defaultDensity="comfortable"
+          dictionary={t as unknown as Record<string, string>}
+          activeRowId={selectedId || undefined}
+          onRowClick={(employee) => setSelectedId(employee.id)}
+          loading={loading}
+          tableClassName="min-h-[440px]"
+          toolbarClassName="flex-wrap"
+          toolbarStart={(
+            <>
+              <ToolbarField label={copy.search} className="min-w-[220px] flex-1 sm:max-w-sm">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    className="h-8 w-full rounded-md bg-field pl-8 text-xs"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder={copy.search}
+                  />
+                </div>
+              </ToolbarField>
+              <ToolbarField label={copy.status}>
+                <NativeComboboxSelect
+                  className="h-8 w-[220px] rounded-md bg-field text-xs"
+                  value={statusFilter || "__all__"}
+                  onChange={(event) =>
+                    setStatusFilter(
+                      event.target.value === "__all__" ? "" : event.target.value,
+                    )
+                  }
+                >
+                  <option value="__all__">{copy.allStatuses}</option>
+                  <option value="active">{copy.statuses.active}</option>
+                  <option value="vacation">{copy.statuses.vacation}</option>
+                  <option value="sick">{copy.statuses.sick}</option>
+                  <option value="training">{copy.statuses.training}</option>
+                  <option value="blocked">{copy.statuses.blocked}</option>
+                  <option value="terminated">{copy.statuses.terminated}</option>
+                </NativeComboboxSelect>
+              </ToolbarField>
+              <ToolbarField label={copy.contractType}>
+                <NativeComboboxSelect
+                  className="h-8 w-[220px] rounded-md bg-field text-xs"
+                  value={contractFilter || "__all__"}
+                  onChange={(event) =>
+                    setContractFilter(
+                      event.target.value === "__all__" ? "" : event.target.value,
+                    )
+                  }
+                >
+                  <option value="__all__">{copy.allContractTypes}</option>
+                  <option value="employee">{copy.contractTypes.employee}</option>
+                  <option value="freelancer">{copy.contractTypes.freelancer}</option>
+                  <option value="hourly">{copy.contractTypes.hourly}</option>
+                </NativeComboboxSelect>
+              </ToolbarField>
               {filtersActive ? (
                 <Button
                   type="button"
                   variant="ghost"
-                  className="h-8 w-full justify-start px-2 text-xs"
+                  size="sm"
+                  className="h-8 rounded-lg gap-1 text-[12.5px] text-muted-foreground"
                   onClick={() => {
                     setSearch("");
                     setStatusFilter("");
                     setContractFilter("");
                   }}
                 >
-	                  <X className="size-3.5" />
-	                  {copy.clearFilters}
-	                </Button>
+                  <X className="size-3.5" />
+                  {copy.clearFilters}
+                </Button>
               ) : null}
+            </>
+          )}
+          toolbarAfter={(
+            <DataTablePager
+              pageIndex={employeesPagination.pageIndex}
+              pageSize={employeesPagination.pageSize}
+              totalPages={employeesPagination.totalPages}
+              totalRows={employeesPagination.totalRows}
+              previousLabel={t.pagination_previous}
+              nextLabel={t.pagination_next}
+              onPageChange={employeesPagination.onPageChange}
+            />
+          )}
+          emptyState={(
+            <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+              {copy.noEmployees}
             </div>
-            <div className="space-y-2">
-              {items.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setSelectedId(item.id)}
-                  className={`w-full rounded-lg border px-3 py-3 text-left transition ${
-                    selected?.id === item.id
-                      ? "border-primary bg-primary/5"
-                      : "border-border bg-card hover:border-primary/40"
-                  }`}
-                >
-                  <span className="block truncate font-mono text-xs font-medium text-foreground">
-                    {item.name}
-                  </span>
-                  <span className="mt-1 block text-xs text-muted-foreground">
-	                    {staffRoleLabel(item.role, copy)} ·{" "}
-	                    {text(item.profile.status) || copy.noStatus}
-	                  </span>
-                </button>
-              ))}
-              {!loading && items.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
-	                  {copy.noEmployees}
-	                </div>
-              ) : null}
-            </div>
-          </aside>
+          )}
+        />
 
-          {selected ? (
-            <form
-              onSubmit={handleSubmit}
-              className="space-y-6 rounded-lg border border-border bg-card p-5"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="size-4 text-primary" />
-                    <h2 className="text-lg font-semibold text-foreground">
-                      {selected.name}
-                    </h2>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {selected.email} · {selected.id}
-                  </p>
-                </div>
-	                <Button type="submit" disabled={saving}>
-	                  <Save className="size-4" />
-	                  {saving ? copy.saving : copy.save}
-	                </Button>
-	              </div>
+        <Sheet
+          open={Boolean(selected)}
+          onOpenChange={(open) => {
+            if (!open) setSelectedId("");
+          }}
+        >
+          <SheetContent
+            side="right"
+            className="w-full border-l border-border p-0 sm:max-w-[920px]"
+          >
+            {selected ? (
+              <form
+                onSubmit={handleSubmit}
+                className="flex min-h-0 flex-1 flex-col"
+              >
+                <AdminSheetScaffold
+                  title={selected.name}
+                  description={`${selected.email || copy.notSet} · ${selected.id}`}
+                  footer={(
+                    <SheetFormFooter
+                      cancelLabel={t.common_cancel}
+                      submitLabel={copy.save}
+                      submittingLabel={copy.saving}
+                      submitting={saving}
+                      onCancel={() => setSelectedId("")}
+                    />
+                  )}
+                >
+                  {error ? (
+                    <Banner tone="error" withIcon>
+                      {error}
+                    </Banner>
+                  ) : null}
+                  {notice ? (
+                    <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                      {notice}
+                    </div>
+                  ) : null}
+                  <div className="space-y-6">
 
 	              <Section title={copy.coreData}>
 	                <div className="grid gap-3 md:grid-cols-3">
 	                  <Field label={copy.status}>
-                    <select
+                    <NativeComboboxSelect
                       className={selectClass}
                       value={form.status}
                       onChange={(event) => patchForm({ status: event.target.value })}
@@ -1507,10 +1672,10 @@ export function InterpretersPage() {
 	                      <option value="training">{copy.statuses.training}</option>
 	                      <option value="blocked">{copy.statuses.blocked}</option>
 	                      <option value="terminated">{copy.statuses.terminated}</option>
-	                    </select>
+	                    </NativeComboboxSelect>
 	                  </Field>
 	                  <Field label={copy.contractType}>
-                    <select
+                    <NativeComboboxSelect
                       className={selectClass}
                       value={form.contractType}
                       onChange={(event) =>
@@ -1521,10 +1686,10 @@ export function InterpretersPage() {
 	                      <option value="employee">{copy.contractTypes.employee}</option>
 	                      <option value="freelancer">{copy.contractTypes.freelancer}</option>
 	                      <option value="hourly">{copy.contractTypes.hourly}</option>
-	                    </select>
+	                    </NativeComboboxSelect>
 	                  </Field>
 	                  <Field label={copy.employmentKind}>
-                    <select
+                    <NativeComboboxSelect
                       className={selectClass}
                       value={form.employmentKind}
                       onChange={(event) =>
@@ -1534,13 +1699,14 @@ export function InterpretersPage() {
 	                      <option value="">{copy.notSet}</option>
 	                      <option value="internal">{copy.employmentKinds.internal}</option>
 	                      <option value="external">{copy.employmentKinds.external}</option>
-	                    </select>
+	                    </NativeComboboxSelect>
 	                  </Field>
 	                  <Field label={copy.userAccount}>
                     <div className="flex min-h-9 flex-col justify-center gap-1 rounded-lg border border-border bg-muted/30 px-3 py-2">
                       <label className="flex items-center gap-2 text-sm text-foreground">
                         <input
                           type="checkbox"
+                          className={checkboxClass}
                           checked={selected.profile_source !== "standalone"}
                           readOnly
                           disabled
@@ -1612,6 +1778,7 @@ export function InterpretersPage() {
                     <label className="flex h-9 items-center gap-2 text-sm">
                       <input
                         type="checkbox"
+                        className={checkboxClass}
                         checked={form.emailSecure}
                         onChange={(event) =>
                           patchForm({ emailSecure: event.target.checked })
@@ -1660,7 +1827,7 @@ export function InterpretersPage() {
               <Section title={profileCopy.qualificationLanguages}>
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    <h3 className="text-[12.5px] font-semibold tracking-tight text-foreground">
                       {profileCopy.structuredLanguages}
                     </h3>
                     <Button
@@ -1706,7 +1873,7 @@ export function InterpretersPage() {
                           />
                         </Field>
                         <Field label={profileCopy.cefr}>
-                          <select
+                          <NativeComboboxSelect
                             className={selectClass}
                             value={language.cefrLevel}
                             onChange={(event) =>
@@ -1722,10 +1889,10 @@ export function InterpretersPage() {
                             <option value="B2">B2</option>
                             <option value="C1">C1</option>
                             <option value="C2">C2</option>
-                          </select>
+                          </NativeComboboxSelect>
                         </Field>
                         <Field label={profileCopy.proficiency}>
-                          <select
+                          <NativeComboboxSelect
                             className={selectClass}
                             value={language.proficiency}
                             onChange={(event) =>
@@ -1739,7 +1906,7 @@ export function InterpretersPage() {
                             <option value="working">{profileCopy.working}</option>
                             <option value="basic">{profileCopy.basic}</option>
                             <option value="unknown">{profileCopy.unknown}</option>
-                          </select>
+                          </NativeComboboxSelect>
                         </Field>
                         <Field label={profileCopy.specialization}>
                           <Input
@@ -1824,7 +1991,7 @@ export function InterpretersPage() {
                         className="grid gap-3 border-t border-border pt-3 md:grid-cols-4"
                       >
                         <Field label={profileCopy.type}>
-                          <select
+                          <NativeComboboxSelect
                             className={selectClass}
                             value={credential.credentialType}
                             onChange={(event) =>
@@ -1841,7 +2008,7 @@ export function InterpretersPage() {
                               {profileCopy.medicalTranslation}
                             </option>
                             <option value="training">{profileCopy.training}</option>
-                          </select>
+                          </NativeComboboxSelect>
                         </Field>
                         <Field label={profileCopy.title}>
                           <Input
@@ -1964,7 +2131,7 @@ export function InterpretersPage() {
               <Section title={profileCopy.legalCompliance}>
                 <div className="grid gap-3 md:grid-cols-3">
                   <Field label={profileCopy.confidentiality}>
-                    <select
+                    <NativeComboboxSelect
                       className={selectClass}
                       value={form.confidentialityStatus}
                       onChange={(event) =>
@@ -1974,7 +2141,7 @@ export function InterpretersPage() {
                       <option value="">{profileCopy.notSet}</option>
                       <option value="signed">{profileCopy.signed}</option>
                       <option value="missing">{profileCopy.missing}</option>
-                    </select>
+                    </NativeComboboxSelect>
                   </Field>
                   <Field label={profileCopy.signedAt}>
                     <Input
@@ -2030,7 +2197,7 @@ export function InterpretersPage() {
                     </div>
                   </Field>
                   <Field label={profileCopy.avvWorkContract}>
-                    <select
+                    <NativeComboboxSelect
                       className={selectClass}
                       value={form.avvStatus}
                       onChange={(event) =>
@@ -2040,7 +2207,7 @@ export function InterpretersPage() {
                       <option value="">{profileCopy.notSet}</option>
                       <option value="signed">{profileCopy.signed}</option>
                       <option value="pending">{profileCopy.pending}</option>
-                    </select>
+                    </NativeComboboxSelect>
                   </Field>
                   <Field label={profileCopy.avvSignedAt}>
                     <Input
@@ -2135,7 +2302,7 @@ export function InterpretersPage() {
                     />
                   </Field>
                   <Field label={profileCopy.billingStatus}>
-                    <select
+                    <NativeComboboxSelect
                       className={selectClass}
                       value={form.billingStatus}
                       onChange={(event) =>
@@ -2146,7 +2313,7 @@ export function InterpretersPage() {
                       <option value="unpaid">{profileCopy.unpaid}</option>
                       <option value="paid">{profileCopy.paid}</option>
                       <option value="overdue">{profileCopy.overdue}</option>
-                    </select>
+                    </NativeComboboxSelect>
                   </Field>
                   <Field label={profileCopy.bankDetails}>
                     <Input
@@ -2174,7 +2341,7 @@ export function InterpretersPage() {
                     />
                   </Field>
                   <Field label={profileCopy.accessLevel}>
-                    <select
+                    <NativeComboboxSelect
                       className={selectClass}
                       value={form.accessLevel}
                       onChange={(event) =>
@@ -2185,10 +2352,10 @@ export function InterpretersPage() {
                       <option value="appointment_only">{profileCopy.appointmentOnly}</option>
                       <option value="medical_shared">{profileCopy.medicalDataShared}</option>
                       <option value="full">{profileCopy.fullAccess}</option>
-                    </select>
+                    </NativeComboboxSelect>
                   </Field>
                   <Field label={profileCopy.autoBlockPolicy}>
-                    <select
+                    <NativeComboboxSelect
                       className={selectClass}
                       value={form.autoBlockPolicy}
                       onChange={(event) =>
@@ -2198,7 +2365,7 @@ export function InterpretersPage() {
                       <option value="">{profileCopy.notSet}</option>
                       <option value="immediate">{profileCopy.immediate}</option>
                       <option value="after_one_hour">{profileCopy.afterOneHour}</option>
-                    </select>
+                    </NativeComboboxSelect>
                   </Field>
                 </div>
               </Section>
@@ -2399,13 +2566,12 @@ export function InterpretersPage() {
                   </Field>
                 </div>
               </Section>
-            </form>
-          ) : loading ? (
-            <div className="rounded-lg border border-border bg-card p-6 text-sm text-muted-foreground">
-              {profileCopy.loadingProfiles}
-            </div>
-          ) : null}
-        </div>
+                  </div>
+                </AdminSheetScaffold>
+              </form>
+            ) : null}
+          </SheetContent>
+        </Sheet>
       </div>
     </div>
   );

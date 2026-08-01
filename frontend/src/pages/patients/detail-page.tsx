@@ -44,7 +44,6 @@ import {
 
 import {
   buildPatientLabelPrintHtml,
-  buildPatientTimelineSummary,
   canOpenPatientDocumentsWorkspace,
   canViewPatientContractsSurface,
   canViewPatientDocumentsSurface,
@@ -52,7 +51,6 @@ import {
   canViewPatientClinicalProfile,
   canViewPatientOperationalSurface,
   DEFAULT_PATIENT_LABEL_FORMAT_ID,
-  filterPatientTimelineItems,
   normalizePatientDetailTab,
   type PatientLabelFormatId,
   type PatientLabelPayload,
@@ -213,13 +211,14 @@ const PATIENT_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-GB", {
   hour: "2-digit",
   minute: "2-digit",
 });
+// de-DE keeps the app-wide money pattern: amount first, currency sign after.
 const PATIENT_MONEY_FORMATTERS: Record<string, Intl.NumberFormat> = {
-  EUR: new Intl.NumberFormat("en-GB", {
+  EUR: new Intl.NumberFormat("de-DE", {
     style: "currency",
     currency: "EUR",
     maximumFractionDigits: 2,
   }),
-  USD: new Intl.NumberFormat("en-GB", {
+  USD: new Intl.NumberFormat("de-DE", {
     style: "currency",
     currency: "USD",
     maximumFractionDigits: 2,
@@ -394,6 +393,10 @@ function orderPhaseLabel(value: string) {
 
 function appointmentTypeLabel(value: string) {
   switch (value) {
+    case "medical":
+      return translateCatalog(getLang()).apt_type_medical;
+    case "non_medical":
+      return translateCatalog(getLang()).apt_type_non_medical;
     case "consultation":
       return patientDetailText("patients_detail_consultation");
     case "followup":
@@ -879,9 +882,6 @@ type PatientDetailPageState = {
   tabVersion: number;
   tabActionError: string;
   profileEditorOpen: boolean;
-  docsPreviewOpen: boolean;
-  contractsPreviewOpen: boolean;
-  invoicesPreviewOpen: boolean;
   legalStatusSheetOpen: boolean;
   notesSheetOpen: boolean;
   appointmentSheetOpen: boolean;
@@ -997,9 +997,6 @@ function usePatientDetailPageContent() {
       tabVersion: 0,
       tabActionError: "",
       profileEditorOpen: false,
-      docsPreviewOpen: false,
-      contractsPreviewOpen: false,
-      invoicesPreviewOpen: false,
       legalStatusSheetOpen: false,
       notesSheetOpen: false,
       appointmentSheetOpen: false,
@@ -1044,9 +1041,6 @@ function usePatientDetailPageContent() {
     tabVersion,
     tabActionError,
     profileEditorOpen,
-    docsPreviewOpen,
-    contractsPreviewOpen,
-    invoicesPreviewOpen,
     legalStatusSheetOpen,
     notesSheetOpen,
     appointmentSheetOpen,
@@ -1096,12 +1090,6 @@ function usePatientDetailPageContent() {
     setPageField("tabActionError", value);
   const setProfileEditorOpen = (value: SetStateAction<boolean>) =>
     setPageField("profileEditorOpen", value);
-  const setDocsPreviewOpen = (value: SetStateAction<boolean>) =>
-    setPageField("docsPreviewOpen", value);
-  const setContractsPreviewOpen = (value: SetStateAction<boolean>) =>
-    setPageField("contractsPreviewOpen", value);
-  const setInvoicesPreviewOpen = (value: SetStateAction<boolean>) =>
-    setPageField("invoicesPreviewOpen", value);
   const setLegalStatusSheetOpen = (value: SetStateAction<boolean>) =>
     setPageField("legalStatusSheetOpen", value);
   const setNotesSheetOpen = (value: SetStateAction<boolean>) =>
@@ -1228,6 +1216,9 @@ function usePatientDetailPageContent() {
     tabError,
     tabLoading,
     timeline,
+    timelineCategoryFacets,
+    timelineSourceFacets,
+    timelineSummary,
     timelineTotal,
     workflowChecklist,
   } = usePatientDetailTabData({
@@ -1337,38 +1328,21 @@ function usePatientDetailPageContent() {
   const timelineCategoryOptions = useMemo(
     () =>
       isTimelineTabActive
-        ? uniqueSortedNonEmpty(timeline.map((item) => item.category))
+        ? timelineCategoryFacets.map((facet) => facet.value)
         : [],
-    [isTimelineTabActive, timeline]
+    [isTimelineTabActive, timelineCategoryFacets]
   );
   const timelineSourceOptions = useMemo(
     () =>
       isTimelineTabActive
-        ? uniqueSortedNonEmpty(timeline.map((item) => item.source_label))
+        ? timelineSourceFacets.map((facet) => facet.value)
         : [],
-    [isTimelineTabActive, timeline]
+    [isTimelineTabActive, timelineSourceFacets]
   );
 
   const filteredTimeline = useMemo(
-    () =>
-      isTimelineTabActive
-        ? filterPatientTimelineItems(timeline, {
-            entityFilter: timelineEntityFilter,
-            categoryFilter: timelineCategoryFilter,
-            sourceFilter: timelineSourceFilter === "all" ? "" : timelineSourceFilter,
-            search: deferredTimelineSearch,
-            rangeFilter: timelineRangeFilter,
-          })
-        : [],
-    [
-      isTimelineTabActive,
-      deferredTimelineSearch,
-      timeline,
-      timelineCategoryFilter,
-      timelineEntityFilter,
-      timelineRangeFilter,
-      timelineSourceFilter,
-    ]
+    () => (isTimelineTabActive ? timeline : []),
+    [isTimelineTabActive, timeline]
   );
   const groupedTimeline = useMemo(() => {
     const groups: Array<{
@@ -1401,10 +1375,6 @@ function usePatientDetailPageContent() {
     return groups;
   }, [filteredTimeline, isTimelineTabActive, lang]);
 
-  const timelineSummary = useMemo(
-    () => (isTimelineTabActive ? buildPatientTimelineSummary(timeline) : buildPatientTimelineSummary([])),
-    [isTimelineTabActive, timeline]
-  );
   const localizedTimelineRangeOptions = useMemo(
     () => (isTimelineTabActive ? timelineRangeOptions() : []),
     [isTimelineTabActive, lang]
@@ -1472,10 +1442,6 @@ function usePatientDetailPageContent() {
   const hasDocumentFilters =
     isDocumentsTabActive &&
     (documentStatusFilter !== "all" || documentCategoryFilter !== "all");
-  const requiredDocumentFulfilledCount =
-    isDocumentsTabActive
-      ? documentAlerts?.required_documents.filter((item) => item.fulfilled).length ?? 0
-      : 0;
   const contractSignedCount = useMemo(
     () => (isContractsTabActive ? contracts.filter((item) => item.status === "signed" || item.status === "active").length : 0),
     [contracts, isContractsTabActive]
@@ -2115,9 +2081,7 @@ function usePatientDetailPageContent() {
         contractPendingCount={contractPendingCount}
         contractSignedCount={contractSignedCount}
         contracts={contracts}
-        contractsPreviewOpen={contractsPreviewOpen}
         detail={detail}
-        docsPreviewOpen={docsPreviewOpen}
         documentAlerts={documentAlerts}
         documentCategoryFilter={documentCategoryFilter}
         documentCategoryOptions={documentCategoryOptions}
@@ -2156,7 +2120,6 @@ function usePatientDetailPageContent() {
         invoicePaidAmountTotal={invoicePaidAmountTotal}
         invoiceTypeLabel={invoiceTypeLabel}
         invoices={invoices}
-        invoicesPreviewOpen={invoicesPreviewOpen}
         isContractExpiringSoon={isContractExpiringSoon}
         l={l}
         legalStatus={legalStatus}
@@ -2168,17 +2131,14 @@ function usePatientDetailPageContent() {
         notesSheetOpen={notesSheetOpen}
         onAppointmentSheetOpenChange={setAppointmentSheetOpen}
         onAssign={handleAssign}
-        onContractsPreviewOpenChange={setContractsPreviewOpen}
         onCreateContract={openCreateContract}
         onCreateRelation={openCreateRelation}
         onDeleteRelation={(relationId) => { void handleDeleteRelation(relationId); }}
-        onDocsPreviewOpenChange={setDocsPreviewOpen}
         onDocumentGenerated={reload}
         onDocumentCategoryFilterChange={setDocumentCategoryFilter}
         onDocumentStatusFilterChange={setDocumentStatusFilter}
         onEditContractStatus={openContractStatusEditor}
         onEditRelation={openEditRelation}
-        onInvoicesPreviewOpenChange={setInvoicesPreviewOpen}
         onLegalStatusSheetOpenChange={setLegalStatusSheetOpen}
         onManageInvoice={openInvoiceManager}
         onNotesSheetOpenChange={setNotesSheetOpen}
@@ -2255,7 +2215,6 @@ function usePatientDetailPageContent() {
         relationTypeLabel={relationTypeLabel}
         relations={relations}
         reload={reload}
-        requiredDocumentFulfilledCount={requiredDocumentFulfilledCount}
         roleColors={ROLE_COLORS}
         roleLabel={roleLbl}
         selectedAssignee={selectedAssignee}

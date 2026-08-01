@@ -28,6 +28,10 @@ import {
   AdminSheetScaffold,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
+import {
+  DataTablePager,
+  useDataTablePagination,
+} from "@/components/data-table/data-table-pager";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
@@ -40,6 +44,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { ToolbarField } from "@/components/data-table/toolbar-field";
 import {
   Banner as ShellBanner,
   PageHeader,
@@ -81,6 +86,7 @@ import {
 } from "./data/invoice-api";
 import {
   DEFAULT_FILTERS,
+  DEFAULT_INVOICE_PAGE_SIZE,
   INVOICE_STATUSES,
   INVOICE_TYPES,
   blankCreateForm,
@@ -766,7 +772,7 @@ function useStaffInvoicesPageContent() {
         pinned: "left",
         width: 180,
         render: (row) => (
-          <span className="font-mono text-xs font-semibold tracking-[0.14em] text-muted-foreground">
+          <span className="font-mono text-xs tracking-[0.14em] text-foreground">
             {row.invoice_number}
           </span>
         ),
@@ -792,7 +798,7 @@ function useStaffInvoicesPageContent() {
         required: true,
         pinned: "left",
         width: 220,
-        render: (row) => <span className="text-sm font-medium text-foreground">{row.patient_name}</span>,
+        render: (row) => <span className="text-xs text-foreground">{row.patient_name}</span>,
       },
       {
         id: "patient_pid",
@@ -878,7 +884,7 @@ function useStaffInvoicesPageContent() {
         sortable: true,
         width: 140,
         render: (row) => (
-          <span className="block text-right font-medium tabular-nums text-foreground">
+          <span className="block text-right tabular-nums text-foreground">
             {formatMoney(row.paid_amount)}
           </span>
         ),
@@ -892,7 +898,7 @@ function useStaffInvoicesPageContent() {
         sortable: true,
         width: 140,
         render: (row) => (
-          <span className="block text-right font-medium tabular-nums text-foreground">
+          <span className="block text-right tabular-nums text-foreground">
             {formatMoney(row.balance_due)}
           </span>
         ),
@@ -906,7 +912,7 @@ function useStaffInvoicesPageContent() {
         sortable: true,
         width: 150,
         render: (row) => (
-          <span className="block text-right font-semibold tabular-nums text-foreground">
+          <span className="block text-right tabular-nums text-foreground">
             {formatMoney(row.total_gross)}
           </span>
         ),
@@ -953,7 +959,7 @@ function useStaffInvoicesPageContent() {
       searchable: true,
       width: 170,
       render: (row) => (
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="font-mono text-xs text-foreground">
           {row.invoice_number ?? row.external_invoice_number ?? t.common_not_set}
         </span>
       ),
@@ -969,7 +975,7 @@ function useStaffInvoicesPageContent() {
       pinned: "left",
       width: 260,
       render: (row) => (
-        <span className="block truncate text-sm text-foreground">{row.description}</span>
+        <span className="block truncate text-xs text-foreground">{row.description}</span>
       ),
     },
     {
@@ -1023,7 +1029,7 @@ function useStaffInvoicesPageContent() {
       sortable: true,
       width: 130,
       render: (row) => (
-        <span className="block text-right font-medium tabular-nums text-foreground">
+        <span className="block text-right tabular-nums text-foreground">
           {formatMoney(row.amount_net)}
         </span>
       ),
@@ -1037,7 +1043,7 @@ function useStaffInvoicesPageContent() {
       sortable: true,
       width: 130,
       render: (row) => (
-        <span className="block text-right font-medium tabular-nums text-foreground">
+        <span className="block text-right tabular-nums text-foreground">
           {formatMoney(row.amount_vat)}
         </span>
       ),
@@ -1051,7 +1057,7 @@ function useStaffInvoicesPageContent() {
       sortable: true,
       width: 140,
       render: (row) => (
-        <span className="block text-right font-semibold tabular-nums text-foreground">
+        <span className="block text-right tabular-nums text-foreground">
           {formatMoney(row.amount_gross)}
         </span>
       ),
@@ -1068,7 +1074,7 @@ function useStaffInvoicesPageContent() {
       required: true,
       pinned: "left",
       width: 160,
-      render: (row) => <span className="font-medium text-foreground">{row.period}</span>,
+      render: (row) => <span className="text-foreground">{row.period}</span>,
     },
     {
       id: "income_gross",
@@ -1079,7 +1085,7 @@ function useStaffInvoicesPageContent() {
       sortable: true,
       width: 170,
       render: (row) => (
-        <span className="block text-right font-medium tabular-nums text-foreground">
+        <span className="block text-right tabular-nums text-foreground">
           {formatMoney(row.income_gross)}
         </span>
       ),
@@ -1093,7 +1099,7 @@ function useStaffInvoicesPageContent() {
       sortable: true,
       width: 170,
       render: (row) => (
-        <span className="block text-right font-medium tabular-nums text-foreground">
+        <span className="block text-right tabular-nums text-foreground">
           {formatMoney(row.expense_gross)}
         </span>
       ),
@@ -1111,7 +1117,7 @@ function useStaffInvoicesPageContent() {
         return (
           <span
             className={cn(
-              "block text-right font-semibold tabular-nums",
+              "block text-right tabular-nums",
               value > 0 ? "text-emerald-700" : value < 0 ? "text-rose-700" : "text-foreground",
             )}
           >
@@ -1124,6 +1130,14 @@ function useStaffInvoicesPageContent() {
   const nextDunning = useMemo(() => nextDunningLevel(dunningEvents), [dunningEvents]);
   const accountingEntries = Array.isArray(accountingLedger?.entries) ? accountingLedger.entries : [];
   const accountingMonthly = Array.isArray(accountingLedger?.monthly) ? accountingLedger.monthly : [];
+  const accountingEntriesPagination = useDataTablePagination(
+    accountingEntries,
+    accountingYear,
+  );
+  const accountingMonthlyPagination = useDataTablePagination(
+    accountingMonthly,
+    accountingYear,
+  );
   const applyLoadedInvoiceDetail = useCallback((data: NonNullable<typeof detail>, dunning: typeof dunningEvents) => {
     setStatusForm(invoiceToStatusForm(data));
     setVisibilityForm(invoiceToVisibilityForm(data));
@@ -1447,7 +1461,7 @@ function useStaffInvoicesPageContent() {
               {accountingLedger || accountingBusy ? (
                 <DataTableSurface
                   loading={accountingBusy}
-                  rows={accountingEntries}
+                  rows={accountingEntriesPagination.pagedRows}
                   columns={accountingTableColumns}
                   rowId={(row) => row.id}
                   defaultDensity="comfortable"
@@ -1457,10 +1471,11 @@ function useStaffInvoicesPageContent() {
                   maxFrozenColumns={ACCOUNTING_MAX_FROZEN_COLUMNS}
                   toolbarStart={
                     <>
-                      <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
-                        {text.accountingTitle}
+                      <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                        {titleWithDot(text.accountingTitle)}
                       </span>
-                      <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
+                      <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+                      <ToolbarField label={t.dash_this_year}>
                       <Input
                         type="number"
                         min="2020"
@@ -1468,8 +1483,9 @@ function useStaffInvoicesPageContent() {
                         value={accountingYear}
                         onChange={(event) => setAccountingYear(event.target.value || currentYear)}
                         aria-label={text.accountingTitle}
-                        className={cn(shellInputClassName, "h-8 w-24 shrink-0 rounded-lg bg-background text-[13px]")}
+                        className={cn(shellInputClassName, "h-8 w-24 shrink-0 rounded-md bg-field text-xs")}
                       />
+                      </ToolbarField>
                       <Button
                         type="button"
                         variant="outline"
@@ -1497,6 +1513,17 @@ function useStaffInvoicesPageContent() {
                       </Button>
                     </>
                   }
+                  toolbarAfter={
+                    <DataTablePager
+                      pageIndex={accountingEntriesPagination.pageIndex}
+                      pageSize={accountingEntriesPagination.pageSize}
+                      totalPages={accountingEntriesPagination.totalPages}
+                      totalRows={accountingEntriesPagination.totalRows}
+                      previousLabel={t.pagination_previous}
+                      nextLabel={t.pagination_next}
+                      onPageChange={accountingEntriesPagination.onPageChange}
+                    />
+                  }
                   rowAccent={(row) => (row.direction === "income" ? "bg-emerald-500" : "bg-rose-500")}
                   emptyState={
                     <EmptyState
@@ -1512,10 +1539,10 @@ function useStaffInvoicesPageContent() {
                   <DataTableSurface
                     toolbarStart={
                       <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
-                        {text.monthlyEuer}
+                        {titleWithDot(text.monthlyEuer)}
                       </span>
                     }
-                    rows={accountingMonthly}
+                    rows={accountingMonthlyPagination.pagedRows}
                     columns={accountingMonthlyTableColumns}
                     rowId={(row) => row.period}
                     defaultDensity="comfortable"
@@ -1524,6 +1551,17 @@ function useStaffInvoicesPageContent() {
                     groupLabels={accountingColumnGroups}
                     maxFrozenColumns={2}
                     toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
+                    toolbarAfter={
+                      <DataTablePager
+                        pageIndex={accountingMonthlyPagination.pageIndex}
+                        pageSize={accountingMonthlyPagination.pageSize}
+                        totalPages={accountingMonthlyPagination.totalPages}
+                        totalRows={accountingMonthlyPagination.totalRows}
+                        previousLabel={t.pagination_previous}
+                        nextLabel={t.pagination_next}
+                        onPageChange={accountingMonthlyPagination.onPageChange}
+                      />
+                    }
                     rowAccent={(row) => {
                       const value = Number(row.net_surplus ?? 0);
                       if (value > 0) return "bg-emerald-500";
@@ -1558,7 +1596,12 @@ function useStaffInvoicesPageContent() {
             maxFrozenColumns={INVOICE_MAX_FROZEN_COLUMNS}
             toolbarStart={
               <>
-            <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+            <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+              {titleWithDot(t.invoices_title)}
+            </span>
+            <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+            <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
+            <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={filters.search}
@@ -1573,11 +1616,13 @@ function useStaffInvoicesPageContent() {
                     (event.target as HTMLInputElement).blur();
                   }
                 }}
-                className={cn(shellInputClassName, "h-8 rounded-lg bg-background pl-8 text-[13px]")}
+                className={cn(shellInputClassName, "h-8 rounded-md bg-field pl-8 text-xs")}
                 placeholder={text.searchPlaceholder}
               />
             </div>
+            </ToolbarField>
 
+            <ToolbarField label={t.invoices_patient}>
             <NativeComboboxSelect
               value={filters.patientId || "__all__"}
               onChange={(event) => {
@@ -1599,7 +1644,7 @@ function useStaffInvoicesPageContent() {
                 setInvoicePage(1);
                 syncQuery({ patient: patientId || null, order: null, quote: null });
               }}
-              className={cn(selectClassName, "h-8 w-[210px] bg-background text-[13px]")}
+              className={cn(selectClassName, "h-8 rounded-md w-[210px] bg-field text-xs")}
             >
               <option value="__all__">{t.invoices_patient}</option>
               {patients.map((patient) => (
@@ -1610,7 +1655,9 @@ function useStaffInvoicesPageContent() {
                 </option>
               ))}
             </NativeComboboxSelect>
+            </ToolbarField>
 
+            <ToolbarField label={t.orders_title}>
             <NativeComboboxSelect
               value={filters.orderId || "__all__"}
               onChange={(event) => {
@@ -1627,7 +1674,7 @@ function useStaffInvoicesPageContent() {
                 setInvoicePage(1);
                 syncQuery({ order: orderId || null, quote: null });
               }}
-              className={cn(selectClassName, "h-8 w-[210px] bg-background text-[13px]")}
+              className={cn(selectClassName, "h-8 rounded-md w-[210px] bg-field text-xs")}
             >
               <option value="__all__">{text.allOrders}</option>
               {filteredOrders.map((order) => (
@@ -1636,7 +1683,9 @@ function useStaffInvoicesPageContent() {
                 </option>
               ))}
             </NativeComboboxSelect>
+            </ToolbarField>
 
+            <ToolbarField label={text.allQuotes}>
             <NativeComboboxSelect
               value={filters.quoteId || "__all__"}
               onChange={(event) => {
@@ -1645,7 +1694,7 @@ function useStaffInvoicesPageContent() {
                 setInvoicePage(1);
                 syncQuery({ quote: quoteId || null });
               }}
-              className={cn(selectClassName, "h-8 w-[190px] bg-background text-[13px]")}
+              className={cn(selectClassName, "h-8 rounded-md w-[190px] bg-field text-xs")}
             >
               <option value="__all__">{text.allQuotes}</option>
               {filteredQuotes.map((quote) => (
@@ -1654,7 +1703,9 @@ function useStaffInvoicesPageContent() {
                 </option>
               ))}
             </NativeComboboxSelect>
+            </ToolbarField>
 
+            <ToolbarField label={t.invoices_status}>
             <NativeComboboxSelect
               value={filters.status || "__all__"}
               onChange={(event) => {
@@ -1667,7 +1718,7 @@ function useStaffInvoicesPageContent() {
                 }));
                 setInvoicePage(1);
               }}
-              className={cn(selectClassName, "h-8 w-[160px] bg-background text-[13px]")}
+              className={cn(selectClassName, "h-8 rounded-md w-[160px] bg-field text-xs")}
             >
               <option value="__all__">{t.invoices_status}</option>
               {INVOICE_STATUSES.map((status) => (
@@ -1676,7 +1727,9 @@ function useStaffInvoicesPageContent() {
                 </option>
               ))}
             </NativeComboboxSelect>
+            </ToolbarField>
 
+            <ToolbarField label={t.invoices_type}>
             <NativeComboboxSelect
               value={filters.invoiceType || "__all__"}
               onChange={(event) => {
@@ -1689,7 +1742,7 @@ function useStaffInvoicesPageContent() {
                 }));
                 setInvoicePage(1);
               }}
-              className={cn(selectClassName, "h-8 w-[150px] bg-background text-[13px]")}
+              className={cn(selectClassName, "h-8 rounded-md w-[150px] bg-field text-xs")}
             >
               <option value="__all__">{t.invoices_type}</option>
               {INVOICE_TYPES.map((invoiceType) => (
@@ -1698,6 +1751,7 @@ function useStaffInvoicesPageContent() {
                 </option>
               ))}
             </NativeComboboxSelect>
+            </ToolbarField>
 
             <div className="ml-auto flex items-center gap-1">
               <Button
@@ -1727,6 +1781,17 @@ function useStaffInvoicesPageContent() {
               ) : null}
             </div>
               </>
+            }
+            toolbarAfter={
+              <DataTablePager
+                pageIndex={Math.max(0, invoicePage - 1)}
+                pageSize={DEFAULT_INVOICE_PAGE_SIZE}
+                totalPages={invoiceTotalPages}
+                totalRows={invoiceTotal}
+                previousLabel={t.pagination_previous}
+                nextLabel={t.pagination_next}
+                onPageChange={(pageIndex) => setInvoicePage(pageIndex + 1)}
+              />
             }
             activeRowId={selectedInvoiceId || null}
             onRowClick={(row) => openInvoice(row.id)}
@@ -1758,30 +1823,6 @@ function useStaffInvoicesPageContent() {
               return `${text.pageLabel} ${invoicePage} ${text.pageOf} ${invoiceTotalPages} | ${pageRowsLabel} / ${invoiceTotal} ${text.invoiceCount}`;
             }}
           />
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={listBusy || invoicePage <= 1}
-                onClick={() => setInvoicePage((current) => Math.max(1, current - 1))}
-              >
-                {text.previous}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={listBusy || invoicePage >= invoiceTotalPages}
-                onClick={() =>
-                  setInvoicePage((current) => Math.min(invoiceTotalPages, current + 1))
-                }
-              >
-                {text.next}
-              </Button>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -2803,7 +2844,7 @@ function SummaryLine({ label, value }: { label: string; value: ReactNode }) {
 function titleWithDot(title: ReactNode) {
   return (
     <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
+      <span aria-hidden className="size-1.5 rounded-full bg-amber-500" />
       <span>{title}</span>
     </span>
   );

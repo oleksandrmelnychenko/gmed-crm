@@ -138,7 +138,7 @@ function patientVitalDateTime(value: string | null | undefined, fallback: string
 }
 
 const inputClass =
-  "h-9 w-full rounded-lg border border-border bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
+  "h-9 w-full rounded-lg border border-border bg-field px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
 const datePillClass =
   "inline-flex items-center rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700";
 const periodPillClass =
@@ -1844,17 +1844,8 @@ export function PatientClinicalTab({
       embedded={embedded}
       className={embedded ? "space-y-4" : "mt-4 min-h-[400px] space-y-4"}
     >
+      {/* PDF-Export (Medikationsplan / Arztbrief) — тимчасово вимкнено.
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold text-foreground">{tx("Клинический профиль", "Klinisches Profil")}</h2>
-          <p className="text-xs text-muted-foreground">
-            {tx(
-              "Диагнозы, медикаменты и обследования пациента (с привязкой к провайдеру и врачу).",
-              "Diagnosen, Medikation und Befunde des Patienten (mit Anbieter- und Arztbezug).",
-            )}
-          </p>
-        </div>
-        {/* PDF-Export (Medikationsplan / Arztbrief) — тимчасово вимкнено.
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
@@ -1875,8 +1866,8 @@ export function PatientClinicalTab({
             {tx("Экспорт Arztbrief (PDF)", "Arztbrief (PDF)")}
           </Button>
         </div>
-        */}
       </div>
+      */}
 
       {error ? (
         <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">

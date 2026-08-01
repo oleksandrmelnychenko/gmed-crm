@@ -76,6 +76,7 @@ type MedicationsSectionState = {
   equivalentMedicationId: string;
   includeEquivalentCandidates: boolean;
   equivalentCandidates: GermanEquivalent[];
+  equivalentSearchCompleted: boolean;
   equivalentLoading: boolean;
   equivalentError: string;
   verifyingEquivalentId: string | null;
@@ -105,6 +106,7 @@ const MEDICATIONS_SECTION_INITIAL_STATE: MedicationsSectionState = {
   equivalentMedicationId: "",
   includeEquivalentCandidates: false,
   equivalentCandidates: [],
+  equivalentSearchCompleted: false,
   equivalentLoading: false,
   equivalentError: "",
   verifyingEquivalentId: null,
@@ -498,6 +500,7 @@ type MedicationReferenceWorkspaceProps = {
   equivalentCandidates: GermanEquivalent[];
   equivalentError: string;
   equivalentLoading: boolean;
+  equivalentSearchCompleted: boolean;
   includeDrugCandidates: boolean;
   includeEquivalentCandidates: boolean;
   lastMedicationMatch: MedicationDrugMatchResponse | null;
@@ -522,6 +525,7 @@ type MedicationReferenceWorkspaceProps = {
   setEquivalentCandidates: (value: SetStateAction<GermanEquivalent[]>) => void;
   setEquivalentError: (value: SetStateAction<string>) => void;
   setEquivalentMedicationId: (value: SetStateAction<string>) => void;
+  setEquivalentSearchCompleted: (value: SetStateAction<boolean>) => void;
   setIncludeDrugCandidates: (value: SetStateAction<boolean>) => void;
   setIncludeEquivalentCandidates: (value: SetStateAction<boolean>) => void;
 };
@@ -539,6 +543,7 @@ function MedicationReferenceWorkspace({
   equivalentCandidates,
   equivalentError,
   equivalentLoading,
+  equivalentSearchCompleted,
   includeDrugCandidates,
   includeEquivalentCandidates,
   lastMedicationMatch,
@@ -563,6 +568,7 @@ function MedicationReferenceWorkspace({
   setEquivalentCandidates,
   setEquivalentError,
   setEquivalentMedicationId,
+  setEquivalentSearchCompleted,
   setIncludeDrugCandidates,
   setIncludeEquivalentCandidates,
 }: MedicationReferenceWorkspaceProps) {
@@ -592,6 +598,7 @@ function MedicationReferenceWorkspace({
             medicationSubstance={selectedEquivalentMedication.wirkstoff}
             candidates={equivalentCandidates}
             includeCandidates={includeEquivalentCandidates}
+            searchCompleted={equivalentSearchCompleted}
             loading={equivalentLoading}
             error={equivalentError || undefined}
             verifyingEquivalentId={verifyingEquivalentId}
@@ -600,6 +607,7 @@ function MedicationReferenceWorkspace({
               setIncludeEquivalentCandidates(next);
               setEquivalentCandidates([]);
               setEquivalentError("");
+              setEquivalentSearchCompleted(false);
             }}
             onVerifyEquivalent={(relationshipId, verificationStatus) =>
               void handleVerifyEquivalent(relationshipId, verificationStatus)
@@ -852,6 +860,7 @@ function useMedicationsSectionContent() {
       equivalentMedicationId,
       includeEquivalentCandidates,
       equivalentCandidates,
+      equivalentSearchCompleted,
       equivalentLoading,
       equivalentError,
       verifyingEquivalentId,
@@ -888,6 +897,7 @@ function useMedicationsSectionContent() {
           ...current,
           equivalentMedicationId,
           equivalentCandidates: [],
+          equivalentSearchCompleted: false,
           equivalentError: "",
           lastMedicationMatch: null,
         };
@@ -897,6 +907,8 @@ function useMedicationsSectionContent() {
     setMedicationField("includeEquivalentCandidates", value);
   const setEquivalentCandidates = (value: SetStateAction<GermanEquivalent[]>) =>
     setMedicationField("equivalentCandidates", value);
+  const setEquivalentSearchCompleted = (value: SetStateAction<boolean>) =>
+    setMedicationField("equivalentSearchCompleted", value);
   const setEquivalentLoading = (value: SetStateAction<boolean>) =>
     setMedicationField("equivalentLoading", value);
   const setEquivalentError = (value: SetStateAction<string>) =>
@@ -949,6 +961,7 @@ function useMedicationsSectionContent() {
   async function handleFindEquivalent() {
     if (!selectedEquivalentMedication?.id) return;
     setEquivalentLoading(true);
+    setEquivalentSearchCompleted(false);
     setEquivalentError("");
     try {
       const payload = await fetchMedicationEquivalents(
@@ -957,6 +970,7 @@ function useMedicationsSectionContent() {
         includeEquivalentCandidates,
       );
       setEquivalentCandidates(payload.candidates);
+      setEquivalentSearchCompleted(true);
     } catch (error) {
       setEquivalentCandidates([]);
       setEquivalentError(
@@ -1148,6 +1162,7 @@ function useMedicationsSectionContent() {
         equivalentCandidates={equivalentCandidates}
         equivalentError={equivalentError}
         equivalentLoading={equivalentLoading}
+        equivalentSearchCompleted={equivalentSearchCompleted}
         includeDrugCandidates={includeDrugCandidates}
         includeEquivalentCandidates={includeEquivalentCandidates}
         lastMedicationMatch={lastMedicationMatch}
@@ -1172,6 +1187,7 @@ function useMedicationsSectionContent() {
         setEquivalentCandidates={setEquivalentCandidates}
         setEquivalentError={setEquivalentError}
         setEquivalentMedicationId={setEquivalentMedicationId}
+        setEquivalentSearchCompleted={setEquivalentSearchCompleted}
         setIncludeDrugCandidates={setIncludeDrugCandidates}
         setIncludeEquivalentCandidates={setIncludeEquivalentCandidates}
       />    </>

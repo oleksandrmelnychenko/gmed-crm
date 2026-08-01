@@ -45,24 +45,8 @@ import {
 import { LegalStatusPill } from "../shared/legal-status-pill";
 import { FormSection, humanizeFunctionalLabel } from "../shared/patient-form-primitives";
 
-const loadPatientLegalPreviewSheets = () => import("../sheets/patient-legal-preview-sheets");
 const loadPatientLegalStatusSheet = () => import("../sheets/patient-legal-status-sheet");
 const loadPatientNotesSheet = () => import("../sheets/patient-notes-sheet");
-
-const LazyPatientDocumentsPreviewSheet = lazy(async () => {
-  const mod = await loadPatientLegalPreviewSheets();
-  return { default: mod.PatientDocumentsPreviewSheet };
-});
-
-const LazyPatientContractsPreviewSheet = lazy(async () => {
-  const mod = await loadPatientLegalPreviewSheets();
-  return { default: mod.PatientContractsPreviewSheet };
-});
-
-const LazyPatientInvoicesPreviewSheet = lazy(async () => {
-  const mod = await loadPatientLegalPreviewSheets();
-  return { default: mod.PatientInvoicesPreviewSheet };
-});
 
 const LazyPatientLegalStatusSheet = lazy(async () => {
   const mod = await loadPatientLegalStatusSheet();
@@ -470,16 +454,13 @@ type PatientProfileTabProps = {
     canViewInvoices: boolean;
   };
   complianceExportBusy: boolean;
-  contractsPreviewOpen: boolean;
   detail: PatientDetail;
-  docsPreviewOpen: boolean;
   fieldValue: FieldValueFn;
   formatDate: DateFormatter;
   genderLabel: (value: string | null | undefined, tr: Record<string, string>) => string;
   handleExportPatientCompliance: () => void | Promise<void>;
   id?: string;
   insuranceLabel: (value: string | null | undefined, tr: Record<string, string>) => string;
-  invoicesPreviewOpen: boolean;
   l: LocalizeFn;
   legalStatus: PatientLegalStatus;
   legalStatusChecklist: LegalStatusChecklistItem[];
@@ -490,10 +471,8 @@ type PatientProfileTabProps = {
   };
   legalStatusSheetOpen: boolean;
   notesSheetOpen: boolean;
-  onContractsPreviewOpenChange: ToggleHandler;
-  onDocsPreviewOpenChange: ToggleHandler;
-  onInvoicesPreviewOpenChange: ToggleHandler;
   onLegalStatusSheetOpenChange: ToggleHandler;
+  onOpenTab: (tab: "documents" | "contracts" | "invoices") => void;
   onNotesSheetOpenChange: ToggleHandler;
   openProfileEditor: () => void;
   patientDetailStatusLabel: StatusLabelFn;
@@ -506,26 +485,21 @@ type PatientProfileTabProps = {
 function usePatientProfileTabContent({
   profileControls,
   complianceExportBusy,
-  contractsPreviewOpen,
   detail,
-  docsPreviewOpen,
   fieldValue,
   formatDate,
   handleExportPatientCompliance,
   id,
   insuranceLabel,
-  invoicesPreviewOpen,
   l,
   legalStatus,
   legalStatusChecklist,
   legalStatusCompletion,
   legalStatusSheetOpen,
   notesSheetOpen,
-  onContractsPreviewOpenChange,
-  onDocsPreviewOpenChange,
-  onInvoicesPreviewOpenChange,
   onLegalStatusSheetOpenChange,
   onNotesSheetOpenChange,
+  onOpenTab,
   openProfileEditor,
   patientDetailStatusLabel,
   reload,
@@ -542,21 +516,6 @@ function usePatientProfileTabContent({
     canViewInvoices,
   } = profileControls;
   const editAction = canEditPatientProfile ? openProfileEditor : undefined;
-
-  function handleDocumentsPreviewOpenChange(open: boolean) {
-    if (open) void loadPatientLegalPreviewSheets();
-    onDocsPreviewOpenChange(open);
-  }
-
-  function handleContractsPreviewOpenChange(open: boolean) {
-    if (open) void loadPatientLegalPreviewSheets();
-    onContractsPreviewOpenChange(open);
-  }
-
-  function handleInvoicesPreviewOpenChange(open: boolean) {
-    if (open) void loadPatientLegalPreviewSheets();
-    onInvoicesPreviewOpenChange(open);
-  }
 
   function handleLegalStatusSheetOpenChange(open: boolean) {
     if (open) void loadPatientLegalStatusSheet();
@@ -1119,56 +1078,26 @@ function usePatientProfileTabContent({
             <ProfileActionCard
               title={t.patient_profile_open_documents}
               description={l("patients_review_documents_linked_to_this_patient")}
-              onClick={() => handleDocumentsPreviewOpenChange(true)}
+              onClick={() => onOpenTab("documents")}
             />
           ) : null}
           {canViewContracts ? (
             <ProfileActionCard
               title={t.patient_profile_open_contracts}
               description={l("patients_open_this_patient_s_contracts_and_confirmations")}
-              onClick={() => handleContractsPreviewOpenChange(true)}
+              onClick={() => onOpenTab("contracts")}
             />
           ) : null}
           {canViewInvoices ? (
             <ProfileActionCard
               title={t.patient_profile_open_invoices}
               description={l("patients_review_invoices_and_payments_for_this_patient")}
-              onClick={() => handleInvoicesPreviewOpenChange(true)}
+              onClick={() => onOpenTab("invoices")}
             />
           ) : null}
         </div>
       </FormSection>
 
-      {id && canViewDocuments && docsPreviewOpen ? (
-        <Suspense fallback={null}>
-          <LazyPatientDocumentsPreviewSheet
-            key={`documents:${id}:${docsPreviewOpen ? "open" : "closed"}`}
-            patientId={id}
-            open={docsPreviewOpen}
-            onOpenChange={handleDocumentsPreviewOpenChange}
-          />
-        </Suspense>
-      ) : null}
-      {id && canViewContracts && contractsPreviewOpen ? (
-        <Suspense fallback={null}>
-          <LazyPatientContractsPreviewSheet
-            key={`contracts:${id}:${contractsPreviewOpen ? "open" : "closed"}`}
-            patientId={id}
-            open={contractsPreviewOpen}
-            onOpenChange={handleContractsPreviewOpenChange}
-          />
-        </Suspense>
-      ) : null}
-      {id && canViewInvoices && invoicesPreviewOpen ? (
-        <Suspense fallback={null}>
-          <LazyPatientInvoicesPreviewSheet
-            key={`invoices:${id}:${invoicesPreviewOpen ? "open" : "closed"}`}
-            patientId={id}
-            open={invoicesPreviewOpen}
-            onOpenChange={handleInvoicesPreviewOpenChange}
-          />
-        </Suspense>
-      ) : null}
       {id && canEditPatientProfile && legalStatusSheetOpen ? (
         <Suspense fallback={null}>
           <LazyPatientLegalStatusSheet

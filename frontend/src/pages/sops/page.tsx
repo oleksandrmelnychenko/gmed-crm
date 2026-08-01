@@ -574,7 +574,7 @@ function useSopsPageContent() {
         sortable: true,
         required: true,
         width: 260,
-        render: (row) => <span className="text-sm font-medium text-foreground">{row.title}</span>,
+        render: (row) => <span className="text-xs text-foreground">{row.title}</span>,
       },
       {
         id: "summary",
@@ -639,7 +639,7 @@ function useSopsPageContent() {
         required: true,
         width: 260,
         pinned: "left",
-        render: (row) => <span className="text-sm font-medium text-foreground">{row.title}</span>,
+        render: (row) => <span className="text-xs text-foreground">{row.title}</span>,
       },
       {
         id: "summary",

@@ -159,20 +159,25 @@ function AppointmentOverviewSection({
           </span>
         ) : null}
       </div>
-      <div className="mt-4 grid gap-2.5 md:grid-cols-3">
-        <div className="min-w-0 overflow-hidden rounded-xl border border-border/50 bg-muted/25 px-4 py-2.5 text-sm text-muted-foreground">
-          <OverviewInfoLine icon={Clock3} label={formatAppointmentSlotLabel(detail)} />
-        </div>
-        <div className="min-w-0 overflow-hidden rounded-xl border border-border/50 bg-muted/25 px-4 py-2.5 text-sm text-muted-foreground">
-          <OverviewInfoLine
-            icon={Stethoscope}
-            label={detail.provider_name || tr.common_not_set}
+      <div className="mt-4 rounded-lg border border-border/70 bg-card px-2 py-1.5">
+        <div className="grid gap-x-6 gap-y-1 lg:grid-cols-3">
+          <OverviewInfoTile
+            icon={Clock3}
+            label={t.appointments_date}
+            value={formatAppointmentSlotLabel(detail)}
+            mono
           />
-        </div>
-        <div className="min-w-0 overflow-hidden rounded-xl border border-border/50 bg-muted/25 px-4 py-2.5 text-sm text-muted-foreground">
-          <OverviewInfoLine
+          <OverviewInfoTile
+            icon={Stethoscope}
+            label={t.common_provider}
+            value={detail.provider_name || tr.common_not_set}
+            muted={!detail.provider_name}
+          />
+          <OverviewInfoTile
             icon={MapPin}
-            label={detail.location || tr.common_not_set}
+            label={t.appointments_location}
+            value={detail.location || tr.common_not_set}
+            muted={!detail.location}
           />
         </div>
       </div>
@@ -241,38 +246,34 @@ function RecurringSeriesDetails({
   if (!recurrenceFrequency) return null;
 
   return (
-    <details className="group relative mt-4 pl-9">
-      <summary className="relative grid cursor-pointer list-none gap-2 rounded-lg p-3 pr-4 transition hover:bg-muted/25 group-open:bg-muted/25 group-open:ring-1 group-open:ring-border/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-        <div className="absolute -left-9 bottom-0 top-0 flex w-8 items-start justify-center pt-3">
-          <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-orange-50 text-orange-700 ring-1 ring-orange-200 transition-colors">
-            <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
-          </span>
-        </div>
-
-        <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+    <details className="group mt-4 overflow-hidden rounded-lg border border-border/70 bg-card">
+      <summary className="grid cursor-pointer list-none gap-2 px-3 py-2.5 transition hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+        <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-              <p className="min-w-0 max-w-full break-words text-[15px] font-semibold leading-5 text-foreground">
+              <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-orange-50 text-orange-700 ring-1 ring-orange-200 transition-colors">
+                <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
+              </span>
+              <p className="min-w-0 max-w-full break-words text-[13px] font-semibold tracking-tight text-foreground">
                 {t.appointments_recurring_series}
               </p>
-              <span className="size-1 rounded-full bg-muted-foreground/35" />
-              <span className="text-xs tabular-nums text-muted-foreground">
+              <span className="rounded-full border border-border/60 bg-muted/25 px-2 py-0.5 font-mono text-[10px] font-medium tabular-nums text-muted-foreground">
                 {detail.recurrence_index + 1}/{detail.recurrence_series_size}
               </span>
-              <span className="size-1 rounded-full bg-muted-foreground/35" />
-              <span className="text-xs text-muted-foreground">
+              <span className="rounded-full border border-border/60 bg-muted/25 px-2 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
                 {recurrenceCadenceLabel(detail)}
               </span>
             </div>
-            <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pl-8 text-xs text-muted-foreground">
               <span>
                 {t.appointments_occurrence}:{" "}
                 <span className="font-medium text-foreground">
                   #{detail.recurrence_index + 1}
                 </span>
               </span>
-              <span className="size-1 rounded-full bg-muted-foreground/35" />
-              <span>{recurrenceFrequencyLabel(recurrenceFrequency)}</span>
+              <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 font-mono text-[10px] font-medium text-sky-700">
+                {recurrenceFrequencyLabel(recurrenceFrequency)}
+              </span>
               {detail.recurrence_until ||
               detail.recurrence_count ||
               detail.recurrence_series_size ? (
@@ -296,18 +297,22 @@ function RecurringSeriesDetails({
                 <SeriesSummaryBadge
                   label={t.appointments_lineage_total_short}
                   value={detailCurrentLineageHistory.total_occurrences}
+                  tone="sky"
                 />
                 <SeriesSummaryBadge
                   label={t.appointments_lineage_active_short}
                   value={detailCurrentLineageHistory.active_occurrences}
+                  tone="emerald"
                 />
                 <SeriesSummaryBadge
                   label={t.appointments_lineage_completed_short}
                   value={detailCurrentLineageHistory.completed_occurrences}
+                  tone="violet"
                 />
                 <SeriesSummaryBadge
                   label={t.appointments_lineage_cancelled_short}
                   value={detailCurrentLineageHistory.cancelled_occurrences}
+                  tone="rose"
                 />
               </>
             ) : null}
@@ -319,110 +324,91 @@ function RecurringSeriesDetails({
         </div>
       </summary>
 
-      <div aria-hidden="true" className="ml-20 flex h-3 items-center px-3">
-        <span className="h-px w-12 bg-gradient-to-r from-transparent via-border/70 to-border/70" />
-        <span className="size-1.5 rounded-full bg-border" />
-        <span className="h-px flex-1 bg-gradient-to-r from-border/70 to-transparent" />
-      </div>
-
-      <div className="mb-2 ml-20 rounded-lg p-2">
+      <div className="space-y-2 border-t border-border/60 bg-muted/10 p-3">
         {detailLineageText ? (
-          <div className="mb-2 rounded-md px-3 py-2 text-xs leading-snug text-muted-foreground ring-1 ring-border/40">
+          <div className="rounded-lg border border-border/60 bg-card px-3 py-2 text-xs leading-snug text-muted-foreground">
             {detailLineageText}
           </div>
         ) : null}
 
         {detail.recurring_scope_preview.length > 0 ? (
-          <div className="rounded-md px-3 py-2 ring-1 ring-border/40">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-[11px] font-semibold text-muted-foreground">
+          <div className="overflow-hidden rounded-lg border border-border/60 bg-card">
+            <div className="flex items-center gap-2 border-b border-border/60 bg-muted/25 px-3 py-1.5">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                 {t.appointments_active_series_path}
-              </p>
-              <span className="text-[11px] text-muted-foreground">
-                {detail.recurring_scope_preview.length}
               </span>
             </div>
-            <div className="mt-2 grid gap-1">
-              {detail.recurring_scope_preview.map((item) => (
-                <div
-                  key={item.id}
-                  className={cn(
-                    "flex flex-wrap items-center gap-2 rounded-md px-2 py-1.5 text-xs",
-                    item.id === detail.id
-                      ? "text-foreground ring-1 ring-orange-200"
-                      : "text-muted-foreground ring-1 ring-border/40",
-                  )}
-                >
-                  <span className="font-semibold">#{item.recurrence_index + 1}</span>
-                  <span>{item.date}</span>
-                  {item.id === detail.id ? (
-                    <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-orange-700 ring-1 ring-orange-200">
-                      {t.appointments_current_occurrence}
-                    </span>
-                  ) : null}
-                  {item.open_checklist_count > 0 ? (
-                    <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-200">
-                      {item.open_checklist_count}{" "}
-                      {item.open_checklist_count === 1
-                        ? t.appointments_open_checklist
-                        : t.appointments_open_checklists}
-                    </span>
-                  ) : null}
-                </div>
-              ))}
-            </div>
+            {detail.recurring_scope_preview.map((item) => (
+              <div
+                key={item.id}
+                className={cn(
+                  "flex w-full items-center gap-2.5 border-b border-border/50 px-3 py-2 last:border-b-0",
+                  item.id === detail.id && "bg-orange-50/40",
+                )}
+              >
+                <span className="w-[40px] shrink-0 font-mono text-xs font-semibold text-foreground">
+                  #{item.recurrence_index + 1}
+                </span>
+                <span className="w-[110px] shrink-0 font-mono text-xs tabular-nums text-foreground">
+                  {item.date}
+                </span>
+                {item.id === detail.id ? (
+                  <span className="shrink-0 rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 font-mono text-[10px] font-medium text-orange-700">
+                    {t.appointments_current_occurrence}
+                  </span>
+                ) : null}
+                {item.open_checklist_count > 0 ? (
+                  <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-mono text-[10px] font-medium text-amber-800">
+                    {item.open_checklist_count}{" "}
+                    {item.open_checklist_count === 1
+                      ? t.appointments_open_checklist
+                      : t.appointments_open_checklists}
+                  </span>
+                ) : null}
+              </div>
+            ))}
           </div>
         ) : null}
 
         {detail.recurring_lineage_history.length > 0 ? (
-          <div className="mt-2 rounded-md px-3 py-2 ring-1 ring-border/40">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-[11px] font-semibold text-muted-foreground">
+          <div className="overflow-hidden rounded-lg border border-border/60 bg-card">
+            <div className="flex items-center gap-2 border-b border-border/60 bg-muted/25 px-3 py-1.5">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                 {t.appointments_lineage_history}
-              </p>
-              <span className="text-[11px] text-muted-foreground">
-                {detail.recurring_lineage_history.length}{" "}
-                {t.appointments_lineage_related_series}
               </span>
             </div>
-            <div className="mt-2 grid gap-1">
-              {detail.recurring_lineage_history.map((item) => (
-                <div
-                  key={item.series_id}
-                  className={cn(
-                    "flex flex-wrap items-center gap-2 rounded-md px-2 py-1.5 text-xs",
-                    item.relation === "current"
-                      ? "text-foreground ring-1 ring-orange-200"
-                      : "text-muted-foreground ring-1 ring-border/40",
-                  )}
-                >
-                  <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-muted-foreground ring-1 ring-border/60">
-                    {recurringLineageRelationLabel(item, t)}
-                  </span>
-                  <span className="font-medium text-foreground">
-                    {recurringLineageSplitLabel(item, t)}
-                  </span>
-                  <span>
-                    {item.first_date} {t.uiText.common_to_separator} {item.last_date}
-                  </span>
-                  <span>
-                    {item.total_occurrences} {t.appointments_lineage_total_short}
-                  </span>
-                  <span>
-                    {item.active_occurrences} {t.appointments_lineage_active_short}
-                  </span>
-                  {item.series_id !== detail.id ? (
-                    <button
-                      type="button"
-                      className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-orange-700 ring-1 ring-orange-200 transition hover:text-orange-800"
-                      onClick={() => onOpenDetail(item.series_id)}
-                    >
-                      {t.appointments_open_branch_root}
-                    </button>
-                  ) : null}
-                </div>
-              ))}
-            </div>
+            {detail.recurring_lineage_history.map((item) => (
+              <div
+                key={item.series_id}
+                className={cn(
+                  "flex w-full items-center gap-2.5 border-b border-border/50 px-3 py-2 last:border-b-0",
+                  item.relation === "current" && "bg-orange-50/40",
+                )}
+              >
+                <span className="w-[130px] shrink-0 rounded-full border border-border/60 bg-muted/25 px-2 py-0.5 text-center font-mono text-[10px] font-medium text-muted-foreground">
+                  {recurringLineageRelationLabel(item, t)}
+                </span>
+                <span className="min-w-0 shrink-0 truncate text-xs font-medium text-foreground">
+                  {recurringLineageSplitLabel(item, t)}
+                </span>
+                <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+                  {item.first_date} {t.uiText.common_to_separator} {item.last_date}
+                </span>
+                <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+                  {item.total_occurrences} {t.appointments_lineage_total_short} ·{" "}
+                  {item.active_occurrences} {t.appointments_lineage_active_short}
+                </span>
+                {item.series_id !== detail.id ? (
+                  <button
+                    type="button"
+                    className="ml-auto shrink-0 rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 font-mono text-[10px] font-medium text-orange-700 transition hover:bg-orange-100"
+                    onClick={() => onOpenDetail(item.series_id)}
+                  >
+                    {t.appointments_open_branch_root}
+                  </button>
+                ) : null}
+              </div>
+            ))}
           </div>
         ) : null}
       </div>
@@ -430,34 +416,64 @@ function RecurringSeriesDetails({
   );
 }
 
-function OverviewInfoLine({
+function OverviewInfoTile({
   icon: Icon,
   label,
+  value,
+  mono = false,
+  muted = false,
 }: {
   icon: LucideIcon;
   label: string;
+  value: string;
+  mono?: boolean;
+  muted?: boolean;
 }) {
   return (
-    <div
-      className="inline-flex max-w-full min-w-0 items-start gap-2 text-foreground"
-      title={label}
-    >
-      <Icon className="size-4 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 flex-1 break-words">{label}</span>
+    <div className="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1" title={value}>
+      <span className="inline-flex min-w-0 shrink-0 items-center gap-1.5 text-xs font-medium text-muted-foreground">
+        <Icon className="size-3.5 shrink-0 text-muted-foreground/70" />
+        {label}
+      </span>
+      <span className="h-px min-w-5 flex-1 self-center bg-border/70" />
+      <span
+        className={cn(
+          "min-w-0 max-w-[62%] break-words text-right text-sm font-semibold leading-snug",
+          mono && "font-mono text-xs tabular-nums",
+          muted ? "font-normal text-muted-foreground" : "text-foreground",
+        )}
+      >
+        {value}
+      </span>
     </div>
   );
 }
 
+const SERIES_BADGE_TONES = {
+  neutral: "border-border/60 bg-muted/25 text-muted-foreground",
+  emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  sky: "border-sky-200 bg-sky-50 text-sky-700",
+  rose: "border-rose-200 bg-rose-50 text-rose-700",
+  violet: "border-violet-200 bg-violet-50 text-violet-700",
+} as const;
+
 function SeriesSummaryBadge({
   label,
   value,
+  tone = "neutral",
 }: {
   label: string;
   value: number;
+  tone?: keyof typeof SERIES_BADGE_TONES;
 }) {
   return (
-    <span className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm">
-      {label}: <span className="ml-1 font-semibold text-foreground">{value}</span>
+    <span
+      className={cn(
+        "rounded-full border px-2 py-0.5 font-mono text-[10px] font-medium",
+        SERIES_BADGE_TONES[tone],
+      )}
+    >
+      {label}: <span className="ml-1 font-semibold">{value}</span>
     </span>
   );
 }

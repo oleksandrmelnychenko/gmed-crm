@@ -59,7 +59,6 @@ export function InterpreterSuggestionsPanel({
   return (
     <Section
       title={t.appointments_interpreter_suggestions_title}
-      accessory={<CountBadge>{suggestions.length}</CountBadge>}
     >
       <p className={tokens.text.muted}>
         {t.appointments_interpreter_suggestions_description}

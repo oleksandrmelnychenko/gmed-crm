@@ -649,7 +649,7 @@ function useAdminCompliancePageContent() {
       width: 240,
       render: (record) => (
         <div className="min-w-0">
-          <div className="truncate font-medium text-foreground">
+          <div className="truncate text-foreground">
             {privacyRequestTypeLabel(record.request_type, t)}
           </div>
           <div className="truncate text-xs text-slate-500">
@@ -688,7 +688,7 @@ function useAdminCompliancePageContent() {
       accessor: (record) => compactDt(record.due_at),
       width: 126,
       render: (record) => (
-        <span className="font-mono text-sm text-slate-500">
+        <span className="font-mono text-xs text-slate-500">
           {compactDt(record.due_at)}
         </span>
       ),
@@ -699,7 +699,7 @@ function useAdminCompliancePageContent() {
       accessor: (record) => compactDt(record.retention_until),
       width: 150,
       render: (record) => (
-        <span className="font-mono text-sm text-slate-500">
+        <span className="font-mono text-xs text-slate-500">
           {compactDt(record.retention_until)}
         </span>
       ),
@@ -721,7 +721,7 @@ function useAdminCompliancePageContent() {
       accessor: (record) => privacyNotesLabel(record),
       width: 240,
       render: (record) => (
-        <span className="truncate text-sm text-slate-600">
+        <span className="truncate text-xs text-slate-600">
           {privacyNotesLabel(record)}
         </span>
       ),
@@ -737,7 +737,7 @@ function useAdminCompliancePageContent() {
       pinned: "left",
       width: 250,
       render: (record) => (
-        <span className="truncate font-medium text-foreground">
+        <span className="truncate text-foreground">
           {patientLabel(record.patient_pid, record.patient_name)}
         </span>
       ),
@@ -749,7 +749,7 @@ function useAdminCompliancePageContent() {
       width: 220,
       render: (record) => (
         <div className="min-w-0">
-          <div className="truncate font-medium text-foreground">
+          <div className="truncate text-foreground">
             {privacyRequestTypeLabel(record.request_type, t)}
           </div>
           <div className="truncate text-xs text-slate-500">
@@ -785,7 +785,7 @@ function useAdminCompliancePageContent() {
       accessor: (record) => compactDt(record.due_at),
       width: 126,
       render: (record) => (
-        <span className="font-mono text-sm text-slate-500">
+        <span className="font-mono text-xs text-slate-500">
           {compactDt(record.due_at)}
         </span>
       ),
@@ -807,7 +807,7 @@ function useAdminCompliancePageContent() {
       accessor: (record) => privacyNotesLabel(record),
       width: 220,
       render: (record) => (
-        <span className="truncate text-sm text-slate-600">
+        <span className="truncate text-xs text-slate-600">
           {privacyNotesLabel(record)}
         </span>
       ),
@@ -904,7 +904,7 @@ function useAdminCompliancePageContent() {
                     id="compliance-patient-id"
                     value={patientInput}
                     onChange={(event) => setPatientInput(event.target.value)}
-                    className="h-9 w-full rounded-lg bg-card text-[13px]"
+                    className="h-9 w-full rounded-lg bg-field text-[13px]"
                   >
                     <option value="">{t.orders_patient}</option>
                     {patientOptions.map((option) => (
@@ -919,7 +919,7 @@ function useAdminCompliancePageContent() {
                     placeholder={t.compliance_patient_uuid_placeholder}
                     value={patientInput}
                     onChange={(event) => setPatientInput(event.target.value)}
-                    className="h-9 rounded-lg bg-card"
+                    className="h-9 rounded-lg bg-field"
                   />
                 )}
               </Field>
@@ -986,7 +986,7 @@ function useAdminCompliancePageContent() {
                   <NativeComboboxSelect
                     value={patientInput}
                     onChange={(event) => setPatientInput(event.target.value)}
-                    className="h-9 w-full rounded-lg bg-card text-[13px]"
+                    className="h-9 w-full rounded-lg bg-field text-[13px]"
                   >
                     <option value="">{t.orders_patient}</option>
                     {patientOptions.map((option) => (
@@ -1000,7 +1000,7 @@ function useAdminCompliancePageContent() {
                     placeholder={t.compliance_uses_loaded_uuid}
                     value={patientInput}
                     onChange={(event) => setPatientInput(event.target.value)}
-                    className="h-9 rounded-lg bg-card"
+                    className="h-9 rounded-lg bg-field"
                   />
                 )}
               </Field>
@@ -1065,7 +1065,7 @@ function useAdminCompliancePageContent() {
 
                       onChange={(event) => setPrivacyRequestType(
                           (event.target.value ?? PRIVACY_REQUEST_TYPE_VALUES[0]) as PrivacyRequestType,
-                        )} className="h-9 w-full rounded-lg bg-card">
+                        )} className="h-9 w-full rounded-lg bg-field">
                         {PRIVACY_REQUEST_TYPE_VALUES.map((value) => (
                           <option key={value} value={value}>
                             {privacyRequestTypeLabel(value, t)}

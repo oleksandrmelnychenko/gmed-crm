@@ -6,13 +6,11 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Label } from "@/components/ui/label";
 import { TabsContent } from "@/components/ui/tabs";
 import {
-  CountBadge,
   EmptyCell,
 } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
 
 import type { PatientAssignment, StaffOption } from "../../model/list-model";
-import { FormSection } from "../shared/patient-form-primitives";
 
 type Localize = (key: string) => string;
 
@@ -63,10 +61,7 @@ export function PatientCuratorsTab({
 }: PatientCuratorsTabProps) {
   return (
     <TabsContent value="curators" className="space-y-4 mt-4 min-h-[400px]">
-      <FormSection
-        title={t.patients_assign_owner}
-        accessory={<CountBadge>{assignments.length} {t.patients_records}</CountBadge>}
-      >
+      <div className="space-y-2.5">
         {assignments.length === 0 ? (
           <EmptyCell>{t.patients_no_assignments}</EmptyCell>
         ) : (
@@ -163,7 +158,7 @@ export function PatientCuratorsTab({
             </div>
           </div>
         ) : null}
-      </FormSection>
+      </div>
     </TabsContent>
   );
 }

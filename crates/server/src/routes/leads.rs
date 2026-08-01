@@ -4045,7 +4045,11 @@ async fn convert_lead(
                RETURNING id
            ), moved_orders AS (
                UPDATE orders
-               SET patient_id = $2
+               SET patient_id = $2,
+                   case_id = COALESCE(
+                       case_id,
+                       (SELECT mc.id FROM moved_cases mc LIMIT 1)
+                   )
                WHERE source_lead_id = $1
                RETURNING id
            ), moved_services AS (
@@ -4199,17 +4203,6 @@ async fn convert_lead(
     if let Err(error) = tx.commit().await {
         tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "commit lead conversion");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-
-    if crate::routes::workflow_checklists::ensure_default_patient_workflow(
-        &state,
-        patient_id,
-        Some(auth.user_id),
-    )
-    .await
-    .is_err()
-    {
-        tracing::error!(lead_id = %lead_id, patient_id = %patient_id, "failed to create default patient workflow after conversion");
     }
 
     let order_ids = match sqlx::query_scalar::<_, Uuid>(

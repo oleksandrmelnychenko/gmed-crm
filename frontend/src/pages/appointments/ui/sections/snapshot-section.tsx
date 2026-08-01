@@ -116,7 +116,7 @@ function SnapshotSummaryRow({
         </p>
       </div>
       <span className="mt-3 h-px min-w-6 bg-border/70" />
-      <p className="min-w-0 max-w-[420px] break-words text-right text-sm font-semibold leading-tight text-foreground">
+      <p className="min-w-0 max-w-[420px] break-words text-right font-mono text-xs leading-tight text-foreground">
         {value}
       </p>
     </div>

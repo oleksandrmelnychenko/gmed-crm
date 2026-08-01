@@ -4,13 +4,16 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useState,
   type FormEvent,
   type SetStateAction,
 } from "react";
 
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Input } from "@/components/ui/input";
 import {
   Banner,
@@ -20,7 +23,6 @@ import { formatUiText, useLang } from "@/lib/i18n";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
-  appointmentElevatedSectionCardClassName,
   appointmentSelectControlClassName,
   appointmentSlateInputClassName,
   appointmentTextareaControlClassName,
@@ -79,7 +81,13 @@ import {
 } from "@/pages/appointments/model/constants";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import { useDebouncedValue } from "@/pages/appointments/data/use-debounced-value";
-import { AppointmentSectionHeading, Field } from "@/pages/appointments/ui/shared/workspace-primitives";
+import {
+  AppointmentEditorSheet,
+  EmptyState,
+  Field,
+} from "@/pages/appointments/ui/shared/workspace-primitives";
+import { appointmentStatusBadgeClassName } from "@/pages/appointments/appearance/status-appearance";
+import { statusLabel as appointmentStatusLabel } from "@/pages/appointments/model/labels";
 import {
   ConflictPanel,
   ScheduleWarningsPanel,
@@ -98,7 +106,6 @@ type AppointmentFollowUpVisitSectionProps = {
   onCreated: (result: { id?: string; notice: string }) => void;
 };
 
-const sectionCardClass = appointmentElevatedSectionCardClassName;
 const selectClassName = appointmentSelectControlClassName;
 const textareaClassName = appointmentTextareaControlClassName;
 
@@ -142,6 +149,7 @@ function useAppointmentFollowUpVisitSectionContent({
 }: AppointmentFollowUpVisitSectionProps) {
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const [sheetOpen, setSheetOpen] = useState(false);
   const appointmentText = (key: string) => t.uiText[key] ?? appointmentTextBase(key);
   const interpreterFieldLabel =
     tr.role_interpreter ??
@@ -463,13 +471,170 @@ function useAppointmentFollowUpVisitSectionContent({
     }
   }
 
+  const upcomingVisits = appointments
+    .filter(
+      (item) =>
+        item.patient_id === detail.patient_id &&
+        item.id !== detail.id &&
+        item.date >= detail.date,
+    )
+    .sort((left, right) =>
+      `${left.date} ${left.time_start ?? ""}`.localeCompare(
+        `${right.date} ${right.time_start ?? ""}`,
+      ),
+    );
+
+  const upcomingVisitColumns = useMemo<ColumnDef<AppointmentListItem>[]>(
+    () => [
+      {
+        id: "date",
+        label: tr.appointments_date,
+        accessor: (item) => `${item.date} ${item.time_start ?? ""}`,
+        filterType: "date",
+        sortable: true,
+        required: true,
+        width: 160,
+        render: (item) => (
+          <span className="font-mono text-xs tabular-nums text-foreground">
+            {item.date}
+            {item.time_start ? ` ${item.time_start}` : ""}
+          </span>
+        ),
+      },
+      {
+        id: "status",
+        label: tr.users_status,
+        accessor: (item) => appointmentStatusLabel(item.status),
+        filterType: "enum",
+        filterOptions: (rows) =>
+          [...new Set(rows.map((item) => appointmentStatusLabel(item.status)))].map(
+            (label) => ({ value: label, label }),
+          ),
+        sortable: true,
+        width: 150,
+        render: (item) => (
+          <span
+            className={cn(
+              "inline-flex rounded-full border px-2 py-0.5 font-mono text-[10px] font-medium",
+              appointmentStatusBadgeClassName(item.status),
+            )}
+          >
+            {appointmentStatusLabel(item.status)}
+          </span>
+        ),
+      },
+      {
+        id: "title",
+        label: tr.appointments_title_col ?? tr.appointments_title,
+        accessor: (item) => item.title,
+        filterType: "text",
+        sortable: true,
+        width: 280,
+        render: (item) => (
+          <span className="block truncate text-xs font-medium text-foreground" title={item.title}>
+            {item.title}
+          </span>
+        ),
+      },
+      {
+        id: "care_path",
+        label: tr.appointments_type,
+        accessor: (item) =>
+          item.care_path_kind ? carePathKindLabel(item.care_path_kind) : "",
+        filterType: "enum",
+        filterOptions: (rows) =>
+          [
+            ...new Set(
+              rows
+                .filter((item) => item.care_path_kind)
+                .map((item) => carePathKindLabel(item.care_path_kind)),
+            ),
+          ].map((label) => ({ value: label, label })),
+        sortable: true,
+        width: 160,
+        render: (item) =>
+          item.care_path_kind ? (
+            <span className="inline-flex rounded-full border border-border/60 bg-muted/25 px-2 py-0.5 font-mono text-[10px] text-foreground">
+              {carePathKindLabel(item.care_path_kind)}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">{tr.common_not_set}</span>
+          ),
+      },
+      {
+        id: "location",
+        label: tr.appointments_location ?? tr.common_not_set,
+        accessor: (item) => item.location ?? "",
+        filterType: "text",
+        width: 220,
+        render: (item) => (
+          <span className="block truncate text-xs text-foreground" title={item.location ?? undefined}>
+            {item.location?.trim() || tr.common_not_set}
+          </span>
+        ),
+      },
+    ],
+    [tr],
+  );
+
   return (
-    <section className={sectionCardClass}>
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <AppointmentSectionHeading
-          title={t.appointments_follow_up_visit_title}
-          description={t.appointments_follow_up_visit_description}
-        />
+    <section className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
+      <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
+        <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
+          {t.appointments_follow_up_visit_title}
+        </span>
+        <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
+        <Button
+          type="button"
+          size="sm"
+          className="h-8 shrink-0 rounded-lg gap-1.5"
+          onClick={() => setSheetOpen(true)}
+        >
+          <Plus className="size-3.5" />
+          {tr.common_create}
+        </Button>
+      </div>
+
+      <DataTableSurface
+        rows={upcomingVisits}
+        columns={upcomingVisitColumns}
+        rowId={(item) => item.id}
+        dictionary={tr}
+        emptyState={<EmptyState text={tr.portal_appointments_no_upcoming_visits} />}
+        surfaceClassName="rounded-none border-0 shadow-none"
+      />
+
+      <AppointmentEditorSheet
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
+        title={t.appointments_follow_up_visit_title}
+        onSubmit={handleSubmit}
+        footerError={
+          error ? <Banner tone="error" withIcon>{error}</Banner> : null
+        }
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={() => setSheetOpen(false)}
+            >
+              {tr.common_cancel}
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              className="h-8 rounded-lg gap-1.5"
+              disabled={busy || !form.title.trim()}
+            >
+              {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+              {tr.common_create}
+            </Button>
+          </>
+        }
+      >
         <div className="flex flex-wrap gap-2">
           {FOLLOW_UP_PRESETS.map((preset) => (
             <Button
@@ -483,13 +648,7 @@ function useAppointmentFollowUpVisitSectionContent({
             </Button>
           ))}
         </div>
-      </div>
-      {error ? (
-        <div className="mt-4">
-          <Banner tone="error" withIcon>{error}</Banner>
-        </div>
-      ) : null}
-      <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+        <div className="space-y-4">
         <Field label={t.appointments_title_col}>
           <Input
             value={form.title}
@@ -778,16 +937,8 @@ function useAppointmentFollowUpVisitSectionContent({
         ) : null}
         <ConflictPanel conflicts={conflicts} />
         <ScheduleWarningsPanel warnings={localWarnings} />
-        <div className="flex justify-end">
-          <Button
-            type="submit"
-            disabled={busy || !form.title.trim()}
-          >
-            {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-            {appointmentText("appointments_create_follow_up_visit")}
-          </Button>
         </div>
-      </form>
+      </AppointmentEditorSheet>
     </section>
   );
 }

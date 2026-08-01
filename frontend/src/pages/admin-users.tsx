@@ -12,6 +12,10 @@ import {
   SheetFormFooter,
   AdminTableCard,
 } from "@/components/admin-page-patterns";
+import {
+  DataTablePager,
+  useDataTablePagination,
+} from "@/components/data-table/data-table-pager";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import {
@@ -31,6 +35,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ToolbarField } from "@/components/data-table/toolbar-field";
 import {
   createAdminUser,
   fetchAdminUsers,
@@ -323,6 +328,7 @@ function useAdminUsersPageContent() {
         roleLabel(u.role).toLowerCase().includes(q),
     );
   }, [users, search, roleLabel]);
+  const usersPagination = useDataTablePagination(filtered, search);
 
   const columns = useMemo<ColumnDef<User>[]>(
     () => [
@@ -339,7 +345,7 @@ function useAdminUsersPageContent() {
             <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground">
               {initials(user.name)}
             </div>
-            <span className="truncate text-sm font-medium text-foreground">
+            <span className="truncate text-xs font-medium text-foreground">
               {user.name}
             </span>
           </div>
@@ -354,8 +360,8 @@ function useAdminUsersPageContent() {
         pinned: "left",
         width: 280,
         render: (user) => (
-          <span className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
-            <Mail className="size-3.5 shrink-0 text-muted-foreground/70" />
+          <span className="flex min-w-0 items-center gap-1.5 text-xs text-foreground">
+            <Mail className="size-3.5 shrink-0 text-foreground/70" />
             <span className="truncate">{user.email}</span>
           </span>
         ),
@@ -419,7 +425,7 @@ function useAdminUsersPageContent() {
         sortable: true,
         width: 170,
         render: (user) => (
-          <span className="text-xs tabular-nums text-muted-foreground">
+          <span className="text-xs tabular-nums text-foreground">
             {formatDate(user.created_at)}
           </span>
         ),
@@ -615,17 +621,17 @@ function useAdminUsersPageContent() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_name}</Label>
-                    <Input required placeholder={t.users_name_placeholder} value={newName} onChange={(e) => setNewName(e.target.value)} className="h-9 rounded-lg bg-card" />
+                    <Input required placeholder={t.users_name_placeholder} value={newName} onChange={(e) => setNewName(e.target.value)} className="h-9 rounded-lg bg-field" />
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_email}</Label>
-                    <Input type="email" required placeholder={t.users_email_placeholder} value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="h-9 rounded-lg bg-card" />
+                    <Input type="email" required placeholder={t.users_email_placeholder} value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="h-9 rounded-lg bg-field" />
                   </div>
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_role}</Label>
                   <NativeComboboxSelect value={newRole}
-                    onChange={(event) => setNewRole(event.target.value ?? "")} className="h-9 w-full rounded-lg bg-card">
+                    onChange={(event) => setNewRole(event.target.value ?? "")} className="h-9 w-full rounded-lg bg-field">
                       {ROLE_KEYS.map((key) => (
                         <option key={key} value={key}>{roleLabel(key)}</option>
                       ))}
@@ -645,7 +651,7 @@ function useAdminUsersPageContent() {
                         setNewPassword(e.target.value);
                         setCreateError(null);
                       }}
-                      className={cn("h-9 rounded-lg bg-card", newPasswordError && "border-rose-400 ring-2 ring-rose-100")}
+                      className={cn("h-9 rounded-lg bg-field", newPasswordError && "border-rose-400 ring-2 ring-rose-100")}
                     />
                     {newPasswordError ? (
                       <p className="text-xs text-rose-600">
@@ -672,7 +678,7 @@ function useAdminUsersPageContent() {
                         setNewPasswordConfirm(e.target.value);
                         setCreateError(null);
                       }}
-                      className={cn("h-9 rounded-lg bg-card", newPasswordMismatch && "border-rose-400 ring-2 ring-rose-100")}
+                      className={cn("h-9 rounded-lg bg-field", newPasswordMismatch && "border-rose-400 ring-2 ring-rose-100")}
                     />
                     {newPasswordMismatch ? (
                       <p className="text-xs text-rose-600">
@@ -715,17 +721,17 @@ function useAdminUsersPageContent() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_name}</Label>
-                    <Input value={euName} onChange={(e) => setEuName(e.target.value)} className="h-9 rounded-lg bg-card" />
+                    <Input value={euName} onChange={(e) => setEuName(e.target.value)} className="h-9 rounded-lg bg-field" />
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_email}</Label>
-                    <Input type="email" value={euEmail} onChange={(e) => setEuEmail(e.target.value)} className="h-9 rounded-lg bg-card" />
+                    <Input type="email" value={euEmail} onChange={(e) => setEuEmail(e.target.value)} className="h-9 rounded-lg bg-field" />
                   </div>
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_role}</Label>
                   <NativeComboboxSelect value={euRole}
-                    onChange={(event) => setEuRole(event.target.value ?? "")} className="h-9 w-full rounded-lg bg-card">
+                    onChange={(event) => setEuRole(event.target.value ?? "")} className="h-9 w-full rounded-lg bg-field">
                       {ROLE_KEYS.map((key) => (
                         <option key={key} value={key}>{roleLabel(key)}</option>
                       ))}
@@ -746,7 +752,7 @@ function useAdminUsersPageContent() {
                         setEuPassword(e.target.value);
                         setEditError(null);
                       }}
-                      className={cn("h-9 rounded-lg bg-card", euPasswordError && "border-rose-400 ring-2 ring-rose-100")}
+                      className={cn("h-9 rounded-lg bg-field", euPasswordError && "border-rose-400 ring-2 ring-rose-100")}
                     />
                     <Button type="button" variant="outline" className="h-9 px-3.5 rounded-lg" disabled={Boolean(euPasswordError) || euPassword.length === 0 || euSaving} onClick={resetPassword}>
                       {t.users_reset_button}
@@ -779,18 +785,31 @@ function useAdminUsersPageContent() {
           className="overflow-hidden"
         >
           <DataTableSurface
-            rows={filtered}
+            rows={usersPagination.pagedRows}
             columns={columns}
             toolbarStart={
-              <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+              <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
+              <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   placeholder={t.common_search}
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="h-8 w-full rounded-lg bg-background pl-8 text-[13px]"
+                  className="h-8 w-full rounded-md bg-field pl-8 text-xs"
                 />
               </div>
+              </ToolbarField>
+            }
+            toolbarAfter={
+              <DataTablePager
+                pageIndex={usersPagination.pageIndex}
+                pageSize={usersPagination.pageSize}
+                totalPages={usersPagination.totalPages}
+                totalRows={usersPagination.totalRows}
+                previousLabel={t.pagination_previous}
+                nextLabel={t.pagination_next}
+                onPageChange={usersPagination.onPageChange}
+              />
             }
             defaultDensity="comfortable"
             defaultFrozenColumns={["name", "email"]}

@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, LoaderCircle } from "lucide-react";
 
+import {
+  fixedDropdownStyle,
+  useFixedDropdownPosition,
+} from "@/components/data-table/use-fixed-dropdown-position";
 import { cn } from "@/lib/utils";
 
 type StatusActionPillProps = {
@@ -25,6 +29,8 @@ export function StatusActionPill({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuPosition = useFixedDropdownPosition(ref, menuRef, open);
 
   useEffect(() => {
     if (!open) return;
@@ -72,7 +78,9 @@ export function StatusActionPill({
       </button>
       {open ? (
         <div
-          className="absolute left-0 top-full z-30 mt-1 w-[220px] rounded-lg border border-border bg-popover p-1.5 shadow-md"
+          ref={menuRef}
+          className="fixed z-[110] w-[220px] rounded-lg border border-border bg-popover p-1.5 shadow-md"
+          style={fixedDropdownStyle(menuPosition)}
         >
           <button
             type="button"

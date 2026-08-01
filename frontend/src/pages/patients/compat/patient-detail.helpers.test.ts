@@ -183,6 +183,44 @@ describe("buildPatientTimelineSummary", () => {
       { entityType: "invoice", count: 1 },
     ]);
   });
+
+  it("does not treat historical facts or future appointments as open recent work", () => {
+    const summary = buildPatientTimelineSummary(
+      [
+        {
+          entity_type: "document",
+          entity_id: "doc-1",
+          title: "Signed consent",
+          category: "consent",
+          status: "active",
+          happened_at: "2026-04-05T10:00:00Z",
+          source_label: null,
+        },
+        {
+          entity_type: "risk_score",
+          entity_id: "risk-1",
+          title: "NEWS2 1",
+          category: "NEWS2",
+          status: "recorded",
+          happened_at: "2026-04-06T10:00:00Z",
+          source_label: null,
+        },
+        {
+          entity_type: "appointment",
+          entity_id: "apt-future",
+          title: "Future consultation",
+          category: "medical",
+          status: "planned",
+          happened_at: "2026-05-01T10:00:00Z",
+          source_label: null,
+        },
+      ],
+      new Date("2026-04-10T00:00:00Z"),
+    );
+
+    expect(summary.open).toBe(1);
+    expect(summary.recent).toBe(2);
+  });
 });
 
 describe("formatRelatedPatientOption", () => {
