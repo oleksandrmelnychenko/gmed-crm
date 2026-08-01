@@ -57,7 +57,7 @@ export function StaffDashboardClinicalSection({
           />
         </ChartCard>
 
-        <div className="relative flex flex-col justify-between overflow-hidden rounded-xl border border-border bg-card p-3.5">
+        <div className="relative flex flex-col justify-between overflow-hidden rounded-lg border border-border/70 bg-card p-3.5">
           <div
             aria-hidden
             className="pointer-events-none absolute inset-0"

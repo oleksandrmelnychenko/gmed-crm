@@ -554,7 +554,7 @@ function TimelineNode({
               <span
                 className={cn(
                   "mt-[3px] size-1.5 shrink-0 rounded-full",
-                  provider.is_active ? "bg-emerald-500" : "bg-zinc-300",
+                  provider.is_active ? "bg-emerald-500" : "bg-slate-300",
                 )}
                 title={provider.is_active ? (tr.common_active ?? "Active") : (tr.common_inactive ?? "Inactive")}
               />

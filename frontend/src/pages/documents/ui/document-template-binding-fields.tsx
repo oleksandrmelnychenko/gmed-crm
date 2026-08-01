@@ -20,7 +20,20 @@ type BindingGroup =
   | "bank"
   | "signatures";
 
+let serviceLineKeySequence = 0;
+
+/** Stable client-side key: index keys lose input state when a middle row is removed. */
+function nextServiceLineKey(): string {
+  serviceLineKeySequence += 1;
+  return `line-${serviceLineKeySequence}`;
+}
+
+function emptyServiceLine(): ServiceLineDraft {
+  return { formKey: nextServiceLineKey(), description: "", fee: "", quantity: "", lineTotal: "", note: "" };
+}
+
 type ServiceLineDraft = {
+  formKey: string;
   description: string;
   fee: string;
   quantity: string;
@@ -66,7 +79,7 @@ function parseServiceLines(value: string): ServiceLineDraft[] {
     .map((line) => {
       const [description = "", fee = "", quantity = "", lineTotal = "", note = ""] =
         line.split("|").map((part) => part.trim());
-      return { description, fee, quantity, lineTotal, note };
+      return { formKey: nextServiceLineKey(), description, fee, quantity, lineTotal, note };
     });
 }
 
@@ -106,7 +119,7 @@ function ServiceLinesEditor({
     const parsedLines = parseServiceLines(value);
     return parsedLines.length > 0
       ? parsedLines
-      : [{ description: "", fee: "", quantity: "", lineTotal: "", note: "" }];
+      : [emptyServiceLine()];
   });
 
   useEffect(() => {
@@ -118,7 +131,7 @@ function ServiceLinesEditor({
         const parsedLines = parseServiceLines(value);
         return parsedLines.length > 0
           ? parsedLines
-          : [{ description: "", fee: "", quantity: "", lineTotal: "", note: "" }];
+          : [emptyServiceLine()];
       });
     });
     return () => {
@@ -135,17 +148,12 @@ function ServiceLinesEditor({
   }
 
   function addLine() {
-    setLines((current) => [
-      ...current,
-      { description: "", fee: "", quantity: "", lineTotal: "", note: "" },
-    ]);
+    setLines((current) => [...current, emptyServiceLine()]);
   }
 
   function removeLine(index: number) {
     const nextLines = lines.filter((_, lineIndex) => lineIndex !== index);
-    const normalizedLines = nextLines.length > 0
-      ? nextLines
-      : [{ description: "", fee: "", quantity: "", lineTotal: "", note: "" }];
+    const normalizedLines = nextLines.length > 0 ? nextLines : [emptyServiceLine()];
     setLines(normalizedLines);
     onChange(serializeServiceLines(normalizedLines));
   }
@@ -182,7 +190,7 @@ function ServiceLinesEditor({
           </thead>
           <tbody className="divide-y divide-border bg-background">
             {lines.map((line, index) => (
-              <tr key={index}>
+              <tr key={line.formKey}>
                 <td className="p-2">
                   <Input
                     aria-label={lang === "de" ? "Leistung" : "Услуга"}

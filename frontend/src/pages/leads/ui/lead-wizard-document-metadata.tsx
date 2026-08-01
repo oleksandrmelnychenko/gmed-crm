@@ -2,6 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { STATUS_TONE } from "@/components/ui-shell";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { cachedNumberFormat } from "@/lib/intl-cache";
 import { formatDateTime } from "@/pages/leads/model/leads-model";
 import type { DocumentItem } from "@/pages/documents/model/types";
 
@@ -17,7 +18,7 @@ type LeadWizardDocumentMetadataProps = {
 
 function formatFileSize(size: number | null, lang: Lang) {
   if (!size || size <= 0) return "";
-  const formatter = new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
+  const formatter = cachedNumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
     maximumFractionDigits: size >= 1024 * 1024 ? 1 : 0,
   });
   if (size >= 1024 * 1024) return `${formatter.format(size / (1024 * 1024))} MB`;

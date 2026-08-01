@@ -33,6 +33,7 @@ import { toast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { cachedNumberFormat } from "@/lib/intl-cache";
 import {
   createSpecialization,
   deleteSpecialization,
@@ -158,7 +159,7 @@ function compareCatalogItems<T extends { sort_order: number; code: string }>(
 }
 
 function formatPriceRange(item: SpecializationWorkType, lang: Lang) {
-  const formatter = new Intl.NumberFormat(lang === "ru" ? "ru-RU" : "de-DE", {
+  const formatter = cachedNumberFormat(lang === "ru" ? "ru-RU" : "de-DE", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -179,7 +180,7 @@ function activeBadge(active: boolean, tx: Translate) {
         "rounded-full px-2 py-0.5 text-[11px]",
         active
           ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-          : "border-zinc-200 bg-zinc-50 text-zinc-600",
+          : "border-slate-200 bg-slate-50 text-slate-600",
       )}
     >
       {active ? tx("Активно", "Aktiv") : tx("Неактивно", "Inaktiv")}
@@ -493,7 +494,7 @@ export function SpecializationsPage() {
                       </span>
                       {!item.is_active ? (
                         <span
-                          className="mt-1 size-2 shrink-0 rounded-full bg-zinc-400"
+                          className="mt-1 size-2 shrink-0 rounded-full bg-slate-400"
                           title={tx("Неактивно", "Inaktiv")}
                         />
                       ) : null}

@@ -178,7 +178,7 @@ export function OrderServiceGroupPanel({
   const previewLines = preview?.lines ?? [];
 
   return (
-    <article className="rounded-xl border border-border bg-card p-3.5">
+    <article className="rounded-lg border border-border/70 bg-card p-3.5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -348,7 +348,7 @@ function SheetSectionCard({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-border bg-card p-6">
+    <section className="rounded-lg border border-border/70 bg-card p-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>

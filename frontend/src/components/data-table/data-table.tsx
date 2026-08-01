@@ -138,6 +138,9 @@ function useDataTableContent<T>({
   overscan = 10,
   storageKey,
 }: DataTableProps<T>) {
+  // tanstack-virtual's returned functions defeat React Compiler memoization —
+  // opt this hook out so virtualization callbacks stay live.
+  "use no memo";
   const { t } = useLang();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const columnMenuRef = useRef<HTMLDivElement | null>(null);
@@ -661,7 +664,7 @@ function ColumnHeaderContextMenu<T>({
       data-column-header-context-menu
       role="menu"
       aria-label={`${labels?.column ?? t.table_columns} ${column.label}`}
-      className="fixed z-[120] w-56 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-xl"
+      className="animate-menu-in fixed z-[120] w-56 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-xl"
       style={{ left: x, top: y }}
     >
       <div className="flex items-center justify-between gap-2 border-b border-border px-2.5 py-2">

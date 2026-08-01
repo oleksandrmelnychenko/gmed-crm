@@ -154,6 +154,7 @@ export const DEFAULT_PATIENT_FILTERS: PatientFilters = {
 };
 
 const PATIENT_INSURANCE_TYPE_ORDER = ["private", "public", "self_pay", "foreign"] as const;
+const PATIENT_INSURANCE_TYPE_ORDER_SET: ReadonlySet<string> = new Set(PATIENT_INSURANCE_TYPE_ORDER);
 
 /** Distinct, ordered insurance types present on the given patients. */
 export function collectPatientInsuranceTypeOptions(
@@ -162,7 +163,7 @@ export function collectPatientInsuranceTypeOptions(
   const present = new Set<string>();
   for (const patient of patients) {
     const value = (patient.insurance_type ?? "").trim();
-    if (PATIENT_INSURANCE_TYPE_ORDER.includes(value as (typeof PATIENT_INSURANCE_TYPE_ORDER)[number])) {
+    if (PATIENT_INSURANCE_TYPE_ORDER_SET.has(value)) {
       present.add(value);
     }
   }

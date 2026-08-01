@@ -600,7 +600,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
       </div>
 
       <Tabs value={activeTab} onValueChange={handleWorkspaceTabChange}>
-        <div className="border-b border-zinc-200 lg:hidden overflow-x-auto">
+        <div className="border-b border-slate-200 lg:hidden overflow-x-auto">
           <TabsList variant="line" className="min-w-max">
             {workspaceTabs.map((tab) => (
               <TabsTrigger key={tab.key} value={tab.key} className="px-4 py-2">

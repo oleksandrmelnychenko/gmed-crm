@@ -368,7 +368,7 @@ function useAppointmentBillingHandoffSectionContentContent({
             <AppointmentDotLabel>
               {appointmentText("appointments_billing_reminders")}
             </AppointmentDotLabel>
-            <span className="text-xs text-zinc-500">
+            <span className="text-xs text-slate-500">
               {reminders.length} {appointmentText("appointments_linked")}
             </span>
           </div>
@@ -381,12 +381,12 @@ function useAppointmentBillingHandoffSectionContentContent({
                   key={item.id}
                   className={appointmentWhiteRowClassName}
                 >
-                  <p className="text-sm font-medium text-zinc-900">{item.title}</p>
-                  <p className="mt-1 text-xs text-zinc-500">
+                  <p className="text-sm font-medium text-slate-900">{item.title}</p>
+                  <p className="mt-1 text-xs text-slate-500">
                     {item.user_name} · {formatDateTimeLabel(item.remind_at)}
                   </p>
                   {item.description ? (
-                    <p className="mt-2 text-sm text-zinc-600">{item.description}</p>
+                    <p className="mt-2 text-sm text-slate-600">{item.description}</p>
                   ) : null}
                 </div>
               ))
@@ -399,7 +399,7 @@ function useAppointmentBillingHandoffSectionContentContent({
             <AppointmentDotLabel>
               {appointmentText("appointments_billing_tasks")}
             </AppointmentDotLabel>
-            <span className="text-xs text-zinc-500">
+            <span className="text-xs text-slate-500">
               {tasks.length} {appointmentText("appointments_linked")}
             </span>
           </div>
@@ -413,7 +413,7 @@ function useAppointmentBillingHandoffSectionContentContent({
                   className={appointmentWhiteRowClassName}
                 >
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-medium text-zinc-900">{task.title}</p>
+                    <p className="text-sm font-medium text-slate-900">{task.title}</p>
                     <span className={appointmentMiniPillClassName}>
                       {taskStatusLabel(task.status)}
                     </span>
@@ -421,7 +421,7 @@ function useAppointmentBillingHandoffSectionContentContent({
                       {taskPriorityLabel(task.priority)}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-zinc-500">
+                  <p className="mt-1 text-xs text-slate-500">
                     {task.assigned_to_name} · {roleLabel(task.assigned_to_role)}
                     {task.due_date
                       ? appointmentText("appointments_due_date_suffix", {
@@ -430,7 +430,7 @@ function useAppointmentBillingHandoffSectionContentContent({
                       : ""}
                   </p>
                   {task.description ? (
-                    <p className="mt-2 text-sm text-zinc-600">{task.description}</p>
+                    <p className="mt-2 text-sm text-slate-600">{task.description}</p>
                   ) : null}
                 </div>
               ))

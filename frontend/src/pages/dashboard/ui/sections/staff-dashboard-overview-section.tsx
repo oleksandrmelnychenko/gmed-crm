@@ -150,7 +150,7 @@ export function StaffDashboardOverviewSection({
         />
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-4">
+      <div className="rounded-lg border border-border/70 bg-card p-4">
         <div className="mb-3 flex items-center justify-between">
           <div>
             <h3 className="text-[14px] font-semibold text-foreground">

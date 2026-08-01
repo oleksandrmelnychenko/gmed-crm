@@ -177,7 +177,7 @@ function DetailSection({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-border bg-card p-6">
+    <section className="rounded-lg border border-border/70 bg-card p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
         {accessory ? <div className="shrink-0">{accessory}</div> : null}
@@ -1074,7 +1074,7 @@ function useSopsPageContent() {
               />
             ) : (
               <div className="space-y-4 rounded-xl">
-                <section className="relative overflow-hidden rounded-xl border border-border bg-card">
+                <section className="relative overflow-hidden rounded-lg border border-border/70 bg-card">
                   <span
                     aria-hidden
                     className={cn(

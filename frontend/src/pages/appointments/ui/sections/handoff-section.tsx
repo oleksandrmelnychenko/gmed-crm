@@ -144,7 +144,7 @@ function AppointmentHandoffSectionContent({
             >
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-semibold text-zinc-950">
+                  <p className="text-sm font-semibold text-slate-950">
                     {peer.name}
                   </p>
                   <span className={appointmentMiniPillClassName}>
@@ -159,7 +159,7 @@ function AppointmentHandoffSectionContent({
                     </span>
                   ))}
                 </div>
-                <p className="mt-1 text-xs text-zinc-500">
+                <p className="mt-1 text-xs text-slate-500">
                   {detail.patient_pid} · {slotLabel(detail)}
                 </p>
               </div>

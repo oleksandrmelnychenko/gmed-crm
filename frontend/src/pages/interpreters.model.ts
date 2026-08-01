@@ -14,7 +14,16 @@ export type InterpreterLanguageRecord = {
   is_active: boolean;
 };
 
+let interpreterFormKeySequence = 0;
+
+/** Stable client-side key for dynamic form rows (index keys lose input state on removal). */
+export function nextInterpreterFormKey(): string {
+  interpreterFormKeySequence += 1;
+  return `row-${interpreterFormKeySequence}`;
+}
+
 export type InterpreterLanguageForm = {
+  formKey: string;
   languageCode: string;
   languageLabel: string;
   proficiency: string;
@@ -74,6 +83,7 @@ export function buildInterpreterProfileDocumentDownloadPath(
 
 export function emptyInterpreterLanguage(): InterpreterLanguageForm {
   return {
+    formKey: nextInterpreterFormKey(),
     languageCode: "",
     languageLabel: "",
     proficiency: "working",
@@ -86,6 +96,7 @@ export function interpreterLanguageRecordToForm(
   language: InterpreterLanguageRecord,
 ): InterpreterLanguageForm {
   return {
+    formKey: nextInterpreterFormKey(),
     languageCode: language.language_code,
     languageLabel: language.language_label || "",
     proficiency: language.proficiency || "working",

@@ -264,7 +264,7 @@ function invoiceAccentClass(status: string) {
   if (status === "paid") return "bg-emerald-500";
   if (status === "overdue" || status === "cancelled") return "bg-rose-500";
   if (status === "partially_paid") return "bg-amber-500";
-  if (status === "draft") return "bg-zinc-400";
+  if (status === "draft") return "bg-slate-400";
   return "bg-sky-500";
 }
 
@@ -1431,7 +1431,7 @@ function usePatientInvoicesTabContent({
             {ledgerEntries.slice(0, 12).map((entry) => (
               <article
                 key={entry.id}
-                className="overflow-hidden rounded-xl border border-border bg-card"
+                className="overflow-hidden rounded-lg border border-border/70 bg-card"
               >
                 <div className="grid gap-2.5 px-4 py-2.5 text-sm md:grid-cols-[96px_minmax(0,1fr)_180px] md:items-center">
                   <div className="flex flex-col gap-1">
@@ -1514,7 +1514,7 @@ function usePatientInvoicesTabContent({
             {invoices.map((invoice) => (
               <article
                 key={invoice.id}
-                className="rounded-xl border border-border bg-card"
+                className="rounded-lg border border-border/70 bg-card"
               >
                 <div className="relative overflow-hidden p-3.5">
                   <span

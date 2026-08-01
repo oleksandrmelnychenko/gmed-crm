@@ -152,7 +152,7 @@ function SubBullets({ items }: { items: string[] }) {
   return (
     <ul className="mt-0.5 ml-3.5 list-disc space-y-0 text-[11px] leading-snug text-muted-foreground marker:text-muted-foreground/40">
       {items.map((item, index) => (
-        <li key={index}>{item}</li>
+        <li key={`${item}-${index}`}>{item}</li>
       ))}
     </ul>
   );
@@ -163,7 +163,7 @@ function SubLines({ items }: { items: string[] }) {
   return (
     <div className="mt-0.5 space-y-0 text-[11px] leading-snug text-muted-foreground">
       {items.map((item, index) => (
-        <div key={index}>{item}</div>
+        <div key={`${item}-${index}`}>{item}</div>
       ))}
     </div>
   );
@@ -455,7 +455,7 @@ export function PatientOverviewCard({
     ));
 
   const renderMedicationTable = () => (
-    <div className="overflow-x-auto rounded-xl border border-border bg-card">
+    <div className="overflow-x-auto rounded-lg border border-border/70 bg-card">
       <table
         aria-label={tx("Медикаменты", "Medikation")}
         className="w-full min-w-[1080px] border-collapse text-left text-xs"
@@ -526,7 +526,7 @@ export function PatientOverviewCard({
               ) : allergyItems.length > 0 ? (
                 <ul className="space-y-0.5 text-[13px] font-medium leading-snug text-orange-700">
                   {allergyItems.map((item, index) => (
-                    <li key={index}>
+                    <li key={`${item}-${index}`}>
                       <span>{item}</span>
                     </li>
                   ))}

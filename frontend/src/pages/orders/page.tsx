@@ -290,7 +290,7 @@ function SectionCard({
   return (
     <section
       className={cn(
-        "rounded-xl border border-border bg-card p-6",
+        "rounded-lg border border-border/70 bg-card p-6",
         className,
       )}
     >
@@ -316,7 +316,7 @@ function OrderSheetSection({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-border bg-card p-6">
+    <section className="rounded-lg border border-border/70 bg-card p-6">
       <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
       <div className="mt-5 space-y-4">{children}</div>
     </section>
@@ -381,7 +381,7 @@ function EmptyState({ title, description, action }: EmptyStateProps) {
   return (
     <div className={cn("rounded-xl px-6 py-10 text-center", tokens.surface.dashed)}>
       <div className="mx-auto flex max-w-md flex-col items-center gap-3">
-        <div className="rounded-xl border border-border bg-card p-3 text-muted-foreground">
+        <div className="rounded-lg border border-border/70 bg-card p-3 text-muted-foreground">
           <ClipboardList className="size-5" />
         </div>
         <div>
@@ -2668,7 +2668,7 @@ function useOrdersPageContent() {
       />
 
       {canManageDebt && (Boolean(debtQueueError) || debtQueue.length > 0) ? (
-        <section className="rounded-xl border border-border bg-card p-6">
+        <section className="rounded-lg border border-border/70 bg-card p-6">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h2 className={tokens.text.sectionTitle}>
@@ -3062,7 +3062,7 @@ function useOrdersPageContent() {
               />
             ) : (
               <div className="space-y-4 rounded-xl">
-                <section className="overflow-hidden rounded-xl border border-border bg-card">
+                <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
                   <div className="relative p-4">
                     <span
                       className={cn(
@@ -3146,7 +3146,7 @@ function useOrdersPageContent() {
 
                 {shouldRenderOrderSection("overview") ? (
                   <>
-                    <section className="rounded-xl border border-border bg-card p-6">
+                    <section className="rounded-lg border border-border/70 bg-card p-6">
                       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                         <div>
                           <h2 className={tokens.text.sectionTitle}>
@@ -3228,7 +3228,7 @@ function useOrdersPageContent() {
                       </div>
                     </section>
 
-                    <section className="rounded-xl border border-border bg-card p-6">
+                    <section className="rounded-lg border border-border/70 bg-card p-6">
                       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                         <div>
                           <h2 className={tokens.text.sectionTitle}>
@@ -3242,7 +3242,7 @@ function useOrdersPageContent() {
                           <button
                             key={link.href}
                             type="button"
-                            className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                            className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                             onClick={() =>
                               window.open(link.href, "_blank", "noopener,noreferrer")
                             }
@@ -3266,7 +3266,7 @@ function useOrdersPageContent() {
                 ) : null}
 
                 {shouldRenderOrderSection("gates") && orderDetail.process_gates ? (
-                  <section className="rounded-xl border border-border bg-card p-6">
+                  <section className="rounded-lg border border-border/70 bg-card p-6">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
@@ -3635,7 +3635,7 @@ function useOrdersPageContent() {
                 ) : null}
 
                 {shouldRenderOrderSection("planning") && orderDetail.planning_preparation ? (
-                  <section className="rounded-xl border border-border bg-card p-6">
+                  <section className="rounded-lg border border-border/70 bg-card p-6">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
@@ -3938,7 +3938,7 @@ function useOrdersPageContent() {
                                 <button
                                   key={link.label}
                                   type="button"
-                                  className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                                  className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                                   onClick={() =>
                                     window.open(
                                       link.href,
@@ -3978,7 +3978,7 @@ function useOrdersPageContent() {
                 ) : null}
 
                 {shouldRenderOrderSection("execution") && orderDetail.execution_flow ? (
-                  <section className="rounded-xl border border-border bg-card p-6">
+                  <section className="rounded-lg border border-border/70 bg-card p-6">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
@@ -4317,7 +4317,7 @@ function useOrdersPageContent() {
                                 <button
                                   key={link.label}
                                   type="button"
-                                  className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                                  className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                                   onClick={() =>
                                     window.open(
                                       link.href,
@@ -4348,7 +4348,7 @@ function useOrdersPageContent() {
                 ) : null}
 
                 {shouldRenderOrderSection("followup") && orderDetail.followup_flow ? (
-                  <section className="rounded-xl border border-border bg-card p-6">
+                  <section className="rounded-lg border border-border/70 bg-card p-6">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
@@ -4703,7 +4703,7 @@ function useOrdersPageContent() {
                                 <button
                                   key={link.label}
                                   type="button"
-                                  className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                                  className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                                   onClick={() =>
                                     window.open(
                                       link.href,
@@ -4734,7 +4734,7 @@ function useOrdersPageContent() {
                 ) : null}
 
                 {shouldRenderOrderSection("phase") ? (
-                  <section className="rounded-xl border border-border bg-card p-6">
+                  <section className="rounded-lg border border-border/70 bg-card p-6">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>
@@ -4831,7 +4831,7 @@ function useOrdersPageContent() {
                                 "relative min-h-[96px] rounded-xl border p-3 pr-10 text-left transition-colors",
                                 selected
                                   ? "border-orange-200 bg-orange-50/60"
-                                  : "border-border bg-zinc-50/70 hover:border-orange-200 hover:bg-orange-50/40",
+                                  : "border-border bg-slate-50/70 hover:border-orange-200 hover:bg-orange-50/40",
                                 disabled && "cursor-not-allowed opacity-60",
                               )}
                             >
@@ -4866,7 +4866,7 @@ function useOrdersPageContent() {
                         })}
                       </div>
 
-                      <div className="flex flex-col gap-3 rounded-xl border border-border bg-zinc-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex flex-col gap-3 rounded-xl border border-border bg-slate-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                           <p className="text-sm font-semibold text-foreground">
                             {phaseDraft
@@ -4958,7 +4958,7 @@ function useOrdersPageContent() {
                                     {formatDateTimeLabel(event.created_at)}
                                   </span>
                                 </div>
-                                <div className="mt-2 rounded-xl border border-border/70 bg-zinc-50/60 px-4 py-3">
+                                <div className="mt-2 rounded-xl border border-border/70 bg-slate-50/60 px-4 py-3">
                                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                     <span>{l("orders_ubergang")}</span>
                                     <span className="h-px min-w-6 flex-1 bg-border/70" />
@@ -4982,7 +4982,7 @@ function useOrdersPageContent() {
                 ) : null}
 
                 {shouldRenderOrderSection("workflow") ? (
-                  <section className="rounded-xl border border-border bg-card p-6">
+                  <section className="rounded-lg border border-border/70 bg-card p-6">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <h2 className={tokens.text.sectionTitle}>
                         {titleWithDot(l("orders_workflow_checkliste"))}
@@ -4991,7 +4991,7 @@ function useOrdersPageContent() {
                         {workflowChecklist ? (
                           <Badge
                             variant="outline"
-                            className="rounded-full border-border bg-zinc-50 text-muted-foreground"
+                            className="rounded-full border-border bg-slate-50 text-muted-foreground"
                           >
                             {workflowMetrics.total} {l("orders_punkte")}
                           </Badge>
@@ -5100,7 +5100,7 @@ function useOrdersPageContent() {
                                     )}
                                   </span>
 
-                                  <div className="rounded-xl border border-border bg-zinc-50/60 p-3">
+                                  <div className="rounded-xl border border-border bg-slate-50/60 p-3">
                                     <div className="grid gap-1.5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
                                       <div className="min-w-0">
                                         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -6360,7 +6360,7 @@ function useOrdersPageContent() {
                         {createRecheck.checks.map((check) => (
                           <div
                             key={check.key}
-                            className="rounded-xl border border-border bg-card px-3 py-2"
+                            className="rounded-lg border border-border/70 bg-card px-3 py-2"
                           >
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-sm text-foreground">

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useState,
   useMemo,
   useReducer,
   type FormEvent,
@@ -54,7 +55,7 @@ import {
   fetchPatientCompliancePrivacyRequests,
   reviewCompliancePrivacyRequest,
 } from "@/pages/admin/data/admin-api";
-import { clearApiCache } from "@/lib/api";
+import { apiFetch, clearApiCache } from "@/lib/api";
 import { useRealtimeSubscription } from "@/lib/realtime";
 
 interface RecordSummary {
@@ -165,11 +166,11 @@ function privacyStatusBadgeClass(status: string) {
     case "approved":
       return "bg-sky-500/15 text-sky-700";
     case "rejected":
-      return "bg-zinc-500/15 text-zinc-700";
+      return "bg-slate-500/15 text-slate-700";
     case "completed":
       return "bg-green-500/15 text-green-700";
     default:
-      return "bg-zinc-500/15 text-zinc-700";
+      return "bg-slate-500/15 text-slate-700";
   }
 }
 
@@ -434,6 +435,29 @@ function useAdminCompliancePageContent() {
     }
   }, []);
 
+  const [patientOptions, setPatientOptions] = useState<
+    Array<{ id: string; label: string }>
+  >([]);
+  useEffect(() => {
+    let cancelled = false;
+    void apiFetch<Array<{ id: string; patient_id: string; first_name: string | null; last_name: string | null }>>(
+      "/patients",
+    )
+      .then((rows) => {
+        if (cancelled) return;
+        setPatientOptions(
+          (rows ?? []).map((row) => ({
+            id: row.id,
+            label: `${row.patient_id} · ${[row.first_name, row.last_name].filter(Boolean).join(" ")}`,
+          })),
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     void loadPrivacyQueue();
   }, [loadPrivacyQueue]);
@@ -628,7 +652,7 @@ function useAdminCompliancePageContent() {
           <div className="truncate font-medium text-foreground">
             {privacyRequestTypeLabel(record.request_type, t)}
           </div>
-          <div className="truncate text-xs text-zinc-500">
+          <div className="truncate text-xs text-slate-500">
             {t.compliance_created_label} {compactDt(record.requested_at)}
           </div>
         </div>
@@ -645,7 +669,7 @@ function useAdminCompliancePageContent() {
             {privacyStatusLabel(record.status, t)}
           </Badge>
           {record.manual_override ? (
-            <span className="truncate text-xs text-zinc-500">
+            <span className="truncate text-xs text-slate-500">
               {t.compliance_manual_override}
             </span>
           ) : null}
@@ -664,7 +688,7 @@ function useAdminCompliancePageContent() {
       accessor: (record) => compactDt(record.due_at),
       width: 126,
       render: (record) => (
-        <span className="font-mono text-sm text-zinc-500">
+        <span className="font-mono text-sm text-slate-500">
           {compactDt(record.due_at)}
         </span>
       ),
@@ -675,7 +699,7 @@ function useAdminCompliancePageContent() {
       accessor: (record) => compactDt(record.retention_until),
       width: 150,
       render: (record) => (
-        <span className="font-mono text-sm text-zinc-500">
+        <span className="font-mono text-sm text-slate-500">
           {compactDt(record.retention_until)}
         </span>
       ),
@@ -686,7 +710,7 @@ function useAdminCompliancePageContent() {
       accessor: (record) => recordSummaryLabel(record.record_summary, t),
       width: 142,
       render: (record) => (
-        <span className="truncate text-xs text-zinc-600">
+        <span className="truncate text-xs text-slate-600">
           {recordSummaryLabel(record.record_summary, t)}
         </span>
       ),
@@ -697,7 +721,7 @@ function useAdminCompliancePageContent() {
       accessor: (record) => privacyNotesLabel(record),
       width: 240,
       render: (record) => (
-        <span className="truncate text-sm text-zinc-600">
+        <span className="truncate text-sm text-slate-600">
           {privacyNotesLabel(record)}
         </span>
       ),
@@ -728,7 +752,7 @@ function useAdminCompliancePageContent() {
           <div className="truncate font-medium text-foreground">
             {privacyRequestTypeLabel(record.request_type, t)}
           </div>
-          <div className="truncate text-xs text-zinc-500">
+          <div className="truncate text-xs text-slate-500">
             {privacySourceLabel(record.source, t)}
           </div>
         </div>
@@ -761,7 +785,7 @@ function useAdminCompliancePageContent() {
       accessor: (record) => compactDt(record.due_at),
       width: 126,
       render: (record) => (
-        <span className="font-mono text-sm text-zinc-500">
+        <span className="font-mono text-sm text-slate-500">
           {compactDt(record.due_at)}
         </span>
       ),
@@ -772,7 +796,7 @@ function useAdminCompliancePageContent() {
       accessor: (record) => recordSummaryLabel(record.record_summary, t),
       width: 142,
       render: (record) => (
-        <span className="truncate text-xs text-zinc-600">
+        <span className="truncate text-xs text-slate-600">
           {recordSummaryLabel(record.record_summary, t)}
         </span>
       ),
@@ -783,7 +807,7 @@ function useAdminCompliancePageContent() {
       accessor: (record) => privacyNotesLabel(record),
       width: 220,
       render: (record) => (
-        <span className="truncate text-sm text-zinc-600">
+        <span className="truncate text-sm text-slate-600">
           {privacyNotesLabel(record)}
         </span>
       ),
@@ -820,13 +844,13 @@ function useAdminCompliancePageContent() {
 
         if (record.status === "completed" && record.executed_at) {
           return (
-            <span className="truncate text-xs text-zinc-500">
+            <span className="truncate text-xs text-slate-500">
               {t.compliance_executed_label} {compactDt(record.executed_at)}
             </span>
           );
         }
 
-        return <span className="text-xs text-zinc-500">-</span>;
+        return <span className="text-xs text-slate-500">-</span>;
       },
     },
   ], [privacyActionBusy, t, user?.role]);
@@ -874,14 +898,30 @@ function useAdminCompliancePageContent() {
               className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]"
               onSubmit={handleLoadPatientRegister}
             >
-              <Field label={t.compliance_patient_id_uuid} htmlFor="compliance-patient-id">
-                <Input
-                  id="compliance-patient-id"
-                  placeholder={t.compliance_patient_uuid_placeholder}
-                  value={patientInput}
-                  onChange={(event) => setPatientInput(event.target.value)}
-                  className="h-9 rounded-lg bg-card"
-                />
+              <Field label={t.orders_patient} htmlFor="compliance-patient-id">
+                {patientOptions.length > 0 ? (
+                  <NativeComboboxSelect
+                    id="compliance-patient-id"
+                    value={patientInput}
+                    onChange={(event) => setPatientInput(event.target.value)}
+                    className="h-9 w-full rounded-lg bg-card text-[13px]"
+                  >
+                    <option value="">{t.orders_patient}</option>
+                    {patientOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                ) : (
+                  <Input
+                    id="compliance-patient-id"
+                    placeholder={t.compliance_patient_uuid_placeholder}
+                    value={patientInput}
+                    onChange={(event) => setPatientInput(event.target.value)}
+                    className="h-9 rounded-lg bg-card"
+                  />
+                )}
               </Field>
               <div className="flex items-end">
                 <Button type="submit" className="h-9 rounded-lg px-3.5">
@@ -941,13 +981,28 @@ function useAdminCompliancePageContent() {
 
           <Section title={t.compliance_export}>
             <div className={cn("grid gap-4 rounded-xl p-3.5 md:grid-cols-[minmax(0,1fr)_auto]", tokens.surface.card)}>
-              <Field label={t.compliance_patient_id_uuid}>
-                <Input
-                  placeholder={t.compliance_uses_loaded_uuid}
-                  value={patientInput}
-                  onChange={(event) => setPatientInput(event.target.value)}
-                  className="h-9 rounded-lg bg-card"
-                />
+              <Field label={t.orders_patient}>
+                {patientOptions.length > 0 ? (
+                  <NativeComboboxSelect
+                    value={patientInput}
+                    onChange={(event) => setPatientInput(event.target.value)}
+                    className="h-9 w-full rounded-lg bg-card text-[13px]"
+                  >
+                    <option value="">{t.orders_patient}</option>
+                    {patientOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                ) : (
+                  <Input
+                    placeholder={t.compliance_uses_loaded_uuid}
+                    value={patientInput}
+                    onChange={(event) => setPatientInput(event.target.value)}
+                    className="h-9 rounded-lg bg-card"
+                  />
+                )}
               </Field>
               <div className="flex items-end">
                 <Button type="button" className="h-9 rounded-lg px-3.5" onClick={() => void doExport()}>
@@ -1060,7 +1115,7 @@ function useAdminCompliancePageContent() {
                       <Badge className={privacyStatusBadgeClass(reviewSheetRecord.status)}>
                         {privacyStatusLabel(reviewSheetRecord.status, t)}
                       </Badge>
-                      <Badge className="bg-zinc-500/15 text-zinc-700">
+                      <Badge className="bg-slate-500/15 text-slate-700">
                         {privacyRequestTypeLabel(reviewSheetRecord.request_type, t)}
                       </Badge>
                       {reviewSheetRecord.is_overdue ? (

@@ -85,7 +85,7 @@ function LinkedRecordTile({
   return (
     <button
       type="button"
-      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-3.5 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
       onClick={onClick}
     >
       <div className="relative z-10 min-w-0">

@@ -280,10 +280,10 @@ function DoctorFollowUpTrailColumn({
               <div key={item.id} className={appointmentWhiteRowClassName}>
                 <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <p className="text-sm font-medium text-zinc-900">
+                    <p className="text-sm font-medium text-slate-900">
                       {item.title.replace(`${DOCTOR_FOLLOW_UP_PREFIX} `, "")}
                     </p>
-                    <p className="mt-1 text-xs text-zinc-500">
+                    <p className="mt-1 text-xs text-slate-500">
                       {item.user_name} В· {formatDateTimeLabel(item.remind_at)}
                     </p>
                   </div>
@@ -298,7 +298,7 @@ function DoctorFollowUpTrailColumn({
                   )}
                 </div>
                 {item.description ? (
-                  <p className="mt-3 whitespace-pre-line text-sm text-zinc-600">
+                  <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
                     {item.description}
                   </p>
                 ) : null}
@@ -317,22 +317,22 @@ function DoctorFollowUpTrailColumn({
               <div key={task.id} className={appointmentWhiteRowClassName}>
                 <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <p className="text-sm font-medium text-zinc-900">
+                    <p className="text-sm font-medium text-slate-900">
                       {task.title.replace(`${DOCTOR_FOLLOW_UP_PREFIX} `, "")}
                     </p>
-                    <p className="mt-1 text-xs text-zinc-500">
+                    <p className="mt-1 text-xs text-slate-500">
                       {task.assigned_to_name} В· {taskStatusLabel(task.status)} В·{" "}
                       {taskPriorityLabel(task.priority)}
                     </p>
                   </div>
-                  <span className="text-xs text-zinc-500">
+                  <span className="text-xs text-slate-500">
                     {task.due_date
                       ? formatDateTimeLabel(task.due_date)
                       : t.common_not_set}
                   </span>
                 </div>
                 {task.description ? (
-                  <p className="mt-3 whitespace-pre-line text-sm text-zinc-600">
+                  <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
                     {task.description}
                   </p>
                 ) : null}
@@ -614,14 +614,14 @@ function AppointmentPackageEndSectionContent({
                   key={item.id}
                   className={appointmentSoftRowClassName}
                 >
-                  <p className="text-sm font-medium text-zinc-900">
+                  <p className="text-sm font-medium text-slate-900">
                     {item.title.replace(`${PACKAGE_END_FOLLOW_UP_PREFIX} `, "")}
                   </p>
-                  <p className="mt-1 text-xs text-zinc-500">
+                  <p className="mt-1 text-xs text-slate-500">
                     {item.user_name} · {formatDateTimeLabel(item.remind_at)}
                   </p>
                   {item.description ? (
-                    <p className="mt-3 whitespace-pre-line text-sm text-zinc-600">
+                    <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
                       {item.description}
                     </p>
                   ) : null}
@@ -633,19 +633,19 @@ function AppointmentPackageEndSectionContent({
                   className={appointmentSoftRowClassName}
                 >
                   <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                    <p className="text-sm font-medium text-zinc-900">
+                    <p className="text-sm font-medium text-slate-900">
                       {task.title.replace(`${PACKAGE_END_FOLLOW_UP_PREFIX} `, "")}
                     </p>
-                    <span className="text-xs text-zinc-500">
+                    <span className="text-xs text-slate-500">
                       {taskStatusLabel(task.status)} · {taskPriorityLabel(task.priority)}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-zinc-500">
+                  <p className="mt-1 text-xs text-slate-500">
                     {task.assigned_to_name}
                     {task.due_date ? ` · ${formatDateTimeLabel(task.due_date)}` : ""}
                   </p>
                   {task.description ? (
-                    <p className="mt-3 whitespace-pre-line text-sm text-zinc-600">
+                    <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
                       {task.description}
                     </p>
                   ) : null}

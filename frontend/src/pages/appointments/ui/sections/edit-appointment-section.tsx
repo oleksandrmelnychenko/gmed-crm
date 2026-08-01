@@ -802,7 +802,7 @@ function useEditAppointmentSectionContentContent({
   return (
     <>
       {showSummary ? (
-      <section className="rounded-xl border border-border bg-card p-6">
+      <section className="rounded-lg border border-border/70 bg-card p-6">
         <div className="flex items-start justify-between gap-4">
           <h2 className={tokens.text.sectionTitle}>
             {editOverviewTitle(t.appointments_title)}

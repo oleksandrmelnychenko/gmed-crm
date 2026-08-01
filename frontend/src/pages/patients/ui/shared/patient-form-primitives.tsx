@@ -8,6 +8,7 @@ import {
   useLang,
 } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { cachedRegionDisplayNames } from "@/lib/intl-cache";
 import {
   Field,
   Section as ShellSection,
@@ -100,11 +101,10 @@ function optionsWithCurrent(options: PatientSelectOption[], value: string) {
 
 function countryOptionLabel(option: PatientSelectOption, lang: "de" | "ru") {
   if (!option.countryCode) return option.fallbackLabel;
+  const display = cachedRegionDisplayNames(lang);
+  if (!display) return option.fallbackLabel;
   try {
-    return (
-      new Intl.DisplayNames([lang], { type: "region" }).of(option.countryCode) ??
-      option.fallbackLabel
-    );
+    return display.of(option.countryCode) ?? option.fallbackLabel;
   } catch {
     return option.fallbackLabel;
   }

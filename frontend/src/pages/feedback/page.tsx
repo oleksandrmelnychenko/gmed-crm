@@ -323,7 +323,7 @@ function FeedbackTextSection({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-border bg-card p-6">
+    <section className="rounded-lg border border-border/70 bg-card p-6">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
@@ -353,7 +353,7 @@ function FeedbackReviewHeaderVariants({ item, t }: { item: PortalFeedbackItem; t
   );
 
   return (
-    <section className="rounded-xl border border-border bg-card">
+    <section className="rounded-lg border border-border/70 bg-card">
       <div className="relative overflow-hidden p-4">
         <span
           className={cn(
@@ -570,7 +570,7 @@ function feedbackCard(item: PortalFeedbackItem, t: Translations, withInternal = 
     <>
         <FeedbackReviewHeaderVariants item={item} t={t} />
 
-        <section className="rounded-xl border border-border bg-card p-6">
+        <section className="rounded-lg border border-border/70 bg-card p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.feedback_scores)}</h2>
@@ -632,7 +632,7 @@ function RankingList({
   horizontal?: boolean;
 }) {
   return (
-    <section className="rounded-xl border border-border bg-card p-6">
+    <section className="rounded-lg border border-border/70 bg-card p-6">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
@@ -1719,7 +1719,7 @@ function useStaffFeedbackWorkspaceContent() {
       <div className="space-y-4">
         {summary ? (
           <div className="grid gap-3 xl:grid-cols-4">
-              <section className="rounded-xl border border-border bg-card p-6 xl:col-span-2">
+              <section className="rounded-lg border border-border/70 bg-card p-6 xl:col-span-2">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2 className={tokens.text.sectionTitle}>
@@ -1936,7 +1936,7 @@ function useStaffFeedbackWorkspaceContent() {
                 <div className="space-y-4 rounded-xl">
                   {feedbackCard(activeReview, t, true)}
 
-                  <section className="rounded-xl border border-border bg-card p-6">
+                  <section className="rounded-lg border border-border/70 bg-card p-6">
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>

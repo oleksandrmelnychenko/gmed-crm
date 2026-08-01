@@ -215,14 +215,14 @@ export function CommandPalette() {
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-start justify-center bg-foreground/25 px-4 pt-[12vh]"
+      className="animate-overlay-in fixed inset-0 z-[90] flex items-start justify-center bg-foreground/25 px-4 pt-[12vh]"
       role="dialog"
       aria-modal="true"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) close();
       }}
     >
-      <div className="w-full max-w-[560px] overflow-hidden rounded-xl border border-border bg-card shadow-2xl">
+      <div className="animate-palette-in w-full max-w-[560px] overflow-hidden rounded-lg border border-border/70 bg-card shadow-2xl">
         <div className="flex items-center gap-2 border-b border-border/70 px-3">
           <Search className="size-4 shrink-0 text-muted-foreground" />
           <input

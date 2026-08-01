@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { Translations } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { cachedNumberFormat } from "@/lib/intl-cache";
 import {
   knownLeadProgramServiceLabel,
   leadInsuranceCoverageLabel,
@@ -148,7 +149,7 @@ function selectedWorkTypeName(item: LeadOriginSelectedWorkType, lang: "de" | "ru
 }
 
 function selectedWorkTypeNumber(value: number, lang: "de" | "ru") {
-  return new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
+  return cachedNumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   }).format(value);
@@ -175,7 +176,7 @@ function ProfileDetailTile({
   return (
     <article
       className={cn(
-        "group relative min-h-[118px] overflow-hidden rounded-xl border border-border bg-white px-3.5 py-2.5 transition-colors hover:border-zinc-300",
+        "group relative min-h-[118px] overflow-hidden rounded-xl border border-border bg-white px-3.5 py-2.5 transition-colors hover:border-slate-300",
       )}
     >
       <div className="flex items-start justify-between gap-2.5">
@@ -228,7 +229,7 @@ function ProfileSummaryCard({
   action?: ReactNode;
 }) {
   return (
-    <section className={cn("rounded-xl border border-border bg-card p-3.5", className)}>
+    <section className={cn("rounded-lg border border-border/70 bg-card p-3.5", className)}>
       <div className="flex min-w-0 items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -418,7 +419,7 @@ function ProfileActionCard({
     <button
       type="button"
       disabled={disabled}
-      className="group relative min-h-[128px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-3.5 pb-12 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-zinc-200 disabled:hover:bg-zinc-50/80"
+      className="group relative min-h-[128px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 pb-12 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-slate-200 disabled:hover:bg-slate-50/80"
       onClick={onClick}
     >
       <div className="relative z-10">
@@ -446,7 +447,7 @@ function ProfileRecordShell({
   aside?: ReactNode;
 }) {
   return (
-    <article className="overflow-hidden rounded-xl border border-border bg-card">
+    <article className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <div className="grid gap-3 px-4 py-3 text-sm md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
         <div className="min-w-0">{children}</div>
         {aside ? (

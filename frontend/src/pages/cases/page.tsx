@@ -514,7 +514,7 @@ function casePermissions(role?: string): CasePermissions {
 
 function cardClass(className?: string) {
   return cn(
-    "rounded-xl border border-border bg-card",
+    "rounded-lg border border-border/70 bg-card",
     className,
   );
 }
@@ -2512,7 +2512,7 @@ function useCasesPageContent({
     return (
       <div className="space-y-6">
         <section className={cardClass("p-8")}>
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground">
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             {t.cases_clinical_no_access_title}
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">
@@ -3041,7 +3041,7 @@ function useCasesPageContent({
                             return (
                               <div
                                 key={snippet.id}
-                                className="rounded-xl border border-border bg-card p-4"
+                                className="rounded-lg border border-border/70 bg-card p-4"
                               >
                                 <div className="flex items-start justify-between gap-3">
                                   <div>
@@ -4451,7 +4451,7 @@ export const casesClinicalEditorTestUtils = {
 
 function MetricCard({ label, value, description, icon }: MetricCardProps) {
   return (
-    <div className="rounded-xl border border-border bg-card p-3.5">
+    <div className="rounded-lg border border-border/70 bg-card p-3.5">
       <div className="flex items-center justify-between gap-3">
         <span className="inline-flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
           <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
@@ -4459,7 +4459,7 @@ function MetricCard({ label, value, description, icon }: MetricCardProps) {
         </span>
         <span className="rounded-lg bg-muted p-2 text-muted-foreground">{icon}</span>
       </div>
-      <p className="mt-4 text-3xl font-semibold tracking-tight text-foreground">{value}</p>
+      <p className="mt-4 text-2xl font-semibold tracking-tight text-foreground">{value}</p>
       <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{description}</p>
     </div>
   );

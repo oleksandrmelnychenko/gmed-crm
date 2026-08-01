@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { cachedRegionDisplayNames } from "@/lib/intl-cache";
 
 /**
  * Comprehensive ISO 3166-1 alpha-2 country codes (uppercase). Labels are
@@ -104,8 +105,9 @@ export function countryLabel(code: string | null | undefined, lang: string): str
     return "";
   }
   const upper = code.toUpperCase();
+  const display = cachedRegionDisplayNames(lang === "de" ? "de" : "ru");
+  if (!display) return upper;
   try {
-    const display = new Intl.DisplayNames([lang === "de" ? "de" : "ru"], { type: "region" });
     return display.of(upper) ?? upper;
   } catch {
     return upper;

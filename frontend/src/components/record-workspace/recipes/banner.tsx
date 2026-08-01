@@ -20,8 +20,10 @@ export function Banner({
 
   return (
     <div
+      role={tone === "error" ? "alert" : "status"}
       className={cn(
-        "rounded-2xl border px-4 py-3 text-sm",
+        "rounded-lg border px-4 py-3 text-sm",
+        tone === "error" && "animate-shake",
         withIcon && "flex items-start gap-3",
         classes,
       )}

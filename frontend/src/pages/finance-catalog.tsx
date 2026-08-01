@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   ChevronDown,
+  CornerDownRight,
   Pencil,
   Plus,
   Search,
@@ -253,6 +254,9 @@ const VAT_SOURCE_LABEL_KEYS = {
   manual: "finance_catalog_vat_source_manual",
   legacy: "finance_catalog_vat_source_legacy",
 } satisfies Partial<Record<string, TranslationKey>>;
+
+const createButtonClassName =
+  "h-9 rounded-lg px-3.5";
 
 const financeMoneyFormatters = new Map<string, Intl.NumberFormat>();
 
@@ -760,6 +764,209 @@ function useFinanceCatalogPageContent() {
       },
     ],
     [t, vatCategoryLabel],
+  );
+
+  type PackageTableRow = {
+    rowId: string;
+    kind: "package" | "item";
+    name: string;
+    itemCount: number;
+    gross: number;
+    net: number;
+    vat: number;
+    currency: string;
+    isActive: boolean;
+    description: string;
+    pkg?: ServicePackage;
+    unitLabel?: string;
+    quantity?: string;
+  };
+  const [expandedPackages, setExpandedPackages] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const togglePackageExpanded = useCallback((packageId: string) => {
+    setExpandedPackages((current) => {
+      const next = new Set(current);
+      if (next.has(packageId)) next.delete(packageId);
+      else next.add(packageId);
+      return next;
+    });
+  }, []);
+  const packageTableRows = useMemo<PackageTableRow[]>(
+    () =>
+      servicePackages.map((pkg) => ({
+        rowId: pkg.id,
+        kind: "package",
+        name: pkg.name,
+        itemCount: pkg.items?.length ?? 0,
+        gross: Number(pkg.base_price_gross) || 0,
+        net: Number(pkg.base_price_net) || 0,
+        vat: Number(pkg.base_price_vat) || 0,
+        currency: pkg.currency,
+        isActive: pkg.is_active,
+        description: pkg.description ?? "",
+        pkg,
+      })),
+    [servicePackages],
+  );
+  const expandPackageRow = useCallback(
+    (row: PackageTableRow): PackageTableRow[] | null => {
+      if (row.kind !== "package" || !row.pkg || !expandedPackages.has(row.rowId)) {
+        return null;
+      }
+      const items = row.pkg.items ?? [];
+      return items.map((item) => ({
+        rowId: `${row.rowId}:item:${item.id}`,
+        kind: "item" as const,
+        name:
+          item.agency_service_name ||
+          agencyServiceNameLabel(item.service_key ?? "", item.agency_service_name ?? null, t) ||
+          item.description,
+        itemCount: 0,
+        gross: 0,
+        net: Number(item.agency_service_unit_price) || 0,
+        vat: 0,
+        currency: item.agency_service_currency || row.currency,
+        isActive: true,
+        description: item.description,
+        unitLabel: agencyServiceUnitLabel(item.unit_label, t),
+        quantity: item.included_quantity,
+      }));
+    },
+    [expandedPackages, t],
+  );
+  const packageTableColumns = useMemo<ColumnDef<PackageTableRow>[]>(
+    () => [
+      {
+        id: "name",
+        label: t.finance_catalog_service,
+        accessor: (row) => row.name,
+        filterType: "text",
+        sortable: true,
+        searchable: true,
+        required: true,
+        width: 380,
+        render: (row) =>
+          row.kind === "item" ? (
+            <div
+              className="flex min-w-0 items-center gap-1.5 pl-7"
+              title={row.description || undefined}
+            >
+              <CornerDownRight className="size-3 shrink-0 text-muted-foreground/60" />
+              <span className="truncate font-mono text-xs text-muted-foreground">
+                {row.name}
+              </span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="flex w-full min-w-0 items-center gap-1.5 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              aria-expanded={expandedPackages.has(row.rowId)}
+              onClick={(event) => {
+                event.stopPropagation();
+                togglePackageExpanded(row.rowId);
+              }}
+            >
+              <span className="truncate font-mono text-xs font-medium text-foreground">
+                {row.name}
+              </span>
+              {row.itemCount > 0 ? (
+                <ChevronDown
+                  className={cn(
+                    "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                    expandedPackages.has(row.rowId) && "rotate-180",
+                  )}
+                />
+              ) : null}
+            </button>
+          ),
+      },
+      {
+        id: "items",
+        label: t.finance_catalog_packages_column,
+        accessor: (row) => (row.kind === "package" ? row.itemCount : Number(row.quantity) || 0),
+        filterType: "number",
+        sortable: true,
+        width: 110,
+        render: (row) =>
+          row.kind === "item" ? (
+            <span className="tabular-nums text-muted-foreground">
+              {row.quantity}
+              {row.unitLabel ? ` ${row.unitLabel}` : ""}
+            </span>
+          ) : (
+            <span className="tabular-nums text-foreground">{row.itemCount}</span>
+          ),
+      },
+      {
+        id: "net",
+        label: t.finance_catalog_net_label,
+        accessor: (row) => row.net,
+        filterType: "number",
+        sortable: true,
+        width: 130,
+        render: (row) => (
+          <span className={cn("tabular-nums", row.kind === "item" ? "text-muted-foreground" : "font-medium text-foreground")}>
+            {row.net ? formatMoney(String(row.net), row.currency) : "—"}
+          </span>
+        ),
+      },
+      {
+        id: "vat",
+        label: t.finance_catalog_vat_label,
+        accessor: (row) => row.vat,
+        filterType: "number",
+        sortable: true,
+        width: 120,
+        render: (row) =>
+          row.kind === "item" ? null : (
+            <span className="tabular-nums text-foreground">
+              {formatMoney(String(row.vat), row.currency)}
+            </span>
+          ),
+      },
+      {
+        id: "gross",
+        label: t.finance_catalog_package_total,
+        accessor: (row) => row.gross,
+        filterType: "number",
+        sortable: true,
+        width: 140,
+        render: (row) =>
+          row.kind === "item" ? null : (
+            <span className="font-semibold tabular-nums text-foreground">
+              {formatMoney(String(row.gross), row.currency)}
+            </span>
+          ),
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (row) => (row.isActive ? "active" : "inactive"),
+        filterType: "enum",
+        filterOptions: [
+          { value: "active", label: t.common_active },
+          { value: "inactive", label: t.common_inactive },
+        ],
+        sortable: true,
+        width: 110,
+        render: (row) =>
+          row.kind === "item" ? null : (
+            <Badge
+              variant="outline"
+              className={cn(
+                "w-fit rounded-full",
+                row.isActive
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-slate-200 bg-slate-50 text-slate-600",
+              )}
+            >
+              {row.isActive ? t.common_active : t.common_inactive}
+            </Badge>
+          ),
+      },
+    ],
+    [expandedPackages, t, togglePackageExpanded],
   );
 
   const agencyServiceColumns = useMemo<ColumnDef<AgencyServiceItem>[]>(
@@ -1315,9 +1522,7 @@ function useFinanceCatalogPageContent() {
             {canManageTaxProfiles ? (
               <Button
                 type="button"
-                size="sm"
-                variant="outline"
-                className="h-8 rounded-lg"
+                className={createButtonClassName}
                 onClick={openCreateTaxProfile}
               >
                 <Plus className="size-4" />
@@ -1366,9 +1571,7 @@ function useFinanceCatalogPageContent() {
             {canManageTaxProfiles ? (
               <Button
                 type="button"
-                size="sm"
-                variant="outline"
-                className="h-8 rounded-lg"
+                className={createButtonClassName}
                 onClick={openCreateAgencyService}
               >
                 <Plus className="size-4" />
@@ -1450,9 +1653,7 @@ function useFinanceCatalogPageContent() {
             {canManageTaxProfiles ? (
               <Button
                 type="button"
-                size="sm"
-                variant="outline"
-                className="h-8 rounded-lg"
+                className={createButtonClassName}
                 onClick={openCreatePackage}
               >
                 <Plus className="size-4" />
@@ -1462,206 +1663,36 @@ function useFinanceCatalogPageContent() {
           </div>
         }
       >
-        {loading ? (
-          <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-8 text-center text-sm text-muted-foreground">
-            {t.finance_catalog_loading_packages}
-          </div>
-        ) : servicePackages.length === 0 ? (
+        {!loading && servicePackages.length === 0 ? (
           <EmptyCell>{t.finance_catalog_empty_packages}</EmptyCell>
         ) : (
-          <div className="space-y-0">
-            {servicePackages.map((item) => (
-              <details
-                key={item.id}
-                className={cn(
-                  "group relative pl-9",
-                  !item.is_active && "opacity-75",
-                )}
-              >
-                <summary className="relative grid cursor-pointer list-none gap-2 rounded-lg p-3 pr-12 transition hover:bg-[#f9fdff] group-open:bg-[#f9fdff] group-open:ring-1 group-open:ring-border/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-                  <div className="absolute -left-9 bottom-0 top-0 flex w-8 items-start justify-center pt-3">
-                    <span
-                      className={cn(
-                        "inline-flex size-7 shrink-0 items-center justify-center rounded-full transition-colors",
-                        item.is_active
-                          ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-                          : "bg-slate-50 text-slate-500 ring-1 ring-slate-200",
-                      )}
-                    >
-                      <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
-                    </span>
-                  </div>
-
-                  {canManageTaxProfiles ? (
-                    <div
-                      role="presentation"
-                      className="absolute right-3 top-3 z-20"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                      }}
-                      onKeyDown={(event) => event.stopPropagation()}
-                    >
+          <DataTableSurface
+            loading={loading}
+            rows={packageTableRows}
+            columns={packageTableColumns}
+            dictionary={t as unknown as Record<string, string>}
+            rowId={(row) => row.rowId}
+            expandRow={expandPackageRow}
+            emptyState={<EmptyCell>{t.finance_catalog_empty_packages}</EmptyCell>}
+            rowActions={
+              canManageTaxProfiles
+                ? (row) =>
+                    row.kind === "package" && row.pkg ? (
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon-sm"
-                        className="size-7 rounded-full bg-white text-muted-foreground shadow-sm ring-1 ring-border/60 hover:bg-[#f9fdff] hover:text-foreground"
-                        onClick={() => openEditPackage(item)}
+                        className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                        onClick={() => row.pkg && openEditPackage(row.pkg)}
                         aria-label={t.finance_catalog_edit}
+                        title={t.finance_catalog_edit}
                       >
                         <Pencil className="size-3.5" />
                       </Button>
-                    </div>
-                  ) : null}
-
-                  <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
-                    <div className="min-w-0">
-                      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                        <p className="min-w-0 max-w-full break-words text-[15px] font-semibold leading-5 text-foreground">
-                          {item.name}
-                        </p>
-                        <span className="size-1 rounded-full bg-muted-foreground/35" />
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {item.package_key}
-                        </span>
-                        <span className="size-1 rounded-full bg-muted-foreground/35" />
-                        <span className="text-xs tabular-nums text-muted-foreground">
-                          {item.valid_from}
-                          {item.valid_to ? ` - ${item.valid_to}` : ""}
-                        </span>
-                      </div>
-                      <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                        <span>
-                          {t.finance_catalog_tax_profile_prefix}: {" "}
-                          <span className="font-medium text-foreground">
-                            {taxProfileLabel(item.tax_profile_name, item.tax_profile_key)}
-                          </span>
-                        </span>
-                        {item.description ? (
-                          <>
-                            <span className="size-1 rounded-full bg-muted-foreground/35" />
-                            <span className="min-w-0 max-w-full break-words">
-                              {item.description}
-                            </span>
-                          </>
-                        ) : null}
-                      </div>
-                    </div>
-                    <div className="flex min-w-0 flex-wrap justify-start gap-1.5 lg:max-w-[520px] lg:justify-end lg:pr-1">
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "rounded-full",
-                          item.is_active
-                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                            : "border-slate-200 bg-slate-50 text-slate-600",
-                        )}
-                      >
-                        {item.is_active ? t.common_active : t.common_inactive}
-                      </Badge>
-                      <Badge
-                        variant="outline"
-                        className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-                      >
-                        {t.finance_catalog_package_total}: {" "}
-                        <span className="ml-1 font-mono text-sm font-semibold tabular-nums text-foreground">
-                          {formatMoney(item.base_price_gross, item.currency)}
-                        </span>
-                      </Badge>
-                      <Badge
-                        variant="outline"
-                        className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
-                      >
-                        {t.finance_catalog_net_label}: {" "}
-                        <span className="ml-1 font-mono text-sm font-semibold tabular-nums text-foreground">
-                          {formatMoney(item.base_price_net, item.currency)}
-                        </span>
-                      </Badge>
-                      <Badge
-                        variant="outline"
-                        className="rounded-full border-0 bg-white px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm"
-                      >
-                        {t.finance_catalog_vat_label}: {" "}
-                        <span className="ml-1 font-mono text-sm font-semibold tabular-nums text-foreground">
-                          {formatMoney(item.base_price_vat, item.currency)}
-                        </span>
-                      </Badge>
-                    </div>
-                  </div>
-                </summary>
-
-                <div
-                  aria-hidden="true"
-                  className="ml-20 flex h-3 items-center px-3"
-                >
-                  <span className="h-px w-12 bg-gradient-to-r from-transparent via-border/70 to-border/70" />
-                  <span className="size-1.5 rounded-full bg-border" />
-                  <span className="h-px flex-1 bg-gradient-to-r from-border/70 to-transparent" />
-                </div>
-                <div className="mb-2 ml-20 overflow-hidden rounded-lg bg-[#fbfdff] p-2 shadow-sm">
-                  {item.items?.length ? (
-                    <div className="grid gap-1.5 sm:grid-cols-2">
-                      {item.items.map((packageItem) => (
-                        <div
-                          key={packageItem.id}
-                          className="rounded-md bg-white px-3 py-2 text-xs shadow-sm ring-1 ring-border/40"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <p className="min-w-0 break-words font-medium text-foreground">
-                              {packageItem.agency_service_name || packageItem.service_key
-                                ? agencyServiceNameLabel(
-                                    packageItem.service_key,
-                                    packageItem.agency_service_name,
-                                    t,
-                                  )
-                                : packageItem.description}
-                            </p>
-                            <span className="shrink-0 tabular-nums text-muted-foreground">
-                              {packageItem.included_quantity}{" "}
-                              {agencyServiceUnitLabel(packageItem.unit_label, t)}
-                            </span>
-                          </div>
-                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                            {packageItem.service_key ? (
-                              <span className="font-mono">{packageItem.service_key}</span>
-                            ) : null}
-                            {packageItem.overage_unit_price_net ? (
-                              <span>
-                                {t.finance_catalog_overage_net_price}: {" "}
-                                <span className="font-medium text-foreground">
-                                  {formatMoney(
-                                    packageItem.overage_unit_price_net,
-                                    item.currency,
-                                  )}
-                                </span>
-                              </span>
-                            ) : null}
-                            <span>
-                              {t.finance_catalog_vat_label}: {" "}
-                              <span className="font-medium text-foreground">
-                                {packageItemVatRate(packageItem, item)}%
-                              </span>
-                            </span>
-                            {packageItem.requires_patient_approval ? (
-                              <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700">
-                                {t.finance_catalog_approval_suffix}
-                              </span>
-                            ) : null}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-3 px-3 py-2 text-xs text-muted-foreground">
-                      <span className="size-2 shrink-0 rounded-full bg-muted-foreground/35" />
-                      {t.finance_catalog_empty_included_items}
-                    </div>
-                  )}
-                </div>
-              </details>
-            ))}
-          </div>
+                    ) : null
+                : undefined
+            }
+          />
         )}
       </Section>
 
@@ -2483,9 +2514,7 @@ function useFinanceCatalogPageContent() {
                         </NativeComboboxSelect>
                         <Button
                           type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 rounded-lg"
+                          className={createButtonClassName}
                           onClick={() =>
                             setPackageForm((current) => ({
                               ...current,

@@ -188,6 +188,7 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useSecurePersistedState } from "@/lib/secure-persist";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
+import { cachedNumberFormat } from "@/lib/intl-cache";
 import { CountrySelect } from "@/pages/patients/ui/shared/patient-form-primitives";
 import {
   fetchSpecializationWorkTypes,
@@ -1283,9 +1284,9 @@ function EmptyPanel({
   text: string;
 }) {
   return (
-    <div className="rounded-[1.5rem] border border-dashed border-zinc-200 bg-zinc-50/90 px-5 py-6">
-      <p className="text-sm font-medium text-zinc-900">{title}</p>
-      <p className="mt-2 text-sm leading-6 text-zinc-600">{text}</p>
+    <div className="rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50/90 px-5 py-6">
+      <p className="text-sm font-medium text-slate-900">{title}</p>
+      <p className="mt-2 text-sm leading-6 text-slate-600">{text}</p>
     </div>
   );
 }
@@ -3333,10 +3334,10 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     return (
       <div className="space-y-6">
         <section className={cardClass("p-8")}>
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-950">
             {t.providers_no_access_title}
           </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-zinc-600">
+          <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
             {t.providers_no_access_body}
           </p>
         </section>
@@ -5798,7 +5799,7 @@ function SpecializationManagerSheet({
                               "rounded-full px-2 py-0.5 text-[11px] font-medium",
                               item.is_active
                                 ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                : "border-zinc-200 bg-zinc-50 text-zinc-600",
+                                : "border-slate-200 bg-slate-50 text-slate-600",
                             )}
                           >
                             {item.is_active ? t.common_active : t.common_inactive}
@@ -6077,7 +6078,7 @@ function StaffRoleManagerSheet({
                               "rounded-full px-2 py-0.5 text-[11px] font-medium",
                               role.is_active
                                 ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                : "border-zinc-200 bg-zinc-50 text-zinc-600",
+                                : "border-slate-200 bg-slate-50 text-slate-600",
                             )}
                           >
                             {role.is_active ? t.common_active : t.common_inactive}
@@ -6309,11 +6310,11 @@ function ProviderSheetHero({
   const internalRatingLabel = formatProviderRating(detail.internal_rating, t.common_not_set);
 
   return (
-    <section className="relative overflow-hidden rounded-xl border border-border bg-card px-7 py-4">
+    <section className="relative overflow-hidden rounded-lg border border-border/70 bg-card px-7 py-4">
       <span
         className={cn(
           "absolute left-0 top-4 h-12 w-1 rounded-r-full",
-          detail.is_active ? "bg-emerald-500" : "bg-zinc-300",
+          detail.is_active ? "bg-emerald-500" : "bg-slate-300",
         )}
       />
       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_240px] md:items-stretch">
@@ -7443,7 +7444,7 @@ function providerWorkTypePrice(
   workType: SpecializationWorkType,
   lang: "de" | "ru",
 ) {
-  const formatter = new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
+  const formatter = cachedNumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -7876,18 +7877,18 @@ function InteractionHistorySection({
                     {compactDateTime(item.occurred_at, t.common_not_set)}
                   </span>
                 </div>
-                <div className="rounded-[1.4rem] border border-zinc-200 p-4">
+                <div className="rounded-[1.4rem] border border-slate-200 p-4">
                   <div className="grid gap-4">
                     <div className="min-w-0 space-y-4">
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline" className="rounded-full border-zinc-200 text-zinc-700">
+                        <Badge variant="outline" className="rounded-full border-slate-200 text-slate-700">
                           {interactionKindLabel(item.kind, t)}
                         </Badge>
-                        <Badge variant="outline" className="rounded-full border-zinc-200 text-zinc-700">
+                        <Badge variant="outline" className="rounded-full border-slate-200 text-slate-700">
                           {interactionStatusLabel(item.status, t)}
                         </Badge>
                         {item.appointment_type ? (
-                          <Badge variant="outline" className="rounded-full border-zinc-200 text-zinc-700">
+                          <Badge variant="outline" className="rounded-full border-slate-200 text-slate-700">
                             {interactionTypeLabel(item.appointment_type, t)}
                           </Badge>
                         ) : null}
@@ -7909,7 +7910,7 @@ function InteractionHistorySection({
                       </div>
 
                       {notes ? (
-                        <div className="rounded-xl border border-border/60 px-3 py-2 text-sm leading-6 text-zinc-700">
+                        <div className="rounded-xl border border-border/60 px-3 py-2 text-sm leading-6 text-slate-700">
                           <span className="mb-1 block text-xs text-muted-foreground">{l("patients_note")}</span>
                           {notes}
                         </div>

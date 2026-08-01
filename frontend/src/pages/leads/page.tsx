@@ -1235,7 +1235,7 @@ function useLeadsPageContent() {
       <div className="flex-1 overflow-y-auto space-y-4 px-5 py-4">
         <div className="space-y-4 rounded-xl">
           {detailLoading ? (
-            <div className="flex min-h-[320px] items-center justify-center text-sm text-zinc-500">
+            <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
               {t.lead_loading_detail}
             </div>
@@ -1265,7 +1265,7 @@ function useLeadsPageContent() {
                       </Badge>
                     ) : null}
                   </div>
-                  <h2 className="mt-4 text-2xl font-semibold text-zinc-950">
+                  <h2 className="mt-4 text-2xl font-semibold text-slate-950">
                     {detail.first_name} {detail.last_name}
                   </h2>
                 </section>
@@ -1330,11 +1330,11 @@ function useLeadsPageContent() {
                 {detailLeadType === "form" ? (
                   <section className={cardClass("p-4")}>
                     {detail.message ? (
-                      <div className="rounded-xl bg-zinc-50 px-4 py-3 text-sm leading-6 text-zinc-700 whitespace-pre-wrap">
+                      <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
                         {detail.message}
                       </div>
                     ) : (
-                      <p className="mt-3 text-sm text-zinc-500">{t.common_not_set}</p>
+                      <p className="mt-3 text-sm text-slate-500">{t.common_not_set}</p>
                     )}
                   </section>
                 ) : null}
@@ -1393,17 +1393,17 @@ function useLeadsPageContent() {
                       <section className={cardClass("p-4")}>
                         <SectionTitle>{t.lead_section_health_concern}</SectionTitle>
                         {detail.primary_concern_text ? (
-                          <div className="mt-4 rounded-xl bg-zinc-50 px-4 py-3 text-sm leading-6 text-zinc-700 whitespace-pre-wrap">
+                          <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
                             {detail.primary_concern_text}
                           </div>
                         ) : null}
                         {detail.additional_concerns ? (
-                          <div className="mt-3 rounded-xl bg-zinc-50 px-4 py-3 text-sm leading-6 text-zinc-700 whitespace-pre-wrap">
+                          <div className="mt-3 rounded-xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
                             {detail.additional_concerns}
                           </div>
                         ) : null}
                         {detail.message ? (
-                          <div className="mt-3 rounded-xl bg-zinc-50 px-4 py-3 text-sm leading-6 text-zinc-700 whitespace-pre-wrap">
+                          <div className="mt-3 rounded-xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
                             {detail.message}
                           </div>
                         ) : null}
@@ -1421,11 +1421,11 @@ function useLeadsPageContent() {
                       {detail.attachments.map((file) => (
                         <li
                           key={file.id}
-                          className="flex items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm"
+                          className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
                         >
                           <div>
-                            <div className="font-medium text-zinc-800">{file.file_name}</div>
-                            <div className="text-xs text-zinc-500">
+                            <div className="font-medium text-slate-800">{file.file_name}</div>
+                            <div className="text-xs text-slate-500">
                               {dashOrValue(file.content_type, t)} - {formatSize(file.size_bytes)}
                             </div>
                           </div>
@@ -1480,10 +1480,10 @@ function useLeadsPageContent() {
                       <StatusBadge tone="success">{statusLabel("converted", t)}</StatusBadge>
                     ) : null}
                   </div>
-                  <h2 className="mt-4 text-2xl font-semibold text-zinc-950">
+                  <h2 className="mt-4 text-2xl font-semibold text-slate-950">
                     {detail.first_name} {detail.last_name}
                   </h2>
-                  <p className="mt-2 text-sm text-zinc-600">
+                  <p className="mt-2 text-sm text-slate-600">
                     {t.users_created} {formatDate(detail.created_at, locale, t.common_not_set)}
                   </p>
                 </section>
@@ -1532,7 +1532,7 @@ function useLeadsPageContent() {
                         </Badge>
                       ) : null}
                       {detail.submitted_at ? (
-                        <span className="text-xs text-zinc-500">
+                        <span className="text-xs text-slate-500">
                           {t.lead_submitted_at} {formatDate(detail.submitted_at, locale, t.common_not_set)}
                         </span>
                       ) : null}
@@ -1583,7 +1583,7 @@ function useLeadsPageContent() {
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <SectionTitle>{t.lead_workflow_title}</SectionTitle>
-                        <p className="mt-1 text-sm text-zinc-600">
+                        <p className="mt-1 text-sm text-slate-600">
                           {t.lead_workflow_description}
                         </p>
                       </div>
@@ -1751,7 +1751,7 @@ function useLeadsPageContent() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <SectionTitle>{t.lead_section_process_readiness}</SectionTitle>
-                      <p className="mt-1 text-sm text-zinc-600">
+                      <p className="mt-1 text-sm text-slate-600">
                         {t.lead_process_readiness_description}
                       </p>
                     </div>
@@ -1833,7 +1833,7 @@ function useLeadsPageContent() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <SectionTitle>{t.lead_section_lifecycle}</SectionTitle>
-                      <p className="mt-1 text-sm text-zinc-600">
+                      <p className="mt-1 text-sm text-slate-600">
                         {t.lead_lifecycle_description}
                       </p>
                     </div>
@@ -1863,25 +1863,25 @@ function useLeadsPageContent() {
                           event.transition_kind,
                           event.note ?? "",
                         ].join("|")}
-                        className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-2.5"
+                        className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div>
-                            <p className="text-sm font-medium text-zinc-900">
+                            <p className="text-sm font-medium text-slate-900">
                               {event.from_stage
                                 ? `${leadStageLabel(event.from_stage, t)} -> ${leadStageLabel(event.to_stage, t)}`
                                 : leadStageLabel(event.to_stage, t)}
                             </p>
-                            <p className="mt-1 text-xs uppercase tracking-[0.12em] text-zinc-500">
+                            <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">
                               {leadTransitionKindLabel(event.transition_kind, t)}
                             </p>
                           </div>
-                          <span className="text-xs text-zinc-500">
+                          <span className="text-xs text-slate-500">
                             {formatDate(event.created_at, locale, t.common_not_set)}
                           </span>
                         </div>
                         {event.note ? (
-                          <p className="mt-2 text-sm text-zinc-600">{event.note}</p>
+                          <p className="mt-2 text-sm text-slate-600">{event.note}</p>
                         ) : null}
                       </div>
                     ))}
@@ -1897,7 +1897,7 @@ function useLeadsPageContent() {
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <SectionTitle>{t.lead_qualification_gate_data}</SectionTitle>
-                        <p className="mt-1 text-sm text-zinc-600">
+                        <p className="mt-1 text-sm text-slate-600">
                           {t.lead_qualification_gate_description}
                         </p>
                       </div>
@@ -2100,7 +2100,7 @@ function useLeadsPageContent() {
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <SectionTitle>{t.lead_failed_resolution_title}</SectionTitle>
-                        <p className="mt-1 text-sm text-zinc-600">
+                        <p className="mt-1 text-sm text-slate-600">
                           {t.lead_failed_resolution_description}
                         </p>
                       </div>
@@ -2111,7 +2111,7 @@ function useLeadsPageContent() {
                             "rounded-full",
                             detail.failed_outcome.status === "delete_anonymized"
                               ? "border-rose-200 bg-rose-50 text-rose-700"
-                              : "border-zinc-200 bg-zinc-100 text-zinc-700"
+                              : "border-slate-200 bg-slate-100 text-slate-700"
                           )}
                         >
                           {failedOutcomeLabel(detail.failed_outcome.status, t)}
@@ -2249,12 +2249,12 @@ function useLeadsPageContent() {
                       <DetailCard label={t.lead_health_risk_for_travel} value={yesNo(detail.has_health_risk_for_travel, t)} />
                     </div>
                     {detail.primary_concern_text ? (
-                      <div className="mt-4 rounded-2xl bg-zinc-50 px-4 py-3 text-sm leading-6 text-zinc-700 whitespace-pre-wrap">
+                      <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
                         {detail.primary_concern_text}
                       </div>
                     ) : null}
                     {detail.additional_concerns ? (
-                      <div className="mt-3 rounded-2xl bg-zinc-50 px-4 py-3 text-sm leading-6 text-zinc-700 whitespace-pre-wrap">
+                      <div className="mt-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
                         {detail.additional_concerns}
                       </div>
                     ) : null}
@@ -2293,7 +2293,7 @@ function useLeadsPageContent() {
                       <DetailCard label={t.lead_visit_timing} value={leadVisitTimingLabel(detail.visit_timing, t)} />
                     </div>
                     {detail.message ? (
-                      <div className="mt-4 rounded-2xl bg-zinc-50 px-4 py-3 text-sm leading-6 text-zinc-700 whitespace-pre-wrap">
+                      <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
                         {detail.message}
                       </div>
                     ) : null}
@@ -2323,11 +2323,11 @@ function useLeadsPageContent() {
                       {detail.attachments.map((file) => (
                         <li
                           key={file.id}
-                          className="flex items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm"
+                          className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
                         >
                           <div>
-                            <div className="font-medium text-zinc-800">{file.file_name}</div>
-                            <div className="text-xs text-zinc-500">
+                            <div className="font-medium text-slate-800">{file.file_name}</div>
+                            <div className="text-xs text-slate-500">
                               {dashOrValue(file.content_type, t)} - {formatSize(file.size_bytes)}
                             </div>
                           </div>
@@ -2360,11 +2360,11 @@ function useLeadsPageContent() {
                       ))}
                     </ul>
                   ) : (
-                    <p className="mt-3 text-sm text-zinc-500">{t.lead_no_files_uploaded}</p>
+                    <p className="mt-3 text-sm text-slate-500">{t.lead_no_files_uploaded}</p>
                   )}
                   {detail.notes ? (
-                    <div className="mt-4 rounded-2xl bg-zinc-50 px-4 py-3 text-sm leading-6 text-zinc-700">
-                      <div className="mb-1 text-xs uppercase tracking-wide text-zinc-400">{t.lead_internal_note}</div>
+                    <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
+                      <div className="mb-1 text-xs uppercase tracking-wide text-slate-400">{t.lead_internal_note}</div>
                       {detail.notes}
                     </div>
                   ) : null}
@@ -2374,7 +2374,7 @@ function useLeadsPageContent() {
             </div>
             )
           ) : (
-            <div className="flex min-h-[320px] items-center justify-center text-sm text-zinc-500">
+            <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
               {t.lead_select_from_queue}
             </div>
           )}
@@ -2749,7 +2749,7 @@ function useLeadsPageContent() {
               {pendingConvertLead ? (
                 <>
                   {t.lead_convert_dialog_start}{" "}
-                  <span className="font-medium text-zinc-900">
+                  <span className="font-medium text-slate-900">
                     {pendingConvertLead.first_name} {pendingConvertLead.last_name}
                   </span>
                   {t.lead_convert_dialog_end}{" "}
@@ -2850,20 +2850,20 @@ function WorkflowActionCard({
     success: "border-emerald-200 bg-emerald-50 text-emerald-700",
     warning: "border-amber-200 bg-amber-50 text-amber-700",
     info: "border-sky-200 bg-sky-50 text-sky-700",
-    muted: "border-zinc-200 bg-zinc-50 text-zinc-600",
+    muted: "border-slate-200 bg-slate-50 text-slate-600",
   }[tone];
 
   return (
-    <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5">
+    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5">
       <div className="flex items-start gap-3">
-        <div className="mt-0.5 rounded-lg border border-zinc-200 bg-white p-2 text-zinc-600">
+        <div className="mt-0.5 rounded-lg border border-slate-200 bg-white p-2 text-slate-600">
           {icon}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <p className="text-sm font-medium text-zinc-900">{title}</p>
-              <p className="mt-1 text-sm leading-5 text-zinc-600">{description}</p>
+              <p className="text-sm font-medium text-slate-900">{title}</p>
+              <p className="mt-1 text-sm leading-5 text-slate-600">{description}</p>
             </div>
             <Badge variant="outline" className={cn("rounded-full", toneClass)}>
               {status}

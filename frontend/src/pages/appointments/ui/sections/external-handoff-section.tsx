@@ -402,10 +402,10 @@ function useAppointmentExternalHandoffSectionContent({
                 >
                   <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-zinc-900">
+                      <p className="text-sm font-medium text-slate-900">
                         {item.subject}
                       </p>
-                      <p className="mt-1 text-xs text-zinc-500">
+                      <p className="mt-1 text-xs text-slate-500">
                         {item.created_by_name} · {communicationDirectionLabel(item.direction)}{" "}
                         {t.appointments_common_via}{" "}
                         {communicationChannelLabel(item.channel)} ·{" "}
@@ -426,7 +426,7 @@ function useAppointmentExternalHandoffSectionContent({
                     </span>
                   </div>
                   {item.message ? (
-                    <p className="mt-3 whitespace-pre-line text-sm text-zinc-600">
+                    <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
                       {item.message}
                     </p>
                   ) : null}
@@ -497,7 +497,7 @@ function useAppointmentExternalHandoffSectionContent({
                 </div>
               ))}
               {canViewReminders && (reminders.length > 0 || tasks.length > 0) ? (
-                <div className="rounded-2xl border border-dashed border-zinc-200 bg-white/70 p-4">
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-4">
                   <AppointmentDotLabel>
                     {t.appointments_external_handoff_internal_trail}
                   </AppointmentDotLabel>
@@ -507,14 +507,14 @@ function useAppointmentExternalHandoffSectionContent({
                         key={item.id}
                         className={appointmentSoftRowClassName}
                       >
-                        <p className="text-sm font-medium text-zinc-900">
+                        <p className="text-sm font-medium text-slate-900">
                           {item.title.replace(`${EXTERNAL_HANDOFF_PREFIX} `, "")}
                         </p>
-                        <p className="mt-1 text-xs text-zinc-500">
+                        <p className="mt-1 text-xs text-slate-500">
                           {item.user_name} · {formatDateTimeLabel(item.remind_at)}
                         </p>
                         {item.description ? (
-                          <p className="mt-3 whitespace-pre-line text-sm text-zinc-600">
+                          <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
                             {item.description}
                           </p>
                         ) : null}
@@ -526,22 +526,22 @@ function useAppointmentExternalHandoffSectionContent({
                         className={appointmentSoftRowClassName}
                       >
                         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                          <p className="text-sm font-medium text-zinc-900">
+                          <p className="text-sm font-medium text-slate-900">
                             {task.title.replace(`${EXTERNAL_HANDOFF_PREFIX} `, "")}
                           </p>
-                          <span className="text-xs text-zinc-500">
+                          <span className="text-xs text-slate-500">
                             {taskStatusLabel(task.status)} ·{" "}
                             {taskPriorityLabel(task.priority)}
                           </span>
                         </div>
-                        <p className="mt-1 text-xs text-zinc-500">
+                        <p className="mt-1 text-xs text-slate-500">
                           {task.assigned_to_name}
                           {task.due_date
                             ? ` · ${formatDateTimeLabel(task.due_date)}`
                             : ""}
                         </p>
                         {task.description ? (
-                          <p className="mt-3 whitespace-pre-line text-sm text-zinc-600">
+                          <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
                             {task.description}
                           </p>
                         ) : null}

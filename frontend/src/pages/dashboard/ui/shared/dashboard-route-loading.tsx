@@ -1,6 +1,6 @@
 export function DashboardRouteLoading() {
   return (
-    <div className="flex min-h-[260px] items-center justify-center rounded-xl border border-border bg-card">
+    <div className="flex min-h-[260px] items-center justify-center rounded-lg border border-border/70 bg-card">
       <div className="size-8 animate-spin rounded-full border-2 border-border border-t-[var(--brand)]" />
     </div>
   );

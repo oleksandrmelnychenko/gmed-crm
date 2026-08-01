@@ -74,7 +74,7 @@ function contractAccentClass(status: string) {
   if (status === "signed" || status === "active") return "bg-emerald-500";
   if (status === "sent") return "bg-sky-500";
   if (status === "expired" || status === "terminated" || status === "cancelled") return "bg-rose-500";
-  if (status === "draft") return "bg-zinc-400";
+  if (status === "draft") return "bg-slate-400";
   return "bg-sky-500";
 }
 
@@ -157,7 +157,7 @@ export function PatientContractsTab({
             {contracts.map((contract) => (
               <article
                 key={contract.id}
-                className="rounded-xl border border-border bg-card"
+                className="rounded-lg border border-border/70 bg-card"
               >
                 <div className="relative overflow-hidden p-3.5">
                   <span

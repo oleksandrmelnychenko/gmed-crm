@@ -263,10 +263,10 @@ export function PatientsPage() {
         <section
           className={cn("rounded-xl p-8", tokens.surface.softCard)}
         >
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-950">
             {t.patients_no_access_title}
           </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-zinc-600">
+          <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
             {t.patients_no_access_body}
           </p>
         </section>

@@ -676,7 +676,7 @@ function priorityBadgeClass(priority: string) {
     case "high":
       return "border-amber-200 bg-amber-50 text-amber-700";
     case "low":
-      return "border-zinc-200 bg-zinc-50 text-zinc-600";
+      return "border-slate-200 bg-slate-50 text-slate-600";
     default:
       return "border-sky-200 bg-sky-50 text-sky-700";
   }
@@ -697,7 +697,7 @@ function timelineEntityDotClass(entityType: string) {
     case "invoice":
       return "bg-rose-500";
     case "compliance":
-      return "bg-zinc-500";
+      return "bg-slate-500";
     default:
       return "bg-[var(--brand)]";
   }
@@ -777,13 +777,13 @@ const STATUS_COLORS: Record<string, string> = {
   closed: "border-emerald-200 bg-emerald-50 text-emerald-700",
   active: "border-emerald-200 bg-emerald-50 text-emerald-700",
   completed: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  draft: "border-zinc-200 bg-zinc-50 text-zinc-700",
+  draft: "border-slate-200 bg-slate-50 text-slate-700",
   sent: "border-sky-200 bg-sky-50 text-sky-700",
   signed: "border-emerald-200 bg-emerald-50 text-emerald-700",
   overdue: "border-rose-200 bg-rose-50 text-rose-700",
   partially_paid: "border-amber-200 bg-amber-50 text-amber-700",
   paid: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  expired: "border-zinc-200 bg-zinc-50 text-zinc-600",
+  expired: "border-slate-200 bg-slate-50 text-slate-600",
   terminated: "border-red-200 bg-red-50 text-red-700",
   cancelled: "border-red-200 bg-red-50 text-red-700",
   planned: "border-sky-200 bg-sky-50 text-sky-700",
@@ -799,7 +799,7 @@ const ROLE_COLORS: Record<string, string> = {
   concierge: "bg-teal-100 text-teal-700",
   billing: "bg-amber-100 text-amber-700",
   sales: "bg-amber-100 text-amber-700",
-  it_admin: "bg-zinc-100 text-zinc-700",
+  it_admin: "bg-slate-100 text-slate-700",
   patient: "bg-emerald-100 text-emerald-700",
 };
 
@@ -2032,7 +2032,7 @@ function usePatientDetailPageContent() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <LoaderCircle className="size-6 animate-spin text-zinc-400" />
+        <LoaderCircle className="size-6 animate-spin text-slate-400" />
       </div>
     );
   }

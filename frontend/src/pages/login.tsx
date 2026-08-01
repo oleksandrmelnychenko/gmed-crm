@@ -207,19 +207,19 @@ export function LoginPage() {
       <div className="relative w-full max-w-lg rounded-3xl bg-white p-10 xl:p-12">
         <div className="mb-8 flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-3xl font-semibold text-zinc-950">{tr.login_title}</h2>
-            <p className="mt-2 text-sm leading-6 text-zinc-600">
+            <h2 className="text-2xl font-semibold text-slate-950">{tr.login_title}</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
               {tr.login_sign_in_subtitle}
             </p>
           </div>
-          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-zinc-700">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-slate-700">
             <LogoMark />
           </div>
         </div>
 
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="space-y-2.5">
-                <label htmlFor="email" className="text-sm font-medium text-zinc-700">
+                <label htmlFor="email" className="text-sm font-medium text-slate-700">
                   {tr.login_email}
                 </label>
                 <input
@@ -234,17 +234,17 @@ export function LoginPage() {
                       fieldErrors: { ...current.fieldErrors, email: undefined },
                     }))
                   }
-                  className={`h-12 w-full rounded-xl border bg-white px-4 text-sm text-zinc-950 outline-none transition-all duration-200 ${
+                  className={`h-12 w-full rounded-xl border bg-white px-4 text-sm text-slate-950 outline-none transition-all duration-200 ${
                     fieldErrors.email
                       ? "border-red-400 ring-4 ring-red-100"
-                      : "border-zinc-300 focus:border-ring focus:ring-2 focus:ring-ring/30"
+                      : "border-slate-300 focus:border-ring focus:ring-2 focus:ring-ring/30"
                   }`}
                 />
                 <FieldError message={fieldErrors.email} />
               </div>
 
               <div className="space-y-2.5">
-                <label htmlFor="password" className="text-sm font-medium text-zinc-700">
+                <label htmlFor="password" className="text-sm font-medium text-slate-700">
                   {tr.login_password}
                 </label>
                 <input
@@ -259,10 +259,10 @@ export function LoginPage() {
                       fieldErrors: { ...current.fieldErrors, password: undefined },
                     }))
                   }
-                  className={`h-12 w-full rounded-xl border bg-white px-4 text-sm text-zinc-950 outline-none transition-all duration-200 ${
+                  className={`h-12 w-full rounded-xl border bg-white px-4 text-sm text-slate-950 outline-none transition-all duration-200 ${
                     fieldErrors.password
                       ? "border-red-400 ring-4 ring-red-100"
-                      : "border-zinc-300 focus:border-ring focus:ring-2 focus:ring-ring/30"
+                      : "border-slate-300 focus:border-ring focus:ring-2 focus:ring-ring/30"
                   }`}
                 />
                 <FieldError message={fieldErrors.password} />
@@ -278,7 +278,7 @@ export function LoginPage() {
               <Button
                 type="submit"
                 size="lg"
-                className="h-12 w-full rounded-xl bg-zinc-950 text-white hover:bg-zinc-800"
+                className="h-12 w-full rounded-xl bg-slate-950 text-white hover:bg-slate-800"
                 disabled={loading}
               >
                 <span>{loading ? tr.login_loading : tr.login_submit}</span>
@@ -304,10 +304,10 @@ export function LoginPage() {
                     <div className="flex items-center justify-center size-16 rounded-2xl bg-red-50">
                       <AlertCircle className="size-8 text-red-500" />
                     </div>
-                    <h3 className="text-lg font-semibold text-zinc-950">
+                    <h3 className="text-lg font-semibold text-slate-950">
                       {tr.login_mfa_rejected_title}
                     </h3>
-                    <p className="text-sm text-zinc-500 max-w-xs">
+                    <p className="text-sm text-slate-500 max-w-xs">
                       {tr.login_mfa_rejected_msg}
                     </p>
                     <Button
@@ -323,22 +323,22 @@ export function LoginPage() {
                     <div className="flex items-center justify-center size-16 rounded-2xl bg-sky-50">
                       <Clock className="size-8 text-sky-500 animate-pulse" />
                     </div>
-                    <h3 className="text-lg font-semibold text-zinc-950">
+                    <h3 className="text-lg font-semibold text-slate-950">
                       {tr.mfa_pending}
                     </h3>
-                    <p className="text-sm text-zinc-500 max-w-xs">
+                    <p className="text-sm text-slate-500 max-w-xs">
                       {tr.login_mfa_pending_msg}
                     </p>
                     <div className="flex items-center gap-2 mt-2">
                       <div className="size-2 rounded-full bg-sky-400 animate-pulse" />
-                      <span className="text-xs text-zinc-400">
+                      <span className="text-xs text-slate-400">
                         {tr.login_mfa_checking}
                       </span>
                     </div>
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="mt-2 text-zinc-400"
+                      className="mt-2 text-slate-400"
                       onClick={() => setPendingLogin(null)}
                     >
                       {tr.common_cancel}

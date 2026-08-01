@@ -33,6 +33,7 @@ import {
   emptyInterpreterLanguage,
   interpreterLanguageRecordToForm,
   interpreterLanguagesToPayload,
+  nextInterpreterFormKey,
   normalizeInterpreterAccountDraft,
   type InterpreterLanguageForm,
   type InterpreterLanguageRecord,
@@ -76,6 +77,7 @@ type UploadedProfileDocument = {
 };
 
 type CredentialForm = {
+  formKey: string;
   credentialType: string;
   title: string;
   issuer: string;
@@ -578,6 +580,7 @@ function compactDate(value: unknown) {
 
 function emptyCredential(): CredentialForm {
   return {
+    formKey: nextInterpreterFormKey(),
     credentialType: "certificate",
     title: "",
     issuer: "",
@@ -608,6 +611,7 @@ function credentialsToForm(value: unknown): CredentialForm[] {
     ? value
         .map((item) => asProfile(item))
         .map((item) => ({
+          formKey: nextInterpreterFormKey(),
           credentialType: text(item.credentialType) || "certificate",
           title: text(item.title),
           issuer: text(item.issuer),
@@ -1676,7 +1680,7 @@ export function InterpretersPage() {
                   ) : languages.length > 0 ? (
                     languages.map((language, index) => (
                       <div
-                        key={index}
+                        key={language.formKey}
                         className="grid gap-3 border-t border-border pt-3 md:grid-cols-2 xl:grid-cols-[minmax(80px,0.7fr)_minmax(0,1.1fr)_minmax(90px,0.7fr)_minmax(120px,0.9fr)_minmax(0,1.2fr)_auto]"
                       >
                         <Field label={profileCopy.languageCode}>
@@ -1816,7 +1820,7 @@ export function InterpretersPage() {
                   {form.credentials.length > 0 ? (
                     form.credentials.map((credential, index) => (
                       <div
-                        key={index}
+                        key={credential.formKey}
                         className="grid gap-3 border-t border-border pt-3 md:grid-cols-4"
                       >
                         <Field label={profileCopy.type}>

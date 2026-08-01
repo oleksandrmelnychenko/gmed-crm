@@ -967,7 +967,7 @@ function useContractsPageContent() {
               "rounded-full",
               row.is_active
                 ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                : "border-zinc-200 bg-zinc-100 text-zinc-600",
+                : "border-slate-200 bg-slate-100 text-slate-600",
             )}
           >
             {row.is_active ? text.activeState : text.inactiveState}
@@ -2276,7 +2276,7 @@ function useContractsPageContent() {
               }
             >
               <div className="space-y-4 rounded-xl">
-                <section className="rounded-xl border border-border bg-card p-5">
+                <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.basicData)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={text.serviceKey}>
@@ -2320,7 +2320,7 @@ function useContractsPageContent() {
                   </div>
                 </section>
 
-                <section className="rounded-xl border border-border bg-card p-5">
+                <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.pricing)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={text.unitPrice}>
@@ -2352,7 +2352,7 @@ function useContractsPageContent() {
                   </div>
                 </section>
 
-                <section className="rounded-xl border border-border bg-card p-5">
+                <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.validityPeriod)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={t.providers_service_valid_from}>
@@ -2379,7 +2379,7 @@ function useContractsPageContent() {
                   </div>
                 </section>
 
-                <section className="rounded-xl border border-border bg-card p-5">
+                <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.descriptionStatus)}</h2>
                   <div className="mt-5 space-y-4">
                     <Field label={text.description}>
@@ -2432,7 +2432,7 @@ function useContractsPageContent() {
               }
             >
               <div className="space-y-4 rounded-xl">
-                <section className="rounded-xl border border-border bg-card p-5">
+                <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.contractPatientStatus)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={t.contracts_patient} required>
@@ -2479,7 +2479,7 @@ function useContractsPageContent() {
                   </div>
                 </section>
 
-                <section className="rounded-xl border border-border bg-card p-5">
+                <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.contractDates)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={t.providers_service_valid_from} required>
@@ -2522,7 +2522,7 @@ function useContractsPageContent() {
                   </div>
                 </section>
 
-                <section className="rounded-xl border border-border bg-card p-5">
+                <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.contractConditions)}</h2>
                   <div className="mt-5">
                     <Field label={t.contracts_notes}>
@@ -2564,7 +2564,7 @@ function useContractsPageContent() {
               }
             >
               <div className="space-y-4 rounded-xl">
-                <section className="rounded-xl border border-border bg-card p-5">
+                <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.quoteOrderSection)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={t.orders_title} className="sm:col-span-2">
@@ -2616,7 +2616,7 @@ function useContractsPageContent() {
                   </div>
                 </section>
 
-                <section className="rounded-xl border border-border bg-card p-5">
+                <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.quoteNotesSection)}</h2>
                   <div className="mt-5">
                     <Field label={t.contracts_notes}>
@@ -2722,7 +2722,7 @@ function useContractsPageContent() {
                     <div className="mt-5 grid gap-3 md:grid-cols-3">
                       <button
                         type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                         onClick={() => window.open(`/patients?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
@@ -2737,7 +2737,7 @@ function useContractsPageContent() {
                       </button>
                       <button
                         type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                         onClick={() => window.open(`/orders?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
@@ -2752,7 +2752,7 @@ function useContractsPageContent() {
                       </button>
                       <button
                         type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                         onClick={() => window.open(`/documents?patient=${contractDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
@@ -2942,7 +2942,7 @@ function useContractsPageContent() {
                     <div className="mt-5 grid gap-3 md:grid-cols-4">
                       <button
                         type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                         onClick={() => window.open(`/patients?patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
@@ -2957,7 +2957,7 @@ function useContractsPageContent() {
                       </button>
                       <button
                         type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                         onClick={() => window.open(`/orders?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
@@ -2972,7 +2972,7 @@ function useContractsPageContent() {
                       </button>
                       <button
                         type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                         onClick={() => window.open(`/invoices?quote=${quoteDetail.id}&order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
@@ -2987,7 +2987,7 @@ function useContractsPageContent() {
                       </button>
                       <button
                         type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                         onClick={() => window.open(`/documents?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
                       >
                         <div className="relative z-10">
@@ -3155,7 +3155,7 @@ function Field({
 
 function LoadingState({ label }: { label: string }) {
   return (
-    <div className="rounded-xl border border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
+    <div className="rounded-lg border border-border/70 bg-card px-6 py-12 text-center text-sm text-muted-foreground">
       <LoaderCircle className="mx-auto mb-3 size-5 animate-spin" />
       {label}
     </div>

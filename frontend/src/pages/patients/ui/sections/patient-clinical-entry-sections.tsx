@@ -642,7 +642,7 @@ export function PatientMedicationTable({
   const dose = (value: string | null) => value?.trim() ?? "";
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-card">
+    <div className="overflow-x-auto rounded-lg border border-border/70 bg-card">
       <table className="w-full min-w-[1080px] border-collapse text-left text-xs">
         <thead className="border-b border-border bg-muted/40">
           <tr>

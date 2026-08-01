@@ -21,6 +21,7 @@ import { toast } from "@/components/ui/toast";
 import { useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
+import { cachedDateTimeFormat } from "@/lib/intl-cache";
 import { PauseCircle, Pencil, PlayCircle, Plus, Trash2 } from "lucide-react";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import type { DoctorOption } from "@/pages/appointments/model/types";
@@ -124,7 +125,7 @@ function patientRiskScoreTypeLabel(scoreType: string, tx: Bilingual): string {
 function patientVitalDateTime(value: string | null | undefined, fallback: string): string {
   if (!value) return fallback;
   try {
-    return new Intl.DateTimeFormat("en-GB", {
+    return cachedDateTimeFormat("en-GB", {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -494,7 +495,7 @@ export function PatientMedicationTable({
   const bodyDoseCell = "px-1.5 py-2 text-center align-top font-mono tabular-nums text-foreground";
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-card">
+    <div className="overflow-x-auto rounded-lg border border-border/70 bg-card">
       <table className="w-full min-w-[1080px] border-collapse text-left text-xs">
         <thead className="border-b border-border bg-muted/40">
           <tr>
@@ -1174,7 +1175,7 @@ function lifecycleBadgeClass(status: RecommendationLifecycleStatus): string {
     case "nicht_erfolgt":
       return "border-rose-300 bg-rose-50 text-rose-700";
     case "unbekannt":
-      return "border-zinc-300 bg-zinc-50 text-zinc-600";
+      return "border-slate-300 bg-slate-50 text-slate-600";
     default:
       return "border-sky-300 bg-sky-50 text-sky-700";
   }
@@ -2625,7 +2626,7 @@ export function PatientClinicalTab({
           ) : null}
 
           {vitalsHistory.length > 0 ? (
-            <div className="max-h-[540px] overflow-y-auto rounded-xl border border-border bg-card">
+            <div className="max-h-[540px] overflow-y-auto rounded-lg border border-border/70 bg-card">
               {vitalsHistory.map((item) => {
                 const notSet = tx("Не указано", "Nicht gesetzt");
                 const vitalMetrics = [

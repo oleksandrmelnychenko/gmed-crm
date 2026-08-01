@@ -47,7 +47,7 @@ export function StaffDashboardActivitySection({
   return (
     <>
       <div className="grid gap-3 lg:grid-cols-2">
-        <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
+        <div className="flex flex-col overflow-hidden rounded-lg border border-border/70 bg-card">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <div className="flex items-center gap-2">
               <CalendarDays className="size-4 text-muted-foreground" />
@@ -106,7 +106,7 @@ export function StaffDashboardActivitySection({
           </div>
         </div>
 
-        <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
+        <div className="flex flex-col overflow-hidden rounded-lg border border-border/70 bg-card">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <div className="flex items-center gap-2">
               <CheckCircle2 className="size-4 text-muted-foreground" />

@@ -1528,7 +1528,7 @@ function useStaffInvoicesPageContent() {
                       const value = Number(row.net_surplus ?? 0);
                       if (value > 0) return "bg-emerald-500";
                       if (value < 0) return "bg-rose-500";
-                      return "bg-zinc-300";
+                      return "bg-slate-300";
                     }}
                     emptyState={
                       <EmptyState
@@ -1803,7 +1803,7 @@ function useStaffInvoicesPageContent() {
             >
               <div className="space-y-4 rounded-xl">
                 {createError ? <ShellBanner tone="error">{createError}</ShellBanner> : null}
-                <section className="rounded-xl border border-border bg-card p-5">
+                <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.createQuoteSection)}</h2>
                   <div className="mt-5 space-y-4">
                     <Field label={text.createQuoteSection}>
@@ -1838,7 +1838,7 @@ function useStaffInvoicesPageContent() {
                   </div>
                 </section>
 
-                <section className="rounded-xl border border-border bg-card p-5">
+                <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.invoiceSettingsSection)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
                     <Field label={t.invoices_type}>
@@ -1872,7 +1872,7 @@ function useStaffInvoicesPageContent() {
                   </div>
                 </section>
 
-                <section className="rounded-xl border border-border bg-card p-5">
+                <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.notes)}</h2>
                   <div className="mt-5">
                     <Field label={text.notes}>
@@ -1910,7 +1910,7 @@ function useStaffInvoicesPageContent() {
           >
             {detailBusy ? <LoadingState label={t.common_loading} /> : detailError ? <ShellBanner tone="error">{detailError}</ShellBanner> : !detail ? <EmptyState title={text.noInvoiceSelected} description={text.noInvoiceSelectedDescription} /> : (
               <div className="space-y-4 rounded-xl">
-                <section className="rounded-xl border border-border bg-card">
+                <section className="rounded-lg border border-border/70 bg-card">
                   <div className="relative overflow-hidden p-3.5">
                     <span
                       className={cn(
@@ -1920,7 +1920,7 @@ function useStaffInvoicesPageContent() {
                           : detail.status === "overdue"
                             ? "bg-rose-500"
                             : detail.status === "cancelled"
-                              ? "bg-zinc-400"
+                              ? "bg-slate-400"
                               : "bg-sky-500",
                       )}
                     />
@@ -2033,7 +2033,7 @@ function useStaffInvoicesPageContent() {
                   <div className="grid gap-2.5 md:grid-cols-4">
                     <button
                       type="button"
-                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                       onClick={() => window.open(`/patients?patient=${detail.patient_id}`, "_blank", "noopener,noreferrer")}
                     >
                       <div className="relative z-10">
@@ -2048,7 +2048,7 @@ function useStaffInvoicesPageContent() {
                     </button>
                     <button
                       type="button"
-                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                       onClick={() => window.open(`/orders?order=${detail.order_id}&patient=${detail.patient_id}`, "_blank", "noopener,noreferrer")}
                     >
                       <div className="relative z-10">
@@ -2063,7 +2063,7 @@ function useStaffInvoicesPageContent() {
                     </button>
                     <button
                       type="button"
-                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                       onClick={() => window.open(`/contracts?quote=${detail.quote_id ?? ""}&order=${detail.order_id}&patient=${detail.patient_id}&tab=quotes`, "_blank", "noopener,noreferrer")}
                     >
                       <div className="relative z-10">
@@ -2078,7 +2078,7 @@ function useStaffInvoicesPageContent() {
                     </button>
                     <button
                       type="button"
-                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
                       onClick={() => window.open(`/documents?order=${detail.order_id}&patient=${detail.patient_id}`, "_blank", "noopener,noreferrer")}
                     >
                       <div className="relative z-10">
@@ -2095,7 +2095,7 @@ function useStaffInvoicesPageContent() {
                 </SectionCard>
 
                 <div className="space-y-4">
-                    <section className="relative rounded-xl border border-border bg-card p-6">
+                    <section className="relative rounded-lg border border-border/70 bg-card p-6">
                       <h2 className={tokens.text.sectionTitle}>
                         {titleWithDot(t.revenue_invoices_patient_preview)}
                       </h2>
@@ -2156,7 +2156,7 @@ function useStaffInvoicesPageContent() {
                       ) : null}
                     </section>
 
-                    <section className="relative rounded-xl border border-border bg-card p-6">
+                    <section className="relative rounded-lg border border-border/70 bg-card p-6">
                       <h2 className={tokens.text.sectionTitle}>
                         {titleWithDot(t.revenue_invoices_current_payer)}
                       </h2>
@@ -2371,7 +2371,7 @@ function useStaffInvoicesPageContent() {
                         <button
                           type="button"
                           key={document.id}
-                          className="group relative w-full overflow-hidden rounded-xl border border-border bg-card p-4 text-left transition-colors hover:bg-muted/20"
+                          className="group relative w-full overflow-hidden rounded-lg border border-border/70 bg-card p-4 text-left transition-colors hover:bg-muted/20"
                           onClick={() =>
                             window.open(
                               `/documents?order=${detail.order_id}&patient=${detail.patient_id}`,
@@ -2418,7 +2418,7 @@ function useStaffInvoicesPageContent() {
             <div className="space-y-4 rounded-xl p-4">
               {dunningError ? <ShellBanner tone="error">{dunningError}</ShellBanner> : null}
               <div className="grid gap-2 sm:grid-cols-2">
-                <div className="rounded-xl border border-border bg-card px-4 py-3">
+                <div className="rounded-lg border border-border/70 bg-card px-4 py-3">
                   <div className="text-xs text-muted-foreground">{text.nextEscalation}</div>
                   <div className="mt-1">
                     <StatusBadge tone={nextDunning ? dunningLevelTone(nextDunning) : "neutral"}>
@@ -2426,7 +2426,7 @@ function useStaffInvoicesPageContent() {
                     </StatusBadge>
                   </div>
                 </div>
-                <div className="rounded-xl border border-border bg-card px-4 py-3">
+                <div className="rounded-lg border border-border/70 bg-card px-4 py-3">
                   <div className="text-xs text-muted-foreground">{text.balancePrefix}</div>
                   <div className="mt-1 text-lg font-semibold leading-none text-foreground">
                     {detail ? formatMoney(detail.balance_due) : t.common_not_set}
@@ -2768,7 +2768,7 @@ export function InvoicesPage() {
 
 function SectionCard({ title, description, action, children }: { title: string; description?: string; action?: ReactNode; children: ReactNode }) {
   return (
-    <section className="rounded-xl border border-border bg-card p-6">
+    <section className="rounded-lg border border-border/70 bg-card p-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>

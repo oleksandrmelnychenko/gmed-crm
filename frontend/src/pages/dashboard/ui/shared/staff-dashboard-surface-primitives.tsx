@@ -23,7 +23,7 @@ export function DashKpi({
     <button
       type="button"
       onClick={onClick}
-      className="relative cursor-pointer overflow-hidden rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-foreground/30"
+      className="relative cursor-pointer overflow-hidden rounded-lg border border-border/70 bg-card p-3.5 text-left transition-colors hover:border-foreground/30"
     >
       <div
         aria-hidden
@@ -60,7 +60,7 @@ export function QuickLink({
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left transition-colors hover:border-foreground/30"
+      className="flex items-center gap-3 rounded-lg border border-border/70 bg-card px-4 py-3 text-left transition-colors hover:border-foreground/30"
     >
       <div className="flex size-9 items-center justify-center rounded-lg bg-[var(--brand-soft)] text-[var(--brand)]">
         <Icon className="size-4" />
@@ -142,7 +142,7 @@ export function ChartCard({
   compact?: boolean;
 }) {
   return (
-    <div className={cn("min-w-0 rounded-xl border border-border bg-card", compact ? "p-3" : "p-4")}>
+    <div className={cn("min-w-0 rounded-lg border border-border/70 bg-card", compact ? "p-3" : "p-4")}>
       <div>
         <h3 className="text-[14px] font-semibold text-foreground">{title}</h3>
         {hint ? <p className="mt-0.5 text-[11.5px] text-muted-foreground">{hint}</p> : null}
