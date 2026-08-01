@@ -3,6 +3,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useState,
   type FormEvent,
   type SetStateAction,
 } from "react";
@@ -13,8 +14,10 @@ import {
   ClipboardList,
   Pencil,
   Plus,
+  Search,
   Trash2,
   Wallet,
+  X,
 } from "lucide-react";
 
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -671,6 +674,22 @@ function useFinanceCatalogPageContent() {
     () => agencyServicePackageUsagesByServiceId(servicePackages),
     [servicePackages],
   );
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const filteredAgencyServices = useMemo(() => {
+    const query = catalogSearch.trim().toLowerCase();
+    if (!query) return agencyServices;
+    return agencyServices.filter((item) =>
+      [
+        agencyServiceNameLabel(item.service_key, item.service_name, t),
+        item.service_key,
+        item.description ? agencyServiceDescriptionLabel(item.service_key, item.description, t) : "",
+        (agencyServicePackageUsages.get(item.id) ?? []).map((usage) => usage.name).join(" "),
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
+  }, [agencyServicePackageUsages, agencyServices, catalogSearch, t]);
   const agencyServiceColumns = useMemo<ColumnDef<AgencyServiceItem>[]>(
     () => [
       {
@@ -1377,12 +1396,46 @@ function useFinanceCatalogPageContent() {
           <EmptyCell>{t.revenue_agency_service_empty_title}</EmptyCell>
         ) : (
           <DataTableSurface
-            rows={agencyServices}
+            rows={filteredAgencyServices}
             columns={agencyServiceColumns}
             dictionary={t as unknown as Record<string, string>}
             rowId={(item) => item.id}
             emptyState={<EmptyCell>{t.revenue_agency_service_empty_title}</EmptyCell>}
-            tableClassName="max-h-[560px]"
+            surfaceClassName="space-y-0 overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm"
+            tableClassName="max-h-[560px] rounded-none border-0 shadow-none"
+            toolbarClassName="flex-nowrap overflow-x-auto border-b border-border/70 bg-card px-3 py-2"
+            toolbarStart={
+              <>
+                <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    type="search"
+                    value={catalogSearch}
+                    onChange={(event) => setCatalogSearch(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        setCatalogSearch("");
+                        (event.target as HTMLInputElement).blur();
+                      }
+                    }}
+                    className={cn(inputClass, "h-8 rounded-lg bg-background pl-8 text-[13px]")}
+                    placeholder={t.common_search}
+                    aria-label={t.common_search}
+                  />
+                </div>
+                {catalogSearch ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setCatalogSearch("")}
+                  >
+                    <X className="size-3.5" />
+                    {t.common_reset}
+                  </Button>
+                ) : null}
+              </>
+            }
             rowActions={
               canManageTaxProfiles
                 ? (item) => (

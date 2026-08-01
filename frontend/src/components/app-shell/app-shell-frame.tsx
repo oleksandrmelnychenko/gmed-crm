@@ -29,7 +29,7 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
       </a>
       <div className="flex h-full min-h-0 min-w-0 flex-col">
         <Topbar />
-        <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-muted/35">
+        <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-muted/60">
           <NavPanel />
           {!collapsed ? (
             <button
@@ -44,7 +44,7 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
             id="main-content"
             tabIndex={-1}
             className={cn(
-              "ml-1 mt-1 min-w-0 flex-1 overflow-auto overscroll-contain rounded-tl-lg bg-card px-3 py-3 sm:px-4 sm:py-3.5 lg:px-5 lg:py-4 [&::-webkit-scrollbar-track]:my-1.5",
+              "ml-1 mt-1 min-w-0 flex-1 overflow-auto overscroll-contain rounded-tl-lg border-t border-border/40 bg-card px-3 py-3 sm:px-4 sm:py-3.5 lg:px-5 lg:py-4 [&::-webkit-scrollbar-track]:my-1.5",
               workspaceRailKind === "appointment" && "bg-white",
             )}
           >
