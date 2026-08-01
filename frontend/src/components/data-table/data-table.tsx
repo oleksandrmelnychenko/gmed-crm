@@ -22,7 +22,7 @@ import { toggleSort } from "./sort-logic";
 import type { ColumnDef, DensityLevel, SortStack } from "./types";
 import { useOutsideClose } from "./use-outside-close";
 
-const HEADER_HEIGHT = 36;
+const HEADER_HEIGHT = 32;
 const EMPTY_STRING_ARRAY: readonly string[] = [];
 const EMPTY_SORT_STACK: SortStack = [];
 
@@ -376,7 +376,7 @@ function useDataTableContent<T>({
         <div
           role="row"
           aria-rowindex={1}
-          className="data-table-header-row sticky top-0 z-20 grid items-center border-b border-border/60 bg-card font-mono text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/80"
+          className="data-table-header-row sticky top-0 z-20 grid items-center border-b border-border/40 bg-card text-xs font-medium text-muted-foreground"
           style={{
             gridTemplateColumns: gridTemplate,
             height: HEADER_HEIGHT,
@@ -417,7 +417,8 @@ function useDataTableContent<T>({
                 onClick={(e) => handleSortClick(col, e)}
                 onContextMenu={(e) => handleColumnContextMenu(col, e)}
                 className={cn(
-                  "data-table-header-cell relative flex h-full items-center gap-1 border-b border-border/60 bg-card px-2 text-left",
+                  "data-table-header-cell relative flex h-full items-center gap-1 border-b border-border/40 bg-card px-2 text-left",
+                  columnAlign(col) === "right" && "justify-end text-right",
                   col.sortable && "cursor-pointer hover:bg-muted/65",
                   pinStyle.className,
                   isPinned && "bg-card shadow-[1px_0_0_color-mix(in_oklch,var(--border)_70%,transparent)]",
@@ -427,7 +428,7 @@ function useDataTableContent<T>({
                 aria-haspopup={onColumnFreezeChange ? "menu" : undefined}
                 disabled={!col.sortable && !onColumnFreezeChange}
               >
-                <span className="truncate uppercase tracking-[0.08em]">{col.label}</span>
+                <span className="truncate">{col.label}</span>
                 {isPinned ? (
                   <span
                     title={columnHeaderContextMenuLabels?.frozen ?? t.table_columns_frozen}
@@ -474,7 +475,7 @@ function useDataTableContent<T>({
               className="sticky right-0 z-30 flex h-full items-center justify-end border-l border-b border-border/50 bg-card px-2 text-right shadow-[-1px_0_0_color-mix(in_oklch,var(--border)_70%,transparent)]"
               style={{ gridColumn: `${visibleCols.length + (selectionEnabled ? 2 : 1)}` }}
             >
-              <span className="truncate uppercase tracking-[0.08em]">{resolvedRowActionsLabel}</span>
+              <span className="truncate">{resolvedRowActionsLabel}</span>
             </div>
           ) : null}
         </div>
@@ -512,7 +513,7 @@ function useDataTableContent<T>({
                     onRowClick(row);
                   }}
                   tabIndex={onRowClick ? -1 : undefined}
-                  className="data-table-row group/row absolute inset-x-0 grid cursor-pointer items-center border-b border-border/45 transition-[background-color,box-shadow]"
+                  className="data-table-row group/row absolute inset-x-0 grid cursor-pointer items-center border-b border-border/30 transition-[background-color,box-shadow]"
                   style={{
                     top: vRow.start,
                     height: vRow.size,
@@ -554,7 +555,13 @@ function useDataTableContent<T>({
                         )}
                         style={pinStyle.style}
                       >
-                        <div className={col.cellClassName ? cn("w-full", col.cellClassName) : "w-full truncate"}>
+                        <div
+                          className={cn(
+                            "w-full",
+                            col.cellClassName ?? "truncate",
+                            columnAlign(col) === "right" && "text-right font-mono tabular-nums",
+                          )}
+                        >
                           {col.render ? col.render(row) : defaultRender(col.accessor(row), t)}
                         </div>
                       </div>
@@ -762,6 +769,10 @@ function orderColumnsForPinning<T>(cols: readonly ColumnDef<T>[]): ColumnDef<T>[
 }
 
 type PinInfo = { className?: string; style?: CSSProperties };
+
+function columnAlign<T>(col: ColumnDef<T>): "left" | "right" {
+  return col.align ?? (col.filterType === "number" ? "right" : "left");
+}
 
 function columnWidth<T>(col: ColumnDef<T>): number | null {
   if (col.width) return col.width;

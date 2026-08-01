@@ -247,6 +247,12 @@ export function Topbar() {
           </div>
         </div>
 
+        {/* Page title + primary actions portal here from PageHeader (lg+) */}
+        <div
+          id="topbar-page-slot"
+          className="ml-8 mr-3 hidden min-w-0 flex-1 items-center lg:flex sm:ml-12 sm:mr-5"
+        />
+
         <div className="flex shrink-0 items-center gap-1 sm:gap-2">
           <RealtimeConnectionIndicator
             status={realtimeConnection.status}

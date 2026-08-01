@@ -88,10 +88,10 @@ describe("lead errors", () => {
 
   it("translates known backend messages in both interface languages", () => {
     expect(leadErrorMessage(new Error("Case intake is incomplete"), ru)).toBe(
-      "Заполните причину обращения и анамнез",
+      "Укажите причину обращения",
     );
     expect(leadErrorMessage(new Error("Case intake is incomplete"), de)).toBe(
-      "Anliegen und Anamnese vollständig ausfüllen",
+      "Anliegen angeben",
     );
     expect(leadErrorMessage(new Error("Invalid legal_sex"), ru)).toBe(
       "Выберите пол по документам",

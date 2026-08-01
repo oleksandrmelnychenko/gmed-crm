@@ -50,6 +50,13 @@ export type PatientLookupItem = {
 
 export type DocumentItem = {
   id: string;
+  document_number?: string | null;
+  generated_template_id?: string | null;
+  order_id?: string | null;
+  version_root_document_id?: string | null;
+  replaces_document_id?: string | null;
+  version_number?: number | null;
+  file_size?: number | null;
   filename: string;
   category?: string | null;
   status?: string | null;

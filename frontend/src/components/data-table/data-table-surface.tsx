@@ -5,7 +5,6 @@ import { cn } from "@/lib/utils";
 
 import { ColumnVisibilityMenu } from "./column-visibility-menu";
 import { DataTable, type DataTableProps } from "./data-table";
-import { DensityToggle } from "./density-toggle";
 import { applyFilters } from "./filter-logic";
 import { FilterBuilder } from "./filter-builder";
 import { applySort } from "./sort-logic";
@@ -42,6 +41,11 @@ export type DataTableSurfaceProps<T> = Omit<
   defaultHiddenColumns?: readonly string[];
   defaultSort?: SortStack;
   dictionary?: Record<string, string>;
+  /**
+   * Injects synthetic child rows directly under a parent row, after
+   * filtering and sorting (children are exempt from both).
+   */
+  expandRow?: (row: T) => readonly T[] | null;
   footer?: ReactNode | ((context: DataTableSurfaceFooterContext<T>) => ReactNode);
   groupLabels?: Record<string, string>;
   maxFrozenColumns?: number;
@@ -97,6 +101,7 @@ export function DataTableSurface<T>({
   defaultHiddenColumns = EMPTY_STRING_ARRAY,
   defaultSort = EMPTY_SORT_STACK,
   dictionary,
+  expandRow,
   footer,
   groupLabels,
   maxFrozenColumns = DEFAULT_MAX_FROZEN_COLUMNS,
@@ -145,8 +150,6 @@ export function DataTableSurface<T>({
     field: K,
     value: SetStateAction<DataTableSurfaceState[K]>,
   ) => dispatchSurfaceState(createDataTableSurfaceFieldPatch(field, value));
-  const setDensity = (value: SetStateAction<DensityLevel>) =>
-    setSurfaceField("density", value);
   const setFilters = (value: SetStateAction<FilterPredicate[]>) =>
     setSurfaceField("filters", value);
   const setFrozenColumns = (value: SetStateAction<string[]>) =>
@@ -202,8 +205,16 @@ export function DataTableSurface<T>({
 
   const visibleRows = useMemo(() => {
     const filtered = applyFilters(rows, filters, { accessors });
-    return applySort(filtered, sortStack, { accessors });
-  }, [accessors, filters, rows, sortStack]);
+    const sorted = applySort(filtered, sortStack, { accessors });
+    // Child rows are injected after filtering/sorting so they always stay
+    // attached directly under their parent row.
+    return expandRow
+      ? sorted.flatMap((row) => {
+          const children = expandRow(row);
+          return children && children.length > 0 ? [row, ...children] : [row];
+        })
+      : sorted;
+  }, [accessors, expandRow, filters, rows, sortStack]);
 
   const handleColumnFreezeChange = (columnId: string, frozen: boolean) => {
     if (frozen) {
@@ -316,16 +327,6 @@ export function DataTableSurface<T>({
             freezeLabel={labels.table_columns_freeze}
             unfreezeLabel={labels.table_columns_unfreeze}
             frozenNoteLabel={labels.table_columns_frozen}
-          />
-          <DensityToggle
-            value={density}
-            onChange={setDensity}
-            ariaLabel={labels.table_density}
-            labels={{
-              comfortable: labels.table_density_comfortable,
-              compact: labels.table_density_compact,
-              condensed: labels.table_density_condensed,
-            }}
           />
         </div>
       </div>

@@ -16,7 +16,7 @@ import {
 } from "./ui/patients-columns";
 
 import { Button } from "@/components/ui/button";
-import { Banner, tokens } from "@/components/ui-shell";
+import { Banner, PageHeader, tokens } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -75,25 +75,17 @@ function PatientsPageHeader({
   onCreate,
 }: PatientsPageHeaderProps) {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <div className="flex items-baseline gap-2">
-        <h1 className="text-[22px] font-semibold tracking-tight text-foreground leading-tight">
-          {title}
-        </h1>
-      </div>
-      <div className="flex items-center gap-1.5">
-        {canCreate ? (
-          <Button
-            type="button"
-            size="sm"
-            onClick={onCreate}
-          >
+    <PageHeader
+      title={title}
+      actions={
+        canCreate ? (
+          <Button type="button" size="sm" onClick={onCreate}>
             <Plus className="size-3.5" />
             {createLabel}
           </Button>
-        ) : null}
-      </div>
-    </div>
+        ) : null
+      }
+    />
   );
 }
 
@@ -170,7 +162,6 @@ export function PatientsPage() {
     refreshList,
     searchInputRef,
     selectedId,
-    setDensity,
     setFilterPredicates,
     setFilters,
     setFrozenColumns,
@@ -322,7 +313,6 @@ export function PatientsPage() {
           defaultFrozenColumns={DEFAULT_PATIENT_FROZEN_COLUMNS}
           defaultHiddenColumns={DEFAULT_PATIENT_HIDDEN_COLUMNS}
           deferredSearchPlaceholder={t.common_search}
-          density={density}
           doctors={doctors}
           filterPredicates={filterPredicates}
           filters={filters}
@@ -337,7 +327,6 @@ export function PatientsPage() {
             syncQuery({ active: value === "true" ? null : value || null });
           }}
           onClearAll={clearAllFilters}
-          onDensityChange={setDensity}
           onDoctorFilterChange={(value) => {
             setFilters((current) => ({ ...current, doctorId: value }));
             syncQuery({ doctor: value || null });

@@ -57,7 +57,8 @@ const LEAD_ERROR_PATTERNS: Array<readonly [pattern: RegExp, translation: LeadErr
   [/(?:insufficient permissions|forbidden|not authorized|unauthori[sz]ed)/i, ["Недостаточно прав для этого действия", "Keine Berechtigung für diese Aktion"]],
   [/(?:lead|case|document|attachment|file|order|quote|contract|patient).*not found/i, ["Запись больше не найдена. Обновите данные", "Der Eintrag wurde nicht gefunden. Daten aktualisieren"]],
   [/already converted/i, ["Пациент по этому лиду уже создан", "Für diesen Lead wurde bereits ein Patient angelegt"]],
-  [/(?:case|anamn(?:esis|ese)|intake).*(?:incomplete|missing)/i, ["Заполните причину обращения и анамнез", "Anliegen und Anamnese vollständig ausfüllen"]],
+  [/(?:case|intake).*(?:incomplete|missing)/i, ["Укажите причину обращения", "Anliegen angeben"]],
+  [/(?:anamn(?:esis|ese)).*(?:incomplete|missing)/i, ["Заполните анамнез", "Anamnese ausfüllen"]],
   [/(?:required|cannot be empty|is missing|must be (?:provided|set))/i, ["Заполните обязательные данные", "Pflichtangaben vervollständigen"]],
   [/(?:invalid|must be a json|must be between|out of range)/i, ["Проверьте введённые данные", "Eingegebene Daten prüfen"]],
   [/failed to (?:load|fetch|download|read)/i, ["Не удалось загрузить данные", "Daten konnten nicht geladen werden"]],
@@ -91,6 +92,13 @@ export function leadErrorBlockingReasons(error: unknown) {
     body.blocking_reasons,
     readiness?.blocking_reasons,
     readiness?.qualification_reasons,
+    Array.isArray(body.blocking_fields)
+      ? body.blocking_fields.map((field) => {
+          if (field === "hauptanfragegrund") return "Primary concern is missing";
+          if (field === "aktuelle_anamnese") return "Anamnesis intake is incomplete";
+          return field;
+        })
+      : null,
   ];
 
   for (const candidate of candidates) {

@@ -1658,26 +1658,22 @@ function useReportsPageContent() {
       <PageHeader
         title={titleWithDot(text.workspaceTitle)}
         actions={
-          <div className="flex flex-wrap items-end justify-end gap-2">
-            <label className="flex min-w-[280px] max-w-full flex-col gap-1">
-              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                {taxonomySelectLabel}
-              </span>
-              <ProviderTaxonomyCascadeSelect
-                value={selectedTaxonomyNodeId}
-                nodes={taxonomyNodes}
-                mode="any"
-                placeholder={taxonomySelectLabel}
-                allLabel={taxonomyAllLabel}
-                disabled={taxonomyLoading || taxonomyNodes.length === 0}
-                containerClassName="max-w-[calc(100vw-2rem)]"
-                selectClassName={cn(
-                  shellSelectClassName,
-                  "h-9 min-w-[200px] bg-card text-[13px]",
-                )}
-                onChange={setSelectedTaxonomyNodeId}
-              />
-            </label>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <ProviderTaxonomyCascadeSelect
+              value={selectedTaxonomyNodeId}
+              nodes={taxonomyNodes}
+              mode="any"
+              placeholder={taxonomySelectLabel}
+              allLabel={taxonomyAllLabel}
+              aria-label={taxonomySelectLabel}
+              disabled={taxonomyLoading || taxonomyNodes.length === 0}
+              containerClassName="max-w-[calc(100vw-2rem)]"
+              selectClassName={cn(
+                shellSelectClassName,
+                "h-9 min-w-[200px] bg-card text-[13px]",
+              )}
+              onChange={setSelectedTaxonomyNodeId}
+            />
             <Button
               variant="outline"
               className="h-9 rounded-lg"

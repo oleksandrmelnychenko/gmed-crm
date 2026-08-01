@@ -2248,6 +2248,8 @@ struct ServiceLineInput {
     #[serde(default)]
     line_total: Option<String>,
     #[serde(default)]
+    vat_rate: Option<String>,
+    #[serde(default)]
     note: Option<String>,
 }
 
@@ -11458,6 +11460,13 @@ async fn generate_document(
         )
     };
 
+    if matches!(template.id, "single_order" | "order_cost_estimate") && order_id.is_none() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Order context is required for this document",
+        );
+    }
+
     let order_number = if let Some(order_uuid) = order_id {
         match sqlx::query_scalar::<_, String>("SELECT order_number FROM orders WHERE id = $1")
             .bind(order_uuid)
@@ -16759,25 +16768,35 @@ fn fmt_money_de(raw: &str) -> String {
     }
 }
 
-/// Best-effort net/VAT(19%)/gross totals summed from manual service lines.
+/// Best-effort net/VAT/gross totals summed from manual service lines.
 fn compute_line_item_totals(
     items: &[GeneratedContractLineItem],
 ) -> Option<(String, String, String)> {
     let mut net = 0.0_f64;
+    let mut vat = 0.0_f64;
     for item in items {
-        if let Some(amount) = parse_eur_amount(&item.line_gross) {
-            net += amount;
+        let line_net = if let Some(amount) = parse_eur_amount(&item.line_gross) {
+            amount
         } else if let Some(unit_price) = parse_eur_amount(&item.unit_price) {
             let quantity = parse_eur_amount(&item.quantity)
                 .filter(|value| *value > 0.0)
                 .unwrap_or(1.0);
-            net += unit_price * quantity;
-        }
+            unit_price * quantity
+        } else {
+            continue;
+        };
+        let vat_rate = item
+            .vat_rate
+            .as_deref()
+            .and_then(parse_eur_amount)
+            .unwrap_or(19.0)
+            .clamp(0.0, 100.0);
+        net += line_net;
+        vat += line_net * vat_rate / 100.0;
     }
     if net <= 0.0 {
         return None;
     }
-    let vat = net * 0.19;
     Some((format_eur(net), format_eur(vat), format_eur(net + vat)))
 }
 
@@ -16791,7 +16810,7 @@ fn service_lines_to_items(lines: &[ServiceLineInput]) -> Vec<GeneratedContractLi
             quantity: line.quantity.clone().unwrap_or_default(),
             unit_price: line.fee.clone().unwrap_or_default(),
             line_gross: line.line_total.clone().unwrap_or_default(),
-            vat_rate: None,
+            vat_rate: line.vat_rate.clone(),
             notes: line
                 .note
                 .as_deref()

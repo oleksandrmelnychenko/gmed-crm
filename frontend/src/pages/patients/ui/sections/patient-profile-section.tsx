@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -20,6 +20,7 @@ import {
   knownLeadProgramServiceLabel,
   leadInsuranceCoverageLabel,
   leadIntakeTypeFromLead,
+  leadLanguageLabel,
   leadLocationDetailedLabel,
   leadLocationLabel,
   leadMedicalRecordsLabel,
@@ -31,9 +32,15 @@ import {
 } from "@/pages/leads/model/leads-model";
 import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
 
+import { fetchPatientRelations } from "../../data/patient-detail-mutations";
+import { patientRelationTypeLabel } from "../../model/detail-model";
+import type { RelationItem } from "../../model/detail-tab-types";
 import type { PatientLegalStatus } from "../../model/legal-status";
 import type { PatientDetail } from "../../model/list-model";
-import { createPatientLeadOrigin } from "../../model/patient-lead-origin";
+import {
+  createPatientLeadOrigin,
+  type LeadOriginSelectedWorkType,
+} from "../../model/patient-lead-origin";
 import { LegalStatusPill } from "../shared/legal-status-pill";
 import { FormSection, humanizeFunctionalLabel } from "../shared/patient-form-primitives";
 
@@ -78,9 +85,42 @@ type LegalStatusChecklistItem = {
   done: boolean;
 };
 
+type LiveRelationsState = {
+  patientId: string;
+  status: "loading" | "loaded" | "unavailable";
+  items: RelationItem[];
+};
+
 function profileRecordString(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function useLivePatientRelations(patientId: string): LiveRelationsState {
+  const [state, setState] = useState<LiveRelationsState>({
+    patientId,
+    status: "loading",
+    items: [],
+  });
+
+  useEffect(() => {
+    let active = true;
+    void fetchPatientRelations(patientId)
+      .then((items) => {
+        if (active) setState({ patientId, status: "loaded", items });
+      })
+      .catch(() => {
+        if (active) setState({ patientId, status: "unavailable", items: [] });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [patientId]);
+
+  return state.patientId === patientId
+    ? state
+    : { patientId, status: "loading", items: [] };
 }
 
 function intakeDiscoverySourceLabel(value: string | null, t: Translations) {
@@ -98,6 +138,27 @@ function intakeDiscoverySourceLabel(value: string | null, t: Translations) {
     other: t.patient_profile_discovery_other,
   };
   return labels[value] ?? humanizeFunctionalLabel(value);
+}
+
+function selectedWorkTypeName(item: LeadOriginSelectedWorkType, lang: "de" | "ru") {
+  const names = lang === "de"
+    ? [item.nameDe, item.nameEn, item.nameRu, item.nameEs]
+    : [item.nameRu, item.nameDe, item.nameEn, item.nameEs];
+  return names.find((name) => name.trim()) ?? item.code;
+}
+
+function selectedWorkTypeNumber(value: number, lang: "de" | "ru") {
+  return new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function selectedWorkTypePriceRange(item: LeadOriginSelectedWorkType, lang: "de" | "ru") {
+  if (item.minPriceEur == null && item.maxPriceEur == null) return null;
+  if (item.minPriceEur == null) return `${selectedWorkTypeNumber(item.maxPriceEur as number, lang)} EUR`;
+  if (item.maxPriceEur == null) return `${selectedWorkTypeNumber(item.minPriceEur, lang)} EUR`;
+  return `${selectedWorkTypeNumber(item.minPriceEur, lang)} - ${selectedWorkTypeNumber(item.maxPriceEur, lang)} EUR`;
 }
 
 function ProfileDetailTile({
@@ -220,6 +281,123 @@ function ProfileSummaryLine({
         </button>
       ) : null}
     </div>
+  );
+}
+
+function PatientEmergencyContactSummary({
+  detail,
+  fieldValue,
+  formatDate,
+  t,
+}: {
+  detail: PatientDetail;
+  fieldValue: FieldValueFn;
+  formatDate: DateFormatter;
+  t: Translations;
+}) {
+  const liveRelations = useLivePatientRelations(detail.id);
+  const emergencyRelations = liveRelations.items.filter((relation) => relation.is_emergency_contact);
+  const hasStoredEmergencyContact = Boolean(
+    detail.emergency_contact_name?.trim()
+      || detail.emergency_contact_phone?.trim()
+      || detail.emergency_contact_relation?.trim(),
+  );
+
+  if (liveRelations.status === "loaded" && emergencyRelations.length > 0) {
+    return emergencyRelations.map((relation, index) => (
+      <div key={relation.id} className={cn(index > 0 && "mt-2 border-t border-border pt-2")}>
+        <ProfileSummaryLine
+          label={t.patients_emergency_name}
+          value={fieldValue(relation.related_display_name || relation.related_name, t.common_not_set)}
+        />
+        {relation.phone ? <ProfileSummaryLine label={t.patients_emergency_phone} value={relation.phone} /> : null}
+        <ProfileSummaryLine
+          label={t.patients_emergency_relation}
+          value={patientRelationTypeLabel(relation.relation_type)}
+        />
+        {relation.notes ? <ProfileSummaryLine label={t.patient_relation_notes} value={relation.notes} /> : null}
+      </div>
+    ));
+  }
+
+  if (hasStoredEmergencyContact) {
+    return (
+      <>
+        <ProfileSummaryLine label={t.patients_emergency_name} value={fieldValue(detail.emergency_contact_name, t.common_not_set)} />
+        <ProfileSummaryLine label={t.patients_emergency_phone} value={fieldValue(detail.emergency_contact_phone, t.common_not_set)} />
+        <ProfileSummaryLine
+          label={t.patients_emergency_relation}
+          value={detail.emergency_contact_relation
+            ? patientRelationTypeLabel(detail.emergency_contact_relation)
+            : t.common_not_set}
+        />
+      </>
+    );
+  }
+
+  if (liveRelations.status === "loading") {
+    return (
+      <div className="flex min-h-20 items-center justify-center text-muted-foreground">
+        <LoaderCircle className="size-4 animate-spin" aria-label={t.common_loading} />
+      </div>
+    );
+  }
+
+  if (liveRelations.status === "loaded") {
+    return <ProfileSummaryLine label={t.patients_emergency_name} value={t.common_not_set} />;
+  }
+
+  const leadOrigin = createPatientLeadOrigin(detail);
+  const intakeContacts = leadOrigin.records("trusted_contacts");
+  if (intakeContacts.length > 0) {
+    return intakeContacts.map((contact, index) => {
+      const contactId = profileRecordString(contact, "id") ?? `trusted-contact-${index + 1}`;
+      const name = profileRecordString(contact, "name");
+      const phone = profileRecordString(contact, "phone");
+      const email = profileRecordString(contact, "email");
+      const relation = profileRecordString(contact, "relation");
+      const birthDate = profileRecordString(contact, "birth_date");
+      const address = profileRecordString(contact, "address");
+      return (
+        <div key={contactId} className={cn(index > 0 && "mt-2 border-t border-border pt-2")}>
+          <ProfileSummaryLine label={t.patients_emergency_name} value={fieldValue(name, t.common_not_set)} />
+          {phone ? <ProfileSummaryLine label={t.patients_emergency_phone} value={phone} /> : null}
+          {email ? <ProfileSummaryLine label={t.patient_profile_editor_email} value={email} /> : null}
+          {relation ? (
+            <ProfileSummaryLine
+              label={t.patients_emergency_relation}
+              value={patientRelationTypeLabel(relation)}
+            />
+          ) : null}
+          {birthDate ? <ProfileSummaryLine label={t.patients_birth_date} value={formatDate(birthDate)} /> : null}
+          {address ? <ProfileSummaryLine label={t.patient_profile_editor_address} value={address} /> : null}
+        </div>
+      );
+    });
+  }
+
+  const intakeContact = leadOrigin.record("trusted_contact");
+  const name = leadOrigin.string("trusted_contact_name") ?? profileRecordString(intakeContact, "name");
+  const phone = leadOrigin.string("trusted_contact_phone") ?? profileRecordString(intakeContact, "phone");
+  const email = leadOrigin.string("trusted_contact_email") ?? profileRecordString(intakeContact, "email");
+  const relation = leadOrigin.string("trusted_contact_relation") ?? profileRecordString(intakeContact, "relation");
+  const birthDate = leadOrigin.string("trusted_contact_birth_date") ?? profileRecordString(intakeContact, "birth_date");
+  const address = leadOrigin.string("trusted_contact_address") ?? profileRecordString(intakeContact, "address");
+  if (![name, phone, email, relation, birthDate, address].some(Boolean)) {
+    return <ProfileSummaryLine label={t.patients_emergency_name} value={t.common_not_set} />;
+  }
+
+  return (
+    <>
+      <ProfileSummaryLine label={t.patients_emergency_name} value={fieldValue(name, t.common_not_set)} />
+      {phone ? <ProfileSummaryLine label={t.patients_emergency_phone} value={phone} /> : null}
+      {email ? <ProfileSummaryLine label={t.patient_profile_editor_email} value={email} /> : null}
+      {relation ? (
+        <ProfileSummaryLine label={t.patients_emergency_relation} value={patientRelationTypeLabel(relation)} />
+      ) : null}
+      {birthDate ? <ProfileSummaryLine label={t.patients_birth_date} value={formatDate(birthDate)} /> : null}
+      {address ? <ProfileSummaryLine label={t.patient_profile_editor_address} value={address} /> : null}
+    </>
   );
 }
 
@@ -390,14 +568,6 @@ function usePatientProfileTabContent({
   }
 
   const leadOrigin = createPatientLeadOrigin(detail);
-  const trustedContactProfile = leadOrigin.record("trusted_contact");
-  const trustedContacts = leadOrigin.records("trusted_contacts");
-  const trustedContactEmail = leadOrigin.string("trusted_contact_email")
-    ?? profileRecordString(trustedContactProfile, "email");
-  const trustedContactBirthDate = leadOrigin.string("trusted_contact_birth_date")
-    ?? profileRecordString(trustedContactProfile, "birth_date");
-  const trustedContactAddress = leadOrigin.string("trusted_contact_address")
-    ?? profileRecordString(trustedContactProfile, "address");
   const intakeSource = leadOrigin.string("source");
   const intakeSourceKind = leadOrigin.string("intake_source");
   const intakeFlow = leadOrigin.string("flow");
@@ -439,6 +609,8 @@ function usePatientProfileTabContent({
   const programDateTo = leadOrigin.string("program_date_to")
     ?? (typeof leadOrigin.wizardState["program_date_to"] === "string" ? leadOrigin.wizardState["program_date_to"] : null);
   const profileLang = t.lead_type_questionnaire === "Fragebogen" ? "de" : "ru";
+  const selectedWorkTypes = leadOrigin.selectedWorkTypes;
+  const costEstimateAdditionalLanguage = leadOrigin.string("cost_estimate_additional_language");
   const requestedSpecialtiesValue = requestedSpecialties
     .map((value) => specializationLabelForValue(value, [], profileLang))
     .join(", ");
@@ -582,40 +754,12 @@ function usePatientProfileTabContent({
         <ProfileSummaryCard
           title={t.patient_profile_emergency_contact}
         >
-          {trustedContacts.length > 0 ? trustedContacts.map((contact, index) => {
-            const contactId = profileRecordString(contact, "id") ?? `trusted-contact-${index + 1}`;
-            const name = profileRecordString(contact, "name");
-            const phone = profileRecordString(contact, "phone");
-            const email = profileRecordString(contact, "email");
-            const relation = profileRecordString(contact, "relation");
-            const birthDate = profileRecordString(contact, "birth_date");
-            const address = profileRecordString(contact, "address");
-            return (
-              <div key={contactId} className={cn(index > 0 && "mt-2 border-t border-border pt-2")}>
-                <ProfileSummaryLine label={t.patients_emergency_name} value={fieldValue(name, t.common_not_set)} />
-                {phone ? <ProfileSummaryLine label={t.patients_emergency_phone} value={phone} /> : null}
-                {email ? <ProfileSummaryLine label={t.patient_profile_editor_email} value={email} /> : null}
-                {relation ? <ProfileSummaryLine label={t.patients_emergency_relation} value={relation} /> : null}
-                {birthDate ? <ProfileSummaryLine label={t.patients_birth_date} value={formatDate(birthDate)} /> : null}
-                {address ? <ProfileSummaryLine label={t.patient_profile_editor_address} value={address} /> : null}
-              </div>
-            );
-          }) : (
-            <>
-              <ProfileSummaryLine label={t.patients_emergency_name} value={fieldValue(detail.emergency_contact_name, t.common_not_set)} />
-              <ProfileSummaryLine label={t.patients_emergency_phone} value={fieldValue(detail.emergency_contact_phone, t.common_not_set)} />
-              <ProfileSummaryLine label={t.patients_emergency_relation} value={fieldValue(detail.emergency_contact_relation, t.common_not_set)} />
-              {trustedContactEmail ? (
-                <ProfileSummaryLine label={t.patient_profile_editor_email} value={trustedContactEmail} />
-              ) : null}
-              {trustedContactBirthDate ? (
-                <ProfileSummaryLine label={t.patients_birth_date} value={formatDate(trustedContactBirthDate)} />
-              ) : null}
-              {trustedContactAddress ? (
-                <ProfileSummaryLine label={t.patient_profile_editor_address} value={trustedContactAddress} />
-              ) : null}
-            </>
-          )}
+          <PatientEmergencyContactSummary
+            detail={detail}
+            fieldValue={fieldValue}
+            formatDate={formatDate}
+            t={t}
+          />
         </ProfileSummaryCard>
 
         {hasIntakeProfile ? (
@@ -764,20 +908,61 @@ function usePatientProfileTabContent({
             {consentOptOut != null ? (
               <ProfileSummaryLine label={t.lead_consent_opt_out} value={booleanValue(consentOptOut)} />
             ) : null}
-            {leadOrigin.serviceRequests.length > 0 ? (
+            {selectedWorkTypes.length > 0
+            || leadOrigin.serviceRequests.length > 0
+            || costEstimateAdditionalLanguage ? (
               <div className="mt-2 border-t border-border pt-2 md:col-span-2">
                 <p className="px-2 pb-1 text-[11px] font-medium uppercase text-muted-foreground">
                   {t.patient_profile_intake_services}
                 </p>
-                <div className="grid gap-1 md:grid-cols-2 md:gap-x-5">
-                  {leadOrigin.serviceRequests.map((service) => (
-                    <ProfileSummaryLine
-                      key={service.value}
-                      label={knownLeadProgramServiceLabel(service.value, t) ?? leadProgramServiceLabel(service.value, t)}
-                      value={service.comment ?? t.patient_profile_intake_service_requested}
-                    />
-                  ))}
-                </div>
+                {costEstimateAdditionalLanguage ? (
+                  <ProfileSummaryLine
+                    label={profileLang === "de" ? "Zusätzliche Sprache" : "Дополнительный язык"}
+                    value={leadLanguageLabel(costEstimateAdditionalLanguage, t)}
+                  />
+                ) : null}
+                {selectedWorkTypes.length > 0 ? (
+                  <div className="mt-1">
+                    <p className="px-2 pb-1 text-[11px] font-medium text-muted-foreground">
+                      {profileLang === "de" ? "Ausgewählte Leistungsarten" : "Выбранные виды работ"}
+                    </p>
+                    <div className="grid gap-1.5 md:grid-cols-2 md:gap-x-3">
+                      {selectedWorkTypes.map((workType) => {
+                        const priceRange = selectedWorkTypePriceRange(workType, profileLang);
+                        return (
+                          <article key={workType.id} className="border-b border-border/60 px-2 py-2 last:border-b-0">
+                            <p className="break-words text-sm font-semibold leading-5 text-foreground">
+                              {selectedWorkTypeName(workType, profileLang)}
+                            </p>
+                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                              {workType.durationHours != null ? (
+                                <span>
+                                  {profileLang === "de" ? "Dauer" : "Длительность"}: {selectedWorkTypeNumber(workType.durationHours, profileLang)} {profileLang === "de" ? "Std." : "ч"}
+                                </span>
+                              ) : null}
+                              {priceRange ? (
+                                <span className="font-mono font-medium tabular-nums text-foreground">
+                                  {priceRange}
+                                </span>
+                              ) : null}
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+                {leadOrigin.serviceRequests.length > 0 ? (
+                  <div className="mt-1 grid gap-1 md:grid-cols-2 md:gap-x-5">
+                    {leadOrigin.serviceRequests.map((service) => (
+                      <ProfileSummaryLine
+                        key={service.value}
+                        label={knownLeadProgramServiceLabel(service.value, t) ?? leadProgramServiceLabel(service.value, t)}
+                        value={service.comment ?? t.patient_profile_intake_service_requested}
+                      />
+                    ))}
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </ProfileSummaryCard>

@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -669,6 +671,150 @@ function useFinanceCatalogPageContent() {
     () => agencyServicePackageUsagesByServiceId(servicePackages),
     [servicePackages],
   );
+  const agencyServiceColumns = useMemo<ColumnDef<AgencyServiceItem>[]>(
+    () => [
+      {
+        id: "service",
+        label: t.finance_catalog_service,
+        accessor: (item) => agencyServiceNameLabel(item.service_key, item.service_name, t),
+        filterType: "text",
+        sortable: true,
+        searchable: true,
+        required: true,
+        width: 260,
+        render: (item) => (
+          <span
+            className="truncate font-medium text-foreground"
+            title={
+              item.description
+                ? agencyServiceDescriptionLabel(item.service_key, item.description, t)
+                : undefined
+            }
+          >
+            {agencyServiceNameLabel(item.service_key, item.service_name, t)}
+          </span>
+        ),
+      },
+      {
+        id: "unit_price",
+        label: t.revenue_agency_service_unit_price,
+        accessor: (item) => Number(item.unit_price) || 0,
+        filterType: "number",
+        sortable: true,
+        width: 120,
+        render: (item) => (
+          <span className="font-medium tabular-nums text-foreground">
+            {formatMoney(item.unit_price as string | number, item.currency)}
+          </span>
+        ),
+      },
+      {
+        id: "gross",
+        label: t.revenue_common_gross,
+        accessor: (item) => agencyServiceGrossAmount(item),
+        filterType: "number",
+        sortable: true,
+        width: 120,
+        render: (item) => (
+          <span className="font-medium tabular-nums text-foreground">
+            {formatMoney(agencyServiceGrossAmount(item), item.currency)}
+          </span>
+        ),
+      },
+      {
+        id: "unit",
+        label: t.revenue_agency_service_unit,
+        accessor: (item) => agencyServiceUnitLabel(item.unit_label, t),
+        filterType: "text",
+        sortable: true,
+        width: 110,
+        render: (item) => (
+          <span className="truncate text-muted-foreground">
+            {agencyServiceUnitLabel(item.unit_label, t)}
+          </span>
+        ),
+      },
+      {
+        id: "vat",
+        label: t.finance_catalog_vat_label,
+        accessor: (item) => Number(valueToInput(item.vat_rate)) || 0,
+        filterType: "number",
+        sortable: true,
+        width: 80,
+        render: (item) => (
+          <span className="tabular-nums text-foreground">{valueToInput(item.vat_rate) || "0"}%</span>
+        ),
+      },
+      {
+        id: "packages",
+        label: t.finance_catalog_packages_column,
+        accessor: (item) =>
+          (agencyServicePackageUsages.get(item.id) ?? []).map((usage) => usage.name).join(", "),
+        filterType: "text",
+        searchable: true,
+        width: 380,
+        render: (item) => {
+          const packageUsages = agencyServicePackageUsages.get(item.id) ?? [];
+          if (packageUsages.length === 0) {
+            return <span className="text-muted-foreground">-</span>;
+          }
+          return (
+            <div className="flex min-w-0 items-center gap-1 overflow-hidden">
+              {packageUsages.slice(0, 2).map((usage) => (
+                <Badge
+                  key={usage.id}
+                  variant="outline"
+                  title={usage.packageKey}
+                  className={cn(
+                    "max-w-[160px] truncate rounded-full",
+                    usage.isActive
+                      ? "border-sky-200 bg-sky-50 text-sky-700"
+                      : "border-slate-200 bg-slate-50 text-slate-600",
+                  )}
+                >
+                  {usage.name}
+                </Badge>
+              ))}
+              {packageUsages.length > 2 ? (
+                <Badge variant="outline" className="shrink-0 rounded-full">
+                  {t.finance_catalog_more_packages.replace(
+                    "{count}",
+                    String(packageUsages.length - 2),
+                  )}
+                </Badge>
+              ) : null}
+            </div>
+          );
+        },
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (item) => (item.is_active ? "active" : "inactive"),
+        filterType: "enum",
+        filterOptions: [
+          { value: "active", label: t.common_active },
+          { value: "inactive", label: t.common_inactive },
+        ],
+        sortable: true,
+        width: 110,
+        render: (item) => (
+          <Badge
+            variant="outline"
+            className={cn(
+              "w-fit rounded-full",
+              item.is_active
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-slate-200 bg-slate-50 text-slate-600",
+            )}
+          >
+            {item.is_active ? t.common_active : t.common_inactive}
+          </Badge>
+        ),
+      },
+    ],
+    [agencyServicePackageUsages, t],
+  );
   const defaultTaxProfile = taxProfiles.find((item) => item.is_default);
   const financeCatalogMetrics = [
     {
@@ -1230,113 +1376,31 @@ function useFinanceCatalogPageContent() {
         ) : agencyServices.length === 0 ? (
           <EmptyCell>{t.revenue_agency_service_empty_title}</EmptyCell>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-border/50 bg-card">
-            <div className="min-w-[1180px]">
-              <div className="grid grid-cols-[minmax(0,1.45fr)_130px_130px_110px_90px_minmax(0,1fr)_100px_44px] gap-3 border-b border-border/50 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                <span>{t.finance_catalog_service}</span>
-                <span>{t.revenue_agency_service_unit_price}</span>
-                <span>{t.revenue_common_gross}</span>
-                <span>{t.revenue_agency_service_unit}</span>
-                <span>{t.finance_catalog_vat_label}</span>
-                <span>{t.finance_catalog_packages_column}</span>
-                <span>{t.users_status}</span>
-                <span />
-              </div>
-              {agencyServices.map((item) => {
-                const packageUsages = agencyServicePackageUsages.get(item.id) ?? [];
-
-                return (
-                  <div
-                    key={item.id}
-                    className="grid grid-cols-[minmax(0,1.45fr)_130px_130px_110px_90px_minmax(0,1fr)_100px_44px] items-center gap-3 border-b border-border/40 px-4 py-3 text-sm last:border-b-0"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate font-medium text-foreground">
-                        {agencyServiceNameLabel(item.service_key, item.service_name, t)}
-                      </p>
-                      <p className="font-mono text-xs text-muted-foreground">
-                        {item.service_key}
-                      </p>
-                      {item.description ? (
-                        <p className="mt-1 truncate text-xs text-muted-foreground">
-                          {agencyServiceDescriptionLabel(item.service_key, item.description, t)}
-                        </p>
-                      ) : null}
-                    </div>
-                    <span className="font-medium tabular-nums text-foreground">
-                      {formatMoney(item.unit_price as string | number, item.currency)}
-                    </span>
-                    <span className="font-medium tabular-nums text-foreground">
-                      {formatMoney(agencyServiceGrossAmount(item), item.currency)}
-                    </span>
-                    <span className="text-muted-foreground">
-                      {agencyServiceUnitLabel(item.unit_label, t)}
-                    </span>
-                    <span className="tabular-nums text-foreground">
-                      {valueToInput(item.vat_rate) || "0"}%
-                    </span>
-                    <div className="flex min-w-0 flex-wrap gap-1">
-                      {packageUsages.length === 0 ? (
-                        <span className="text-muted-foreground">-</span>
-                      ) : (
-                        <>
-                          {packageUsages.slice(0, 2).map((usage) => (
-                            <Badge
-                              key={usage.id}
-                              variant="outline"
-                              title={usage.packageKey}
-                              className={cn(
-                                "max-w-[160px] truncate rounded-full",
-                                usage.isActive
-                                  ? "border-sky-200 bg-sky-50 text-sky-700"
-                                  : "border-slate-200 bg-slate-50 text-slate-600",
-                              )}
-                            >
-                              {usage.name}
-                            </Badge>
-                          ))}
-                          {packageUsages.length > 2 ? (
-                            <Badge variant="outline" className="rounded-full">
-                              {t.finance_catalog_more_packages.replace(
-                                "{count}",
-                                String(packageUsages.length - 2),
-                              )}
-                            </Badge>
-                          ) : null}
-                        </>
-                      )}
-                    </div>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "w-fit rounded-full",
-                        item.is_active
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                          : "border-slate-200 bg-slate-50 text-slate-600",
-                      )}
+          <DataTableSurface
+            rows={agencyServices}
+            columns={agencyServiceColumns}
+            dictionary={t as unknown as Record<string, string>}
+            rowId={(item) => item.id}
+            emptyState={<EmptyCell>{t.revenue_agency_service_empty_title}</EmptyCell>}
+            tableClassName="max-h-[560px]"
+            rowActions={
+              canManageTaxProfiles
+                ? (item) => (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                      onClick={() => openEditAgencyService(item)}
+                      aria-label={t.finance_catalog_edit}
+                      title={t.finance_catalog_edit}
                     >
-                      {item.is_active ? t.common_active : t.common_inactive}
-                    </Badge>
-                    {canManageTaxProfiles ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        className="size-7 rounded-full text-muted-foreground hover:text-foreground"
-                        onClick={() => openEditAgencyService(item)}
-                        aria-label={t.finance_catalog_edit}
-                        title={t.finance_catalog_edit}
-                      >
-                        <Pencil className="size-3.5" />
-                      </Button>
-                    ) : (
-                      <span />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+                      <Pencil className="size-3.5" />
+                    </Button>
+                  )
+                : undefined
+            }
+          />
         )}
       </Section>
 

@@ -14,12 +14,12 @@ use uuid::Uuid;
 use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
-use crate::pdf_text::{pdf_text_save_options, win_ansi_show_text_op};
+use crate::pdf_text::{add_unicode_pdf_fonts, pdf_text_save_options, unicode_show_text_op};
 use crate::state::AppState;
 use gmed_domain::role::Role;
 use printpdf::{
-    BuiltinFont, Color, Mm, Op, PaintMode, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point,
-    Pt, Rect, Rgb, WindingOrder,
+    Color, Mm, Op, PaintMode, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point, Pt, Rect,
+    Rgb, WindingOrder,
 };
 use sqlx::types::Json as SqlxJson;
 use sqlx::{Postgres, Row, Transaction};
@@ -4211,6 +4211,13 @@ async fn list_patient_documents(
 
     let rows = sqlx::query(
         r#"SELECT d.id,
+                  d.document_number,
+                  d.generated_template_id,
+                  d.order_id,
+                  d.version_root_document_id,
+                  d.replaces_document_id,
+                  d.version_number,
+                  d.file_size,
                   COALESCE(d.original_filename, d.auto_name, 'Document') AS filename,
                   COALESCE(d.category, d.art) AS category,
                   d.status,
@@ -4250,6 +4257,13 @@ async fn list_patient_documents(
         .map(|row| {
             serde_json::json!({
                 "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+                "document_number": row.try_get::<String, _>("document_number").unwrap_or_default(),
+                "generated_template_id": row.try_get::<Option<String>, _>("generated_template_id").unwrap_or_default(),
+                "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
+                "version_root_document_id": row.try_get::<Uuid, _>("version_root_document_id").unwrap_or_else(|_| Uuid::nil()),
+                "replaces_document_id": row.try_get::<Option<Uuid>, _>("replaces_document_id").unwrap_or_default(),
+                "version_number": row.try_get::<i32, _>("version_number").unwrap_or(1),
+                "file_size": row.try_get::<i64, _>("file_size").unwrap_or_default(),
                 "filename": row.try_get::<String, _>("filename").unwrap_or_default(),
                 "category": row.try_get::<Option<String>, _>("category").unwrap_or_default(),
                 "status": row.try_get::<String, _>("status").unwrap_or_default(),
@@ -9355,13 +9369,13 @@ struct ClinPdf {
 }
 
 impl ClinPdf {
-    fn new() -> Self {
+    fn new(regular: PdfFontHandle, bold: PdfFontHandle) -> Self {
         Self {
             pages: Vec::new(),
             ops: Vec::new(),
             y: CLIN_PDF_H - CLIN_PDF_TOP,
-            regular: PdfFontHandle::Builtin(BuiltinFont::Helvetica),
-            bold: PdfFontHandle::Builtin(BuiltinFont::HelveticaBold),
+            regular,
+            bold,
         }
     }
 
@@ -9431,7 +9445,7 @@ impl ClinPdf {
                 pos: Point::new(Mm(x), Mm(self.y)),
             });
             self.ops.push(Op::SetFillColor { col: col.clone() });
-            self.ops.push(win_ansi_show_text_op(&line));
+            self.ops.push(unicode_show_text_op(&line));
             self.ops.push(Op::EndTextSection);
             self.y -= lh;
         }
@@ -9648,7 +9662,15 @@ async fn get_patient_clinical_pdf(
         .map(|d| d.format("%d.%m.%Y").to_string())
         .unwrap_or_default();
 
-    let mut pdf = ClinPdf::new();
+    let mut document = PdfDocument::new("Arztbrief");
+    let (regular_font, bold_font) = match add_unicode_pdf_fonts(&mut document) {
+        Ok(fonts) => fonts,
+        Err(error) => {
+            tracing::error!(error, patient_id = %patient_uuid, "load fonts for clinical PDF");
+            return fail();
+        }
+    };
+    let mut pdf = ClinPdf::new(regular_font, bold_font);
     pdf.text("Arztbrief", 16.0, true, false, 0.0, 0.0, 1.0);
     pdf.text(
         format!("{} {}", first.trim(), last.trim()).trim(),
@@ -9873,7 +9895,6 @@ async fn get_patient_clinical_pdf(
         }
     }
 
-    let mut document = PdfDocument::new("Arztbrief");
     let mut warnings: Vec<PdfWarnMsg> = Vec::new();
     let bytes = document
         .with_pages(pdf.finish())
@@ -9952,11 +9973,11 @@ struct MedPlan {
 }
 
 impl MedPlan {
-    fn new() -> Self {
+    fn new(regular: PdfFontHandle, bold: PdfFontHandle) -> Self {
         Self {
             ops: Vec::new(),
-            regular: PdfFontHandle::Builtin(BuiltinFont::Helvetica),
-            bold: PdfFontHandle::Builtin(BuiltinFont::HelveticaBold),
+            regular,
+            bold,
         }
     }
 
@@ -10001,7 +10022,7 @@ impl MedPlan {
             pos: Point::new(Mm(x), Mm(baseline)),
         });
         self.ops.push(Op::SetFillColor { col });
-        self.ops.push(win_ansi_show_text_op(text));
+        self.ops.push(unicode_show_text_op(text));
         self.ops.push(Op::EndTextSection);
     }
 
@@ -10263,7 +10284,15 @@ async fn get_patient_medikationsplan_pdf(
     let datamatrix = crate::bmp::encode_datamatrix(&xml);
 
     // ---- Render ----
-    let mut pdf = MedPlan::new();
+    let mut document = PdfDocument::new("Medikationsplan");
+    let (regular_font, bold_font) = match add_unicode_pdf_fonts(&mut document) {
+        Ok(fonts) => fonts,
+        Err(error) => {
+            tracing::error!(error, patient_id = %patient_uuid, "load fonts for Medikationsplan");
+            return fail();
+        }
+    };
+    let mut pdf = MedPlan::new(regular_font, bold_font);
     let full_name = format!("{first_name} {last_name}").trim().to_string();
 
     pdf.text_at(MP_LEFT, MP_TOP, "Medikationsplan", 17.0, true, mp_ink());
@@ -10365,7 +10394,6 @@ async fn get_patient_medikationsplan_pdf(
         );
     }
 
-    let mut document = PdfDocument::new("Medikationsplan");
     let mut warnings: Vec<PdfWarnMsg> = Vec::new();
     let bytes = document
         .with_pages(pdf.finish())
@@ -10410,4 +10438,50 @@ async fn get_patient_medikationsplan_pdf(
         bytes,
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod unicode_pdf_tests {
+    use super::{ClinPdf, MedPlan, add_unicode_pdf_fonts, mp_ink, pdf_text_save_options};
+    use printpdf::{PdfDocument, PdfWarnMsg};
+
+    #[test]
+    fn arztbrief_pdf_preserves_cyrillic_text() {
+        let mut document = PdfDocument::new("Arztbrief Unicode test");
+        let (regular, bold) = add_unicode_pdf_fonts(&mut document).unwrap();
+        let mut layout = ClinPdf::new(regular, bold);
+        layout.text(
+            "Пацієнт: Олександр Іванов",
+            12.0,
+            false,
+            false,
+            0.0,
+            0.0,
+            0.0,
+        );
+
+        let mut warnings: Vec<PdfWarnMsg> = Vec::new();
+        let bytes = document
+            .with_pages(layout.finish())
+            .save(&pdf_text_save_options(), &mut warnings);
+        let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+
+        assert!(text.contains("Пацієнт: Олександр Іванов"));
+    }
+
+    #[test]
+    fn medikationsplan_pdf_preserves_cyrillic_text() {
+        let mut document = PdfDocument::new("Medikationsplan Unicode test");
+        let (regular, bold) = add_unicode_pdf_fonts(&mut document).unwrap();
+        let mut layout = MedPlan::new(regular, bold);
+        layout.text_at(14.0, 283.0, "Препарат: Метформін", 12.0, false, mp_ink());
+
+        let mut warnings: Vec<PdfWarnMsg> = Vec::new();
+        let bytes = document
+            .with_pages(layout.finish())
+            .save(&pdf_text_save_options(), &mut warnings);
+        let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+
+        assert!(text.contains("Препарат: Метформін"));
+    }
 }

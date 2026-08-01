@@ -7,9 +7,7 @@ use axum::{
     routing::{get, post},
 };
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
-use printpdf::{
-    BuiltinFont, Color, Mm, Op, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point, Pt, Rgb,
-};
+use printpdf::{Color, Mm, Op, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point, Pt, Rgb};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::{Number as JsonNumber, Value, json};
@@ -21,7 +19,7 @@ use uuid::Uuid;
 use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
-use crate::pdf_text::{pdf_text_save_options, win_ansi_show_text_op};
+use crate::pdf_text::{add_unicode_pdf_fonts, pdf_text_save_options, unicode_show_text_op};
 use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -1259,15 +1257,8 @@ fn append_invoice_pdf_text_line(
     ops.push(Op::SetFillColor {
         col: invoice_pdf_color(color),
     });
-    ops.push(win_ansi_show_text_op(text));
+    ops.push(unicode_show_text_op(text));
     ops.push(Op::EndTextSection);
-}
-
-fn invoice_pdf_text_font_handles() -> (PdfFontHandle, PdfFontHandle) {
-    (
-        PdfFontHandle::Builtin(BuiltinFont::Helvetica),
-        PdfFontHandle::Builtin(BuiltinFont::HelveticaBold),
-    )
 }
 
 fn invoice_pdf_footer_line(footer_text: &str, page_number: usize, total_pages: usize) -> String {
@@ -2742,7 +2733,7 @@ async fn load_invoice_pdf_context(
 
 fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static str> {
     let mut document = PdfDocument::new(&context.invoice_number);
-    let (regular_handle, bold_handle) = invoice_pdf_text_font_handles();
+    let (regular_handle, bold_handle) = add_unicode_pdf_fonts(&mut document)?;
 
     let footer_text = format!(
         "{}: {}",
@@ -4776,7 +4767,7 @@ mod tests {
     }
 
     #[test]
-    fn invoice_pdf_uses_renderable_builtin_font_text() {
+    fn invoice_pdf_preserves_cyrillic_text() {
         let context = InvoicePdfContext {
             invoice_id: Uuid::new_v4(),
             patient_id: Uuid::new_v4(),
@@ -4793,16 +4784,16 @@ mod tests {
             total_gross: "145.00".to_string(),
             paid_amount: "0.00".to_string(),
             balance_due: "145.00".to_string(),
-            notes: Some("Zahlbar nach Rechnungserhalt.".to_string()),
+            notes: Some("Оплатить после получения счёта.".to_string()),
             patient_pid: "PT-INV-UNIT".to_string(),
-            patient_name: "Max Müller".to_string(),
+            patient_name: "Макс Мюллер".to_string(),
             patient_title: Some("Dr.".to_string()),
             birth_date: Some(NaiveDate::from_ymd_opt(1990, 1, 1).unwrap()),
             order_number: "ORD-UNIT-1".to_string(),
             quote_number: Some("Q-UNIT-1".to_string()),
-            language: "de".to_string(),
+            language: "ru".to_string(),
             line_items: vec![InvoicePdfLineItem {
-                description: "Approved PDF line".to_string(),
+                description: "Медицинская консультация".to_string(),
                 quantity: "1".to_string(),
                 unit_price: "145.00".to_string(),
                 vat_rate: "0".to_string(),
@@ -4816,20 +4807,11 @@ mod tests {
         };
 
         let bytes = build_invoice_pdf(&context).unwrap();
-        let raw_pdf = String::from_utf8_lossy(&bytes);
-
-        assert!(raw_pdf.contains("/F5"));
-        assert!(raw_pdf.contains("/F6"));
-        assert!(raw_pdf.contains("INV-UNIT-1"));
-        assert!(raw_pdf.contains("Approved PDF line"));
-        assert!(raw_pdf.contains("4D6178204DFC6C6C6572"));
-        assert!(!raw_pdf.contains("4D6178204DC3BC6C6C6572"));
-        assert!(!raw_pdf.contains("[] TJ"));
-
         let extracted_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
         assert!(extracted_text.contains("INV-UNIT-1"));
-        assert!(extracted_text.contains("Approved PDF line"));
+        assert!(extracted_text.contains("Медицинская консультация"));
         assert!(extracted_text.contains("PT-INV-UNIT"));
-        assert!(extracted_text.contains("Müller"));
+        assert!(extracted_text.contains("Макс Мюллер"));
+        assert!(extracted_text.contains("Оплатить после получения счёта."));
     }
 }

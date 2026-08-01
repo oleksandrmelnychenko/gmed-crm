@@ -177,7 +177,7 @@ export function buildPatientColumns(
       searchable: true,
       required: true,
       pinned: "left",
-      width: 96,
+      width: 128,
       group: "identity",
       render: (p: PatientSummary) => (
         <span className="truncate font-mono text-[11px] tabular-nums text-muted-foreground">
@@ -213,8 +213,8 @@ export function buildPatientColumns(
       cellClassName: "min-w-0 whitespace-normal",
       group: "identity",
       render: (p: PatientSummary) => (
-        <div className="flex h-full min-w-0 flex-col justify-center gap-1 overflow-hidden py-1">
-          <div className="line-clamp-2 min-w-0 break-words text-xs font-medium leading-4 text-foreground">
+        <div className="flex h-full min-w-0 items-center overflow-hidden">
+          <div className="min-w-0 truncate font-mono text-xs font-medium text-foreground">
             {patientDisplayName(p)}
           </div>
         </div>
@@ -227,7 +227,7 @@ export function buildPatientColumns(
       filterType: "tag_array",
       filterOptions: dyn.labels,
       searchable: true,
-      width: 320,
+      width: 420,
       group: "identity",
       render: (p: PatientSummary) => (
         <TagListCell
@@ -248,12 +248,12 @@ export function buildPatientColumns(
       filterType: "number",
       sortable: true,
       defaultVisible: true,
-      width: 64,
+      width: 96,
       group: "identity",
       render: (p: PatientSummary) => {
         const age = computeAge(p.birth_date);
         return (
-          <span className="tabular-nums text-xs text-muted-foreground">
+          <span className="font-mono tabular-nums text-xs text-foreground">
             {age != null ? age : "—"}
           </span>
         );
@@ -525,7 +525,7 @@ function TagListCell({
           key={value}
           data-patient-functional-label={dataValueAttribute?.(value)}
           className={cn(
-            "max-w-[6.5rem] shrink truncate rounded-md border px-1.5 py-0.5 text-[11px] font-medium",
+            "shrink-0 whitespace-nowrap rounded-md border px-1.5 py-0.5 font-mono text-[11px] font-medium",
             classNameForValue ? classNameForValue(value) : "border-transparent bg-muted text-muted-foreground",
           )}
         >

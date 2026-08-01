@@ -29,6 +29,19 @@ export const VISIBILITY_OPTIONS: DocumentVisibility[] = [
   "patient_visible",
 ];
 
+const ORDER_CONTEXT_REQUIRED_TEMPLATE_IDS = new Set([
+  "single_order",
+  "order_cost_estimate",
+]);
+
+export function documentTemplateRequiresOrder(templateId?: string | null) {
+  return ORDER_CONTEXT_REQUIRED_TEMPLATE_IDS.has(templateId?.trim() ?? "");
+}
+
+export function formatBusinessDocumentNumber(documentNumber?: string | null) {
+  return documentNumber?.trim().replace(/-V\d+$/i, "") ?? "";
+}
+
 export function canManageDocuments(role?: string) {
   return role === "ceo" || role === "patient_manager" || role === "it_admin";
 }

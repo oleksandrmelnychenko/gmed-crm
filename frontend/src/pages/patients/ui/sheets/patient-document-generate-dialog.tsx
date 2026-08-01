@@ -14,13 +14,17 @@ import {
 } from "@/pages/documents/data/document-api";
 import {
   DOCUMENT_BINDING_FIELDS,
+  enhancedDueDiligenceBindingDefaults,
+  formatEnhancedDueDiligenceError,
   isDesignedAgencyDocumentTemplate,
   patientPartyBindingDefaults,
+  validateEnhancedDueDiligenceBindings,
 } from "@/pages/documents/model/document-bindings";
 import {
   buildGeneratedDocumentManualTextDraft,
   buildGenerateDocumentAutoName,
   buildGenerateDocumentPayload,
+  documentTemplateRequiresOrder,
   emptyGenerateForm,
   patientDocumentAddresseeLabel,
   patientOptionLabel,
@@ -77,6 +81,7 @@ export function PatientDocumentGenerateDialog({
   const [patientProfile, setPatientProfile] =
     useState<PatientDocumentProfile | null>(null);
   const [busy, setBusy] = useState(false);
+  const [validationError, setValidationError] = useState("");
   const patientOptions = useMemo(
     () => (patient && patient.id === patientId ? [patient] : []),
     [patient, patientId],
@@ -86,6 +91,7 @@ export function PatientDocumentGenerateDialog({
   useEffect(() => {
     if (!open) {
       setForm(emptyGenerateForm(patientId ?? ""));
+      setValidationError("");
     }
   }, [open, patientId]);
 
@@ -163,6 +169,13 @@ export function PatientDocumentGenerateDialog({
       frameworkContracts !== null &&
       frameworkContracts.length === 0,
   );
+  const selectedTemplateRequiresOrder = documentTemplateRequiresOrder(
+    selectedTemplate?.id,
+  );
+  const orderContextRequiredMessage = tx(
+    "Выберите заказ для создания этого документа.",
+    "Wählen Sie einen Auftrag aus, um dieses Dokument zu erstellen.",
+  );
   const patientLabel = patientOptions[0] ? patientOptionLabel(patientOptions[0]) : "";
   const patientAddressee = patientDocumentAddresseeLabel(
     patientId ?? "",
@@ -193,6 +206,7 @@ export function PatientDocumentGenerateDialog({
     : generatedManualTextDraft;
 
   function selectTemplate(id: string) {
+    setValidationError("");
     const template = templates.find((t) => t.id === id);
     const nextForm = emptyGenerateForm(patientId ?? "");
     if (!template) {
@@ -221,7 +235,12 @@ export function PatientDocumentGenerateDialog({
         nextForm.accessCategory,
       ),
       addresseePerson: patientAddressee,
-      bindings: patientPartyBindingDefaults(patientProfile),
+      bindings: {
+        ...patientPartyBindingDefaults(patientProfile),
+        ...(template.id === "enhanced_due_diligence"
+          ? enhancedDueDiligenceBindingDefaults()
+          : {}),
+      },
     };
     setForm({
       ...formWithTemplate,
@@ -237,6 +256,18 @@ export function PatientDocumentGenerateDialog({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedTemplate || !patientId || busy) return;
+    if (selectedTemplateRequiresOrder && !form.orderId) {
+      setValidationError(orderContextRequiredMessage);
+      return;
+    }
+    if (selectedTemplate.id === "enhanced_due_diligence") {
+      const amlError = validateEnhancedDueDiligenceBindings(form.bindings, lang);
+      if (amlError) {
+        setValidationError(amlError);
+        return;
+      }
+    }
+    setValidationError("");
     setBusy(true);
     try {
       const response = await generateDocument(
@@ -256,11 +287,13 @@ export function PatientDocumentGenerateDialog({
       onGenerated?.();
       onOpenChange(false);
     } catch (error) {
-      toast.error(
-        error instanceof Error
+      const amlError = formatEnhancedDueDiligenceError(error, lang);
+      const errorMessage =
+        amlError ||
+        (error instanceof Error
           ? error.message
-          : tx("Не удалось сгенерировать документ", "Dokument konnte nicht erstellt werden"),
-      );
+          : tx("Не удалось сгенерировать документ", "Dokument konnte nicht erstellt werden"));
+      toast.error(errorMessage);
     } finally {
       setBusy(false);
     }
@@ -389,12 +422,19 @@ export function PatientDocumentGenerateDialog({
               <label className="block">
                 <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
                   {tx("Заказ", "Auftrag")}
+                  {selectedTemplateRequiresOrder ? (
+                    <span className="ml-1 text-rose-600">*</span>
+                  ) : null}
                 </span>
                 <NativeComboboxSelect
                   value={form.orderId}
                   className={fieldInputClass}
+                  aria-invalid={
+                    selectedTemplateRequiresOrder && !form.orderId && Boolean(validationError)
+                  }
                   onChange={(event) => {
                     const orderId = event.target.value;
+                    setValidationError("");
                     setForm((current) => ({
                       ...current,
                       orderId,
@@ -408,8 +448,10 @@ export function PatientDocumentGenerateDialog({
                     }));
                   }}
                 >
-                  <option value="">
-                    {tx("Без привязки к заказу", "Ohne Auftragsbezug")}
+                  <option value="" disabled={selectedTemplateRequiresOrder}>
+                    {selectedTemplateRequiresOrder
+                      ? tx("Выберите заказ", "Auftrag auswählen")
+                      : tx("Без привязки к заказу", "Ohne Auftragsbezug")}
                   </option>
                   {orders.map((order) => (
                     <option key={order.id} value={order.id}>
@@ -417,6 +459,9 @@ export function PatientDocumentGenerateDialog({
                     </option>
                   ))}
                 </NativeComboboxSelect>
+                {selectedTemplateRequiresOrder && !form.orderId && validationError ? (
+                  <p className="mt-1 text-xs text-destructive">{validationError}</p>
+                ) : null}
               </label>
               <label className="block">
                 <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
@@ -466,7 +511,8 @@ export function PatientDocumentGenerateDialog({
                       selectedTemplate.id,
                     ),
                 )}
-                onChange={(key, value) =>
+                onChange={(key, value) => {
+                  setValidationError("");
                   setForm((current) => ({
                     ...current,
                     manualText: "",
@@ -475,9 +521,12 @@ export function PatientDocumentGenerateDialog({
                       ...current.bindings,
                       [key]: value,
                     },
-                  }))
-                }
+                  }));
+                }}
               />
+              {selectedTemplate.id === "enhanced_due_diligence" && validationError ? (
+                <p className="mt-3 text-xs text-destructive">{validationError}</p>
+              ) : null}
             </div>
           ) : null}
 

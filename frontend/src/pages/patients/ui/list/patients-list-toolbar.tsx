@@ -2,12 +2,10 @@ import type { RefObject } from "react";
 import { Info, Search, X } from "lucide-react";
 
 import { ColumnVisibilityMenu } from "@/components/data-table/column-visibility-menu";
-import { DensityToggle } from "@/components/data-table/density-toggle";
 import { FilterBuilder } from "@/components/data-table/filter-builder";
 import { SortBuilder } from "@/components/data-table/sort-builder";
 import type {
   ColumnDef,
-  DensityLevel,
   FilterPredicate,
   SortStack,
 } from "@/components/data-table/types";
@@ -42,7 +40,6 @@ type PatientsListToolbarProps = {
   defaultFrozenColumns: string[];
   defaultHiddenColumns: string[];
   deferredSearchPlaceholder: string;
-  density: DensityLevel;
   doctors: DoctorOption[];
   filterPredicates: FilterPredicate[];
   filters: {
@@ -60,7 +57,6 @@ type PatientsListToolbarProps = {
   maxFrozenColumns: number;
   onActiveFilterChange: (value: string) => void;
   onClearAll: () => void;
-  onDensityChange: (value: DensityLevel) => void;
   onDoctorFilterChange: (value: string) => void;
   onFiltersChange: (value: FilterPredicate[]) => void;
   onFrozenColumnsChange: (value: string[]) => void;
@@ -85,7 +81,6 @@ export function PatientsListToolbar({
   defaultFrozenColumns,
   defaultHiddenColumns,
   deferredSearchPlaceholder,
-  density,
   doctors,
   filterPredicates,
   filters,
@@ -97,7 +92,6 @@ export function PatientsListToolbar({
   maxFrozenColumns,
   onActiveFilterChange,
   onClearAll,
-  onDensityChange,
   onDoctorFilterChange,
   onFiltersChange,
   onFrozenColumnsChange,
@@ -285,17 +279,6 @@ export function PatientsListToolbar({
           freezeLabel={t.table_columns_freeze}
           unfreezeLabel={t.table_columns_unfreeze}
           frozenNoteLabel={t.table_columns_frozen}
-        />
-
-        <DensityToggle
-          value={density}
-          onChange={onDensityChange}
-          ariaLabel={t.table_density}
-          labels={{
-            comfortable: t.table_density_comfortable,
-            compact: t.table_density_compact,
-            condensed: t.table_density_condensed,
-          }}
         />
       </div>
     </div>

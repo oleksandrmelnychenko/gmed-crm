@@ -307,6 +307,7 @@ type CaseDetail = {
   case_uuid?: string;
   case_id: string;
   patient_id: string;
+  onboarding_order_id?: string | null;
   manager_id: string;
   status: CaseStatus | string;
   hauptanfragegrund: string | null;
@@ -2254,7 +2255,11 @@ function useCasesPageContent({
 
   function openOrdersWorkspace() {
     if (!detail) return;
-    staffGo(`/orders?patient=${detail.patient_id}`);
+    staffGo(
+      detail.onboarding_order_id
+        ? `/orders/${detail.onboarding_order_id}`
+        : `/orders?patient=${detail.patient_id}`,
+    );
   }
 
   function openAppointmentsWorkspace() {

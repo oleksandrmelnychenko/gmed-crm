@@ -44,11 +44,14 @@ import { DocumentsGrid } from "@/components/documents-grid";
 import { localizeDocumentCode } from "@/lib/required-document-labels";
 import {
   DOCUMENT_BINDING_FIELDS,
+  enhancedDueDiligenceBindingDefaults,
+  formatEnhancedDueDiligenceError,
   hydrateDocumentBindings,
   isDesignedAgencyDocumentTemplate,
   isFixedLegalDocumentTemplate,
   keepPatientPartyBindings,
   patientPartyBindingDefaults,
+  validateEnhancedDueDiligenceBindings,
 } from "@/pages/documents/model/document-bindings";
 import { localizeTextBlock } from "@/pages/documents/model/text-block-labels";
 import {
@@ -142,9 +145,11 @@ import {
   canViewDocumentShares,
   canViewDocuments,
   detailToEditForm,
+  documentTemplateRequiresOrder,
   emptyGenerateForm,
   emptyUploadForm,
   formatConfidenceLabel,
+  formatBusinessDocumentNumber,
   normalizeTemplateLanguage,
   patientDocumentAddresseeLabel,
   patientOptionLabel,
@@ -620,8 +625,15 @@ function formatDateTime(value?: string | null) {
   }
 }
 
-function formatGenerateDocumentError(error: unknown, l: (key: string) => string) {
+function formatGenerateDocumentError(
+  error: unknown,
+  l: (key: string) => string,
+  lang: "de" | "ru",
+) {
   const message = error instanceof Error ? error.message : "";
+
+  const amlMessage = formatEnhancedDueDiligenceError(error, lang);
+  if (amlMessage !== message) return amlMessage;
 
   if (message.includes("Treatment plan template requires at least one appointment")) {
     return l("documents_scope");
@@ -1328,6 +1340,13 @@ function StaffDocumentsPage({
     : [];
   const selectedTemplateNeedsFrameworkContract =
     selectedTemplate?.id === "framework_contract";
+  const selectedTemplateRequiresOrder = documentTemplateRequiresOrder(
+    selectedTemplate?.id,
+  );
+  const orderContextRequiredMessage =
+    lang === "ru"
+      ? "Выберите заказ для создания этого документа."
+      : "Wählen Sie einen Auftrag aus, um dieses Dokument zu erstellen.";
   const selectedFrameworkContract = generateFrameworkContracts?.[0] ?? null;
   const generateBlockedByMissingFrameworkContract = Boolean(
     selectedTemplateNeedsFrameworkContract &&
@@ -1985,6 +2004,7 @@ function StaffDocumentsPage({
   }
 
   function updateBindingField(key: string, value: string) {
+    setGenerateError("");
     setGenerateForm((current) => ({
       ...current,
       bindings: { ...current.bindings, [key]: value },
@@ -1993,6 +2013,7 @@ function StaffDocumentsPage({
 
   function applyGenerateTemplate(templateId: string) {
     const template = templates.find((item) => item.id === templateId);
+    setGenerateError("");
     setGenerateForm((current) => {
       if (!template) {
         return {
@@ -2051,7 +2072,12 @@ function StaffDocumentsPage({
         bindings:
           template.id === current.templateId
             ? current.bindings
-            : keepPatientPartyBindings(current.bindings),
+            : {
+                ...keepPatientPartyBindings(current.bindings),
+                ...(template.id === "enhanced_due_diligence"
+                  ? enhancedDueDiligenceBindingDefaults()
+                  : {}),
+              },
       };
     });
   }
@@ -2149,6 +2175,20 @@ function StaffDocumentsPage({
       setGenerateError(t.documents_patient_context_required);
       return;
     }
+    if (selectedTemplateRequiresOrder && !generateForm.orderId) {
+      setGenerateError(orderContextRequiredMessage);
+      return;
+    }
+    if (selectedTemplate.id === "enhanced_due_diligence") {
+      const amlError = validateEnhancedDueDiligenceBindings(
+        generateForm.bindings,
+        lang,
+      );
+      if (amlError) {
+        setGenerateError(amlError);
+        return;
+      }
+    }
     if (generateBlockedByMissingFrameworkContract) {
       setGenerateError(l("documents_scope_4"));
       return;
@@ -2192,7 +2232,7 @@ function StaffDocumentsPage({
       }
     } catch (nextError) {
       setGenerateError(
-        formatGenerateDocumentError(nextError, l) || t.documents_failed_generate,
+        formatGenerateDocumentError(nextError, l, lang) || t.documents_failed_generate,
       );
     } finally {
       setGenerateBusy(false);
@@ -3397,7 +3437,10 @@ function StaffDocumentsPage({
                       orderId: "",
                       appointmentId: "",
                       replaceDocumentId: "",
-                      bindings: {},
+                      bindings:
+                        selectedTemplate?.id === "enhanced_due_diligence"
+                          ? enhancedDueDiligenceBindingDefaults()
+                          : {},
                       language: resolveTemplateLanguage(
                         patientId,
                         selectedTemplate,
@@ -3417,11 +3460,13 @@ function StaffDocumentsPage({
               </Field>
               {!selectedTemplateIsFixedLegal ? (
                 <>
-              <Field label={t.orders_title}>
+              <div className="space-y-1">
+              <Field label={t.orders_title} required={selectedTemplateRequiresOrder}>
                 <NativeComboboxSelect
                   value={generateForm.orderId}
                   onChange={(event) => {
                     const orderId = event.target.value;
+                    setGenerateError("");
                     setGenerateForm((current) => ({
                       ...current,
                       orderId,
@@ -3437,7 +3482,13 @@ function StaffDocumentsPage({
                   className={selectClassName}
                   disabled={!generateForm.patientId}
                 >
-                  <option value="">{t.documents_patient_wide_context}</option>
+                  <option value="" disabled={selectedTemplateRequiresOrder}>
+                    {selectedTemplateRequiresOrder
+                      ? lang === "ru"
+                        ? "Выберите заказ"
+                        : "Auftrag auswählen"
+                      : t.documents_patient_wide_context}
+                  </option>
                   {generateOrders.map((order) => (
                     <option key={order.id} value={order.id}>
                       {order.order_number} · {order.patient_pid}
@@ -3445,6 +3496,14 @@ function StaffDocumentsPage({
                   ))}
                 </NativeComboboxSelect>
               </Field>
+              {selectedTemplateRequiresOrder &&
+              !generateForm.orderId &&
+              generateError === orderContextRequiredMessage ? (
+                <p className="text-xs text-destructive">
+                  {orderContextRequiredMessage}
+                </p>
+              ) : null}
+              </div>
               <Field label={t.appointments_title}>
                 <NativeComboboxSelect
                   value={generateForm.appointmentId}
@@ -5378,7 +5437,9 @@ function StaffDocumentsPage({
                           .join(" · ")}
                       </p>
                       <p className="mt-1 text-[11px] font-mono tabular-nums text-muted-foreground/80">
-                        {detail.document_number ? `${detail.document_number} · ` : ""}
+                        {detail.document_number
+                          ? `${formatBusinessDocumentNumber(detail.document_number)} · `
+                          : ""}
                         {text.versionOf(detail.version_number, detail.version_count)}
                         {detail.is_latest_version
                           ? ` · ${text.current}`
@@ -6926,7 +6987,7 @@ function DocumentIntakeQueueTable({
         id: "document",
         label: t.documents_filename,
         accessor: (item) =>
-          `${item.document_number ?? ""} ${localizeDocumentCode(item.auto_name, l)} ${item.original_filename ?? ""}`.trim(),
+          `${formatBusinessDocumentNumber(item.document_number)} ${localizeDocumentCode(item.auto_name, l)} ${item.original_filename ?? ""}`.trim(),
         searchable: true,
         sortable: true,
         required: true,
@@ -6946,7 +7007,9 @@ function DocumentIntakeQueueTable({
             </div>
             <div className="mt-0.5 flex min-w-0 items-baseline gap-1.5 text-[11px] text-muted-foreground">
               {item.document_number ? (
-                <span className="shrink-0 font-mono tabular-nums">{item.document_number}</span>
+                <span className="shrink-0 font-mono tabular-nums">
+                  {formatBusinessDocumentNumber(item.document_number)}
+                </span>
               ) : null}
               <span className="truncate">{item.original_filename ?? t.documents_unlinked_document}</span>
             </div>

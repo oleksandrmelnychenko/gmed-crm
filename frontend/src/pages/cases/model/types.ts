@@ -183,6 +183,7 @@ export type CaseDetail = {
   case_uuid?: string;
   case_id: string;
   patient_id: string;
+  onboarding_order_id?: string | null;
   manager_id: string;
   status: CaseStatus | string;
   hauptanfragegrund: string | null;

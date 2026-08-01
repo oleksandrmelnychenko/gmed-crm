@@ -18,6 +18,7 @@ import {
 } from "@/lib/required-document-labels";
 import { useLang, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { formatBusinessDocumentNumber } from "@/pages/documents/model/document-model";
 import type { PatientOption as DocumentPatientOption } from "@/pages/documents/model/types";
 
 import type { DocumentAlerts, DocumentItem } from "../../model/detail-tab-types";
@@ -551,6 +552,11 @@ export function PatientDocumentsTab({
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="break-words text-sm font-medium text-foreground">{doc.filename}</p>
+                        {formatBusinessDocumentNumber(doc.document_number) ? (
+                          <span className="mt-1 inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 font-mono text-[10px] text-sky-700">
+                            {formatBusinessDocumentNumber(doc.document_number)}
+                          </span>
+                        ) : null}
                         <p className="mt-1 text-xs text-muted-foreground">
                           {doc.category ? localizeDocumentCode(doc.category, l) : commonNotSet}
                         </p>
@@ -614,7 +620,14 @@ export function PatientDocumentsTab({
                       idx < filteredDocuments.length - 1 && "border-b border-border/45",
                     )}
                   >
-                    <span className="min-w-0 break-words text-sm font-medium text-foreground">{doc.filename}</span>
+                    <span className="min-w-0">
+                      <span className="block break-words text-sm font-medium text-foreground">{doc.filename}</span>
+                      {formatBusinessDocumentNumber(doc.document_number) ? (
+                        <span className="mt-1 inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 font-mono text-[10px] text-sky-700">
+                          {formatBusinessDocumentNumber(doc.document_number)}
+                        </span>
+                      ) : null}
+                    </span>
                     <span className="break-words text-xs text-muted-foreground">
                       {doc.category ? localizeDocumentCode(doc.category, l) : commonNotSet}
                     </span>

@@ -356,7 +356,7 @@ async fn list_cases(
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
 
     match sqlx::query(
-        r#"SELECT c.id, c.case_id, c.patient_id, c.lead_id, c.manager_id,
+        r#"SELECT c.id, c.case_id, c.patient_id, c.lead_id, c.onboarding_order_id, c.manager_id,
                   c.status, c.hauptanfragegrund, c.created_at,
                   COALESCE(p.first_name, l.first_name) AS first_name,
                   COALESCE(p.last_name, l.last_name) AS last_name,
@@ -409,6 +409,7 @@ async fn list_cases(
                     "case_id": r.try_get::<String, _>("case_id").unwrap_or_default(),
                     "patient_id": patient_id,
                     "lead_id": lead_id,
+                    "onboarding_order_id": r.try_get::<Option<Uuid>, _>("onboarding_order_id").unwrap_or_default(),
                     "patient_name": format!(
                         "{} {}",
                         r.try_get::<String, _>("first_name").unwrap_or_default(),
@@ -849,7 +850,7 @@ async fn get_case_full(
     }
 
     let case = match sqlx::query(
-        r#"SELECT c.id, c.case_id, c.patient_id, c.lead_id, c.manager_id, c.status,
+        r#"SELECT c.id, c.case_id, c.patient_id, c.lead_id, c.onboarding_order_id, c.manager_id, c.status,
                   c.hauptanfragegrund, c.aktuelle_anamnese, c.zuweiser_doctor_id, c.zuweiser,
                   c.notes, c.created_at, c.updated_at, c.retention_until,
                   c.last_clinical_update_at, c.version_count,
@@ -1117,6 +1118,7 @@ async fn get_case_full(
         "case_id": case.try_get::<String, _>("case_id").unwrap_or_default(),
         "patient_id": patient_id,
         "lead_id": lead_id,
+        "onboarding_order_id": case.try_get::<Option<Uuid>, _>("onboarding_order_id").unwrap_or_default(),
         "manager_id": case.try_get::<Uuid, _>("manager_id").unwrap_or_default(),
         "status": case.try_get::<String, _>("status").unwrap_or_default(),
         "hauptanfragegrund": case.try_get::<Option<String>, _>("hauptanfragegrund").unwrap_or_default(),

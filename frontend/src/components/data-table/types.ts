@@ -78,6 +78,8 @@ export type ColumnDef<T> = {
   group?: string;
   render?: (row: T) => ReactNode;
   headerRender?: () => ReactNode;
+  /** Horizontal alignment. Defaults to "right" for number-typed columns. */
+  align?: "left" | "right";
   cellClassName?: string;
   ariaLabel?: string;
 };

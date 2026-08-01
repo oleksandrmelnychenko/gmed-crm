@@ -80,8 +80,10 @@ export function updateLeadWizard(leadId: string, payload: JsonPayload) {
 }
 
 /** Convert a fully ready lead; the backend returns the exact blocking checks otherwise. */
-export function wizardConvertLead(leadId: string) {
-  return postJson<WizardConvertResponse>(`/leads/${leadId}/wizard-convert`, {});
+export function wizardConvertLead(leadId: string, confirmed: boolean) {
+  return postJson<WizardConvertResponse>(`/leads/${leadId}/wizard-convert`, {
+    confirmed,
+  });
 }
 
 export function downloadLeadAttachment(leadId: string, fileId: string) {

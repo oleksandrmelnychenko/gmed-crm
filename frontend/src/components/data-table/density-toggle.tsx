@@ -79,7 +79,7 @@ export function DensityToggle({
 }
 
 export const DENSITY_ROW_HEIGHT: Record<DensityLevel, number> = {
-  comfortable: 44,
-  compact: 36,
-  condensed: 28,
+  comfortable: 34,
+  compact: 30,
+  condensed: 26,
 };

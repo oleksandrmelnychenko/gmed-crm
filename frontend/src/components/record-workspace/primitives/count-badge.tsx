@@ -7,7 +7,7 @@ export function CountBadge({ children }: { children: ReactNode }) {
   return (
     <Badge
       variant="outline"
-      className={cn("rounded-full border-border/60 bg-muted/25 text-foreground")}
+      className={cn("rounded-full border-border/60 bg-muted/25 font-mono tabular-nums text-foreground")}
     >
       {children}
     </Badge>

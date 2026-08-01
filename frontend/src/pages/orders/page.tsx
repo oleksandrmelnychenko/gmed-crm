@@ -2717,7 +2717,7 @@ function useOrdersPageContent() {
         />
       </div>
 
-      {canManageDebt ? (
+      {canManageDebt && (debtQueueLoading || Boolean(debtQueueError) || debtQueue.length > 0) ? (
         <section className="rounded-xl border border-border bg-card p-6">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
@@ -2746,10 +2746,6 @@ function useOrdersPageContent() {
               <div className="flex items-center gap-2 rounded-xl border border-border/70 bg-muted/20 px-4 py-5 text-sm text-muted-foreground">
                 <LoaderCircle className="size-4 animate-spin" />
                 {l("orders_debt_management_queue_wird_geladen")}
-              </div>
-            ) : debtQueue.length === 0 ? (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                {l("orders_aktuell_gibt_es_keine_offenen_debt_management_falle")}
               </div>
             ) : (
               <div className="space-y-3 pl-6">

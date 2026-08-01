@@ -3,12 +3,15 @@ import { describe, expect, it } from "vitest";
 import {
   DOCUMENT_BINDING_FIELDS,
   buildBindingsPayload,
+  enhancedDueDiligenceBindingDefaults,
+  formatEnhancedDueDiligenceError,
   hydrateDocumentBindings,
   isDesignedAgencyDocumentTemplate,
   isFixedLegalDocumentTemplate,
   keepPatientPartyBindings,
   patientPartyBindingDefaults,
   prefillDocumentBindingsFromText,
+  validateEnhancedDueDiligenceBindings,
 } from "./document-bindings";
 
 describe("document template binding payloads", () => {
@@ -188,10 +191,145 @@ describe("document template binding payloads", () => {
     });
   });
 
+  it("serializes the complete AML form with the lead wizard backend contract", () => {
+    expect(
+      buildBindingsPayload("enhanced_due_diligence", {
+        riskTier: "blacklist",
+        triggeredCountries: "IR, KP",
+        internalRiskAnalysis: "true",
+        individualReview: "false",
+        riskReason: "Bezug zu einer Hochrisiko-Jurisdiktion",
+        assetOrigin: "Dokumentierte Eigenmittel",
+        pepContractPartner: "false",
+        pepBeneficialOwner: "true",
+        pepOfficeFunction: "Minister",
+        pepAssetOrigin: "Geprüfte Einkünfte",
+        highRiskCountryTransaction: "true",
+        highRiskCountryResident: "true",
+        affectedThirdCountry: "Iran, Nordkorea",
+        additionalContractPartnerInfo: "Identität verifiziert",
+        additionalBeneficialOwnerInfo: "Registerauszug geprüft",
+        intendedBusinessRelationshipInfo: "Medizinische Koordination",
+        contractPartnerAssetInfo: "Banknachweis",
+        beneficialOwnerAssetInfo: "Vermögensnachweis",
+        transactionReasons: "Behandlungskosten",
+        plannedAssetUse: "Behandlung und Betreuung",
+        managerApprovalName: "Leitung Beispiel",
+        unusualComplexOrLarge: "true",
+        unusualPattern: "false",
+        noLawfulPurpose: "false",
+        investigationResults: "Keine weiteren Auffälligkeiten",
+        continuousMonitoring: "Prüfung jeder Zahlung",
+        additionalMeasures: "Vier-Augen-Prinzip",
+        reviewerName: "Prüfer Beispiel",
+        reviewDate: "2026-08-01",
+      }),
+    ).toEqual({
+      aml_enhanced_due_diligence: {
+        riskTier: "blacklist",
+        triggeredCountries: ["IR", "KP"],
+        internalRiskAnalysis: true,
+        individualReview: false,
+        riskReason: "Bezug zu einer Hochrisiko-Jurisdiktion",
+        assetOrigin: "Dokumentierte Eigenmittel",
+        pepContractPartner: false,
+        pepBeneficialOwner: true,
+        pepOfficeFunction: "Minister",
+        pepAssetOrigin: "Geprüfte Einkünfte",
+        highRiskCountryTransaction: true,
+        highRiskCountryResident: true,
+        affectedThirdCountry: "Iran, Nordkorea",
+        additionalContractPartnerInfo: "Identität verifiziert",
+        additionalBeneficialOwnerInfo: "Registerauszug geprüft",
+        intendedBusinessRelationshipInfo: "Medizinische Koordination",
+        contractPartnerAssetInfo: "Banknachweis",
+        beneficialOwnerAssetInfo: "Vermögensnachweis",
+        transactionReasons: "Behandlungskosten",
+        plannedAssetUse: "Behandlung und Betreuung",
+        managerApprovalName: "Leitung Beispiel",
+        unusualComplexOrLarge: true,
+        unusualPattern: false,
+        noLawfulPurpose: false,
+        investigationResults: "Keine weiteren Auffälligkeiten",
+        continuousMonitoring: "Prüfung jeder Zahlung",
+        additionalMeasures: "Vier-Augen-Prinzip",
+        reviewerName: "Prüfer Beispiel",
+        reviewDate: "2026-08-01",
+      },
+    });
+  });
+
+  it("hydrates a persisted nested AML form for document versioning", () => {
+    expect(
+      hydrateDocumentBindings(
+        "enhanced_due_diligence",
+        {
+          aml_enhanced_due_diligence: {
+            riskTier: "high_risk",
+            triggeredCountries: ["SY", "MM"],
+            internalRiskAnalysis: true,
+            individualReview: false,
+            riskReason: "Länderrisiko",
+            reviewDate: "2026-08-01",
+          },
+        },
+        null,
+      ),
+    ).toMatchObject({
+      riskTier: "high_risk",
+      triggeredCountries: "SY,MM",
+      internalRiskAnalysis: "true",
+      individualReview: "false",
+      riskReason: "Länderrisiko",
+      reviewDate: "2026-08-01",
+    });
+  });
+
+  it("validates common, country-risk, and PEP AML requirements in RU and DE", () => {
+    const base = {
+      ...enhancedDueDiligenceBindingDefaults(),
+      riskTier: "high_risk",
+      riskReason: "Länderrisiko",
+      managerApprovalName: "Leitung Beispiel",
+      continuousMonitoring: "Laufende Prüfung",
+      reviewerName: "Prüfer Beispiel",
+      affectedThirdCountry: "Syrien",
+      additionalContractPartnerInfo: "Geprüft",
+      intendedBusinessRelationshipInfo: "Medizinische Betreuung",
+      contractPartnerAssetInfo: "Nachgewiesen",
+      transactionReasons: "Behandlung",
+      plannedAssetUse: "Behandlungskosten",
+    };
+    expect(validateEnhancedDueDiligenceBindings(base, "de")).toBe("");
+    expect(
+      validateEnhancedDueDiligenceBindings(
+        { ...base, pepContractPartner: "true", pepOfficeFunction: "" },
+        "ru",
+      ),
+    ).toContain("Должность / функция");
+    expect(
+      validateEnhancedDueDiligenceBindings(
+        { ...base, riskReason: "" },
+        "de",
+      ),
+    ).toContain("Begründung des erhöhten Risikos");
+  });
+
+  it("localizes backend AML validation fallbacks", () => {
+    const error = new Error("Required enhanced due diligence fields are missing");
+    expect(formatEnhancedDueDiligenceError(error, "ru")).toContain(
+      "Обязательные поля AML-проверки",
+    );
+    expect(formatEnhancedDueDiligenceError(error, "de")).toContain(
+      "Pflichtfelder der AML-Prüfung",
+    );
+  });
+
   it("keeps fixed legal templates on the protected renderer", () => {
     expect(isFixedLegalDocumentTemplate("confidentiality_release")).toBe(true);
     expect(isFixedLegalDocumentTemplate("privacy_information")).toBe(true);
     expect(isFixedLegalDocumentTemplate("privacy_consents")).toBe(true);
+    expect(isFixedLegalDocumentTemplate("enhanced_due_diligence")).toBe(true);
     expect(isFixedLegalDocumentTemplate("cost_estimate")).toBe(false);
   });
 
@@ -204,6 +342,7 @@ describe("document template binding payloads", () => {
       "confidentiality_release",
       "privacy_information",
       "privacy_consents",
+      "enhanced_due_diligence",
     ]) {
       expect(isDesignedAgencyDocumentTemplate(templateId)).toBe(true);
     }

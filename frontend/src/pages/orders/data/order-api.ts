@@ -288,6 +288,20 @@ export function createOrderLeistung(orderId: string, payload: JsonPayload) {
   return postJson<CreatedOrderLeistung>(`/orders/${orderId}/leistungen`, payload);
 }
 
+export function syncLeadWizardOrderLeistungen(
+  orderId: string,
+  leadId: string,
+  clientReferences: string[],
+) {
+  return postJson<{ ok: boolean; removed_count: number }>(
+    `/orders/${orderId}/leistungen/sync-lead-wizard`,
+    {
+      lead_id: leadId,
+      client_references: clientReferences,
+    },
+  );
+}
+
 export function updateOrderCommercialBasis(
   orderId: string,
   payload: {
@@ -296,6 +310,7 @@ export function updateOrderCommercialBasis(
     signed_patient?: boolean;
     signed_agency?: boolean;
     prepayment_required?: boolean;
+    prepayment_amount?: string;
     needs_description?: string;
     date_from?: string;
     date_to?: string;
@@ -314,6 +329,7 @@ export function updateOrderCommercialBasis(
     signed_agency_at: string | null;
     signed_at: string | null;
     prepayment_required: boolean;
+    prepayment_amount: string | null;
     date_from: string | null;
     date_to: string | null;
   }>(`/orders/${orderId}/commercial-basis`, payload);

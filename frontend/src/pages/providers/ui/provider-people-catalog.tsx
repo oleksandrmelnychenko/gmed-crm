@@ -1,7 +1,9 @@
-import { useMemo, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import {
   ArrowUpRight,
   Building2,
+  ChevronDown,
+  CornerDownRight,
   Mail,
   Phone,
   RotateCcw,
@@ -36,6 +38,7 @@ import {
 import { specializationLabelForItem, specializationLabelForValue } from "../model/specialization-labels";
 import type {
   InsuranceProviderItem,
+  LinkedPatient,
   ProviderPersonGender,
   ProviderStaffRoleItem,
   ProviderSummary,
@@ -69,6 +72,16 @@ type ProviderOption = {
   value: string;
 };
 
+type ProviderPeopleCatalogRow = ProviderPeopleRow & {
+  providerRows: ProviderPeopleRow[];
+  /** Synthetic per-clinic row rendered under an expanded doctor. */
+  isProviderChild?: boolean;
+};
+
+function catalogRowIdentity(row: ProviderPeopleRow) {
+  return row.shared_identity_id?.trim() || row.person_id;
+}
+
 const DEFAULT_HIDDEN_COLUMNS = ["gender", "contacts", "last_interaction_at"];
 const DEFAULT_FROZEN_COLUMNS = ["person"];
 const EMPTY_PATIENT_OPTIONS: readonly ProviderPeoplePatientOption[] = [];
@@ -89,6 +102,124 @@ const STAFF_ROLE_LABEL_KEYS: Record<string, string> = {
   secretary: "providers_staff_role_secretary",
   staff: "providers_staff_role_staff",
 };
+
+function uniqueBy<T>(items: readonly T[], keyOf: (item: T) => string) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = keyOf(item);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function latestTimestamp(values: readonly (string | null | undefined)[]) {
+  return values
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) ?? null;
+}
+
+function mergeLinkedPatients(rows: readonly ProviderPeopleRow[]): LinkedPatient[] {
+  const patients = new Map<string, LinkedPatient>();
+
+  for (const patient of rows.flatMap((row) => row.linked_patients)) {
+    const key = patient.patient_id || patient.id;
+    const current = patients.get(key);
+    if (!current) {
+      patients.set(key, patient);
+      continue;
+    }
+
+    patients.set(key, {
+      ...current,
+      appointment_count: current.appointment_count + patient.appointment_count,
+      leistung_count: current.leistung_count + patient.leistung_count,
+      concierge_count: current.concierge_count + patient.concierge_count,
+      last_interaction_at:
+        latestTimestamp([current.last_interaction_at, patient.last_interaction_at]) ?? "",
+    });
+  }
+
+  return [...patients.values()].sort((left, right) =>
+    (right.last_interaction_at || "").localeCompare(left.last_interaction_at || ""),
+  );
+}
+
+function mergePeopleCounts(
+  rows: readonly ProviderPeopleRow[],
+  linkedPatients: readonly LinkedPatient[],
+) {
+  const countKeys = new Set(rows.flatMap((row) => Object.keys(row.counts)));
+  const counts = Object.fromEntries(
+    [...countKeys].map((countKey) => [
+      countKey,
+      rows.reduce((sum, row) => sum + (row.counts[countKey] ?? 0), 0),
+    ]),
+  );
+
+  if (countKeys.has("patient_count")) {
+    counts.patient_count = linkedPatients.length;
+  }
+
+  return counts;
+}
+
+export function groupProviderPeopleRows(
+  rows: readonly ProviderPeopleRow[],
+  groupDoctors = true,
+): ProviderPeopleCatalogRow[] {
+  const grouped = new Map<string, ProviderPeopleCatalogRow>();
+
+  for (const row of rows) {
+    const identity = row.shared_identity_id?.trim() || row.person_id;
+    const key = groupDoctors && row.person_type === "doctor"
+      ? `doctor:${identity}`
+      : `staff:${row.person_id}:${row.provider_id}`;
+    const current = grouped.get(key);
+
+    if (!current) {
+      grouped.set(key, { ...row, providerRows: [row] });
+      continue;
+    }
+
+    const providerRows = uniqueBy([...current.providerRows, row], (item) => item.provider_id);
+    const linkedPatients = mergeLinkedPatients(providerRows);
+
+    grouped.set(key, {
+      ...current,
+      providerRows: [...providerRows].sort((left, right) =>
+        left.provider_name.localeCompare(right.provider_name, undefined, { sensitivity: "base" }),
+      ),
+      specializations: uniqueBy(
+        providerRows.flatMap((providerRow) => providerRow.specializations),
+        (item) => item.id || item.code || item.name_en || "",
+      ),
+      insurance_providers: uniqueBy(
+        providerRows.flatMap((providerRow) => providerRow.insurance_providers),
+        (item) => item.id || item.name,
+      ),
+      contacts: uniqueBy(
+        providerRows.flatMap((providerRow) => providerRow.contacts),
+        (item) => `${item.contact_kind}:${item.value.trim().toLocaleLowerCase()}`,
+      ),
+      languages: uniqueBy(
+        providerRows.flatMap((providerRow) => providerRow.languages),
+        (item) => item.trim().toLocaleLowerCase(),
+      ),
+      linked_patients: linkedPatients,
+      counts: mergePeopleCounts(providerRows, linkedPatients),
+      last_interaction_at: latestTimestamp(
+        providerRows.flatMap((providerRow) => [
+          providerRow.last_interaction_at,
+          ...providerRow.linked_patients.map((patient) => patient.last_interaction_at),
+        ]),
+      ),
+    });
+  }
+
+  return [...grouped.values()];
+}
 
 const DOCTOR_ROLE_OPTIONS = [
   "clinical_director",
@@ -207,6 +338,31 @@ function genderLabel(value: ProviderPersonGender, labels: Record<string, string>
     default:
       return labelFrom(labels, "common_unknown", "-");
   }
+}
+
+const ROLE_CHIP_TONES: Record<string, string> = {
+  // Doctor roles
+  clinical_director: "border-purple-200 bg-purple-50 text-purple-700",
+  chefarzt: "border-purple-200 bg-purple-50 text-purple-700",
+  oberarzt: "border-sky-200 bg-sky-50 text-sky-700",
+  facharzt: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  assistenzarzt: "border-teal-200 bg-teal-50 text-teal-700",
+  // Staff roles
+  administration: "border-amber-200 bg-amber-50 text-amber-700",
+  coordinator: "border-amber-200 bg-amber-50 text-amber-700",
+  billing: "border-orange-200 bg-orange-50 text-orange-700",
+  nurse: "border-rose-200 bg-rose-50 text-rose-700",
+  assistant: "border-teal-200 bg-teal-50 text-teal-700",
+  reception: "border-sky-200 bg-sky-50 text-sky-700",
+  secretary: "border-sky-200 bg-sky-50 text-sky-700",
+  driver: "border-lime-200 bg-lime-50 text-lime-700",
+};
+
+function roleChipTone(roleCode: string | null | undefined) {
+  return (
+    (roleCode && ROLE_CHIP_TONES[roleCode]) ||
+    "border-border/60 bg-muted/40 text-foreground"
+  );
 }
 
 function roleLabel(
@@ -344,44 +500,22 @@ function ProviderTypeBadge({
 
 function PersonIdentityCell({
   forceNonMedical,
-  lang,
-  labels,
   row,
-  uiText,
 }: {
   forceNonMedical: boolean;
-  lang: Lang;
-  labels: Record<string, string>;
   row: ProviderPeopleRow;
-  uiText: Record<string, string>;
 }) {
   const isContactPerson = isContactPersonType(row.person_type, row.provider_type, forceNonMedical);
   return (
     <div className="flex min-w-0 items-center gap-2">
-      <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-        {row.person_type === "doctor" && !isContactPerson ? (
-          <Stethoscope className="size-3.5" />
-        ) : (
-          <UserRound className="size-3.5" />
-        )}
-      </div>
-      <div className="min-w-0">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-xs font-medium text-foreground">
-            {personDisplayName(row, forceNonMedical)}
-          </span>
-          <PersonTypeBadge
-            forceNonMedical={forceNonMedical}
-            labels={labels}
-            lang={lang}
-            row={row}
-            uiText={uiText}
-          />
-        </div>
-        <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
-          {roleLabel(row, labels, uiText, lang)}
-        </div>
-      </div>
+      {row.person_type === "doctor" && !isContactPerson ? (
+        <Stethoscope className="size-3.5 shrink-0 text-muted-foreground" />
+      ) : (
+        <UserRound className="size-3.5 shrink-0 text-muted-foreground" />
+      )}
+      <span className="truncate font-mono text-xs font-medium text-foreground">
+        {personDisplayName(row, forceNonMedical)}
+      </span>
     </div>
   );
 }
@@ -438,11 +572,13 @@ function buildPeopleColumns(
   lang: Lang,
   forceNonMedical: boolean,
   onOpenProvider: (providerId: string, row: ProviderPeopleRow) => void,
-): ColumnDef<ProviderPeopleRow>[] {
+  expandedDoctors: ReadonlySet<string>,
+  onToggleExpanded: (row: ProviderPeopleCatalogRow) => void,
+): ColumnDef<ProviderPeopleCatalogRow>[] {
   const notSet = labels.common_not_set ?? "-";
   const providerLabel = providerCatalogLabel(labels, lang, forceNonMedical);
 
-  const columns: ColumnDef<ProviderPeopleRow>[] = [
+  const columns: ColumnDef<ProviderPeopleCatalogRow>[] = [
     {
       id: "person",
       label: uiLabel(uiText, "providers_people_person", localizedFallback(lang, "Person", "Человек")),
@@ -454,14 +590,53 @@ function buildPeopleColumns(
       pinned: "left",
       width: 300,
       group: "identity",
+      render: (row) => {
+        if (row.isProviderChild) {
+          return (
+            <button
+              type="button"
+              className="group/provider flex w-full min-w-0 items-center gap-1.5 pl-7 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenProvider(row.provider_id, row);
+              }}
+            >
+              <CornerDownRight className="size-3 shrink-0 text-muted-foreground/60" />
+              <Building2 className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate font-mono text-xs text-muted-foreground group-hover/provider:text-[var(--brand)]">
+                {row.provider_name}
+              </span>
+            </button>
+          );
+        }
+        return <PersonIdentityCell forceNonMedical={forceNonMedical} row={row} />;
+      },
+    },
+    {
+      id: "role",
+      label: uiLabel(uiText, "providers_people_role", localizedFallback(lang, "Funktion", "Должность")),
+      accessor: (row) => roleLabel(row, labels, uiText, lang),
+      filterType: "text",
+      searchable: true,
+      sortable: true,
+      width: 240,
+      group: "identity",
       render: (row) => (
-        <PersonIdentityCell
-          forceNonMedical={forceNonMedical}
-          labels={labels}
-          lang={lang}
-          row={row}
-          uiText={uiText}
-        />
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span
+            className={cn(
+              "shrink-0 whitespace-nowrap rounded-md border px-1.5 py-0.5 font-mono text-[11px] font-medium",
+              roleChipTone(row.role_code),
+            )}
+          >
+            {roleLabel(row, labels, uiText, lang)}
+          </span>
+          {row.subrole ? (
+            <span className="truncate font-mono text-[10px] text-foreground">
+              {readableCode(row.subrole, "")}
+            </span>
+          ) : null}
+        </div>
       ),
     },
     {
@@ -496,47 +671,60 @@ function buildPeopleColumns(
       sortable: true,
       width: 260,
       group: "provider",
-      render: (row) => (
-        <button
-          type="button"
-          className="group/provider flex max-w-full flex-col items-start rounded-md px-1.5 py-1 text-left transition hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-          onClick={(event) => {
-            event.stopPropagation();
-            onOpenProvider(row.provider_id, row);
-          }}
-        >
-          <span className="flex min-w-0 max-w-full items-center gap-1.5">
+      render: (row) => {
+        if (row.isProviderChild) {
+          return (
+            <span className="px-1.5">
+              <ProviderTypeBadge labels={labels} providerType={row.provider_type} />
+            </span>
+          );
+        }
+
+        if (row.providerRows.length > 1) {
+          const expanded = expandedDoctors.has(catalogRowIdentity(row));
+          return (
+            <button
+              type="button"
+              className="flex w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-left text-xs font-medium text-foreground transition hover:bg-muted/40 hover:text-[var(--brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              aria-expanded={expanded}
+              title={row.providerRows.map((providerRow) => providerRow.provider_name).join("\n")}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleExpanded(row);
+              }}
+            >
+              <Building2 className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate">
+                {row.providerRows.length} {localizedFallback(lang, "Provider", "провайдера")}
+              </span>
+              <ChevronDown
+                className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-180")}
+              />
+            </button>
+          );
+        }
+
+        const primary = row.providerRows[0] ?? row;
+        return (
+          <button
+            type="button"
+            className="group/provider flex w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-left transition hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenProvider(primary.provider_id, primary);
+            }}
+          >
             <Building2 className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="truncate text-xs font-medium text-foreground group-hover/provider:text-[var(--brand)]">
-              {row.provider_name}
+              {primary.provider_name}
             </span>
             <ArrowUpRight className="size-3 shrink-0 text-muted-foreground transition group-hover/provider:-translate-y-0.5 group-hover/provider:translate-x-0.5 group-hover/provider:text-[var(--brand)]" />
-          </span>
-          <div className="mt-1">
-            <ProviderTypeBadge labels={labels} providerType={row.provider_type} />
-          </div>
-        </button>
-      ),
-    },
-    {
-      id: "role",
-      label: uiLabel(uiText, "providers_people_role", localizedFallback(lang, "Funktion", "Должность")),
-      accessor: (row) => roleLabel(row, labels, uiText, lang),
-      filterType: "text",
-      searchable: true,
-      sortable: true,
-      width: 180,
-      group: "identity",
-      render: (row) => (
-        <div className="truncate text-xs text-muted-foreground">
-          {roleLabel(row, labels, uiText, lang)}
-          {row.subrole ? (
-            <span className="ml-1 text-[10px] text-muted-foreground/75">
-              {readableCode(row.subrole, "")}
+            <span className="shrink-0">
+              <ProviderTypeBadge labels={labels} providerType={primary.provider_type} />
             </span>
-          ) : null}
-        </div>
-      ),
+          </button>
+        );
+      },
     },
     {
       id: "gender",
@@ -596,17 +784,19 @@ function buildPeopleColumns(
       sortable: false,
       width: 240,
       group: "contact",
-      render: (row) => (
-        <div className="flex min-w-0 flex-col gap-0.5 text-xs text-muted-foreground">
-          {primaryContactValue(row, "phone") ? (
-            <ContactLine icon="phone" value={primaryContactValue(row, "phone")} />
-          ) : null}
-          {primaryContactValue(row, "email") ? (
-            <ContactLine icon="email" value={primaryContactValue(row, "email")} />
-          ) : null}
-          {!primaryContactValue(row, "phone") && !primaryContactValue(row, "email") ? notSet : null}
-        </div>
-      ),
+      render: (row) => {
+        const phone = primaryContactValue(row, "phone");
+        const email = primaryContactValue(row, "email");
+        if (!phone && !email) {
+          return <span className="text-xs text-muted-foreground">{notSet}</span>;
+        }
+        return (
+          <div className="flex min-w-0 items-center gap-2.5 text-xs text-muted-foreground">
+            {phone ? <ContactLine icon="phone" value={phone} /> : null}
+            {email ? <ContactLine icon="email" value={email} /> : null}
+          </div>
+        );
+      },
     },
     {
       id: "counts",
@@ -1123,7 +1313,7 @@ function MobilePeopleCards({
   labels: Record<string, string>;
   lang: Lang;
   loading: boolean;
-  rows: readonly ProviderPeopleRow[];
+  rows: readonly ProviderPeopleCatalogRow[];
   uiText: Record<string, string>;
   onOpenPerson: (personId: string, row: ProviderPeopleRow) => void;
   onOpenProvider: (providerId: string, row: ProviderPeopleRow) => void;
@@ -1153,7 +1343,7 @@ function MobilePeopleCards({
     <div className="space-y-2 md:hidden">
       {rows.map((row) => (
         <article
-          key={`${row.person_type}:${row.person_id}:${row.provider_id}`}
+          key={`${row.person_type}:${row.shared_identity_id ?? row.person_id}`}
           className="rounded-lg border border-border bg-card p-3 shadow-sm"
         >
           <div className="flex items-start gap-2.5">
@@ -1181,9 +1371,29 @@ function MobilePeopleCards({
               <p className="mt-1 break-words text-xs text-muted-foreground">
                 {roleLabel(row, labels, uiText, lang)}
               </p>
-              <p className="mt-1.5 break-words text-xs text-muted-foreground">
-                {row.provider_name}
-              </p>
+              {row.providerRows.length === 1 ? (
+                <p className="mt-1.5 break-words text-xs text-muted-foreground">
+                  {row.provider_name}
+                </p>
+              ) : (
+                <details className="mt-1.5 text-xs text-muted-foreground">
+                  <summary className="cursor-pointer select-none font-medium text-foreground/75">
+                    {row.providerRows.length} {localizedFallback(lang, "Provider", "провайдера")}
+                  </summary>
+                  <div className="mt-1 space-y-1 border-l border-border pl-2">
+                    {row.providerRows.map((providerRow) => (
+                      <button
+                        key={providerRow.provider_id}
+                        type="button"
+                        className="block max-w-full truncate text-left hover:text-[var(--brand)]"
+                        onClick={() => onOpenProvider(providerRow.provider_id, providerRow)}
+                      >
+                        {providerRow.provider_name}
+                      </button>
+                    ))}
+                  </div>
+                </details>
+              )}
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 <ProviderTypeBadge labels={labels} providerType={row.provider_type} />
                 <Badge
@@ -1223,21 +1433,28 @@ function MobilePeopleCards({
               variant="outline"
               size="sm"
               className="h-8 justify-center rounded-lg bg-muted/20"
-              onClick={() => onOpenPerson(row.person_id, row)}
+              onClick={() => {
+                const providerRow = row.providerRows[0] ?? row;
+                onOpenPerson(providerRow.person_id, providerRow);
+              }}
             >
               <UserRound className="size-3.5" />
               {uiLabel(uiText, "providers_people_open_person", localizedFallback(lang, "Person öffnen", "Открыть человека"))}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 justify-center rounded-lg bg-muted/20"
-              onClick={() => onOpenProvider(row.provider_id, row)}
-            >
-              <Building2 className="size-3.5" />
-              {uiLabel(uiText, "providers_open_provider", localizedFallback(lang, "Provider öffnen", "Открыть провайдера"))}
-            </Button>
+            {row.providerRows.length === 1 ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 justify-center rounded-lg bg-muted/20"
+                onClick={() => onOpenProvider(row.provider_id, row)}
+              >
+                <Building2 className="size-3.5" />
+                {uiLabel(uiText, "providers_open_provider", localizedFallback(lang, "Provider öffnen", "Открыть провайдера"))}
+              </Button>
+            ) : (
+              <span />
+            )}
           </div>
         </article>
       ))}
@@ -1267,13 +1484,52 @@ export function ProviderPeopleCatalog({
   const { lang, t } = useLang();
   const labels = t as unknown as Record<string, string>;
   const uiText = t.uiText as Record<string, string>;
+  const groupedRows = useMemo(
+    () => groupProviderPeopleRows(rows, !filters.providerId),
+    [filters.providerId, rows],
+  );
   const providerOptions = useMemo(() => {
     const options = providerOptionsFromProviders(providers);
     return options.length > 0 ? options : deriveProviderOptions(rows);
   }, [providers, rows]);
+  const [expandedDoctors, setExpandedDoctors] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleExpandedDoctor = useCallback((row: ProviderPeopleCatalogRow) => {
+    const identity = catalogRowIdentity(row);
+    setExpandedDoctors((current) => {
+      const next = new Set(current);
+      if (next.has(identity)) next.delete(identity);
+      else next.add(identity);
+      return next;
+    });
+  }, []);
+  const expandRow = useCallback(
+    (row: ProviderPeopleCatalogRow) => {
+      if (
+        row.isProviderChild ||
+        row.providerRows.length <= 1 ||
+        !expandedDoctors.has(catalogRowIdentity(row))
+      ) {
+        return null;
+      }
+      return row.providerRows.map((providerRow) => ({
+        ...providerRow,
+        providerRows: [providerRow],
+        isProviderChild: true,
+      }));
+    },
+    [expandedDoctors],
+  );
   const columns = useMemo(
-    () => buildPeopleColumns(labels, uiText, lang, forceNonMedical, onOpenProvider),
-    [forceNonMedical, labels, lang, onOpenProvider, uiText],
+    () => buildPeopleColumns(
+      labels,
+      uiText,
+      lang,
+      forceNonMedical,
+      onOpenProvider,
+      expandedDoctors,
+      toggleExpandedDoctor,
+    ),
+    [expandedDoctors, forceNonMedical, labels, lang, onOpenProvider, toggleExpandedDoctor, uiText],
   );
   const title = forceNonMedical
     ? peopleCatalogTitle(lang, true)
@@ -1287,7 +1543,7 @@ export function ProviderPeopleCatalog({
           <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
           <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
-            {rows.length}
+            {groupedRows.length}
           </span>
         </div>
       </div>
@@ -1313,7 +1569,7 @@ export function ProviderPeopleCatalog({
 
       <div className="hidden md:block">
         <DataTableSurface
-          rows={rows}
+          rows={groupedRows}
           columns={columns}
           defaultDensity="comfortable"
           defaultFrozenColumns={DEFAULT_FROZEN_COLUMNS}
@@ -1336,8 +1592,20 @@ export function ProviderPeopleCatalog({
           }}
           loading={loading}
           maxFrozenColumns={2}
-          onRowClick={(row) => onOpenPerson(row.person_id, row)}
-          rowId={(row) => `${row.person_type}:${row.person_id}:${row.provider_id}`}
+          expandRow={expandRow}
+          onRowClick={(row) => {
+            if (row.isProviderChild) {
+              onOpenProvider(row.provider_id, row);
+              return;
+            }
+            const providerRow = row.providerRows[0] ?? row;
+            onOpenPerson(providerRow.person_id, providerRow);
+          }}
+          rowId={(row) =>
+            row.isProviderChild
+              ? `child:${row.person_type}:${row.person_id}:${row.provider_id}`
+              : `${row.person_type}:${row.shared_identity_id ?? row.person_id}`
+          }
           storageKey="provider-people-catalog"
           tableClassName="min-h-[360px]"
         />
@@ -1348,7 +1616,7 @@ export function ProviderPeopleCatalog({
         labels={labels}
         lang={lang}
         loading={loading}
-        rows={rows}
+        rows={groupedRows}
         uiText={uiText}
         onOpenPerson={onOpenPerson}
         onOpenProvider={onOpenProvider}

@@ -75,4 +75,38 @@ describe("createPatientLeadOrigin", () => {
     ]);
     expect(origin.hasData).toBe(true);
   });
+
+  it("normalizes selected work types stored during lead conversion", () => {
+    const origin = createPatientLeadOrigin(patient({
+      intake_profile: {
+        cost_estimate_additional_language: "ru",
+        selected_work_types: [{
+          id: "work-type-1",
+          code: "CARDIO_CHECK",
+          name_de: "Kardiologische Untersuchung",
+          name_ru: "Кардиологическое обследование",
+          name_en: "Cardiology examination",
+          name_es: "Examen cardiologico",
+          duration_hours: 3,
+          min_price_eur: "100",
+          max_price_eur: 1000,
+          specialization_ids: ["specialization-1", "", null],
+        }],
+      },
+    }));
+
+    expect(origin.string("cost_estimate_additional_language")).toBe("ru");
+    expect(origin.selectedWorkTypes).toEqual([{
+      id: "work-type-1",
+      code: "CARDIO_CHECK",
+      nameDe: "Kardiologische Untersuchung",
+      nameRu: "Кардиологическое обследование",
+      nameEn: "Cardiology examination",
+      nameEs: "Examen cardiologico",
+      durationHours: 3,
+      minPriceEur: 100,
+      maxPriceEur: 1000,
+      specializationIds: ["specialization-1"],
+    }]);
+  });
 });

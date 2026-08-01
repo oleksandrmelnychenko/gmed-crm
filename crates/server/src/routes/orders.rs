@@ -47,6 +47,10 @@ pub fn router() -> Router<AppState> {
             get(list_leistungen).post(add_leistung),
         )
         .route(
+            "/orders/{order_id}/leistungen/sync-lead-wizard",
+            post(sync_lead_wizard_leistungen),
+        )
+        .route(
             "/orders/{order_id}/external-invoices",
             get(list_external_invoices).post(create_external_invoice),
         )
@@ -103,6 +107,7 @@ struct UpdateOrderCommercialBasisRequest {
     signed_patient: Option<bool>,
     signed_agency: Option<bool>,
     prepayment_required: Option<bool>,
+    prepayment_amount: Option<String>,
     needs_description: Option<String>,
     date_from: Option<String>,
     date_to: Option<String>,
@@ -179,6 +184,12 @@ struct AddLeistungRequest {
     external_document_id: Option<Uuid>,
     notes: Option<String>,
     client_reference: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct SyncLeadWizardLeistungenRequest {
+    lead_id: Uuid,
+    client_references: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -303,7 +314,7 @@ async fn list_orders(
     match sqlx::query(
         r#"SELECT o.id, o.order_number, o.patient_id, o.source_lead_id, o.phase, o.status,
                   o.total_estimated, o.signed_patient, o.signed_agency,
-                  o.prepayment_required, o.date_from, o.date_to, o.created_at,
+                  o.prepayment_required, o.prepayment_amount, o.date_from, o.date_to, o.created_at,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
                   COALESCE(p.last_name, l.last_name) AS subject_last_name,
                   p.patient_id AS p_pid
@@ -420,6 +431,7 @@ async fn list_orders(
                     "signed_patient": r.try_get::<bool, _>("signed_patient").unwrap_or(false),
                     "signed_agency": r.try_get::<bool, _>("signed_agency").unwrap_or(false),
                     "prepayment_required": r.try_get::<bool, _>("prepayment_required").unwrap_or(false),
+                    "prepayment_amount": r.try_get::<Option<rust_decimal::Decimal>, _>("prepayment_amount").unwrap_or_default(),
                     "date_from": r.try_get::<Option<chrono::NaiveDate>, _>("date_from").unwrap_or_default().map(|value| value.to_string()),
                     "date_to": r.try_get::<Option<chrono::NaiveDate>, _>("date_to").unwrap_or_default().map(|value| value.to_string()),
                     "created_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
@@ -2774,6 +2786,18 @@ async fn update_order_commercial_basis(
         },
         None => None,
     };
+    let prepayment_amount = match body.prepayment_amount.as_deref() {
+        Some(raw) => match raw.trim().parse::<rust_decimal::Decimal>() {
+            Ok(value) if value >= rust_decimal::Decimal::ZERO => Some(value),
+            _ => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "prepayment_amount must be a non-negative decimal",
+                );
+            }
+        },
+        None => None,
+    };
     let date_from_patch = match body.date_from.as_deref() {
         Some(value) => match parse_optional_order_date(Some(value)) {
             Ok(value) => Some(value),
@@ -2843,9 +2867,13 @@ async fn update_order_commercial_basis(
              signed_patient = COALESCE($4, signed_patient),
              signed_agency = COALESCE($5, signed_agency),
              prepayment_required = COALESCE($6, prepayment_required),
-             needs_description = COALESCE($7, needs_description),
-             date_from = CASE WHEN $8 THEN $9 ELSE date_from END,
-             date_to = CASE WHEN $10 THEN $11 ELSE date_to END,
+             prepayment_amount = CASE
+                 WHEN $6 IS FALSE THEN NULL
+                 ELSE COALESCE($7, prepayment_amount)
+             END,
+             needs_description = COALESCE($8, needs_description),
+             date_from = CASE WHEN $9 THEN $10 ELSE date_from END,
+             date_to = CASE WHEN $11 THEN $12 ELSE date_to END,
              signed_patient_at = CASE
                  WHEN $4 IS TRUE THEN COALESCE(signed_patient_at, now())
                  WHEN $4 IS FALSE THEN NULL
@@ -2864,7 +2892,8 @@ async fn update_order_commercial_basis(
              updated_at = now()
          WHERE id = $1
          RETURNING contract_id, total_estimated, signed_patient, signed_agency,
-                   signed_patient_at, signed_agency_at, prepayment_required, signed_at,
+                   signed_patient_at, signed_agency_at, prepayment_required,
+                   prepayment_amount, signed_at,
                    date_from, date_to"#,
     )
     .bind(order_id)
@@ -2873,6 +2902,7 @@ async fn update_order_commercial_basis(
     .bind(body.signed_patient)
     .bind(body.signed_agency)
     .bind(body.prepayment_required)
+    .bind(prepayment_amount)
     .bind(body.needs_description.as_deref())
     .bind(date_from_patch.is_some())
     .bind(date_from_patch.flatten())
@@ -2899,6 +2929,9 @@ async fn update_order_commercial_basis(
             let prepayment_required = row
                 .try_get::<bool, _>("prepayment_required")
                 .unwrap_or(false);
+            let prepayment_amount = row
+                .try_get::<Option<rust_decimal::Decimal>, _>("prepayment_amount")
+                .unwrap_or_default();
             let signed_at = row
                 .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_at")
                 .unwrap_or_default();
@@ -2919,6 +2952,7 @@ async fn update_order_commercial_basis(
                     "signed_patient": signed_patient,
                     "signed_agency": signed_agency,
                     "prepayment_required": prepayment_required,
+                    "prepayment_amount": prepayment_amount.map(|value| value.to_string()),
                     "date_from": date_from.map(|value| value.to_string()),
                     "date_to": date_to.map(|value| value.to_string()),
                 }),
@@ -2936,6 +2970,7 @@ async fn update_order_commercial_basis(
                 "signed_agency_at": signed_agency_at.map(|value| value.to_rfc3339()),
                 "signed_at": signed_at.map(|value| value.to_rfc3339()),
                 "prepayment_required": prepayment_required,
+                "prepayment_amount": prepayment_amount.map(|value| value.to_string()),
                 "date_from": date_from.map(|value| value.to_string()),
                 "date_to": date_to.map(|value| value.to_string()),
             }))
@@ -4727,6 +4762,97 @@ async fn add_leistung(
         Err(e) => {
             tracing::error!(error = %e, "add leistung");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
+    }
+}
+
+async fn sync_lead_wizard_leistungen(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+    Json(body): Json<SyncLeadWizardLeistungenRequest>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::PatientManager]) {
+        return resp;
+    }
+    match can_access_order(&state, &auth, order_id, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    let order_lead_id = match sqlx::query_scalar::<_, Option<Uuid>>(
+        "SELECT source_lead_id FROM orders WHERE id = $1",
+    )
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "load lead wizard order for service sync");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to sync order services",
+            );
+        }
+    };
+    if order_lead_id != Some(body.lead_id) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Order does not belong to the selected lead",
+        );
+    }
+
+    let prefix = format!("lead-wizard:{}:", body.lead_id);
+    if body.client_references.len() > 200
+        || body
+            .client_references
+            .iter()
+            .any(|value| !value.starts_with(&prefix))
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid lead wizard service references",
+        );
+    }
+
+    match sqlx::query(
+        r#"DELETE FROM order_leistungen
+           WHERE order_id = $1
+             AND client_reference LIKE $2
+             AND NOT (client_reference = ANY($3::text[]))
+             AND status = 'planned'"#,
+    )
+    .bind(order_id)
+    .bind(format!("{}%", prefix))
+    .bind(&body.client_references)
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) => {
+            let deleted = result.rows_affected();
+            if deleted > 0 {
+                state.audit_sender.try_send(audit::domain_event(
+                    "sync_lead_wizard_order_services",
+                    Some(auth.user_id),
+                    "order",
+                    Some(order_id),
+                    serde_json::json!({
+                        "lead_id": body.lead_id,
+                        "removed_count": deleted,
+                    }),
+                ));
+            }
+            Json(serde_json::json!({ "ok": true, "removed_count": deleted })).into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, lead_id = %body.lead_id, "sync lead wizard order services");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to sync order services",
+            )
         }
     }
 }

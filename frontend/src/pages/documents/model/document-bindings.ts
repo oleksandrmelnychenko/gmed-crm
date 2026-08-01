@@ -109,6 +109,167 @@ const PATIENT_STICKER_BINDING_FIELDS: BindingFieldDef[] = [
   { key: "cost_code", label: "Kostenstelle / Code", kind: "text" },
 ];
 
+const ENHANCED_DUE_DILIGENCE_BOOLEAN_KEYS = [
+  "internalRiskAnalysis",
+  "individualReview",
+  "pepContractPartner",
+  "pepBeneficialOwner",
+  "highRiskCountryTransaction",
+  "highRiskCountryResident",
+  "unusualComplexOrLarge",
+  "unusualPattern",
+  "noLawfulPurpose",
+] as const;
+
+export const ENHANCED_DUE_DILIGENCE_BINDING_FIELDS: BindingFieldDef[] = [
+  { key: "riskTier", label: "Risikostufe", labelRu: "Уровень риска", kind: "text" },
+  { key: "triggeredCountries", label: "Auslösende Länder", labelRu: "Страны риска", kind: "text" },
+  { key: "internalRiskAnalysis", label: "Interne Risikoanalyse", labelRu: "Внутренний анализ рисков", kind: "boolean" },
+  { key: "individualReview", label: "Individuelle Prüfung des konkreten Einzelfalls", labelRu: "Индивидуальная оценка конкретного случая", kind: "boolean" },
+  { key: "riskReason", label: "Begründung des erhöhten Risikos", labelRu: "Обоснование повышенного риска", kind: "textarea" },
+  { key: "assetOrigin", label: "Herkunft der eingesetzten Vermögenswerte", labelRu: "Происхождение задействованных активов", kind: "textarea" },
+  { key: "pepContractPartner", label: "Vertragspartner ist eine PeP", labelRu: "Контрагент является PEP", kind: "boolean" },
+  { key: "pepBeneficialOwner", label: "Wirtschaftlich Berechtigter ist eine PeP", labelRu: "Бенефициарный владелец является PEP", kind: "boolean" },
+  { key: "pepOfficeFunction", label: "Amt / Funktion", labelRu: "Должность / функция", kind: "text" },
+  { key: "pepAssetOrigin", label: "Herkunft der Vermögenswerte der PeP", labelRu: "Происхождение активов PEP", kind: "text" },
+  { key: "highRiskCountryTransaction", label: "Transaktion mit Bezug zu einem Drittstaat mit hohem Risiko", labelRu: "Операция связана с третьей страной высокого риска", kind: "boolean" },
+  { key: "highRiskCountryResident", label: "Vertragspartner ist dort niedergelassen oder wohnhaft", labelRu: "Контрагент проживает или зарегистрирован в такой стране", kind: "boolean" },
+  { key: "affectedThirdCountry", label: "Betroffener Drittstaat", labelRu: "Затронутая третья страна", kind: "text" },
+  { key: "additionalContractPartnerInfo", label: "Zusätzliche Informationen zum Vertragspartner", labelRu: "Дополнительная информация о контрагенте", kind: "textarea" },
+  { key: "additionalBeneficialOwnerInfo", label: "Zusätzliche Informationen zum wirtschaftlich Berechtigten", labelRu: "Дополнительная информация о бенефициаре", kind: "textarea" },
+  { key: "intendedBusinessRelationshipInfo", label: "Angestrebte Art der Geschäftsbeziehung", labelRu: "Планируемый характер деловых отношений", kind: "textarea" },
+  { key: "contractPartnerAssetInfo", label: "Vermögenswerte des Vertragspartners", labelRu: "Активы контрагента", kind: "textarea" },
+  { key: "beneficialOwnerAssetInfo", label: "Vermögenswerte des wirtschaftlich Berechtigten", labelRu: "Активы бенефициарного владельца", kind: "textarea" },
+  { key: "transactionReasons", label: "Gründe der konkreten Transaktion", labelRu: "Причины конкретной операции", kind: "textarea" },
+  { key: "plannedAssetUse", label: "Geplante Verwendung der eingesetzten Vermögenswerte", labelRu: "Планируемое использование активов", kind: "textarea" },
+  { key: "managerApprovalName", label: "Zustimmende Führungskraft", labelRu: "Согласовавший руководитель", kind: "text" },
+  { key: "unusualComplexOrLarge", label: "Komplexe oder ungewöhnlich große Transaktion", labelRu: "Сложная или необычно крупная операция", kind: "boolean" },
+  { key: "unusualPattern", label: "Ungewöhnliches Transaktionsmuster", labelRu: "Необычная схема операции", kind: "boolean" },
+  { key: "noLawfulPurpose", label: "Kein offensichtlicher rechtmäßiger Zweck", labelRu: "Нет очевидной законной цели", kind: "boolean" },
+  { key: "investigationResults", label: "Ergebnisse der Untersuchung", labelRu: "Результаты проверки", kind: "textarea" },
+  { key: "continuousMonitoring", label: "Maßnahmen der kontinuierlichen Überwachung", labelRu: "Меры постоянного мониторинга", kind: "textarea" },
+  { key: "additionalMeasures", label: "Zusätzlich getroffene Maßnahmen", labelRu: "Принятые дополнительные меры", kind: "textarea" },
+  { key: "reviewerName", label: "Bearbeiter/in", labelRu: "Проверил", kind: "text" },
+  { key: "reviewDate", label: "Prüfdatum", labelRu: "Дата проверки", kind: "date" },
+];
+
+export function enhancedDueDiligenceBindingDefaults(): DocumentBindingForm {
+  return {
+    internalRiskAnalysis: "true",
+    individualReview: "false",
+    pepContractPartner: "false",
+    pepBeneficialOwner: "false",
+    highRiskCountryTransaction: "false",
+    highRiskCountryResident: "false",
+    unusualComplexOrLarge: "false",
+    unusualPattern: "false",
+    noLawfulPurpose: "false",
+    reviewDate: new Date().toISOString().slice(0, 10),
+  };
+}
+
+export function parseEnhancedDueDiligenceCountries(value?: string) {
+  return Array.from(
+    new Set(
+      (value ?? "")
+        .split(/[\s,;]+/)
+        .map((country) => country.trim().toUpperCase())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function enhancedDueDiligencePayload(bindings: DocumentBindingForm) {
+  const aml: Record<string, unknown> = {
+    triggeredCountries: parseEnhancedDueDiligenceCountries(
+      bindings.triggeredCountries,
+    ),
+  };
+  for (const key of ENHANCED_DUE_DILIGENCE_BOOLEAN_KEYS) {
+    aml[key] = bindings[key] === "true";
+  }
+  for (const field of ENHANCED_DUE_DILIGENCE_BINDING_FIELDS) {
+    if (
+      field.kind === "boolean" ||
+      field.key === "triggeredCountries"
+    ) {
+      continue;
+    }
+    const value = bindings[field.key]?.trim();
+    if (value) aml[field.key] = value;
+  }
+  return { aml_enhanced_due_diligence: aml };
+}
+
+export function validateEnhancedDueDiligenceBindings(
+  bindings: DocumentBindingForm,
+  lang: "de" | "ru",
+) {
+  const missing: string[] = [];
+  const labels = new Map(
+    ENHANCED_DUE_DILIGENCE_BINDING_FIELDS.map((field) => [
+      field.key,
+      documentBindingFieldLabel(field, lang),
+    ]),
+  );
+  const requireFields = (keys: string[]) => {
+    for (const key of keys) {
+      if (!bindings[key]?.trim()) missing.push(labels.get(key) ?? key);
+    }
+  };
+  const riskTier = bindings.riskTier?.trim();
+  if (!["pep", "high_risk", "blacklist"].includes(riskTier ?? "")) {
+    missing.push(labels.get("riskTier") ?? "Risikostufe");
+  }
+  requireFields([
+    "riskReason",
+    "managerApprovalName",
+    "continuousMonitoring",
+    "reviewerName",
+    "reviewDate",
+  ]);
+  const countryRisk =
+    riskTier === "high_risk" ||
+    riskTier === "blacklist" ||
+    parseEnhancedDueDiligenceCountries(bindings.triggeredCountries).length > 0;
+  if (countryRisk) {
+    requireFields([
+      "affectedThirdCountry",
+      "additionalContractPartnerInfo",
+      "intendedBusinessRelationshipInfo",
+      "contractPartnerAssetInfo",
+      "transactionReasons",
+      "plannedAssetUse",
+    ]);
+  }
+  if (
+    bindings.pepContractPartner === "true" ||
+    bindings.pepBeneficialOwner === "true"
+  ) {
+    requireFields(["pepOfficeFunction", "pepAssetOrigin"]);
+  }
+  if (missing.length === 0) return "";
+  return lang === "de"
+    ? `Pflichtfelder der AML-Prüfung ausfüllen: ${missing.join(", ")}.`
+    : `Заполните обязательные поля AML-проверки: ${missing.join(", ")}.`;
+}
+
+export function formatEnhancedDueDiligenceError(
+  error: unknown,
+  lang: "de" | "ru",
+) {
+  const message = error instanceof Error ? error.message : "";
+  if (
+    message.includes("Enhanced due diligence data is required") ||
+    message.includes("Required enhanced due diligence fields are missing")
+  ) {
+    return lang === "de"
+      ? "Die Pflichtfelder der AML-Prüfung sind unvollständig. Prüfen Sie die eingegebenen Daten."
+      : "Обязательные поля AML-проверки заполнены не полностью. Проверьте введённые данные.";
+  }
+  return message;
+}
+
 const PATIENT_PARTY_BINDING_FIELDS: BindingFieldDef[] = [
   { key: "party_street", label: "Patient Straße", labelRu: "Улица пациента", kind: "text" },
   { key: "party_zip", label: "Patient PLZ", labelRu: "Индекс пациента", kind: "text" },
@@ -136,6 +297,7 @@ const PAYER_SIGNATURE_BINDING_FIELDS: BindingFieldDef[] = [
 // Manual "binding socket" fields per generated template id. Field keys match
 // the backend `bindings` field names; `*_text` keys are parsed into arrays.
 export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
+  enhanced_due_diligence: ENHANCED_DUE_DILIGENCE_BINDING_FIELDS,
   framework_contract: [
     { key: "contract_date", label: "Rahmenvertrag vom / Inkrafttreten", labelRu: "Дата начала действия договора", kind: "date" },
     ...PATIENT_PARTY_BINDING_FIELDS,
@@ -413,6 +575,9 @@ export function buildBindingsPayload(
   templateId: string,
   bindings: DocumentBindingForm,
 ): Record<string, unknown> | null {
+  if (templateId === "enhanced_due_diligence") {
+    return enhancedDueDiligencePayload(bindings);
+  }
   const out: Record<string, unknown> = {};
   const fieldDefs = DOCUMENT_BINDING_FIELDS[templateId] ?? [];
   const fieldDefsByKey = new Map(fieldDefs.map((field) => [field.key, field]));
@@ -576,6 +741,34 @@ export function hydrateDocumentBindings(
 ): DocumentBindingForm {
   const extracted = prefillDocumentBindingsFromText(templateId, extractedText);
   if (!persisted) return extracted;
+
+  if (templateId === "enhanced_due_diligence") {
+    const nested = persisted.aml_enhanced_due_diligence;
+    if (!nested || typeof nested !== "object" || Array.isArray(nested)) {
+      return extracted;
+    }
+    const source = nested as Record<string, unknown>;
+    const hydrated: DocumentBindingForm = { ...extracted };
+    for (const field of ENHANCED_DUE_DILIGENCE_BINDING_FIELDS) {
+      const value = source[field.key];
+      if (field.key === "triggeredCountries") {
+        if (Array.isArray(value)) {
+          hydrated[field.key] = value
+            .filter((country): country is string => typeof country === "string")
+            .join(",");
+        }
+        continue;
+      }
+      if (field.kind === "boolean" && typeof value === "boolean") {
+        hydrated[field.key] = String(value);
+        continue;
+      }
+      if (typeof value === "string" || typeof value === "number") {
+        hydrated[field.key] = String(value).trim();
+      }
+    }
+    return hydrated;
+  }
 
   const allowed = new Set((DOCUMENT_BINDING_FIELDS[templateId] ?? []).map((field) => field.key));
   const hydrated: DocumentBindingForm = { ...extracted };

@@ -10,6 +10,7 @@ import {
   type BindingFieldDef,
   type DocumentBindingForm,
 } from "@/pages/documents/model/document-bindings";
+import { EnhancedDueDiligenceBindingFields } from "@/pages/documents/ui/enhanced-due-diligence-binding-fields";
 
 type BindingGroup =
   | "document"
@@ -346,6 +347,16 @@ export function DocumentTemplateBindingFields({
   useOrderServices?: boolean;
   onChange: (key: string, value: string) => void;
 }) {
+  if (templateId === "enhanced_due_diligence") {
+    return (
+      <EnhancedDueDiligenceBindingFields
+        bindings={bindings}
+        lang={lang}
+        onChange={onChange}
+      />
+    );
+  }
+
   const groupedFields = fields.reduce(
     (groups, field) => {
       const group = bindingGroup(field);

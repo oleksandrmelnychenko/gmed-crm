@@ -7,8 +7,10 @@ import {
   buildStandardDocumentNameFromMetadata,
   buildDocumentsPath,
   detailToEditForm,
+  documentTemplateRequiresOrder,
   emptyGenerateForm,
   emptyUploadForm,
+  formatBusinessDocumentNumber,
   patientDocumentAddresseeLabel,
 } from "./document-model";
 import type { DocumentItem, DocumentTemplate, GenerateFormState, PatientOption } from "./types";
@@ -45,6 +47,25 @@ function generateForm(overrides: Partial<GenerateFormState> = {}): GenerateFormS
     ...overrides,
   };
 }
+
+describe("commercial document context", () => {
+  it("hides technical version suffixes from displayed business numbers", () => {
+    expect(formatBusinessDocumentNumber("FC-20260714-0010-V18")).toBe(
+      "FC-20260714-0010",
+    );
+    expect(formatBusinessDocumentNumber("KV-20260721-0019-V01")).toBe(
+      "KV-20260721-0019",
+    );
+    expect(formatBusinessDocumentNumber("DOC-1001")).toBe("DOC-1001");
+  });
+
+  it("requires an order only for order-bound commercial templates", () => {
+    expect(documentTemplateRequiresOrder("single_order")).toBe(true);
+    expect(documentTemplateRequiresOrder("order_cost_estimate")).toBe(true);
+    expect(documentTemplateRequiresOrder("cost_estimate")).toBe(false);
+    expect(documentTemplateRequiresOrder("privacy_consents")).toBe(false);
+  });
+});
 
 describe("buildStandardDocumentName", () => {
   it("builds the requested medical specialty document naming pattern", () => {

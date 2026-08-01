@@ -1326,7 +1326,7 @@ async fn wizard_convert_uses_the_full_readiness_gate() {
         "POST",
         &format!("/api/v1/leads/{lead_id}/wizard-convert"),
         &pm,
-        None,
+        Some(json!({ "confirmed": true })),
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
@@ -1588,7 +1588,7 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
         "POST",
         &format!("/api/v1/leads/{lead_id}/wizard-convert"),
         &pm,
-        None,
+        Some(json!({ "confirmed": true })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{converted}");
@@ -2181,7 +2181,7 @@ async fn wizard_convert_requires_identity_basics() {
         "POST",
         &format!("/api/v1/leads/{lead_id}/wizard-convert"),
         &pm,
-        None,
+        Some(json!({ "confirmed": true })),
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);

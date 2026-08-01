@@ -9,7 +9,7 @@ import {
 import { useSearchParams } from "react-router-dom";
 
 import type { DensityLevel, FilterPredicate, SortStack } from "@/components/data-table/types";
-import { useLocalStorage, useVersionedLocalStorage } from "@/components/data-table/use-local-storage";
+import { useVersionedLocalStorage } from "@/components/data-table/use-local-storage";
 import { useResponsiveViewMode } from "@/components/data-table/use-responsive-view-mode";
 import { readDataTableState, writeDataTableState } from "@/components/data-table/url-state";
 import { useSecurePersistedState } from "@/lib/secure-persist";
@@ -110,7 +110,7 @@ export function usePatientsListViewState() {
     DEFAULT_PATIENT_FROZEN_COLUMNS,
     1,
   );
-  const [density, setDensity] = useLocalStorage<DensityLevel>("patients.density", "comfortable");
+  const density: DensityLevel = "comfortable";
   const viewMode = useResponsiveViewMode();
   const patientParam = searchParams.get("patient") ?? "";
   const detailOpen = Boolean(patientParam);
@@ -218,7 +218,6 @@ export function usePatientsListViewState() {
     refreshList,
     searchInputRef,
     selectedId,
-    setDensity,
     setFilterPredicates,
     setFilters,
     setFrozenColumns,

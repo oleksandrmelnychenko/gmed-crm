@@ -656,6 +656,105 @@ fn lead_requires_enhanced_due_diligence(country: Option<&str>, wizard_state: &Va
             .unwrap_or(false)
 }
 
+fn readiness_decimal(value: Option<&Value>) -> String {
+    let parsed = value.and_then(|value| match value {
+        Value::Number(number) => number.as_f64(),
+        Value::String(raw) => raw.trim().replace(',', ".").parse::<f64>().ok(),
+        _ => None,
+    });
+    format!("{:.4}", parsed.unwrap_or_default())
+}
+
+fn readiness_line_signatures(value: &Value) -> Vec<String> {
+    let mut signatures = value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .map(|item| {
+            format!(
+                "{}|{}|{}|{}",
+                item.get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .trim(),
+                readiness_decimal(item.get("quantity")),
+                readiness_decimal(item.get("unit_price")),
+                readiness_decimal(item.get("vat_rate")),
+            )
+        })
+        .collect::<Vec<_>>();
+    signatures.sort();
+    signatures
+}
+
+fn normalized_patient_relation_type(value: Option<&str>) -> &'static str {
+    let normalized = value.unwrap_or_default().trim().to_lowercase();
+    if normalized.contains("spouse")
+        || normalized.contains("partner")
+        || normalized.contains("ehe")
+        || normalized.contains("супруг")
+        || normalized.contains("чолов")
+        || normalized.contains("друж")
+    {
+        "spouse"
+    } else if normalized.contains("father")
+        || normalized.contains("mother")
+        || normalized.contains("parent")
+        || normalized.contains("vater")
+        || normalized.contains("mutter")
+        || normalized.contains("пап")
+        || normalized.contains("мам")
+        || normalized.contains("родител")
+        || normalized.contains("бать")
+    {
+        "parent"
+    } else if normalized.contains("child")
+        || normalized.contains("son")
+        || normalized.contains("daughter")
+        || normalized.contains("kind")
+        || normalized.contains("сын")
+        || normalized.contains("доч")
+        || normalized.contains("син")
+    {
+        "child"
+    } else if normalized.contains("sibling")
+        || normalized.contains("brother")
+        || normalized.contains("sister")
+        || normalized.contains("bruder")
+        || normalized.contains("schwester")
+        || normalized.contains("брат")
+        || normalized.contains("сестр")
+    {
+        "sibling"
+    } else if normalized.contains("guardian")
+        || normalized.contains("vormund")
+        || normalized.contains("опек")
+        || normalized.contains("піклув")
+    {
+        "guardian"
+    } else if normalized.contains("caregiver")
+        || normalized.contains("betreuer")
+        || normalized.contains("ухаж")
+        || normalized.contains("догляд")
+    {
+        "caregiver"
+    } else if normalized.contains("friend")
+        || normalized.contains("freund")
+        || normalized.contains("друг")
+    {
+        "friend"
+    } else if normalized.contains("relative")
+        || normalized.contains("verwand")
+        || normalized.contains("родствен")
+        || normalized.contains("родич")
+    {
+        "relative"
+    } else {
+        "other"
+    }
+}
+
 #[derive(Default)]
 struct LeadConversionReadinessInput {
     qualification_status: String,
@@ -677,7 +776,6 @@ struct LeadConversionReadinessInput {
     confidentiality_release_signed: bool,
     enhanced_due_diligence_required: bool,
     enhanced_due_diligence_document_generated: bool,
-    intake_completed: bool,
     contract_signed: bool,
     framework_document_generated: bool,
     order_exists: bool,
@@ -729,7 +827,7 @@ fn evaluate_lead_conversion_readiness(
     };
     let master_data_ready =
         birth_date_present && legal_sex_present && primary_contact_present && address_ready;
-    let medical_ready = input.intake_completed;
+    let medical_ready = primary_concern_present;
     let service_ready = primary_concern_present && specialties_present;
     let documents_ready = compliance_completed
         && input.consent_privacy_practices
@@ -852,9 +950,9 @@ fn evaluate_lead_conversion_readiness(
             "stage": "documents",
         }),
         json!({
-            "key": "intake_completed",
-            "label": "Anamnesis intake completed",
-            "passed": input.intake_completed,
+            "key": "medical_characteristics_present",
+            "label": "Medical characteristics captured",
+            "passed": medical_ready,
             "blocking_for": "conversion",
             "stage": "medical",
         }),
@@ -959,9 +1057,6 @@ fn evaluate_lead_conversion_readiness(
 
     let qualification_ready = qualification_reasons.is_empty();
     let mut conversion_reasons = qualification_reasons.clone();
-    if !lead_qualified {
-        conversion_reasons.insert(0, "Lead must be qualified before conversion".to_string());
-    }
     if input.consent_healthcare && !address_present {
         conversion_reasons.push("Complete street, city and postal code".to_string());
     }
@@ -982,9 +1077,6 @@ fn evaluate_lead_conversion_readiness(
     }
     if input.enhanced_due_diligence_required && !input.enhanced_due_diligence_document_generated {
         conversion_reasons.push("Enhanced due diligence document is missing".to_string());
-    }
-    if !input.intake_completed {
-        conversion_reasons.push("Anamnesis intake is incomplete".to_string());
     }
     if !input.contract_signed {
         conversion_reasons.push("Framework contract is not signed".to_string());
@@ -1056,6 +1148,15 @@ fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversio
         .unwrap_or_else(|_| json!({}));
     let enhanced_due_diligence_required =
         lead_requires_enhanced_due_diligence(country.as_deref(), &wizard_state);
+    let quote_line_items = row
+        .try_get::<Value, _>("quote_line_items")
+        .unwrap_or_else(|_| json!([]));
+    let order_service_line_items = row
+        .try_get::<Value, _>("order_service_line_items")
+        .unwrap_or_else(|_| json!([]));
+    let quote_matches_order = !readiness_line_signatures(&quote_line_items).is_empty()
+        && readiness_line_signatures(&quote_line_items)
+            == readiness_line_signatures(&order_service_line_items);
     evaluate_lead_conversion_readiness(&LeadConversionReadinessInput {
         qualification_status: row.try_get("qualification_status").unwrap_or_default(),
         compliance_status: row.try_get("compliance_status").unwrap_or_default(),
@@ -1082,7 +1183,6 @@ fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversio
         enhanced_due_diligence_document_generated: row
             .try_get("enhanced_due_diligence_document_generated")
             .unwrap_or(false),
-        intake_completed: row.try_get("intake_completed").unwrap_or(false),
         contract_signed: row.try_get("contract_signed").unwrap_or(false),
         framework_document_generated: row.try_get("framework_document_generated").unwrap_or(false),
         order_exists: row.try_get("order_exists").unwrap_or(false),
@@ -1093,11 +1193,11 @@ fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversio
             .unwrap_or(false),
         order_signed_patient: row.try_get("order_signed_patient").unwrap_or(false),
         order_signed_agency: row.try_get("order_signed_agency").unwrap_or(false),
-        quote_accepted: row.try_get("quote_accepted").unwrap_or(false),
+        quote_accepted: row.try_get("quote_accepted").unwrap_or(false) && quote_matches_order,
         cost_estimate_document_generated: row
             .try_get("cost_estimate_document_generated")
             .unwrap_or(false),
-        prepayment_ready: row.try_get("prepayment_ready").unwrap_or(false),
+        prepayment_ready: row.try_get("prepayment_ready").unwrap_or(false) && quote_matches_order,
     })
 }
 
@@ -1151,11 +1251,6 @@ async fn load_lead_conversion_readiness(
                         AND d.file_deleted_at IS NULL
                   ) AS enhanced_due_diligence_document_generated,
                   EXISTS (
-                      SELECT 1 FROM cases c
-                      WHERE c.lead_id = leads.id
-                        AND c.intake_completed_at IS NOT NULL
-                  ) AS intake_completed,
-                  EXISTS (
                       SELECT 1 FROM framework_contracts fc
                       WHERE fc.lead_id = leads.id
                         AND fc.status = 'signed'
@@ -1199,12 +1294,14 @@ async fn load_lead_conversion_readiness(
                       SELECT o.signed_patient
                       FROM orders o
                       WHERE o.source_lead_id = leads.id
+                      ORDER BY o.created_at DESC, o.id DESC
                       LIMIT 1
                   ), false) AS order_signed_patient,
                   COALESCE((
                       SELECT o.signed_agency
                       FROM orders o
                       WHERE o.source_lead_id = leads.id
+                      ORDER BY o.created_at DESC, o.id DESC
                       LIMIT 1
                   ), false) AS order_signed_agency,
                   COALESCE((
@@ -1219,8 +1316,43 @@ async fn load_lead_conversion_readiness(
                           LIMIT 1
                       ) q ON true
                       WHERE o.source_lead_id = leads.id
+                      ORDER BY o.created_at DESC, o.id DESC
                       LIMIT 1
                   ), false) AS quote_accepted,
+                  COALESCE((
+                      SELECT q.line_items
+                      FROM orders o
+                      JOIN LATERAL (
+                          SELECT line_items
+                          FROM quotes
+                          WHERE order_id = o.id
+                          ORDER BY created_at DESC, id DESC
+                          LIMIT 1
+                      ) q ON true
+                      WHERE o.source_lead_id = leads.id
+                      ORDER BY o.created_at DESC, o.id DESC
+                      LIMIT 1
+                  ), '[]'::jsonb) AS quote_line_items,
+                  COALESCE((
+                      SELECT jsonb_agg(
+                          jsonb_build_object(
+                              'description', ol.description,
+                              'quantity', ol.quantity,
+                              'unit_price', ol.unit_price,
+                              'vat_rate', ol.vat_rate
+                          )
+                          ORDER BY ol.created_at, ol.id
+                      )
+                      FROM order_leistungen ol
+                      WHERE ol.order_id = (
+                          SELECT o.id
+                          FROM orders o
+                          WHERE o.source_lead_id = leads.id
+                          ORDER BY o.created_at DESC, o.id DESC
+                          LIMIT 1
+                      )
+                        AND ol.status <> 'invoiced'
+                  ), '[]'::jsonb) AS order_service_line_items,
                   EXISTS (
                       SELECT 1 FROM documents d
                       WHERE d.lead_id = leads.id
@@ -1234,7 +1366,10 @@ async fn load_lead_conversion_readiness(
                           ELSE COALESCE((
                               SELECT q.status = 'accepted'
                                      AND q.total_gross = o.total_estimated
-                                     AND q.paid_amount >= q.total_gross
+                                     AND q.paid_amount >= COALESCE(
+                                         NULLIF(o.prepayment_amount, 0),
+                                         q.total_gross
+                                     )
                               FROM quotes q
                               WHERE q.order_id = o.id
                               ORDER BY q.created_at DESC, q.id DESC
@@ -1243,6 +1378,7 @@ async fn load_lead_conversion_readiness(
                       END
                       FROM orders o
                       WHERE o.source_lead_id = leads.id
+                      ORDER BY o.created_at DESC, o.id DESC
                       LIMIT 1
                   ), false) AS prepayment_ready
            FROM leads
@@ -3516,6 +3652,61 @@ async fn convert_lead(
     let zip_code: Option<String> = lead.try_get("zip_code").ok().flatten();
     let lead_notes: Option<String> = lead.try_get("notes").ok().flatten();
     let wizard_state: Value = lead.try_get("wizard_state").unwrap_or_else(|_| json!({}));
+    let selected_work_type_ids = wizard_state
+        .get("selected_specialization_work_type_ids")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter_map(|value| Uuid::parse_str(value).ok())
+        .collect::<Vec<_>>();
+    let selected_work_types = if selected_work_type_ids.is_empty() {
+        json!([])
+    } else {
+        match sqlx::query_scalar::<_, Value>(
+            r#"SELECT COALESCE(
+                     jsonb_agg(
+                         jsonb_build_object(
+                             'id', wt.id,
+                             'code', wt.code,
+                             'name_de', wt.name_de,
+                             'name_ru', wt.name_ru,
+                             'name_en', wt.name_en,
+                             'name_es', wt.name_es,
+                             'duration_hours', wt.duration_hours,
+                             'min_price_eur', wt.min_price_eur,
+                             'max_price_eur', wt.max_price_eur,
+                             'specialization_ids', COALESCE((
+                                 SELECT jsonb_agg(assignment.specialization_id ORDER BY assignment.specialization_id)
+                                 FROM medical_specialization_work_type_assignments assignment
+                                 WHERE assignment.work_type_id = wt.id
+                             ), '[]'::jsonb)
+                         )
+                         ORDER BY wt.sort_order, wt.name_de, wt.id
+                     ),
+                     '[]'::jsonb
+                 )
+               FROM medical_specialization_work_types wt
+               WHERE wt.id = ANY($1::uuid[])
+                 AND wt.deleted_at IS NULL"#,
+        )
+        .bind(&selected_work_type_ids)
+        .fetch_one(&mut *tx)
+        .await
+        {
+            Ok(items) => items,
+            Err(error) => {
+                tracing::error!(error = %error, lead_id = %lead_id, "load selected work types for lead conversion");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    };
+    let requested_work_type_language = wizard_state
+        .get("cost_estimate_additional_language")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
     let lead_snapshot: Value = lead.try_get("lead_snapshot").unwrap_or_else(|_| json!({}));
     let snapshot_value = |key: &str| lead_snapshot.get(key).cloned().unwrap_or(Value::Null);
     let source: Option<String> = lead.try_get("source").ok().flatten();
@@ -3565,6 +3756,8 @@ async fn convert_lead(
         "primary_concern_text": snapshot_value("primary_concern_text"),
         "additional_concerns": snapshot_value("additional_concerns"),
         "requested_specialties": snapshot_value("requested_specialties"),
+        "selected_work_types": selected_work_types,
+        "cost_estimate_additional_language": requested_work_type_language.clone(),
         "program_date_from": wizard_state.get("program_date_from").cloned().unwrap_or(Value::Null),
         "program_date_to": wizard_state.get("program_date_to").cloned().unwrap_or(Value::Null),
         "notes": lead_notes.clone(),
@@ -3585,7 +3778,7 @@ async fn convert_lead(
             "birth_date": trusted_contact_birth_date.map(|value| value.to_string()),
             "address": trusted_contact_address.clone(),
         },
-        "trusted_contacts": trusted_contacts,
+        "trusted_contacts": trusted_contacts.clone(),
     });
     let contacts = lead_patient_contacts(
         email.as_deref(),
@@ -3640,6 +3833,14 @@ async fn convert_lead(
         "document_pack_complete": true,
         "compliance_completed": true,
         "contract_status": "signed",
+        "aml_enhanced_due_diligence_required": lead_requires_enhanced_due_diligence(
+            lead_country.as_deref(),
+            &wizard_state,
+        ),
+        "aml_enhanced_due_diligence": wizard_state
+            .get("aml_enhanced_due_diligence")
+            .cloned()
+            .unwrap_or_else(|| json!({})),
         "notes": null,
     }))
     .bind(lead_notes.as_deref())
@@ -3676,10 +3877,112 @@ async fn convert_lead(
         }
     }
 
+    for trusted_contact in trusted_contacts.as_array().into_iter().flatten() {
+        let Some(contact) = trusted_contact.as_object() else {
+            continue;
+        };
+        let name = contact
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim();
+        if name.is_empty() {
+            continue;
+        }
+        let relation = contact.get("relation").and_then(Value::as_str);
+        let notes = [
+            contact
+                .get("email")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| format!("Email: {}", value.trim())),
+            contact
+                .get("birth_date")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| format!("Geburtsdatum: {}", value.trim())),
+            contact
+                .get("address")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| format!("Adresse: {}", value.trim())),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("\n");
+
+        if let Err(error) = sqlx::query(
+            r#"INSERT INTO patient_relations (
+                    patient_id, related_name, relation_type,
+                    is_emergency_contact, phone, notes
+               ) VALUES ($1, $2, $3, true, $4, $5)"#,
+        )
+        .bind(patient_id)
+        .bind(name)
+        .bind(normalized_patient_relation_type(relation))
+        .bind(contact.get("phone").and_then(Value::as_str))
+        .bind((!notes.is_empty()).then_some(notes.as_str()))
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "transfer trusted contact to patient relation");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
+
     if let Err(error) =
         transfer_lead_clinical_profile(&mut tx, lead_id, patient_id, &wizard_state).await
     {
         tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "transfer lead clinical profile");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    if !selected_work_type_ids.is_empty()
+        && let Err(error) = sqlx::query(
+            r#"INSERT INTO patient_requested_work_types (
+                    patient_id, case_id, order_id, source_lead_id,
+                    work_type_id, additional_language
+               )
+               SELECT $1,
+                      (
+                          SELECT c.id
+                          FROM cases c
+                          WHERE c.lead_id = $2
+                          ORDER BY c.created_at DESC, c.id DESC
+                          LIMIT 1
+                      ),
+                      (
+                          SELECT o.id
+                          FROM orders o
+                          WHERE o.source_lead_id = $2
+                          ORDER BY o.created_at DESC, o.id DESC
+                          LIMIT 1
+                      ),
+                      $2,
+                      selected.work_type_id,
+                      $4
+               FROM unnest($3::uuid[]) AS selected(work_type_id)
+               JOIN medical_specialization_work_types wt
+                 ON wt.id = selected.work_type_id
+                AND wt.deleted_at IS NULL
+               ON CONFLICT (patient_id, source_lead_id, work_type_id)
+                   WHERE source_lead_id IS NOT NULL
+               DO UPDATE SET
+                   case_id = EXCLUDED.case_id,
+                   order_id = EXCLUDED.order_id,
+                   additional_language = EXCLUDED.additional_language,
+                   status = 'requested',
+                   updated_at = now()"#,
+        )
+        .bind(patient_id)
+        .bind(lead_id)
+        .bind(&selected_work_type_ids)
+        .bind(requested_work_type_language.as_deref())
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "transfer requested work types");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 
@@ -3688,6 +3991,16 @@ async fn convert_lead(
                UPDATE cases
                SET patient_id = $2,
                    lead_id = NULL,
+                   onboarding_order_id = COALESCE(
+                       onboarding_order_id,
+                       (
+                           SELECT o.id
+                           FROM orders o
+                           WHERE o.source_lead_id = $1
+                           ORDER BY o.created_at DESC, o.id DESC
+                           LIMIT 1
+                       )
+                   ),
                    notes = COALESCE(
                        NULLIF(btrim(notes), ''),
                        NULLIF(btrim($3), '')
@@ -3734,7 +4047,11 @@ async fn convert_lead(
 
     if let Err(error) = sqlx::query(
         r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
-           VALUES ($1, $2, $2)
+           SELECT $1, $2, $2
+           UNION
+           SELECT $1, c.manager_id, $2
+           FROM cases c
+           WHERE c.patient_id = $1
            ON CONFLICT (patient_id, user_id) DO UPDATE
            SET assigned_by = EXCLUDED.assigned_by,
                assigned_at = now(),
@@ -3754,37 +4071,40 @@ async fn convert_lead(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 
-    if let Err(resp) = crate::routes::workflow_checklists::ensure_default_patient_workflow(
+    if crate::routes::workflow_checklists::ensure_default_patient_workflow(
         &state,
         patient_id,
         Some(auth.user_id),
     )
     .await
+    .is_err()
     {
-        return resp;
+        tracing::error!(lead_id = %lead_id, patient_id = %patient_id, "failed to create default patient workflow after conversion");
     }
 
-    let order_ids =
-        match sqlx::query_scalar::<_, Uuid>("SELECT id FROM orders WHERE source_lead_id = $1")
-            .bind(lead_id)
-            .fetch_all(&state.db)
-            .await
-        {
-            Ok(order_ids) => order_ids,
-            Err(error) => {
-                tracing::error!(error = %error, lead_id = %lead_id, "load converted lead orders");
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-            }
-        };
+    let order_ids = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM orders WHERE source_lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(order_ids) => order_ids,
+        Err(error) => {
+            tracing::error!(error = %error, lead_id = %lead_id, "load converted lead orders after conversion");
+            Vec::new()
+        }
+    };
     for order_id in order_ids {
-        if let Err(resp) = crate::routes::workflow_checklists::ensure_default_order_workflow(
+        if crate::routes::workflow_checklists::ensure_default_order_workflow(
             &state,
             order_id,
             Some(auth.user_id),
         )
         .await
+        .is_err()
         {
-            return resp;
+            tracing::error!(lead_id = %lead_id, patient_id = %patient_id, order_id = %order_id, "failed to create default order workflow after conversion");
         }
     }
 
@@ -3793,10 +4113,14 @@ async fn convert_lead(
         Some(auth.user_id),
         "lead",
         Some(lead_id),
-        json!({ "patient_id": patient_id, "patient_pid": pid.clone() }),
+        json!({
+            "patient_id": patient_id,
+            "patient_pid": pid.clone(),
+            "conversion_confirmed": true,
+        }),
     ));
     let previous_status: String = lead.try_get("qualification_status").unwrap_or_default();
-    if let Err(resp) = crate::routes::workflow_lifecycle::record_event(
+    if crate::routes::workflow_lifecycle::record_event(
         &state,
         crate::routes::workflow_lifecycle::RecordEvent {
             entity_type: "lead",
@@ -3813,8 +4137,9 @@ async fn convert_lead(
         },
     )
     .await
+    .is_err()
     {
-        return resp;
+        tracing::error!(lead_id = %lead_id, patient_id = %patient_id, "failed to record lead conversion lifecycle event");
     }
     crate::realtime::publish_lead_event(
         &state,
@@ -3848,11 +4173,23 @@ async fn convert_lead(
     .into_response()
 }
 
+#[derive(Deserialize)]
+struct WizardConvertLeadRequest {
+    confirmed: bool,
+}
+
 async fn wizard_convert_lead(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
+    Json(body): Json<WizardConvertLeadRequest>,
 ) -> axum::response::Response {
+    if !body.confirmed {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Lead conversion must be explicitly confirmed",
+        );
+    }
     convert_lead(State(state), Extension(auth), Path(lead_id)).await
 }
 
@@ -4967,7 +5304,6 @@ mod lead_conversion_readiness_tests {
             confidentiality_release_signed: true,
             enhanced_due_diligence_required: false,
             enhanced_due_diligence_document_generated: false,
-            intake_completed: true,
             contract_signed: true,
             framework_document_generated: true,
             order_exists: true,

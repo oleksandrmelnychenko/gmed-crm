@@ -96,6 +96,7 @@ import {
   createOrderLeistung,
   fetchOrder,
   fetchOrders,
+  syncLeadWizardOrderLeistungen,
   updateOrderCommercialBasis,
 } from "@/pages/orders/data/order-api";
 import type { Leistung, OrderSummary } from "@/pages/orders/model/types";
@@ -276,6 +277,7 @@ type AutosaveSnapshot = {
   lines: ServiceLine[];
   paidAmount: string;
   prepayment: boolean;
+  prepaymentAmount: string;
   step: StepId;
 };
 
@@ -283,12 +285,14 @@ type StoredCommercialDraft = {
   lines: ServiceLine[];
   paidAmount: string;
   prepayment: boolean;
+  prepaymentAmount: string;
 };
 
 type CommercialFlagsPatch = {
   signed_patient?: boolean;
   signed_agency?: boolean;
   prepayment_required?: boolean;
+  prepayment_amount?: string;
 };
 
 type CommercialFlagKey = keyof CommercialFlagsPatch;
@@ -634,6 +638,7 @@ function storedCommercialDraftFromLead(lead: LeadDetail): StoredCommercialDraft 
     lines,
     paidAmount: inputString(stored.paid_amount),
     prepayment: stored.prepayment === true,
+    prepaymentAmount: inputString(stored.prepayment_amount),
   };
 }
 
@@ -645,7 +650,7 @@ function autosavePayload(
   snapshot: AutosaveSnapshot,
   previousWizardState: Record<string, unknown>,
 ) {
-  const { draft, lines, paidAmount, prepayment, step } = snapshot;
+  const { draft, lines, paidAmount, prepayment, prepaymentAmount, step } = snapshot;
   const payload: Record<string, unknown> & { wizard_state: Record<string, unknown> } = {
     date_of_birth: draft.birthDate || undefined,
     legal_sex: draft.legalSex || undefined,
@@ -722,6 +727,7 @@ function autosavePayload(
         })),
         paid_amount: paidAmount,
         prepayment,
+        prepayment_amount: prepaymentAmount,
       },
     },
   };
@@ -1907,6 +1913,9 @@ export function LeadWizard({
   const [signedPatient, setSignedPatient] = useState(false);
   const [signedAgency, setSignedAgency] = useState(false);
   const [paidAmount, setPaidAmount] = useState("");
+  const [prepaymentAmount, setPrepaymentAmount] = useState("");
+  const [commercialFlagsBusyCount, setCommercialFlagsBusyCount] = useState(0);
+  const [conversionConfirmed, setConversionConfirmed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -1949,6 +1958,7 @@ export function LeadWizard({
     signed_patient: 0,
     signed_agency: 0,
     prepayment_required: 0,
+    prepayment_amount: 0,
   });
   const selectedSpecializationItems = useMemo(() => {
     const values = new Set(draft?.specialties ?? []);
@@ -2274,6 +2284,10 @@ export function LeadWizard({
       const nextPrepayment = nextOrder
         ? Boolean(nextOrder.prepayment_required)
         : storedCommercialDraft?.prepayment ?? false;
+      const nextPrepaymentAmount = nextOrder?.prepayment_amount != null
+        ? String(nextOrder.prepayment_amount)
+        : storedCommercialDraft?.prepaymentAmount
+          || (nextPrepayment && paymentQuote ? String(paymentQuote.total_gross) : "");
       const nextPaidAmount = paymentQuote
         ? String(paymentQuote.paid_amount ?? "")
         : storedCommercialDraft?.paidAmount ?? "";
@@ -2300,6 +2314,7 @@ export function LeadWizard({
       if (hydrateDraft || hydrateCommercial) {
         setLines(nextLines);
         setPrepayment(nextPrepayment);
+        setPrepaymentAmount(nextPrepaymentAmount);
         setSignedPatient(Boolean(nextOrder?.signed_patient));
         setSignedAgency(Boolean(nextOrder?.signed_agency));
         setPaidAmount(nextPaidAmount);
@@ -2310,6 +2325,7 @@ export function LeadWizard({
           lines: nextLines,
           paidAmount: nextPaidAmount,
           prepayment: nextPrepayment,
+          prepaymentAmount: nextPrepaymentAmount,
           step: nextStep,
         });
         currentAutosaveSignatureRef.current = signature;
@@ -2373,6 +2389,7 @@ export function LeadWizard({
       lines: [],
       paidAmount: "",
       prepayment: false,
+      prepaymentAmount: "",
       step: "master_data",
     });
 
@@ -2564,16 +2581,23 @@ export function LeadWizard({
   const quoteTotal = quote ? money(quote.total_gross) : 0;
   const persistedPrepayment = quote ? money(quote.paid_amount) : 0;
   const enteredPrepayment = money(paidAmount);
-  const prepaymentRemaining = Math.max(quoteTotal - enteredPrepayment, 0);
+  const requiredPrepayment = prepayment ? money(prepaymentAmount) : 0;
+  const requiredPrepaymentValid = !prepayment || (
+    validMoneyInput(prepaymentAmount)
+    && requiredPrepayment > 0
+    && requiredPrepayment <= quoteTotal + 0.005
+  );
+  const prepaymentRemaining = Math.max(requiredPrepayment - enteredPrepayment, 0);
   const quoteAndPrepaymentReady = Boolean(acceptedQuote)
-    && (!prepayment || persistedPrepayment + 0.005 >= quoteTotal);
+    && requiredPrepaymentValid
+    && (!prepayment || persistedPrepayment + 0.005 >= requiredPrepayment);
   const quoteStateLabel = !quote
     ? tx("Смета ещё не рассчитана", "Kostenvoranschlag noch nicht berechnet")
     : !quoteIsCurrent
       ? tx("Услуги изменены — пересчитайте смету", "Leistungen geändert — Kostenvoranschlag neu berechnen")
       : quote.status !== "accepted"
         ? tx("Смета ожидает подтверждения", "Kostenvoranschlag wartet auf Annahme")
-        : prepayment && persistedPrepayment + 0.005 < quoteTotal
+        : prepayment && (!requiredPrepaymentValid || persistedPrepayment + 0.005 < requiredPrepayment)
           ? tx("Смета подтверждена, ожидается предоплата", "Kostenvoranschlag angenommen, Vorauszahlung ausstehend")
           : tx("Смета и предоплата актуальны", "Kostenvoranschlag und Vorauszahlung sind aktuell");
   const masterErrors = useMemo(() => validateMasterDraft(draft, tx), [draft, tx]);
@@ -2613,9 +2637,25 @@ export function LeadWizard({
   const orderFieldError = (...keys: string[]) =>
     visibleOrderErrors.find((issue) => keys.includes(issue.key))?.message;
   const autosaveSnapshot = useMemo<AutosaveSnapshot | null>(
-    () => draft ? { draft, lines, paidAmount, prepayment, step } : null,
-    [draft, lines, paidAmount, prepayment, step],
+    () => draft ? { draft, lines, paidAmount, prepayment, prepaymentAmount, step } : null,
+    [draft, lines, paidAmount, prepayment, prepaymentAmount, step],
   );
+
+  useEffect(() => {
+    setConversionConfirmed(false);
+  }, [
+    leadId,
+    draft,
+    lines,
+    signedPatient,
+    signedAgency,
+    prepayment,
+    prepaymentAmount,
+    paidAmount,
+    quote?.id,
+    quote?.updated_at,
+    documents,
+  ]);
 
   const persistMedicalDraft = useCallback(async (medicalDraft: Draft) => {
     const run = async () => {
@@ -3093,6 +3133,7 @@ export function LeadWizard({
         lines,
         paidAmount,
         prepayment,
+        prepaymentAmount,
         step: target,
       };
       currentAutosaveSignatureRef.current = autosaveSnapshotSignature(snapshot);
@@ -3444,17 +3485,27 @@ ${serviceCommentLines.join("\n")}`
       })).id;
     }
     if (syncOrderServiceLines) {
+      const currentServiceLines = lines.filter(validLine).map((line) => ({
+        line,
+        clientReference:
+          line.clientReference ?? `lead-wizard:${leadId}:${line.id}`,
+      }));
       await Promise.all(
-        lines.filter(validLine).map((line) =>
+        currentServiceLines.map(({ line, clientReference }) =>
           createOrderLeistung(orderId, {
             agency_service_id: line.agencyServiceId,
             description: line.description.trim(),
             quantity: money(line.quantity),
             unit_price: money(line.price),
             vat_rate: money(line.vat),
-            client_reference: line.clientReference ?? "lead-wizard:" + leadId + ":" + line.id,
+            client_reference: clientReference,
           }),
         ),
+      );
+      await syncLeadWizardOrderLeistungen(
+        orderId,
+        leadId,
+        currentServiceLines.map((item) => item.clientReference),
       );
     }
     await updateOrderCommercialBasis(orderId, {
@@ -3463,6 +3514,8 @@ ${serviceCommentLines.join("\n")}`
         ? { total_estimated: estimate.gross.toFixed(2) }
         : {}),
       prepayment_required: flags.prepayment_required ?? prepayment,
+      prepayment_amount: flags.prepayment_amount
+        ?? (prepayment && validMoneyInput(prepaymentAmount) ? prepaymentAmount : undefined),
       signed_patient: flags.signed_patient ?? signedPatient,
       signed_agency: flags.signed_agency ?? signedAgency,
       needs_description: needsDescription,
@@ -3502,6 +3555,7 @@ ${serviceCommentLines.join("\n")}`
     patchValue: CommercialFlagsPatch,
     rollbackValue: CommercialFlagsPatch,
   ) {
+    setCommercialFlagsBusyCount((current) => current + 1);
     const flagKeys = Object.keys(patchValue) as CommercialFlagKey[];
     const requestVersions = new Map(
       flagKeys.map((key) => {
@@ -3535,13 +3589,23 @@ ${serviceCommentLines.join("\n")}`
           if (commercialFlagRequestVersionRef.current[key] !== requestVersions.get(key)) return;
           const rollback = rollbackValue[key];
           if (rollback === undefined) return;
-          if (key === "signed_patient") setSignedPatient(rollback);
-          if (key === "signed_agency") setSignedAgency(rollback);
-          if (key === "prepayment_required") setPrepayment(rollback);
+          if (key === "signed_patient" && typeof rollback === "boolean") {
+            setSignedPatient(rollback);
+          }
+          if (key === "signed_agency" && typeof rollback === "boolean") {
+            setSignedAgency(rollback);
+          }
+          if (key === "prepayment_required" && typeof rollback === "boolean") {
+            setPrepayment(rollback);
+          }
+          if (key === "prepayment_amount" && typeof rollback === "string") {
+            setPrepaymentAmount(rollback);
+          }
         });
       }
     } finally {
       if (!existingOrderId) setBusy(null);
+      setCommercialFlagsBusyCount((current) => Math.max(0, current - 1));
     }
   }
 
@@ -3557,6 +3621,13 @@ ${serviceCommentLines.join("\n")}`
       setError(tx(
         "Предоплата должна быть числом не меньше нуля",
         "Die Vorauszahlung muss eine Zahl größer oder gleich null sein",
+      ));
+      return;
+    }
+    if (prepayment && !requiredPrepaymentValid) {
+      setError(tx(
+        "Укажите необходимую предоплату больше нуля и не больше суммы сметы",
+        "Geben Sie eine erforderliche Vorauszahlung größer als null und nicht höher als den Kostenvoranschlag an",
       ));
       return;
     }
@@ -3689,6 +3760,7 @@ ${serviceCommentLines.join("\n")}`
                 quantity: line.quantity,
                 fee: serviceDocumentFee(line),
                 line_total: `${(money(line.quantity) * money(line.price)).toFixed(2)} EUR`,
+                vat_rate: line.vat,
                 note: serviceDocumentNote(line),
               })),
         },
@@ -3724,12 +3796,19 @@ ${serviceCommentLines.join("\n")}`
 
   async function convert() {
     if (!leadId) return;
+    if (!conversionConfirmed) {
+      setError(tx(
+        "Подтвердите, что данные проверены и пациента можно создать",
+        "Bestätigen Sie, dass die Daten geprüft wurden und der Patient angelegt werden kann",
+      ));
+      return;
+    }
     if (!(await finishIntake("release"))) return;
     if (!(await finishOrder("release"))) return;
     setBusy("convert");
     try {
       await ensureCommercial();
-      const result = await wizardConvertLead(leadId);
+      const result = await wizardConvertLead(leadId, true);
       if (onConverted) onConverted(result.patient_id);
       else onOpenChange(false);
     } catch (nextError) {
@@ -3876,7 +3955,7 @@ ${serviceCommentLines.join("\n")}`
   }
 
   if (!leadId && !createMode) return null;
-  const isBusy = busy !== null;
+  const isBusy = busy !== null || commercialFlagsBusyCount > 0;
   const autosaveIsDirty = autosaveStatus === "dirty"
     || autosaveStatus === "saving"
     || autosaveStatus === "error";
@@ -3922,9 +4001,9 @@ ${serviceCommentLines.join("\n")}`
             {leadId && lead && ["new", "in_progress", "qualified"].includes(lead.qualification_status) ? (
               <Button
                 type="button"
-                variant="ghost"
+                variant="outline"
                 size="sm"
-                className="h-8 text-destructive hover:text-destructive"
+                className="h-8 rounded-lg border-destructive/35 bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive"
                 disabled={loading || isBusy}
                 onClick={() => {
                   if (!leadId) return;
@@ -3999,7 +4078,7 @@ ${serviceCommentLines.join("\n")}`
               const done = item.id === "master_data"
                 ? Boolean(draft && Object.keys(masterErrors).length === 0)
                 : item.id === "medical"
-                  ? Boolean(draft?.concern.trim() && draft.anamnese.trim())
+                  ? Boolean(draft?.concern.trim())
                   : item.id === "order"
                     ? Boolean(draft && orderIssues.length === 0)
                     : readiness.get(item.id) ?? false;
@@ -5534,16 +5613,51 @@ ${serviceCommentLines.join("\n")}`
                     disabled={isBusy}
                     onChange={(checked) => {
                       setPrepayment(checked);
+                      const nextAmount = checked
+                        ? prepaymentAmount || (quote ? quoteTotal.toFixed(2) : "")
+                        : prepaymentAmount;
+                      if (checked && nextAmount !== prepaymentAmount) {
+                        setPrepaymentAmount(nextAmount);
+                      }
                       void saveFlags(
-                        { prepayment_required: checked },
-                        { prepayment_required: prepayment },
+                        {
+                          prepayment_required: checked,
+                          ...(checked && nextAmount ? { prepayment_amount: nextAmount } : {}),
+                        },
+                        {
+                          prepayment_required: prepayment,
+                          prepayment_amount: prepaymentAmount,
+                        },
                       );
                     }}
                     label={tx("Требуется предоплата", "Vorauszahlung erforderlich")}
                   />
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+                  {prepayment ? (
+                    <Field label={tx("Необходимая предоплата", "Erforderliche Vorauszahlung")}>
+                      <Input
+                        className={cn(inputClass, "font-mono tabular-nums")}
+                        inputMode="decimal"
+                        min="0.01"
+                        max={quote ? quoteTotal : undefined}
+                        step="0.01"
+                        value={prepaymentAmount}
+                        onChange={(event) => setPrepaymentAmount(event.target.value)}
+                        onBlur={() => {
+                          if (order?.id && validMoneyInput(prepaymentAmount)) {
+                            void saveFlags(
+                              { prepayment_amount: prepaymentAmount },
+                              { prepayment_amount: String(order.prepayment_amount ?? "") },
+                            );
+                          }
+                        }}
+                        disabled={isBusy}
+                        placeholder="0.00"
+                      />
+                    </Field>
+                  ) : null}
                   <Field label={tx("Полученная предоплата", "Erhaltene Vorauszahlung")}>
                     <Input
                       className={cn(inputClass, "font-mono tabular-nums")}
@@ -5573,7 +5687,7 @@ ${serviceCommentLines.join("\n")}`
                 </div>
                 {prepayment && quote ? (
                   <div className="flex justify-end text-xs text-muted-foreground">
-                    <span>{tx("Остаток после ввода", "Restbetrag nach Eingabe")}: </span>
+                    <span>{tx("Осталось получить", "Noch zu erhalten")}: </span>
                     <span className="ml-1 font-mono tabular-nums text-foreground">
                       {formatMoneyValue(prepaymentRemaining, lang)} EUR
                     </span>
@@ -5664,16 +5778,40 @@ ${serviceCommentLines.join("\n")}`
                   ))}
                 </div>
               </Section>
-              {lead.readiness.blocking_reasons.length > 0 ? (
+              {lead.readiness.blocking_reasons.length > 0 || !conversionConfirmed ? (
                 <Banner tone="warning">
                   <div className="font-medium">{tx("Что осталось заполнить", "Was noch fehlt")}</div>
                   <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5">
                     {lead.readiness.blocking_reasons.map((reason) => <li key={reason}>{readinessReasonLabel(reason, tx)}</li>)}
+                    {!conversionConfirmed ? (
+                      <li>{tx(
+                        "Подтвердите, что данные проверены и пациента можно создать",
+                        "Bestätigen Sie, dass die Daten geprüft wurden und der Patient angelegt werden kann",
+                      )}</li>
+                    ) : null}
                   </ul>
                 </Banner>
               ) : null}
+              <label className={cn(
+                "flex items-start gap-3 rounded-lg border border-border bg-card px-4 py-3",
+                (!lead.readiness.conversion_ready || !quoteAndPrepaymentReady) && "opacity-60",
+              )}>
+                <input
+                  type="checkbox"
+                  className={cn(checkboxClass, "mt-0.5")}
+                  checked={conversionConfirmed}
+                  disabled={isBusy || !lead.readiness.conversion_ready || !quoteAndPrepaymentReady}
+                  onChange={(event) => setConversionConfirmed(event.target.checked)}
+                />
+                <span className="text-sm leading-5 text-foreground">
+                  {tx(
+                    "Я проверил данные обращения и подтверждаю, что пациента можно создать. Данные, документы, медицинская характеристика, услуги и заказ будут перенесены в карточку пациента.",
+                    "Ich habe die Angaben geprüft und bestätige, dass der Patient angelegt werden kann. Daten, Dokumente, medizinische Merkmale, Leistungen und Auftrag werden in die Patientenakte übernommen.",
+                  )}
+                </span>
+              </label>
               <div className="flex justify-end">
-                <Button type="button" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={isBusy || !lead.readiness.conversion_ready || !quoteAndPrepaymentReady} onClick={() => void convert()}>
+                <Button type="button" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={isBusy || !lead.readiness.conversion_ready || !quoteAndPrepaymentReady || !conversionConfirmed} onClick={() => void convert()}>
                   {busy === "convert" ? <LoaderCircle className="size-4 animate-spin" /> : <UserRoundCheck className="size-4" />}
                   {tx("Создать пациента", "Patient anlegen")}
                 </Button>

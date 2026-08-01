@@ -566,7 +566,11 @@ function useLeadsPageContent() {
         sortable: true,
         width: 260,
         pinned: "left",
-        render: (row) => <span className="text-sm font-medium text-foreground">{`${row.first_name} ${row.last_name}`.trim()}</span>,
+        render: (row) => (
+          <span className="truncate font-mono text-xs font-medium text-foreground">
+            {`${row.first_name} ${row.last_name}`.trim()}
+          </span>
+        ),
       },
       {
         id: "lead_type",
@@ -600,16 +604,16 @@ function useLeadsPageContent() {
         })),
         group: "qualification",
         sortable: true,
-        width: 180,
+        width: 210,
         render: (row) => {
           const days = daysInStatus(row.status_changed_at);
           return (
-            <div className="flex flex-col items-start gap-1">
+            <div className="flex min-w-0 items-center gap-1.5">
               <StatusBadge tone={leadStatusTone(row.qualification_status)}>
                 {statusLabel(row.qualification_status, t)}
               </StatusBadge>
               {days != null ? (
-                <span className="whitespace-nowrap text-[11px] tabular-nums text-muted-foreground">
+                <span className="shrink-0 whitespace-nowrap text-[11px] tabular-nums text-muted-foreground">
                   {daysInStatusLabel(days, lang)}
                 </span>
               ) : null}

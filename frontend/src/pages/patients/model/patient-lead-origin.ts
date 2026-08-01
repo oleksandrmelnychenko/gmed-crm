@@ -5,6 +5,19 @@ export type LeadOriginServiceRequest = {
   comment: string | null;
 };
 
+export type LeadOriginSelectedWorkType = {
+  id: string;
+  code: string;
+  nameDe: string;
+  nameRu: string;
+  nameEn: string;
+  nameEs: string;
+  durationHours: number | null;
+  minPriceEur: number | null;
+  maxPriceEur: number | null;
+  specializationIds: string[];
+};
+
 function recordFromUnknown(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -31,6 +44,15 @@ function stringsFromUnknown(value: unknown) {
     const normalized = stringFromUnknown(item);
     return normalized ? [normalized] : [];
   });
+}
+
+function numberFromUnknown(value: unknown) {
+  const parsed = typeof value === "number"
+    ? value
+    : typeof value === "string" && value.trim()
+      ? Number(value)
+      : Number.NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
 export function createPatientLeadOrigin(detail: PatientDetail) {
@@ -70,6 +92,28 @@ export function createPatientLeadOrigin(detail: PatientDetail) {
     value: service,
     comment: stringFromUnknown(serviceComments[service]),
   }));
+  const selectedWorkTypes: LeadOriginSelectedWorkType[] = records("selected_work_types")
+    .flatMap((item) => {
+      const id = stringFromUnknown(item["id"]);
+      const code = stringFromUnknown(item["code"]);
+      const nameDe = stringFromUnknown(item["name_de"]) ?? "";
+      const nameRu = stringFromUnknown(item["name_ru"]) ?? "";
+      const nameEn = stringFromUnknown(item["name_en"]) ?? "";
+      const nameEs = stringFromUnknown(item["name_es"]) ?? "";
+      if (!id && !code && !nameDe && !nameRu && !nameEn && !nameEs) return [];
+      return [{
+        id: id ?? code ?? `${nameDe}-${nameRu}-${nameEn}-${nameEs}`,
+        code: code ?? "",
+        nameDe,
+        nameRu,
+        nameEn,
+        nameEs,
+        durationHours: numberFromUnknown(item["duration_hours"]),
+        minPriceEur: numberFromUnknown(item["min_price_eur"]),
+        maxPriceEur: numberFromUnknown(item["max_price_eur"]),
+        specializationIds: stringsFromUnknown(item["specialization_ids"]),
+      }];
+    });
 
   const sourceLeadId = detail.source_lead_id ?? stringFromUnknown(snapshot["id"]);
   const hasData = Boolean(sourceLeadId) || Object.values(profile).some(hasValue) || Object.values(snapshot).some(hasValue);
@@ -80,6 +124,7 @@ export function createPatientLeadOrigin(detail: PatientDetail) {
     profile,
     record,
     records,
+    selectedWorkTypes,
     serviceRequests,
     snapshot,
     sourceLeadId,

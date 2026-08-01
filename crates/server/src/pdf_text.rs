@@ -1,8 +1,15 @@
-use printpdf::{DictItem, Op, PdfSaveOptions};
+use std::collections::BTreeMap;
+
+use printpdf::{
+    DictItem, FontMetrics, Op, ParsedFont, PdfDocument, PdfFontHandle, PdfSaveOptions, TextItem,
+};
+
+const PDF_ARIAL_REGULAR_BYTES: &[u8] = include_bytes!("../../../docs/comparison/fonts/arial.ttf");
+const PDF_ARIAL_BOLD_BYTES: &[u8] = include_bytes!("../../../docs/comparison/fonts/arialbd.ttf");
 
 pub(crate) fn pdf_text_save_options() -> PdfSaveOptions {
-    // The generated document builders emit pre-encoded Tj text operations so
-    // German WinAnsi characters render correctly with PDF built-in fonts.
+    // Some legacy builders emit pre-encoded Tj operations for built-in fonts;
+    // Unicode builders use embedded fonts and regular ShowText operations.
     PdfSaveOptions {
         secure: false,
         ..Default::default()
@@ -18,6 +25,63 @@ pub(crate) fn win_ansi_show_text_op(text: &str) -> Op {
             data,
         }],
     }
+}
+
+pub(crate) fn unicode_show_text_op(text: &str) -> Op {
+    Op::ShowText {
+        items: vec![TextItem::Text(text.to_string())],
+    }
+}
+
+pub(crate) fn add_unicode_pdf_fonts(
+    document: &mut PdfDocument,
+) -> Result<(PdfFontHandle, PdfFontHandle), &'static str> {
+    let regular_font = parsed_unicode_pdf_font(PDF_ARIAL_REGULAR_BYTES, "Arial")
+        .ok_or("Failed to load PDF regular font")?;
+    let bold_font = parsed_unicode_pdf_font(PDF_ARIAL_BOLD_BYTES, "Arial Bold")
+        .ok_or("Failed to load PDF bold font")?;
+    let regular = PdfFontHandle::External(document.add_font(&regular_font));
+    let bold = PdfFontHandle::External(document.add_font(&bold_font));
+    Ok((regular, bold))
+}
+
+fn parsed_unicode_pdf_font(bytes: &[u8], font_name: &str) -> Option<ParsedFont> {
+    let face = ttf_parser::Face::parse(bytes, 0).ok()?;
+    let cmap = face.tables().cmap?;
+    let mut codepoint_to_glyph = BTreeMap::new();
+    let mut glyph_widths = BTreeMap::new();
+
+    for subtable in cmap.subtables {
+        if !subtable.is_unicode() {
+            continue;
+        }
+        subtable.codepoints(|codepoint| {
+            let Some(character) = char::from_u32(codepoint) else {
+                return;
+            };
+            let Some(glyph) = face.glyph_index(character) else {
+                return;
+            };
+            codepoint_to_glyph.entry(codepoint).or_insert(glyph.0);
+            glyph_widths.entry(glyph.0).or_insert_with(|| {
+                face.glyph_hor_advance(glyph)
+                    .unwrap_or(face.units_per_em() / 2)
+            });
+        });
+    }
+
+    Some(ParsedFont::with_glyph_data(
+        bytes.to_vec(),
+        0,
+        Some(font_name.to_string()),
+        codepoint_to_glyph,
+        glyph_widths,
+        face.units_per_em(),
+        FontMetrics {
+            ascent: face.ascender(),
+            descent: face.descender(),
+        },
+    ))
 }
 
 fn needs_hex_encoding(bytes: &[u8]) -> bool {
@@ -67,7 +131,10 @@ fn win_ansi_byte(ch: char) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use super::encode_win_ansi_text;
+    use super::{
+        PDF_ARIAL_BOLD_BYTES, PDF_ARIAL_REGULAR_BYTES, encode_win_ansi_text,
+        parsed_unicode_pdf_font,
+    };
 
     #[test]
     fn win_ansi_encoder_supports_german_text() {
@@ -75,5 +142,17 @@ mod tests {
             encode_win_ansi_text("Müller Köln Straße Ärzteteam €"),
             b"M\xFCller K\xF6ln Stra\xDFe \xC4rzteteam \x80"
         );
+    }
+
+    #[test]
+    fn bundled_arial_fonts_include_cyrillic_glyphs() {
+        for (bytes, name) in [
+            (PDF_ARIAL_REGULAR_BYTES, "Arial"),
+            (PDF_ARIAL_BOLD_BYTES, "Arial Bold"),
+        ] {
+            let font = parsed_unicode_pdf_font(bytes, name).expect("bundled Arial should parse");
+            assert!(font.codepoint_to_glyph.contains_key(&('Ж' as u32)));
+            assert!(font.codepoint_to_glyph.contains_key(&('ї' as u32)));
+        }
     }
 }
