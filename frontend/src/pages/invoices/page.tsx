@@ -1615,9 +1615,6 @@ function useStaffInvoicesPageContent() {
             groupLabels={invoiceColumnGroups}
             loading={listBusy}
             maxFrozenColumns={INVOICE_MAX_FROZEN_COLUMNS}
-            surfaceClassName="space-y-0 overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm"
-            tableClassName="rounded-none border-0 shadow-none"
-            toolbarClassName="flex-nowrap overflow-x-auto border-b border-border/70 bg-card px-3 py-2"
             toolbarStart={
               <>
             <div className="relative min-w-[220px] flex-1 sm:max-w-sm">

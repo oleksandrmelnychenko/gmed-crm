@@ -1401,9 +1401,7 @@ function useFinanceCatalogPageContent() {
             dictionary={t as unknown as Record<string, string>}
             rowId={(item) => item.id}
             emptyState={<EmptyCell>{t.revenue_agency_service_empty_title}</EmptyCell>}
-            surfaceClassName="space-y-0 overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm"
-            tableClassName="max-h-[560px] rounded-none border-0 shadow-none"
-            toolbarClassName="flex-nowrap overflow-x-auto border-b border-border/70 bg-card px-3 py-2"
+            tableClassName="max-h-[560px]"
             toolbarStart={
               <>
                 <div className="relative min-w-[220px] flex-1 sm:max-w-sm">

@@ -23,7 +23,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   AdminSheetScaffold,
-  AdminToolbar,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -1950,9 +1949,7 @@ function useContractsPageContent() {
             loading={agencyServicesLoading}
             activeRowId={agencyServiceForm.id || null}
             onRowClick={permissions.canManageCatalog ? handleEditAgencyService : undefined}
-            surfaceClassName="mt-3 space-y-0 overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm"
-            tableClassName="rounded-none border-0 shadow-none"
-            toolbarClassName="flex-nowrap overflow-x-auto border-b border-border/70 bg-card px-3 py-2"
+            surfaceClassName="mt-3"
             toolbarStart={
               <>
                 <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
@@ -2027,75 +2024,11 @@ function useContractsPageContent() {
                 </Badge>
               </div>
 
-              <div className="mt-5 space-y-4 border-b border-border pb-4">
-                <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
-                  <div className="relative min-w-[260px] flex-1">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      type="search"
-                      aria-label={`${text.contractsTab} ${t.common_search}`}
-                      value={contractFilters.search}
-                      onChange={(event) =>
-                        setContractFilters((current) => ({ ...current, search: event.target.value }))
-                      }
-                      className={cn(shellInputClassName, "pl-9")}
-                      placeholder={t.common_search}
-                    />
-                  </div>
-                  <NativeComboboxSelect
-                    value={contractFilters.patientId || "__all__"}
-                    onChange={(event) => {
-                      const patientId = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
-                      setContractFilters((current) => ({ ...current, patientId }));
-                      syncQuery({ patient: patientId || null });
-                    }}
-                    className={cn(selectClassName, "w-[260px] min-w-[260px]")}
-                  >
-                    <option value="__all__">
-                      {t.revenue_filter_all_patients}
-                    </option>
-                    {patients.map((patient) => (
-                      <option key={patient.id} value={patient.id}>
-                        {patientOptionLabel(patient)}
-                      </option>
-                    ))}
-                  </NativeComboboxSelect>
-                  <NativeComboboxSelect
-                    value={contractFilters.status || "__all__"}
-                    onChange={(event) =>
-                      setContractFilters((current) => ({
-                        ...current,
-                        status:
-                          event.target.value && event.target.value !== "__all__"
-                            ? event.target.value
-                            : "",
-                      }))
-                    }
-                    className={cn(selectClassName, "w-[180px] min-w-[180px]")}
-                  >
-                    <option value="__all__">{t.providers_all}</option>
-                    {CONTRACT_STATUSES.map((status) => (
-                      <option key={status} value={status}>
-                        {contractStatusLabel(status)}
-                      </option>
-                    ))}
-                  </NativeComboboxSelect>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-9 rounded-lg px-3.5"
-                    onClick={() => {
-                      setContractFilters({
-                        ...DEFAULT_CONTRACT_FILTERS,
-                        patientId: searchParams.get("patient") ?? "",
-                      });
-                    }}
-                  >
-                    {t.access_reset}
-                  </Button>
-                </AdminToolbar>
-                {contractsError ? <ShellBanner tone="error">{contractsError}</ShellBanner> : null}
-              </div>
+              {contractsError ? (
+                <div className="mt-3">
+                  <ShellBanner tone="error">{contractsError}</ShellBanner>
+                </div>
+              ) : null}
 
               <DataTableSurface
                 rows={contracts}
@@ -2106,7 +2039,76 @@ function useContractsPageContent() {
                 loading={contractsLoading}
                 activeRowId={selectedContractId || null}
                 onRowClick={(row) => openContract(row.id)}
-                rowAccent={(row) => (row.id === selectedContractId ? "bg-sky-500" : null)}
+                surfaceClassName="mt-3"
+                toolbarStart={
+                  <>
+                    <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+                      <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        type="search"
+                        aria-label={`${text.contractsTab} ${t.common_search}`}
+                        value={contractFilters.search}
+                        onChange={(event) =>
+                          setContractFilters((current) => ({ ...current, search: event.target.value }))
+                        }
+                        className={cn(shellInputClassName, "h-8 rounded-lg bg-background pl-8 text-[13px]")}
+                        placeholder={t.common_search}
+                      />
+                    </div>
+                    <NativeComboboxSelect
+                      value={contractFilters.patientId || "__all__"}
+                      onChange={(event) => {
+                        const patientId = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
+                        setContractFilters((current) => ({ ...current, patientId }));
+                        syncQuery({ patient: patientId || null });
+                      }}
+                      className={cn(selectClassName, "h-8 w-[240px] min-w-[240px] bg-background text-[13px]")}
+                    >
+                      <option value="__all__">
+                        {t.revenue_filter_all_patients}
+                      </option>
+                      {patients.map((patient) => (
+                        <option key={patient.id} value={patient.id}>
+                          {patientOptionLabel(patient)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                    <NativeComboboxSelect
+                      value={contractFilters.status || "__all__"}
+                      onChange={(event) =>
+                        setContractFilters((current) => ({
+                          ...current,
+                          status:
+                            event.target.value && event.target.value !== "__all__"
+                              ? event.target.value
+                              : "",
+                        }))
+                      }
+                      className={cn(selectClassName, "h-8 w-[170px] min-w-[170px] bg-background text-[13px]")}
+                    >
+                      <option value="__all__">{t.providers_all}</option>
+                      {CONTRACT_STATUSES.map((status) => (
+                        <option key={status} value={status}>
+                          {contractStatusLabel(status)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setContractFilters({
+                          ...DEFAULT_CONTRACT_FILTERS,
+                          patientId: searchParams.get("patient") ?? "",
+                        });
+                      }}
+                    >
+                      <X className="size-3.5" />
+                      {t.access_reset}
+                    </Button>
+                  </>
+                }
                 emptyState={
                   <EmptyState
                     title={t.common_not_set}
@@ -2142,10 +2144,26 @@ function useContractsPageContent() {
                 </Badge>
               </div>
 
-              <div className="mt-5 space-y-4 border-b border-border pb-4">
-                <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
-                  <div className="relative min-w-[240px] flex-1">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              {quotesError ? (
+                <div className="mt-3">
+                  <ShellBanner tone="error">{quotesError}</ShellBanner>
+                </div>
+              ) : null}
+
+              <DataTableSurface
+                rows={quotes}
+                columns={quoteTableColumns}
+                rowId={(row) => row.id}
+                defaultDensity="comfortable"
+                dictionary={t as unknown as Record<string, string>}
+                loading={quotesLoading}
+                activeRowId={selectedQuoteId || null}
+                onRowClick={(row) => openQuote(row.id)}
+                surfaceClassName="mt-3"
+                toolbarStart={
+                  <>
+                  <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       type="search"
                       aria-label={`${text.quotesTab} ${t.common_search}`}
@@ -2153,7 +2171,7 @@ function useContractsPageContent() {
                       onChange={(event) =>
                         setQuoteFilters((current) => ({ ...current, search: event.target.value }))
                       }
-                      className={cn(shellInputClassName, "pl-9")}
+                      className={cn(shellInputClassName, "h-8 rounded-lg bg-background pl-8 text-[13px]")}
                       placeholder={t.common_search}
                     />
                   </div>
@@ -2226,8 +2244,8 @@ function useContractsPageContent() {
                   </NativeComboboxSelect>
                   <Button
                     type="button"
-                    variant="outline"
-                    className="h-9 rounded-lg px-3.5"
+                    variant="ghost"
+                    size="sm"
                     onClick={() => {
                       setQuoteFilters({
                         ...DEFAULT_QUOTE_FILTERS,
@@ -2236,22 +2254,11 @@ function useContractsPageContent() {
                       });
                     }}
                   >
+                    <X className="size-3.5" />
                     {t.access_reset}
                   </Button>
-                </AdminToolbar>
-                {quotesError ? <ShellBanner tone="error">{quotesError}</ShellBanner> : null}
-              </div>
-
-              <DataTableSurface
-                rows={quotes}
-                columns={quoteTableColumns}
-                rowId={(row) => row.id}
-                defaultDensity="comfortable"
-                dictionary={t as unknown as Record<string, string>}
-                loading={quotesLoading}
-                activeRowId={selectedQuoteId || null}
-                onRowClick={(row) => openQuote(row.id)}
-                rowAccent={(row) => (row.id === selectedQuoteId ? "bg-sky-500" : null)}
+                  </>
+                }
                 emptyState={
                   <EmptyState
                     title={t.common_not_set}

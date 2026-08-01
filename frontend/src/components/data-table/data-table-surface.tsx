@@ -252,10 +252,15 @@ export function DataTableSurface<T>({
   const labels = useMemo(() => ({ ...t, ...dictionary }), [dictionary, t]);
 
   return (
-    <div className={cn("space-y-2", surfaceClassName)}>
+    <div
+      className={cn(
+        "space-y-0 overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm",
+        surfaceClassName,
+      )}
+    >
       <div
         className={cn(
-          "relative z-30 flex flex-wrap items-center gap-1.5 border-b border-border/70 px-3 py-2",
+          "relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2",
           toolbarClassName,
         )}
       >
