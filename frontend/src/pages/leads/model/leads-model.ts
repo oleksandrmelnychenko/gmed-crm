@@ -163,7 +163,6 @@ export const STATUS_OPTIONS = [
   "in_progress",
   "qualified",
   "not_qualified",
-  "converted",
   "archived",
 ] as const;
 

@@ -299,6 +299,7 @@ async fn list_leads(
                   (SELECT COUNT(*) FROM lead_attachments a WHERE a.lead_id = leads.id) AS attachment_count
            FROM leads
            WHERE ($1::bool = true OR qualification_status != 'archived')
+             AND converted_patient_id IS NULL
              AND ($2::text IS NULL OR qualification_status = $2)
              AND (
                 $3::text = '%%'

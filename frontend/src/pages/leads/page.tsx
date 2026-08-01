@@ -915,6 +915,16 @@ function useLeadsPageContent() {
 
   useDebouncedRealtimeSubscription(LEAD_REALTIME_EVENTS, (_event, events) => {
     if (!permissions.canViewPage) return;
+    const convertedLeadIds = new Set(
+      events
+        .filter((event) => event.type === "lead.converted" && event.entity_type === "lead")
+        .map((event) => event.entity_id),
+    );
+    if (convertedLeadIds.size > 0) {
+      dispatchListState((current) => ({
+        leads: current.leads.filter((lead) => !convertedLeadIds.has(lead.id)),
+      }));
+    }
     clearApiCache("/leads");
     clearApiCache("/stats/leads");
     for (const event of events) {
@@ -2763,6 +2773,14 @@ function useLeadsPageContent() {
             }}
             onShowDetails={(leadId) => openLeadDetail(leadId)}
             onConverted={(patientId) => {
+              if (wizardLeadId) {
+                dispatchListState((current) => ({
+                  leads: current.leads.filter((lead) => lead.id !== wizardLeadId),
+                }));
+                clearApiCache(`/leads/${wizardLeadId}`);
+              }
+              clearApiCache("/leads");
+              clearApiCache("/patients");
               setNewLeadWizardOpen(false);
               setWizardLeadId(null);
               staffGo(`/patients/${patientId}`);
