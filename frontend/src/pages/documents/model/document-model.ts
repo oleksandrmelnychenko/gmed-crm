@@ -158,6 +158,7 @@ const DOCUMENT_ART_LABELS: Record<string, string> = {
   consent_data_release_single: "Einverständniserklärung (alleiniges Sorgerecht)",
   cost_coverage_declaration: "Kostenübernahmeerklärung",
   cost_estimate: "Vorläufige Kostenkalkulation",
+  enhanced_due_diligence: "Durchführung verstärkter Sorgfaltspflichten",
   framework_contract: "Rahmendienstleistungsvertrag",
   medication_summary: "Medikamentenübersicht",
   patient_sticker: "Patientenetikett",

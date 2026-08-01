@@ -553,6 +553,101 @@ struct LeadConversionReadiness {
     payload: Value,
 }
 
+fn is_enhanced_due_diligence_country(value: &str) -> bool {
+    let normalized = value.trim();
+    if normalized.is_empty() {
+        return false;
+    }
+    let upper = normalized.to_uppercase();
+    if matches!(
+        upper.as_str(),
+        "AF" | "DZ"
+            | "AO"
+            | "BO"
+            | "VG"
+            | "CI"
+            | "CD"
+            | "HT"
+            | "YE"
+            | "CM"
+            | "KE"
+            | "LA"
+            | "LB"
+            | "MC"
+            | "MM"
+            | "NA"
+            | "NP"
+            | "RU"
+            | "SS"
+            | "SY"
+            | "TT"
+            | "VU"
+            | "VE"
+            | "VN"
+            | "KP"
+            | "IR"
+    ) {
+        return true;
+    }
+    matches!(
+        normalized.to_lowercase().as_str(),
+        "afghanistan"
+            | "algeria"
+            | "algerien"
+            | "angola"
+            | "bolivia"
+            | "bolivien"
+            | "british virgin islands"
+            | "britische jungferninseln"
+            | "côte d’ivoire"
+            | "côte d'ivoire"
+            | "democratic republic of the congo"
+            | "demokratische republik kongo"
+            | "haiti"
+            | "yemen"
+            | "jemen"
+            | "cameroon"
+            | "kamerun"
+            | "kenya"
+            | "kenia"
+            | "laos"
+            | "lebanon"
+            | "libanon"
+            | "monaco"
+            | "myanmar"
+            | "myanmar/birma"
+            | "burma"
+            | "namibia"
+            | "nepal"
+            | "russian federation"
+            | "russische föderation"
+            | "russia"
+            | "russland"
+            | "south sudan"
+            | "südsudan"
+            | "syria"
+            | "syrien"
+            | "trinidad and tobago"
+            | "trinidad und tobago"
+            | "vanuatu"
+            | "venezuela"
+            | "vietnam"
+            | "democratic people's republic of korea"
+            | "demokratische volksrepublik korea"
+            | "north korea"
+            | "nordkorea"
+            | "iran"
+    )
+}
+
+fn lead_requires_enhanced_due_diligence(country: Option<&str>, wizard_state: &Value) -> bool {
+    country.is_some_and(is_enhanced_due_diligence_country)
+        || wizard_state
+            .get("registration_country")
+            .and_then(Value::as_str)
+            .is_some_and(is_enhanced_due_diligence_country)
+}
+
 #[derive(Default)]
 struct LeadConversionReadinessInput {
     qualification_status: String,
@@ -572,6 +667,8 @@ struct LeadConversionReadinessInput {
     identity_document_verified: bool,
     dsgvo_document_signed: bool,
     confidentiality_release_signed: bool,
+    enhanced_due_diligence_required: bool,
+    enhanced_due_diligence_document_generated: bool,
     intake_completed: bool,
     contract_signed: bool,
     framework_document_generated: bool,
@@ -631,7 +728,9 @@ fn evaluate_lead_conversion_readiness(
         && input.consent_healthcare
         && input.identity_document_verified
         && input.dsgvo_document_signed
-        && input.confidentiality_release_signed;
+        && input.confidentiality_release_signed
+        && (!input.enhanced_due_diligence_required
+            || input.enhanced_due_diligence_document_generated);
     let commercial_ready = input.contract_signed
         && input.framework_document_generated
         && input.order_exists
@@ -733,6 +832,14 @@ fn evaluate_lead_conversion_readiness(
             "key": "confidentiality_release_signed",
             "label": "Confidentiality release signed",
             "passed": input.confidentiality_release_signed,
+            "blocking_for": "conversion",
+            "stage": "documents",
+        }),
+        json!({
+            "key": "enhanced_due_diligence_document_generated",
+            "label": "Enhanced due diligence documented when required",
+            "passed": !input.enhanced_due_diligence_required
+                || input.enhanced_due_diligence_document_generated,
             "blocking_for": "conversion",
             "stage": "documents",
         }),
@@ -865,6 +972,9 @@ fn evaluate_lead_conversion_readiness(
     if !input.confidentiality_release_signed {
         conversion_reasons.push("Signed confidentiality release is missing".to_string());
     }
+    if input.enhanced_due_diligence_required && !input.enhanced_due_diligence_document_generated {
+        conversion_reasons.push("Enhanced due diligence document is missing".to_string());
+    }
     if !input.intake_completed {
         conversion_reasons.push("Anamnesis intake is incomplete".to_string());
     }
@@ -930,6 +1040,14 @@ fn evaluate_lead_conversion_readiness(
 }
 
 fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversionReadiness {
+    let country = row
+        .try_get::<Option<String>, _>("country")
+        .unwrap_or_default();
+    let wizard_state = row
+        .try_get::<Value, _>("wizard_state")
+        .unwrap_or_else(|_| json!({}));
+    let enhanced_due_diligence_required =
+        lead_requires_enhanced_due_diligence(country.as_deref(), &wizard_state);
     evaluate_lead_conversion_readiness(&LeadConversionReadinessInput {
         qualification_status: row.try_get("qualification_status").unwrap_or_default(),
         compliance_status: row.try_get("compliance_status").unwrap_or_default(),
@@ -951,6 +1069,10 @@ fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversio
         dsgvo_document_signed: row.try_get("dsgvo_document_signed").unwrap_or(false),
         confidentiality_release_signed: row
             .try_get("confidentiality_release_signed")
+            .unwrap_or(false),
+        enhanced_due_diligence_required,
+        enhanced_due_diligence_document_generated: row
+            .try_get("enhanced_due_diligence_document_generated")
             .unwrap_or(false),
         intake_completed: row.try_get("intake_completed").unwrap_or(false),
         contract_signed: row.try_get("contract_signed").unwrap_or(false),
@@ -988,6 +1110,8 @@ async fn load_lead_conversion_readiness(
                   zip_code,
                   primary_concern_text,
                   requested_specialties,
+                  country,
+                  wizard_state,
                   consent_privacy_practices,
                   consent_healthcare,
                   EXISTS (
@@ -1011,6 +1135,13 @@ async fn load_lead_conversion_readiness(
                         AND d.compliance_kind = 'confidentiality_release'
                         AND d.signed_at IS NOT NULL
                   ) AS confidentiality_release_signed,
+                  EXISTS (
+                      SELECT 1 FROM documents d
+                      WHERE d.lead_id = leads.id
+                        AND d.generated_template_id = 'enhanced_due_diligence'
+                        AND d.status = 'active'
+                        AND d.file_deleted_at IS NULL
+                  ) AS enhanced_due_diligence_document_generated,
                   EXISTS (
                       SELECT 1 FROM cases c
                       WHERE c.lead_id = leads.id
@@ -4826,6 +4957,8 @@ mod lead_conversion_readiness_tests {
             identity_document_verified: true,
             dsgvo_document_signed: true,
             confidentiality_release_signed: true,
+            enhanced_due_diligence_required: false,
+            enhanced_due_diligence_document_generated: false,
             intake_completed: true,
             contract_signed: true,
             framework_document_generated: true,
@@ -4872,6 +5005,39 @@ mod lead_conversion_readiness_tests {
                 .map(|check| &check["passed"]),
             Some(&Value::Bool(false))
         );
+    }
+
+    #[test]
+    fn enhanced_due_diligence_country_detection_covers_blacklist_and_high_risk() {
+        assert!(lead_requires_enhanced_due_diligence(
+            Some("DE"),
+            &json!({ "registration_country": "IR" }),
+        ));
+        assert!(lead_requires_enhanced_due_diligence(
+            Some("Russische Föderation"),
+            &json!({}),
+        ));
+        assert!(!lead_requires_enhanced_due_diligence(
+            Some("DE"),
+            &json!({ "registration_country": "AT" }),
+        ));
+    }
+
+    #[test]
+    fn enhanced_due_diligence_document_is_required_for_risk_country() {
+        let mut input = ready_input();
+        input.enhanced_due_diligence_required = true;
+
+        let readiness = evaluate_lead_conversion_readiness(&input);
+
+        assert!(!readiness.conversion_ready);
+        assert_eq!(
+            readiness.conversion_reasons,
+            vec!["Enhanced due diligence document is missing".to_string()]
+        );
+
+        input.enhanced_due_diligence_document_generated = true;
+        assert!(evaluate_lead_conversion_readiness(&input).conversion_ready);
     }
 
     #[test]

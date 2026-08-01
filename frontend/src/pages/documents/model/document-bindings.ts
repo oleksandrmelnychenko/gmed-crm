@@ -77,6 +77,7 @@ const FIXED_LEGAL_TEMPLATE_IDS = new Set([
   "confidentiality_release",
   "privacy_information",
   "privacy_consents",
+  "enhanced_due_diligence",
 ]);
 
 const DESIGNED_AGENCY_TEMPLATE_IDS = new Set([

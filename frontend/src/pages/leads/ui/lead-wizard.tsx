@@ -32,7 +32,7 @@ import {
 import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { CountrySelect } from "@/components/ui/country-select";
+import { CountrySelect, countryLabel } from "@/components/ui/country-select";
 import { LANGUAGE_OPTIONS, languageLabel } from "@/components/ui/language-multi-select";
 import {
   Dialog,
@@ -169,6 +169,38 @@ type TrustedContactDraft = {
   address: string;
 };
 
+type AmlRiskTier = "high_risk" | "blacklist";
+
+type AmlEnhancedDueDiligenceDraft = {
+  internalRiskAnalysis: boolean;
+  individualReview: boolean;
+  riskReason: string;
+  assetOrigin: string;
+  pepContractPartner: boolean;
+  pepBeneficialOwner: boolean;
+  pepOfficeFunction: string;
+  pepAssetOrigin: string;
+  highRiskCountryTransaction: boolean;
+  highRiskCountryResident: boolean;
+  affectedThirdCountry: string;
+  additionalContractPartnerInfo: string;
+  additionalBeneficialOwnerInfo: string;
+  intendedBusinessRelationshipInfo: string;
+  contractPartnerAssetInfo: string;
+  beneficialOwnerAssetInfo: string;
+  transactionReasons: string;
+  plannedAssetUse: string;
+  managerApprovalName: string;
+  unusualComplexOrLarge: boolean;
+  unusualPattern: boolean;
+  noLawfulPurpose: boolean;
+  investigationResults: string;
+  continuousMonitoring: string;
+  additionalMeasures: string;
+  reviewerName: string;
+  reviewDate: string;
+};
+
 type Draft = {
   firstName: string;
   middleName: string;
@@ -183,6 +215,8 @@ type Draft = {
   state: string;
   zip: string;
   country: string;
+  registrationCountry: string;
+  amlEnhancedDueDiligence: AmlEnhancedDueDiligenceDraft;
   language: string;
   whatsappNumber: string;
   hasInsurance: "" | "yes" | "no";
@@ -229,7 +263,8 @@ type WizardDocumentKind =
   | "identity"
   | "confidentiality_release"
   | "privacy_information"
-  | "privacy_consents";
+  | "privacy_consents"
+  | "enhanced_due_diligence";
 type CommercialDocumentKind =
   | "framework_contract"
   | "single_order"
@@ -257,6 +292,115 @@ type CommercialFlagsPatch = {
 };
 
 type CommercialFlagKey = keyof CommercialFlagsPatch;
+
+const AML_HIGH_RISK_COUNTRY_CODES = new Set([
+  "AF", "DZ", "AO", "BO", "VG", "CI", "CD", "HT", "YE", "CM", "KE", "LA",
+  "LB", "MC", "MM", "NA", "NP", "RU", "SS", "SY", "TT", "VU", "VE", "VN",
+]);
+const AML_BLACKLIST_COUNTRY_CODES = new Set(["KP", "IR", "MM"]);
+const AML_COUNTRY_CODE_ALIASES: Record<string, string> = {
+  afghanistan: "AF",
+  afghanistanischen: "AF",
+  algeria: "DZ",
+  algerien: "DZ",
+  angola: "AO",
+  bolivia: "BO",
+  bolivien: "BO",
+  "british virgin islands": "VG",
+  "britische jungferninseln": "VG",
+  "cote d'ivoire": "CI",
+  "côte d’ivoire": "CI",
+  "côte d'ivoire": "CI",
+  "democratic republic of the congo": "CD",
+  "demokratische republik kongo": "CD",
+  haiti: "HT",
+  yemen: "YE",
+  jemen: "YE",
+  cameroon: "CM",
+  kamerun: "CM",
+  kenya: "KE",
+  kenia: "KE",
+  laos: "LA",
+  lebanon: "LB",
+  libanon: "LB",
+  monaco: "MC",
+  myanmar: "MM",
+  "myanmar/birma": "MM",
+  burma: "MM",
+  namibia: "NA",
+  nepal: "NP",
+  "russian federation": "RU",
+  "russische föderation": "RU",
+  russia: "RU",
+  russland: "RU",
+  "south sudan": "SS",
+  südsudan: "SS",
+  syria: "SY",
+  syrien: "SY",
+  "trinidad and tobago": "TT",
+  "trinidad und tobago": "TT",
+  vanuatu: "VU",
+  venezuela: "VE",
+  vietnam: "VN",
+  "democratic people's republic of korea": "KP",
+  "demokratische volksrepublik korea": "KP",
+  "north korea": "KP",
+  nordkorea: "KP",
+  iran: "IR",
+};
+
+function normalizedAmlCountryCode(value: string | null | undefined) {
+  const normalized = value?.trim();
+  if (!normalized) return "";
+  const upper = normalized.toUpperCase();
+  if (/^[A-Z]{2}$/.test(upper)) return upper;
+  return AML_COUNTRY_CODE_ALIASES[normalized.toLocaleLowerCase()] ?? upper;
+}
+
+function amlRiskForCountries(...values: Array<string | null | undefined>): {
+  tier: AmlRiskTier;
+  countries: string[];
+} | null {
+  const countries = [...new Set(values.map(normalizedAmlCountryCode).filter(Boolean))]
+    .filter((code) => AML_HIGH_RISK_COUNTRY_CODES.has(code) || AML_BLACKLIST_COUNTRY_CODES.has(code));
+  if (countries.length === 0) return null;
+  return {
+    tier: countries.some((code) => AML_BLACKLIST_COUNTRY_CODES.has(code)) ? "blacklist" : "high_risk",
+    countries,
+  };
+}
+
+function blankAmlEnhancedDueDiligence(): AmlEnhancedDueDiligenceDraft {
+  return {
+    internalRiskAnalysis: true,
+    individualReview: false,
+    riskReason: "",
+    assetOrigin: "",
+    pepContractPartner: false,
+    pepBeneficialOwner: false,
+    pepOfficeFunction: "",
+    pepAssetOrigin: "",
+    highRiskCountryTransaction: false,
+    highRiskCountryResident: true,
+    affectedThirdCountry: "",
+    additionalContractPartnerInfo: "",
+    additionalBeneficialOwnerInfo: "",
+    intendedBusinessRelationshipInfo: "",
+    contractPartnerAssetInfo: "",
+    beneficialOwnerAssetInfo: "",
+    transactionReasons: "",
+    plannedAssetUse: "",
+    managerApprovalName: "",
+    unusualComplexOrLarge: false,
+    unusualPattern: false,
+    noLawfulPurpose: false,
+    investigationResults: "",
+    continuousMonitoring: "",
+    additionalMeasures: "",
+    reviewerName: "",
+    reviewDate: new Date().toISOString().slice(0, 10),
+  };
+}
 
 type MasterFieldKey =
   | "firstName"
@@ -548,6 +692,8 @@ function autosavePayload(
       program_date_to: draft.programDateTo,
       contract_effective_date: draft.contractEffectiveDate,
       cost_threshold: draft.costThreshold,
+      registration_country: draft.registrationCountry,
+      aml_enhanced_due_diligence: draft.amlEnhancedDueDiligence,
       selected_specialization_work_type_ids:
         draft.selectedSpecializationWorkTypeIds,
       cost_estimate_additional_language:
@@ -606,6 +752,40 @@ function nullableString(record: Record<string, unknown>, ...keys: string[]) {
 
 function firstBoolean(record: Record<string, unknown>, ...keys: string[]) {
   return keys.some((key) => record[key] === true);
+}
+
+function amlEnhancedDueDiligenceFromLead(lead: LeadDetail): AmlEnhancedDueDiligenceDraft {
+  const stored = recordFromUnknown(lead.wizard_state?.["aml_enhanced_due_diligence"]);
+  const defaults = blankAmlEnhancedDueDiligence();
+  return {
+    internalRiskAnalysis: stored["internalRiskAnalysis"] !== false,
+    individualReview: stored["individualReview"] === true,
+    riskReason: inputString(stored["riskReason"]),
+    assetOrigin: inputString(stored["assetOrigin"]),
+    pepContractPartner: stored["pepContractPartner"] === true,
+    pepBeneficialOwner: stored["pepBeneficialOwner"] === true,
+    pepOfficeFunction: inputString(stored["pepOfficeFunction"]),
+    pepAssetOrigin: inputString(stored["pepAssetOrigin"]),
+    highRiskCountryTransaction: stored["highRiskCountryTransaction"] === true,
+    highRiskCountryResident: stored["highRiskCountryResident"] !== false,
+    affectedThirdCountry: inputString(stored["affectedThirdCountry"]),
+    additionalContractPartnerInfo: inputString(stored["additionalContractPartnerInfo"]),
+    additionalBeneficialOwnerInfo: inputString(stored["additionalBeneficialOwnerInfo"]),
+    intendedBusinessRelationshipInfo: inputString(stored["intendedBusinessRelationshipInfo"]),
+    contractPartnerAssetInfo: inputString(stored["contractPartnerAssetInfo"]),
+    beneficialOwnerAssetInfo: inputString(stored["beneficialOwnerAssetInfo"]),
+    transactionReasons: inputString(stored["transactionReasons"]),
+    plannedAssetUse: inputString(stored["plannedAssetUse"]),
+    managerApprovalName: inputString(stored["managerApprovalName"]),
+    unusualComplexOrLarge: stored["unusualComplexOrLarge"] === true,
+    unusualPattern: stored["unusualPattern"] === true,
+    noLawfulPurpose: stored["noLawfulPurpose"] === true,
+    investigationResults: inputString(stored["investigationResults"]),
+    continuousMonitoring: inputString(stored["continuousMonitoring"]),
+    additionalMeasures: inputString(stored["additionalMeasures"]),
+    reviewerName: inputString(stored["reviewerName"]),
+    reviewDate: inputString(stored["reviewDate"], defaults.reviewDate),
+  };
 }
 
 function serviceCommentsFromLead(lead: LeadDetail) {
@@ -840,6 +1020,8 @@ function draftFromLead(lead: LeadDetail): Draft {
     state: lead.state ?? "",
     zip: lead.zip_code ?? "",
     country: lead.country ?? "",
+    registrationCountry: inputString(lead.wizard_state?.["registration_country"]),
+    amlEnhancedDueDiligence: amlEnhancedDueDiligenceFromLead(lead),
     language: normalizedLanguageCode(lead.primary_language) || normalizedLanguageCode(lead.locale),
     whatsappNumber: lead.whatsapp_number ?? "",
     hasInsurance: lead.has_insurance == null ? "" : lead.has_insurance ? "yes" : "no",
@@ -896,6 +1078,8 @@ function blankDraft(): Draft {
     state: "",
     zip: "",
     country: "",
+    registrationCountry: "",
+    amlEnhancedDueDiligence: blankAmlEnhancedDueDiligence(),
     language: "",
     whatsappNumber: "",
     hasInsurance: "",
@@ -1181,6 +1365,7 @@ function lineFromOrderLeistung(item: Leistung): ServiceLine {
 function wizardDocumentKind(item: DocumentItem): WizardDocumentKind | null {
   const templateId = item.generated_template_id?.trim().toLowerCase();
   if (templateId === "privacy_information") return "privacy_information";
+  if (templateId === "enhanced_due_diligence") return "enhanced_due_diligence";
 
   const complianceKind = item.compliance_kind?.trim().toLowerCase();
   if (complianceKind === "identity" || complianceKind === "confidentiality_release") {
@@ -1265,6 +1450,7 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Identity document is not verified": tx("Подтвердите документ, удостоверяющий личность", "Ausweisdokument bestätigen"),
     "Signed DSGVO document is missing": tx("Создайте и подтвердите документ согласий", "Einwilligungsdokument erstellen und bestätigen"),
     "Signed confidentiality release is missing": tx("Создайте и подтвердите освобождение от медицинской тайны", "Schweigepflichtsentbindung erstellen und bestätigen"),
+    "Enhanced due diligence document is missing": tx("Заполните усиленную AML-проверку и создайте документ", "Verstärkte AML-Sorgfaltsprüfung ausfüllen und Dokument erstellen"),
     "Anamnesis intake is incomplete": tx("Укажите причину обращения", "Anliegen angeben"),
     "Framework contract is not signed": tx("Подпишите рамочный договор", "Rahmenvertrag unterzeichnen"),
     "Framework contract document is missing": tx("Создайте документ рамочного договора", "Rahmenvertragsdokument erstellen"),
@@ -1732,6 +1918,8 @@ export function LeadWizard({
   const [deleteError, setDeleteError] = useState("");
   const [trustedContactEditor, setTrustedContactEditor] = useState<TrustedContactDraft | null>(null);
   const [trustedContactEditorError, setTrustedContactEditorError] = useState("");
+  const [amlSheetOpen, setAmlSheetOpen] = useState(false);
+  const [amlSheetError, setAmlSheetError] = useState("");
   const [documentPreview, setDocumentPreview] = useState<WizardDocumentPreview | null>(null);
   const [touchedMasterFields, setTouchedMasterFields] = useState<Set<MasterFieldKey>>(
     () => new Set(),
@@ -1752,6 +1940,7 @@ export function LeadWizard({
   const reloadVersionRef = useRef(0);
   const caseIdRef = useRef<string | null>(null);
   const documentPreviewUrlRef = useRef<string | null>(null);
+  const lastPersistedLeadIdRef = useRef<string | null>(null);
   // Service options that were present when the draft was hydrated. Kept so that
   // unchecking a lead-supplied service (one outside the fixed questionnaire options)
   // leaves its row in place instead of removing it and making it unrecoverable.
@@ -2098,6 +2287,7 @@ export function LeadWizard({
       wizardStateBaseRef.current = nextLead.wizard_state ?? {};
       if (hydrateDraft || hydrated.current !== leadId) {
         hydrated.current = leadId;
+        lastPersistedLeadIdRef.current = leadId;
         setDraft(nextDraft);
         initialServiceOptionsRef.current = nextDraft.serviceNeeds;
         setStep(nextStep);
@@ -2264,6 +2454,8 @@ export function LeadWizard({
     setDeleteError("");
     setTrustedContactEditor(null);
     setTrustedContactEditorError("");
+    setAmlSheetOpen(false);
+    setAmlSheetError("");
     replaceDocumentPreview(null);
     setTouchedMasterFields(new Set());
     setMasterValidationAttempted(false);
@@ -2274,6 +2466,7 @@ export function LeadWizard({
     lastSavedAutosaveSignatureRef.current = "";
     wizardStateBaseRef.current = {};
     caseIdRef.current = null;
+    lastPersistedLeadIdRef.current = null;
     initialServiceOptionsRef.current = [];
   }, [open, replaceDocumentPreview]);
 
@@ -2308,6 +2501,10 @@ export function LeadWizard({
     [order, quotes],
   );
   const quote = orderQuotes[0] ?? null;
+  const amlRisk = useMemo(
+    () => draft ? amlRiskForCountries(draft.country, draft.registrationCountry) : null,
+    [draft?.country, draft?.registrationCountry],
+  );
   const agencyServiceById = useMemo(
     () => new Map(agencyServices.map((service) => [service.id, service])),
     [agencyServices],
@@ -2318,6 +2515,7 @@ export function LeadWizard({
       confidentiality_release: [],
       privacy_information: [],
       privacy_consents: [],
+      enhanced_due_diligence: [],
     };
     documents.forEach((item) => {
       if (item.file_deleted_at || item.has_stored_file === false) return;
@@ -2526,10 +2724,12 @@ export function LeadWizard({
           targetLeadId = created.id;
           createdNow = true;
           hydrated.current = targetLeadId;
+          lastPersistedLeadIdRef.current = targetLeadId;
           setCreatedLeadId(targetLeadId);
           onCreated?.(targetLeadId);
         }
 
+        lastPersistedLeadIdRef.current = targetLeadId;
         await updateLeadWizard(targetLeadId, payload);
         if (hydrated.current !== targetLeadId) return;
 
@@ -2595,6 +2795,68 @@ export function LeadWizard({
     clearServerValidation();
     setDraft((current) => current ? { ...current, [key]: value } : current);
   };
+
+  const patchAml = <K extends keyof AmlEnhancedDueDiligenceDraft>(
+    key: K,
+    value: AmlEnhancedDueDiligenceDraft[K],
+  ) => {
+    setAmlSheetError("");
+    setDraft((current) => current ? {
+      ...current,
+      amlEnhancedDueDiligence: {
+        ...current.amlEnhancedDueDiligence,
+        [key]: value,
+      },
+    } : current);
+  };
+
+  function handleAmlCountryChange(
+    key: "country" | "registrationCountry",
+    value: string | null,
+  ) {
+    const country = key === "country" ? value : draft?.country;
+    const registrationCountry = key === "registrationCountry" ? value : draft?.registrationCountry;
+    const nextRisk = amlRiskForCountries(country, registrationCountry);
+    const affectedThirdCountry = nextRisk?.countries
+      .map((code) => countryLabel(code, "de"))
+      .join(", ") ?? "";
+    setError("");
+    clearServerValidation();
+    setDraft((current) => current ? {
+      ...current,
+      [key]: value ?? "",
+      amlEnhancedDueDiligence: nextRisk ? {
+        ...current.amlEnhancedDueDiligence,
+        affectedThirdCountry,
+        highRiskCountryResident: true,
+        riskReason: current.amlEnhancedDueDiligence.riskReason || (
+          nextRisk.tier === "blacklist"
+            ? "Bezug zu einem Land der FATF-Liste der Hochrisiko-Jurisdiktionen"
+            : "Wohnsitz oder Registrierung in einem Drittstaat mit erhöhtem Geldwäscherisiko"
+        ),
+      } : current.amlEnhancedDueDiligence,
+    } : current);
+    if (nextRisk) {
+      setAmlSheetError("");
+      setAmlSheetOpen(true);
+    }
+  }
+
+  function openAmlSheet() {
+    if (!amlRisk) return;
+    const affectedThirdCountry = amlRisk.countries
+      .map((code) => countryLabel(code, "de"))
+      .join(", ");
+    setDraft((current) => current ? {
+      ...current,
+      amlEnhancedDueDiligence: {
+        ...current.amlEnhancedDueDiligence,
+        affectedThirdCountry: current.amlEnhancedDueDiligence.affectedThirdCountry || affectedThirdCountry,
+      },
+    } : current);
+    setAmlSheetError("");
+    setAmlSheetOpen(true);
+  }
 
   const toggleSpecializationWorkType = (workTypeId: string, checked: boolean) => {
     setError("");
@@ -2983,16 +3245,21 @@ export function LeadWizard({
     templateId:
       | "confidentiality_release"
       | "privacy_information"
-      | "privacy_consents",
-  ) {
-    if (!leadId || !draft || !lead) return;
+      | "privacy_consents"
+      | "enhanced_due_diligence",
+  ): Promise<boolean> {
+    if (!draft) return false;
     setBusy(`generate-${templateId}`);
     setError("");
     try {
-      if (!(await save("documents", false))) return;
+      if (!(await save(templateId === "enhanced_due_diligence" ? "master_data" : "documents", false))) {
+        return false;
+      }
+      const targetLeadId = leadId ?? lastPersistedLeadIdRef.current;
+      if (!targetLeadId) return false;
       const generated = await generateDocument({
         template_id: templateId,
-        lead_id: leadId,
+        lead_id: targetLeadId,
         language: "de",
         document_language: "de",
         document_direction: "outgoing",
@@ -3007,20 +3274,47 @@ export function LeadWizard({
                 consent_privacy: draft.privacyConsent,
                 consent_healthcare: draft.healthcareConsent,
                 consent_provider_release: draft.healthcareConsent,
-                consent_email: Boolean(lead.email_consent),
-                consent_whatsapp: Boolean(lead.whatsapp_consent),
+                consent_email: Boolean(lead?.email_consent),
+                consent_whatsapp: Boolean(lead?.whatsapp_consent),
+              }
+            : {}),
+          ...(templateId === "enhanced_due_diligence" && amlRisk
+            ? {
+                aml_enhanced_due_diligence: {
+                  ...draft.amlEnhancedDueDiligence,
+                  riskTier: amlRisk.tier,
+                  triggeredCountries: amlRisk.countries,
+                },
               }
             : {}),
         },
       });
-      const nextDocuments = await fetchDocuments(`/documents?lead_id=${encodeURIComponent(leadId)}`);
+      const nextDocuments = await fetchDocuments(`/documents?lead_id=${encodeURIComponent(targetLeadId)}`);
       setDocuments(nextDocuments);
       const generatedDocument = nextDocuments.find((document) => document.id === generated.id);
       if (generatedDocument) await openOrDownloadDocument(generatedDocument, true);
+      return true;
     } catch (nextError) {
       showWizardError(nextError);
+      return false;
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function submitAmlEnhancedDueDiligence(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!draft || !amlRisk) return;
+    setAmlSheetError("");
+    const generated = await generateLeadComplianceDocument("enhanced_due_diligence");
+    if (generated) {
+      setAmlSheetOpen(false);
+      await refreshLeadState();
+    } else {
+      setAmlSheetError(tx(
+        "Не удалось сохранить проверку и создать документ",
+        "Prüfung konnte nicht gespeichert und das Dokument nicht erstellt werden",
+      ));
     }
   }
 
@@ -4007,10 +4301,72 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("zip", event.target.value)}
                   />
                 </Field>
-                <Field label={tx("Страна", "Land")} className="md:col-span-2">
-                  <CountrySelect value={draft.country} lang={lang} className={selectClass} aria-label={tx("Страна", "Land")} onChange={(value) => patch("country", value ?? "")} />
+                <Field label={tx("Страна проживания", "Wohnsitzland")}>
+                  <CountrySelect
+                    value={draft.country}
+                    lang={lang}
+                    className={selectClass}
+                    aria-label={tx("Страна проживания", "Wohnsitzland")}
+                    onChange={(value) => handleAmlCountryChange("country", value)}
+                  />
+                </Field>
+                <Field label={tx("Страна регистрации", "Meldeland")}>
+                  <CountrySelect
+                    value={draft.registrationCountry}
+                    lang={lang}
+                    className={selectClass}
+                    aria-label={tx("Страна регистрации", "Meldeland")}
+                    onChange={(value) => handleAmlCountryChange("registrationCountry", value)}
+                  />
                 </Field>
               </div>
+              {amlRisk ? (
+                <div className="mt-4">
+                  <Banner tone={amlRisk.tier === "blacklist" ? "error" : "warning"} withIcon>
+                    <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="font-semibold">
+                          {amlRisk.tier === "blacklist"
+                            ? tx("Чёрный список: требуется усиленная AML-проверка", "Blacklist: verstärkte AML-Prüfung erforderlich")
+                            : tx("Страна повышенного риска: требуется AML-проверка", "Hochrisikoland: verstärkte AML-Prüfung erforderlich")}
+                        </div>
+                        <div className="mt-1 text-xs leading-5">
+                          {amlRisk.countries.map((code) => countryLabel(code, lang)).join(", ")}
+                          {" · Durchführung verstärkter Sorgfaltspflichten (§ 15 GwG)"}
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant={amlRisk.tier === "blacklist" ? "destructive" : "outline"}
+                        size="sm"
+                        className="shrink-0"
+                        disabled={isBusy}
+                        onClick={openAmlSheet}
+                      >
+                        <ShieldCheck aria-hidden="true" className="size-3.5" />
+                        {wizardDocuments.enhanced_due_diligence.length > 0
+                          ? tx("Обновить проверку", "Prüfung aktualisieren")
+                          : tx("Заполнить проверку", "Prüfung ausfüllen")}
+                      </Button>
+                    </div>
+                    {wizardDocuments.enhanced_due_diligence.length > 0 ? (
+                      <div className="mt-3 border-t border-current/15 pt-3">
+                        <WizardDocumentRows
+                          documents={wizardDocuments.enhanced_due_diligence}
+                          emptyLabel=""
+                          lang={lang}
+                          busy={busy}
+                          disabled={isBusy}
+                          tx={tx}
+                          onOpen={(document) => void openOrDownloadDocument(document)}
+                          onDownload={(document) => void downloadDocument(document)}
+                          onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                        />
+                      </div>
+                    ) : null}
+                  </Banner>
+                </div>
+              ) : null}
               </Section>
               <Section title={tx("Страхование", "Versicherung")}>
               <div className="grid gap-4 md:grid-cols-2">
@@ -4287,6 +4643,31 @@ ${serviceCommentLines.join("\n")}`
 
           {draft && step === "documents" ? (
             <section className="space-y-5">
+              {amlRisk || wizardDocuments.enhanced_due_diligence.length > 0 ? (
+                <Section
+                  title={tx("Усиленная AML-проверка", "Verstärkte Sorgfaltspflichten (§ 15 GwG)")}
+                  accessory={amlRisk ? (
+                    <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={openAmlSheet}>
+                      <ShieldCheck className="size-3.5" />
+                      {wizardDocuments.enhanced_due_diligence.length > 0
+                        ? tx("Создать новую версию", "Neue Version erstellen")
+                        : tx("Заполнить проверку", "Prüfung ausfüllen")}
+                    </Button>
+                  ) : undefined}
+                >
+                  <WizardDocumentRows
+                    documents={wizardDocuments.enhanced_due_diligence}
+                    emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
+                    lang={lang}
+                    busy={busy}
+                    disabled={isBusy}
+                    tx={tx}
+                    onOpen={(document) => void openOrDownloadDocument(document)}
+                    onDownload={(document) => void downloadDocument(document)}
+                    onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                  />
+                </Section>
+              ) : null}
               <div id={CONFIDENTIALITY_RELEASE_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
                   title={tx("Освобождение от медицинской тайны", "Schweigepflichtsentbindung")}
@@ -5229,6 +5610,216 @@ ${serviceCommentLines.join("\n")}`
 
       </DialogContent>
       </Dialog>
+      <Sheet open={amlSheetOpen} onOpenChange={setAmlSheetOpen}>
+        <SheetContent
+          side="right"
+          className="w-full max-w-none gap-0 border-l border-border p-0 sm:max-w-3xl"
+        >
+          {draft && amlRisk ? (
+            <form className="flex min-h-0 flex-1 flex-col" onSubmit={submitAmlEnhancedDueDiligence}>
+              <AdminSheetScaffold
+                title={tx("Усиленная AML-проверка (§ 15 GwG)", "Verstärkte Sorgfaltspflichten (§ 15 GwG)")}
+                footer={(
+                  <SheetFormFooter
+                    cancelLabel={tx("Отмена", "Abbrechen")}
+                    submitLabel={wizardDocuments.enhanced_due_diligence.length > 0
+                      ? tx("Сохранить и создать новую версию", "Speichern und neue Version erstellen")
+                      : tx("Сохранить и создать документ", "Speichern und Dokument erstellen")}
+                    submittingLabel={tx("Создание документа", "Dokument wird erstellt")}
+                    submitting={busy === "generate-enhanced_due_diligence"}
+                    error={amlSheetError || undefined}
+                    onCancel={() => setAmlSheetOpen(false)}
+                  />
+                )}
+                bodyWrapperClassName="space-y-6"
+              >
+                <div className={cn(
+                  "border-l-4 px-3 py-2.5 text-sm",
+                  amlRisk.tier === "blacklist"
+                    ? "border-rose-500 bg-rose-50 text-rose-800"
+                    : "border-amber-500 bg-amber-50 text-amber-900",
+                )}>
+                  <div className="font-semibold">
+                    {amlRisk.tier === "blacklist"
+                      ? tx("Страна из чёрного списка", "Land auf der Blacklist")
+                      : tx("Страна повышенного риска", "Hochrisikoland")}
+                  </div>
+                  <div className="mt-1 text-xs leading-5">
+                    {amlRisk.countries.map((code) => countryLabel(code, lang)).join(", ")}
+                  </div>
+                </div>
+
+                <section className="space-y-4">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {tx("1. Установление повышенного риска", "1. Feststellung eines erhöhten Geldwäscherisikos")}
+                  </h3>
+                  <div className="border-y border-border/70">
+                    <ToggleRow
+                      checked={draft.amlEnhancedDueDiligence.internalRiskAnalysis}
+                      disabled={isBusy}
+                      onChange={(checked) => patchAml("internalRiskAnalysis", checked)}
+                      label={tx("Внутренний анализ рисков", "Interne Risikoanalyse")}
+                    />
+                    <ToggleRow
+                      checked={draft.amlEnhancedDueDiligence.individualReview}
+                      disabled={isBusy}
+                      onChange={(checked) => patchAml("individualReview", checked)}
+                      label={tx("Индивидуальная оценка конкретного случая", "Individuelle Prüfung des konkreten Einzelfalls")}
+                    />
+                  </div>
+                  <Field required label={tx("Обоснование повышенного риска", "Begründung des erhöhten Risikos")}>
+                    <textarea
+                      className={textareaClass}
+                      required
+                      rows={3}
+                      value={draft.amlEnhancedDueDiligence.riskReason}
+                      onChange={(event) => patchAml("riskReason", event.target.value)}
+                    />
+                  </Field>
+                  <Field label={tx("Происхождение задействованных активов", "Herkunft der eingesetzten Vermögenswerte")}>
+                    <textarea
+                      className={textareaClass}
+                      rows={2}
+                      value={draft.amlEnhancedDueDiligence.assetOrigin}
+                      onChange={(event) => patchAml("assetOrigin", event.target.value)}
+                    />
+                  </Field>
+                </section>
+
+                <section className="space-y-4 border-t border-border pt-5">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {tx("Политически значимое лицо (PEP)", "Politisch exponierte Person (PeP)")}
+                  </h3>
+                  <div className="border-y border-border/70">
+                    <ToggleRow
+                      checked={draft.amlEnhancedDueDiligence.pepContractPartner}
+                      disabled={isBusy}
+                      onChange={(checked) => patchAml("pepContractPartner", checked)}
+                      label={tx("Контрагент является PEP", "Vertragspartner ist eine PeP")}
+                    />
+                    <ToggleRow
+                      checked={draft.amlEnhancedDueDiligence.pepBeneficialOwner}
+                      disabled={isBusy}
+                      onChange={(checked) => patchAml("pepBeneficialOwner", checked)}
+                      label={tx("Бенефициарный владелец является PEP", "Wirtschaftlich Berechtigter ist eine PeP")}
+                    />
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field label={tx("Должность / функция", "Amt / Funktion")}>
+                      <Input
+                        className={inputClass}
+                        value={draft.amlEnhancedDueDiligence.pepOfficeFunction}
+                        onChange={(event) => patchAml("pepOfficeFunction", event.target.value)}
+                      />
+                    </Field>
+                    <Field label={tx("Происхождение активов PEP", "Herkunft der Vermögenswerte der PeP")}>
+                      <Input
+                        className={inputClass}
+                        value={draft.amlEnhancedDueDiligence.pepAssetOrigin}
+                        onChange={(event) => patchAml("pepAssetOrigin", event.target.value)}
+                      />
+                    </Field>
+                  </div>
+                </section>
+
+                <section className="space-y-4 border-t border-border pt-5">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {tx("Третья страна с высоким риском", "Drittstaat mit hohem Risiko")}
+                  </h3>
+                  <div className="border-y border-border/70">
+                    <ToggleRow
+                      checked={draft.amlEnhancedDueDiligence.highRiskCountryTransaction}
+                      disabled={isBusy}
+                      onChange={(checked) => patchAml("highRiskCountryTransaction", checked)}
+                      label={tx("Операция связана с третьей страной высокого риска", "Transaktion steht im Zusammenhang mit einem Drittstaat mit hohem Risiko")}
+                    />
+                    <ToggleRow
+                      checked={draft.amlEnhancedDueDiligence.highRiskCountryResident}
+                      disabled={isBusy}
+                      onChange={(checked) => patchAml("highRiskCountryResident", checked)}
+                      label={tx("Контрагент проживает или зарегистрирован в такой стране", "Vertragspartner ist dort niedergelassen oder wohnhaft")}
+                    />
+                  </div>
+                  <Field required label={tx("Затронутая третья страна", "Betroffener Drittstaat")}>
+                    <Input
+                      className={inputClass}
+                      required
+                      value={draft.amlEnhancedDueDiligence.affectedThirdCountry}
+                      onChange={(event) => patchAml("affectedThirdCountry", event.target.value)}
+                    />
+                  </Field>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field required label={tx("Дополнительная информация о контрагенте", "Zusätzliche Informationen zum Vertragspartner")}>
+                      <textarea className={textareaClass} required rows={3} value={draft.amlEnhancedDueDiligence.additionalContractPartnerInfo} onChange={(event) => patchAml("additionalContractPartnerInfo", event.target.value)} />
+                    </Field>
+                    <Field label={tx("Дополнительная информация о бенефициаре", "Zusätzliche Informationen zum wirtschaftlich Berechtigten")}>
+                      <textarea className={textareaClass} rows={3} value={draft.amlEnhancedDueDiligence.additionalBeneficialOwnerInfo} onChange={(event) => patchAml("additionalBeneficialOwnerInfo", event.target.value)} />
+                    </Field>
+                    <Field required label={tx("Планируемый характер деловых отношений", "Angestrebte Art der Geschäftsbeziehung")}>
+                      <textarea className={textareaClass} required rows={3} value={draft.amlEnhancedDueDiligence.intendedBusinessRelationshipInfo} onChange={(event) => patchAml("intendedBusinessRelationshipInfo", event.target.value)} />
+                    </Field>
+                    <Field required label={tx("Активы контрагента", "Vermögenswerte des Vertragspartners")}>
+                      <textarea className={textareaClass} required rows={3} value={draft.amlEnhancedDueDiligence.contractPartnerAssetInfo} onChange={(event) => patchAml("contractPartnerAssetInfo", event.target.value)} />
+                    </Field>
+                    <Field label={tx("Активы бенефициарного владельца", "Vermögenswerte des wirtschaftlich Berechtigten")}>
+                      <textarea className={textareaClass} rows={3} value={draft.amlEnhancedDueDiligence.beneficialOwnerAssetInfo} onChange={(event) => patchAml("beneficialOwnerAssetInfo", event.target.value)} />
+                    </Field>
+                    <Field required label={tx("Причины конкретной операции", "Gründe der konkreten Transaktion")}>
+                      <textarea className={textareaClass} required rows={3} value={draft.amlEnhancedDueDiligence.transactionReasons} onChange={(event) => patchAml("transactionReasons", event.target.value)} />
+                    </Field>
+                    <Field required label={tx("Планируемое использование активов", "Geplante Verwendung der eingesetzten Vermögenswerte")}>
+                      <textarea className={textareaClass} required rows={3} value={draft.amlEnhancedDueDiligence.plannedAssetUse} onChange={(event) => patchAml("plannedAssetUse", event.target.value)} />
+                    </Field>
+                    <Field required label={tx("Согласовавший руководитель", "Zustimmende Führungskraft")}>
+                      <Input className={inputClass} required value={draft.amlEnhancedDueDiligence.managerApprovalName} onChange={(event) => patchAml("managerApprovalName", event.target.value)} />
+                    </Field>
+                  </div>
+                </section>
+
+                <section className="space-y-4 border-t border-border pt-5">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {tx("Необычная операция", "Ungewöhnliche Transaktion")}
+                  </h3>
+                  <div className="border-y border-border/70">
+                    <ToggleRow checked={draft.amlEnhancedDueDiligence.unusualComplexOrLarge} disabled={isBusy} onChange={(checked) => patchAml("unusualComplexOrLarge", checked)} label={tx("Сложная или необычно крупная операция", "Komplexe oder ungewöhnlich große Transaktion")} />
+                    <ToggleRow checked={draft.amlEnhancedDueDiligence.unusualPattern} disabled={isBusy} onChange={(checked) => patchAml("unusualPattern", checked)} label={tx("Необычная схема операции", "Ungewöhnliches Transaktionsmuster")} />
+                    <ToggleRow checked={draft.amlEnhancedDueDiligence.noLawfulPurpose} disabled={isBusy} onChange={(checked) => patchAml("noLawfulPurpose", checked)} label={tx("Нет очевидной законной цели", "Kein offensichtlicher rechtmäßiger Zweck")} />
+                  </div>
+                  <Field label={tx("Результаты проверки", "Ergebnisse der Untersuchung")}>
+                    <textarea className={textareaClass} rows={3} value={draft.amlEnhancedDueDiligence.investigationResults} onChange={(event) => patchAml("investigationResults", event.target.value)} />
+                  </Field>
+                </section>
+
+                <section className="space-y-4 border-t border-border pt-5">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {tx("2. Усиленный мониторинг", "2. Verstärkte kontinuierliche Überwachung")}
+                  </h3>
+                  <Field required label={tx("Меры постоянного мониторинга", "Maßnahmen der kontinuierlichen Überwachung")}>
+                    <textarea className={textareaClass} required rows={3} value={draft.amlEnhancedDueDiligence.continuousMonitoring} onChange={(event) => patchAml("continuousMonitoring", event.target.value)} />
+                  </Field>
+                </section>
+
+                <section className="space-y-4 border-t border-border pt-5">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {tx("3. Дополнительные меры", "3. Weitere verstärkte Sorgfaltspflichten")}
+                  </h3>
+                  <Field label={tx("Принятые дополнительные меры", "Zusätzliche getroffene Maßnahmen")}>
+                    <textarea className={textareaClass} rows={3} value={draft.amlEnhancedDueDiligence.additionalMeasures} onChange={(event) => patchAml("additionalMeasures", event.target.value)} />
+                  </Field>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field required label={tx("Проверил", "Bearbeiter/in")}>
+                      <Input className={inputClass} required value={draft.amlEnhancedDueDiligence.reviewerName} onChange={(event) => patchAml("reviewerName", event.target.value)} />
+                    </Field>
+                    <Field required label={tx("Дата проверки", "Prüfdatum")}>
+                      <Input className={inputClass} type="date" required value={draft.amlEnhancedDueDiligence.reviewDate} onChange={(event) => patchAml("reviewDate", event.target.value)} />
+                    </Field>
+                  </div>
+                </section>
+              </AdminSheetScaffold>
+            </form>
+          ) : null}
+        </SheetContent>
+      </Sheet>
       <Sheet
         open={Boolean(trustedContactEditor)}
         onOpenChange={(nextOpen) => {

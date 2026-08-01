@@ -1334,6 +1334,21 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         text_block_keys: &[],
     },
     DocumentTemplateDefinition {
+        id: "enhanced_due_diligence",
+        label: "Verstärkte Sorgfaltspflichten (§ 15 GwG)",
+        description: "Interner Dokumentationsbogen für verstärkte Sorgfaltspflichten bei erhöhtem Geldwäscherisiko.",
+        art: "enhanced_due_diligence",
+        category: "compliance_aml",
+        default_auto_name: "Durchführung verstärkter Sorgfaltspflichten",
+        default_status: "active",
+        default_visibility: "internal",
+        mime_type: "application/pdf",
+        file_extension: "pdf",
+        is_medical: false,
+        languages: &["de"],
+        text_block_keys: &[],
+    },
+    DocumentTemplateDefinition {
         id: "consent_data_release_child",
         label: "Einverständniserklärung · Kind (zwei Sorgeberechtigte)",
         description: "DSGVO-Datenübermittlung und Schweigepflichtsentbindung für ein minderjähriges Kind mit zwei Sorgeberechtigten.",
@@ -2184,6 +2199,43 @@ struct DocumentBindingOverrides {
     consent_healthcare: Option<bool>,
     consent_provider_release: Option<bool>,
     consent_privacy: Option<bool>,
+    #[serde(default)]
+    aml_enhanced_due_diligence: Option<AmlEnhancedDueDiligenceBindings>,
+}
+
+#[derive(Deserialize, Serialize, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AmlEnhancedDueDiligenceBindings {
+    risk_tier: Option<String>,
+    #[serde(default)]
+    triggered_countries: Vec<String>,
+    internal_risk_analysis: bool,
+    individual_review: bool,
+    risk_reason: Option<String>,
+    asset_origin: Option<String>,
+    pep_contract_partner: bool,
+    pep_beneficial_owner: bool,
+    pep_office_function: Option<String>,
+    pep_asset_origin: Option<String>,
+    high_risk_country_transaction: bool,
+    high_risk_country_resident: bool,
+    affected_third_country: Option<String>,
+    additional_contract_partner_info: Option<String>,
+    additional_beneficial_owner_info: Option<String>,
+    intended_business_relationship_info: Option<String>,
+    contract_partner_asset_info: Option<String>,
+    beneficial_owner_asset_info: Option<String>,
+    transaction_reasons: Option<String>,
+    planned_asset_use: Option<String>,
+    manager_approval_name: Option<String>,
+    unusual_complex_or_large: bool,
+    unusual_pattern: bool,
+    no_lawful_purpose: bool,
+    investigation_results: Option<String>,
+    continuous_monitoring: Option<String>,
+    additional_measures: Option<String>,
+    reviewer_name: Option<String>,
+    review_date: Option<NaiveDate>,
 }
 
 #[derive(Deserialize, Serialize, Default, Clone)]
@@ -3103,6 +3155,7 @@ fn is_fixed_legal_document_template(template_id: &str) -> bool {
             | "confidentiality_release"
             | "privacy_consents"
             | "privacy_information"
+            | "enhanced_due_diligence"
     )
 }
 
@@ -3116,6 +3169,7 @@ fn is_lead_allowed_document_template(template_id: &str) -> bool {
             | "confidentiality_release"
             | "privacy_consents"
             | "privacy_information"
+            | "enhanced_due_diligence"
             | "consent_data_release_child"
             | "consent_data_release_single"
     )
@@ -4988,6 +5042,7 @@ fn default_generated_document_name(
         ("cost_estimate", "en") => "Preliminary cost calculation",
         ("cost_estimate", _) => "Vorläufige Kostenkalkulation",
         ("privacy_information", _) => "Informationsblatt zum Datenschutz",
+        ("enhanced_due_diligence", _) => "Durchführung verstärkter Sorgfaltspflichten",
         ("appointment_confirmation", "en") => "Appointment confirmation",
         ("appointment_confirmation", _) => "Terminbestätigung",
         ("consent_data_release_child" | "consent_data_release_single", "en") => {
@@ -5022,6 +5077,7 @@ fn generated_typed_document_number(
         "confidentiality_release" => "SE",
         "privacy_consents" | "consent_data_release_child" | "consent_data_release_single" => "EW",
         "privacy_information" => "DS",
+        "enhanced_due_diligence" => "AML",
         _ => return None,
     };
     let simple = document_id.simple().to_string();
@@ -12838,6 +12894,63 @@ async fn generate_document(
             };
             (preview, pdf_bytes)
         }
+        "enhanced_due_diligence" => {
+            let agency = match load_agency_contract_settings(&state).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+            let Some(aml) = bindings.aml_enhanced_due_diligence.as_ref() else {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Enhanced due diligence data is required",
+                );
+            };
+            let required_text_fields = [
+                aml.risk_reason.as_deref(),
+                aml.affected_third_country.as_deref(),
+                aml.additional_contract_partner_info.as_deref(),
+                aml.intended_business_relationship_info.as_deref(),
+                aml.contract_partner_asset_info.as_deref(),
+                aml.transaction_reasons.as_deref(),
+                aml.planned_asset_use.as_deref(),
+                aml.manager_approval_name.as_deref(),
+                aml.continuous_monitoring.as_deref(),
+                aml.reviewer_name.as_deref(),
+            ];
+            if required_text_fields
+                .iter()
+                .any(|value| value.map(str::trim).is_none_or(|value| value.is_empty()))
+                || aml.review_date.is_none()
+            {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Required enhanced due diligence fields are missing",
+                );
+            }
+            let preview = admin_preview_html(
+                "Durchführung verstärkter Sorgfaltspflichten",
+                &[patient_party.name.clone(), generated_doc_id.clone()],
+            );
+            let pdf_bytes = match build_enhanced_due_diligence_pdf(
+                &patient_party,
+                &agency,
+                aml,
+                bindings.order_number.as_deref(),
+                &generated_doc_id,
+            ) {
+                Ok(bytes) => bytes,
+                Err(message) => {
+                    tracing::error!(
+                        template_id = template.id,
+                        ?patient_id,
+                        ?lead_id,
+                        "build enhanced due diligence PDF"
+                    );
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, message);
+                }
+            };
+            (preview, pdf_bytes)
+        }
         "consent_data_release_child" | "consent_data_release_single" => {
             let sole_guardian = template.id == "consent_data_release_single";
             let guardian_relations = sqlx::query(
@@ -15816,6 +15929,266 @@ fn build_adult_privacy_information_pdf(
     let (document, regular, bold) = new_admin_pdf()?;
     let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
     render_adult_privacy_information(&mut layout, agency);
+    Ok(finalize_admin_pdf(document, layout))
+}
+
+fn aml_binding_value(value: Option<&str>) -> &str {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("—")
+}
+
+fn aml_checkbox_line(layout: &mut TreatmentPlanPdfLayout, checked: bool, text: &str) {
+    layout.text_block_justified(
+        &format!("[{}]  {text}", if checked { "X" } else { " " }),
+        10.0,
+        false,
+        3.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.0,
+    );
+}
+
+fn aml_labeled_value(layout: &mut TreatmentPlanPdfLayout, label: &str, value: Option<&str>) {
+    layout.text_block(
+        label,
+        9.0,
+        true,
+        4.0,
+        TreatmentPlanPdfColor::Muted,
+        1.0,
+        0.3,
+    );
+    layout.text_block_justified(
+        aml_binding_value(value),
+        10.5,
+        false,
+        4.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.3,
+    );
+}
+
+fn build_enhanced_due_diligence_pdf(
+    party: &DocPartyBlock,
+    agency: &AgencyContractSettings,
+    aml: &AmlEnhancedDueDiligenceBindings,
+    order_number: Option<&str>,
+    document_reference: &str,
+) -> Result<Vec<u8>, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
+    let countries = aml
+        .triggered_countries
+        .iter()
+        .map(|country| german_document_country(country))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let risk_tier = match aml.risk_tier.as_deref() {
+        Some("blacklist") => "Blacklist / besonders hohes Risiko",
+        _ => "Drittstaat mit hohem Risiko",
+    };
+    let review_date = aml
+        .review_date
+        .map(|date| date.format("%d.%m.%Y").to_string())
+        .unwrap_or_else(|| "—".to_string());
+
+    adult_legal_document_header(
+        &mut layout,
+        "Anlage zu Dokumentationsbogen",
+        "Durchführung verstärkter Sorgfaltspflichten",
+    );
+    layout.text_block_centered(
+        "nach § 15 Geldwäschegesetz (GwG) für Verpflichtete aus dem Nichtfinanzsektor (§ 2 Abs. 1 Nrn. 6, 8, 11, 13, 14, 16 GwG) ohne die Pflichten bei Korrespondenzbeziehungen (§ 15 Abs. 7 GwG)",
+        9.5,
+        false,
+        TreatmentPlanPdfColor::Muted,
+        0.0,
+        2.0,
+    );
+    legal_meta_grid(
+        &mut layout,
+        &[
+            ("Vertragspartner", party.name_with_salutation()),
+            (
+                "Auftrags-/Rechnungs-Nr.",
+                order_number
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or("—")
+                    .to_string(),
+            ),
+            (
+                "Bearbeiter/in",
+                aml_binding_value(aml.reviewer_name.as_deref()).to_string(),
+            ),
+            ("Prüfdatum", review_date),
+            ("Risikostufe", risk_tier.to_string()),
+            (
+                "Auslösende Länder",
+                if countries.is_empty() {
+                    aml_binding_value(aml.affected_third_country.as_deref()).to_string()
+                } else {
+                    countries
+                },
+            ),
+        ],
+    );
+
+    admin_heading(
+        &mut layout,
+        "1. Feststellung eines erhöhten Geldwäscherisikos",
+    );
+    aml_checkbox_line(
+        &mut layout,
+        aml.internal_risk_analysis,
+        "Feststellung aufgrund der internen Risikoanalyse",
+    );
+    aml_checkbox_line(
+        &mut layout,
+        aml.individual_review,
+        "Feststellung aufgrund der individuellen Prüfung des konkreten Einzelfalls",
+    );
+    aml_labeled_value(&mut layout, "Begründung", aml.risk_reason.as_deref());
+    aml_labeled_value(
+        &mut layout,
+        "Herkunft der eingesetzten Vermögenswerte",
+        aml.asset_origin.as_deref(),
+    );
+
+    fc_subhead(&mut layout, "Politisch exponierte Person (PeP)");
+    aml_checkbox_line(
+        &mut layout,
+        aml.pep_contract_partner,
+        "Der Vertragspartner ist eine politisch exponierte Person.",
+    );
+    aml_checkbox_line(
+        &mut layout,
+        aml.pep_beneficial_owner,
+        "Der wirtschaftlich Berechtigte ist eine politisch exponierte Person.",
+    );
+    aml_labeled_value(
+        &mut layout,
+        "Amt / Funktion",
+        aml.pep_office_function.as_deref(),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "Herkunft der Vermögenswerte der PeP",
+        aml.pep_asset_origin.as_deref(),
+    );
+
+    fc_subhead(&mut layout, "Drittstaat mit hohem Risiko");
+    aml_checkbox_line(
+        &mut layout,
+        aml.high_risk_country_transaction,
+        "Die Transaktion steht im Zusammenhang mit einem Drittstaat mit hohem Risiko.",
+    );
+    aml_checkbox_line(
+        &mut layout,
+        aml.high_risk_country_resident,
+        "Der Vertragspartner ist in einem Drittstaat mit hohem Risiko niedergelassen oder wohnhaft.",
+    );
+    aml_labeled_value(
+        &mut layout,
+        "a. Betroffener Drittstaat",
+        aml.affected_third_country.as_deref(),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "b. Zusätzliche Informationen zum Vertragspartner",
+        aml.additional_contract_partner_info.as_deref(),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "c. Zusätzliche Informationen zum wirtschaftlich Berechtigten",
+        aml.additional_beneficial_owner_info.as_deref(),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "d. Zusätzliche Informationen über die angestrebte Art der Geschäftsbeziehung",
+        aml.intended_business_relationship_info.as_deref(),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "e. Zusätzliche Informationen zu den Vermögenswerten des Vertragspartners",
+        aml.contract_partner_asset_info.as_deref(),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "f. Zusätzliche Informationen zu den Vermögenswerten des wirtschaftlich Berechtigten",
+        aml.beneficial_owner_asset_info.as_deref(),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "g. Gründe der konkreten Transaktion",
+        aml.transaction_reasons.as_deref(),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "h. Geplante Verwendung der eingesetzten Vermögenswerte",
+        aml.planned_asset_use.as_deref(),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "Zustimmende Führungskraft",
+        aml.manager_approval_name.as_deref(),
+    );
+
+    fc_subhead(&mut layout, "Ungewöhnliche Transaktion");
+    aml_checkbox_line(
+        &mut layout,
+        aml.unusual_complex_or_large,
+        "Komplexe oder ungewöhnlich große Transaktion",
+    );
+    aml_checkbox_line(
+        &mut layout,
+        aml.unusual_pattern,
+        "Ungewöhnliches Transaktionsmuster",
+    );
+    aml_checkbox_line(
+        &mut layout,
+        aml.no_lawful_purpose,
+        "Kein offensichtlicher wirtschaftlicher oder rechtmäßiger Zweck",
+    );
+    aml_labeled_value(
+        &mut layout,
+        "Ergebnisse der Untersuchung",
+        aml.investigation_results.as_deref(),
+    );
+
+    admin_heading(&mut layout, "2. Verstärkte kontinuierliche Überwachung");
+    aml_labeled_value(
+        &mut layout,
+        "Festgelegte Maßnahmen",
+        aml.continuous_monitoring.as_deref(),
+    );
+    admin_heading(&mut layout, "3. Weitere verstärkte Sorgfaltspflichten");
+    aml_labeled_value(
+        &mut layout,
+        "Zusätzlich getroffene Maßnahmen",
+        aml.additional_measures.as_deref(),
+    );
+    layout.spacer(5.0);
+    layout.text_block(
+        &format!(
+            "Datum: {}     Bearbeiter/in: {}     Unterschrift: ____________________",
+            aml.review_date
+                .map(|date| date.format("%d.%m.%Y").to_string())
+                .unwrap_or_else(|| "____________".to_string()),
+            aml_binding_value(aml.reviewer_name.as_deref()),
+        ),
+        10.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.0,
+    );
+
     Ok(finalize_admin_pdf(document, layout))
 }
 
@@ -21302,18 +21675,19 @@ async fn list_document_categories(
 #[cfg(test)]
 mod tests {
     use super::{
-        AdminSignatureParty, AgencyContractSettings, DocPartyBlock, DocumentBindingOverrides,
-        GeneratedConsentContext, GeneratedContractLineItem, GeneratedCostEstimateContext,
-        GeneratedFrameworkContractContext, GeneratedPatientStickerContext,
-        GeneratedSingleOrderContext, PDF_PAGE_WIDTH_MM, ServiceLineInput, TreatmentPlanPdfLayout,
-        admin_signature_grid, adult_legal_agency_identity, agency_block_lines,
-        agency_identity_profile_lines, build_adult_confidentiality_release_pdf,
-        build_adult_privacy_consents_pdf, build_adult_privacy_information_pdf, build_consent_pdf,
-        build_cost_estimate_pdf, build_framework_contract_pdf, build_manual_generated_text_pdf,
-        build_order_cost_estimate_pdf, build_patient_sticker_pdf, build_single_order_pdf,
-        compute_line_item_totals, cost_coverage_money_cell, cost_estimate_price_text,
-        document_satisfies_compliance_kind, document_template_by_id, finalize_admin_pdf,
-        generated_binding_snapshot, generated_cost_estimate_document_number,
+        AdminSignatureParty, AgencyContractSettings, AmlEnhancedDueDiligenceBindings,
+        DocPartyBlock, DocumentBindingOverrides, GeneratedConsentContext,
+        GeneratedContractLineItem, GeneratedCostEstimateContext, GeneratedFrameworkContractContext,
+        GeneratedPatientStickerContext, GeneratedSingleOrderContext, PDF_PAGE_WIDTH_MM,
+        ServiceLineInput, TreatmentPlanPdfLayout, admin_signature_grid,
+        adult_legal_agency_identity, agency_block_lines, agency_identity_profile_lines,
+        build_adult_confidentiality_release_pdf, build_adult_privacy_consents_pdf,
+        build_adult_privacy_information_pdf, build_consent_pdf, build_cost_estimate_pdf,
+        build_enhanced_due_diligence_pdf, build_framework_contract_pdf,
+        build_manual_generated_text_pdf, build_order_cost_estimate_pdf, build_patient_sticker_pdf,
+        build_single_order_pdf, compute_line_item_totals, cost_coverage_money_cell,
+        cost_estimate_price_text, document_satisfies_compliance_kind, document_template_by_id,
+        finalize_admin_pdf, generated_binding_snapshot, generated_cost_estimate_document_number,
         generated_document_number_for_template, generated_typed_document_number,
         german_document_country, is_fixed_legal_document_template,
         is_lead_allowed_document_template, legal_agency_block_lines, legal_document_reference,
@@ -21818,6 +22192,44 @@ mod tests {
         assert!(!privacy_information_text.contains("Heorhii Hudiiev, geb. am 12.12.1994"));
         assert!(!privacy_information_text.contains("Anna Beispiel"));
         assert!(!privacy_information_text.contains('?'));
+    }
+
+    #[test]
+    fn enhanced_due_diligence_pdf_binds_risk_data_and_legal_chrome() {
+        let aml = AmlEnhancedDueDiligenceBindings {
+            risk_tier: Some("blacklist".to_string()),
+            triggered_countries: vec!["IR".to_string()],
+            internal_risk_analysis: true,
+            risk_reason: Some("Wohnsitz in einem Hochrisikoland".to_string()),
+            high_risk_country_resident: true,
+            affected_third_country: Some("Iran".to_string()),
+            additional_contract_partner_info: Some("Identität geprüft".to_string()),
+            intended_business_relationship_info: Some("Patientenbetreuung".to_string()),
+            contract_partner_asset_info: Some("Eigenmittel".to_string()),
+            transaction_reasons: Some("Medizinische Behandlung".to_string()),
+            planned_asset_use: Some("Behandlungskosten".to_string()),
+            manager_approval_name: Some("Leitung Beispiel".to_string()),
+            continuous_monitoring: Some("Prüfung jeder Zahlung".to_string()),
+            reviewer_name: Some("Bearbeiter Beispiel".to_string()),
+            review_date: NaiveDate::from_ymd_opt(2026, 8, 1),
+            ..Default::default()
+        };
+        let bytes = build_enhanced_due_diligence_pdf(
+            &legal_test_party("IR"),
+            &legal_test_agency(),
+            &aml,
+            Some("A-20260801-0001"),
+            "AML-20260801-UNITTEST0001",
+        )
+        .unwrap();
+        let text = assert_legal_pdf_chrome(&bytes, "AML-20260801-UNITTEST0001");
+
+        assert!(text.contains("Durchführung verstärkter Sorgfaltspflichten"));
+        assert!(text.contains("Blacklist / besonders hohes Risiko"));
+        assert!(text.contains("Frau Anna Beispiel"));
+        assert!(text.contains("A-20260801-0001"));
+        assert!(text.contains("Iran"));
+        assert!(text.contains("Prüfung jeder Zahlung"));
     }
 
     #[test]
