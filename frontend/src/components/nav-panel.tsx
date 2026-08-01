@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
+import { useNavCounters } from "@/lib/use-nav-counters";
 import { useNavState } from "@/lib/nav-state";
 import {
   listPatientPortalNavItems,
@@ -104,6 +105,7 @@ export function NavPanel() {
   const tr = t as unknown as Record<string, string>;
   const { collapsed, toggle } = useNavState();
   const isPatientPortal = user?.role === "patient";
+  const counters = useNavCounters(Boolean(user) && !isPatientPortal);
   const patientPortalNav = isPatientPortal ? listPatientPortalNavItems().map(toPatientNavItem) : [];
   const staffNavBySection =
     user && user.role !== "patient"
@@ -148,6 +150,7 @@ export function NavPanel() {
             tr={tr}
             translations={t}
             collapsed={collapsed}
+            counters={{ chat: counters.chatUnread, leads: counters.newLeads }}
             onNavigate={closeOnCompactViewport}
           />
         )}
@@ -177,12 +180,14 @@ function StaffNavGroups({
   tr,
   translations,
   collapsed,
+  counters,
   onNavigate,
 }: {
   staffNavBySection: Map<StaffNavSection, NavItem[]>;
   tr: Record<string, string>;
   translations: UnknownTranslations;
   collapsed: boolean;
+  counters?: NavCounterMap;
   onNavigate: () => void;
 }) {
   const sections = STAFF_NAV_SECTIONS.filter((section) => (staffNavBySection.get(section)?.length ?? 0) > 0);
@@ -192,11 +197,8 @@ function StaffNavGroups({
       {sections.map((section) => (
         <div key={section} className="flex flex-col gap-1">
           {!collapsed && (
-            <div className="flex flex-col items-center gap-1 pb-1.5 pt-0.5">
-              <div className="h-px w-10 bg-sidebar-border" />
-              <div className="text-[10px] tracking-wide text-sidebar-foreground/50 uppercase">
-                {sectionLabel(section, tr, translations)}
-              </div>
+            <div className="px-3 pb-1 pt-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-sidebar-foreground/45">
+              {sectionLabel(section, tr, translations)}
             </div>
           )}
           {collapsed && <SectionDivider />}
@@ -205,6 +207,7 @@ function StaffNavGroups({
             tr={tr}
             translations={translations}
             collapsed={collapsed}
+            counters={counters}
             onNavigate={onNavigate}
           />
         </div>
@@ -223,17 +226,21 @@ function groupStaffNavItems(items: StaffNavItem[]): Map<StaffNavSection, NavItem
   return grouped;
 }
 
+type NavCounterMap = Partial<Record<string, number>>;
+
 function NavGroup({
   items,
   tr,
   translations,
   collapsed,
+  counters,
   onNavigate,
 }: {
   items: NavItem[];
   tr: Record<string, string>;
   translations: UnknownTranslations;
   collapsed: boolean;
+  counters?: NavCounterMap;
   onNavigate: () => void;
 }) {
   return (
@@ -241,6 +248,7 @@ function NavGroup({
       {items.map((item) => {
         const Icon = NAV_ICONS[item.id] ?? FileText;
         const label = navItemLabel(item, tr, translations);
+        const count = counters?.[item.id] ?? 0;
         return (
           <NavLink
             key={item.to}
@@ -252,9 +260,9 @@ function NavGroup({
             className={({ isActive }: { isActive: boolean }) =>
               cn(
                 "relative flex items-center rounded-lg text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring motion-reduce:transition-none",
-                collapsed ? "justify-center size-11 mx-auto" : "gap-3 px-3 h-10",
+                collapsed ? "justify-center size-10 mx-auto" : "gap-3 px-3 h-9",
                 isActive
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-r-full before:bg-[var(--brand)]"
+                  ? "bg-[var(--brand)]/10 text-foreground font-semibold before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-r-full before:bg-[var(--brand)]"
                   : "text-sidebar-foreground/90 hover:text-sidebar-foreground hover:bg-sidebar-accent/60",
               )
             }
@@ -264,11 +272,24 @@ function NavGroup({
                 <Icon
                   aria-hidden="true"
                   strokeWidth={isActive ? 1.85 : 1.6}
-                  className={cn("shrink-0", collapsed ? "size-5" : "size-[18px]")}
+                  className={cn(
+                    "shrink-0",
+                    collapsed ? "size-5" : "size-[18px]",
+                    isActive && "text-[var(--brand)]",
+                  )}
                 />
                 {!collapsed && (
-                  <span className="whitespace-nowrap overflow-hidden">{label}</span>
+                  <span className="min-w-0 flex-1 truncate whitespace-nowrap">{label}</span>
                 )}
+                {count > 0 ? (
+                  collapsed ? (
+                    <span className="absolute right-1 top-1 size-2 rounded-full bg-[var(--brand)]" />
+                  ) : (
+                    <span className="shrink-0 rounded-full bg-[var(--brand)]/12 px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums text-[var(--brand)]">
+                      {count > 99 ? "99+" : count}
+                    </span>
+                  )
+                ) : null}
               </>
             )}
           </NavLink>
