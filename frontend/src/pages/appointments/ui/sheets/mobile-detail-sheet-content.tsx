@@ -125,6 +125,7 @@ export type AppointmentMobileDetailSheetContentProps = {
   onNotice: (message: string) => void;
   onFollowUpVisitCreated: (payload: { id?: string; notice: string }) => void;
   onEditSaved: (notice: string) => void;
+  onDeleteAppointment: (id: string) => Promise<void>;
 };
 
 function useAppointmentMobileDetailSheetContentContent({
@@ -189,6 +190,7 @@ function useAppointmentMobileDetailSheetContentContent({
   onNotice,
   onFollowUpVisitCreated,
   onEditSaved,
+  onDeleteAppointment,
 }: AppointmentMobileDetailSheetContentProps) {
   const { t } = useLang();
   const [overviewEditAppointmentId, setOverviewEditAppointmentId] = useState<string | null>(null);
@@ -230,7 +232,9 @@ function useAppointmentMobileDetailSheetContentContent({
               <MemoizedAppointmentOverviewSection
                 detail={detail}
                 canEdit={permissions.canEditSchedule}
+                canDelete={permissions.canDelete}
                 onEdit={() => setOverviewEditAppointmentId(detail.id)}
+                onDelete={() => onDeleteAppointment(detail.id)}
                 onOpenDetail={openDetailSheet}
               />
               {permissions.canEditSchedule ? (

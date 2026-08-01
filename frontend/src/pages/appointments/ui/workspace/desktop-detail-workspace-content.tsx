@@ -157,6 +157,7 @@ type AppointmentDesktopDetailWorkspaceContentProps = {
   onError: (message: string) => void;
   onNotice: (message: string) => void;
   onEditSaved: (notice: string) => void;
+  onDeleteAppointment: (id: string) => Promise<void>;
   onFollowUpVisitCreated: (payload: { id?: string; notice: string }) => void;
 };
 
@@ -225,6 +226,7 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
   onError,
   onNotice,
   onEditSaved,
+  onDeleteAppointment,
   onFollowUpVisitCreated,
 }: AppointmentDesktopDetailWorkspaceContentProps) {
   const { t } = useLang();
@@ -309,7 +311,9 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
       <MemoizedAppointmentOverviewSection
         detail={detail}
         canEdit={permissions.canEditSchedule}
+        canDelete={permissions.canDelete}
         onEdit={() => setOverviewEditAppointmentId(detail.id)}
+        onDelete={() => onDeleteAppointment(detail.id)}
         onOpenDetail={onOpenDetail}
       />
       {permissions.canEditSchedule ? (

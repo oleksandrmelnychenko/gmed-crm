@@ -102,7 +102,10 @@ pub fn router() -> Router<AppState> {
             "/appointments",
             get(list_appointments).post(create_appointment),
         )
-        .route("/appointments/{id}", get(get_appointment))
+        .route(
+            "/appointments/{id}",
+            get(get_appointment).delete(delete_appointment),
+        )
         .route("/appointments/{id}/update", post(update_appointment))
         .route("/appointments/{id}/status", post(update_status))
         .route(
@@ -3763,6 +3766,332 @@ async fn get_appointment(
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
         }
     }
+}
+
+async fn delete_appointment(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(apt_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin]) {
+        return resp;
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, appointment_id = %apt_id, "begin appointment delete transaction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete appointment",
+            );
+        }
+    };
+
+    let current = match sqlx::query(
+        r#"SELECT patient_id, owner_user_id, interpreter_id, title, date, status,
+                  recurrence_series_id, recurrence_index
+           FROM appointments
+           WHERE id = $1
+           FOR UPDATE"#,
+    )
+    .bind(apt_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Appointment not found"),
+        Err(error) => {
+            tracing::error!(error = %error, appointment_id = %apt_id, "load appointment for delete");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete appointment",
+            );
+        }
+    };
+
+    let patient_id: Uuid = match current.try_get("patient_id") {
+        Ok(value) => value,
+        Err(_) => {
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete appointment",
+            );
+        }
+    };
+    let owner_user_id: Option<Uuid> = current.try_get("owner_user_id").unwrap_or_default();
+    let interpreter_id: Option<Uuid> = current.try_get("interpreter_id").unwrap_or_default();
+    let title: String = current.try_get("title").unwrap_or_default();
+    let date: chrono::NaiveDate = match current.try_get("date") {
+        Ok(value) => value,
+        Err(_) => {
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete appointment",
+            );
+        }
+    };
+    let status: String = current.try_get("status").unwrap_or_default();
+    let recurrence_series_id: Option<Uuid> =
+        current.try_get("recurrence_series_id").unwrap_or_default();
+    let recurrence_index: i32 = current.try_get("recurrence_index").unwrap_or_default();
+
+    match can_access_appointment(
+        &state,
+        &auth,
+        apt_id,
+        Some(patient_id),
+        interpreter_id,
+        owner_user_id,
+    )
+    .await
+    {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    if matches!(status.as_str(), "in_progress" | "completed") {
+        return err(
+            StatusCode::CONFLICT,
+            "In-progress or completed appointments cannot be deleted",
+        );
+    }
+
+    let replacement_series_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT id
+           FROM appointments
+           WHERE recurrence_series_id = $1
+             AND id <> $1
+           ORDER BY recurrence_index, date, id
+           LIMIT 1
+           FOR UPDATE"#,
+    )
+    .bind(apt_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, appointment_id = %apt_id, "select replacement appointment series root");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete appointment",
+            );
+        }
+    };
+
+    let recurrence_update_result = if let Some(replacement_id) = replacement_series_id {
+        sqlx::query(
+            r#"UPDATE appointments
+               SET recurrence_series_id = CASE
+                       WHEN recurrence_series_id = $1 THEN $2
+                       ELSE recurrence_series_id
+                   END,
+                   recurrence_parent_series_id = CASE
+                       WHEN recurrence_parent_series_id = $1 THEN $2
+                       ELSE recurrence_parent_series_id
+                   END,
+                   recurrence_split_from_appointment_id = CASE
+                       WHEN recurrence_split_from_appointment_id = $1 THEN NULL
+                       ELSE recurrence_split_from_appointment_id
+                   END
+               WHERE recurrence_series_id = $1
+                  OR recurrence_parent_series_id = $1
+                  OR recurrence_split_from_appointment_id = $1"#,
+        )
+        .bind(apt_id)
+        .bind(replacement_id)
+        .execute(&mut *tx)
+        .await
+    } else {
+        sqlx::query(
+            r#"UPDATE appointments
+               SET recurrence_series_id = CASE
+                       WHEN recurrence_series_id = $1 THEN NULL
+                       ELSE recurrence_series_id
+                   END,
+                   recurrence_parent_series_id = CASE
+                       WHEN recurrence_parent_series_id = $1 THEN NULL
+                       ELSE recurrence_parent_series_id
+                   END,
+                   recurrence_split_from_appointment_id = CASE
+                       WHEN recurrence_split_from_appointment_id = $1 THEN NULL
+                       ELSE recurrence_split_from_appointment_id
+                   END
+               WHERE recurrence_series_id = $1
+                  OR recurrence_parent_series_id = $1
+                  OR recurrence_split_from_appointment_id = $1"#,
+        )
+        .bind(apt_id)
+        .execute(&mut *tx)
+        .await
+    };
+
+    if let Err(error) = recurrence_update_result {
+        tracing::error!(error = %error, appointment_id = %apt_id, "repair appointment recurrence links before delete");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to delete appointment",
+        );
+    }
+
+    let detached_documents = match sqlx::query(
+        "UPDATE documents SET appointment_id = NULL WHERE appointment_id = $1",
+    )
+    .bind(apt_id)
+    .execute(&mut *tx)
+    .await
+    {
+        Ok(result) => result.rows_affected(),
+        Err(error) => {
+            tracing::error!(error = %error, appointment_id = %apt_id, "detach documents before appointment delete");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete appointment",
+            );
+        }
+    };
+
+    let detached_tasks = match sqlx::query(
+        "UPDATE tasks SET appointment_id = NULL WHERE appointment_id = $1",
+    )
+    .bind(apt_id)
+    .execute(&mut *tx)
+    .await
+    {
+        Ok(result) => result.rows_affected(),
+        Err(error) => {
+            tracing::error!(error = %error, appointment_id = %apt_id, "detach tasks before appointment delete");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete appointment",
+            );
+        }
+    };
+
+    let detached_billing_rows = match sqlx::query(
+        "UPDATE order_leistungen SET source_medical_appointment_id = NULL WHERE source_medical_appointment_id = $1",
+    )
+    .bind(apt_id)
+    .execute(&mut *tx)
+    .await
+    {
+        Ok(result) => result.rows_affected(),
+        Err(error) => {
+            tracing::error!(error = %error, appointment_id = %apt_id, "detach billing rows before appointment delete");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete appointment");
+        }
+    };
+
+    let detached_interpreter_billing_rows = match sqlx::query(
+        r#"UPDATE order_leistungen
+           SET source_interpreter_report_id = NULL
+           WHERE source_interpreter_report_id IN (
+               SELECT id
+               FROM interpreter_reports
+               WHERE appointment_id = $1
+           )"#,
+    )
+    .bind(apt_id)
+    .execute(&mut *tx)
+    .await
+    {
+        Ok(result) => result.rows_affected(),
+        Err(error) => {
+            tracing::error!(error = %error, appointment_id = %apt_id, "detach interpreter billing rows before appointment delete");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete appointment",
+            );
+        }
+    };
+
+    let detached_concierge_services = match sqlx::query(
+        "UPDATE concierge_services SET appointment_id = NULL WHERE appointment_id = $1",
+    )
+    .bind(apt_id)
+    .execute(&mut *tx)
+    .await
+    {
+        Ok(result) => result.rows_affected(),
+        Err(error) => {
+            tracing::error!(error = %error, appointment_id = %apt_id, "detach concierge services before appointment delete");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete appointment",
+            );
+        }
+    };
+
+    let deleted = match sqlx::query("DELETE FROM appointments WHERE id = $1")
+        .bind(apt_id)
+        .execute(&mut *tx)
+        .await
+    {
+        Ok(result) => result.rows_affected(),
+        Err(error) => {
+            tracing::error!(error = %error, appointment_id = %apt_id, "delete appointment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete appointment",
+            );
+        }
+    };
+
+    if deleted != 1 {
+        return err(StatusCode::NOT_FOUND, "Appointment not found");
+    }
+
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, appointment_id = %apt_id, "commit appointment delete transaction");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to delete appointment",
+        );
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "delete_appointment",
+        Some(auth.user_id),
+        "appointment",
+        Some(apt_id),
+        serde_json::json!({
+            "patient_id": patient_id,
+            "title": title,
+            "date": date,
+            "status": status,
+            "recurrence_series_id": recurrence_series_id,
+            "recurrence_index": recurrence_index,
+            "replacement_series_id": replacement_series_id,
+            "detached_documents": detached_documents,
+            "detached_tasks": detached_tasks,
+            "detached_billing_rows": detached_billing_rows,
+            "detached_interpreter_billing_rows": detached_interpreter_billing_rows,
+            "detached_concierge_services": detached_concierge_services,
+        }),
+    ));
+
+    crate::realtime::publish_deleted_appointment_event(
+        &state,
+        Some(auth.user_id),
+        apt_id,
+        patient_id,
+        owner_user_id,
+        interpreter_id,
+        serde_json::json!({
+            "appointment_id": apt_id,
+            "replacement_series_id": replacement_series_id,
+        }),
+    )
+    .await;
+
+    Json(serde_json::json!({
+        "ok": true,
+        "id": apt_id,
+        "replacement_series_id": replacement_series_id,
+    }))
+    .into_response()
 }
 
 async fn update_appointment(

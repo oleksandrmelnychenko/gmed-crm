@@ -8,6 +8,7 @@ describe("appointment role contracts", () => {
       const permissions = appointmentPermissions(role);
       expect(permissions).toEqual(
         expect.objectContaining({
+          canDelete: true,
           canManageStatus: true,
           canAssignInterpreter: true,
           canManageChecklist: true,
@@ -20,6 +21,9 @@ describe("appointment role contracts", () => {
     }
 
     expect(appointmentPermissions("interpreter").canSubmitReport).toBe(true);
+    expect(appointmentPermissions("interpreter").canDelete).toBe(false);
+    expect(appointmentPermissions("teamlead_interpreter").canDelete).toBe(false);
+    expect(appointmentPermissions("concierge").canDelete).toBe(false);
     expect(appointmentPermissions("teamlead_interpreter")).toEqual(
       expect.objectContaining({
         canApproveReport: true,

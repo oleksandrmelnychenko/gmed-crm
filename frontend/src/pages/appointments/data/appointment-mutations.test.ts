@@ -6,7 +6,10 @@ vi.mock("@/lib/api", () => ({
   apiFetch: apiFetchMock,
 }));
 
-import { updateAppointmentSchedule } from "./appointment-mutations";
+import {
+  deleteAppointment,
+  updateAppointmentSchedule,
+} from "./appointment-mutations";
 
 describe("updateAppointmentSchedule", () => {
   beforeEach(() => {
@@ -37,6 +40,15 @@ describe("updateAppointmentSchedule", () => {
         time_end: null,
         skip_medical_provider_binding: true,
       }),
+    );
+  });
+
+  it("deletes the selected appointment through the appointment endpoint", async () => {
+    await deleteAppointment("appointment-1");
+
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      "/appointments/appointment-1",
+      { method: "DELETE" },
     );
   });
 });

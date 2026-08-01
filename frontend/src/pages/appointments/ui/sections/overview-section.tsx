@@ -1,14 +1,17 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 import {
   ChevronDown,
   Clock3,
   MapPin,
   Pencil,
   Stethoscope,
+  Trash2,
   type LucideIcon,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
+import { toast } from "@/components/ui/toast";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
@@ -28,6 +31,7 @@ import {
   recurringLineageSplitLabel,
 } from "@/pages/appointments/model/recurrence";
 import { formatAppointmentSlotLabel } from "@/pages/appointments/model/runtime-formatters";
+import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import type { AppointmentDetail } from "@/pages/appointments/model/types";
 import {
   appointmentStatusBadgeClassName,
@@ -37,16 +41,26 @@ import {
 function AppointmentOverviewSection({
   detail,
   canEdit = false,
+  canDelete = false,
   onEdit,
+  onDelete,
   onOpenDetail,
 }: {
   detail: AppointmentDetail;
   canEdit?: boolean;
+  canDelete?: boolean;
   onEdit?: () => void;
+  onDelete?: () => Promise<void>;
   onOpenDetail: (id: string) => void;
 }) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const deletionLocked = detail.status === "in_progress" || detail.status === "completed";
+  const deleteTitle = deletionLocked
+    ? appointmentText("appointments_delete_locked")
+    : appointmentText("appointments_delete_action");
   const detailLineageBadge = recurrenceLineageBadge(detail, t);
   const patientInitials = detail.patient_name
     .split(/\s+/)
@@ -109,6 +123,20 @@ function AppointmentOverviewSection({
               <Pencil className="size-3.5" />
             </Button>
           ) : null}
+          {canDelete && onDelete ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="size-8 rounded-lg text-rose-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+              disabled={deletionLocked || deleteBusy}
+              onClick={() => setDeleteConfirmOpen(true)}
+              aria-label={deleteTitle}
+              title={deleteTitle}
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
+          ) : null}
         </div>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -156,6 +184,41 @@ function AppointmentOverviewSection({
       {!detail.is_blocked && detail.recurrence_frequency ? (
         <RecurringSeriesDetails detail={detail} onOpenDetail={onOpenDetail} />
       ) : null}
+      <DirtyDismissConfirmDialog
+        open={deleteConfirmOpen}
+        title={appointmentText("appointments_delete_title")}
+        message={
+          detail.recurrence_frequency
+            ? appointmentText("appointments_delete_recurring_warning")
+            : appointmentText("appointments_delete_warning")
+        }
+        cancelLabel={t.common_cancel}
+        confirmDisabled={deleteBusy}
+        destructive
+        confirmLabel={
+          deleteBusy
+            ? appointmentText("appointments_deleting")
+            : appointmentText("appointments_delete_action")
+        }
+        onCancel={() => {
+          if (!deleteBusy) setDeleteConfirmOpen(false);
+        }}
+        onConfirm={() => {
+          if (deleteBusy || !onDelete) return;
+          setDeleteBusy(true);
+          void onDelete()
+            .then(() => setDeleteConfirmOpen(false))
+            .catch((error: unknown) => {
+              toast.error(
+                appointmentActionErrorMessage(
+                  error,
+                  appointmentText("appointments_failed_to_delete"),
+                ),
+              );
+            })
+            .finally(() => setDeleteBusy(false));
+        }}
+      />
     </section>
   );
 }

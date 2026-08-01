@@ -107,6 +107,13 @@ export function updateAppointmentStatus(
   });
 }
 
+export function deleteAppointment(appointmentId: string) {
+  return apiFetch<{ ok: boolean; id: string }>(
+    `/appointments/${appointmentId}`,
+    { method: "DELETE" },
+  );
+}
+
 export function reviewAppointmentRequest(
   requestId: string,
   status: Extract<AppointmentRequestStatus, "approved" | "rejected">,

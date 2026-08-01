@@ -44,7 +44,7 @@ export function AppShellFrame({ children, workspaceRailKind }: AppShellFrameProp
             id="main-content"
             tabIndex={-1}
             className={cn(
-              "min-w-0 flex-1 overflow-auto overscroll-contain bg-card px-3 py-4 sm:px-5 sm:py-5 lg:px-7 lg:py-6",
+              "ml-1 mt-1 min-w-0 flex-1 overflow-auto overscroll-contain rounded-tl-lg bg-card px-3 py-4 sm:px-5 sm:py-5 lg:px-7 lg:py-6 [&::-webkit-scrollbar-track]:my-1.5",
               workspaceRailKind === "appointment" && "bg-white",
             )}
           >

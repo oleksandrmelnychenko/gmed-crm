@@ -204,6 +204,36 @@ pub async fn publish_appointment_event(
     .await;
 }
 
+pub async fn publish_deleted_appointment_event(
+    state: &AppState,
+    actor_user_id: Option<Uuid>,
+    appointment_id: Uuid,
+    patient_id: Uuid,
+    owner_user_id: Option<Uuid>,
+    interpreter_id: Option<Uuid>,
+    payload: Value,
+) {
+    let mut target_user_ids = load_active_patient_assignment_user_ids(state, patient_id)
+        .await
+        .unwrap_or_default();
+    target_user_ids.extend(
+        [actor_user_id, owner_user_id, interpreter_id]
+            .into_iter()
+            .flatten(),
+    );
+
+    publish_event(
+        state,
+        RealtimeEvent::new("appointment.deleted", "appointment", appointment_id)
+            .patient_id(patient_id)
+            .actor(actor_user_id)
+            .target_users(target_user_ids)
+            .roles(&["ceo"])
+            .payload(payload),
+    )
+    .await;
+}
+
 pub async fn publish_appointment_request_event(
     state: &AppState,
     actor_user_id: Option<Uuid>,

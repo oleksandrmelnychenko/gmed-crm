@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button"
 
 type DirtyDismissConfirmDialogProps = {
   cancelLabel: string
+  confirmDisabled?: boolean
   confirmLabel: string
+  destructive?: boolean
   message: string
   onCancel: () => void
   onConfirm: () => void
@@ -15,7 +17,9 @@ type DirtyDismissConfirmDialogProps = {
 
 export function DirtyDismissConfirmDialog({
   cancelLabel,
+  confirmDisabled = false,
   confirmLabel,
+  destructive = false,
   message,
   onCancel,
   onConfirm,
@@ -129,7 +133,9 @@ export function DirtyDismissConfirmDialog({
           <Button
             ref={confirmButtonRef}
             type="button"
+            variant={destructive ? "destructive" : "default"}
             className="h-9 rounded-lg"
+            disabled={confirmDisabled}
             onClick={onConfirm}
           >
             {confirmLabel}

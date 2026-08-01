@@ -70,6 +70,7 @@ import { useAppointmentsSchedulerData } from "@/pages/appointments/data/use-appo
 import { useProviderDoctorOptions } from "@/pages/appointments/data/use-provider-doctor-options";
 import {
   convertAppointmentRequest,
+  deleteAppointment,
   reviewAppointmentRequest,
   type ConvertAppointmentRequestInput,
 } from "@/pages/appointments/data/appointment-mutations";
@@ -197,6 +198,7 @@ const EMPTY_DETAIL_DERIVED_STATE = {
 const APPOINTMENT_REALTIME_EVENTS = [
   "appointment.created",
   "appointment.updated",
+  "appointment.deleted",
   "appointment.status_changed",
   "appointment_checklist.created",
   "appointment_checklist.completed",
@@ -1291,6 +1293,24 @@ function useStaffAppointmentsPageContent() {
     bumpDetailVersion();
   }, [bumpDetailVersion, dismissCalendarQuickActionMenu]);
 
+  const handleDeleteAppointment = useCallback(
+    async (appointmentId: string) => {
+      await deleteAppointment(appointmentId);
+      clearApiCache(`/appointments/${appointmentId}`);
+      clearApiCache("/appointments");
+      closeDetailWorkspace();
+      refreshAppointments();
+      reportAppointmentsNotice(
+        appointmentText("appointments_deleted_notice"),
+      );
+    },
+    [
+      closeDetailWorkspace,
+      refreshAppointments,
+      reportAppointmentsNotice,
+    ],
+  );
+
   const handleReviewAppointmentRequest = useCallback(
     async (requestId: string, status: "approved" | "rejected") => {
       const busyKey = `${requestId}:${status}`;
@@ -1465,6 +1485,17 @@ function useStaffAppointmentsPageContent() {
           ? event.payload.appointment_id
           : null;
 
+      if (
+        event.type === "appointment.deleted" &&
+        detailOpen &&
+        selectedId &&
+        event.entity_id === selectedId
+      ) {
+        closeDetailWorkspace();
+        shouldRefreshAppointments = true;
+        continue;
+      }
+
       if (event.entity_type === "concierge_service") {
         clearApiCache("/concierge-services");
         if (detailOpen) {
@@ -1614,6 +1645,7 @@ function useStaffAppointmentsPageContent() {
             onError={reportDetailError}
             onNotice={reportAppointmentsNotice}
             onEditSaved={handleEditSaved}
+            onDeleteAppointment={handleDeleteAppointment}
             onFollowUpVisitCreated={handleFollowUpVisitCreated}
           />
         </Suspense>
@@ -1977,6 +2009,7 @@ function useStaffAppointmentsPageContent() {
           onNotice={reportAppointmentsNotice}
           onFollowUpVisitCreated={handleFollowUpVisitCreated}
           onEditSaved={handleEditSaved}
+          onDeleteAppointment={handleDeleteAppointment}
         />
       ) : null}
     </>

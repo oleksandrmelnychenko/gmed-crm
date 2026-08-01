@@ -735,6 +735,7 @@ export type AppointmentPermissions = {
   canViewPage: boolean;
   canCreate: boolean;
   canEditSchedule: boolean;
+  canDelete: boolean;
   canManageStatus: boolean;
   canAssignInterpreter: boolean;
   canManageChecklist: boolean;
