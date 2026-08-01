@@ -1631,7 +1631,11 @@ function normalizeProviderPeopleFiltersForScope(
   filters: ProviderPeopleFilters,
   forceNonMedical: boolean,
 ): ProviderPeopleFilters {
-  if (!forceNonMedical) return filters;
+  if (!forceNonMedical) {
+    return filters.personType === "doctor" && !filters.providerType
+      ? { ...filters, providerType: "medical" }
+      : filters;
+  }
   return {
     ...filters,
     providerType: "non_medical",
@@ -1640,6 +1644,54 @@ function normalizeProviderPeopleFiltersForScope(
     patientId: "",
     insuranceProvider: "",
   };
+}
+
+function readProviderPeopleFilters(
+  searchParams: URLSearchParams,
+  forceNonMedical: boolean,
+): ProviderPeopleFilters {
+  return normalizeProviderPeopleFiltersForScope(
+    {
+      ...DEFAULT_PROVIDER_PEOPLE_FILTERS,
+      search: searchParams.get("people_search") ?? "",
+      personType:
+        searchParams.get("person_type") === "doctor" ||
+        searchParams.get("person_type") === "staff"
+          ? (searchParams.get("person_type") as ProviderPeopleFilters["personType"])
+          : "",
+      providerId: searchParams.get("people_provider") ?? "",
+      providerType:
+        searchParams.get("people_provider_type") === "medical" ||
+        searchParams.get("people_provider_type") === "non_medical"
+          ? (searchParams.get(
+              "people_provider_type",
+            ) as ProviderPeopleFilters["providerType"])
+          : "",
+      taxonomyNodeId: searchParams.get("people_taxonomy") ?? "",
+      gender:
+        searchParams.get("people_gender") === "male" ||
+        searchParams.get("people_gender") === "female" ||
+        searchParams.get("people_gender") === "unknown"
+          ? (searchParams.get("people_gender") as ProviderPeopleFilters["gender"])
+          : "",
+      fachbereich: searchParams.get("people_fachbereich") ?? "",
+      specialization: searchParams.get("people_specialization") ?? "",
+      role: searchParams.get("people_role") ?? "",
+      patientId: searchParams.get("people_patient") ?? "",
+      insuranceProvider: searchParams.get("people_insurance") ?? "",
+      activeOnly: searchParams.get("people_active") !== "false",
+    },
+    forceNonMedical,
+  );
+}
+
+function providerPeopleFiltersEqual(
+  left: ProviderPeopleFilters,
+  right: ProviderPeopleFilters,
+) {
+  return (Object.keys(left) as (keyof ProviderPeopleFilters)[]).every(
+    (key) => left[key] === right[key],
+  );
 }
 
 function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}) {
@@ -1704,35 +1756,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   const [doctorDetailView, setDoctorDetailView] = useState<DoctorDetailView | null>(null);
   const [staffDetailView, setStaffDetailView] = useState<StaffDetailView | null>(null);
   const [peopleFilters, setPeopleFilters] = useState<ProviderPeopleFilters>(() =>
-    normalizeProviderPeopleFiltersForScope(
-      {
-        ...DEFAULT_PROVIDER_PEOPLE_FILTERS,
-        search: searchParams.get("people_search") ?? "",
-        personType:
-          searchParams.get("person_type") === "doctor" || searchParams.get("person_type") === "staff"
-            ? (searchParams.get("person_type") as ProviderPeopleFilters["personType"])
-            : "",
-        providerId: searchParams.get("people_provider") ?? "",
-        providerType:
-          searchParams.get("people_provider_type") === "medical" ||
-          searchParams.get("people_provider_type") === "non_medical"
-            ? (searchParams.get("people_provider_type") as ProviderPeopleFilters["providerType"])
-            : "",
-        taxonomyNodeId: searchParams.get("people_taxonomy") ?? "",
-        gender:
-          searchParams.get("people_gender") === "male" ||
-          searchParams.get("people_gender") === "female" ||
-          searchParams.get("people_gender") === "unknown"
-            ? (searchParams.get("people_gender") as ProviderPeopleFilters["gender"])
-            : "",
-        fachbereich: searchParams.get("people_fachbereich") ?? "",
-        specialization: searchParams.get("people_specialization") ?? "",
-        role: searchParams.get("people_role") ?? "",
-        patientId: searchParams.get("people_patient") ?? "",
-        insuranceProvider: searchParams.get("people_insurance") ?? "",
-      },
-      permissions.forceNonMedical,
-    ),
+    readProviderPeopleFilters(searchParams, permissions.forceNonMedical),
   );
   const [peopleVersion, setPeopleVersion] = useState(0);
   type PersistedProviderFilters = Pick<
@@ -1823,6 +1847,38 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     [setPersistedProviderFilters],
   );
   const deferredSearch = useDeferredValue(filters.search);
+  const deferredPeopleSearch = useDeferredValue(peopleFilters.search);
+  const deferredPeopleFilters = useMemo(
+    () => ({ ...peopleFilters, search: deferredPeopleSearch }),
+    [
+      deferredPeopleSearch,
+      peopleFilters.activeOnly,
+      peopleFilters.fachbereich,
+      peopleFilters.gender,
+      peopleFilters.insuranceProvider,
+      peopleFilters.patientId,
+      peopleFilters.personType,
+      peopleFilters.providerId,
+      peopleFilters.providerType,
+      peopleFilters.role,
+      peopleFilters.specialization,
+      peopleFilters.taxonomyNodeId,
+    ],
+  );
+  useEffect(() => {
+    const nextMode = searchParams.get("mode") === "people" ? "people" : "providers";
+    setCatalogModeState((current) => (current === nextMode ? current : nextMode));
+
+    const nextPeopleFilters = readProviderPeopleFilters(
+      searchParams,
+      permissions.forceNonMedical,
+    );
+    setPeopleFilters((current) =>
+      providerPeopleFiltersEqual(current, nextPeopleFilters)
+        ? current
+        : nextPeopleFilters,
+    );
+  }, [permissions.forceNonMedical, searchParams]);
   const [pageState, dispatchPageState] = useReducer(
     providersPageReducer,
     undefined,
@@ -2163,6 +2219,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       people_role: nextFilters.role || null,
       people_patient: nextFilters.patientId || null,
       people_insurance: nextFilters.insuranceProvider || null,
+      people_active: nextFilters.activeOnly ? null : "false",
     });
   }
 
@@ -2373,7 +2430,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     let cancelled = false;
     dispatchPageState({ peopleBusy: true, peopleError: "" });
 
-    void fetchProviderPeople(peopleFilters)
+    void fetchProviderPeople(deferredPeopleFilters)
       .then((items) => {
         if (cancelled) return;
         dispatchPageState({ peopleRows: items, peopleBusy: false });
@@ -2392,7 +2449,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   }, [
     catalogMode,
     detailPageMode,
-    peopleFilters,
+    deferredPeopleFilters,
     peopleVersion,
     permissions.canViewPage,
     t.common_failed_load,
@@ -3869,7 +3926,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   value={filters.insuranceProvider}
                   items={insuranceProviders}
                   compact
-                  useInsuranceTypes
                   disabled={permissions.forceNonMedical || filters.providerType === "non_medical"}
                   onChange={(nextValue) => setServerFilter("insuranceProvider", nextValue, "insurance")}
                 />

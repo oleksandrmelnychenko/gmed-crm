@@ -293,6 +293,7 @@ export function buildProviderPeopleQuery(filters: Partial<ProviderPeopleFilters>
   setQueryParam(params, "role", next.role);
   setQueryParam(params, "patient_id", next.patientId);
   setQueryParam(params, "insurance_provider", next.insuranceProvider);
+  if (!next.activeOnly) params.set("active_only", "false");
 
   const query = params.toString();
   return query ? `/provider-people?${query}` : "/provider-people";

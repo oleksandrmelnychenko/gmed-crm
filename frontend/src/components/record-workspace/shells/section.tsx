@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 
 import { tokens } from "../primitives/design-tokens";
 
+
 export function Section({
   title,
   accessory,
@@ -18,13 +19,7 @@ export function Section({
   showMarker?: boolean;
 }) {
   return (
-    <section
-      className={cn(
-        "space-y-2.5 rounded-xl p-3.5",
-        tokens.surface.softCard,
-        className,
-      )}
-    >
+    <section className={cn("space-y-2.5", className)}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           {showMarker ? (

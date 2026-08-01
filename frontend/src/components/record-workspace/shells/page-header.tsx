@@ -39,7 +39,7 @@ export function PageHeader({ title, actions }: PageHeaderProps) {
       </div>
       {topbarSlot
         ? createPortal(
-            <div className="flex w-full min-w-0 items-center gap-3">
+            <div className="flex h-9 w-fit max-w-full min-w-0 items-center gap-3 rounded-lg border border-border/50 bg-muted/25 px-2.5">
               <h1 className="min-w-0 truncate text-[15px] font-medium tracking-tight text-foreground">
                 {title}
               </h1>

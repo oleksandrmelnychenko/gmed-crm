@@ -1,10 +1,29 @@
-import { useMemo } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useMemo, useState } from "react";
 
+import { ColumnVisibilityMenu } from "@/components/data-table/column-visibility-menu";
+import { DataTable } from "@/components/data-table/data-table";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
-import type { ColumnDef, DensityLevel } from "@/components/data-table/types";
+import { applyFilters } from "@/components/data-table/filter-logic";
+import { FilterBuilder } from "@/components/data-table/filter-builder";
+import { applySort } from "@/components/data-table/sort-logic";
+import { SortBuilder } from "@/components/data-table/sort-builder";
+import type {
+  ColumnDef,
+  DensityLevel,
+  FilterPredicate,
+  SortStack,
+} from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
-import { uiText } from "@/lib/i18n";
+import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { uiText, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import {
+  DEFAULT_DOCUMENT_PAGE_SIZE,
+  DOCUMENT_PAGE_SIZE_OPTIONS,
+  buildDocumentPage,
+} from "@/pages/documents/model/document-pagination";
 
 type DocumentsGridItem = {
   id: string;
@@ -60,8 +79,248 @@ type DocumentsGridProps = {
   formatSensitivityLabel: (value: string) => string;
   formatFileSize: (value: number | null) => string;
   formatDateTime: (value?: string | null) => string;
+  paginated?: boolean;
+  paginationResetKey?: string;
   rowHeightOverrides?: Partial<Record<DensityLevel, number>>;
 };
+
+type PaginatedDocumentsTableProps = {
+  columns: readonly ColumnDef<DocumentsGridItem>[];
+  documents: readonly DocumentsGridItem[];
+  filenameLabel: string;
+  onOpenDocument: (id: string) => void;
+  onSelectionChange: (ids: string[]) => void;
+  paginationResetKey: string;
+  rowHeightOverrides?: Partial<Record<DensityLevel, number>>;
+  selectedDocumentIds: string[];
+  selectedId: string | null;
+  showSelection: boolean;
+};
+
+function PaginatedDocumentsTable({
+  columns,
+  documents,
+  filenameLabel,
+  onOpenDocument,
+  onSelectionChange,
+  paginationResetKey,
+  rowHeightOverrides,
+  selectedDocumentIds,
+  selectedId,
+  showSelection,
+}: PaginatedDocumentsTableProps) {
+  const { t } = useLang();
+  const [filters, setFilters] = useState<FilterPredicate[]>([]);
+  const [sortStack, setSortStack] = useState<SortStack>([
+    { field: "updated_at", dir: "desc" },
+  ]);
+  const [hiddenColumns, setHiddenColumns] = useState<string[]>(["updated_at"]);
+  const [frozenColumns, setFrozenColumns] = useState<string[]>(["filename"]);
+  const [paginationState, setPaginationState] = useState(() => ({
+    pageIndex: 0,
+    pageSize: DEFAULT_DOCUMENT_PAGE_SIZE,
+    resetKey: paginationResetKey,
+  }));
+  const pageIndex =
+    paginationState.resetKey === paginationResetKey
+      ? paginationState.pageIndex
+      : 0;
+  const pageSize = paginationState.pageSize;
+
+  function setPageIndex(nextPageIndex: number) {
+    setPaginationState((current) => ({
+      ...current,
+      pageIndex: nextPageIndex,
+      resetKey: paginationResetKey,
+    }));
+  }
+
+  function setPageSize(nextPageSize: number) {
+    setPaginationState({
+      pageIndex: 0,
+      pageSize: nextPageSize,
+      resetKey: paginationResetKey,
+    });
+  }
+
+  const visibleColumnIds = useMemo(
+    () => new Set(columns.map((column) => column.id)),
+    [columns],
+  );
+  const effectiveFrozenColumns = useMemo(
+    () => frozenColumns.filter((id) => visibleColumnIds.has(id)),
+    [frozenColumns, visibleColumnIds],
+  );
+  const effectiveHiddenColumns = useMemo(
+    () => hiddenColumns.filter((id) => visibleColumnIds.has(id)),
+    [hiddenColumns, visibleColumnIds],
+  );
+  const enhancedColumns = useMemo<ColumnDef<DocumentsGridItem>[]>(() => {
+    const frozenSet = new Set(effectiveFrozenColumns);
+    return columns.map((column) => ({
+      ...column,
+      filterType: column.filterType ?? "text",
+      pinned: frozenSet.has(column.id) ? "left" : undefined,
+      sortable: column.sortable ?? true,
+    }));
+  }, [columns, effectiveFrozenColumns]);
+  const accessors = useMemo(
+    () =>
+      Object.fromEntries(
+        enhancedColumns.map((column) => [column.id, column.accessor]),
+      ),
+    [enhancedColumns],
+  );
+  const visibleRows = useMemo(
+    () =>
+      applySort(applyFilters(documents, filters, { accessors }), sortStack, {
+        accessors,
+      }),
+    [accessors, documents, filters, sortStack],
+  );
+  const page = useMemo(
+    () => buildDocumentPage(visibleRows, pageIndex, pageSize),
+    [pageIndex, pageSize, visibleRows],
+  );
+  const pageIdSet = useMemo(
+    () => new Set(page.rows.map((document) => document.id)),
+    [page.rows],
+  );
+  const pageSelectedIds = useMemo(
+    () => selectedDocumentIds.filter((id) => pageIdSet.has(id)),
+    [pageIdSet, selectedDocumentIds],
+  );
+
+  function updateFilters(next: FilterPredicate[]) {
+    setFilters(next);
+    setPageIndex(0);
+  }
+
+  function updateSort(next: SortStack) {
+    setSortStack(next);
+    setPageIndex(0);
+  }
+
+  function updatePageSelection(nextPageIds: string[]) {
+    const preservedIds = selectedDocumentIds.filter((id) => !pageIdSet.has(id));
+    onSelectionChange([...preservedIds, ...nextPageIds]);
+  }
+
+  function updateColumnFreeze(columnId: string, frozen: boolean) {
+    if (frozen) {
+      if (
+        effectiveFrozenColumns.includes(columnId) ||
+        effectiveFrozenColumns.length >= 3
+      ) {
+        return;
+      }
+      setFrozenColumns([...effectiveFrozenColumns, columnId]);
+      return;
+    }
+    setFrozenColumns(effectiveFrozenColumns.filter((id) => id !== columnId));
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b border-border/70 px-3 py-2">
+        <FilterBuilder
+          columns={enhancedColumns}
+          rows={documents}
+          filters={filters}
+          onChange={updateFilters}
+        />
+        <SortBuilder
+          columns={enhancedColumns}
+          value={sortStack}
+          onChange={updateSort}
+        />
+        <ColumnVisibilityMenu
+          columns={enhancedColumns}
+          hiddenColumns={effectiveHiddenColumns}
+          onChange={setHiddenColumns}
+          defaultHidden={["updated_at"]}
+          frozenColumns={effectiveFrozenColumns}
+          onFrozenColumnsChange={setFrozenColumns}
+          defaultFrozen={["filename"]}
+          maxFrozenColumns={3}
+        />
+      </div>
+      <DataTable
+        rows={page.rows}
+        columns={enhancedColumns}
+        hiddenColumns={effectiveHiddenColumns}
+        sort={sortStack}
+        onSortChange={updateSort}
+        onColumnFreezeChange={updateColumnFreeze}
+        isColumnFreezeDisabled={(column, nextFrozen) =>
+          nextFrozen &&
+          !effectiveFrozenColumns.includes(column.id) &&
+          effectiveFrozenColumns.length >= 3
+        }
+        rowId={(document) => document.id}
+        activeRowId={selectedId}
+        selectionEnabled={showSelection}
+        selectedIds={pageSelectedIds}
+        onSelectedIdsChange={updatePageSelection}
+        onRowClick={(document) => onOpenDocument(document.id)}
+        className="min-h-[360px] rounded-none border-0 shadow-none"
+        rowHeightOverrides={rowHeightOverrides}
+        footer={
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="tabular-nums">
+              {page.start}-{page.end} / {visibleRows.length}{" "}
+              {filenameLabel.toLowerCase()}
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-1.5 whitespace-nowrap">
+                <span>{t.pagination_per_page}</span>
+                <NativeComboboxSelect
+                  value={String(pageSize)}
+                  onChange={(event) => {
+                    setPageSize(Number(event.target.value));
+                  }}
+                  className="h-7 w-[76px] rounded-lg bg-background text-xs"
+                  aria-label={t.pagination_per_page}
+                >
+                  {DOCUMENT_PAGE_SIZE_OPTIONS.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7"
+                disabled={page.pageIndex === 0}
+                onClick={() => setPageIndex(page.pageIndex - 1)}
+              >
+                <ChevronLeft className="size-3.5" />
+                {t.pagination_previous}
+              </Button>
+              <span className="min-w-14 text-center tabular-nums">
+                {page.pageIndex + 1} / {page.totalPages}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7"
+                disabled={page.pageIndex >= page.totalPages - 1}
+                onClick={() => setPageIndex(page.pageIndex + 1)}
+              >
+                {t.pagination_next}
+                <ChevronRight className="size-3.5" />
+              </Button>
+            </div>
+          </div>
+        }
+      />
+    </div>
+  );
+}
 
 export function DocumentsGrid({
   documents,
@@ -80,6 +339,8 @@ export function DocumentsGrid({
   formatSensitivityLabel,
   formatFileSize,
   formatDateTime,
+  paginated = false,
+  paginationResetKey = "",
   rowHeightOverrides,
 }: DocumentsGridProps) {
   const {
@@ -286,6 +547,23 @@ export function DocumentsGrid({
     visibilityBadge,
     visibilityLabel,
   ]);
+
+  if (paginated) {
+    return (
+      <PaginatedDocumentsTable
+        columns={columns}
+        documents={documents}
+        filenameLabel={filenameLabel}
+        onOpenDocument={onOpenDocument}
+        onSelectionChange={onSelectionChange}
+        paginationResetKey={paginationResetKey}
+        rowHeightOverrides={rowHeightOverrides}
+        selectedDocumentIds={selectedDocumentIds}
+        selectedId={selectedId}
+        showSelection={showSelection}
+      />
+    );
+  }
 
   return (
     <DataTableSurface

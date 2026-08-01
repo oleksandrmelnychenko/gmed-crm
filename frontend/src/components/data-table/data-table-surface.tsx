@@ -46,6 +46,8 @@ export type DataTableSurfaceProps<T> = Omit<
    * filtering and sorting (children are exempt from both).
    */
   expandRow?: (row: T) => readonly T[] | null;
+  /** Custom controls rendered at the start of the toolbar row (before filter/sort). */
+  toolbarStart?: ReactNode;
   footer?: ReactNode | ((context: DataTableSurfaceFooterContext<T>) => ReactNode);
   groupLabels?: Record<string, string>;
   maxFrozenColumns?: number;
@@ -111,6 +113,7 @@ export function DataTableSurface<T>({
   surfaceClassName,
   tableClassName,
   toolbarClassName,
+  toolbarStart,
   ...tableProps
 }: DataTableSurfaceProps<T>) {
   const { t } = useLang();
@@ -256,6 +259,7 @@ export function DataTableSurface<T>({
           toolbarClassName,
         )}
       >
+        {toolbarStart}
         <FilterBuilder
           columns={enhancedColumns}
           rows={rows}

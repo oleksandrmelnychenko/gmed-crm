@@ -279,6 +279,7 @@ export type DocumentComplianceKind =
   | "confidentiality_release"
   | "identity"
   | "framework_contract"
+  | "enhanced_due_diligence"
   | "other";
 
 export type MarkDocumentSignedResponse = {

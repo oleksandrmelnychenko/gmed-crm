@@ -3235,6 +3235,8 @@ function StaffDocumentsPage({
         ) : (
           <DocumentsGrid
             documents={documents}
+            paginated
+            paginationResetKey={documentsPath}
             selectedDocumentIds={selectedDocumentIds}
             selectedId={selectedId}
             labels={{
@@ -6992,27 +6994,25 @@ function DocumentIntakeQueueTable({
         sortable: true,
         required: true,
         pinned: "left",
-        width: 160,
+        width: 280,
         render: (item) => (
-          <div className="min-w-0">
-            <div className="flex min-w-0 items-center gap-1.5">
-              <span className="truncate font-medium text-foreground">
-                {localizeDocumentCode(item.auto_name, l)}
+          <div
+            className="flex min-w-0 items-center gap-1.5"
+            title={item.original_filename ?? undefined}
+          >
+            {item.document_number ? (
+              <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+                {formatBusinessDocumentNumber(item.document_number)}
               </span>
-              {!item.has_stored_file && item.file_deleted_at ? (
-                <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                  {t.documents_file_removed}
-                </span>
-              ) : null}
-            </div>
-            <div className="mt-0.5 flex min-w-0 items-baseline gap-1.5 text-[11px] text-muted-foreground">
-              {item.document_number ? (
-                <span className="shrink-0 font-mono tabular-nums">
-                  {formatBusinessDocumentNumber(item.document_number)}
-                </span>
-              ) : null}
-              <span className="truncate">{item.original_filename ?? t.documents_unlinked_document}</span>
-            </div>
+            ) : null}
+            <span className="truncate text-xs font-medium text-foreground">
+              {localizeDocumentCode(item.auto_name, l)}
+            </span>
+            {!item.has_stored_file && item.file_deleted_at ? (
+              <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
+                {t.documents_file_removed}
+              </span>
+            ) : null}
           </div>
         ),
       },
@@ -7025,13 +7025,13 @@ function DocumentIntakeQueueTable({
         width: 220,
         render: (item) =>
           item.patient_name || item.patient_pid ? (
-            <div className="min-w-0">
-              <span className="font-mono text-[11px] text-muted-foreground">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
                 {item.patient_pid ?? text.pidFallback}
               </span>
-              <div className="truncate text-xs text-foreground">
+              <span className="truncate font-mono text-xs text-foreground">
                 {item.patient_name ?? t.common_not_set}
-              </div>
+              </span>
             </div>
           ) : (
             <span className="text-xs text-muted-foreground">
@@ -7060,21 +7060,19 @@ function DocumentIntakeQueueTable({
           }
 
           return (
-            <div className="min-w-0">
-              <div className="truncate text-xs font-medium text-foreground">
+            <div
+              className="flex min-w-0 items-center gap-1.5"
+              title={suggestion.rationale ?? undefined}
+            >
+              <span className="truncate text-xs font-medium text-foreground">
                 {text.suggested(
                   localizeDocumentCode(suggestion.art, l),
                   localizeDocumentCode(suggestion.category, l),
                 )}
-              </div>
-              <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                {t.documents_confidence}:{" "}
-                {formatConfidenceLabel(
-                  suggestion.confidence,
-                  t,
-                )}
-                {suggestion.rationale ? ` / ${suggestion.rationale}` : ""}
-              </div>
+              </span>
+              <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                {formatConfidenceLabel(suggestion.confidence, t)}
+              </span>
             </div>
           );
         },
@@ -7086,10 +7084,10 @@ function DocumentIntakeQueueTable({
         sortable: true,
         width: 150,
         render: (item) => (
-          <div className="flex min-w-0 flex-col items-start gap-1">
+          <div className="flex min-w-0 items-center gap-1.5">
             <Badge
               variant="outline"
-              className="rounded-full border-amber-200 bg-amber-50 text-[10px] text-amber-700"
+              className="shrink-0 rounded-full border-amber-200 bg-amber-50 text-[10px] text-amber-700"
             >
               {t.documents_needs_review}
             </Badge>
@@ -7212,17 +7210,17 @@ function DocumentTranslationRequestsTable({
         sortable: true,
         required: true,
         pinned: "left",
-        width: 160,
+        width: 280,
         render: (request) => (
-          <div className="min-w-0">
-            <div className="truncate font-medium text-foreground">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-xs font-medium text-foreground">
               {request.document_name || request.document_id}
-            </div>
-            <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+            </span>
+            <span className="shrink-0 truncate text-[11px] text-muted-foreground">
               {request.document_category
                 ? localizeDocumentCode(request.document_category, l)
                 : t.documents_unclassified}
-            </div>
+            </span>
           </div>
         ),
       },
@@ -7236,13 +7234,13 @@ function DocumentTranslationRequestsTable({
         width: 220,
         render: (request) =>
           request.patient_name || request.patient_pid ? (
-            <div className="min-w-0">
-              <span className="font-mono text-[11px] text-muted-foreground">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
                 {request.patient_pid ?? t.uiText.documents_pid_fallback}
               </span>
-              <div className="truncate text-xs text-foreground">
+              <span className="truncate font-mono text-xs text-foreground">
                 {request.patient_name ?? t.common_not_set}
-              </div>
+              </span>
             </div>
           ) : (
             <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
@@ -7287,13 +7285,13 @@ function DocumentTranslationRequestsTable({
         sortable: true,
         width: 158,
         render: (request) => (
-          <div className="min-w-0">
-            <div className="truncate text-xs text-foreground">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="shrink-0 font-mono text-xs tabular-nums text-foreground">
               {formatDateTime(request.requested_at)}
-            </div>
-            <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+            </span>
+            <span className="truncate text-[11px] text-muted-foreground">
               {formatDocumentSourceLabel(request.request_source, t)}
-            </div>
+            </span>
           </div>
         ),
       },
@@ -7306,15 +7304,11 @@ function DocumentTranslationRequestsTable({
         sortable: true,
         width: 120,
         render: (request) => (
-          <div className="min-w-0">
-            <div className="truncate text-xs text-foreground">
-              {request.assigned_to_name ?? t.common_not_set}
-            </div>
-            {request.translated_document_name ? (
-              <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                {request.translated_document_name}
-              </div>
-            ) : null}
+          <div
+            className="min-w-0 truncate text-xs text-foreground"
+            title={request.translated_document_name ?? undefined}
+          >
+            {request.assigned_to_name ?? t.common_not_set}
           </div>
         ),
       },

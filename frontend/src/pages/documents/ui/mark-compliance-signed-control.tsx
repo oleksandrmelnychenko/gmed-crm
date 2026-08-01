@@ -17,6 +17,7 @@ const KINDS: readonly DocumentComplianceKind[] = [
   "confidentiality_release",
   "identity",
   "framework_contract",
+  "enhanced_due_diligence",
   "other",
 ];
 
@@ -30,6 +31,8 @@ function kindLabel(kind: DocumentComplianceKind, tx: Bilingual): string {
       return tx("Подтверждение личности", "Identitätsnachweis");
     case "framework_contract":
       return tx("Рамочный договор", "Rahmenvertrag");
+    case "enhanced_due_diligence":
+      return tx("Усиленная AML-проверка", "Verstärkte AML-Sorgfaltsprüfung");
     case "other":
       return tx("Другое", "Sonstiges");
   }

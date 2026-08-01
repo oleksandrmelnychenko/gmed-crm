@@ -1603,13 +1603,23 @@ function useStaffInvoicesPageContent() {
 
         {optionsError ? <ShellBanner tone="error">{optionsError}</ShellBanner> : null}
 
-        <div className="rounded-xl border border-border bg-card p-6">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.invoices_title)}</h2>
-            </div>
-          </div>
-          <div className="relative z-30 mt-5 flex flex-wrap items-center gap-1.5">
+        <div className="space-y-3">
+          {listError ? <ShellBanner tone="error">{listError}</ShellBanner> : null}
+          <DataTableSurface
+            rows={invoices}
+            columns={invoiceTableColumns}
+            rowId={(row) => row.id}
+            defaultDensity="comfortable"
+            defaultFrozenColumns={INVOICE_DEFAULT_FROZEN_COLUMNS}
+            dictionary={t as unknown as Record<string, string>}
+            groupLabels={invoiceColumnGroups}
+            loading={listBusy}
+            maxFrozenColumns={INVOICE_MAX_FROZEN_COLUMNS}
+            surfaceClassName="space-y-0 overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm"
+            tableClassName="rounded-none border-0 shadow-none"
+            toolbarClassName="flex-nowrap overflow-x-auto border-b border-border/70 bg-card px-3 py-2"
+            toolbarStart={
+              <>
             <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -1778,25 +1788,8 @@ function useStaffInvoicesPageContent() {
                 </Button>
               ) : null}
             </div>
-          </div>
-
-          {listError ? (
-            <div className="mt-4">
-              <ShellBanner tone="error">{listError}</ShellBanner>
-            </div>
-          ) : null}
-          <div className="mt-5">
-            <DataTableSurface
-            rows={invoices}
-            columns={invoiceTableColumns}
-            rowId={(row) => row.id}
-            defaultDensity="comfortable"
-            defaultFrozenColumns={INVOICE_DEFAULT_FROZEN_COLUMNS}
-            dictionary={t as unknown as Record<string, string>}
-            groupLabels={invoiceColumnGroups}
-            loading={listBusy}
-            maxFrozenColumns={INVOICE_MAX_FROZEN_COLUMNS}
-            toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
+              </>
+            }
             activeRowId={selectedInvoiceId || null}
             onRowClick={(row) => openInvoice(row.id)}
             rowAccent={(row) => {
@@ -1826,9 +1819,8 @@ function useStaffInvoicesPageContent() {
                   : `${filteredCount} / ${totalCount}`;
               return `${text.pageLabel} ${invoicePage} ${text.pageOf} ${invoiceTotalPages} | ${pageRowsLabel} / ${invoiceTotal} ${text.invoiceCount}`;
             }}
-            />
-          </div>
-          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+          />
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
             <div className="flex gap-2">
               <Button
                 type="button"

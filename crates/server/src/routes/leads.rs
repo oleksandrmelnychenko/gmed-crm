@@ -776,6 +776,7 @@ struct LeadConversionReadinessInput {
     confidentiality_release_signed: bool,
     enhanced_due_diligence_required: bool,
     enhanced_due_diligence_document_generated: bool,
+    enhanced_due_diligence_document_signed: bool,
     contract_signed: bool,
     framework_document_generated: bool,
     order_exists: bool,
@@ -836,7 +837,8 @@ fn evaluate_lead_conversion_readiness(
         && input.dsgvo_document_signed
         && input.confidentiality_release_signed
         && (!input.enhanced_due_diligence_required
-            || input.enhanced_due_diligence_document_generated);
+            || (input.enhanced_due_diligence_document_generated
+                && input.enhanced_due_diligence_document_signed));
     let commercial_ready = input.contract_signed
         && input.framework_document_generated
         && input.order_exists
@@ -946,6 +948,14 @@ fn evaluate_lead_conversion_readiness(
             "label": "Enhanced due diligence documented when required",
             "passed": !input.enhanced_due_diligence_required
                 || input.enhanced_due_diligence_document_generated,
+            "blocking_for": "conversion",
+            "stage": "documents",
+        }),
+        json!({
+            "key": "enhanced_due_diligence_document_signed",
+            "label": "Enhanced due diligence document signed when required",
+            "passed": !input.enhanced_due_diligence_required
+                || input.enhanced_due_diligence_document_signed,
             "blocking_for": "conversion",
             "stage": "documents",
         }),
@@ -1077,6 +1087,9 @@ fn evaluate_lead_conversion_readiness(
     }
     if input.enhanced_due_diligence_required && !input.enhanced_due_diligence_document_generated {
         conversion_reasons.push("Enhanced due diligence document is missing".to_string());
+    } else if input.enhanced_due_diligence_required && !input.enhanced_due_diligence_document_signed
+    {
+        conversion_reasons.push("Enhanced due diligence document is not signed".to_string());
     }
     if !input.contract_signed {
         conversion_reasons.push("Framework contract is not signed".to_string());
@@ -1183,6 +1196,9 @@ fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversio
         enhanced_due_diligence_document_generated: row
             .try_get("enhanced_due_diligence_document_generated")
             .unwrap_or(false),
+        enhanced_due_diligence_document_signed: row
+            .try_get("enhanced_due_diligence_document_signed")
+            .unwrap_or(false),
         contract_signed: row.try_get("contract_signed").unwrap_or(false),
         framework_document_generated: row.try_get("framework_document_generated").unwrap_or(false),
         order_exists: row.try_get("order_exists").unwrap_or(false),
@@ -1249,7 +1265,16 @@ async fn load_lead_conversion_readiness(
                         AND d.generated_template_id = 'enhanced_due_diligence'
                         AND d.status = 'active'
                         AND d.file_deleted_at IS NULL
-                  ) AS enhanced_due_diligence_document_generated,
+                   ) AS enhanced_due_diligence_document_generated,
+                   EXISTS (
+                       SELECT 1 FROM documents d
+                       WHERE d.lead_id = leads.id
+                         AND d.generated_template_id = 'enhanced_due_diligence'
+                         AND d.status = 'active'
+                         AND d.file_deleted_at IS NULL
+                         AND d.compliance_kind = 'enhanced_due_diligence'
+                         AND d.signed_at IS NOT NULL
+                   ) AS enhanced_due_diligence_document_signed,
                   EXISTS (
                       SELECT 1 FROM framework_contracts fc
                       WHERE fc.lead_id = leads.id

@@ -74,6 +74,7 @@ export type ProviderPeopleFilters = {
   role: string;
   patientId: string;
   insuranceProvider: string;
+  activeOnly: boolean;
 };
 
 export const DEFAULT_PROVIDER_PEOPLE_FILTERS: ProviderPeopleFilters = {
@@ -88,6 +89,7 @@ export const DEFAULT_PROVIDER_PEOPLE_FILTERS: ProviderPeopleFilters = {
   role: "",
   patientId: "",
   insuranceProvider: "",
+  activeOnly: true,
 };
 
 export type ProviderPeoplePatientOption = {

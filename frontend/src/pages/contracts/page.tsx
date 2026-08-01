@@ -16,6 +16,7 @@ import {
   LoaderCircle,
   Plus,
   Search,
+  X,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -920,9 +921,12 @@ function useContractsPageContent() {
         id: "description",
         label: text.description,
         accessor: (row) => agencyServiceDescriptionLabel(row.service_key, row.description, t),
-        width: 320,
+        width: 460,
         render: (row) => (
-          <span className="block max-w-[320px] truncate text-sm text-foreground">
+          <span
+            className="block truncate text-sm text-foreground"
+            title={agencyServiceDescriptionLabel(row.service_key, row.description, t)}
+          >
             {agencyServiceDescriptionLabel(row.service_key, row.description, t)}
           </span>
         ),
@@ -934,7 +938,9 @@ function useContractsPageContent() {
         filterType: "number",
         sortable: true,
         width: 140,
-        render: (row) => formatCurrency(row.unit_price),
+        render: (row) => (
+          <span className="font-medium text-foreground">{formatCurrency(row.unit_price)}</span>
+        ),
       },
       {
         id: "unit_label",
@@ -998,7 +1004,7 @@ function useContractsPageContent() {
         accessor: (row) => row.contract_number,
         sortable: true,
         required: true,
-        width: 180,
+        width: 220,
         render: (row) => <span className="font-mono text-xs">{row.contract_number}</span>,
       },
       {
@@ -1007,7 +1013,7 @@ function useContractsPageContent() {
         accessor: (row) => row.patient_name,
         sortable: true,
         required: true,
-        width: 240,
+        width: 300,
       },
       {
         id: "patient_pid",
@@ -1083,7 +1089,7 @@ function useContractsPageContent() {
         accessor: (row) => row.quote_number,
         sortable: true,
         required: true,
-        width: 180,
+        width: 220,
         render: (row) => <span className="font-mono text-xs">{row.quote_number}</span>,
       },
       {
@@ -1092,7 +1098,7 @@ function useContractsPageContent() {
         accessor: (row) => row.patient_name,
         sortable: true,
         required: true,
-        width: 220,
+        width: 280,
       },
       {
         id: "order_number",
@@ -1201,12 +1207,15 @@ function useContractsPageContent() {
         filterType: "number",
         sortable: true,
         width: 140,
-        render: (row) => formatCurrency(row.unit_price),
+        render: (row) => (
+          <span className="font-medium text-foreground">{formatCurrency(row.unit_price)}</span>
+        ),
       },
       {
         id: "vat_rate",
         label: t.invoices_vat,
         accessor: (row) => Number(row.vat_rate ?? 0),
+        filterType: "number",
         sortable: true,
         width: 110,
         render: (row) => `${row.vat_rate}%`,
@@ -1912,7 +1921,7 @@ function useContractsPageContent() {
 
         {optionsError ? <ShellBanner tone="error">{optionsError}</ShellBanner> : null}
 
-        <section className="rounded-xl border border-border bg-card p-6">
+        <section>
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.agencyServiceTitle)}</h2>
@@ -1922,64 +1931,12 @@ function useContractsPageContent() {
             </Badge>
           </div>
 
-          <div className="mt-5 space-y-4 border-b border-border pb-4">
+          <div className="mt-5 space-y-3">
             <div className="grid gap-1.5 sm:grid-cols-3">
               <MiniMetric label={text.catalogItems} value={String(agencyServiceStats.total)} />
               <MiniMetric label={text.activeLabel} value={String(agencyServiceStats.active)} />
               <MiniMetric label={text.priced} value={String(agencyServiceStats.priced)} />
             </div>
-
-            <div className="flex items-center gap-2" aria-hidden>
-              <span className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border" />
-              <span className="size-1.5 rounded-full bg-orange-400" />
-              <span className="size-1.5 rounded-full bg-orange-300" />
-              <span className="size-1.5 rounded-full bg-orange-200" />
-              <span className="h-px flex-1 bg-gradient-to-r from-border via-border to-transparent" />
-            </div>
-
-            <AdminToolbar className="rounded-none border-0 bg-transparent p-0 shadow-none">
-              <div className="relative min-w-[260px] flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  type="search"
-                  aria-label={text.agencyServiceSearchPlaceholder}
-                  value={agencyServiceFilters.search}
-                  onChange={(event) =>
-                    setAgencyServiceFilters((current) => ({
-                      ...current,
-                      search: event.target.value,
-                    }))
-                  }
-                  className={cn(shellInputClassName, "pl-9")}
-                  placeholder={text.agencyServiceSearchPlaceholder}
-                />
-              </div>
-              <NativeComboboxSelect
-                value={agencyServiceFilters.activeOnly || "__all__"}
-                onChange={(event) =>
-                  setAgencyServiceFilters((current) => ({
-                    ...current,
-                    activeOnly:
-                      event.target.value && event.target.value !== "__all__"
-                        ? event.target.value
-                        : "",
-                  }))
-                }
-                className={cn(selectClassName, "w-[180px] min-w-[180px]")}
-              >
-                <option value="true">{text.activeOnly}</option>
-                <option value="__all__">{text.allStatuses}</option>
-                <option value="false">{text.inactiveOnly}</option>
-              </NativeComboboxSelect>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-lg px-3.5"
-                onClick={() => setAgencyServiceFilters(DEFAULT_AGENCY_SERVICE_FILTERS)}
-              >
-                {t.access_reset}
-              </Button>
-            </AdminToolbar>
 
             {agencyServicesError ? <ShellBanner tone="error">{agencyServicesError}</ShellBanner> : null}
           </div>
@@ -1993,10 +1950,55 @@ function useContractsPageContent() {
             loading={agencyServicesLoading}
             activeRowId={agencyServiceForm.id || null}
             onRowClick={permissions.canManageCatalog ? handleEditAgencyService : undefined}
-            rowAccent={(row) => {
-              if (row.id === agencyServiceForm.id) return "bg-sky-500";
-              return row.is_active ? "bg-emerald-500" : "bg-zinc-300";
-            }}
+            surfaceClassName="mt-3 space-y-0 overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm"
+            tableClassName="rounded-none border-0 shadow-none"
+            toolbarClassName="flex-nowrap overflow-x-auto border-b border-border/70 bg-card px-3 py-2"
+            toolbarStart={
+              <>
+                <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    type="search"
+                    aria-label={text.agencyServiceSearchPlaceholder}
+                    value={agencyServiceFilters.search}
+                    onChange={(event) =>
+                      setAgencyServiceFilters((current) => ({
+                        ...current,
+                        search: event.target.value,
+                      }))
+                    }
+                    className={cn(shellInputClassName, "h-8 rounded-lg bg-background pl-8 text-[13px]")}
+                    placeholder={text.agencyServiceSearchPlaceholder}
+                  />
+                </div>
+                <NativeComboboxSelect
+                  value={agencyServiceFilters.activeOnly || "__all__"}
+                  onChange={(event) =>
+                    setAgencyServiceFilters((current) => ({
+                      ...current,
+                      activeOnly:
+                        event.target.value && event.target.value !== "__all__"
+                          ? event.target.value
+                          : "",
+                    }))
+                  }
+                  className={cn(selectClassName, "h-8 w-[180px] min-w-[180px] bg-background text-[13px]")}
+                >
+                  <option value="true">{text.activeOnly}</option>
+                  <option value="__all__">{text.allStatuses}</option>
+                  <option value="false">{text.inactiveOnly}</option>
+                </NativeComboboxSelect>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setAgencyServiceFilters(DEFAULT_AGENCY_SERVICE_FILTERS)}
+                >
+                  <X className="size-3.5" />
+                  {t.access_reset}
+                </Button>
+              </>
+            }
             emptyState={
               <EmptyState
                 title={text.noCatalogItems}
@@ -2015,7 +2017,7 @@ function useContractsPageContent() {
         </section>
 
         <div className="space-y-4">
-            <section className="rounded-xl border border-border bg-card p-6">
+            <section>
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.contractsTab)}</h2>
@@ -2130,7 +2132,7 @@ function useContractsPageContent() {
                 />
             </section>
           
-            <section className="rounded-xl border border-border bg-card p-6">
+            <section>
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.quotesTab)}</h2>
@@ -2680,7 +2682,7 @@ function useContractsPageContent() {
                 <EmptyState title={t.common_not_set} description={t.contracts_subtitle} />
               ) : (
                 <>
-                  <section className="rounded-xl border border-border bg-card p-6">
+                  <section>
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.contracts_title)}</h2>
@@ -2731,7 +2733,7 @@ function useContractsPageContent() {
                     </div>
                   </section>
 
-                  <section className="rounded-xl border border-border bg-card p-6">
+                  <section>
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.providers_linked_patients)}</h2>
@@ -2786,7 +2788,7 @@ function useContractsPageContent() {
                     </div>
                   </section>
 
-                  <section className="rounded-xl border border-border bg-card p-6">
+                  <section>
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.contracts_status)}</h2>
@@ -2901,7 +2903,7 @@ function useContractsPageContent() {
                 <EmptyState title={t.common_not_set} description={t.contracts_subtitle} />
               ) : (
                 <>
-                  <section className="rounded-xl border border-border bg-card p-6">
+                  <section>
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.quotesTab)}</h2>
@@ -2951,7 +2953,7 @@ function useContractsPageContent() {
                     </div>
                   </section>
 
-                  <section className="rounded-xl border border-border bg-card p-6">
+                  <section>
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.providers_linked_patients)}</h2>
@@ -3021,7 +3023,7 @@ function useContractsPageContent() {
                     </div>
                   </section>
 
-                  <section className="rounded-xl border border-border bg-card p-6">
+                  <section>
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.quoteLifecycle)}</h2>
@@ -3084,7 +3086,7 @@ function useContractsPageContent() {
                     </div>
                   </section>
 
-                  <section className="rounded-xl border border-border bg-card p-6">
+                  <section>
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.lineItems)}</h2>
@@ -3103,7 +3105,7 @@ function useContractsPageContent() {
                     </div>
                   </section>
 
-                  <section className="rounded-xl border border-border bg-card p-6">
+                  <section>
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.versionHistory)}</h2>

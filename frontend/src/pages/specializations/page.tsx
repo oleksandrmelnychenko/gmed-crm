@@ -353,13 +353,13 @@ export function SpecializationsPage() {
       setWorkTypeSheet(null);
       const nextSpecializationIds =
         payload.specialization_ids ?? [selectedSpecializationId];
-      if (!nextSpecializationIds.includes(selectedSpecializationId)) {
-        setSelectedSpecializationId(
-          nextSpecializationIds[0] ?? selectedSpecializationId,
-        );
-      } else {
-        setReloadWorkTypesToken((current) => current + 1);
-      }
+      const nextSelectedSpecializationId = nextSpecializationIds.includes(
+        selectedSpecializationId,
+      )
+        ? selectedSpecializationId
+        : nextSpecializationIds[0] ?? selectedSpecializationId;
+      await loadSpecializations(nextSelectedSpecializationId);
+      setReloadWorkTypesToken((current) => current + 1);
       toast.success(
         item
           ? tx("Вид работы обновлён.", "Leistungsart aktualisiert.")
@@ -386,6 +386,7 @@ export function SpecializationsPage() {
     setBusyAction(`work-type-delete-${item.id}`);
     try {
       await deleteSpecializationWorkType(selectedSpecializationId, item.id);
+      await loadSpecializations(selectedSpecializationId);
       setReloadWorkTypesToken((current) => current + 1);
       toast.success(tx("Вид работы удалён.", "Leistungsart gelöscht."));
     } catch (error) {
@@ -588,7 +589,7 @@ export function SpecializationsPage() {
                 <div className="hidden min-w-[720px] grid-cols-[minmax(220px,1.5fr)_190px_110px_96px_80px] gap-3 border-b border-border/60 bg-muted/25 px-5 py-2 text-[11px] font-semibold uppercase text-muted-foreground md:grid">
                   <span>{tx("Вид работы", "Leistungsart")}</span>
                   <span>{tx("Диапазон, EUR", "Preisspanne, EUR")}</span>
-                  <span>{tx("Описания", "Beschreibungen")}</span>
+                  <span className="text-right">{tx("Описания", "Beschreibungen")}</span>
                   <span>{tx("Статус", "Status")}</span>
                   <span className="text-right">{tx("Действия", "Aktionen")}</span>
                 </div>
@@ -636,7 +637,7 @@ export function SpecializationsPage() {
                         <span className="font-mono text-sm tabular-nums text-foreground">
                           {formatPriceRange(item, lang)}
                         </span>
-                        <span className="font-mono text-sm tabular-nums text-muted-foreground">
+                        <span className="text-right font-mono text-sm tabular-nums text-muted-foreground">
                           {item.descriptions.length}
                         </span>
                         <span>{activeBadge(item.is_active, tx)}</span>

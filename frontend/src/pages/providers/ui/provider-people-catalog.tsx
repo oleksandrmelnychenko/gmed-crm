@@ -1041,7 +1041,7 @@ function FiltersBar({
     );
   };
   const setPersonType = (value: ProviderPeopleFilters["personType"]) => {
-    const patch: Partial<ProviderPeopleFilters> = { personType: value };
+    const patch: Partial<ProviderPeopleFilters> = { personType: value, role: "" };
     if (value === "staff" || forceNonMedical) {
       patch.fachbereich = "";
       patch.specialization = "";
@@ -1188,6 +1188,19 @@ function FiltersBar({
           <option value="">{allLabel}</option>
           <option value="medical">{providerTypeLabel("medical", labels)}</option>
           <option value="non_medical">{providerTypeLabel("non_medical", labels)}</option>
+        </SelectField>
+
+        <SelectField
+          label={localizedFallback(lang, "Status", "Статус")}
+          value={filters.activeOnly ? "true" : "false"}
+          onChange={(value) => setFilter("activeOnly", value === "true")}
+        >
+          <option value="true">
+            {localizedFallback(lang, "Nur aktive", "Только активные")}
+          </option>
+          <option value="false">
+            {localizedFallback(lang, "Alle, einschließlich inaktive", "Все, включая неактивные")}
+          </option>
         </SelectField>
 
         {showClinicalFilters ? (

@@ -172,15 +172,6 @@ const LEAD_REALTIME_EVENTS = [
   "lead.failed_resolved",
 ] as const;
 
-function titleWithDot(title: ReactNode) {
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
-      <span>{title}</span>
-    </span>
-  );
-}
-
 function shouldOpenWizardFromRow(lead: LeadListItem, canConvert: boolean) {
   return canConvert &&
     ACTIVE_WIZARD_LEAD_STATUSES.has(lead.qualification_status) &&
@@ -227,7 +218,7 @@ function leadDetailDateOfBirth(detail: LeadDetail) {
 }
 
 function cardClass(extra?: string) {
-  return cn("rounded-xl border border-border bg-card", extra);
+  return cn(extra);
 }
 
 function Banner({
@@ -604,20 +595,29 @@ function useLeadsPageContent() {
         })),
         group: "qualification",
         sortable: true,
-        width: 210,
+        width: 170,
+        render: (row) => (
+          <StatusBadge tone={leadStatusTone(row.qualification_status)}>
+            {statusLabel(row.qualification_status, t)}
+          </StatusBadge>
+        ),
+      },
+      {
+        id: "days_in_status",
+        label: lang === "de" ? "Tage im Status" : "Дней в статусе",
+        accessor: (row) => daysInStatus(row.status_changed_at) ?? 0,
+        filterType: "number",
+        group: "qualification",
+        sortable: true,
+        width: 130,
         render: (row) => {
           const days = daysInStatus(row.status_changed_at);
-          return (
-            <div className="flex min-w-0 items-center gap-1.5">
-              <StatusBadge tone={leadStatusTone(row.qualification_status)}>
-                {statusLabel(row.qualification_status, t)}
-              </StatusBadge>
-              {days != null ? (
-                <span className="shrink-0 whitespace-nowrap text-[11px] tabular-nums text-muted-foreground">
-                  {daysInStatusLabel(days, lang)}
-                </span>
-              ) : null}
-            </div>
+          return days != null ? (
+            <span className="whitespace-nowrap font-mono text-xs tabular-nums text-foreground">
+              {daysInStatusLabel(days, lang)}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">—</span>
           );
         },
       },
@@ -2468,11 +2468,22 @@ function useLeadsPageContent() {
         {error ? <ShellBanner tone="error">{error}</ShellBanner> : null}
         {successMessage ? <SuccessBanner>{successMessage}</SuccessBanner> : null}
 
-        <AdminTableCard
-          title={titleWithDot(t.leads_title)}
-          count={filteredLeads.length}
-        >
-          <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b border-border/70 bg-card px-3 py-2">
+        <AdminTableCard>
+          <DataTableSurface
+            rows={filteredLeads}
+            columns={leadColumns}
+            rowId={(row) => row.id}
+            defaultDensity="comfortable"
+            defaultFrozenColumns={LEAD_DEFAULT_FROZEN_COLUMNS}
+            dictionary={t as unknown as Record<string, string>}
+            groupLabels={leadColumnGroupLabels}
+            loading={loading}
+            maxFrozenColumns={LEAD_MAX_FROZEN_COLUMNS}
+            surfaceClassName="space-y-0 overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm"
+            tableClassName="rounded-none border-0 shadow-none"
+            toolbarClassName="flex-nowrap overflow-x-auto border-b border-border/70 bg-card px-3 py-2"
+            toolbarStart={
+              <>
             <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -2573,19 +2584,8 @@ function useLeadsPageContent() {
                 </Button>
               ) : null}
             </div>
-          </div>
-
-          <DataTableSurface
-            rows={filteredLeads}
-            columns={leadColumns}
-            rowId={(row) => row.id}
-            defaultDensity="comfortable"
-            defaultFrozenColumns={LEAD_DEFAULT_FROZEN_COLUMNS}
-            dictionary={t as unknown as Record<string, string>}
-            groupLabels={leadColumnGroupLabels}
-            loading={loading}
-            maxFrozenColumns={LEAD_MAX_FROZEN_COLUMNS}
-            toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
+              </>
+            }
             activeRowId={wizardLeadId || selectedLeadId || null}
             onRowClick={openLeadFromRow}
             rowAccent={(row) => leadRowAccent(row.qualification_status)}

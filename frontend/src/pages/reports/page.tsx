@@ -461,7 +461,7 @@ function clearReportsStatsCache() {
 }
 
 function card(extra?: string) {
-  return cn("rounded-xl border border-border bg-card", extra);
+  return cn(extra);
 }
 
 function titleWithDot(title: string) {

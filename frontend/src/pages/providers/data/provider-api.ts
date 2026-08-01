@@ -169,19 +169,20 @@ export function fetchProviders(path: string) {
   });
 }
 
-export function fetchSpecializations(includeInactive = false) {
+export function fetchSpecializations(includeInactive = false, forceFresh = false) {
   const path = includeInactive
     ? "/providers/specializations?include_inactive=true"
     : "/providers/specializations";
   return apiFetch<SpecializationItem[]>(path, {
     cacheTtlMs: PROVIDER_STATIC_META_CACHE_TTL_MS,
+    forceFresh,
   }).then((items) =>
     items.map(normalizeSpecializationItem),
   );
 }
 
 export function fetchSpecializationsForAdmin() {
-  return fetchSpecializations(true);
+  return fetchSpecializations(true, true);
 }
 
 export function fetchInsuranceProviders(includeInactive = false) {

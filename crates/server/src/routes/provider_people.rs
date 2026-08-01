@@ -72,6 +72,8 @@ async fn list_provider_people(
     }
     let provider_type = if auth.role == Role::Concierge {
         Some("non_medical".to_string())
+    } else if requested_provider_type.is_none() && person_type == PersonTypeFilter::Doctor {
+        Some("medical".to_string())
     } else {
         requested_provider_type
     };
@@ -86,12 +88,10 @@ async fn list_provider_people(
     let provider_id = query.provider_id;
     let provider_taxonomy_node_id = query.provider_taxonomy_node_id.or(query.taxonomy_node_id);
     let patient_id = query.patient_id;
-    let search_pattern = like_pattern(query.search);
-    let specialization_terms = normalize_filter_terms([
-        query.fachbereich,
-        query.specialization,
-        query.specializations,
-    ]);
+    let search_term = normalize_optional(query.search).unwrap_or_default();
+    let fachbereich_terms = normalize_filter_terms([query.fachbereich]);
+    let specialization_terms =
+        normalize_filter_terms([query.specialization, query.specializations]);
     let role = normalize_optional(query.role).map(|value| value.to_lowercase());
     let role_pattern = role
         .as_ref()
@@ -113,7 +113,8 @@ async fn list_provider_people(
             provider_taxonomy_node_id,
             patient_id,
             provider_type.as_deref(),
-            &search_pattern,
+            &search_term,
+            &fachbereich_terms,
             &specialization_terms,
             role.as_deref(),
             &role_pattern,
@@ -129,6 +130,7 @@ async fn list_provider_people(
 
     if matches!(person_type, PersonTypeFilter::Staff | PersonTypeFilter::All)
         && patient_id.is_none()
+        && fachbereich_terms.is_empty()
         && specialization_terms.is_empty()
         && !has_insurance_provider_filter
     {
@@ -138,7 +140,7 @@ async fn list_provider_people(
             provider_id,
             provider_taxonomy_node_id,
             provider_type.as_deref(),
-            &search_pattern,
+            &search_term,
             role.as_deref(),
             &role_pattern,
             gender.as_deref(),
@@ -167,7 +169,8 @@ async fn load_doctor_people(
     provider_taxonomy_node_id: Option<Uuid>,
     patient_id: Option<Uuid>,
     provider_type: Option<&str>,
-    search_pattern: &str,
+    search_term: &str,
+    fachbereich_terms: &[String],
     specialization_terms: &[String],
     role: Option<&str>,
     role_pattern: &str,
@@ -262,34 +265,34 @@ async fn load_doctor_people(
              AND ($2::uuid IS NULL OR p.id = $2)
              AND ($3::text IS NULL OR p.provider_type = $3)
              AND (
-                 $4::text = '%%'
-                 OR de_normalize(concat_ws(' ',
+                 $4::text = ''
+                 OR POSITION(de_normalize($4) IN de_normalize(concat_ws(' ',
                       d.name, d.display_name, d.first_name, d.last_name,
                       d.title, d.role_code, d.role_label,
                       to_jsonb(d)->>'subrole', d.fachbereich,
                       d.license_number, d.licensing_country, d.phone, d.email,
                       p.name, p.legal_name, p.tax_id, p.address_city, p.address_country
-                    )) LIKE de_normalize($4)
+                    ))) > 0
                  OR EXISTS (
                      SELECT 1
                      FROM provider_person_contacts pc
                      WHERE pc.doctor_id = d.id
                        AND pc.provider_id = p.id
-                       AND de_normalize(pc.value) LIKE de_normalize($4)
+                       AND POSITION(de_normalize($4) IN de_normalize(pc.value)) > 0
                  )
                  OR EXISTS (
                      SELECT 1
 	                     FROM provider_doctor_specializations ds
 	                     JOIN medical_specializations ms ON ms.id = ds.specialization_id
 	                     WHERE ds.doctor_id = d.id
-	                       AND de_normalize(concat_ws(' ', ms.code, ms.name_en, ms.name_de, ms.name_ru)) LIKE de_normalize($4)
+	                       AND POSITION(de_normalize($4) IN de_normalize(concat_ws(' ', ms.code, ms.name_en, ms.name_de, ms.name_ru))) > 0
 	                 )
 	                 OR EXISTS (
 	                     SELECT 1
 	                     FROM provider_doctor_insurances di
 	                     JOIN insurance_providers ip ON ip.id = di.insurance_provider_id
 	                     WHERE di.doctor_id = d.id
-	                       AND de_normalize(ip.name) LIKE de_normalize($4)
+	                       AND POSITION(de_normalize($4) IN de_normalize(ip.name)) > 0
 	                 )
 	             )
              AND (
@@ -299,6 +302,9 @@ async fn load_doctor_people(
                      FROM unnest($5::text[]) AS wanted(value)
                      WHERE lower(COALESCE(d.fachbereich, '')) LIKE '%' || wanted.value || '%'
                  )
+             )
+             AND (
+                 cardinality($6::text[]) = 0
                  OR EXISTS (
                      SELECT 1
                      FROM provider_doctor_specializations ds
@@ -306,7 +312,7 @@ async fn load_doctor_people(
                      WHERE ds.doctor_id = d.id
                        AND EXISTS (
                            SELECT 1
-                           FROM unnest($5::text[]) AS wanted(value)
+                           FROM unnest($6::text[]) AS wanted(value)
                            WHERE lower(ms.code) LIKE '%' || wanted.value || '%'
                               OR lower(ms.name_en) LIKE '%' || wanted.value || '%'
                               OR lower(COALESCE(ms.name_de, '')) LIKE '%' || wanted.value || '%'
@@ -315,25 +321,67 @@ async fn load_doctor_people(
                  )
              )
              AND (
-                 $6::text IS NULL
-                 OR lower(COALESCE(d.role_code, '')) = $6
-                 OR lower(COALESCE(d.role_label, '')) = $6
-                 OR lower(COALESCE(to_jsonb(d)->>'subrole', '')) = $6
-                 OR COALESCE(d.role_label, '') ILIKE $7
-                 OR COALESCE(to_jsonb(d)->>'subrole', '') ILIKE $7
+                 $7::text IS NULL
+                 OR lower(COALESCE(d.role_code, '')) = $7
+                 OR lower(COALESCE(d.role_label, '')) = $7
+                 OR lower(COALESCE(to_jsonb(d)->>'subrole', '')) = $7
+                 OR COALESCE(d.role_label, '') ILIKE $8
+                 OR COALESCE(to_jsonb(d)->>'subrole', '') ILIKE $8
              )
-             AND ($8::text IS NULL OR d.gender = $8)
+             AND ($9::text IS NULL OR d.gender = $9)
              AND (
-                 $9::uuid IS NULL
+                 $10::uuid IS NULL
                  OR EXISTS (
                      SELECT 1
                      FROM appointments a
                      WHERE a.doctor_id = d.id
-                       AND a.patient_id = $9
+                       AND a.provider_id = p.id
+                       AND a.patient_id = $10
+                 )
+                 OR EXISTS (
+                     SELECT 1
+                     FROM order_leistungen ol
+                     JOIN orders o ON o.id = ol.order_id
+                     WHERE ol.doctor_id = d.id
+                       AND ol.provider_id = p.id
+                       AND o.patient_id = $10
+                 )
+                 OR EXISTS (
+                     SELECT 1
+                     FROM patient_diagnoses pd
+                     WHERE (pd.doctor_id = d.id OR pd.treating_doctor_id = d.id)
+                       AND pd.patient_id = $10
+                 )
+                 OR EXISTS (
+                     SELECT 1
+                     FROM patient_medications pm
+                     WHERE pm.doctor_id = d.id
+                       AND pm.provider_id = p.id
+                       AND pm.patient_id = $10
+                 )
+                 OR EXISTS (
+                     SELECT 1
+                     FROM patient_examinations pe
+                     WHERE pe.doctor_id = d.id
+                       AND pe.provider_id = p.id
+                       AND pe.patient_id = $10
+                 )
+                 OR EXISTS (
+                     SELECT 1
+                     FROM patient_procedures pp
+                     WHERE pp.doctor_id = d.id
+                       AND pp.provider_id = p.id
+                       AND pp.patient_id = $10
+                 )
+                 OR EXISTS (
+                     SELECT 1
+                     FROM patient_recommendations pr
+                     WHERE pr.source_doctor_id = d.id
+                       AND pr.patient_id = $10
                  )
              )
 	             AND (
-	                 $10::uuid IS NULL
+	                 $11::uuid IS NULL
                  OR EXISTS (
                     WITH RECURSIVE assigned_taxonomy AS (
                         SELECT ptn.id, ptn.parent_id
@@ -349,11 +397,11 @@ async fn load_doctor_people(
                     )
                     SELECT 1
                     FROM assigned_taxonomy
-                    WHERE id = $10
+                    WHERE id = $11
 	                 )
 	             )
 	             AND (
-	                 cardinality($11::text[]) = 0
+	                 cardinality($12::text[]) = 0
 	                 OR EXISTS (
 	                     SELECT 1
 	                     FROM provider_doctor_insurances di
@@ -361,7 +409,7 @@ async fn load_doctor_people(
 	                     WHERE di.doctor_id = d.id
 	                       AND EXISTS (
 	                           SELECT 1
-	                           FROM unnest($11::text[]) AS wanted(value)
+	                           FROM unnest($12::text[]) AS wanted(value)
 	                           WHERE de_normalize(ip.name) LIKE '%' || de_normalize(wanted.value) || '%'
 	                       )
 	                 )
@@ -371,7 +419,8 @@ async fn load_doctor_people(
     .bind(active_only)
     .bind(provider_id)
     .bind(provider_type)
-    .bind(search_pattern)
+    .bind(search_term)
+    .bind(fachbereich_terms)
     .bind(specialization_terms)
     .bind(role)
     .bind(role_pattern)
@@ -689,7 +738,7 @@ async fn load_staff_people(
     provider_id: Option<Uuid>,
     provider_taxonomy_node_id: Option<Uuid>,
     provider_type: Option<&str>,
-    search_pattern: &str,
+    search_term: &str,
     role: Option<&str>,
     role_pattern: &str,
     gender: Option<&str>,
@@ -744,17 +793,17 @@ async fn load_staff_people(
              AND ($2::uuid IS NULL OR p.id = $2)
              AND ($3::text IS NULL OR p.provider_type = $3)
              AND (
-                 $4::text = '%%'
-                 OR de_normalize(concat_ws(' ',
+                 $4::text = ''
+                 OR POSITION(de_normalize($4) IN de_normalize(concat_ws(' ',
                       s.display_name, s.first_name, s.last_name, s.role,
                       sr.name_en, sr.name_de, sr.name_ru, s.department,
                       p.name, p.legal_name, p.tax_id, p.address_city, p.address_country
-                    )) LIKE de_normalize($4)
+                    ))) > 0
                  OR EXISTS (
                      SELECT 1
                      FROM provider_person_contacts pc
                      WHERE pc.staff_id = s.id
-                       AND de_normalize(pc.value) LIKE de_normalize($4)
+                       AND POSITION(de_normalize($4) IN de_normalize(pc.value)) > 0
                  )
              )
              AND (
@@ -793,7 +842,7 @@ async fn load_staff_people(
     .bind(active_only)
     .bind(provider_id)
     .bind(provider_type)
-    .bind(search_pattern)
+    .bind(search_term)
     .bind(role)
     .bind(role_pattern)
     .bind(gender)
@@ -898,12 +947,6 @@ fn normalize_filter_terms<const N: usize>(values: [Option<String>; N]) -> Vec<St
         }
     }
     terms
-}
-
-fn like_pattern(value: Option<String>) -> String {
-    normalize_optional(value)
-        .map(|value| format!("%{value}%"))
-        .unwrap_or_else(|| "%%".to_string())
 }
 
 fn contacts_with_legacy(contacts: Value, phone: Option<String>, email: Option<String>) -> Value {

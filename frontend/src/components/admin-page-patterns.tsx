@@ -159,29 +159,29 @@ export function AdminTableCard({
   children,
   className,
 }: {
-  title: ReactNode;
+  title?: ReactNode;
   description?: ReactNode;
   count?: ReactNode;
   accessory?: ReactNode;
   children: ReactNode;
   className?: string;
 }) {
+  const hasHeader = title !== undefined || count !== undefined || Boolean(accessory);
   return (
-    <div
-      className={cn(
-        "rounded-xl border border-border bg-card overflow-hidden",
-        className,
-      )}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-            {title}
-          </h3>
-          {count !== undefined ? <CountBadge>{count}</CountBadge> : null}
+    <div className={cn("space-y-2", className)}>
+      {hasHeader ? (
+        <div className="flex flex-wrap items-start justify-between gap-3 px-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {title !== undefined ? (
+              <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
+                {title}
+              </h3>
+            ) : null}
+            {count !== undefined ? <CountBadge>{count}</CountBadge> : null}
+          </div>
+          {accessory ? <div className="shrink-0">{accessory}</div> : null}
         </div>
-        {accessory ? <div className="shrink-0">{accessory}</div> : null}
-      </div>
+      ) : null}
       {children}
     </div>
   );

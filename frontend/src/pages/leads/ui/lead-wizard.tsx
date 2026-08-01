@@ -1457,6 +1457,7 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Signed DSGVO document is missing": tx("Создайте и подтвердите документ согласий", "Einwilligungsdokument erstellen und bestätigen"),
     "Signed confidentiality release is missing": tx("Создайте и подтвердите освобождение от медицинской тайны", "Schweigepflichtsentbindung erstellen und bestätigen"),
     "Enhanced due diligence document is missing": tx("Заполните усиленную AML-проверку и создайте документ", "Verstärkte AML-Sorgfaltsprüfung ausfüllen und Dokument erstellen"),
+    "Enhanced due diligence document is not signed": tx("Получите подпись на документе усиленной AML-проверки", "Unterschrift für die verstärkte AML-Sorgfaltsprüfung einholen"),
     "Anamnesis intake is incomplete": tx("Укажите причину обращения", "Anliegen angeben"),
     "Framework contract is not signed": tx("Подпишите рамочный договор", "Rahmenvertrag unterzeichnen"),
     "Framework contract document is missing": tx("Создайте документ рамочного договора", "Rahmenvertragsdokument erstellen"),
@@ -1491,6 +1492,8 @@ function readinessReasonStep(reason: string): StepId {
     "Identity document is not verified": "documents",
     "Signed DSGVO document is missing": "documents",
     "Signed confidentiality release is missing": "documents",
+    "Enhanced due diligence document is missing": "documents",
+    "Enhanced due diligence document is not signed": "documents",
     "Anamnesis intake is incomplete": "medical",
     "Framework contract is not signed": "commercial",
     "Framework contract document is missing": "commercial",
@@ -1672,6 +1675,26 @@ function documentsValidationIssues(
       step: "documents",
       message: readinessReasonLabel("Identity document is not verified", tx),
       fieldId: "lead-file-identity",
+    });
+  }
+  const amlRequired = Boolean(
+    amlRiskForCountries(draft.country, draft.registrationCountry)
+    || draft.amlEnhancedDueDiligence.pepContractPartner
+    || draft.amlEnhancedDueDiligence.pepBeneficialOwner
+  );
+  if (amlRequired && !documents.enhanced_due_diligence.some((document) => (
+    document.signed_at && document.compliance_kind === "enhanced_due_diligence"
+  ))) {
+    const documentGenerated = documents.enhanced_due_diligence.length > 0;
+    issues.push({
+      key: "enhanced-due-diligence-document",
+      step: "documents",
+      message: readinessReasonLabel(
+        documentGenerated
+          ? "Enhanced due diligence document is not signed"
+          : "Enhanced due diligence document is missing",
+        tx,
+      ),
     });
   }
   return issues;
@@ -4430,12 +4453,12 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(value) => handleAmlCountryChange("country", value)}
                   />
                 </Field>
-                <Field label={tx("Страна регистрации", "Meldeland")}>
+                <Field label={tx("Гражданство", "Staatsangehörigkeit")}>
                   <CountrySelect
                     value={draft.registrationCountry}
                     lang={lang}
                     className={selectClass}
-                    aria-label={tx("Страна регистрации", "Meldeland")}
+                    aria-label={tx("Гражданство", "Staatsangehörigkeit")}
                     onChange={(value) => handleAmlCountryChange("registrationCountry", value)}
                   />
                 </Field>
@@ -4506,6 +4529,7 @@ ${serviceCommentLines.join("\n")}`
                       <div className="mt-3 border-t border-current/15 pt-3">
                         <WizardDocumentRows
                           documents={wizardDocuments.enhanced_due_diligence}
+                          complianceKind="enhanced_due_diligence"
                           emptyLabel=""
                           lang={lang}
                           busy={busy}
@@ -4513,6 +4537,7 @@ ${serviceCommentLines.join("\n")}`
                           tx={tx}
                           onOpen={(document) => void openOrDownloadDocument(document)}
                           onDownload={(document) => void downloadDocument(document)}
+                          onSign={(document, kind) => void signDocument(document.id, kind)}
                           onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                         />
                       </div>
@@ -4810,6 +4835,7 @@ ${serviceCommentLines.join("\n")}`
                 >
                   <WizardDocumentRows
                     documents={wizardDocuments.enhanced_due_diligence}
+                    complianceKind="enhanced_due_diligence"
                     emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
                     lang={lang}
                     busy={busy}
@@ -4817,6 +4843,7 @@ ${serviceCommentLines.join("\n")}`
                     tx={tx}
                     onOpen={(document) => void openOrDownloadDocument(document)}
                     onDownload={(document) => void downloadDocument(document)}
+                    onSign={(document, kind) => void signDocument(document.id, kind)}
                     onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                   />
                 </Section>
