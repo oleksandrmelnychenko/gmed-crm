@@ -4072,6 +4072,110 @@ async fn convert_lead(
     }
 
     if let Err(error) = sqlx::query(
+        r#"WITH consent_evidence AS (
+               SELECT 'document'::text AS source_kind,
+                      d.id AS source_id,
+                      CASE d.compliance_kind
+                        WHEN 'dsgvo' THEN 'dsgvo_data_transfer'
+                        WHEN 'confidentiality_release' THEN 'schweigepflicht_release'
+                        WHEN 'framework_contract' THEN 'treatment_contract'
+                      END AS consent_type,
+                      COALESCE(d.signed_by, d.uploaded_by) AS managed_by,
+                      d.signed_at AS granted_at,
+                      d.signed_at + INTERVAL '1 year' AS expires_at,
+                      jsonb_build_object(
+                        'source', 'lead_document_signature',
+                        'source_document_id', d.id,
+                        'source_lead_id', $2,
+                        'compliance_kind', d.compliance_kind
+                      ) AS context
+               FROM documents d
+               WHERE d.patient_id = $1
+                 AND d.signed_at IS NOT NULL
+                 AND d.file_deleted_at IS NULL
+                 AND d.compliance_kind IN ('dsgvo', 'confidentiality_release', 'framework_contract')
+
+               UNION ALL
+
+               SELECT 'framework_contract'::text,
+                      fc.id,
+                      'treatment_contract'::text,
+                      fc.created_by,
+                      fc.signed_at,
+                      COALESCE(
+                        fc.valid_to::timestamp AT TIME ZONE 'UTC',
+                        fc.signed_at + INTERVAL '1 year'
+                      ),
+                      jsonb_build_object(
+                        'source', 'lead_framework_contract',
+                        'source_contract_id', fc.id,
+                        'source_lead_id', $2,
+                        'contract_number', fc.contract_number
+                      )
+               FROM framework_contracts fc
+               WHERE fc.patient_id = $1
+                 AND fc.status = 'signed'
+                 AND fc.signed_at IS NOT NULL
+
+               UNION ALL
+
+               SELECT 'lead_contact_consent'::text,
+                      l.id,
+                      channel.consent_type,
+                      $3::uuid,
+                      COALESCE(l.submitted_at, l.created_at, now()),
+                      COALESCE(l.submitted_at, l.created_at, now()) + INTERVAL '1 year',
+                      jsonb_build_object(
+                        'source', 'lead_contact_consent',
+                        'source_lead_id', l.id,
+                        'channel', channel.channel
+                      )
+               FROM leads l
+               CROSS JOIN LATERAL (
+                 VALUES
+                   ('document_share_email'::text, 'email'::text, $4::bool),
+                   ('document_share_whatsapp'::text, 'whatsapp'::text, $5::bool)
+               ) AS channel(consent_type, channel, granted)
+               WHERE l.id = $2
+                 AND channel.granted
+           ), latest_evidence AS (
+               SELECT DISTINCT ON (consent_type)
+                      consent_type, managed_by, granted_at, expires_at, context
+               FROM consent_evidence
+               WHERE consent_type IS NOT NULL
+                 AND managed_by IS NOT NULL
+                 AND granted_at IS NOT NULL
+               ORDER BY consent_type, granted_at DESC, source_kind, source_id DESC
+           )
+           INSERT INTO consent_records (
+               patient_id, user_id, consent_type, granted, granted_at, expires_at, context
+           )
+           SELECT $1, evidence.managed_by, evidence.consent_type, true,
+                  evidence.granted_at, evidence.expires_at, evidence.context
+           FROM latest_evidence evidence
+           WHERE NOT EXISTS (
+               SELECT 1
+               FROM consent_records existing
+               WHERE existing.patient_id = $1
+                 AND existing.consent_type = evidence.consent_type
+                 AND existing.granted = true
+                 AND existing.revoked_at IS NULL
+                 AND (existing.expires_at IS NULL OR existing.expires_at > now())
+           )"#,
+    )
+    .bind(patient_id)
+    .bind(lead_id)
+    .bind(auth.user_id)
+    .bind(email_consent.unwrap_or(false))
+    .bind(whatsapp_consent.unwrap_or(false))
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "transfer lead consent evidence");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    if let Err(error) = sqlx::query(
         r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
            SELECT $1, $2, $2
            UNION
@@ -5330,6 +5434,7 @@ mod lead_conversion_readiness_tests {
             confidentiality_release_signed: true,
             enhanced_due_diligence_required: false,
             enhanced_due_diligence_document_generated: false,
+            enhanced_due_diligence_document_signed: false,
             contract_signed: true,
             framework_document_generated: true,
             order_exists: true,

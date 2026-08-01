@@ -1588,6 +1588,15 @@ fn document_satisfies_compliance_kind(
     }
 }
 
+fn consent_type_for_compliance_kind(compliance_kind: &str) -> Option<&'static str> {
+    match compliance_kind {
+        "dsgvo" => Some("dsgvo_data_transfer"),
+        "confidentiality_release" => Some("schweigepflicht_release"),
+        "framework_contract" => Some("treatment_contract"),
+        _ => None,
+    }
+}
+
 /// Record a document as the signed evidence for a compliance requirement, and
 /// atomically flip the matching flag on the linked patient's `legal_status`
 /// (#13). Replaces the previous two-step dance of "upload a scan" + "separately
@@ -1745,6 +1754,52 @@ async fn mark_document_signed(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
         compliance_updated = true;
+    }
+    if let (Some(pid), Some(consent_type)) = (patient_id, consent_type_for_compliance_kind(kind))
+        && let Err(e) = sqlx::query(
+            r#"WITH existing_evidence AS (
+                   SELECT EXISTS (
+                       SELECT 1
+                       FROM consent_records
+                       WHERE patient_id = $1
+                         AND consent_type = $2
+                         AND granted = true
+                         AND revoked_at IS NULL
+                         AND context->>'source_document_id' = $3::text
+                   ) AS found
+               ), closed AS (
+                   UPDATE consent_records
+                   SET revoked_at = GREATEST($4, COALESCE(granted_at, created_at))
+                   WHERE patient_id = $1
+                     AND consent_type = $2
+                     AND granted = true
+                     AND revoked_at IS NULL
+                     AND NOT (SELECT found FROM existing_evidence)
+                   RETURNING id
+               )
+               INSERT INTO consent_records (
+                   patient_id, user_id, consent_type, granted,
+                   granted_at, expires_at, context
+               )
+               SELECT $1, $5, $2, true, $4, $4 + INTERVAL '1 year',
+                      jsonb_build_object(
+                        'source', 'document_signature',
+                        'source_document_id', $3,
+                        'compliance_kind', $6
+                      )
+               WHERE NOT (SELECT found FROM existing_evidence)"#,
+        )
+        .bind(pid)
+        .bind(consent_type)
+        .bind(document_id)
+        .bind(signed_at)
+        .bind(auth.user_id)
+        .bind(kind)
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(error = %e, patient_id = %pid, document_id = %document_id, "sync signed document consent");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     if let Some(lead_id) = lead_id
         && kind == "dsgvo"
@@ -8759,13 +8814,22 @@ async fn has_active_patient_share_consent(
     sqlx::query_scalar(
         r#"SELECT EXISTS(
                SELECT 1
-               FROM consent_records
-               WHERE patient_id = $1
-                 AND user_id = $2
-                 AND consent_type = $3
-                 AND granted = true
-                 AND revoked_at IS NULL
-                 AND (expires_at IS NULL OR expires_at > now())
+               FROM consent_records consent
+               WHERE consent.patient_id = $1
+                 AND consent.consent_type = $3
+                 AND consent.granted = true
+                 AND consent.revoked_at IS NULL
+                 AND (consent.expires_at IS NULL OR consent.expires_at > now())
+                 AND EXISTS (
+                     SELECT 1
+                     FROM patient_assignments assignment
+                     JOIN users target_user ON target_user.id = assignment.user_id
+                     WHERE assignment.patient_id = consent.patient_id
+                       AND assignment.user_id = $2
+                       AND assignment.revoked_at IS NULL
+                       AND target_user.role = 'patient'
+                       AND target_user.is_active = true
+                 )
            )"#,
     )
     .bind(patient_id)
@@ -21718,11 +21782,11 @@ mod tests {
         build_adult_privacy_information_pdf, build_consent_pdf, build_cost_estimate_pdf,
         build_enhanced_due_diligence_pdf, build_framework_contract_pdf,
         build_manual_generated_text_pdf, build_order_cost_estimate_pdf, build_patient_sticker_pdf,
-        build_single_order_pdf, compute_line_item_totals, cost_coverage_money_cell,
-        cost_estimate_price_text, document_satisfies_compliance_kind, document_template_by_id,
-        finalize_admin_pdf, generated_binding_snapshot, generated_cost_estimate_document_number,
-        generated_document_number_for_template, generated_typed_document_number,
-        german_document_country, is_fixed_legal_document_template,
+        build_single_order_pdf, compute_line_item_totals, consent_type_for_compliance_kind,
+        cost_coverage_money_cell, cost_estimate_price_text, document_satisfies_compliance_kind,
+        document_template_by_id, finalize_admin_pdf, generated_binding_snapshot,
+        generated_cost_estimate_document_number, generated_document_number_for_template,
+        generated_typed_document_number, german_document_country, is_fixed_legal_document_template,
         is_lead_allowed_document_template, legal_agency_block_lines, legal_document_reference,
         localized_estimate_work_type_sections, new_admin_pdf, patient_sticker_agency_line,
         pdf_mm_to_pt, trusted_contact_recipients_binding,
@@ -21906,6 +21970,27 @@ mod tests {
             Some("privacy_consents"),
             "privacy_consents"
         ));
+    }
+
+    #[test]
+    fn signed_legal_documents_map_to_patient_consent_types() {
+        assert_eq!(
+            consent_type_for_compliance_kind("dsgvo"),
+            Some("dsgvo_data_transfer")
+        );
+        assert_eq!(
+            consent_type_for_compliance_kind("confidentiality_release"),
+            Some("schweigepflicht_release")
+        );
+        assert_eq!(
+            consent_type_for_compliance_kind("framework_contract"),
+            Some("treatment_contract")
+        );
+        assert_eq!(consent_type_for_compliance_kind("identity"), None);
+        assert_eq!(
+            consent_type_for_compliance_kind("enhanced_due_diligence"),
+            None
+        );
     }
 
     #[test]
