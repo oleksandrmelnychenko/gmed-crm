@@ -85,7 +85,7 @@ function catalogRowIdentity(row: ProviderPeopleRow) {
 }
 
 const DEFAULT_HIDDEN_COLUMNS = ["gender", "contacts", "last_interaction_at"];
-const DEFAULT_FROZEN_COLUMNS = ["person"];
+const DEFAULT_FROZEN_COLUMNS = ["person_code", "person"];
 const PROVIDER_PEOPLE_PAGE_SIZE = 50;
 const EMPTY_PATIENT_OPTIONS: readonly ProviderPeoplePatientOption[] = [];
 const EMPTY_PROVIDER_OPTIONS: readonly ProviderSummary[] = [];

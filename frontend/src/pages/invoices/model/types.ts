@@ -7,7 +7,7 @@ export type InvoiceStatus =
   | "overdue"
   | "cancelled";
 
-type InvoiceLineItem = {
+export type InvoiceLineItem = {
   description: string;
   quantity: string;
   unit_price: string;

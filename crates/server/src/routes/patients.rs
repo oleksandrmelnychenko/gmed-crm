@@ -6197,7 +6197,7 @@ async fn get_patient_timeline(
                        THEN (al.context->>'match_id')::uuid
                        ELSE NULL::uuid
                    END
-            LEFT JOIN medikamente m ON m.id = mdm.medication_id
+            LEFT JOIN patient_medications m ON m.id = mdm.patient_medication_id
             LEFT JOIN drug_products dp ON dp.id = mdm.drug_product_id
             WHERE al.entity_type = 'case'
               AND al.action = 'drug_match_verified'

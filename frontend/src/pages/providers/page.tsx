@@ -29,7 +29,6 @@ import {
   Stethoscope,
   Trash2,
   X,
-  UsersRound,
   BadgeCheck,
   ExternalLink,
 } from "lucide-react";
@@ -4815,11 +4814,15 @@ function PaginatedLinkedPatientsGrid({
   patients,
   className,
   pageSize = LINKED_PATIENTS_PAGE_SIZE,
+  toolbarTitle,
+  emptyState,
 }: {
   patients: LinkedPatient[];
   className?: string;
   cardClassName?: string;
   pageSize?: number;
+  toolbarTitle?: string;
+  emptyState?: ReactNode;
 }) {
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
@@ -4909,6 +4912,18 @@ function PaginatedLinkedPatientsGrid({
         columns={columns}
         rowId={(patient) => patient.id}
         dictionary={t as unknown as Record<string, string>}
+        emptyState={emptyState}
+        toolbarStart={
+          toolbarTitle ? (
+            <>
+              <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+                {toolbarTitle}
+              </span>
+              <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+            </>
+          ) : undefined
+        }
         toolbarAfter={
           <DataTablePager
             pageIndex={safePageIndex}
@@ -6603,70 +6618,39 @@ function DoctorSection({
     ? t.providers_doctor_new
     : t.providers_contact_person_new;
 
-  return (
-    <section className={providerDetailPanelClassName}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-          <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
-            {title}
-          </h3>
-        </div>
-        {canManage ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="default"
-              size="sm"
-              className={cn(providerPrimaryActionButtonClassName, "justify-center gap-1.5")}
-              onClick={onNew}
-            >
-              <Plus className="size-3.5" />
-              {createLabel}
-            </Button>
-          </div>
-        ) : null}
-      </div>
+  if (isMedicalProvider) {
+    return (
+      <ProviderDoctorsTable
+        title={title}
+        createLabel={canManage ? createLabel : undefined}
+        onNew={onNew}
+        doctors={detail.doctors}
+        busy={busy}
+        canManage={canManage}
+        relationshipBusy={relationshipBusy}
+        onOpen={onOpen}
+        onDelete={onDelete}
+        onDeleteRelationship={onDeleteRelationship}
+        onEdit={onEdit}
+        onEditRelationship={onEditRelationship}
+        onOpenProvider={onOpenProvider}
+        onNewRelationship={onNewRelationship}
+      />
+    );
+  }
 
-      {detail.doctors.length === 0 ? (
-        <div className="mt-4">
-          <EmptyPanel
-            title={title}
-            text={isMedicalProvider ? t.providers_no_patients : t.providers_no_contacts}
-          />
-        </div>
-      ) : isMedicalProvider ? (
-        <div className="mt-4">
-          <ProviderDoctorsTable
-            doctors={detail.doctors}
-            busy={busy}
-            canManage={canManage}
-            relationshipBusy={relationshipBusy}
-            onOpen={onOpen}
-            onDelete={onDelete}
-            onDeleteRelationship={onDeleteRelationship}
-            onEdit={onEdit}
-            onEditRelationship={onEditRelationship}
-            onOpenProvider={onOpenProvider}
-            onNewRelationship={onNewRelationship}
-          />
-        </div>
-      ) : (
-        <div className="mt-4 space-y-3">
-          {detail.doctors.map((doctor) => (
-            <ContactPersonCard
-              key={doctor.id}
-              contact={doctor}
-              busy={busy}
-              canManage={canManage}
-              onOpen={onOpen}
-              onDelete={onDelete}
-              onEdit={onEdit}
-            />
-          ))}
-        </div>
-      )}
-    </section>
+  return (
+    <ContactPersonsTable
+      contacts={detail.doctors}
+      busy={busy}
+      canManage={canManage}
+      title={title}
+      createLabel={createLabel}
+      onNew={onNew}
+      onOpen={onOpen}
+      onEdit={onEdit}
+      onDelete={onDelete}
+    />
   );
 }
 
@@ -6679,6 +6663,9 @@ type ProviderDoctorTableRow = {
 };
 
 function ProviderDoctorsTable({
+  title,
+  createLabel,
+  onNew,
   doctors,
   busy,
   canManage,
@@ -6691,6 +6678,9 @@ function ProviderDoctorsTable({
   onEditRelationship,
   onNewRelationship,
 }: {
+  title?: string;
+  createLabel?: string;
+  onNew?: () => void;
   doctors: DoctorSummary[];
   busy: boolean;
   canManage: boolean;
@@ -6895,7 +6885,32 @@ function ProviderDoctorsTable({
       columns={columns}
       rowId={(row) => row.key}
       dictionary={t as unknown as Record<string, string>}
+      emptyState={t.providers_no_doctors}
       expandRow={expandRow}
+      toolbarStart={
+        title ? (
+          <>
+            <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+              {title}
+            </span>
+            {createLabel && onNew ? (
+              <>
+                <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 shrink-0 rounded-lg gap-1.5"
+                  onClick={onNew}
+                >
+                  <Plus className="size-3.5" />
+                  {createLabel}
+                </Button>
+              </>
+            ) : null}
+          </>
+        ) : undefined
+      }
       toolbarAfter={
         <DataTablePager
           pageIndex={pagination.pageIndex}
@@ -7003,105 +7018,194 @@ function ProviderDoctorsTable({
   );
 }
 
-function ContactPersonCard({
-  contact,
+function ContactPersonsTable({
+  contacts,
   busy,
   canManage,
+  title,
+  createLabel,
+  onNew,
   onOpen,
-  onDelete,
   onEdit,
+  onDelete,
 }: {
-  contact: DoctorSummary;
+  contacts: DoctorSummary[];
   busy: boolean;
   canManage: boolean;
+  title: string;
+  createLabel: string;
+  onNew: () => void;
   onOpen: (doctor: DoctorSummary) => void;
-  onDelete: (doctorId: string, doctorName: string) => void;
   onEdit: (doctor: DoctorSummary) => void;
+  onDelete: (doctorId: string, doctorName: string) => void;
 }) {
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
-  const contacts = contactSummary(contact.contacts, contact.phone, contact.email);
-  const position = contact.subrole?.trim() ?? "";
 
-  return (
-    <div className="grid gap-3 rounded-[1.4rem] border border-border bg-card p-3.5 md:grid-cols-[minmax(0,1fr)_160px]">
-      <button
-        type="button"
-        className="min-w-0 text-left"
-        onClick={() => onOpen(contact)}
-      >
-        <div className="flex min-w-0 gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-sm font-medium text-muted-foreground">
-            <UsersRound className="size-4" />
+  const contactColumns = useMemo<ColumnDef<DoctorSummary>[]>(
+    () => [
+      {
+        id: "name",
+        label: t.users_name,
+        accessor: (contact) => doctorListDisplayName(contact),
+        sortable: true,
+        searchable: true,
+        required: true,
+        width: 230,
+        render: (contact) => (
+          <span className="block truncate font-mono text-xs font-medium text-foreground">
+            {doctorListDisplayName(contact)}
           </span>
-          <span className="min-w-0">
-            <span className="block text-sm font-semibold text-foreground">
-              {doctorListDisplayName(contact)}
+        ),
+      },
+      {
+        id: "position",
+        label: t.users_role,
+        accessor: (contact) => contact.subrole?.trim() ?? "",
+        sortable: true,
+        width: 190,
+        render: (contact) =>
+          contact.subrole?.trim() ? (
+            <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 font-mono text-[10px] font-medium text-sky-700">
+              {contact.subrole}
             </span>
-            <span className="mt-2 flex flex-wrap gap-1.5">
-              {position ? (
-                <Badge
-                  variant="outline"
-                  className="rounded-full border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700"
-                >
-                  {position}
-                </Badge>
-              ) : null}
-              <Badge
-                variant="outline"
-                className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-              >
-                {personGenderLabel(contact.gender)}
-              </Badge>
+          ) : (
+            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+          ),
+      },
+      {
+        id: "gender",
+        label: t.patients_gender,
+        accessor: (contact) => personGenderLabel(contact.gender),
+        sortable: true,
+        width: 130,
+        render: (contact) => (
+          <span className="inline-flex rounded-full border border-border/60 bg-muted/25 px-2 py-0.5 font-mono text-[10px] font-medium text-foreground">
+            {personGenderLabel(contact.gender)}
+          </span>
+        ),
+      },
+      {
+        id: "languages",
+        label: l("providers_languages"),
+        accessor: (contact) =>
+          contact.languages.map((language) => languageLabel(language, lang)).join(" "),
+        width: 200,
+        render: (contact) =>
+          contact.languages.length > 0 ? (
+            <span className="flex flex-wrap items-center gap-1">
               {contact.languages.map((language) => (
-                <Badge
+                <span
                   key={`${contact.id}-${language}`}
-                  variant="outline"
-                  className="rounded-full border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
+                  className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-mono text-[10px] font-medium text-amber-700"
                 >
                   {languageLabel(language, lang)}
-                </Badge>
+                </span>
               ))}
             </span>
-            <span className="mt-2 block text-xs leading-snug text-muted-foreground">
-              {contacts || t.common_not_set}
+          ) : (
+            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+          ),
+      },
+      {
+        id: "contacts",
+        label: l("providers_contacts"),
+        accessor: (contact) =>
+          contactSummary(contact.contacts, contact.phone, contact.email) ?? "",
+        searchable: true,
+        width: 260,
+        render: (contact) => {
+          const summary = contactSummary(contact.contacts, contact.phone, contact.email);
+          return summary ? (
+            <span className="block truncate font-mono text-xs text-foreground" title={summary}>
+              {summary}
             </span>
-            {contact.opening_hours ? (
-              <span className="mt-2 block">
-                <span className="mb-1 block text-[11px] font-medium leading-tight text-muted-foreground">
-                  {l("providers_opening_hours")}
-                </span>
-                <WeeklyAvailabilityBadgeList value={contact.opening_hours} />
-              </span>
-            ) : null}
+          ) : (
+            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+          );
+        },
+      },
+      {
+        id: "opening_hours",
+        label: l("providers_opening_hours"),
+        accessor: (contact) => contact.opening_hours ?? "",
+        width: 260,
+        render: (contact) =>
+          contact.opening_hours ? (
+            <WeeklyAvailabilityBadgeList value={contact.opening_hours} />
+          ) : (
+            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+          ),
+      },
+    ],
+    [l, lang, t],
+  );
+
+  return (
+    <DataTableSurface
+      rows={contacts}
+      columns={contactColumns}
+      rowId={(contact) => contact.id}
+      dictionary={t as unknown as Record<string, string>}
+      onRowClick={(contact) => onOpen(contact)}
+      emptyState={
+        <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+          {t.providers_no_contacts}
+        </div>
+      }
+      toolbarStart={
+        <>
+          <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+            {title}
           </span>
-        </div>
-      </button>
-      {canManage ? (
-        <div className="flex flex-col items-stretch justify-end gap-2 border-t border-dashed border-border pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
-          <Button
-            type="button"
-            variant="default"
-            size="sm"
-            className={cn(providerPrimaryActionButtonClassName, "w-full justify-center")}
-            onClick={() => onEdit(contact)}
-          >
-            {l("patients_edit")}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 w-full justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
-            disabled={busy}
-            onClick={() => onDelete(contact.id, contact.name)}
-          >
-            <Trash2 className="size-3.5" />
-            {l("patients_delete")}
-          </Button>
-        </div>
-      ) : null}
-    </div>
+          {canManage ? (
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 shrink-0 self-center rounded-lg"
+              onClick={onNew}
+            >
+              <Plus className="size-3.5" />
+              {createLabel}
+            </Button>
+          ) : null}
+          <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+        </>
+      }
+      rowActions={
+        canManage
+          ? (contact) => (
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                  onClick={() => onEdit(contact)}
+                  aria-label={l("patients_edit")}
+                  title={l("patients_edit")}
+                >
+                  <Pencil className="size-3.5" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-7 rounded-full text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                  disabled={busy}
+                  onClick={() => onDelete(contact.id, contact.name)}
+                  aria-label={l("patients_delete")}
+                  title={l("patients_delete")}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </div>
+            )
+          : undefined
+      }
+      rowActionsWidth={100}
+    />
   );
 }
 
@@ -7227,91 +7331,82 @@ function StaffSection({
   );
 
   return (
-    <section className={providerDetailPanelClassName}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-          <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
-            {l("providers_staff")}
-          </h3>
-        </div>
-        {canManage ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 justify-center rounded-lg bg-muted/20"
-              onClick={onManageRoles}
-            >
-              <BadgeCheck className="size-3.5" />
-              {l("providers_staff_roles_manage")}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 justify-center rounded-lg bg-muted/20"
-              onClick={onNew}
-            >
-              <Plus className="size-3.5" />
-              {l("providers_staff_new")}
-            </Button>
+      <DataTableSurface
+        rows={detail.staff}
+        columns={staffColumns}
+        rowId={(staff) => staff.id}
+        dictionary={t as unknown as Record<string, string>}
+        onRowClick={(staff) => onOpen(staff)}
+        emptyState={
+          <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+            {l("providers_no_staff")}
           </div>
-        ) : null}
-      </div>
-
-      {detail.staff.length === 0 ? (
-        <div className="mt-4">
-          <EmptyPanel
-            title={l("providers_staff")}
-            text={l("providers_no_staff")}
-          />
-        </div>
-      ) : (
-        <div className="mt-4">
-          <DataTableSurface
-            rows={detail.staff}
-            columns={staffColumns}
-            rowId={(staff) => staff.id}
-            dictionary={t as unknown as Record<string, string>}
-            onRowClick={(staff) => onOpen(staff)}
-            rowActions={
-              canManage
-                ? (staff) => (
-                    <div className="flex items-center gap-1">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        className="size-7 rounded-full text-muted-foreground hover:text-foreground"
-                        onClick={() => onEdit(staff)}
-                        aria-label={l("patients_edit")}
-                        title={l("patients_edit")}
-                      >
-                        <Pencil className="size-3.5" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        className="size-7 rounded-full text-rose-600 hover:bg-rose-50 hover:text-rose-700"
-                        disabled={busy}
-                        onClick={() => onDelete(staff.id, staff.display_name)}
-                        aria-label={l("patients_delete")}
-                        title={l("patients_delete")}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    </div>
-                  )
-                : undefined
-            }
-            rowActionsWidth={100}
-          />
-        </div>
-      )}
-    </section>
+        }
+        toolbarStart={
+          <>
+            <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+              {l("providers_staff")}
+            </span>
+            {canManage ? (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 shrink-0 self-center rounded-lg"
+                  onClick={onNew}
+                >
+                  <Plus className="size-3.5" />
+                  {l("providers_staff_new")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 shrink-0 self-center rounded-lg"
+                  onClick={onManageRoles}
+                >
+                  <BadgeCheck className="size-3.5" />
+                  {l("providers_staff_roles_manage")}
+                </Button>
+              </>
+            ) : null}
+            <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+          </>
+        }
+        rowActions={
+          canManage
+            ? (staff) => (
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                    onClick={() => onEdit(staff)}
+                    aria-label={l("patients_edit")}
+                    title={l("patients_edit")}
+                  >
+                    <Pencil className="size-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="size-7 rounded-full text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                    disabled={busy}
+                    onClick={() => onDelete(staff.id, staff.display_name)}
+                    aria-label={l("patients_delete")}
+                    title={l("patients_delete")}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </div>
+              )
+            : undefined
+        }
+        rowActionsWidth={100}
+      />
   );
 }
 
@@ -7345,6 +7440,7 @@ function providerWorkTypePrice(
 
 function ProviderWorkTypesCatalog({ detail }: { detail: ProviderDetail }) {
   const { t, lang } = useLang();
+  const l2 = (key: string) => t.uiText[key] ?? key;
   const [workTypes, setWorkTypes] = useState<SpecializationWorkType[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -7422,17 +7518,89 @@ function ProviderWorkTypesCatalog({ detail }: { detail: ProviderDetail }) {
     [specializationIds],
   );
 
-  return (
-    <div className="mt-4 border-y border-border/70">
-      <div className="flex items-center justify-between gap-3 bg-muted/25 px-3 py-2">
-        <p className="text-xs font-semibold text-foreground">
-          {lang === "de" ? "Leistungsarten" : "Виды работ"}
-        </p>
-        <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-          {workTypes.length}
-        </span>
-      </div>
+  const workTypeColumns = useMemo<ColumnDef<SpecializationWorkType>[]>(
+    () => [
+      {
+        id: "name",
+        label: lang === "de" ? "Leistungsart" : "Вид работ",
+        accessor: (workType) => providerWorkTypeName(workType, lang),
+        sortable: true,
+        searchable: true,
+        required: true,
+        width: 300,
+        render: (workType) => (
+          <span className="block truncate text-xs font-medium text-foreground">
+            {providerWorkTypeName(workType, lang)}
+          </span>
+        ),
+      },
+      {
+        id: "specializations",
+        label: t.providers_fachbereich,
+        accessor: (workType) =>
+          workType.specialization_ids
+            .filter((specializationId) => specializationIdSet.has(specializationId))
+            .map((specializationId) => {
+              const specialization = detail.specializations.find(
+                (candidate) => candidate.id === specializationId,
+              );
+              return specialization
+                ? specializationLabelForItem(specialization, lang)
+                : "";
+            })
+            .join(" "),
+        width: 280,
+        render: (workType) => (
+          <span className="flex flex-wrap items-center gap-1">
+            {workType.specialization_ids
+              .filter((specializationId) => specializationIdSet.has(specializationId))
+              .map((specializationId) => {
+                const specialization = detail.specializations.find(
+                  (candidate) => candidate.id === specializationId,
+                );
+                return specialization ? (
+                  <Badge
+                    key={specializationId}
+                    variant="outline"
+                    className="rounded-full font-mono text-[10px]"
+                  >
+                    {specializationLabelForItem(specialization, lang)}
+                  </Badge>
+                ) : null;
+              })}
+          </span>
+        ),
+      },
+      {
+        id: "duration",
+        label: lang === "de" ? "Dauer" : "Длительность",
+        accessor: (workType) => workType.duration_hours,
+        sortable: true,
+        width: 120,
+        render: (workType) => (
+          <span className="block text-right font-mono text-xs tabular-nums text-foreground">
+            {workType.duration_hours} {lang === "de" ? "Std." : "ч."}
+          </span>
+        ),
+      },
+      {
+        id: "price",
+        label: l2("providers_price"),
+        accessor: (workType) => workType.min_price_eur,
+        sortable: true,
+        width: 200,
+        render: (workType) => (
+          <span className="block text-right font-mono text-xs tabular-nums text-foreground">
+            {providerWorkTypePrice(workType, lang)}
+          </span>
+        ),
+      },
+    ],
+    [detail.specializations, l2, lang, specializationIdSet, t],
+  );
 
+  return (
+    <div>
       {loading ? (
         <div className="flex min-h-20 items-center justify-center text-muted-foreground">
           <LoaderCircle className="size-4 animate-spin" />
@@ -7446,47 +7614,21 @@ function ProviderWorkTypesCatalog({ detail }: { detail: ProviderDetail }) {
             : "Для специализаций виды работ не добавлены."}
         </p>
       ) : (
-        <div className="max-h-80 divide-y divide-border/60 overflow-y-auto overscroll-contain">
-          {workTypes.map((workType) => (
-            <div
-              key={workType.id}
-              className="grid min-w-0 gap-2 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_90px_190px] sm:items-center"
-            >
-              <div className="min-w-0">
-                <p className="break-words text-sm font-medium text-foreground">
-                  {providerWorkTypeName(workType, lang)}
-                </p>
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {workType.specialization_ids
-                    .filter((specializationId) =>
-                      specializationIdSet.has(specializationId),
-                    )
-                    .map((specializationId) => {
-                      const specialization = detail.specializations.find(
-                        (candidate) => candidate.id === specializationId,
-                      );
-                      return specialization ? (
-                        <Badge
-                          key={specializationId}
-                          variant="outline"
-                          className="rounded-full px-2 py-0.5 text-[11px]"
-                        >
-                          {specializationLabelForItem(specialization, lang)}
-                        </Badge>
-                      ) : null;
-                    })}
-                </div>
-              </div>
-              <span className="font-mono text-xs tabular-nums text-muted-foreground">
-                {workType.duration_hours}{" "}
-                {lang === "de" ? "Std." : "ч."}
+        <DataTableSurface
+          rows={workTypes}
+          columns={workTypeColumns}
+          rowId={(workType) => workType.id}
+          dictionary={t as unknown as Record<string, string>}
+          toolbarStart={
+            <>
+              <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+                {lang === "de" ? "Leistungsarten" : "Виды работ"}
               </span>
-              <span className="font-mono text-sm tabular-nums text-foreground">
-                {providerWorkTypePrice(workType, lang)}
-              </span>
-            </div>
-          ))}
-        </div>
+              <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+            </>
+          }
+        />
       )}
     </div>
   );
@@ -7511,110 +7653,156 @@ function ServiceSection({
 }) {
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
-  return (
-    <section className={providerDetailPanelClassName}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-          <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
-            {l("providers_service_catalog")}
-          </h3>
-          <span className="shrink-0 text-xs font-medium text-muted-foreground">
-            {detail.services.length}
-          </span>
-        </div>
-        {canManage ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 justify-center rounded-lg bg-muted/20"
-            onClick={onNew}
+
+  const serviceColumns = useMemo<ColumnDef<ServiceItem>[]>(
+    () => [
+      {
+        id: "name",
+        label: t.providers_services,
+        accessor: (service) => service.service_name,
+        sortable: true,
+        searchable: true,
+        required: true,
+        width: 260,
+        render: (service) => (
+          <div className="min-w-0">
+            <span className="block truncate text-xs font-medium text-foreground">
+              {service.service_name}
+            </span>
+            {serviceTaxonomyLabel(service, taxonomyNodes, lang) ? (
+              <span className="block truncate text-[10px] text-muted-foreground">
+                {serviceTaxonomyLabel(service, taxonomyNodes, lang)}
+              </span>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        id: "description",
+        label: t.providers_service_desc,
+        accessor: (service) => service.description ?? "",
+        searchable: true,
+        width: 300,
+        render: (service) => (
+          <span
+            className="block truncate text-xs text-muted-foreground"
+            title={service.description ?? undefined}
           >
-            <Plus className="size-3.5" />
-            {t.providers_service_new}
-          </Button>
-        ) : null}
-      </div>
+            {service.description || t.common_not_set}
+          </span>
+        ),
+      },
+      {
+        id: "valid_from",
+        label: t.providers_service_valid_from,
+        accessor: (service) => service.valid_from ?? "",
+        sortable: true,
+        filterType: "date",
+        width: 140,
+        render: (service) => (
+          <span className="font-mono text-xs tabular-nums text-foreground">
+            {compactDate(service.valid_from, t.common_not_set)}
+          </span>
+        ),
+      },
+      {
+        id: "valid_to",
+        label: t.providers_service_valid_to,
+        accessor: (service) => service.valid_to ?? "",
+        sortable: true,
+        filterType: "date",
+        width: 140,
+        render: (service) => (
+          <span className="font-mono text-xs tabular-nums text-foreground">
+            {compactDate(service.valid_to, t.common_not_set)}
+          </span>
+        ),
+      },
+      {
+        id: "price",
+        label: l("providers_price"),
+        accessor: (service) => servicePriceLabel(service),
+        sortable: true,
+        width: 180,
+        render: (service) => (
+          <span className="block text-right font-mono text-xs font-medium tabular-nums text-foreground">
+            {servicePriceLabel(service)}
+          </span>
+        ),
+      },
+    ],
+    [l, lang, t, taxonomyNodes],
+  );
 
-      <ProviderWorkTypesCatalog detail={detail} />
-
-      {detail.services.length === 0 ? (
-        <div className="mt-4">
-          <EmptyPanel
-            title={t.providers_services}
-            text={t.providers_no_patients}
-          />
-        </div>
-      ) : (
-        <div className="mt-4 space-y-3">
-          {detail.services.map((service) => (
-            <div
-              key={service.id}
-              className="overflow-hidden rounded-[1.4rem] border border-border bg-card"
-            >
-              <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_180px_160px]">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-foreground">{service.service_name}</p>
-                  {serviceTaxonomyLabel(service, taxonomyNodes, lang) ? (
-                    <p className="mt-1 break-words text-xs font-medium text-muted-foreground">
-                      {serviceTaxonomyLabel(service, taxonomyNodes, lang)}
-                    </p>
-                  ) : null}
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    {service.description || t.common_not_set}
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                    <span>
-                      {t.providers_service_valid_from}:{" "}
-                      <span className="font-medium text-foreground">
-                        {compactDate(service.valid_from, t.common_not_set)}
-                      </span>
-                    </span>
-                    <span>
-                      {t.providers_service_valid_to}:{" "}
-                      <span className="font-medium text-foreground">
-                        {compactDate(service.valid_to, t.common_not_set)}
-                      </span>
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex flex-col justify-between gap-2 rounded-xl border border-border/70 px-3 py-2">
-                  <span className="text-xs text-muted-foreground">{l("providers_price")}</span>
-                  <span className="text-lg font-semibold leading-none text-foreground">
-                    {servicePriceLabel(service)}
-                  </span>
-                </div>
-
-                {canManage ? (
-                  <div className="flex flex-col justify-end gap-2 border-t border-dashed border-border pt-3 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+  return (
+    <section className="space-y-4">
+      <DataTableSurface
+          rows={detail.services}
+          columns={serviceColumns}
+          rowId={(service) => service.id}
+          dictionary={t as unknown as Record<string, string>}
+          emptyState={
+            <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+              {l("providers_no_services")}
+            </div>
+          }
+          toolbarStart={
+            <>
+              <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+                {l("providers_service_catalog")}
+              </span>
+              {canManage ? (
+                <>
+                  <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 shrink-0 rounded-lg gap-1.5"
+                    onClick={onNew}
+                  >
+                    <Plus className="size-3.5" />
+                    {t.providers_service_new}
+                  </Button>
+                </>
+              ) : null}
+            </>
+          }
+          rowActions={
+            canManage
+              ? (service) => (
+                  <div className="flex items-center gap-1">
                     <Button
                       type="button"
-                      variant="default"
-                      size="sm"
-                      className={cn(providerPrimaryActionButtonClassName, "w-full justify-center")}
+                      variant="ghost"
+                      size="icon-sm"
+                      className="size-7 rounded-full text-muted-foreground hover:text-foreground"
                       onClick={() => onEdit(service)}
+                      aria-label={l("patients_edit")}
+                      title={l("patients_edit")}
                     >
-                      {l("patients_edit")}
+                      <Pencil className="size-3.5" />
                     </Button>
                     <Button
                       type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-8 w-full justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="size-7 rounded-full text-rose-600 hover:bg-rose-50 hover:text-rose-700"
                       disabled={busy}
                       onClick={() => onDelete(service.id, service.service_name)}
+                      aria-label={l("patients_delete")}
+                      title={l("patients_delete")}
                     >
                       <Trash2 className="size-3.5" />
-                      {l("patients_delete")}
                     </Button>
                   </div>
-                ) : null}
-              </div>
-            </div>
-          ))}
-        </div>      )}
+                )
+              : undefined
+          }
+          rowActionsWidth={100}
+        />
+
+      <ProviderWorkTypesCatalog detail={detail} />
     </section>
   );
 }
@@ -7625,21 +7813,15 @@ function LinkedPatientsSection({
 }) {
   const { t } = useLang();
   return (
-    <section className={providerDetailPanelClassName}>
-      <CollapsibleLinkedPatientsPanel
-        patients={detail.linked_patients}
-        showMarker
-        cardClassName="border-border bg-card"
-        emptyContent={(
-          <div className="mt-4">
-            <EmptyPanel
-              title={t.providers_no_patients}
-              text={t.providers_no_patients}
-            />
-          </div>
-        )}
-      />
-    </section>
+    <PaginatedLinkedPatientsGrid
+      patients={detail.linked_patients}
+      toolbarTitle={t.providers_linked_patients}
+      emptyState={
+        <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+          {t.providers_no_patients}
+        </div>
+      }
+    />
   );
 }
 
@@ -7847,45 +8029,37 @@ function InteractionHistorySection({
   );
 
   return (
-    <section className={providerDetailPanelClassName}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-          <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
+    <DataTableSurface
+      rows={pagination.pagedRows}
+      columns={columns}
+      rowId={(item) => item.id}
+      dictionary={t as unknown as Record<string, string>}
+      emptyState={
+        <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+          {t.providers_no_activity}
+        </div>
+      }
+      toolbarStart={
+        <>
+          <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
             {l("providers_interaction_history")}
-          </h3>
-        </div>
-      </div>
-
-      {detail.interactions.length === 0 ? (
-        <div className="mt-4">
-          <EmptyPanel
-            title={t.providers_no_activity}
-            text={t.providers_no_activity}
-          />
-        </div>
-      ) : (
-        <div className="mt-4">
-          <DataTableSurface
-            rows={pagination.pagedRows}
-            columns={columns}
-            rowId={(item) => item.id}
-            dictionary={t as unknown as Record<string, string>}
-            toolbarAfter={
-              <DataTablePager
-                pageIndex={pagination.pageIndex}
-                pageSize={pagination.pageSize}
-                totalPages={pagination.totalPages}
-                totalRows={pagination.totalRows}
-                previousLabel={t.pagination_previous}
-                nextLabel={t.pagination_next}
-                onPageChange={pagination.onPageChange}
-              />
-            }
-          />
-        </div>
-      )}
-    </section>
+          </span>
+          <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+        </>
+      }
+      toolbarAfter={
+        <DataTablePager
+          pageIndex={pagination.pageIndex}
+          pageSize={pagination.pageSize}
+          totalPages={pagination.totalPages}
+          totalRows={pagination.totalRows}
+          previousLabel={t.pagination_previous}
+          nextLabel={t.pagination_next}
+          onPageChange={pagination.onPageChange}
+        />
+      }
+    />
   );
 }
 

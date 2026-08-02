@@ -110,6 +110,7 @@ import type {
   DunningForm,
   Filters,
   InvoiceItem,
+  InvoiceLineItem,
   InvoiceStatus,
   InvoiceType,
   OrderOption,
@@ -2071,67 +2072,48 @@ function useStaffInvoicesPageContent() {
                 </SectionCard>
 
                 <SectionCard title={t.providers_linked_patients}>
-                  <div className="grid gap-2.5 md:grid-cols-4">
-                    <button
-                      type="button"
-                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
-                      onClick={() => window.open(`/patients?patient=${detail.patient_id}`, "_blank", "noopener,noreferrer")}
-                    >
-                      <div className="relative z-10">
-                        <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{t.invoices_patient}</h3>
-                        <p className="mt-1.5 text-xs leading-tight text-muted-foreground">
-                          {text.linkedPatientCardDescription}
-                        </p>
-                      </div>
-                      <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                        <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
-                      onClick={() => window.open(`/orders?order=${detail.order_id}&patient=${detail.patient_id}`, "_blank", "noopener,noreferrer")}
-                    >
-                      <div className="relative z-10">
-                        <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.linkedOrder}</h3>
-                        <p className="mt-1.5 text-xs leading-tight text-muted-foreground">
-                          {text.linkedOrderCardDescription}
-                        </p>
-                      </div>
-                      <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                        <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
-                      onClick={() => window.open(`/contracts?quote=${detail.quote_id ?? ""}&order=${detail.order_id}&patient=${detail.patient_id}&tab=quotes`, "_blank", "noopener,noreferrer")}
-                    >
-                      <div className="relative z-10">
-                        <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.quotes}</h3>
-                        <p className="mt-1.5 text-xs leading-tight text-muted-foreground">
-                          {text.linkedQuoteCardDescription}
-                        </p>
-                      </div>
-                      <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                        <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
-                      onClick={() => window.open(`/documents?order=${detail.order_id}&patient=${detail.patient_id}`, "_blank", "noopener,noreferrer")}
-                    >
-                      <div className="relative z-10">
-                        <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.documents}</h3>
-                        <p className="mt-1.5 text-xs leading-tight text-muted-foreground">
-                          {text.linkedDocumentsCardDescription}
-                        </p>
-                      </div>
-                      <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                        <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                      </span>
-                    </button>
+                  <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
+                    {[
+                      {
+                        key: "patient",
+                        label: t.invoices_patient,
+                        description: text.linkedPatientCardDescription,
+                        href: `/patients?patient=${detail.patient_id}`,
+                      },
+                      {
+                        key: "order",
+                        label: text.linkedOrder,
+                        description: text.linkedOrderCardDescription,
+                        href: `/orders?order=${detail.order_id}&patient=${detail.patient_id}`,
+                      },
+                      {
+                        key: "quotes",
+                        label: text.quotes,
+                        description: text.linkedQuoteCardDescription,
+                        href: `/contracts?quote=${detail.quote_id ?? ""}&order=${detail.order_id}&patient=${detail.patient_id}&tab=quotes`,
+                      },
+                      {
+                        key: "documents",
+                        label: t.nav_documents,
+                        description: text.linkedDocumentsCardDescription ?? text.linkedOrderDocument,
+                        href: `/documents?order=${detail.order_id}&patient=${detail.patient_id}`,
+                      },
+                    ].map((link) => (
+                      <button
+                        key={link.key}
+                        type="button"
+                        className="group flex w-full items-center gap-2.5 border-b border-border/50 px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-muted/20"
+                        onClick={() => window.open(link.href, "_blank", "noopener,noreferrer")}
+                      >
+                        <span className="min-w-0 shrink-0 truncate text-xs font-semibold text-foreground">
+                          {link.label}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-right text-xs text-muted-foreground">
+                          {link.description}
+                        </span>
+                        <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground group-hover:text-orange-700" />
+                      </button>
+                    ))}
                   </div>
                 </SectionCard>
 
@@ -2241,209 +2223,338 @@ function useStaffInvoicesPageContent() {
                     </section>
                   </div>
 
-                <SectionCard
-                  title={text.dunningTitle}
-                  action={
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setDunningDialogOpen(true)}
-                      disabled={!access.canManage || !nextDunning}
-                    >
-                      {nextDunning ? text.createDunning : text.noFurtherEscalation}
-                    </Button>
+                {dunningError ? <ShellBanner tone="error">{dunningError}</ShellBanner> : null}
+                <DataTableSurface
+                  rows={dunningEvents}
+                  columns={
+                    [
+                      {
+                        id: "level",
+                        label: text.dunningTitle,
+                        accessor: (event) => dunningLevelLabel(event.level),
+                        sortable: true,
+                        required: true,
+                        width: 190,
+                        render: (event) => (
+                          <StatusBadge tone={dunningLevelTone(event.level)}>
+                            {dunningLevelLabel(event.level)}
+                          </StatusBadge>
+                        ),
+                      },
+                      {
+                        id: "sent_at",
+                        label: t.appointments_date,
+                        accessor: (event) => event.sent_at ?? "",
+                        filterType: "date",
+                        sortable: true,
+                        width: 170,
+                        render: (event) => (
+                          <span className="whitespace-nowrap font-mono text-xs tabular-nums text-foreground">
+                            {formatDateTime(event.sent_at, locale, t.common_not_set)}
+                          </span>
+                        ),
+                      },
+                      {
+                        id: "balance_due",
+                        label: text.dunningBalanceDue,
+                        accessor: (event) => Number(event.balance_due),
+                        sortable: true,
+                        width: 140,
+                        render: (event) => (
+                          <span className="block text-right font-mono text-xs font-semibold tabular-nums text-foreground">
+                            {formatMoney(event.balance_due)}
+                          </span>
+                        ),
+                      },
+                      {
+                        id: "responsible",
+                        label: text.dunningResponsible,
+                        accessor: (event) => event.created_by_name ?? text.system,
+                        sortable: true,
+                        width: 200,
+                        render: (event) => (
+                          <span className="block truncate font-mono text-xs text-foreground">
+                            {event.created_by_name ?? text.system}
+                          </span>
+                        ),
+                      },
+                      {
+                        id: "note",
+                        label: text.dunningNote,
+                        accessor: (event) => event.note ?? "",
+                        searchable: true,
+                        width: 320,
+                        render: (event) => (
+                          <span
+                            className="block truncate text-xs text-foreground"
+                            title={event.note ?? undefined}
+                          >
+                            {event.note?.trim() || t.common_not_set}
+                          </span>
+                        ),
+                      },
+                    ] satisfies ColumnDef<(typeof dunningEvents)[number]>[]
                   }
-                >
-                  {dunningError ? <ShellBanner tone="error">{dunningError}</ShellBanner> : null}
-                  <div className="space-y-2.5">
-                    {dunningEvents.length === 0 ? (
-                      <EmptyState title={text.noDunningEvents} description={text.noDunningEventsDescription} />
-                    ) : (
-                      <div className="space-y-2.5 pl-6">
-                        {dunningEvents.map((event, index) => (
-                          <div
-                            key={event.id}
-                            className={cn(
-                              "relative",
-                              index < dunningEvents.length - 1 &&
-                                "before:absolute before:-bottom-5 before:-left-4 before:top-3 before:w-px before:bg-border",
-                            )}
-                          >
-                            <span className="absolute -left-[1.125rem] top-1.5 z-10 size-2 rounded-full bg-muted-foreground ring-4 ring-background" />
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className={tokens.text.sectionTitle}>
-                                {dunningLevelLabel(event.level)}
-                              </div>
-                              <span className="text-xs text-muted-foreground">
-                                {formatDateTime(event.sent_at, locale, t.common_not_set)}
-                              </span>
-                            </div>
-                            <div className="mt-2 overflow-hidden rounded-2xl border border-border bg-card">
-                              <div className="grid gap-0 sm:grid-cols-[minmax(0,1fr)_190px]">
-                                <div className="px-4 py-2.5">
-                                  <div className="text-xs text-muted-foreground">
-                                    {text.dunningBalanceDue}
-                                  </div>
-                                  <div className="mt-1 text-2xl font-semibold leading-none text-foreground">
-                                    {formatMoney(event.balance_due)}
-                                  </div>
-                                  {event.note ? (
-                                    <div className="mt-2.5 max-w-xl text-xs leading-snug text-muted-foreground">
-                                      {event.note}
-                                    </div>
-                                  ) : null}
-                                </div>
-                                <div className="relative border-t border-border px-4 py-2.5 sm:border-t-0 sm:pl-5 sm:before:absolute sm:before:bottom-3 sm:before:left-0 sm:before:top-3 sm:before:border-l sm:before:border-dashed sm:before:border-border">
-                                  <div className="space-y-1.5 text-xs leading-tight">
-                                    <div>
-                                      <div className="text-muted-foreground">{text.dunningResponsible}</div>
-                                      <div className="mt-0.5 font-medium text-foreground">
-                                        {event.created_by_name ?? text.system}
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </SectionCard>
-
-                <SectionCard title={text.lineItems}>
-                  {!detail.line_items || detail.line_items.length === 0 ? <EmptyState title={text.noLineItems} description={text.noLineItemsDescription} /> : (
-                    <div className="space-y-2.5">
-                      {detail.line_items.map((line, index) => {
-                        const lineDescription = agencyServiceNameLabel(
-                          undefined,
-                          line.description,
-                          t,
-                        );
-
-                        return (
-                          <article
-                            key={[
-                              line.description,
-                              line.quantity,
-                              line.unit_price,
-                              line.line_net,
-                              line.line_vat,
-                              line.line_gross,
-                              line.tax_profile_key ?? "",
-                            ].join("|")}
-                            className="overflow-hidden rounded-2xl border border-border bg-card"
-                          >
-                            <div className="grid lg:grid-cols-[minmax(0,1fr)_120px]">
-                              <div className="p-3.5">
-                                <div className="flex items-start gap-3">
-                                  <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-xs font-semibold text-muted-foreground">
-                                    {index + 1}
-                                  </div>
-                                  <div className="min-w-0">
-                                    <h3 className="text-sm font-semibold leading-snug text-foreground">{lineDescription}</h3>
-                                    <div className="mt-2 flex flex-wrap gap-1.5">
-                                      <StatusBadge tone="neutral">
-                                        {taxProfileLabel(
-                                          line.tax_profile_name,
-                                          line.tax_profile_key,
-                                          line.vat_source,
-                                        )}
-                                      </StatusBadge>
-                                      {line.is_cost_passthrough ? (
-                                        <StatusBadge tone="warning">{t.orders_cost_pass_through_badge}</StatusBadge>
-                                      ) : null}
-                                    </div>
-                                    <p className="mt-1.5 max-w-2xl text-xs leading-snug text-muted-foreground">
-                                      {line.vat_source_explanation ??
-                                        `${text.vatSource}: ${vatSourceLabel(line.vat_source ?? "legacy")}`}
-                                    </p>
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="relative border-t border-border p-3.5 lg:border-t-0 lg:pl-5 lg:before:absolute lg:before:bottom-4 lg:before:left-0 lg:before:top-4 lg:before:border-l lg:before:border-dashed lg:before:border-border">
-                                <div className="flex flex-wrap gap-1.5 lg:justify-end">
-                                  <span className="rounded-full border border-border bg-background px-2.5 py-1 text-xs font-semibold leading-none text-foreground">
-                                    {`${t.invoices_vat} ${line.vat_rate}%`}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="grid border-t border-border bg-muted/15 sm:grid-cols-3">
-                              <div className="px-4 py-2.5">
-                                <div className="text-xs text-muted-foreground">{text.net}</div>
-                                <div className="mt-1 text-sm font-semibold text-foreground">{formatMoney(line.line_net)}</div>
-                              </div>
-                              <div className="border-t border-border px-4 py-2.5 sm:border-l sm:border-t-0">
-                                <div className="text-xs text-muted-foreground">{t.invoices_vat}</div>
-                                <div className="mt-1 text-sm font-semibold text-foreground">{formatMoney(line.line_vat)}</div>
-                              </div>
-                              <div className="border-t border-border px-4 py-2.5 sm:border-l sm:border-t-0">
-                                <div className="text-xs text-muted-foreground">{text.gross}</div>
-                                <div className="mt-1 text-sm font-semibold text-foreground">{formatMoney(line.line_gross)}</div>
-                              </div>
-                            </div>
-                            {line.notes ? (
-                              <div className="border-t border-border px-4 py-2 text-xs leading-snug text-muted-foreground">
-                                {line.notes}
-                              </div>
-                            ) : null}
-                          </article>
-                        );
-                      })}
+                  rowId={(event) => event.id}
+                  dictionary={t as unknown as Record<string, string>}
+                  emptyState={
+                    <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                      {text.noDunningEvents}
                     </div>
-                  )}
-                </SectionCard>
+                  }
+                  toolbarStart={
+                    <>
+                      <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+                        {text.dunningTitle}
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-8 shrink-0 self-center rounded-lg"
+                        onClick={() => setDunningDialogOpen(true)}
+                        disabled={!access.canManage || !nextDunning}
+                      >
+                        {nextDunning ? text.createDunning : text.noFurtherEscalation}
+                      </Button>
+                      <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+                    </>
+                  }
+                />
 
-                <SectionCard
-                  title={text.supportingDocuments}
-                  description={text.supportingDocumentsDescription}
-                >
-                  {!detail.supporting_documents || detail.supporting_documents.length === 0 ? (
-                    <EmptyState
-                      title={text.noSupportingDocuments}
-                      description={text.noSupportingDocumentsDescription}
-                    />
-                  ) : (
-                    <div className="space-y-2.5">
-                      {detail.supporting_documents.map((document) => (
-                        <button
-                          type="button"
-                          key={document.id}
-                          className="group relative w-full overflow-hidden rounded-lg border border-border/70 bg-card p-4 text-left transition-colors hover:bg-muted/20"
-                          onClick={() =>
-                            window.open(
-                              `/documents?order=${detail.order_id}&patient=${detail.patient_id}`,
-                              "_blank",
-                              "noopener,noreferrer",
-                            )
-                          }
-                        >
-                          <div className="flex items-start gap-3 pr-11">
-                            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-orange-700">
-                              <FileText className="size-4" />
-                            </div>
-                            <div className="min-w-0">
-                              <h3 className="break-words text-[13px] font-semibold tracking-tight text-foreground">
-                                {document.auto_name || document.original_filename || document.id}
-                              </h3>
-                              <p className="mt-1 break-words text-xs leading-snug text-muted-foreground">
-                                {[document.art, document.category, document.original_filename]
-                                  .filter(Boolean)
-                                  .join(" | ") || text.linkedOrderDocument}
-                              </p>
-                            </div>
-                            <span className="absolute right-3 top-3 flex size-8 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground group-hover:border-orange-200 group-hover:bg-orange-50 group-hover:text-orange-700">
-                              <ArrowUpRight className="size-3.5" />
+                {!detail.line_items || detail.line_items.length === 0 ? (
+                  <SectionCard title={text.lineItems}>
+                    <EmptyState title={text.noLineItems} description={text.noLineItemsDescription} />
+                  </SectionCard>
+                ) : (
+                  <DataTableSurface
+                    rows={detail.line_items.map((line, index) => ({ line, index }))}
+                    columns={
+                      [
+                        {
+                          id: "num",
+                          label: "#",
+                          accessor: (row) => row.index + 1,
+                          sortable: true,
+                          required: true,
+                          width: 56,
+                          render: (row) => (
+                            <span className="font-mono text-xs font-semibold tabular-nums text-muted-foreground">
+                              {row.index + 1}
                             </span>
-                          </div>
-                        </button>
-                      ))}
+                          ),
+                        },
+                        {
+                          id: "description",
+                          label: text.lineItems,
+                          accessor: (row) =>
+                            agencyServiceNameLabel(undefined, row.line.description, t),
+                          sortable: true,
+                          searchable: true,
+                          required: true,
+                          width: 260,
+                          render: (row) => {
+                            const lineDescription = agencyServiceNameLabel(
+                              undefined,
+                              row.line.description,
+                              t,
+                            );
+                            return (
+                              <div
+                                className="min-w-0"
+                                title={row.line.vat_source_explanation ?? undefined}
+                              >
+                                <span className="flex min-w-0 items-center gap-1.5">
+                                  <span
+                                    className="truncate text-xs font-medium text-foreground"
+                                    title={lineDescription}
+                                  >
+                                    {lineDescription}
+                                  </span>
+                                  <span className="shrink-0 rounded-full border border-border/60 bg-muted/25 px-2 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
+                                    {taxProfileLabel(
+                                      row.line.tax_profile_name,
+                                      row.line.tax_profile_key,
+                                      row.line.vat_source,
+                                    )}
+                                  </span>
+                                  {row.line.is_cost_passthrough ? (
+                                    <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-mono text-[10px] font-medium text-amber-700">
+                                      {t.orders_cost_pass_through_badge}
+                                    </span>
+                                  ) : null}
+                                </span>
+                                {row.line.notes ? (
+                                  <span
+                                    className="block truncate text-[11px] text-muted-foreground"
+                                    title={row.line.notes}
+                                  >
+                                    {row.line.notes}
+                                  </span>
+                                ) : null}
+                              </div>
+                            );
+                          },
+                        },
+                        {
+                          id: "vat_rate",
+                          label: `${t.invoices_vat} %`,
+                          accessor: (row) => row.line.vat_rate,
+                          sortable: true,
+                          width: 90,
+                          render: (row) => (
+                            <span className="block text-right font-mono text-xs tabular-nums text-foreground">
+                              {row.line.vat_rate}%
+                            </span>
+                          ),
+                        },
+                        {
+                          id: "net",
+                          label: text.net,
+                          accessor: (row) => Number(row.line.line_net),
+                          sortable: true,
+                          width: 110,
+                          render: (row) => (
+                            <span className="block text-right font-mono text-xs tabular-nums text-foreground">
+                              {formatMoney(row.line.line_net)}
+                            </span>
+                          ),
+                        },
+                        {
+                          id: "vat",
+                          label: t.invoices_vat,
+                          accessor: (row) => Number(row.line.line_vat),
+                          sortable: true,
+                          width: 110,
+                          render: (row) => (
+                            <span className="block text-right font-mono text-xs tabular-nums text-foreground">
+                              {formatMoney(row.line.line_vat)}
+                            </span>
+                          ),
+                        },
+                        {
+                          id: "gross",
+                          label: text.gross,
+                          accessor: (row) => Number(row.line.line_gross),
+                          sortable: true,
+                          width: 120,
+                          render: (row) => (
+                            <span className="block text-right font-mono text-xs font-semibold tabular-nums text-foreground">
+                              {formatMoney(row.line.line_gross)}
+                            </span>
+                          ),
+                        },
+                      ] satisfies ColumnDef<{ line: InvoiceLineItem; index: number }>[]
+                    }
+                    rowId={(row) => String(row.index)}
+                    dictionary={t as unknown as Record<string, string>}
+                    toolbarStart={
+                      <>
+                        <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+                          {text.lineItems}
+                        </span>
+                        <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+                      </>
+                    }
+                  />
+                )}
+
+                <DataTableSurface
+                  rows={detail.supporting_documents ?? []}
+                  columns={
+                    [
+                      {
+                        id: "name",
+                        label: t.users_name,
+                        accessor: (document) =>
+                          document.auto_name || document.original_filename || document.id,
+                        sortable: true,
+                        searchable: true,
+                        required: true,
+                        width: 300,
+                        render: (document) => (
+                          <span className="flex min-w-0 items-center gap-2">
+                            <FileText className="size-3.5 shrink-0 text-orange-600" />
+                            <span className="truncate font-mono text-xs font-medium text-foreground">
+                              {document.auto_name || document.original_filename || document.id}
+                            </span>
+                          </span>
+                        ),
+                      },
+                      {
+                        id: "art",
+                        label: t.providers_type,
+                        accessor: (document) => document.art ?? "",
+                        sortable: true,
+                        width: 170,
+                        render: (document) =>
+                          document.art ? (
+                            <span className="inline-flex rounded-full border border-border/60 bg-muted/25 px-2 py-0.5 font-mono text-[10px] font-medium text-foreground">
+                              {document.art}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+                          ),
+                      },
+                      {
+                        id: "category",
+                        label: t.documents_category,
+                        accessor: (document) => document.category ?? "",
+                        sortable: true,
+                        width: 180,
+                        render: (document) =>
+                          document.category ? (
+                            <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 font-mono text-[10px] font-medium text-sky-700">
+                              {document.category}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+                          ),
+                      },
+                      {
+                        id: "file",
+                        label: text.linkedOrderDocument,
+                        accessor: (document) => document.original_filename ?? "",
+                        searchable: true,
+                        width: 280,
+                        render: (document) => (
+                          <span
+                            className="block truncate font-mono text-xs text-foreground"
+                            title={document.original_filename ?? undefined}
+                          >
+                            {document.original_filename || text.linkedOrderDocument}
+                          </span>
+                        ),
+                      },
+                    ] satisfies ColumnDef<
+                      NonNullable<typeof detail.supporting_documents>[number]
+                    >[]
+                  }
+                  rowId={(document) => document.id}
+                  dictionary={t as unknown as Record<string, string>}
+                  onRowClick={() =>
+                    window.open(
+                      `/documents?order=${detail.order_id}&patient=${detail.patient_id}`,
+                      "_blank",
+                      "noopener,noreferrer",
+                    )
+                  }
+                  emptyState={
+                    <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                      {text.noSupportingDocuments}
                     </div>
-                  )}
-                </SectionCard>
+                  }
+                  toolbarStart={
+                    <>
+                      <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+                        {text.supportingDocuments}
+                      </span>
+                      <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+                    </>
+                  }
+                />
               </div>
             )}
           </AdminSheetScaffold>
