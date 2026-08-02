@@ -16,7 +16,6 @@ import {
   Banner,
   CountBadge,
   EmptyCell,
-  Section,
   StatusBadge,
   tokens,
 } from "@/components/ui-shell";
@@ -329,36 +328,6 @@ function useAppointmentReportSectionContent({
 
   return (
     <div className="space-y-4">
-      <Section
-        title={t.appointments_interpreter_report_title}
-        accessory={
-          <div className="flex items-center gap-2">
-            {detailReport ? (
-              <StatusBadge tone={reportStatusTone}>
-                {reportApprovalLabel(detailReport.approval_status)}
-              </StatusBadge>
-            ) : (
-              <CountBadge>
-                {appointmentText("appointments_not_submitted")}
-              </CountBadge>
-            )}
-            {canOpenReportEditor ? (
-              <Button
-                type="button"
-                size="sm"
-                className="h-8 gap-1.5 rounded-lg"
-                onClick={() => dispatchReportState({ editorOpen: true })}
-              >
-                {reportOpenButtonLabel}
-              </Button>
-            ) : null}
-          </div>
-        }
-      >
-        <p className="text-sm text-muted-foreground">
-          {t.appointments_interpreter_report_subtitle}
-        </p>
-
         {detailReport ? (
           <>
             <DataTableSurface
@@ -366,6 +335,28 @@ function useAppointmentReportSectionContent({
               columns={reportColumns}
               rowId={() => detailReport.id ?? "report"}
               dictionary={tr}
+              toolbarStart={
+                <>
+                  <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                    <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+                    {t.appointments_interpreter_report_title}
+                  </span>
+                  <StatusBadge tone={reportStatusTone}>
+                    {reportApprovalLabel(detailReport.approval_status)}
+                  </StatusBadge>
+                  {canOpenReportEditor ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8 shrink-0 gap-1.5 rounded-lg"
+                      onClick={() => dispatchReportState({ editorOpen: true })}
+                    >
+                      {reportOpenButtonLabel}
+                    </Button>
+                  ) : null}
+                  <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+                </>
+              }
             />
 
             {detailReport.notes ? (
@@ -429,11 +420,34 @@ function useAppointmentReportSectionContent({
             </div>
           </>
         ) : (
-          <EmptyCell>
-            {appointmentText("appointments_no_interpreter_report_has_been_submitted_for_this_appoin")}
-          </EmptyCell>
+          <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
+            <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
+              <span className="flex shrink-0 items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+                {t.appointments_interpreter_report_title}
+              </span>
+              <CountBadge>{appointmentText("appointments_not_submitted")}</CountBadge>
+              {canOpenReportEditor ? (
+                <>
+                  <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 shrink-0 gap-1.5 rounded-lg"
+                    onClick={() => dispatchReportState({ editorOpen: true })}
+                  >
+                    {reportOpenButtonLabel}
+                  </Button>
+                </>
+              ) : null}
+            </div>
+            <div className="px-4 py-6">
+              <EmptyCell>
+                {appointmentText("appointments_no_interpreter_report_has_been_submitted_for_this_appoin")}
+              </EmptyCell>
+            </div>
+          </div>
         )}
-      </Section>
 
       {canOpenReportEditor ? (
         <AppointmentEditorSheet

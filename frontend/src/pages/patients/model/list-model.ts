@@ -15,6 +15,7 @@ export type PatientSummary = {
   insurance_provider?: string | null;
   insurance_type?: string | null;
   is_active: boolean;
+  lifecycle_status?: "prospective" | "active" | "inactive" | "deleted";
   created_at: string;
 };
 
@@ -141,6 +142,7 @@ export type PatientFormState = {
 export type PatientPermissions = {
   canViewPage: boolean;
   canCreateEdit: boolean;
+  canFilterLifecycle: boolean;
   canViewAssignments: boolean;
   canManageAssignments: boolean;
 };
@@ -193,6 +195,8 @@ export function patientPermissions(role?: string): PatientPermissions {
       "concierge",
     ].includes(role ?? ""),
     canCreateEdit: role === "ceo" || role === "patient_manager",
+    canFilterLifecycle:
+      role === "ceo" || role === "patient_manager" || role === "it_admin",
     canViewAssignments: [
       "ceo",
       "patient_manager",
@@ -423,10 +427,16 @@ export function buildPatientsPath(filters: PatientFilters) {
   const params = new URLSearchParams();
   if (filters.search.trim()) params.set("search", filters.search.trim());
   // Server defaults active_only=true, so we always pass it explicitly:
-  //   "true"   → only active rows from the server
-  //   "false"  → only inactive (server returns all, client filters)
-  //   ""       → "All" filter, also returns all from the server
-  params.set("active_only", filters.activeOnly === "true" ? "true" : "false");
+  //   "true"        → only active rows from the server
+  //   "false"       → only inactive (server returns all, client filters)
+  //   ""            → "All" filter, also returns all from the server
+  //   "prospective" → prospect patients only (server-side lifecycle filter)
+  if (filters.activeOnly === "prospective") {
+    params.set("active_only", "false");
+    params.set("lifecycle", "prospective");
+  } else {
+    params.set("active_only", filters.activeOnly === "true" ? "true" : "false");
+  }
   if (filters.providerId) params.set("provider_id", filters.providerId);
   if (filters.doctorId) params.set("doctor_id", filters.doctorId);
   const query = params.toString();

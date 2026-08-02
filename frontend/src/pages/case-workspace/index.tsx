@@ -27,24 +27,31 @@ import {
   daysInStatusLabel,
 } from "@/pages/leads/appearance/status-appearance";
 
-import { AllergiesSection } from "./allergies-section";
 import { CardiologySection } from "./cardiology-section";
 import { CaseWorkspaceProvider, useCaseWorkspace } from "./context";
 import { GastroenterologySection } from "./gastroenterology-section";
 import { HistorySection } from "./history-section";
-import { ImpfstatusSection } from "./impfstatus-section";
-import { MedicationsSection } from "./medications-section";
 import { NeurologySection } from "./neurology-section";
 import { OrthopedicsSection } from "./orthopedics-section";
 import { OverviewSection } from "./overview-section";
 import { PainSection } from "./pain-section";
-import { PreconditionsSection } from "./preconditions-section";
+import {
+  CaseRecordAllergiesSection,
+  CaseRecordAnamneseSection,
+  CaseRecordBefundeSection,
+  CaseRecordDiagnosesSection,
+  CaseRecordMedicationsSection,
+  CaseRecordProceduresSection,
+  CaseRecordVerlaufSection,
+} from "./patient-record-sections";
 import { PulmonologySection } from "./pulmonology-section";
-import { SurgeriesSection } from "./surgeries-section";
 import { SymptomsSection } from "./symptoms-section";
 import { UrologySection } from "./urology-section";
-import { VegetativeSection } from "./vegetative-section";
-import { type CaseSectionKey, normalizeCaseSectionKey } from "./sections";
+import {
+  CASE_RECORD_SECTION_KEYS,
+  type CaseSectionKey,
+  normalizeCaseSectionKey,
+} from "./sections";
 
 type CasePatientSummary = {
   id: string;
@@ -81,22 +88,10 @@ function renderSection(section: CaseSectionKey) {
   switch (section) {
     case "overview":
       return <OverviewSection />;
-    case "preconditions":
-      return <PreconditionsSection />;
-    case "allergies":
-      return <AllergiesSection />;
-    case "surgeries":
-      return <SurgeriesSection />;
-    case "medications":
-      return <MedicationsSection />;
-    case "pain":
-      return <PainSection />;
     case "symptoms":
       return <SymptomsSection />;
-    case "vegetative":
-      return <VegetativeSection />;
-    case "impfstatus":
-      return <ImpfstatusSection />;
+    case "pain":
+      return <PainSection />;
     case "cardiology":
       return <CardiologySection />;
     case "gastroenterology":
@@ -109,11 +104,40 @@ function renderSection(section: CaseSectionKey) {
       return <PulmonologySection />;
     case "urology":
       return <UrologySection />;
+    case "anamnese":
+      return <CaseRecordAnamneseSection />;
+    case "diagnoses":
+      return <CaseRecordDiagnosesSection />;
+    case "medications":
+      return <CaseRecordMedicationsSection />;
+    case "allergies":
+      return <CaseRecordAllergiesSection />;
+    case "befunde":
+      return <CaseRecordBefundeSection />;
+    case "procedures":
+      return <CaseRecordProceduresSection />;
+    case "verlauf":
+      return <CaseRecordVerlaufSection />;
     case "history":
       return <HistorySection />;
     default:
       return <OverviewSection />;
   }
+}
+
+/** Lead-backed cases have no patient record yet: record sections show a hint. */
+function RecordUnavailableHint() {
+  const { t } = useLang();
+  return (
+    <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-8 text-center">
+      <p className="text-sm font-medium text-foreground">
+        {t.cases_workspace_record_hint_title}
+      </p>
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+        {t.cases_workspace_record_hint_description}
+      </p>
+    </div>
+  );
 }
 
 export function CaseWorkspacePage() {
@@ -227,9 +251,6 @@ function CaseWorkspaceContent() {
                 </span>
               ) : null}
             </div>
-            <p className="mt-2 max-w-3xl text-xs leading-relaxed text-muted-foreground">
-              {t.cases_workspace_header_description}
-            </p>
             {patientLabelText ? (
               <p className="mt-3 inline-flex items-center gap-2 text-sm text-foreground">
                 <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground/60" />
@@ -340,6 +361,8 @@ function CaseWorkspaceContent() {
           <LoaderCircle className="mr-2 size-4 animate-spin" />
           {t.common_loading}
         </div>
+      ) : !activePatientId && CASE_RECORD_SECTION_KEYS.includes(activeSection) ? (
+        <RecordUnavailableHint />
       ) : (
         renderSection(activeSection)
       )}

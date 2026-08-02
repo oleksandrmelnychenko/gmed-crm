@@ -1665,17 +1665,29 @@ async fn load_order_followup_readiness(
                 ) AS doctor_followup_visits,
                 COUNT(*) FILTER (
                     WHERE checklist_phase = 'followup'
-                      AND title ILIKE '1-week follow-up check-in%'
+                      AND (
+                            title ILIKE '1-week follow-up check-in%'
+                         OR title ILIKE 'Контроль%1 неделю%'
+                         OR title ILIKE 'Nachsorge nach 1 Woche%'
+                      )
                       AND status <> 'cancelled'
                 ) AS followup_1w_visits,
                 COUNT(*) FILTER (
                     WHERE checklist_phase = 'followup'
-                      AND title ILIKE '1-month follow-up check-in%'
+                      AND (
+                            title ILIKE '1-month follow-up check-in%'
+                         OR title ILIKE 'Контроль%1 месяц%'
+                         OR title ILIKE 'Nachsorge nach 1 Monat%'
+                      )
                       AND status <> 'cancelled'
                 ) AS followup_1m_visits,
                 COUNT(*) FILTER (
                     WHERE checklist_phase = 'followup'
-                      AND title ILIKE '6-month follow-up check-in%'
+                      AND (
+                            title ILIKE '6-month follow-up check-in%'
+                         OR title ILIKE 'Контроль%6 месяцев%'
+                         OR title ILIKE 'Nachsorge nach 6 Monaten%'
+                      )
                       AND status <> 'cancelled'
                 ) AS followup_6m_visits
            FROM appointments
@@ -1694,10 +1706,22 @@ async fn load_order_followup_readiness(
 
     let reminder_row = sqlx::query(
         r#"SELECT
-                COUNT(*) FILTER (WHERE r.title = '1-week follow-up check-in' AND NOT r.is_completed) AS followup_1w_reminders,
-                COUNT(*) FILTER (WHERE r.title = '1-month follow-up check-in' AND NOT r.is_completed) AS followup_1m_reminders,
-                COUNT(*) FILTER (WHERE r.title = '6-month follow-up check-in' AND NOT r.is_completed) AS followup_6m_reminders,
-                COUNT(*) FILTER (WHERE r.title ILIKE 'Package-end:%' AND NOT r.is_completed) AS package_end_reminders
+                COUNT(*) FILTER (
+                    WHERE r.title ILIKE '1-week follow-up check-in%'
+                       OR r.title ILIKE 'Контроль%1 неделю%'
+                       OR r.title ILIKE 'Nachsorge nach 1 Woche%'
+                ) AS followup_1w_reminders,
+                COUNT(*) FILTER (
+                    WHERE r.title ILIKE '1-month follow-up check-in%'
+                       OR r.title ILIKE 'Контроль%1 месяц%'
+                       OR r.title ILIKE 'Nachsorge nach 1 Monat%'
+                ) AS followup_1m_reminders,
+                COUNT(*) FILTER (
+                    WHERE r.title ILIKE '6-month follow-up check-in%'
+                       OR r.title ILIKE 'Контроль%6 месяцев%'
+                       OR r.title ILIKE 'Nachsorge nach 6 Monaten%'
+                ) AS followup_6m_reminders,
+                COUNT(*) FILTER (WHERE r.title ILIKE 'Package-end:%') AS package_end_reminders
            FROM reminders r
            JOIN appointments a ON a.id = r.appointment_id
            WHERE a.order_id = $1"#,
@@ -1857,7 +1881,8 @@ async fn load_order_followup_readiness(
         || followup_6m_visits + followup_6m_reminders > 0;
 
     let effective_package_end_date = package_end_date.or(suggested_package_end_date);
-    let package_end_required = effective_package_end_date.is_some();
+    let package_end_required =
+        effective_package_end_date.is_some() && package_end_status != "not_required";
     let package_end_ready = if !package_end_required {
         true
     } else {
@@ -2086,10 +2111,12 @@ async fn resolve_order_case(
     source_lead_id: Option<Uuid>,
 ) -> Result<Option<Uuid>, axum::response::Response> {
     if let Some(case_id) = case_id {
-        let row = match sqlx::query("SELECT patient_id, lead_id FROM cases WHERE id = $1")
-            .bind(case_id)
-            .fetch_optional(&state.db)
-            .await
+        let row = match sqlx::query(
+            "SELECT patient_id, lead_id, source_lead_id FROM cases WHERE id = $1",
+        )
+        .bind(case_id)
+        .fetch_optional(&state.db)
+        .await
         {
             Ok(value) => value,
             Err(error) => {
@@ -2100,10 +2127,18 @@ async fn resolve_order_case(
         let Some(row) = row else {
             return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Case not found"));
         };
-        let case_patient_id = row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default();
-        let case_lead_id = row.try_get::<Option<Uuid>, _>("lead_id").unwrap_or_default();
+        let case_patient_id = row
+            .try_get::<Option<Uuid>, _>("patient_id")
+            .unwrap_or_default();
+        let case_lead_id = row
+            .try_get::<Option<Uuid>, _>("lead_id")
+            .unwrap_or_default();
+        let case_source_lead_id = row
+            .try_get::<Option<Uuid>, _>("source_lead_id")
+            .unwrap_or_default();
         let matches_patient = patient_id.is_some() && case_patient_id == patient_id;
-        let matches_lead = source_lead_id.is_some() && case_lead_id == source_lead_id;
+        let matches_lead = source_lead_id.is_some()
+            && (case_lead_id == source_lead_id || case_source_lead_id == source_lead_id);
         if !matches_patient && !matches_lead {
             return Err(err(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -2116,10 +2151,12 @@ async fn resolve_order_case(
     let Some(source_lead_id) = source_lead_id else {
         return Ok(None);
     };
-    match sqlx::query_scalar::<_, Uuid>("SELECT id FROM cases WHERE lead_id = $1")
-        .bind(source_lead_id)
-        .fetch_optional(&state.db)
-        .await
+    match sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM cases WHERE lead_id = $1 OR source_lead_id = $1",
+    )
+    .bind(source_lead_id)
+    .fetch_optional(&state.db)
+    .await
     {
         Ok(value) => Ok(value),
         Err(error) => {
@@ -2557,7 +2594,9 @@ async fn get_order(
     let contract_id = order
         .try_get::<Option<Uuid>, _>("contract_id")
         .unwrap_or_default();
-    let case_id = order.try_get::<Option<Uuid>, _>("case_id").unwrap_or_default();
+    let case_id = order
+        .try_get::<Option<Uuid>, _>("case_id")
+        .unwrap_or_default();
     let case_code = order
         .try_get::<Option<String>, _>("case_code")
         .unwrap_or_default();

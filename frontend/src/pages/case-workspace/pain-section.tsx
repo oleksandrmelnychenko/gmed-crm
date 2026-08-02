@@ -1,5 +1,7 @@
-import { Badge } from "@/components/ui/badge";
+import { useMemo } from "react";
+
 import { Input } from "@/components/ui/input";
+import type { ColumnDef } from "@/components/data-table/types";
 import { useLang } from "@/lib/i18n";
 
 import { CaseItemList } from "./case-item-list";
@@ -43,8 +45,86 @@ export function PainSection() {
     savePain,
   } = useCaseWorkspace();
 
+  const columns = useMemo<ColumnDef<PainItem>[]>(
+    () => [
+      {
+        id: "lokalisierung",
+        label: t.cases_pain_location,
+        accessor: (item) => item.lokalisierung,
+        filterType: "text",
+        searchable: true,
+        sortable: true,
+        required: true,
+        width: 260,
+        render: (item) => (
+          <span className="block max-w-[260px] truncate text-xs font-medium text-foreground">
+            {item.lokalisierung || t.cases_pain_no_location}
+          </span>
+        ),
+      },
+      {
+        id: "nrs_aktuell",
+        label: t.cases_pain_nrs_current,
+        accessor: (item) => item.nrs_aktuell ?? "",
+        sortable: true,
+        width: 110,
+        render: (item) =>
+          item.nrs_aktuell != null ? (
+            <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 font-mono text-[10px] font-medium text-rose-700">
+              {t.uiText.cases_pain_nrs_label} {item.nrs_aktuell}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">—</span>
+          ),
+      },
+      {
+        id: "seit_wann",
+        label: t.cases_pain_since_when,
+        accessor: (item) => item.seit_wann ?? "",
+        filterType: "text",
+        sortable: true,
+        width: 150,
+        render: (item) => (
+          <span className="block truncate font-mono text-xs text-foreground">
+            {item.seit_wann?.trim() || "—"}
+          </span>
+        ),
+      },
+      {
+        id: "qualitaet",
+        label: t.cases_pain_quality,
+        accessor: (item) => item.qualitaet ?? "",
+        filterType: "text",
+        width: 180,
+        render: (item) =>
+          item.qualitaet?.trim() ? (
+            <span className="inline-flex rounded-full border border-border/60 bg-muted/25 px-2 py-0.5 font-mono text-[10px] font-medium text-foreground">
+              {item.qualitaet}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">—</span>
+          ),
+      },
+      {
+        id: "ursache",
+        label: t.cases_pain_cause,
+        accessor: (item) => item.ursache ?? "",
+        filterType: "text",
+        searchable: true,
+        width: 320,
+        render: (item) => (
+          <span className="block max-w-[320px] truncate text-xs text-foreground">
+            {item.ursache?.trim() || "—"}
+          </span>
+        ),
+      },
+    ],
+    [t],
+  );
+
   return (
     <CaseItemList<PainItem>
+      columns={columns}
       title={t.cases_pain_title}
       description={t.cases_pain_description}
       items={detail?.pain_records ?? []}
@@ -63,50 +143,6 @@ export function PainSection() {
       emptyTitle={t.cases_pain_empty_title}
       addFirstLabel={t.cases_pain_add_first}
       missingPrimaryMessage={t.cases_pain_missing_location}
-      cardContent={(item) => (
-        <>
-          <div className="flex min-w-0 items-center gap-1.5">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
-            <p className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
-              {item.lokalisierung || t.cases_pain_no_location}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {item.nrs_aktuell != null ? (
-              <Badge
-                variant="outline"
-                className="rounded-full border-rose-200 bg-rose-50 text-[11px] font-semibold text-rose-700"
-              >
-                {t.uiText.cases_pain_nrs_label} {item.nrs_aktuell}
-              </Badge>
-            ) : null}
-            {item.seit_wann ? (
-              <Badge
-                variant="outline"
-                className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
-              >
-                {t.cases_pain_since} {item.seit_wann}
-              </Badge>
-            ) : null}
-            {item.qualitaet ? (
-              <Badge
-                variant="outline"
-                className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
-              >
-                {item.qualitaet}
-              </Badge>
-            ) : null}
-          </div>
-          {item.ursache ? (
-            <p className="min-w-0 max-w-full whitespace-pre-wrap break-words text-[13px] leading-relaxed text-muted-foreground">
-              <span className="mr-1 text-[11.5px] font-medium text-muted-foreground">
-                {t.cases_pain_cause}:
-              </span>
-              {item.ursache}
-            </p>
-          ) : null}
-        </>
-      )}
       formContent={({ form, updateField, disabled }) => (
         <>
           <Panel title={t.cases_pain_group_location_timing}>

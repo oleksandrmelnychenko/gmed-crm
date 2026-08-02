@@ -1796,7 +1796,8 @@ function usePatientInvoicesTabContent({
           emptyState={<EmptyCell>{t.patient_invoices_no_service_package}</EmptyCell>}
           toolbarStart={
             <>
-              <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+              <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
                 {t.patient_invoices_service_packages}
               </span>
               {canManageInvoices ? (
@@ -1834,7 +1835,8 @@ function usePatientInvoicesTabContent({
           emptyState={<EmptyCell>{t.patient_invoices_no_ledger_entries}</EmptyCell>}
           toolbarStart={
             <>
-              <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+              <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
                 {t.patient_invoices_accounting_ledger}
               </span>
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
@@ -1858,7 +1860,8 @@ function usePatientInvoicesTabContent({
           rowAccent={(invoice) => invoiceAccentClass(invoice.status)}
           toolbarStart={
             <>
-              <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+              <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
                 {t.patient_invoices_payment_followup}
               </span>
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />

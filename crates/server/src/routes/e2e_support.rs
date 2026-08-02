@@ -1025,10 +1025,10 @@ async fn seed_complete_lead_onboarding(
     sqlx::query(
         r#"INSERT INTO cases (
                 case_id, lead_id, manager_id, status, hauptanfragegrund,
-                aktuelle_anamnese, zuweiser, intake_completed_at, intake_completed_by
+                zuweiser, intake_completed_at, intake_completed_by
            ) VALUES (
                 $1, $2, $3, 'open', 'Cardiology follow-up',
-                'Symptoms require a cardiology follow-up.', 'Self referral', now(), $3
+                'Self referral', now(), $3
            )"#,
     )
     .bind(format!("C-E2E-{tag}"))

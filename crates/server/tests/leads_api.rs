@@ -243,21 +243,49 @@ async fn seed_complete_lead_onboarding(app: &TestApp, lead_id: Uuid) -> SeededOn
     .await
     .unwrap();
 
-    let case_id: Uuid = sqlx::query_scalar(
-        r#"INSERT INTO cases (
-                case_id, lead_id, manager_id, status, hauptanfragegrund,
-                aktuelle_anamnese, zuweiser, intake_completed_at, intake_completed_by
-           ) VALUES (
-                $1, $2, $3, 'open', 'Chronic knee pain',
-                'Pain for six months', 'Self referral', now(), $3
-           ) RETURNING id"#,
+    let existing_case_id: Option<Uuid> = sqlx::query_scalar(
+        r#"SELECT id FROM cases
+           WHERE lead_id = $1 OR source_lead_id = $1
+           ORDER BY created_at DESC, id DESC
+           LIMIT 1"#,
     )
-    .bind(format!("C-ONBOARD-{tag}"))
     .bind(lead_id)
-    .bind(app.patient_manager_id)
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await
     .unwrap();
+    let case_id = if let Some(case_id) = existing_case_id {
+        sqlx::query(
+            r#"UPDATE cases
+               SET hauptanfragegrund = 'Chronic knee pain',
+                   aktuelle_anamnese = 'Pain for six months',
+                   zuweiser = 'Self referral',
+                   intake_completed_at = now(),
+                   intake_completed_by = $2
+               WHERE id = $1"#,
+        )
+        .bind(case_id)
+        .bind(app.patient_manager_id)
+        .execute(pool)
+        .await
+        .unwrap();
+        case_id
+    } else {
+        sqlx::query_scalar(
+            r#"INSERT INTO cases (
+                    case_id, lead_id, manager_id, status, hauptanfragegrund,
+                    aktuelle_anamnese, zuweiser, intake_completed_at, intake_completed_by
+               ) VALUES (
+                    $1, $2, $3, 'open', 'Chronic knee pain',
+                    'Pain for six months', 'Self referral', now(), $3
+               ) RETURNING id"#,
+        )
+        .bind(format!("C-ONBOARD-{tag}"))
+        .bind(lead_id)
+        .bind(app.patient_manager_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    };
 
     let mut document_ids = Vec::new();
     for compliance_kind in ["identity", "dsgvo", "confidentiality_release"] {
@@ -336,7 +364,9 @@ async fn seed_complete_lead_onboarding(app: &TestApp, lead_id: Uuid) -> SeededOn
                 status, paid_amount, paid_at, line_items, created_by
            ) VALUES (
                 $1, $2, 100, 19, 119,
-                'accepted', 119, now(), '[]'::jsonb, $3
+                'accepted', 119, now(),
+                '[{"description":"Initial orthopedic coordination","quantity":1,"unit_price":100,"vat_rate":19}]'::jsonb,
+                $3
            ) RETURNING id"#,
     )
     .bind(order_id)
@@ -1080,11 +1110,7 @@ async fn list_leads_exposes_conversion_ready_field() {
 }
 
 #[tokio::test]
-async fn list_leads_conversion_ready_is_false_for_converted_lead() {
-    // After conversion the lead row carries converted_patient_id, which
-    // the readiness builder treats as "already converted" and reports
-    // as not-ready. The UI uses this to hide the Convert button
-    // entirely on the `converted` stage card.
+async fn converted_lead_is_absent_from_registry_but_detail_remains_auditable() {
     let Some(app) = test_app().await else { return };
     let pm = app.auth_header("patient_manager");
 
@@ -1105,6 +1131,11 @@ async fn list_leads_conversion_ready_is_false_for_converted_lead() {
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let lead_id = created["id"].as_str().unwrap().to_string();
+    sqlx::query("UPDATE leads SET intake_model = 'legacy' WHERE id = $1")
+        .bind(Uuid::parse_str(&lead_id).unwrap())
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
 
     let (status, _) = json_request(
         &app,
@@ -1146,22 +1177,25 @@ async fn list_leads_conversion_ready_is_false_for_converted_lead() {
     assert_eq!(status, StatusCode::OK);
     assert!(convert_body["patient_id"].is_string());
 
-    let (status, list) =
-        json_request(&app, "GET", "/api/v1/leads?status=converted", &pm, None).await;
+    let (status, list) = json_request(&app, "GET", "/api/v1/leads", &pm, None).await;
     assert_eq!(status, StatusCode::OK);
+    assert!(
+        !list
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|lead| lead["id"] == lead_id),
+        "converted lead must leave the operational lead registry"
+    );
 
-    let entry = list
-        .as_array()
-        .expect("converted leads list returns an array")
-        .iter()
-        .find(|l| l["id"] == lead_id)
-        .expect("converted lead must appear in converted list");
-
-    assert_eq!(entry["qualification_status"], "converted");
+    let (status, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["qualification_status"], "converted");
     assert_eq!(
-        entry["conversion_ready"].as_bool(),
+        detail["readiness"]["conversion_ready"].as_bool(),
         Some(false),
-        "converted leads must report conversion_ready=false; entry was {entry}"
+        "converted lead detail must remain non-convertible and auditable: {detail}"
     );
 }
 
@@ -1356,6 +1390,424 @@ async fn wizard_convert_uses_the_full_readiness_gate() {
 }
 
 #[tokio::test]
+async fn patient_first_conversion_activates_the_prospect_and_keeps_case_provenance() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pool = &app.suite.pool;
+    let email = format!("patient-first-{}@example.com", Uuid::new_v4().simple());
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, phone, country, primary_language,
+                date_of_birth, legal_sex, street_address, city, zip_code,
+                primary_concern_text, requested_specialties,
+                qualification_status, compliance_status,
+                consent_healthcare, consent_privacy_practices,
+                intake_source, intake_model, created_by
+           ) VALUES (
+                'Identity', 'First', $1, '+4915112345678', 'DE', 'de',
+                DATE '1990-05-01', 'female', 'Hauptstr. 1', 'Berlin', '10115',
+                'Chronic knee pain', '["orthopedics"]'::jsonb,
+                'qualified', 'signed', true, true,
+                'staff_wizard', 'patient_first', $2
+           ) RETURNING id"#,
+    )
+    .bind(&email)
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let pm = app.auth_header("patient_manager");
+
+    let (status, prospect) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/prospect"),
+        &pm,
+        Some(json!({
+            "hauptanfragegrund": "Chronic knee pain",
+            "zuweiser": "Self referral"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{prospect}");
+    assert_eq!(prospect["lifecycle_status"], "prospective");
+    let patient_id = Uuid::parse_str(prospect["patient_id"].as_str().unwrap()).unwrap();
+    let case_id = Uuid::parse_str(prospect["case_id"].as_str().unwrap()).unwrap();
+
+    let lifecycle: (String, bool) =
+        sqlx::query_as("SELECT lifecycle_status, is_active FROM patients WHERE id = $1")
+            .bind(patient_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(lifecycle, ("prospective".to_string(), false));
+    let case_subject: (Option<Uuid>, Option<Uuid>, Option<Uuid>) =
+        sqlx::query_as("SELECT patient_id, lead_id, source_lead_id FROM cases WHERE id = $1")
+            .bind(case_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(case_subject, (Some(patient_id), None, Some(lead_id)));
+    let assignment_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM patient_assignments WHERE patient_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(assignment_count >= 1);
+
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    assert_eq!(artifacts.case_id, case_id);
+    let (status, lead) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{lead}");
+    assert_eq!(lead["readiness"]["conversion_ready"], true, "{lead}");
+
+    let (status, converted) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/wizard-convert"),
+        &pm,
+        Some(json!({ "confirmed": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{converted}");
+    assert_eq!(converted["patient_id"], patient_id.to_string());
+
+    let activated: (String, bool) =
+        sqlx::query_as("SELECT lifecycle_status, is_active FROM patients WHERE id = $1")
+            .bind(patient_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(activated, ("active".to_string(), true));
+    let patient_count: i64 = sqlx::query_scalar("SELECT count(*) FROM patients WHERE email = $1")
+        .bind(&email)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        patient_count, 1,
+        "conversion must activate, not duplicate, the prospect"
+    );
+    let converted_case: (Option<Uuid>, Option<Uuid>, Option<Uuid>) =
+        sqlx::query_as("SELECT patient_id, lead_id, source_lead_id FROM cases WHERE id = $1")
+            .bind(case_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(converted_case, (Some(patient_id), None, Some(lead_id)));
+    let order_case_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT case_id FROM orders WHERE id = $1")
+            .bind(artifacts.order_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(order_case_id, Some(case_id));
+
+    for path in [
+        format!("/api/v1/cases?lead_id={lead_id}"),
+        format!("/api/v1/cases?patient_id={patient_id}"),
+    ] {
+        let (status, cases) = json_request(&app, "GET", &path, &pm, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {cases}");
+        assert!(
+            cases.as_array().unwrap().iter().any(|case| {
+                case["id"] == case_id.to_string()
+                    && case["source_lead_id"] == lead_id.to_string()
+                    && case["patient_id"] == patient_id.to_string()
+            }),
+            "converted case must remain discoverable by lead provenance and patient: {cases}"
+        );
+    }
+
+    let (status, timeline) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/timeline?entity_type=case"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{timeline}");
+    assert!(
+        timeline["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["entity_id"] == case_id.to_string()),
+        "converted case must remain visible in the patient timeline: {timeline}"
+    );
+}
+
+#[tokio::test]
+async fn returning_patient_attach_reuses_identity_without_overwriting_master_data() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pool = &app.suite.pool;
+    let tag = Uuid::new_v4().simple().to_string();
+    let existing_email = format!("existing-{tag}@example.com");
+    let incoming_email = format!("incoming-{tag}@example.com");
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (
+                patient_id, first_name, last_name, birth_date, gender,
+                email, notes, lifecycle_status, is_active, created_by, languages
+           ) VALUES (
+                $1, 'Returning', 'Patient', DATE '1982-04-03', 'female',
+                $2, 'Existing longitudinal note', 'active', true, $3, ARRAY['de']::text[]
+           ) RETURNING id"#,
+    )
+    .bind(format!("P-RETURNING-{tag}"))
+    .bind(&existing_email)
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, phone, country, primary_language,
+                date_of_birth, legal_sex, street_address, city, zip_code,
+                primary_concern_text, requested_specialties,
+                qualification_status, compliance_status,
+                consent_healthcare, consent_privacy_practices,
+                intake_source, intake_model, created_by
+           ) VALUES (
+                'Returning', 'Patient', $1, '+4915776543210', 'DE', 'de',
+                DATE '1982-04-03', 'female', 'Neue Str. 2', 'Berlin', '10115',
+                'New episode concern', '["orthopedics"]'::jsonb,
+                'qualified', 'signed', true, true,
+                'staff_wizard', 'patient_first', $2
+           ) RETURNING id"#,
+    )
+    .bind(&incoming_email)
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let pm = app.auth_header("patient_manager");
+
+    let (status, duplicate_response) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/prospect"),
+        &pm,
+        Some(json!({ "hauptanfragegrund": "New episode concern" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{duplicate_response}");
+    let candidates = duplicate_response["duplicate_candidates"]
+        .as_array()
+        .unwrap();
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate["id"] == patient_id.to_string())
+    );
+    let patient_count_before: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM patients WHERE first_name = 'Returning' AND last_name = 'Patient'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    let (status, attached) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/prospect"),
+        &pm,
+        Some(json!({
+            "attach_patient_id": patient_id,
+            "hauptanfragegrund": "New episode concern"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{attached}");
+    assert_eq!(attached["patient_id"], patient_id.to_string());
+    assert_eq!(attached["attached"], true);
+    assert_eq!(attached["lifecycle_status"], "active");
+    let case_id = Uuid::parse_str(attached["case_id"].as_str().unwrap()).unwrap();
+
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    assert_eq!(artifacts.case_id, case_id);
+    let (status, lead) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{lead}");
+    assert_eq!(lead["readiness"]["conversion_ready"], true, "{lead}");
+
+    let (status, converted) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/wizard-convert"),
+        &pm,
+        Some(json!({ "confirmed": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{converted}");
+    assert_eq!(converted["patient_id"], patient_id.to_string());
+
+    let preserved: (Option<String>, Option<String>, Option<Uuid>, String, bool) = sqlx::query_as(
+        r#"SELECT email, notes, source_lead_id, lifecycle_status, is_active
+           FROM patients WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(preserved.0.as_deref(), Some(existing_email.as_str()));
+    assert_eq!(preserved.1.as_deref(), Some("Existing longitudinal note"));
+    assert_eq!(preserved.2, None);
+    assert_eq!(preserved.3, "active");
+    assert!(preserved.4);
+    let patient_count_after: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM patients WHERE first_name = 'Returning' AND last_name = 'Patient'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(patient_count_after, patient_count_before);
+}
+
+#[tokio::test]
+async fn failed_lead_purges_only_unconverted_prospect_and_preserves_attached_patient() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pool = &app.suite.pool;
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+
+    let prospect_lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, phone, country, primary_language,
+                date_of_birth, legal_sex, qualification_status, intake_source,
+                intake_model, created_by
+           ) VALUES (
+                'Purge', 'Prospect', $1, '+4915111111111', 'DE', 'de',
+                DATE '1991-01-01', 'female', 'in_progress', 'staff_wizard',
+                'patient_first', $2
+           ) RETURNING id"#,
+    )
+    .bind(format!("purge-{tag}@example.com"))
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let (status, prospect) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{prospect_lead_id}/prospect"),
+        &pm,
+        Some(json!({ "hauptanfragegrund": "Temporary concern" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{prospect}");
+    let prospect_patient_id = Uuid::parse_str(prospect["patient_id"].as_str().unwrap()).unwrap();
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{prospect_patient_id}/diagnoses"),
+        &pm,
+        Some(json!({ "items": [{ "kind": "main", "label": "Temporary diagnosis" }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let version_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM patient_clinical_versions WHERE patient_id = $1")
+            .bind(prospect_patient_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(version_count > 0);
+
+    let (status, deleted) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{prospect_lead_id}/failed-flow"),
+        &pm,
+        Some(json!({ "resolution": "delete", "reason": "not_our_lead" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{deleted}");
+    let prospect_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
+            .bind(prospect_patient_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(!prospect_exists);
+    let version_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM patient_clinical_versions WHERE patient_id = $1)",
+    )
+    .bind(prospect_patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(!version_exists);
+
+    let active_patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (
+                patient_id, first_name, last_name, birth_date, gender,
+                lifecycle_status, is_active, created_by, languages
+           ) VALUES (
+                $1, 'Keep', 'Patient', DATE '1985-05-05', 'male',
+                'active', true, $2, ARRAY['de']::text[]
+           ) RETURNING id"#,
+    )
+    .bind(format!("P-KEEP-{tag}"))
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let attached_lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, phone, country, primary_language,
+                date_of_birth, legal_sex, qualification_status, intake_source,
+                intake_model, created_by
+           ) VALUES (
+                'Keep', 'Patient', $1, '+4915222222222', 'DE', 'de',
+                DATE '1985-05-05', 'male', 'in_progress', 'staff_wizard',
+                'patient_first', $2
+           ) RETURNING id"#,
+    )
+    .bind(format!("keep-{tag}@example.com"))
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let (status, attached) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{attached_lead_id}/prospect"),
+        &pm,
+        Some(json!({ "attach_patient_id": active_patient_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{attached}");
+    let (status, deleted_lead) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{attached_lead_id}/failed-flow"),
+        &pm,
+        Some(json!({ "resolution": "delete", "reason": "not_our_lead" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{deleted_lead}");
+    let active_patient_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
+            .bind(active_patient_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(
+        active_patient_exists,
+        "attached active patient must never be purged with a lead"
+    );
+}
+
+#[tokio::test]
 async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     let Some(app) = test_app().await else {
         return;
@@ -1393,7 +1845,7 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
                 date_of_birth, legal_sex, street_address, city, zip_code,
                 primary_concern_text, requested_specialties,
                 qualification_status, compliance_status,
-                consent_healthcare, consent_privacy_practices, intake_source, created_by,
+                consent_healthcare, consent_privacy_practices, intake_source, intake_model, created_by,
                 wizard_state
            ) VALUES (
                 'Atomic', 'Marie', 'Onboarding', 'Jr.', $1, true, '+4915112345678',
@@ -1414,7 +1866,7 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
                 'Manager service note from the lead',
                 DATE '1990-05-01', 'female', 'Hauptstr. 1', 'Berlin', '10115',
                 'Chronic knee pain', '["orthopedics"]'::jsonb,
-                'qualified', 'signed', true, true, 'staff_wizard', $2,
+                'qualified', 'signed', true, true, 'staff_wizard', 'legacy', $2,
                 $3::jsonb
            ) RETURNING id"#,
     )

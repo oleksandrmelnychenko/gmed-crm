@@ -95,7 +95,6 @@ export function leadErrorBlockingReasons(error: unknown) {
     Array.isArray(body.blocking_fields)
       ? body.blocking_fields.map((field) => {
           if (field === "hauptanfragegrund") return "Primary concern is missing";
-          if (field === "aktuelle_anamnese") return "Anamnesis intake is incomplete";
           return field;
         })
       : null,

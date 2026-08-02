@@ -170,9 +170,7 @@ function useCreateAppointmentSheetContent({
 }: CreateAppointmentSheetProps) {
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const interpreterFieldLabel =
-    tr.role_interpreter ??
-    appointmentText("appointments_interpreter");
+  const interpreterFieldLabel = appointmentText("appointments_interpreter");
   const [sheetState, dispatchSheetState] = useReducer(
     createAppointmentSheetReducer,
     undefined,

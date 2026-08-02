@@ -1,5 +1,7 @@
-import { Badge } from "@/components/ui/badge";
+import { useMemo } from "react";
+
 import { Input } from "@/components/ui/input";
+import type { ColumnDef } from "@/components/data-table/types";
 import { t as translateCatalog, useLang } from "@/lib/i18n";
 
 import { CaseItemList } from "./case-item-list";
@@ -26,8 +28,54 @@ export function SymptomsSection() {
     saveSymptoms,
   } = useCaseWorkspace();
 
+  const columns = useMemo<ColumnDef<SymptomItem>[]>(
+    () => [
+      {
+        id: "beschreibung",
+        label: tri(lang, "case_ws_description"),
+        accessor: (item) => item.beschreibung,
+        filterType: "text",
+        searchable: true,
+        sortable: true,
+        required: true,
+        width: 420,
+        render: (item) => (
+          <span className="block max-w-[420px] truncate text-xs font-medium text-foreground">
+            {item.beschreibung || tri(lang, "case_ws_untitled_3")}
+          </span>
+        ),
+      },
+      {
+        id: "fachrichtung",
+        label: tri(lang, "case_ws_specialty"),
+        accessor: (item) => item.fachrichtung ?? "",
+        filterType: "enum",
+        filterOptions: () =>
+          [
+            ...new Set(
+              (detail?.symptome ?? [])
+                .map((item) => item.fachrichtung?.trim())
+                .filter((value): value is string => Boolean(value)),
+            ),
+          ].map((value) => ({ value, label: value })),
+        sortable: true,
+        width: 240,
+        render: (item) =>
+          item.fachrichtung?.trim() ? (
+            <span className="inline-flex rounded-full border border-border/60 bg-muted/25 px-2 py-0.5 font-mono text-[10px] font-medium text-foreground">
+              {item.fachrichtung}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">—</span>
+          ),
+      },
+    ],
+    [detail?.symptome, lang],
+  );
+
   return (
     <CaseItemList<SymptomItem>
+      columns={columns}
       title={tri(lang, "case_ws_symptoms")}
       description={tri(lang, "case_ws_clinical_complaints_and_related_specialty")}
       items={detail?.symptome ?? []}
@@ -48,25 +96,6 @@ export function SymptomsSection() {
       emptyTitle={tri(lang, "case_ws_no_symptoms_recorded_yet")}
       addFirstLabel={tri(lang, "case_ws_add_first_entry_3")}
       missingPrimaryMessage={tri(lang, "case_ws_please_enter_a_description")}
-      cardContent={(item) => (
-        <>
-          <div className="flex min-w-0 items-center gap-1.5">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
-            <p className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
-              {item.beschreibung ||
-                tri(lang, "case_ws_untitled_3")}
-            </p>
-          </div>
-          {item.fachrichtung ? (
-            <Badge
-              variant="outline"
-              className="self-start rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
-            >
-              {item.fachrichtung}
-            </Badge>
-          ) : null}
-        </>
-      )}
       formContent={({ form, updateField, disabled }) => (
         <Panel title={tri(lang, "case_ws_symptoms")}>
           <Field

@@ -6,7 +6,7 @@ import {
   type FormEvent,
 } from "react";
 
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,6 @@ import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
 import {
   appointmentElevatedSectionCardClassName,
-  appointmentMetaPillClassName,
   appointmentSelectControlClassName,
   appointmentSlateInputClassName,
   appointmentSlateTextareaControlClassName,
@@ -61,6 +60,7 @@ import {
   AppointmentTasksTable,
 } from "@/pages/appointments/ui/shared/follow-up-tables";
 import {
+  AppointmentEditorSheet,
   AppointmentSectionHeading,
   Field,
 } from "@/pages/appointments/ui/shared/workspace-primitives";
@@ -294,6 +294,7 @@ function useAppointmentBillingHandoffSectionContentContent({
           form.kind,
         ),
       );
+      setSheetOpen(false);
       onRefresh();
     } catch (error) {
       onError(appointmentActionErrorMessage(error, tr.common_failed_create));
@@ -302,6 +303,7 @@ function useAppointmentBillingHandoffSectionContentContent({
     }
   }
 
+  const [sheetOpen, setSheetOpen] = useState(false);
   const noBillingStaff = billingStaff.length === 0;
   const dueAtIsPast = Boolean(form.dueAt && form.dueAt < earliestDueAt);
   const handoffBlockedReason = !form.assigneeId
@@ -317,12 +319,18 @@ function useAppointmentBillingHandoffSectionContentContent({
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <AppointmentSectionHeading
           title={appointmentText("appointments_billing_and_settlement_handoff")}
-          description={appointmentText("appointments_structured_transfer_to_billing_before_the_document_layer")}
         />
-        <span className={appointmentMetaPillClassName}>
-          {tasks.length + reminders.length}{" "}
-          {appointmentText("appointments_linked")}
-        </span>
+        {canManageConciergeBilling && !noBillingStaff ? (
+          <Button
+            type="button"
+            size="sm"
+            className="h-8 shrink-0 rounded-lg gap-1.5"
+            onClick={() => setSheetOpen(true)}
+          >
+            <Plus className="size-3.5" />
+            {appointmentText("appointments_create_billing_handoff")}
+          </Button>
+        ) : null}
       </div>
 
       <div className="mt-4 grid gap-3 xl:grid-cols-3">
@@ -397,7 +405,24 @@ function useAppointmentBillingHandoffSectionContentContent({
       </div>
 
       {canManageConciergeBilling && !noBillingStaff ? (
-        <form onSubmit={handleSubmit} className="mt-5 grid gap-4 md:grid-cols-2">
+        <AppointmentEditorSheet
+          open={sheetOpen}
+          onOpenChange={setSheetOpen}
+          title={appointmentText("appointments_billing_and_settlement_handoff")}
+          maxWidthClassName="sm:max-w-[720px]"
+          footer={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={() => setSheetOpen(false)}
+            >
+              {t.common_cancel}
+            </Button>
+          }
+        >
+        <form onSubmit={handleSubmit} className="grid gap-4 md:grid-cols-2">
           <Field label={appointmentText("appointments_billing_handoff_type")}>
             <NativeComboboxSelect
               value={form.kind}
@@ -559,6 +584,7 @@ function useAppointmentBillingHandoffSectionContentContent({
             </p>
           ) : null}
         </form>
+        </AppointmentEditorSheet>
       ) : null}
     </section>
   );

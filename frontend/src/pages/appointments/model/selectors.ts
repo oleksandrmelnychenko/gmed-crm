@@ -155,10 +155,10 @@ export function appointmentPermissions(
         canApproveReport: true,
         canRejectReport: true,
         canViewNotes: true,
-        canViewTasks: true,
-        canCreateTasks: true,
-        canViewConciergeServices: true,
-        canManageConciergeServices: true,
+        canViewTasks: false,
+        canCreateTasks: false,
+        canViewConciergeServices: false,
+        canManageConciergeServices: false,
         canManageConciergeBilling: true,
         canViewCommunications: true,
         canManageCommunications: true,
@@ -700,7 +700,7 @@ export function buildAppointmentTimelineEvents(args: {
           ? labels.appointments_timeline_interpreter_accepted
           : detail.interpreter_response === "declined"
             ? labels.appointments_timeline_interpreter_declined
-            : detail.interpreter_response === "discussion"
+            : detail.interpreter_response === "discussion_requested"
               ? labels.appointments_timeline_interpreter_discussion
               : labels.appointments_timeline_interpreter_assigned,
       detail: [detail.interpreter_name, detail.interpreter_response]
@@ -712,7 +712,7 @@ export function buildAppointmentTimelineEvents(args: {
           ? "success"
           : detail.interpreter_response === "declined"
             ? "danger"
-            : detail.interpreter_response === "discussion"
+            : detail.interpreter_response === "discussion_requested"
               ? "warning"
               : "info",
     });

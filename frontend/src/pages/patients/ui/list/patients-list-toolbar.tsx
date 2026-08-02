@@ -37,6 +37,7 @@ type DoctorOption = {
 
 type PatientsListToolbarProps = {
   anyTopFilterActive: boolean;
+  canFilterLifecycle: boolean;
   columns: ColumnDef<PatientSummary>[];
   defaultFrozenColumns: string[];
   defaultHiddenColumns: string[];
@@ -77,6 +78,7 @@ type PatientsListToolbarProps = {
 
 export function PatientsListToolbar({
   anyTopFilterActive,
+  canFilterLifecycle,
   columns,
   defaultFrozenColumns,
   defaultHiddenColumns,
@@ -188,6 +190,9 @@ export function PatientsListToolbar({
             <option value="">{t.providers_all}</option>
             <option value="true">{t.common_active}</option>
             <option value="false">{t.common_inactive}</option>
+            {canFilterLifecycle ? (
+              <option value="prospective">{t.patients_lifecycle_prospective}</option>
+            ) : null}
           </NativeComboboxSelect>
         </ToolbarField>
 

@@ -577,6 +577,23 @@ function buildPeopleColumns(
 
   const columns: ColumnDef<ProviderPeopleCatalogRow>[] = [
     {
+      id: "person_code",
+      label: uiLabel(uiText, "providers_people_person_code", "ID"),
+      accessor: (row) => (row.isProviderChild ? "" : row.person_id.slice(0, 8).toUpperCase()),
+      filterType: "text",
+      searchable: true,
+      sortable: true,
+      pinned: "left",
+      width: 110,
+      group: "identity",
+      render: (row) =>
+        row.isProviderChild ? null : (
+          <span className="font-mono text-xs text-foreground">
+            {row.person_id.slice(0, 8).toUpperCase()}
+          </span>
+        ),
+    },
+    {
       id: "person",
       label: uiLabel(uiText, "providers_people_person", localizedFallback(lang, "Person", "Человек")),
       accessor: (row) => row.name,

@@ -1,6 +1,7 @@
 import { Fragment, lazy, Suspense, useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { apiFetch } from "@/lib/api";
+import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CountBadge, EmptyCell } from "@/components/ui-shell";
@@ -40,16 +41,19 @@ import {
 } from "../../data/medication-options";
 
 import {
+  createPatientMedicationDrugMatch,
   createPatientRecommendation,
   deletePatientNarrative,
   deletePatientRecommendation,
   fetchAllDoctors,
   fetchNarrativeHistory,
   fetchPatientClinical,
+  fetchPatientMedicationEquivalents,
   fetchPatientRecommendations,
   savePatientClinicalWarnings,
   savePatientDiagnoses,
   savePatientExaminations,
+  savePatientImpfstatus,
   savePatientMedications,
   savePatientNarrative,
   savePatientProcedures,
@@ -65,9 +69,24 @@ import {
   type ClinicalVerlaufEntry,
   type ClinicalWarning,
   type ClinicalWarningKind,
+  type PatientImpfstatus,
   type PatientRecommendation,
   type RecommendationLifecycleStatus,
 } from "@/pages/patients/data/patient-clinical";
+
+/** Case reference for episode chips, from GET /patients/{id}/cases. */
+type PatientCaseRef = {
+  id: string;
+  case_id: string;
+};
+
+import {
+  searchDrugProducts,
+  verifyDrugEquivalent,
+  type DrugProduct,
+  type GermanEquivalent,
+} from "@/lib/api/clinical";
+import { MedicationEquivalentsPanel } from "@/pages/case-workspace/medication-equivalents-panel";
 
 import { AnamneseSection } from "./anamnese-section";
 import { DiagnosisTreeSection } from "./diagnosis-tree";
@@ -1628,6 +1647,10 @@ export function PatientClinicalTab({
   const [procedures, setProcedures] = useState<ClinicalProcedure[]>([]);
   const [verlauf, setVerlauf] = useState<ClinicalVerlaufEntry[]>([]);
   const [narrative, setNarrative] = useState<ClinicalNarrative | null>(null);
+  const [impfstatus, setImpfstatus] = useState<PatientImpfstatus | null>(null);
+  const [impfstatusDraft, setImpfstatusDraft] = useState("");
+  const [impfstatusBusy, setImpfstatusBusy] = useState(false);
+  const [patientCases, setPatientCases] = useState<PatientCaseRef[]>([]);
   const [recommendations, setRecommendations] = useState<PatientRecommendation[]>([]);
   const [vitalsHistory, setVitalsHistory] = useState<PatientVitalMeasurement[]>([]);
   const [riskScores, setRiskScores] = useState<PatientRiskScore[]>([]);
@@ -1668,8 +1691,11 @@ export function PatientClinicalTab({
       apiFetch<{ items: PatientRiskScore[] }>(`/patients/${patientId}/risk-scores`).catch(() => ({
         items: [] as PatientRiskScore[],
       })),
+      apiFetch<PatientCaseRef[]>(`/patients/${patientId}/cases`).catch(
+        () => [] as PatientCaseRef[],
+      ),
     ])
-      .then(([clinical, recs, providerRows, doctorRows, vitals, scores]) => {
+      .then(([clinical, recs, providerRows, doctorRows, vitals, scores, caseRefs]) => {
         if (!active) return;
         setAllergien(clinical.allergien ?? []);
         setCave(clinical.cave ?? []);
@@ -1679,6 +1705,9 @@ export function PatientClinicalTab({
         setProcedures(clinical.procedures ?? []);
         setVerlauf((current) => mergeVerlaufDoctorAttribution(clinical.verlauf ?? [], current));
         setNarrative(clinical.narrative ?? null);
+        setImpfstatus(clinical.impfstatus ?? null);
+        setImpfstatusDraft(clinical.impfstatus?.status_text ?? "");
+        setPatientCases(Array.isArray(caseRefs) ? caseRefs : []);
         setRecommendations(recs ?? []);
         setProviders(clinicalMedicalProviderRows(providerRows ?? []));
         setAllDoctors(doctorRows ?? []);
@@ -1721,6 +1750,23 @@ export function PatientClinicalTab({
         {tx("Провайдер", "Anbieter")}: {item.provider_name}
       </p>
     ) : null;
+  };
+
+  // Episode attribution chip: C-code of the case that established the entry,
+  // linking into the case workspace.
+  const episodeChip = (caseId: string | null | undefined) => {
+    if (!caseId) return null;
+    const caseRef = patientCases.find((candidate) => candidate.id === caseId);
+    if (!caseRef) return null;
+    return (
+      <StaffLink
+        to={`/cases/${caseRef.id}?patient=${patientId}`}
+        onClick={(event) => event.stopPropagation()}
+        className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 font-mono text-[10px] font-medium text-violet-700 hover:bg-violet-100"
+      >
+        {caseRef.case_id}
+      </StaffLink>
+    );
   };
 
   function openMedicationHoldEditor(index: number, medication: ClinicalMedication) {
@@ -2026,6 +2072,7 @@ export function PatientClinicalTab({
                   ({p.ops_code})
                 </span>
               ) : null}
+              {episodeChip(p.case_id)}
             </div>
             {p.note ? (
               <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{p.note}</p>
@@ -2125,6 +2172,7 @@ export function PatientClinicalTab({
                   {item.occurred_on}
                 </span>
               ) : null}
+              {episodeChip(item.case_id)}
             </div>
             <p className="min-w-0 max-w-full whitespace-pre-line break-words text-sm text-foreground">
               {item.note}
@@ -2478,6 +2526,12 @@ export function PatientClinicalTab({
         }}
         onSubmit={() => void submitMedicationHoldEditor()}
       />
+      <PatientMedicationEquivalentsBlock
+        patientId={patientId}
+        medications={medications}
+        canManage={canManage}
+        tx={tx}
+      />
 
       {/* ---- Examinations / Befunde ---- */}
       <ClinicalSection<ClinicalExamination>
@@ -2505,6 +2559,7 @@ export function PatientClinicalTab({
                   {tx("Ожидается", "Ausstehend")}
                 </Badge>
               ) : null}
+              {episodeChip(e.case_id)}
             </div>
             {e.result ? (
               <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{e.result}</p>
@@ -2580,6 +2635,68 @@ export function PatientClinicalTab({
           </div>
         )}
       />
+
+      {/* ---- Impfstatus (patient state, moved from the case per RFC D4) ---- */}
+      <section className="rounded-xl border border-border/70 bg-card">
+        <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-foreground">
+              {tx("Статус вакцинации", "Impfstatus")}
+            </h3>
+            {impfstatus?.updated_at ? (
+              <span className="text-[11px] text-muted-foreground">
+                {cachedDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+                  dateStyle: "medium",
+                }).format(new Date(impfstatus.updated_at))}
+              </span>
+            ) : null}
+          </div>
+        </header>
+        <div className="space-y-3 p-4">
+          <textarea
+            value={impfstatusDraft}
+            onChange={(e) => setImpfstatusDraft(e.target.value)}
+            className={cn(inputClass, "h-24 py-2")}
+            placeholder={tx(
+              "Свободный текст о статусе вакцинации",
+              "Freitext zum Impfstatus",
+            )}
+            disabled={!canManage || impfstatusBusy}
+          />
+          {canManage ? (
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                className="h-8 rounded-lg"
+                disabled={
+                  impfstatusBusy ||
+                  impfstatusDraft.trim() === (impfstatus?.status_text ?? "").trim()
+                }
+                onClick={async () => {
+                  setImpfstatusBusy(true);
+                  try {
+                    await savePatientImpfstatus(
+                      patientId,
+                      impfstatusDraft.trim() || null,
+                    );
+                    setVersion((current) => current + 1);
+                  } catch (err: unknown) {
+                    toast.error(
+                      err instanceof Error
+                        ? err.message
+                        : tx("Не удалось сохранить", "Speichern fehlgeschlagen"),
+                    );
+                  } finally {
+                    setImpfstatusBusy(false);
+                  }
+                }}
+              >
+                {tx("Сохранить", "Speichern")}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      </section>
 
       {/* ---- Vitalwerte-Verlauf (moved from Profile) ---- */}
       {(canManage || vitalsHistory.length > 0) && (
@@ -2955,5 +3072,239 @@ export function PatientClinicalTab({
         }}
       />
     </ClinicalWrapper>
+  );
+}
+
+export function PatientMedicationEquivalentsBlock({
+  patientId,
+  medications,
+  canManage,
+  tx,
+}: {
+  patientId: string;
+  medications: ClinicalMedication[];
+  canManage: boolean;
+  tx: Bilingual;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [includeCandidates, setIncludeCandidates] = useState(false);
+  const [candidates, setCandidates] = useState<GermanEquivalent[]>([]);
+  const [searchCompleted, setSearchCompleted] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [verifyingEquivalentId, setVerifyingEquivalentId] = useState<string | null>(null);
+  const [drugQuery, setDrugQuery] = useState("");
+  const [drugResults, setDrugResults] = useState<DrugProduct[]>([]);
+  const [drugSearching, setDrugSearching] = useState(false);
+  const [drugError, setDrugError] = useState("");
+  const [linkingProductId, setLinkingProductId] = useState<string | null>(null);
+
+  const persisted = medications.filter((m): m is ClinicalMedication & { id: string } =>
+    Boolean(m.id),
+  );
+  const selected = persisted.find((m) => m.id === selectedId) ?? persisted[0] ?? null;
+  if (persisted.length === 0) return null;
+
+  const resetResults = () => {
+    setCandidates([]);
+    setSearchCompleted(false);
+    setError("");
+    setDrugResults([]);
+    setDrugError("");
+  };
+
+  const findEquivalents = async (include = includeCandidates) => {
+    if (!selected) return;
+    setLoading(true);
+    setError("");
+    try {
+      const payload = await fetchPatientMedicationEquivalents(patientId, selected.id, include);
+      setCandidates(payload.candidates);
+      setSearchCompleted(true);
+    } catch (findError) {
+      setCandidates([]);
+      setSearchCompleted(false);
+      setError(
+        findError instanceof Error
+          ? findError.message
+          : tx("Не удалось загрузить эквиваленты.", "Äquivalente konnten nicht geladen werden."),
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const verifyEquivalent = async (
+    relationshipId: string,
+    verificationStatus: "verified" | "rejected" | "candidate",
+  ) => {
+    setVerifyingEquivalentId(relationshipId);
+    setError("");
+    try {
+      await verifyDrugEquivalent(relationshipId, verificationStatus);
+      await findEquivalents();
+    } catch (verifyError) {
+      setError(
+        verifyError instanceof Error
+          ? verifyError.message
+          : tx("Не удалось обновить статус.", "Status konnte nicht aktualisiert werden."),
+      );
+    } finally {
+      setVerifyingEquivalentId(null);
+    }
+  };
+
+  const searchDrugs = async () => {
+    if (!drugQuery.trim()) return;
+    setDrugSearching(true);
+    setDrugError("");
+    try {
+      const results = await searchDrugProducts({
+        q: drugQuery,
+        include_candidates: includeCandidates,
+      });
+      setDrugResults(results);
+    } catch (searchError) {
+      setDrugResults([]);
+      setDrugError(
+        searchError instanceof Error
+          ? searchError.message
+          : tx("Поиск препаратов не удался.", "Arzneimittelsuche fehlgeschlagen."),
+      );
+    } finally {
+      setDrugSearching(false);
+    }
+  };
+
+  const linkProduct = async (productId: string) => {
+    if (!selected) return;
+    setLinkingProductId(productId);
+    setDrugError("");
+    try {
+      await createPatientMedicationDrugMatch(patientId, selected.id, {
+        drug_product_id: productId,
+        confidence: 0.85,
+      });
+      await findEquivalents();
+    } catch (linkError) {
+      setDrugError(
+        linkError instanceof Error
+          ? linkError.message
+          : tx("Не удалось связать препарат.", "Verknüpfung fehlgeschlagen."),
+      );
+    } finally {
+      setLinkingProductId(null);
+    }
+  };
+
+  return (
+    <section className="space-y-3">
+      <div className="grid gap-2 md:grid-cols-2">
+        <Field label={tx("Медикамент для проверки эквивалентов", "Medikament für Äquivalent-Prüfung")}>
+          <NativeComboboxSelect
+            value={selected?.id ?? ""}
+            aria-label={tx("Медикамент для проверки эквивалентов", "Medikament für Äquivalent-Prüfung")}
+            className={inputClass}
+            onChange={(e) => {
+              setSelectedId(e.target.value || null);
+              resetResults();
+            }}
+          >
+            {persisted.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.handelsname || m.wirkstoff || "—"}
+              </option>
+            ))}
+          </NativeComboboxSelect>
+        </Field>
+        {canManage ? (
+          <Field label={tx("Поиск в справочнике препаратов", "Arzneimittel-Referenz durchsuchen")}>
+            <div className="flex gap-2">
+              <Input
+                value={drugQuery}
+                onChange={(e) => setDrugQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void searchDrugs();
+                  }
+                }}
+                className={inputClass}
+                placeholder={tx("Название или вещество", "Name oder Wirkstoff")}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-9 shrink-0 rounded-lg"
+                disabled={drugSearching || !drugQuery.trim()}
+                onClick={() => void searchDrugs()}
+              >
+                {drugSearching ? tx("Поиск…", "Suche…") : tx("Найти", "Suchen")}
+              </Button>
+            </div>
+          </Field>
+        ) : null}
+      </div>
+
+      {drugError ? (
+        <p role="alert" className="text-xs text-destructive">
+          {drugError}
+        </p>
+      ) : null}
+      {drugResults.length > 0 && canManage ? (
+        <ul className="space-y-1.5">
+          {drugResults.map((product) => (
+            <li
+              key={product.id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-1.5"
+            >
+              <span className="min-w-0 text-sm text-foreground">
+                {product.brand_name}
+                <span className="ml-1.5 text-xs text-muted-foreground">
+                  {product.country_code}
+                  {product.strength ? ` · ${product.strength}` : ""}
+                  {product.form ? ` · ${product.form}` : ""}
+                </span>
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 rounded-full px-2.5 text-[11px]"
+                disabled={linkingProductId === product.id}
+                onClick={() => void linkProduct(product.id)}
+              >
+                {linkingProductId === product.id
+                  ? tx("Связывание…", "Verknüpfen…")
+                  : tx("Связать с медикаментом", "Mit Medikament verknüpfen")}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <MedicationEquivalentsPanel
+        medicationName={selected?.handelsname || selected?.wirkstoff || "—"}
+        medicationSubstance={selected?.wirkstoff}
+        candidates={candidates}
+        includeCandidates={includeCandidates}
+        searchCompleted={searchCompleted}
+        loading={loading}
+        error={error}
+        verifyingEquivalentId={verifyingEquivalentId}
+        onFind={() => void findEquivalents()}
+        onToggleCandidates={(include) => {
+          setIncludeCandidates(include);
+          if (searchCompleted) void findEquivalents(include);
+        }}
+        onVerifyEquivalent={
+          canManage
+            ? (relationshipId, verificationStatus) =>
+                void verifyEquivalent(relationshipId, verificationStatus)
+            : undefined
+        }
+      />
+    </section>
   );
 }

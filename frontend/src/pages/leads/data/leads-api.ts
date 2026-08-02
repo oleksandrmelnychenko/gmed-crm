@@ -74,6 +74,41 @@ export type WizardConvertResponse = {
   patient_pid: string;
 };
 
+export type ProspectDuplicateCandidate = {
+  id: string;
+  patient_id: string;
+  first_name: string;
+  last_name: string;
+  birth_date: string;
+  lifecycle_status: string;
+  email: string | null;
+  residence_country: string | null;
+};
+
+export type ProspectResponse = {
+  patient_id?: string;
+  patient_pid?: string;
+  case_id?: string;
+  case_code?: string;
+  lifecycle_status?: string;
+  already_exists?: boolean;
+  attached?: boolean;
+  duplicate_candidates?: ProspectDuplicateCandidate[];
+};
+
+/** Create (or resolve) the prospect patient + funnel case for a patient_first lead. */
+export function createLeadProspect(
+  leadId: string,
+  payload: {
+    attach_patient_id?: string;
+    force_create?: boolean;
+    hauptanfragegrund?: string;
+    zuweiser?: string;
+  } = {},
+) {
+  return postJson<ProspectResponse>(`/leads/${leadId}/prospect`, payload);
+}
+
 /** Save any subset of the wizard's editable lead fields (#12). */
 export function updateLeadWizard(leadId: string, payload: JsonPayload) {
   return postJson<void>(`/leads/${leadId}/update`, payload);

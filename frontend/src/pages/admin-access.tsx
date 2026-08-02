@@ -14,13 +14,11 @@ import {
   Lock,
   RefreshCcw,
   RotateCcw,
-  ShieldCheck,
   Zap,
 } from "lucide-react";
 
 import { AdminGuideButton, GuideSection } from "@/components/admin-guide";
 import {
-  AdminInlineMetric,
   AdminSectionTitle,
   AdminSheetScaffold,
   SheetActionsFooter,
@@ -308,20 +306,6 @@ function useAdminAccessPageContent() {
     [fieldLabel],
   );
 
-  const metrics = useMemo(() => {
-    const relevantPolicies = policies.filter((policy) =>
-      FIELD_KEYS.includes(policy.field_name as (typeof FIELD_KEYS)[number]),
-    );
-    return {
-      fields: FIELD_KEYS.length,
-      roles: ROLE_KEYS.length,
-      conditional: relevantPolicies.filter(
-        (policy) => policy.access_level === "conditional" && !policy.is_system_locked,
-      ).length,
-      locked: relevantPolicies.filter((policy) => policy.is_system_locked).length,
-    };
-  }, [policies]);
-
   const selectedFieldPolicies = useMemo(() => {
     if (!selectedField) return [];
     return ROLE_KEYS.map((role) => {
@@ -432,10 +416,7 @@ function useAdminAccessPageContent() {
             setSelectedField(row.field);
           }}
         >
-          <div className="truncate font-medium text-foreground">{row.label}</div>
-          <div className="mt-0.5 truncate text-xs text-foreground">
-            {t.admin_system_field_workspace}
-          </div>
+          <div className="truncate text-xs font-medium text-foreground">{row.label}</div>
         </button>
       ),
     },
@@ -479,17 +460,17 @@ function useAdminAccessPageContent() {
                 void updatePolicy(role, row.field);
               }}
               className={cn(
-                "inline-flex size-9 items-center justify-center rounded-xl border transition-all",
+                "inline-flex size-6 items-center justify-center rounded-full border transition-colors",
                 cfg.buttonClass,
                 locked
                   ? "cursor-not-allowed opacity-60"
-                  : "hover:scale-105 hover:shadow-sm active:scale-95",
+                  : "hover:brightness-95 active:scale-95",
               )}
             >
               {busy ? (
-                <LoaderCircle className="size-4 animate-spin" />
+                <LoaderCircle className="size-3 animate-spin" />
               ) : (
-                <Icon className="size-[17px]" />
+                <Icon className="size-3" />
               )}
             </button>
           </div>
@@ -593,49 +574,11 @@ function useAdminAccessPageContent() {
           )}
         />
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          <StatusBadge tone="info">{`${t.access_entity}: ${t.admin_system_patient_entity}`}</StatusBadge>
-        </div>
-
-        <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
-          <AdminInlineMetric
-            icon={ShieldCheck}
-            tone="sky"
-            label={t.access_field}
-            value={metrics.fields}
-            description={t.common_registry}
-          />
-          <AdminInlineMetric
-            icon={Check}
-            tone="emerald"
-            label={t.users_role}
-            value={metrics.roles}
-            description={t.admin_system_patient_entity}
-          />
-          <AdminInlineMetric
-            icon={Zap}
-            tone="amber"
-            label={t.access_conditional}
-            value={metrics.conditional}
-            description={t.common_monitoring}
-          />
-          <AdminInlineMetric
-            icon={Lock}
-            tone="slate"
-            label={t.access_system_locked}
-            value={metrics.locked}
-            description={t.common_monitoring}
-          />
-        </div>
-
         {loading ? <TabLoader /> : null}
         {!loading && error ? <Banner tone="error">{error}</Banner> : null}
 
         {!loading && !error ? (
-          <AdminTableCard
-            title={t.access_title}
-            count={FIELD_KEYS.length}
-          >
+          <AdminTableCard>
             {accessRows.length === 0 ? (
               <div className="p-4">
                 <EmptyCell>{t.access_field}</EmptyCell>

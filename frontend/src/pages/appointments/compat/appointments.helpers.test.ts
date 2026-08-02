@@ -7,6 +7,16 @@ import {
   canResubmitInterpreterReport,
   shouldUseInterpreterMobileAgenda,
 } from "../model/selectors";
+import { responseLabel } from "../model/labels";
+import { getLang, t } from "@/lib/i18n";
+
+describe("appointment enum labels", () => {
+  it("renders the persisted discussion_requested response as a known label", () => {
+    expect(responseLabel("discussion_requested")).toBe(
+      t(getLang()).appointment_interpreter_response_discussion,
+    );
+  });
+});
 
 describe("canResubmitInterpreterReport", () => {
   it("allows the assigned interpreter to resubmit a rejected report", () => {
@@ -242,7 +252,7 @@ describe("buildAppointmentTimelineEvents", () => {
         provider_name: "Clinic Nord",
         doctor_name: "Dr. Lange",
         interpreter_name: "Yulia Bondar",
-        interpreter_response: "discussion",
+        interpreter_response: "discussion_requested",
         created_at: "2026-03-20T09:00:00Z",
       },
       checklist: [],

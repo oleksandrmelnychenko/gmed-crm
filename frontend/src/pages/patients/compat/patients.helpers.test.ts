@@ -54,6 +54,11 @@ describe("buildPatientsPath", () => {
     expect(buildPatientsPath({ search: "", activeOnly: "false", providerId: "", doctorId: "" }))
       .toBe("/patients?active_only=false");
   });
+
+  it("maps the prospective filter to the server-side lifecycle param", () => {
+    expect(buildPatientsPath({ search: "", activeOnly: "prospective", providerId: "", doctorId: "" }))
+      .toBe("/patients?active_only=false&lifecycle=prospective");
+  });
 });
 
 describe("toOptional", () => {

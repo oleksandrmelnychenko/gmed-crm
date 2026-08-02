@@ -1753,6 +1753,75 @@ async fn followup_flow_requires_explicit_milestones_before_order_enters_followup
 }
 
 #[tokio::test]
+async fn followup_flow_recognizes_localized_and_completed_reminders() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("order-localized-followup");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let patient_id = create_patient(&app, &pm_bearer, &tag).await;
+    let order_id = create_order(&app, &pm_bearer, patient_id).await;
+
+    let appointment_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO appointments (
+                patient_id, order_id, appointment_type, title, date, status,
+                checklist_phase, created_by
+           ) VALUES (
+                $1, $2, 'medical', 'Completed source visit', CURRENT_DATE,
+                'completed', 'execution', $3
+           )
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(pm_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO reminders (
+                appointment_id, user_id, remind_at, title, is_completed, completed_at
+           ) VALUES
+                ($1, $2, now() + interval '7 days', 'Контроль через 1 неделю', true, now()),
+                ($1, $2, now() + interval '1 month', 'Nachsorge nach 1 Monat', false, NULL),
+                ($1, $2, now() + interval '6 months', 'Контрольный контакт через 6 месяцев', false, NULL)"#,
+    )
+    .bind(appointment_id)
+    .bind(pm_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, flow) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/followup-flow"),
+        &pm_bearer,
+        Some(json!({
+            "doctor_followup_status": "not_required",
+            "followup_1w_status": "scheduled",
+            "followup_1m_status": "scheduled",
+            "followup_6m_status": "scheduled",
+            "package_end_date": "2026-12-31",
+            "package_end_status": "not_required",
+            "results_handoff_status": "not_required"
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "{flow}");
+    assert_eq!(flow["followup_1w_reminders"], 1);
+    assert_eq!(flow["followup_1m_reminders"], 1);
+    assert_eq!(flow["followup_6m_reminders"], 1);
+    assert_eq!(flow["package_end_required"], false);
+    assert_eq!(flow["followup_ready"], true, "{flow}");
+    assert_eq!(flow["blocking_reasons"], json!([]));
+}
+
+#[tokio::test]
 async fn order_amendment_requires_separate_approval_and_updates_total() {
     let Some((app, pool, _admin_id)) = test_context().await else {
         return;

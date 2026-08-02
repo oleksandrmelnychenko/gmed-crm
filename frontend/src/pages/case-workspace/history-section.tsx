@@ -1,12 +1,14 @@
 import { useMemo } from "react";
 
-import { Badge } from "@/components/ui/badge";
 import { CountBadge } from "@/components/ui-shell";
-import { formatEnumLabelFromKeys, useLang, type Translations } from "@/lib/i18n";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import { DEFAULT_DATA_TABLE_PAGE_SIZE } from "@/components/data-table/data-table-pager";
+import type { ColumnDef } from "@/components/data-table/types";
+import { formatEnumLabelFromKeys, useLang } from "@/lib/i18n";
 import { CASE_HISTORY_SECTION_LABEL_KEYS } from "@/lib/i18n/catalogs/cases-clinical";
+import { cn } from "@/lib/utils";
 
 import { type CaseHistoryEntry, useCaseWorkspace } from "./context";
-import { Panel } from "./primitives";
 
 function localeCode(lang: string) {
   if (lang === "de") return "de-DE";
@@ -27,25 +29,115 @@ function formatDateTime(lang: string, value: string | null | undefined) {
   return (HISTORY_DATE_TIME_FORMATTERS[localeCode(lang)] ?? HISTORY_DATE_TIME_FORMATTERS["en-GB"]).format(date);
 }
 
+const HISTORY_SECTION_CHIP_TONES = [
+  "border-sky-200 bg-sky-50 text-sky-700",
+  "border-emerald-200 bg-emerald-50 text-emerald-700",
+  "border-amber-200 bg-amber-50 text-amber-700",
+  "border-violet-200 bg-violet-50 text-violet-700",
+  "border-rose-200 bg-rose-50 text-rose-700",
+  "border-teal-200 bg-teal-50 text-teal-700",
+  "border-indigo-200 bg-indigo-50 text-indigo-700",
+  "border-orange-200 bg-orange-50 text-orange-700",
+] as const;
+
+function historySectionChipTone(section: string) {
+  let hash = 0;
+  for (let index = 0; index < section.length; index += 1) {
+    hash = (hash * 31 + section.charCodeAt(index)) | 0;
+  }
+  return HISTORY_SECTION_CHIP_TONES[Math.abs(hash) % HISTORY_SECTION_CHIP_TONES.length];
+}
+
 export function HistorySection() {
   const { lang, t } = useLang();
   const { detail } = useCaseWorkspace();
 
   const history = useMemo(() => detail?.history ?? [], [detail?.history]);
 
+  const sectionLabel = useMemo(
+    () => (entry: CaseHistoryEntry) =>
+      entry.section
+        ? formatEnumLabelFromKeys(entry.section, CASE_HISTORY_SECTION_LABEL_KEYS, t)
+        : t.common_unknown,
+    [t],
+  );
+
+  const columns = useMemo<ColumnDef<CaseHistoryEntry>[]>(
+    () => [
+      {
+        id: "section",
+        label: t.cases_workspace_history_title,
+        accessor: (entry) => sectionLabel(entry),
+        filterType: "enum",
+        filterOptions: () =>
+          [...new Set(history.map((entry) => sectionLabel(entry)))].map((label) => ({
+            value: label,
+            label,
+          })),
+        sortable: true,
+        required: true,
+        width: 240,
+        render: (entry) => (
+          <span
+            className={cn(
+              "inline-flex rounded-full border px-2 py-0.5 font-mono text-[10px] font-medium",
+              historySectionChipTone(entry.section ?? ""),
+            )}
+          >
+            {sectionLabel(entry)}
+          </span>
+        ),
+      },
+      {
+        id: "created_at",
+        label: t.users_created,
+        accessor: (entry) => entry.created_at ?? "",
+        filterType: "date",
+        sortable: true,
+        width: 190,
+        render: (entry) => (
+          <span className="whitespace-nowrap font-mono text-xs text-foreground">
+            {formatDateTime(lang, entry.created_at)}
+          </span>
+        ),
+      },
+      {
+        id: "changed_by",
+        label: t.cases_workspace_history_changed_by,
+        accessor: (entry) => entry.changed_by_name || entry.changed_by || "",
+        filterType: "text",
+        searchable: true,
+        sortable: true,
+        width: 260,
+        render: (entry) => (
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate font-mono text-xs font-medium text-foreground">
+              {entry.changed_by_name || entry.changed_by}
+            </span>
+            {entry.changed_by_role ? (
+              <span className="inline-flex shrink-0 rounded-full border border-border/60 bg-muted/25 px-2 py-0.5 font-mono text-[10px] font-medium text-foreground">
+                {entry.changed_by_role}
+              </span>
+            ) : null}
+          </span>
+        ),
+      },
+    ],
+    [history, lang, sectionLabel, t],
+  );
+
   return (
-    <Panel
-      title={t.cases_workspace_history_title}
-      description={t.cases_workspace_history_description}
-      action={
-        <CountBadge>
-          {detail?.version_count ?? history.length}{" "}
-          {t.cases_workspace_history_revisions}
-        </CountBadge>
-      }
-    >
-      {history.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-8 text-center">
+    <DataTableSurface
+      rows={history}
+      columns={columns}
+      rowId={(entry) => String(entry.id)}
+      dictionary={t as unknown as Record<string, string>}
+      pagination={{
+        pageSize: DEFAULT_DATA_TABLE_PAGE_SIZE,
+        resetKey: String(history.length),
+      }}
+      emptyState={
+        <div className="px-4 py-8 text-center">
           <p className="text-sm font-medium text-foreground">
             {t.cases_workspace_history_empty_title}
           </p>
@@ -53,58 +145,21 @@ export function HistorySection() {
             {t.cases_workspace_history_empty_description}
           </p>
         </div>
-      ) : (
-        <ol className="space-y-3">
-          {history.map((entry) => (
-            <HistoryRow key={entry.id} entry={entry} lang={lang} t={t} />
-          ))}
-        </ol>
-      )}
-    </Panel>
-  );
-}
-
-function HistoryRow({
-  entry,
-  lang,
-  t,
-}: {
-  entry: CaseHistoryEntry;
-  lang: string;
-  t: Translations;
-}) {
-  const sectionLabel = entry.section
-    ? formatEnumLabelFromKeys(entry.section, CASE_HISTORY_SECTION_LABEL_KEYS, t)
-    : t.common_unknown;
-
-  return (
-    <li className="rounded-xl border border-border/50 bg-card px-4 py-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
-        <p className="text-sm font-medium text-foreground">
-          {sectionLabel}
-        </p>
-        <Badge
-          variant="outline"
-          className="rounded-full border-border/60 bg-muted/25 text-[11px] font-medium text-muted-foreground"
-        >
-          {formatDateTime(lang, entry.created_at)}
-        </Badge>
-      </div>
-      <p className="mt-2 text-[13px] text-muted-foreground">
-        <span className="text-[11.5px] font-medium text-muted-foreground">
-          {t.cases_workspace_history_changed_by}
-        </span>
-        {" · "}
-        <span className="text-foreground">
-          {entry.changed_by_name || entry.changed_by}
-        </span>
-        {entry.changed_by_role ? (
-          <span className="ml-1 text-muted-foreground">
-            ({entry.changed_by_role})
+      }
+      toolbarStart={
+        <>
+          <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+            {t.cases_workspace_history_title}
           </span>
-        ) : null}
-      </p>
-    </li>
+          <span className="shrink-0 self-center">
+            <CountBadge>
+              {detail?.version_count ?? history.length} {t.cases_workspace_history_revisions}
+            </CountBadge>
+          </span>
+          <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+        </>
+      }
+    />
   );
 }

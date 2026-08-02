@@ -1,6 +1,15 @@
 import { apiFetch } from "@/lib/api";
+import type {
+  MedicationDrugMatchResponse,
+  MedicationEquivalentPayload,
+} from "@/lib/api/clinical";
 
 type JsonPayload = Record<string, unknown>;
+export type ClinicalSaveMode = "replace" | "merge";
+
+function clinicalSavePath(path: string, mode: ClinicalSaveMode) {
+  return mode === "merge" ? `${path}?mode=merge` : path;
+}
 
 function postJson<T = unknown>(path: string, payload?: JsonPayload) {
   const init: RequestInit = { method: "POST" };
@@ -63,6 +72,8 @@ export type ClinicalAttribution = {
 export type ClinicalDiagnosis = ClinicalAttribution & {
   /** Server uuid; null/absent for a newly added node. */
   id?: string | null;
+  /** Episode (case) this entry was established in, if any. */
+  case_id?: string | null;
   /** Client id; for existing nodes cid === id, FE-generated for new ones. */
   cid?: string;
   /** Client parent reference used on SAVE. */
@@ -133,6 +144,8 @@ export type ClinicalMedication = ClinicalAttribution & {
 
 export type ClinicalExamination = ClinicalAttribution & {
   id?: string;
+  /** Episode (case) this entry was established in, if any. */
+  case_id?: string | null;
   kind: ExaminationKind | null;
   title: string;
   performed_on: string | null;
@@ -143,6 +156,8 @@ export type ClinicalExamination = ClinicalAttribution & {
 
 export type ClinicalProcedure = ClinicalAttribution & {
   id?: string;
+  /** Episode (case) this entry was established in, if any. */
+  case_id?: string | null;
   label: string;
   ops_code: string | null;
   performed_on: string | null;
@@ -152,6 +167,8 @@ export type ClinicalProcedure = ClinicalAttribution & {
 export type ClinicalNarrative = {
   /** Server uuid of this version; null/absent for a brand-new version. */
   id?: string | null;
+  /** Episode (case) this version was taken in, if any. */
+  case_id?: string | null;
   anamnese_aktuelle: string | null;
   anamnese_vorgeschichte: string | null;
   anamnese_vegetative: string | null;
@@ -169,8 +186,15 @@ export type ClinicalNarrative = {
 export type ClinicalVerlaufEntry = ClinicalAttribution & {
   /** Server uuid; null/absent for a newly added entry. */
   id?: string | null;
+  /** Episode (case) this entry was established in, if any. */
+  case_id?: string | null;
   occurred_on: string | null;
   note: string;
+};
+
+export type PatientImpfstatus = {
+  status_text: string | null;
+  updated_at?: string | null;
 };
 
 export type PatientClinicalProfile = {
@@ -182,6 +206,7 @@ export type PatientClinicalProfile = {
   narrative: ClinicalNarrative | null;
   allergien: ClinicalWarning[];
   cave: ClinicalWarning[];
+  impfstatus?: PatientImpfstatus | null;
 };
 
 /** Empfehlung outcome lifecycle, independent of the existing `status` field. */
@@ -295,12 +320,20 @@ export function deletePatientRecommendation(
   );
 }
 
-export function savePatientDiagnoses(patientId: string, items: ClinicalDiagnosis[]) {
-  return postJson(`/patients/${patientId}/diagnoses`, { items });
+export function savePatientDiagnoses(
+  patientId: string,
+  items: ClinicalDiagnosis[],
+  mode: ClinicalSaveMode = "replace",
+) {
+  return postJson(clinicalSavePath(`/patients/${patientId}/diagnoses`, mode), { items });
 }
 
-export function savePatientMedications(patientId: string, items: ClinicalMedication[]) {
-  return postJson(`/patients/${patientId}/medications`, { items });
+export function savePatientMedications(
+  patientId: string,
+  items: ClinicalMedication[],
+  mode: ClinicalSaveMode = "replace",
+) {
+  return postJson(clinicalSavePath(`/patients/${patientId}/medications`, mode), { items });
 }
 
 export function savePatientExaminations(patientId: string, items: ClinicalExamination[]) {
@@ -315,13 +348,18 @@ export function savePatientClinicalWarnings(
   patientId: string,
   kind: ClinicalWarningKind,
   items: ClinicalWarning[],
+  mode: ClinicalSaveMode = "replace",
 ) {
-  return postJson(`/patients/${patientId}/clinical-warnings`, { kind, items });
+  return postJson(
+    clinicalSavePath(`/patients/${patientId}/clinical-warnings`, mode),
+    { kind, items },
+  );
 }
 
 export function savePatientNarrative(patientId: string, narrative: ClinicalNarrative) {
   return postJson<ClinicalNarrative>(`/patients/${patientId}/narrative`, {
     id: narrative.id ?? null,
+    case_id: narrative.case_id ?? null,
     anamnese_aktuelle: narrative.anamnese_aktuelle,
     anamnese_vorgeschichte: narrative.anamnese_vorgeschichte,
     anamnese_vegetative: narrative.anamnese_vegetative,
@@ -341,6 +379,7 @@ export function deletePatientNarrative(patientId: string, narrativeId: string) {
 export function savePatientVerlauf(patientId: string, items: ClinicalVerlaufEntry[]) {
   return postJson(`/patients/${patientId}/verlauf`, {
     items: items.map((item) => ({
+      case_id: item.case_id ?? null,
       provider_id: item.provider_id,
       doctor_id: item.doctor_id,
       occurred_on: item.occurred_on,
@@ -349,8 +388,68 @@ export function savePatientVerlauf(patientId: string, items: ClinicalVerlaufEntr
   });
 }
 
+export function fetchPatientImpfstatus(patientId: string) {
+  return apiFetch<{ impfstatus: PatientImpfstatus | null }>(
+    `/patients/${patientId}/impfstatus`,
+  );
+}
+
+export function savePatientImpfstatus(patientId: string, statusText: string | null) {
+  return postJson(`/patients/${patientId}/impfstatus`, {
+    status_text: statusText,
+  });
+}
+
 export function fetchNarrativeHistory(patientId: string) {
   return apiFetch<ClinicalNarrative[]>(`/patients/${patientId}/narrative/history`);
+}
+
+export function fetchPatientMedicationEquivalents(
+  patientId: string,
+  medicationId: string,
+  includeCandidates = false,
+) {
+  const query = includeCandidates ? "?include_candidates=true" : "";
+  return apiFetch<MedicationEquivalentPayload>(
+    `/patients/${patientId}/medications/${medicationId}/equivalents${query}`,
+  );
+}
+
+export function createPatientMedicationDrugMatch(
+  patientId: string,
+  medicationId: string,
+  body: {
+    drug_product_id: string;
+    confidence?: number | null;
+    note?: string | null;
+  },
+) {
+  return postJson<MedicationDrugMatchResponse>(
+    `/patients/${patientId}/medications/${medicationId}/drug-matches`,
+    body,
+  );
+}
+
+export function verifyPatientMedicationDrugMatch(
+  patientId: string,
+  medicationId: string,
+  matchId: string,
+  verificationStatus: "candidate" | "verified" | "rejected",
+  note?: string | null,
+) {
+  return postJson(
+    `/patients/${patientId}/medications/${medicationId}/drug-matches/${matchId}/verify`,
+    { verification_status: verificationStatus, note: note ?? null },
+  );
+}
+
+export function confirmPatientMedicationExpiry(
+  patientId: string,
+  medicationId: string,
+) {
+  return postJson(
+    `/patients/${patientId}/medications/${medicationId}/expiry-confirm`,
+  );
 }
 
 export function blankNarrative(): ClinicalNarrative {

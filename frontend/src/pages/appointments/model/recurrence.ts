@@ -1,5 +1,9 @@
 import { formatUiText, type Translations } from "@/lib/i18n";
-import { appointmentText, recurrenceFrequencyLabel } from "@/pages/appointments/model/labels";
+import {
+  appointmentPluralText,
+  appointmentText,
+  recurrenceFrequencyLabel,
+} from "@/pages/appointments/model/labels";
 import type {
   AppointmentDetail,
   AppointmentRecurringActionScope,
@@ -93,10 +97,10 @@ export function recurringOccurrenceLabel(
   },
   t: Translations | Record<string, string>,
 ) {
-  const checklistLabel =
-    item.open_checklist_count === 1
-      ? t.appointments_open_checklist
-      : t.appointments_open_checklists;
+  const checklistLabel = appointmentPluralText(
+    "appointments_open_checklist_items",
+    item.open_checklist_count,
+  );
   return formatUiText(t.appointments_recurring_occurrence_summary, {
     index: item.recurrence_index + 1,
     date: item.date,

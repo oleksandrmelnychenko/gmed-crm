@@ -969,6 +969,7 @@ export interface Translations
   common_unknown: string;
   common_active: string;
   common_inactive: string;
+  patients_lifecycle_prospective: string;
   common_activity: string;
   common_provider: string;
   common_doctor: string;

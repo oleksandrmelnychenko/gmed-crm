@@ -314,14 +314,6 @@ struct GeneratedMedicationLine {
     source_case_reason: Option<String>,
 }
 
-#[derive(Clone)]
-struct MedicationCaseScope {
-    id: Uuid,
-    case_id: String,
-    status: String,
-    reason: Option<String>,
-}
-
 struct GeneratedTreatmentPlanContext {
     patient_pid: String,
     patient_name: String,
@@ -3663,6 +3655,8 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         ("uk", "medication_scope_latest") => {
             "Активних кейсів не знайдено, використано останній кейс пацієнта."
         }
+        ("uk", "medication_scope_patient") => "Джерело: медикаційний план пацієнта.",
+        ("uk", "medication_source_patient") => "Карта пацієнта",
         ("uk", "document_title") => "План обстеження та лікування для",
         ("uk", "created_on") => "Дата створення",
         ("uk", "patient_id") => "ID пацієнта",
@@ -3731,6 +3725,8 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         ("en", "medication_scope_latest") => {
             "No active case was found, so the latest patient case was used."
         }
+        ("en", "medication_scope_patient") => "Source: the patient's medication plan.",
+        ("en", "medication_source_patient") => "Patient record",
         ("en", "document_title") => "Treatment plan for",
         ("en", "created_on") => "Created on",
         ("en", "patient_id") => "Patient ID",
@@ -3801,6 +3797,10 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         (_, "medication_scope_latest") => {
             "Kein aktives Case gefunden, daher wurde das zuletzt erfasste Patientencase verwendet."
         }
+        (_, "medication_scope_patient") => {
+            "Quelle: Medikationsplan der Patientenakte."
+        }
+        (_, "medication_source_patient") => "Patientenakte",
         (_, "document_title") => "Behandlungsplan für",
         (_, "created_on") => "Datum",
         (_, "patient_id") => "Patienten-ID",
@@ -11884,82 +11884,30 @@ async fn generate_document(
             (preview_html, pdf_bytes)
         }
         "medication_summary" => {
-            let case_rows = match sqlx::query(
-                r#"SELECT id, case_id, status, hauptanfragegrund
-                   FROM cases
-                   WHERE patient_id = $1
-                   ORDER BY
-                     CASE WHEN status IN ('open', 'in_progress') THEN 0 ELSE 1 END,
-                     created_at DESC"#,
+            let scope_note = translated_label(language, "medication_scope_patient").to_string();
+            let medication_rows = match sqlx::query(
+                r#"SELECT m.category, m.wirkstoff, m.handelsname, m.staerke, m.form,
+                          m.einheit, m.hinweis, m.grund, m.einnahme_von,
+                          NULLIF(concat_ws('-',
+                              COALESCE(NULLIF(btrim(COALESCE(m.dose_morgens, '')), ''), '0'),
+                              COALESCE(NULLIF(btrim(COALESCE(m.dose_mittags, '')), ''), '0'),
+                              COALESCE(NULLIF(btrim(COALESCE(m.dose_abends, '')), ''), '0'),
+                              COALESCE(NULLIF(btrim(COALESCE(m.dose_nachts, '')), ''), '0')
+                          ), '0-0-0-0') AS schedule,
+                          CASE WHEN m.einnahme_bis ~ '^\d{4}-\d{2}-\d{2}$'
+                               THEN m.einnahme_bis::date END AS expiry_date,
+                          d.name AS doctor_name
+                   FROM patient_medications m
+                   LEFT JOIN provider_doctors d ON d.id = m.doctor_id
+                   WHERE m.patient_id = $1
+                     AND m.status IN ('aktiv', 'pausiert')
+                   ORDER BY CASE m.category
+                       WHEN 'dauer' THEN 0
+                       WHEN 'besondere' THEN 1
+                       ELSE 2
+                   END, m.sort_order ASC, m.created_at ASC"#,
             )
             .bind(patient_uuid)
-            .fetch_all(&state.db)
-            .await
-            {
-                Ok(rows) => rows,
-                Err(e) => {
-                    tracing::error!(error = %e, patient_id = %patient_uuid, "load medication template cases");
-                    return err(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Failed to load medication case context",
-                    );
-                }
-            };
-
-            let case_scopes = case_rows
-                .into_iter()
-                .map(|row| MedicationCaseScope {
-                    id: row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
-                    case_id: row.try_get::<String, _>("case_id").unwrap_or_default(),
-                    status: row.try_get::<String, _>("status").unwrap_or_default(),
-                    reason: row
-                        .try_get::<Option<String>, _>("hauptanfragegrund")
-                        .unwrap_or_default(),
-                })
-                .collect::<Vec<_>>();
-
-            if case_scopes.is_empty() {
-                return err(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "Medication summary template requires at least one case in scope",
-                );
-            }
-
-            let active_cases = case_scopes
-                .iter()
-                .filter(|case_scope| matches!(case_scope.status.as_str(), "open" | "in_progress"))
-                .cloned()
-                .collect::<Vec<_>>();
-            let (relevant_cases, scope_note) = if active_cases.is_empty() {
-                (
-                    vec![case_scopes[0].clone()],
-                    translated_label(language, "medication_scope_latest").to_string(),
-                )
-            } else {
-                (
-                    active_cases,
-                    translated_label(language, "medication_scope_active").to_string(),
-                )
-            };
-            let relevant_case_ids = relevant_cases
-                .iter()
-                .map(|case_scope| case_scope.id)
-                .collect::<Vec<_>>();
-            let relevant_case_map = relevant_cases
-                .iter()
-                .cloned()
-                .map(|case_scope| (case_scope.id, case_scope))
-                .collect::<BTreeMap<_, _>>();
-
-            let medication_rows = match sqlx::query(
-                r#"SELECT case_id, handelsname, wirkstoff, dosis, dosis_einheit, einnahmeschema,
-                          darreichungsform, einheit, anmerkung, grund, seit, verordnender_arzt,
-                          expiry_date, med_typ
-                   FROM medikamente
-                   WHERE case_id = ANY($1::uuid[])
-                   ORDER BY sort_order ASC, created_at ASC"#,
-            )
-            .bind(&relevant_case_ids)
             .fetch_all(&state.db)
             .await
             {
@@ -11973,54 +11921,50 @@ async fn generate_document(
                 }
             };
 
-            let mut medications = medication_rows
-                .into_iter()
-                .filter_map(|row| {
-                    let case_id = row
-                        .try_get::<Uuid, _>("case_id")
-                        .unwrap_or_else(|_| Uuid::nil());
-                    let case_scope = relevant_case_map.get(&case_id)?;
-                    Some(GeneratedMedicationLine {
-                        trade_name: row.try_get::<String, _>("handelsname").unwrap_or_default(),
-                        ingredient: row
-                            .try_get::<Option<String>, _>("wirkstoff")
-                            .unwrap_or_default(),
-                        dose: row
-                            .try_get::<Option<String>, _>("dosis")
-                            .unwrap_or_default(),
-                        dose_unit: row
-                            .try_get::<Option<String>, _>("dosis_einheit")
-                            .unwrap_or_default(),
-                        schedule: row
-                            .try_get::<Option<String>, _>("einnahmeschema")
-                            .unwrap_or_default(),
-                        dosage_form: row
-                            .try_get::<Option<String>, _>("darreichungsform")
-                            .unwrap_or_default(),
-                        unit: row
-                            .try_get::<Option<String>, _>("einheit")
-                            .unwrap_or_default(),
-                        note: row
-                            .try_get::<Option<String>, _>("anmerkung")
-                            .unwrap_or_default(),
-                        reason: row
-                            .try_get::<Option<String>, _>("grund")
-                            .unwrap_or_default(),
-                        since: row.try_get::<Option<String>, _>("seit").unwrap_or_default(),
-                        expiry_date: row
-                            .try_get::<Option<NaiveDate>, _>("expiry_date")
-                            .unwrap_or_default(),
-                        prescribing_doctor: row
-                            .try_get::<Option<String>, _>("verordnender_arzt")
-                            .unwrap_or_default(),
-                        medication_type: row
-                            .try_get::<String, _>("med_typ")
-                            .unwrap_or_else(|_| "permanent".to_string()),
-                        source_case_id: case_scope.case_id.clone(),
-                        source_case_reason: case_scope.reason.clone(),
-                    })
-                })
-                .collect::<Vec<_>>();
+            let source_label = translated_label(language, "medication_source_patient").to_string();
+            let mut medications = Vec::with_capacity(medication_rows.len());
+            for row in medication_rows {
+                let wirkstoff: String = row.try_get("wirkstoff").unwrap_or_default();
+                let handelsname: String = row.try_get("handelsname").unwrap_or_default();
+                let trade_name = if handelsname.trim().is_empty() {
+                    wirkstoff.clone()
+                } else {
+                    handelsname.clone()
+                };
+                let category: String = row
+                    .try_get("category")
+                    .unwrap_or_else(|_| "dauer".to_string());
+                let medication_type = if category == "dauer" {
+                    "permanent".to_string()
+                } else {
+                    "temporary".to_string()
+                };
+                medications.push(GeneratedMedicationLine {
+                    trade_name,
+                    ingredient: Some(wirkstoff),
+                    dose: row.try_get::<Option<String>, _>("staerke").unwrap_or_default(),
+                    dose_unit: None,
+                    schedule: row
+                        .try_get::<Option<String>, _>("schedule")
+                        .unwrap_or_default(),
+                    dosage_form: row.try_get::<Option<String>, _>("form").unwrap_or_default(),
+                    unit: row.try_get::<Option<String>, _>("einheit").unwrap_or_default(),
+                    note: row.try_get::<Option<String>, _>("hinweis").unwrap_or_default(),
+                    reason: row.try_get::<Option<String>, _>("grund").unwrap_or_default(),
+                    since: row
+                        .try_get::<Option<String>, _>("einnahme_von")
+                        .unwrap_or_default(),
+                    expiry_date: row
+                        .try_get::<Option<NaiveDate>, _>("expiry_date")
+                        .unwrap_or_default(),
+                    prescribing_doctor: row
+                        .try_get::<Option<String>, _>("doctor_name")
+                        .unwrap_or_default(),
+                    medication_type,
+                    source_case_id: source_label.clone(),
+                    source_case_reason: None,
+                });
+            }
 
             if medications.is_empty() {
                 return err(

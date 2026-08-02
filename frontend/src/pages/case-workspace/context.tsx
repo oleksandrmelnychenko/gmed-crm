@@ -13,44 +13,7 @@ import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { SpecializationItem } from "@/pages/providers/model/types";
 
-export type VorerkrankungItem = {
-  erkrankung: string;
-  erstdiagnose?: string | null;
-  notiz?: string | null;
-};
-
-export type AllergieItem = {
-  allergie: string;
-  reaktion?: string | null;
-};
-
-export type OperationItem = {
-  datum?: string | null;
-  grund: string;
-  arzt_id?: string | null;
-  arzt?: string | null;
-  notiz?: string | null;
-};
-
-export type MedikamentItem = {
-  id?: string | null;
-  handelsname: string;
-  wirkstoff?: string | null;
-  dosis?: string | null;
-  dosis_einheit?: string | null;
-  einnahmeschema?: string | null;
-  darreichungsform?: string | null;
-  einheit?: string | null;
-  anmerkung?: string | null;
-  grund?: string | null;
-  seit?: string | null;
-  verordnender_arzt_id?: string | null;
-  verordnender_arzt?: string | null;
-  med_typ?: string | null;
-  expiry_date?: string | null;
-  is_expired?: boolean;
-  pending_expiry_confirmation?: boolean;
-};
+import { publishCaseSubject } from "./subject-store";
 
 export type PainItem = {
   lokalisierung: string;
@@ -71,16 +34,6 @@ export type SymptomItem = {
   beschreibung: string;
   fachrichtung?: string | null;
 };
-
-export type VegetativeForm = {
-  appetit_durst: string;
-  koerpergroesse: string;
-  gewicht: string;
-  gewichtsveraenderung: string;
-  grund: string;
-};
-
-export type VegetativeNumericValue = number | string | null;
 
 export type CardiologyAssessment = {
   is_relevant: boolean;
@@ -192,35 +145,31 @@ export type CaseWorkspaceDetail = {
   closed_reason?: string | null;
   closed_at?: string | null;
   status_changed_at?: string | null;
-  patient_id: string;
+  patient_id: string | null;
+  lead_id?: string | null;
+  source_lead_id?: string | null;
+  patient_pid?: string | null;
+  patient_first_name?: string | null;
+  patient_last_name?: string | null;
+  manager_name?: string | null;
+  linked_order_id?: string | null;
+  linked_order_number?: string | null;
+  intake_completed_at?: string | null;
   hauptanfragegrund: string | null;
-  aktuelle_anamnese: string | null;
   zuweiser_doctor_id?: string | null;
   zuweiser: string | null;
   created_at?: string;
   updated_at?: string;
   last_clinical_update_at?: string | null;
   version_count?: number | null;
-  vorerkrankungen?: VorerkrankungItem[];
-  allergien?: AllergieItem[];
-  operationen?: OperationItem[];
-  medikamente?: MedikamentItem[];
   pain_records?: PainItem[];
   symptome?: SymptomItem[];
-  vegetative_anamnese?: {
-    appetit_durst?: string | null;
-    koerpergroesse?: VegetativeNumericValue;
-    gewicht?: VegetativeNumericValue;
-    gewichtsveraenderung?: string | null;
-    grund?: string | null;
-  } | null;
   cardiology?: Partial<CardiologyAssessment> | null;
   gastroenterology?: Partial<GastroenterologyAssessment> | null;
   orthopedics?: Partial<OrthopedicsAssessment> | null;
   neurology?: Partial<NeurologyAssessment> | null;
   pulmonology?: Partial<PulmonologyAssessment> | null;
   urology?: Partial<UrologyAssessment> | null;
-  impfstatus?: string | null;
   history?: CaseHistoryEntry[];
 };
 
@@ -234,16 +183,6 @@ export type CaseWorkspaceDoctor = {
   specializations?: SpecializationItem[];
 };
 
-export type CaseWorkspaceSnippet = {
-  id: string;
-  label: string;
-  category: string;
-  body: string;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-};
-
 type CaseWorkspacePermissions = {
   canViewPage: boolean;
   canEdit: boolean;
@@ -251,34 +190,26 @@ type CaseWorkspacePermissions = {
 
 export type CaseOverviewForm = {
   hauptanfragegrund: string;
-  aktuelle_anamnese: string;
   zuweiser_doctor_id: string;
   zuweiser: string;
 };
 
 type SectionBusyKey =
   | "overview"
-  | "preconditions"
-  | "allergies"
-  | "surgeries"
-  | "medications"
   | "pain"
   | "symptoms"
-  | "vegetative"
   | "cardiology"
   | "gastroenterology"
   | "orthopedics"
   | "neurology"
   | "pulmonology"
   | "urology"
-  | "impfstatus"
   | "status";
 
 type CaseWorkspaceContextValue = {
   caseId: string;
   detail: CaseWorkspaceDetail | null;
   doctors: CaseWorkspaceDoctor[];
-  snippets: CaseWorkspaceSnippet[];
   loading: boolean;
   error: string;
   permissions: CaseWorkspacePermissions;
@@ -286,27 +217,20 @@ type CaseWorkspaceContextValue = {
   sectionError: string;
   reload: () => void;
   saveOverview: (form: CaseOverviewForm) => Promise<boolean>;
-  savePreconditions: (items: VorerkrankungItem[]) => Promise<boolean>;
-  saveAllergies: (items: AllergieItem[]) => Promise<boolean>;
-  saveSurgeries: (items: OperationItem[]) => Promise<boolean>;
-  saveMedications: (items: MedikamentItem[]) => Promise<boolean>;
   savePain: (items: PainItem[]) => Promise<boolean>;
   saveSymptoms: (items: SymptomItem[]) => Promise<boolean>;
-  saveVegetative: (form: VegetativeForm) => Promise<boolean>;
   saveCardiology: (form: CardiologyAssessment) => Promise<boolean>;
   saveGastroenterology: (form: GastroenterologyAssessment) => Promise<boolean>;
   saveOrthopedics: (form: OrthopedicsAssessment) => Promise<boolean>;
   saveNeurology: (form: NeurologyAssessment) => Promise<boolean>;
   savePulmonology: (form: PulmonologyAssessment) => Promise<boolean>;
   saveUrology: (form: UrologyAssessment) => Promise<boolean>;
-  saveImpfstatus: (statusText: string) => Promise<boolean>;
   updateStatus: (status: string, reason?: string) => Promise<boolean>;
 };
 
 type CaseWorkspaceState = {
   detail: CaseWorkspaceDetail | null;
   doctors: CaseWorkspaceDoctor[];
-  snippets: CaseWorkspaceSnippet[];
   loading: boolean;
   error: string;
   version: number;
@@ -370,7 +294,6 @@ function createCaseWorkspaceState(): CaseWorkspaceState {
   return {
     detail: null,
     doctors: [],
-    snippets: [],
     loading: true,
     error: "",
     version: 0,
@@ -407,7 +330,6 @@ function useCaseWorkspaceProviderContent({
   const {
     detail,
     doctors,
-    snippets,
     loading,
     error,
     version,
@@ -422,20 +344,12 @@ function useCaseWorkspaceProviderContent({
     const controller = new AbortController();
     const { signal } = controller;
 
-    Promise.all([
-      apiFetch<CaseWorkspaceDoctor[]>("/cases/meta/doctors", { signal }).catch(
-        () => [],
-      ),
-      apiFetch<CaseWorkspaceSnippet[]>("/cases/text-snippets", { signal }).catch(
-        () => [],
-      ),
-    ]).then(([doctorItems, snippetItems]) => {
-      if (signal.aborted) return;
-      dispatchWorkspaceState({
-        doctors: doctorItems,
-        snippets: snippetItems,
+    apiFetch<CaseWorkspaceDoctor[]>("/cases/meta/doctors", { signal })
+      .catch(() => [])
+      .then((doctorItems) => {
+        if (signal.aborted) return;
+        dispatchWorkspaceState({ doctors: doctorItems });
       });
-    });
 
     return () => controller.abort();
   }, []);
@@ -451,10 +365,19 @@ function useCaseWorkspaceProviderContent({
       loading: true,
       error: "",
     });
+    publishCaseSubject(caseId, "unknown");
 
     apiFetch<CaseWorkspaceDetail>(`/cases/${caseId}`, { signal })
       .then((result) => {
         if (signal.aborted) return;
+        publishCaseSubject(
+          caseId,
+          result.patient_id
+            ? "patient"
+            : result.lead_id || result.source_lead_id
+              ? "lead"
+              : "unknown",
+        );
         dispatchWorkspaceState({
           detail: result,
           loading: false,
@@ -462,6 +385,7 @@ function useCaseWorkspaceProviderContent({
       })
       .catch((err: unknown) => {
         if (signal.aborted) return;
+        publishCaseSubject(caseId, "unknown");
         dispatchWorkspaceState({
           detail: null,
           error: err instanceof Error ? err.message : String(err),
@@ -488,7 +412,6 @@ function useCaseWorkspaceProviderContent({
           method: "POST",
           body: JSON.stringify({
             hauptanfragegrund: toOptionalText(form.hauptanfragegrund),
-            aktuelle_anamnese: toOptionalText(form.aktuelle_anamnese),
             zuweiser_doctor_id: toOptionalText(form.zuweiser_doctor_id),
             zuweiser: toOptionalText(form.zuweiser),
           }),
@@ -536,99 +459,6 @@ function useCaseWorkspaceProviderContent({
       }
     },
     [caseId],
-  );
-
-  const savePreconditions = useCallback(
-    (items: VorerkrankungItem[]) =>
-      runListSave<VorerkrankungItem>(
-        "preconditions",
-        "vorerkrankungen",
-        (list) =>
-          list.flatMap((item) => {
-            const erkrankung = item.erkrankung.trim();
-            if (!erkrankung) return [];
-            return [{
-              erkrankung,
-              erstdiagnose: toOptionalText(item.erstdiagnose ?? ""),
-              notiz: toOptionalText(item.notiz ?? ""),
-            }];
-          }),
-        items,
-      ),
-    [runListSave],
-  );
-
-  const saveAllergies = useCallback(
-    (items: AllergieItem[]) =>
-      runListSave<AllergieItem>(
-        "allergies",
-        "allergien",
-        (list) =>
-          list.flatMap((item) => {
-            const allergie = item.allergie.trim();
-            if (!allergie) return [];
-            return [{
-              allergie,
-              reaktion: toOptionalText(item.reaktion ?? ""),
-            }];
-          }),
-        items,
-      ),
-    [runListSave],
-  );
-
-  const saveSurgeries = useCallback(
-    (items: OperationItem[]) =>
-      runListSave<OperationItem>(
-        "surgeries",
-        "operationen",
-        (list) =>
-          list.flatMap((item) => {
-            const grund = item.grund.trim();
-            if (!grund) return [];
-            return [{
-              datum: toOptionalText(item.datum ?? ""),
-              grund,
-              arzt_id: toOptionalText(item.arzt_id ?? ""),
-              arzt: toOptionalText(item.arzt ?? ""),
-              notiz: toOptionalText(item.notiz ?? ""),
-            }];
-          }),
-        items,
-      ),
-    [runListSave],
-  );
-
-  const saveMedications = useCallback(
-    (items: MedikamentItem[]) =>
-      runListSave<MedikamentItem>(
-        "medications",
-        "medikamente",
-        (list) =>
-          list.flatMap((item) => {
-            const handelsname = item.handelsname.trim();
-            const wirkstoff = (item.wirkstoff ?? "").trim();
-            if (!wirkstoff) return [];
-            return [{
-              handelsname,
-              wirkstoff,
-              dosis: toOptionalText(item.dosis ?? ""),
-              dosis_einheit: toOptionalText(item.dosis_einheit ?? ""),
-              einnahmeschema: toOptionalText(item.einnahmeschema ?? ""),
-              darreichungsform: toOptionalText(item.darreichungsform ?? ""),
-              einheit: toOptionalText(item.einheit ?? ""),
-              anmerkung: toOptionalText(item.anmerkung ?? ""),
-              grund: toOptionalText(item.grund ?? ""),
-              seit: toOptionalText(item.seit ?? ""),
-              verordnender_arzt_id: toOptionalText(item.verordnender_arzt_id ?? ""),
-              verordnender_arzt: toOptionalText(item.verordnender_arzt ?? ""),
-              med_typ: toOptionalText(item.med_typ ?? "") ?? "permanent",
-              expiry_date: toOptionalText(item.expiry_date ?? ""),
-            }];
-          }),
-        items,
-      ),
-    [runListSave],
   );
 
   const savePain = useCallback(
@@ -709,18 +539,6 @@ function useCaseWorkspaceProviderContent({
     [caseId],
   );
 
-  const saveVegetative = useCallback(
-    (form: VegetativeForm) =>
-      runFormSave("vegetative", "vegetative", {
-        appetit_durst: toOptionalText(form.appetit_durst),
-        koerpergroesse: normalizePainNumber(form.koerpergroesse),
-        gewicht: normalizePainNumber(form.gewicht),
-        gewichtsveraenderung: toOptionalText(form.gewichtsveraenderung),
-        grund: toOptionalText(form.grund),
-      }),
-    [runFormSave],
-  );
-
   const saveCardiology = useCallback(
     (form: CardiologyAssessment) =>
       runFormSave("cardiology", "cardiology", sanitizeAssessment(form)),
@@ -757,14 +575,6 @@ function useCaseWorkspaceProviderContent({
     [runFormSave],
   );
 
-  const saveImpfstatus = useCallback(
-    (statusText: string) =>
-      runFormSave("impfstatus", "impfstatus", {
-        status_text: toOptionalText(statusText),
-      }),
-    [runFormSave],
-  );
-
   const updateStatus = useCallback(
     (status: string, reason?: string) =>
       runFormSave("status", "status", {
@@ -779,7 +589,6 @@ function useCaseWorkspaceProviderContent({
       caseId,
       detail,
       doctors,
-      snippets,
       loading,
       error,
       permissions,
@@ -787,20 +596,14 @@ function useCaseWorkspaceProviderContent({
       sectionError,
       reload,
       saveOverview,
-      savePreconditions,
-      saveAllergies,
-      saveSurgeries,
-      saveMedications,
       savePain,
       saveSymptoms,
-      saveVegetative,
       saveCardiology,
       saveGastroenterology,
       saveOrthopedics,
       saveNeurology,
       savePulmonology,
       saveUrology,
-      saveImpfstatus,
       updateStatus,
     }),
     [
@@ -811,24 +614,17 @@ function useCaseWorkspaceProviderContent({
       loading,
       permissions,
       reload,
-      saveAllergies,
       saveCardiology,
       saveGastroenterology,
-      saveImpfstatus,
-      saveMedications,
       saveNeurology,
       saveOrthopedics,
       saveOverview,
       savePain,
-      savePreconditions,
       savePulmonology,
-      saveSurgeries,
       saveSymptoms,
       saveUrology,
-      saveVegetative,
       sectionBusy,
       sectionError,
-      snippets,
       updateStatus,
     ],
   );

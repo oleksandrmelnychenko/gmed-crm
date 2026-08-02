@@ -1109,6 +1109,127 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
 }
 
 #[tokio::test]
+async fn patient_clinical_merge_preserves_rows_omitted_by_returning_patient_intake() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("patient-clinical-merge");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let bearer = auth_header_for(pm_id, "patient_manager");
+
+    for (path, body) in [
+        (
+            "diagnoses",
+            json!({ "items": [{ "kind": "main", "label": "Existing diagnosis" }] }),
+        ),
+        (
+            "medications",
+            json!({ "items": [{
+                "category": "dauer",
+                "wirkstoff": "Existing ingredient",
+                "handelsname": "Existing medication"
+            }] }),
+        ),
+        (
+            "clinical-warnings",
+            json!({ "kind": "allergie", "items": [{ "label": "Existing allergy" }] }),
+        ),
+    ] {
+        let (status, payload) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/patients/{patient_id}/{path}"),
+            &bearer,
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{path}: {payload:?}");
+    }
+
+    for (path, body) in [
+        (
+            "diagnoses",
+            json!({ "items": [{ "kind": "secondary", "label": "Intake diagnosis" }] }),
+        ),
+        (
+            "medications",
+            json!({ "items": [{
+                "category": "dauer",
+                "wirkstoff": "Intake ingredient",
+                "handelsname": "Intake medication"
+            }] }),
+        ),
+        (
+            "clinical-warnings",
+            json!({ "kind": "allergie", "items": [{ "label": "Intake allergy" }] }),
+        ),
+    ] {
+        let (status, payload) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/patients/{patient_id}/{path}?mode=merge"),
+            &bearer,
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{path}: {payload:?}");
+    }
+
+    let (status, clinical) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{clinical:?}");
+    assert_eq!(clinical["diagnoses"].as_array().unwrap().len(), 2);
+    assert_eq!(clinical["medications"].as_array().unwrap().len(), 2);
+    assert_eq!(clinical["allergien"].as_array().unwrap().len(), 2);
+    assert!(
+        clinical["diagnoses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| { row["label"] == "Existing diagnosis" })
+    );
+    assert!(
+        clinical["medications"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| { row["wirkstoff"] == "Existing ingredient" })
+    );
+    assert!(
+        clinical["allergien"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| { row["label"] == "Existing allergy" })
+    );
+
+    let (status, timeline) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/timeline?entity_type=assignment"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{timeline:?}");
+    assert!(
+        timeline["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| { row["entity_type"] == "assignment" && row["status"] == "active" })
+    );
+}
+
+#[tokio::test]
 async fn patient_clinical_rejects_invalid_provider_doctor_attribution() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;

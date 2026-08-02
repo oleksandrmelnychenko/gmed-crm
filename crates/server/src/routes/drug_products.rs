@@ -39,16 +39,50 @@ pub fn router() -> Router<AppState> {
         )
         .route(
             "/cases/{case_id}/medikamente/{medication_id}/equivalents",
-            get(get_medication_equivalents),
+            get(retired_case_medication_route),
         )
         .route(
             "/cases/{case_id}/medikamente/{medication_id}/drug-matches",
-            post(create_medication_drug_match),
+            post(retired_case_medication_route),
         )
         .route(
             "/cases/{case_id}/medikamente/{medication_id}/drug-matches/{match_id}/verify",
-            post(verify_medication_drug_match),
+            post(retired_case_medication_match_route),
         )
+        .route(
+            "/patients/{patient_id}/medications/{medication_id}/equivalents",
+            get(get_patient_medication_equivalents),
+        )
+        .route(
+            "/patients/{patient_id}/medications/{medication_id}/drug-matches",
+            post(create_patient_medication_drug_match),
+        )
+        .route(
+            "/patients/{patient_id}/medications/{medication_id}/drug-matches/{match_id}/verify",
+            post(verify_patient_medication_drug_match),
+        )
+        .route(
+            "/patients/{patient_id}/medications/{medication_id}/expiry-confirm",
+            post(confirm_patient_medication_expiry),
+        )
+}
+
+async fn retired_case_medication_route(
+    Path((_case_id, _medication_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    err(
+        StatusCode::GONE,
+        "Case medications moved to the patient record (/patients/{id}/medications)",
+    )
+}
+
+async fn retired_case_medication_match_route(
+    Path((_case_id, _medication_id, _match_id)): Path<(Uuid, Uuid, Uuid)>,
+) -> axum::response::Response {
+    err(
+        StatusCode::GONE,
+        "Case medications moved to the patient record (/patients/{id}/medications)",
+    )
 }
 
 #[derive(Deserialize)]
@@ -142,111 +176,6 @@ async fn get_german_equivalents(
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to load German equivalents",
-            )
-        }
-    }
-}
-
-async fn get_medication_equivalents(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path((case_id, medication_id)): Path<(Uuid, Uuid)>,
-    Query(query): Query<EquivalentQuery>,
-) -> axum::response::Response {
-    if let Err(resp) = require_staff_drug_access(&auth) {
-        return resp;
-    }
-    if let Err(resp) = ensure_case_access(&state, &auth, case_id).await {
-        return resp;
-    }
-
-    match load_medication_german_equivalents(
-        &state.db,
-        case_id,
-        medication_id,
-        query.include_candidates.unwrap_or(false),
-    )
-    .await
-    {
-        Ok(Some(payload)) => Json(payload).into_response(),
-        Ok(None) => err(StatusCode::NOT_FOUND, "Medication not found"),
-        Err(error) => {
-            tracing::error!(error = %error, case_id = %case_id, medication_id = %medication_id, "load medication equivalents");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to load medication equivalents",
-            )
-        }
-    }
-}
-
-async fn create_medication_drug_match(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path((case_id, medication_id)): Path<(Uuid, Uuid)>,
-    Json(body): Json<CreateMedicationDrugMatch>,
-) -> axum::response::Response {
-    if let Err(resp) = require_staff_drug_access(&auth) {
-        return resp;
-    }
-    if let Err(resp) = ensure_case_access(&state, &auth, case_id).await {
-        return resp;
-    }
-
-    let confidence =
-        Decimal::try_from(body.confidence.unwrap_or(0.70)).unwrap_or_else(|_| Decimal::new(70, 2));
-    if confidence < Decimal::ZERO || confidence > Decimal::ONE {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Confidence must be between 0 and 1",
-        );
-    }
-
-    match sqlx::query(
-        r#"INSERT INTO medication_drug_matches (
-                case_id, medication_id, drug_product_id, match_kind, confidence,
-                verification_status, note, created_by
-           ) VALUES ($1, $2, $3, 'staff_candidate', $4, 'candidate', $5, $6)
-           ON CONFLICT (case_id, medication_id, drug_product_id)
-           DO UPDATE SET confidence = EXCLUDED.confidence,
-                         note = EXCLUDED.note,
-                         updated_at = now()
-           RETURNING id, verification_status, confidence"#,
-    )
-    .bind(case_id)
-    .bind(medication_id)
-    .bind(body.drug_product_id)
-    .bind(confidence)
-    .bind(normalize_optional_text(body.note))
-    .bind(auth.user_id)
-    .fetch_one(&state.db)
-    .await
-    {
-        Ok(row) => {
-            let match_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
-            state.audit_sender.try_send(audit::domain_event(
-                "drug_match_created".to_string(),
-                Some(auth.user_id),
-                "case",
-                Some(case_id),
-                serde_json::json!({
-                    "medication_id": medication_id,
-                    "drug_product_id": body.drug_product_id,
-                    "match_id": match_id,
-                }),
-            ));
-            Json(serde_json::json!({
-                "id": match_id,
-                "verification_status": row.try_get::<String, _>("verification_status").unwrap_or_else(|_| "candidate".to_string()),
-                "confidence": row.try_get::<Decimal, _>("confidence").unwrap_or(confidence).round_dp(2).normalize().to_string(),
-            }))
-            .into_response()
-        }
-        Err(error) => {
-            tracing::error!(error = %error, case_id = %case_id, medication_id = %medication_id, "create medication drug match");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to create medication match",
             )
         }
     }
@@ -473,16 +402,127 @@ async fn verify_drug_equivalent(
     }
 }
 
-async fn verify_medication_drug_match(
+async fn get_patient_medication_equivalents(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
-    Path((case_id, medication_id, match_id)): Path<(Uuid, Uuid, Uuid)>,
+    Path((patient_id, medication_id)): Path<(Uuid, Uuid)>,
+    Query(query): Query<EquivalentQuery>,
+) -> axum::response::Response {
+    if let Err(resp) = require_patient_drug_access(&auth) {
+        return resp;
+    }
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+
+    match load_medication_german_equivalents(
+        &state.db,
+        patient_id,
+        medication_id,
+        query.include_candidates.unwrap_or(false),
+    )
+    .await
+    {
+        Ok(Some(payload)) => Json(payload).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Medication not found"),
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_id, medication_id = %medication_id, "load patient medication equivalents");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load medication equivalents",
+            )
+        }
+    }
+}
+
+async fn create_patient_medication_drug_match(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((patient_id, medication_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<CreateMedicationDrugMatch>,
+) -> axum::response::Response {
+    if let Err(resp) = require_patient_drug_access(&auth) {
+        return resp;
+    }
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+    if let Err(resp) = ensure_patient_medication(&state, patient_id, medication_id).await {
+        return resp;
+    }
+
+    let confidence =
+        Decimal::try_from(body.confidence.unwrap_or(0.70)).unwrap_or_else(|_| Decimal::new(70, 2));
+    if confidence < Decimal::ZERO || confidence > Decimal::ONE {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Confidence must be between 0 and 1",
+        );
+    }
+
+    match sqlx::query(
+        r#"INSERT INTO medication_drug_matches (
+                patient_medication_id, drug_product_id, match_kind, confidence,
+                verification_status, note, created_by
+           ) VALUES ($1, $2, 'staff_candidate', $3, 'candidate', $4, $5)
+           ON CONFLICT (patient_medication_id, drug_product_id)
+               WHERE patient_medication_id IS NOT NULL
+           DO UPDATE SET confidence = EXCLUDED.confidence,
+                         note = EXCLUDED.note,
+                         updated_at = now()
+           RETURNING id, verification_status, confidence"#,
+    )
+    .bind(medication_id)
+    .bind(body.drug_product_id)
+    .bind(confidence)
+    .bind(normalize_optional_text(body.note))
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => {
+            let match_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+            state.audit_sender.try_send(audit::domain_event(
+                "drug_match_created".to_string(),
+                Some(auth.user_id),
+                "patient",
+                Some(patient_id),
+                serde_json::json!({
+                    "patient_medication_id": medication_id,
+                    "drug_product_id": body.drug_product_id,
+                    "match_id": match_id,
+                }),
+            ));
+            Json(serde_json::json!({
+                "id": match_id,
+                "verification_status": row.try_get::<String, _>("verification_status").unwrap_or_else(|_| "candidate".to_string()),
+                "confidence": row.try_get::<Decimal, _>("confidence").unwrap_or(confidence).round_dp(2).normalize().to_string(),
+            }))
+            .into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_id, medication_id = %medication_id, "create patient medication drug match");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create medication match",
+            )
+        }
+    }
+}
+
+async fn verify_patient_medication_drug_match(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((patient_id, medication_id, match_id)): Path<(Uuid, Uuid, Uuid)>,
     Json(body): Json<VerifyRequest>,
 ) -> axum::response::Response {
     if let Err(resp) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return resp;
     }
-    if let Err(resp) = ensure_case_access(&state, &auth, case_id).await {
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+    if let Err(resp) = ensure_patient_medication(&state, patient_id, medication_id).await {
         return resp;
     }
     let status = body
@@ -500,19 +540,17 @@ async fn verify_medication_drug_match(
 
     match sqlx::query(
         r#"UPDATE medication_drug_matches
-           SET verification_status = $4,
-               match_kind = CASE WHEN $4 = 'verified' THEN 'staff_verified' ELSE match_kind END,
-               note = COALESCE($5, note),
-               verified_by = CASE WHEN $4 = 'verified' THEN $6 ELSE verified_by END,
-               verified_at = CASE WHEN $4 = 'verified' THEN now() ELSE verified_at END,
+           SET verification_status = $3,
+               match_kind = CASE WHEN $3 = 'verified' THEN 'staff_verified' ELSE match_kind END,
+               note = COALESCE($4, note),
+               verified_by = CASE WHEN $3 = 'verified' THEN $5 ELSE verified_by END,
+               verified_at = CASE WHEN $3 = 'verified' THEN now() ELSE verified_at END,
                updated_at = now()
            WHERE id = $1
-             AND case_id = $2
-             AND medication_id = $3
+             AND patient_medication_id = $2
            RETURNING drug_product_id"#,
     )
     .bind(match_id)
-    .bind(case_id)
     .bind(medication_id)
     .bind(status)
     .bind(normalize_optional_text(body.note))
@@ -524,10 +562,10 @@ async fn verify_medication_drug_match(
             state.audit_sender.try_send(audit::domain_event(
                 "drug_match_verified".to_string(),
                 Some(auth.user_id),
-                "case",
-                Some(case_id),
+                "patient",
+                Some(patient_id),
                 serde_json::json!({
-                    "medication_id": medication_id,
+                    "patient_medication_id": medication_id,
                     "match_id": match_id,
                     "drug_product_id": row.try_get::<Uuid, _>("drug_product_id").unwrap_or_default(),
                     "verification_status": status,
@@ -537,7 +575,7 @@ async fn verify_medication_drug_match(
         }
         Ok(None) => err(StatusCode::NOT_FOUND, "Medication match not found"),
         Err(error) => {
-            tracing::error!(error = %error, match_id = %match_id, "verify medication drug match");
+            tracing::error!(error = %error, match_id = %match_id, "verify patient medication drug match");
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to verify medication match",
@@ -546,61 +584,143 @@ async fn verify_medication_drug_match(
     }
 }
 
+async fn confirm_patient_medication_expiry(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((patient_id, medication_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(resp) = require_patient_drug_access(&auth) {
+        return resp;
+    }
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+
+    let confirmed = match sqlx::query(
+        r#"UPDATE medication_expiry_events
+           SET status = 'confirmed',
+               confirmed_at = now(),
+               confirmed_by = $3
+           WHERE patient_medication_id = $1
+             AND patient_id = $2
+             AND status = 'pending_confirmation'
+           RETURNING id, expiry_date"#,
+    )
+    .bind(medication_id)
+    .bind(patient_id)
+    .bind(auth.user_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return err(
+                StatusCode::NOT_FOUND,
+                "No pending medication expiry confirmation found",
+            );
+        }
+        Err(error) => {
+            tracing::error!(
+                error = %error,
+                patient_id = %patient_id,
+                medication_id = %medication_id,
+                "confirm patient medication expiry",
+            );
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to confirm medication expiry",
+            );
+        }
+    };
+
+    let expiry_date = confirmed
+        .try_get::<chrono::NaiveDate, _>("expiry_date")
+        .map(|value| value.to_string())
+        .unwrap_or_default();
+
+    state.audit_sender.try_send(audit::domain_event(
+        "confirm_medication_expiry".to_string(),
+        Some(auth.user_id),
+        "patient",
+        Some(patient_id),
+        serde_json::json!({
+            "patient_medication_id": medication_id,
+            "expiry_date": expiry_date.clone(),
+        }),
+    ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.medication_expiry_confirmed",
+        patient_id,
+        serde_json::json!({
+            "patient_medication_id": medication_id,
+            "expiry_date": expiry_date,
+        }),
+    )
+    .await;
+
+    Json(serde_json::json!({ "ok": true })).into_response()
+}
+
 fn require_staff_drug_access(auth: &AuthUser) -> Result<(), axum::response::Response> {
     auth.require_any_role(&[Role::PatientManager, Role::TeamleadInterpreter, Role::Ceo])
 }
 
-async fn ensure_case_access(
+fn require_patient_drug_access(auth: &AuthUser) -> Result<(), axum::response::Response> {
+    auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin])
+}
+
+async fn ensure_patient_access(
     state: &AppState,
     auth: &AuthUser,
-    case_id: Uuid,
+    patient_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    if auth.role == Role::Ceo {
+    if auth.role.has_full_access() {
         return Ok(());
     }
-
-    let row = sqlx::query("SELECT patient_id, manager_id FROM cases WHERE id = $1")
-        .bind(case_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|error| {
-            tracing::error!(error = %error, case_id = %case_id, "load case access");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to validate case access",
-            )
-        })?;
-    let Some(row) = row else {
-        return Err(err(StatusCode::NOT_FOUND, "Case not found"));
-    };
-    let manager_id = row.try_get::<Uuid, _>("manager_id").map_err(|_| {
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to decode case access",
-        )
-    })?;
-    if manager_id == auth.user_id {
+    if !access::requires_patient_assignment(auth.role) {
         return Ok(());
     }
-    let patient_id = row.try_get::<Uuid, _>("patient_id").map_err(|_| {
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to decode case access",
-        )
-    })?;
     let assigned = access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
         .await
         .map_err(|error| {
-            tracing::error!(error = %error, patient_id = %patient_id, "validate case assignment");
+            tracing::error!(error = %error, patient_id = %patient_id, "validate patient assignment");
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to validate case access",
+                "Failed to validate patient access",
             )
         })?;
     if assigned {
         Ok(())
     } else {
         Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
+    }
+}
+
+async fn ensure_patient_medication(
+    state: &AppState,
+    patient_id: Uuid,
+    medication_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let found = sqlx::query_scalar::<_, i32>(
+        "SELECT 1 FROM patient_medications WHERE id = $1 AND patient_id = $2",
+    )
+    .bind(medication_id)
+    .bind(patient_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, patient_id = %patient_id, medication_id = %medication_id, "load patient medication");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate medication",
+        )
+    })?;
+    if found.is_some() {
+        Ok(())
+    } else {
+        Err(err(StatusCode::NOT_FOUND, "Medication not found"))
     }
 }
 

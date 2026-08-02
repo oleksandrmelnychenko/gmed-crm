@@ -94,6 +94,10 @@ import {
   normalizeOrderSectionKey,
 } from "./sections";
 import {
+  isOrderReadinessGateApplicable,
+  resolveOrderBlockingReason,
+} from "./model/blocking-reasons";
+import {
   approveOrderLeistung,
   completeWorkflowChecklistItem,
   createExternalInvoice,
@@ -159,7 +163,6 @@ import type {
   OrderDetail,
   OrderExecutionFormState,
   OrderFollowupFormState,
-  OrderPhase,
   OrderPlanningFormState,
   OrderProcessGateFormState,
   OrdersFilters,
@@ -226,64 +229,6 @@ const ORDER_TASK_STATUS_LABEL_KEYS = {
   done: "orders_task_status_completed",
   cancelled: "orders_task_status_cancelled",
 } satisfies Partial<Record<string, TranslationKey>>;
-
-const ORDER_BLOCKING_REASON_LABEL_KEYS: Record<string, string> = {
-  "Billing release is not granted and package coverage is not confirmed":
-    "orders_blocking_billing_release_package_coverage",
-  "Order signatures are still incomplete": "orders_blocking_signatures_incomplete",
-  "Advance invoice exists but payment is still missing":
-    "orders_blocking_advance_invoice_missing_payment",
-  "Treatment plan must be finalized before execution":
-    "orders_blocking_treatment_plan_not_final",
-  "At least one confirmed medical appointment is required":
-    "orders_blocking_medical_appointment_required",
-  "Required non-medical services still need a confirmed booking":
-    "orders_blocking_non_medical_booking_required",
-  "Interpreter is required but not assigned yet":
-    "orders_blocking_interpreter_not_assigned",
-  "Assigned interpreter has not confirmed yet":
-    "orders_blocking_interpreter_not_confirmed",
-  "Interpreter briefing is still pending":
-    "orders_blocking_interpreter_briefing_pending",
-  "Preparation documents still need to be sent":
-    "orders_blocking_preparation_documents_pending",
-  "Patient arrival or execution start is not recorded yet":
-    "orders_blocking_patient_arrival_missing",
-  "Medical execution must be completed and backed by delivered appointments or services":
-    "orders_blocking_medical_execution_incomplete",
-  "Required non-medical services still need execution confirmation":
-    "orders_blocking_non_medical_execution_missing",
-  "Interpreter-supported execution still needs completion or report confirmation":
-    "orders_blocking_interpreter_execution_incomplete",
-  "Execution deviations or incidents must be resolved or marked as not required":
-    "orders_blocking_execution_deviations_unresolved",
-  "Results, Arztbrief or final patient handoff still need to be released":
-    "orders_blocking_results_handoff_unreleased",
-  "Doctor-directed follow-up is required but not scheduled yet":
-    "orders_blocking_doctor_followup_unscheduled",
-  "1-week follow-up is not scheduled yet":
-    "orders_blocking_1w_followup_unscheduled",
-  "1-month follow-up is not scheduled yet":
-    "orders_blocking_1m_followup_unscheduled",
-  "6-month follow-up is not scheduled yet":
-    "orders_blocking_6m_followup_unscheduled",
-  "Package-end follow-up is required but not scheduled yet":
-    "orders_blocking_package_end_followup_unscheduled",
-  "No follow-up reminder, task or appointment has been launched yet":
-    "orders_blocking_no_followup_launched",
-  "Primary contact is missing": "orders_blocking_primary_contact_missing",
-  "Residence or address country is missing": "orders_blocking_country_missing",
-  "Preferred language is missing": "orders_blocking_preferred_language_missing",
-  "Compliance status is not completed": "orders_blocking_compliance_incomplete",
-  "DSGVO/compliance documents are not signed":
-    "orders_blocking_compliance_documents_unsigned",
-  "Identity is not verified": "orders_blocking_identity_unverified",
-  "Valid contract documentation is missing":
-    "orders_blocking_contract_documentation_missing",
-  "Patient is still in debt-management hold": "orders_blocking_debt_hold",
-  "Existing-customer re-check is not required before the first operational order":
-    "orders_blocking_existing_customer_recheck_not_required",
-};
 
 function SectionCard({
   title,
@@ -835,61 +780,8 @@ function useOrdersPageContent() {
     return l(key);
   };
   const localizedBlockingReason = (reason: string) => {
-    const exactKey = ORDER_BLOCKING_REASON_LABEL_KEYS[reason];
-    if (exactKey) return l(exactKey);
-
-    const patientDebtHoldMatch = reason.match(
-      /^(\d+) overdue invoice\(s\) keep the patient in debt-management hold$/,
-    );
-    if (patientDebtHoldMatch) {
-      return l("orders_debt_reason_patient_hold", {
-        count: Number(patientDebtHoldMatch[1]),
-      });
-    }
-
-    const debtReasonMatch = reason.match(
-      /^(\d+) overdue invoice\(s\) (require debt-management review|are in payment-plan handling|are awaiting payment confirmation|are in escalated debt-management)(?:; next review .+)?$/,
-    );
-    if (debtReasonMatch) {
-      const statusByReason: Record<string, string> = {
-        "require debt-management review": "review_required",
-        "are in payment-plan handling": "payment_plan",
-        "are awaiting payment confirmation": "awaiting_payment",
-        "are in escalated debt-management": "escalated",
-      };
-      return debtBlockingReasonLabel(
-        statusByReason[debtReasonMatch[2]] ?? "review_required",
-        Number(debtReasonMatch[1]),
-      );
-    }
-
-    const openDebtStatusByReason: Record<string, string> = {
-      "Debt-management review is still open": "review_required",
-      "Debt-management payment plan is still open": "payment_plan",
-      "Debt-management is still awaiting payment confirmation": "awaiting_payment",
-      "Debt-management escalation is still open": "escalated",
-    };
-    const normalizedDebtReason = reason.replace(/; next review .+$/, "");
-    if (openDebtStatusByReason[normalizedDebtReason]) {
-      return debtBlockingReasonLabel(openDebtStatusByReason[normalizedDebtReason], 0);
-    }
-
-    const executionChecklistMatch = reason.match(
-      /^(\d+) execution checklist item\(s\) remain open$/,
-    );
-    if (executionChecklistMatch) {
-      return l("orders_blocking_execution_checklist_open_count", {
-        count: Number(executionChecklistMatch[1]),
-      });
-    }
-    const missingDocsMatch = reason.match(
-      /^(\d+) required patient document\(s\) are missing$/,
-    );
-    if (missingDocsMatch) {
-      return l("orders_blocking_missing_required_patient_documents_count", {
-        count: Number(missingDocsMatch[1]),
-      });
-    }
+    const translation = resolveOrderBlockingReason(reason);
+    if (translation) return l(translation.key, translation.values);
     return formatUnknownValue(reason, t);
   };
 
@@ -1398,15 +1290,22 @@ function useOrdersPageContent() {
     () => orderDetail?.lifecycle?.allowed_transitions?.[0] ?? null,
     [orderDetail?.lifecycle],
   );
-  const currentOrderPhaseIndex = orderDetail
-    ? ORDER_PHASES.indexOf(orderDetail.phase as OrderPhase)
-    : -1;
-  const planningReadinessApplicable =
-    currentOrderPhaseIndex >= ORDER_PHASES.indexOf("intake");
-  const executionReadinessApplicable =
-    currentOrderPhaseIndex >= ORDER_PHASES.indexOf("execution");
-  const followupReadinessApplicable =
-    currentOrderPhaseIndex >= ORDER_PHASES.indexOf("closure");
+  const planningReadinessApplicable = isOrderReadinessGateApplicable(
+    orderDetail?.phase,
+    "planning",
+  );
+  const processGateReadinessApplicable = isOrderReadinessGateApplicable(
+    orderDetail?.phase,
+    "process",
+  );
+  const executionReadinessApplicable = isOrderReadinessGateApplicable(
+    orderDetail?.phase,
+    "execution",
+  );
+  const followupReadinessApplicable = isOrderReadinessGateApplicable(
+    orderDetail?.phase,
+    "followup",
+  );
   const activeWorkflowAssignments = useMemo(
     () =>
       workflowAssignments.filter(
@@ -3473,14 +3372,18 @@ function useOrdersPageContent() {
                               variant="outline"
                               className={cn(
                                 "rounded-full",
-                                orderDetail.process_gates.execution_ready
-                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                  : "border-rose-200 bg-rose-50 text-rose-700",
+                                !processGateReadinessApplicable
+                                  ? "border-border bg-muted/50 text-muted-foreground"
+                                  : orderDetail.process_gates.execution_ready
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                    : "border-rose-200 bg-rose-50 text-rose-700",
                               )}
                             >
-                              {orderDetail.process_gates.execution_ready
-                                ? l("orders_bereit")
-                                : l("orders_blockiert")}
+                              {!processGateReadinessApplicable
+                                ? l("orders_nicht_verfugbar")
+                                : orderDetail.process_gates.execution_ready
+                                  ? l("orders_bereit")
+                                  : l("orders_blockiert")}
                             </Badge>
                           }
                         />
@@ -3522,7 +3425,8 @@ function useOrdersPageContent() {
                         />
                       </div>
 
-                      {orderDetail.process_gates.blocking_reasons.length > 0 ? (
+                      {processGateReadinessApplicable &&
+                      orderDetail.process_gates.blocking_reasons.length > 0 ? (
                         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                           <div className="font-medium">
                             {l("orders_blockierende_grunde")}

@@ -398,6 +398,7 @@ export function PatientsPage() {
         <div className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
         <PatientsListToolbar
           anyTopFilterActive={anyTopFilterActive}
+          canFilterLifecycle={permissions.canFilterLifecycle}
           columns={columns}
           defaultFrozenColumns={DEFAULT_PATIENT_FROZEN_COLUMNS}
           defaultHiddenColumns={DEFAULT_PATIENT_HIDDEN_COLUMNS}

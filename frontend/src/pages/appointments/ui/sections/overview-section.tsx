@@ -153,14 +153,13 @@ function AppointmentOverviewSection({
         ) : null}
         {detail.interpreter_response ? (
           <span className="rounded-full border border-border/60 bg-muted/25 px-2.5 py-1 text-[10.5px] font-semibold text-muted-foreground">
-            {(tr.role_interpreter ??
-              appointmentText("appointments_interpreter"))}{" "}
+            {appointmentText("appointments_interpreter")}{" "}
             {responseLabel(detail.interpreter_response)}
           </span>
         ) : null}
       </div>
       <div className="mt-4 rounded-lg border border-border/70 bg-card px-2 py-1.5">
-        <div className="grid gap-x-6 gap-y-1 lg:grid-cols-3">
+        <div className="grid gap-x-6 gap-y-1 lg:grid-cols-[1.6fr_1fr_1fr]">
           <OverviewInfoTile
             icon={Clock3}
             label={t.appointments_date}
@@ -438,7 +437,7 @@ function OverviewInfoTile({
       <span className="h-px min-w-5 flex-1 self-center bg-border/70" />
       <span
         className={cn(
-          "min-w-0 max-w-[62%] break-words text-right text-sm font-semibold leading-snug",
+          "min-w-0 max-w-[70%] truncate whitespace-nowrap text-right text-sm font-semibold leading-snug",
           mono && "font-mono text-xs tabular-nums",
           muted ? "font-normal text-muted-foreground" : "text-foreground",
         )}

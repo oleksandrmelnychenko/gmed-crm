@@ -76,28 +76,6 @@ export function completeCaseIntake(
   );
 }
 
-export function saveCaseVorerkrankungen(caseId: string, payload: JsonPayload) {
-  return postJson(`/cases/${caseId}/vorerkrankungen`, payload);
-}
-
-export function saveCaseAllergien(caseId: string, payload: JsonPayload) {
-  return postJson(`/cases/${caseId}/allergien`, payload);
-}
-
-export function saveCaseOperationen(caseId: string, payload: JsonPayload) {
-  return postJson(`/cases/${caseId}/operationen`, payload);
-}
-
-export function saveCaseMedikamente(caseId: string, payload: JsonPayload) {
-  return postJson(`/cases/${caseId}/medikamente`, payload);
-}
-
-export function confirmMedicationExpiry(caseId: string, medicationId: string) {
-  return apiFetch(`/cases/${caseId}/medikamente/${medicationId}/expiry-confirm`, {
-    method: "POST",
-  });
-}
-
 export function saveCasePain(caseId: string, payload: JsonPayload) {
   return postJson(`/cases/${caseId}/pain`, payload);
 }
@@ -128,12 +106,4 @@ export function saveCasePulmonology(caseId: string, payload: JsonPayload) {
 
 export function saveCaseUrology(caseId: string, payload: JsonPayload) {
   return postJson(`/cases/${caseId}/urology`, payload);
-}
-
-export function saveCaseVegetative(caseId: string, payload: JsonPayload) {
-  return postJson(`/cases/${caseId}/vegetative`, payload);
-}
-
-export function saveCaseImpfstatus(caseId: string, payload: JsonPayload) {
-  return postJson(`/cases/${caseId}/impfstatus`, payload);
 }

@@ -45,7 +45,7 @@ describe("MedicationEquivalentsPanel", () => {
 
     expect(html).toContain("Sortis");
     expect(html).toContain("Candidate");
-    expect(html).toContain("не назначением");
+    expect(html).toContain("Это не назначение");
     expect(html).toContain("Непроверенный кандидат");
     expect(html).toContain("не показывать пациенту");
   });

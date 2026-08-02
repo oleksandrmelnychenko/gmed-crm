@@ -1779,7 +1779,6 @@ async fn list_attention_items(
                   owner.role AS owner_role,
                   COALESCE(checklists.open_count, 0) AS open_checklist_count,
                   COALESCE(tasks.open_count, 0) AS open_task_count,
-                  COALESCE(reminders.open_count, 0) AS open_reminder_count,
                   COALESCE(reminders.overdue_count, 0) AS overdue_reminder_count,
                   reminders.next_due_at AS next_reminder_due_at,
                   COALESCE(comms.open_count, 0) AS open_communication_count,
@@ -1802,8 +1801,7 @@ async fn list_attention_items(
              WHERE t.appointment_id = a.id
            ) tasks ON true
            LEFT JOIN LATERAL (
-             SELECT COUNT(*) FILTER (WHERE NOT r.is_completed) AS open_count,
-                    COUNT(*) FILTER (WHERE NOT r.is_completed AND r.remind_at <= now()) AS overdue_count,
+             SELECT COUNT(*) FILTER (WHERE NOT r.is_completed AND r.remind_at <= now()) AS overdue_count,
                     MIN(r.remind_at) FILTER (WHERE NOT r.is_completed) AS next_due_at
              FROM reminders r
              WHERE r.appointment_id = a.id
@@ -1838,7 +1836,7 @@ async fn list_attention_items(
                         AND a.interpreter_response IS DISTINCT FROM 'accepted'
                     )
                  OR (
-                        a.status NOT IN ('completed', 'cancelled')
+                        a.status <> 'cancelled'
                         AND COALESCE(reminders.overdue_count, 0) > 0
                     )
                  OR (
@@ -1856,21 +1854,13 @@ async fn list_attention_items(
                         AND COALESCE(comms.open_count, 0) > 0
                     )
                  OR (
-                        a.date <= $17
+                        a.interpreter_id IS NOT NULL
+                        AND a.status <> 'cancelled'
                         AND (
-                               latest_report.approval_status = 'pending'
-                            OR (
-                                   a.status = 'completed'
-                               AND a.interpreter_id IS NOT NULL
-                               AND latest_report.approval_status IS DISTINCT FROM 'approved'
-                            )
+                               (a.date < $17 AND latest_report.approval_status IS DISTINCT FROM 'approved')
+                            OR (a.date <= $17 AND latest_report.approval_status = 'pending')
+                            OR (a.status = 'completed' AND latest_report.approval_status IS DISTINCT FROM 'approved')
                         )
-                    )
-                 OR (
-                        a.date < $17
-                        AND a.status NOT IN ('completed', 'cancelled')
-                        AND COALESCE(reminders.open_count, 0) > 0
-                        AND COALESCE(reminders.overdue_count, 0) = 0
                     )
              )
              AND ($1::text = '%%'
@@ -1975,8 +1965,6 @@ async fn list_attention_items(
                 let open_checklist_count: i64 =
                     row.try_get("open_checklist_count").unwrap_or_default();
                 let open_task_count: i64 = row.try_get("open_task_count").unwrap_or_default();
-                let open_reminder_count: i64 =
-                    row.try_get("open_reminder_count").unwrap_or_default();
                 let overdue_reminder_count: i64 =
                     row.try_get("overdue_reminder_count").unwrap_or_default();
                 let open_communication_count: i64 =
@@ -2033,7 +2021,7 @@ async fn list_attention_items(
                         serde_json::json!({}),
                     );
                 }
-                if !terminal && overdue_reminder_count > 0 {
+                if status != "cancelled" && overdue_reminder_count > 0 {
                     push_reason(
                         "appointments_attention_reason_overdue_reminders_count",
                         format!("{overdue_reminder_count} reminder(s) are overdue"),
@@ -2061,10 +2049,13 @@ async fn list_attention_items(
                         serde_json::json!({ "count": open_communication_count }),
                     );
                 }
-                if appointment_date <= today
-                    && (latest_report_status.as_deref() == Some("pending")
+                if interpreter_id.is_some()
+                    && status != "cancelled"
+                    && ((appointment_date < today
+                        && latest_report_status.as_deref() != Some("approved"))
+                        || (appointment_date <= today
+                            && latest_report_status.as_deref() == Some("pending"))
                         || (status == "completed"
-                            && interpreter_id.is_some()
                             && latest_report_status.as_deref() != Some("approved")))
                 {
                     push_reason(
@@ -2073,18 +2064,6 @@ async fn list_attention_items(
                         serde_json::json!({}),
                     );
                 }
-                if appointment_date < today
-                    && !terminal
-                    && open_reminder_count > 0
-                    && overdue_reminder_count == 0
-                {
-                    push_reason(
-                        "appointments_attention_reason_active_reminders_count",
-                        format!("{open_reminder_count} reminder(s) are still active"),
-                        serde_json::json!({ "count": open_reminder_count }),
-                    );
-                }
-
                 if reasons.is_empty() {
                     continue;
                 }
@@ -5160,7 +5139,7 @@ async fn update_status(
     Path(apt_id): Path<Uuid>,
     Json(body): Json<StatusUpdate>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin]) {
         return e;
     }
     match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
@@ -5404,7 +5383,7 @@ async fn update_status(
     {
         return resp;
     }
-    if matches!(body.status.as_str(), "completed" | "cancelled")
+    if body.status == "cancelled"
         && let Err(resp) =
             close_terminal_appointment_artifacts_in_tx(&mut tx, &target_ids, auth.user_id).await
     {
@@ -5550,9 +5529,12 @@ async fn assign_interpreter(
     Path(apt_id): Path<Uuid>,
     Json(body): Json<AssignInterpreter>,
 ) -> axum::response::Response {
-    if let Err(e) =
-        auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::TeamleadInterpreter])
-    {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::ItAdmin,
+    ]) {
         return e;
     }
     match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
@@ -5817,7 +5799,12 @@ async fn list_checklist(
     Extension(auth): Extension<AuthUser>,
     Path(apt_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::Concierge,
+        Role::ItAdmin,
+    ]) {
         return e;
     }
     if let Err(resp) = ensure_checklist_access(&state, &auth, apt_id).await {
@@ -5845,7 +5832,12 @@ async fn add_checklist_item(
     Path(apt_id): Path<Uuid>,
     Json(body): Json<ChecklistItem>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::Concierge,
+        Role::ItAdmin,
+    ]) {
         return e;
     }
     if let Err(resp) = ensure_checklist_access(&state, &auth, apt_id).await {
@@ -5953,7 +5945,12 @@ async fn complete_checklist(
     Extension(auth): Extension<AuthUser>,
     Path((apt_id, item_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::Concierge,
+        Role::ItAdmin,
+    ]) {
         return e;
     }
     if let Err(resp) = ensure_checklist_access(&state, &auth, apt_id).await {
@@ -6042,6 +6039,7 @@ async fn list_reminders(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -6092,7 +6090,7 @@ async fn add_reminder(
     Path(apt_id): Path<Uuid>,
     Json(body): Json<CreateReminder>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin]) {
         return e;
     }
     match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
@@ -6172,6 +6170,7 @@ async fn complete_reminder(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -6229,6 +6228,7 @@ async fn list_communications(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -6307,6 +6307,7 @@ async fn create_communication(
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -6466,6 +6467,7 @@ async fn update_communication_status(
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -6660,6 +6662,22 @@ async fn submit_report(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    if let Err(e) = sqlx::query(
+        r#"UPDATE appointments
+           SET interpreter_response = 'accepted',
+               updated_at = now()
+           WHERE id = $1
+             AND interpreter_id = $2
+             AND interpreter_response IS DISTINCT FROM 'accepted'"#,
+    )
+    .bind(apt_id)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "accept interpreter assignment on report submission");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "submit report: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
@@ -7109,6 +7127,7 @@ async fn get_report(
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Interpreter,
+        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -7210,9 +7229,12 @@ async fn approve_report(
     Extension(auth): Extension<AuthUser>,
     Path(apt_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) =
-        auth.require_any_role(&[Role::Ceo, Role::TeamleadInterpreter, Role::PatientManager])
-    {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::TeamleadInterpreter,
+        Role::PatientManager,
+        Role::ItAdmin,
+    ]) {
         return e;
     }
     match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
@@ -7329,9 +7351,12 @@ async fn reject_report(
     Path(apt_id): Path<Uuid>,
     Json(body): Json<RejectReport>,
 ) -> axum::response::Response {
-    if let Err(e) =
-        auth.require_any_role(&[Role::Ceo, Role::TeamleadInterpreter, Role::PatientManager])
-    {
+    if let Err(e) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::TeamleadInterpreter,
+        Role::PatientManager,
+        Role::ItAdmin,
+    ]) {
         return e;
     }
     match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
@@ -7522,7 +7547,11 @@ async fn ensure_appointment_communication_access(
     if manage
         && !matches!(
             auth.role,
-            Role::Ceo | Role::PatientManager | Role::TeamleadInterpreter | Role::Concierge
+            Role::Ceo
+                | Role::PatientManager
+                | Role::TeamleadInterpreter
+                | Role::Concierge
+                | Role::ItAdmin
         )
     {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
@@ -9071,7 +9100,13 @@ async fn load_active_user_role(
 
     if matches!(
         role.as_str(),
-        "interpreter" | "teamlead_interpreter" | "patient_manager" | "concierge" | "ceo"
+        "interpreter"
+            | "teamlead_interpreter"
+            | "patient_manager"
+            | "concierge"
+            | "billing"
+            | "ceo"
+            | "it_admin"
     ) {
         Ok(Some(role))
     } else {

@@ -61,8 +61,8 @@ export interface CasesClinicalTranslations {
   cases_clinical_medication_type_temporary: string;
   cases_clinical_medication_type_as_needed: string;
 
-  cases_workspace_group_clinical: string;
-  cases_workspace_group_specialty: string;
+  cases_workspace_group_episode: string;
+  cases_workspace_group_record: string;
   cases_workspace_group_meta: string;
   cases_workspace_header_description: string;
   cases_workspace_history_title: string;
@@ -75,12 +75,25 @@ export interface CasesClinicalTranslations {
   cases_workspace_overview_main_reason: string;
   cases_workspace_overview_referrer: string;
   cases_workspace_overview_referrer_label: string;
-  cases_workspace_overview_current_anamnesis: string;
-  cases_workspace_overview_snippets_title: string;
-  cases_workspace_overview_snippets_description: string;
-  cases_workspace_overview_snippets_empty: string;
-  cases_workspace_overview_snippets_insert: string;
+  cases_workspace_overview_links: string;
+  cases_workspace_overview_patient: string;
+  cases_workspace_overview_order: string;
+  cases_workspace_overview_manager: string;
+  cases_workspace_overview_intake: string;
+  cases_workspace_overview_intake_done: string;
+  cases_workspace_overview_intake_open: string;
   cases_workspace_overview_save: string;
+  cases_workspace_record_hint_title: string;
+  cases_workspace_record_hint_description: string;
+  cases_workspace_record_badge: string;
+  cases_workspace_scope_episode: string;
+  cases_workspace_scope_all: string;
+  cases_workspace_scope_empty_episode: string;
+  cases_workspace_section_anamnese: string;
+  cases_workspace_section_diagnoses: string;
+  cases_workspace_section_befunde: string;
+  cases_workspace_section_procedures: string;
+  cases_workspace_section_verlauf: string;
 
   cases_workspace_item_save_failed: string;
   cases_workspace_item_remove_failed: string;
@@ -303,8 +316,8 @@ export const casesClinicalRu: CasesClinicalTranslations = {
   cases_clinical_medication_type_temporary: "Временная",
   cases_clinical_medication_type_as_needed: "По необходимости",
 
-  cases_workspace_group_clinical: "Клинические",
-  cases_workspace_group_specialty: "Специализации",
+  cases_workspace_group_episode: "Эпизод",
+  cases_workspace_group_record: "Карта пациента",
   cases_workspace_group_meta: "Метаданные",
   cases_workspace_header_description:
     "Рабочее пространство выбранного кейса пациента. Разделы открываются из левого меню.",
@@ -317,17 +330,30 @@ export const casesClinicalRu: CasesClinicalTranslations = {
     "Каждое сохранение добавляет запись в историю.",
   cases_workspace_history_changed_by: "Изменено",
   cases_workspace_overview_description:
-    "Причина обращения, направивший врач и текущий анамнез.",
+    "Причина обращения, направивший врач и связи эпизода.",
   cases_workspace_overview_main_reason: "Причина обращения",
   cases_workspace_overview_referrer: "Направивший врач",
   cases_workspace_overview_referrer_label: "Наименование направившего врача",
-  cases_workspace_overview_current_anamnesis: "Текущий анамнез",
-  cases_workspace_overview_snippets_title: "Шаблоны текста",
-  cases_workspace_overview_snippets_description:
-    "Повторно используемые фрагменты для вставки в текст анамнеза.",
-  cases_workspace_overview_snippets_empty: "Активных шаблонов пока нет.",
-  cases_workspace_overview_snippets_insert: "Вставить",
+  cases_workspace_overview_links: "Связи",
+  cases_workspace_overview_patient: "Пациент",
+  cases_workspace_overview_order: "Заказ",
+  cases_workspace_overview_manager: "Менеджер",
+  cases_workspace_overview_intake: "Медицинский интейк",
+  cases_workspace_overview_intake_done: "Завершён",
+  cases_workspace_overview_intake_open: "Не завершён",
   cases_workspace_overview_save: "Сохранить обзор",
+  cases_workspace_record_hint_title: "Карта пациента недоступна",
+  cases_workspace_record_hint_description:
+    "Карта пациента появится после создания пациента в мастере лида.",
+  cases_workspace_record_badge: "Карта пациента",
+  cases_workspace_scope_episode: "Этот эпизод",
+  cases_workspace_scope_all: "Вся карта",
+  cases_workspace_scope_empty_episode: "В этом эпизоде пока нет записей.",
+  cases_workspace_section_anamnese: "Анамнез",
+  cases_workspace_section_diagnoses: "Диагнозы",
+  cases_workspace_section_befunde: "Обследования",
+  cases_workspace_section_procedures: "Терапия",
+  cases_workspace_section_verlauf: "Течение",
   cases_workspace_item_save_failed:
     "Не удалось сохранить. Попробуйте ещё раз.",
   cases_workspace_item_remove_failed: "Не удалось удалить.",
@@ -581,8 +607,8 @@ export const casesClinicalDe: CasesClinicalTranslations = {
   cases_clinical_medication_type_temporary: "Befristet",
   cases_clinical_medication_type_as_needed: "Bei Bedarf",
 
-  cases_workspace_group_clinical: "Klinisch",
-  cases_workspace_group_specialty: "Fachgebiete",
+  cases_workspace_group_episode: "Episode",
+  cases_workspace_group_record: "Patientenakte",
   cases_workspace_group_meta: "Metadaten",
   cases_workspace_header_description:
     "Workspace für den ausgewählten Patientenfall. Die Sektionen werden aus der linken Navigation geöffnet.",
@@ -595,18 +621,30 @@ export const casesClinicalDe: CasesClinicalTranslations = {
     "Jede Speicherung erzeugt einen Eintrag in der Historie.",
   cases_workspace_history_changed_by: "Geändert von",
   cases_workspace_overview_description:
-    "Hauptanfragegrund, Zuweiser und aktuelle Anamnese.",
+    "Hauptanfragegrund, Zuweiser und Verknüpfungen der Episode.",
   cases_workspace_overview_main_reason: "Hauptanfragegrund",
   cases_workspace_overview_referrer: "Zuweiser",
   cases_workspace_overview_referrer_label: "Bezeichnung des Zuweisers",
-  cases_workspace_overview_current_anamnesis: "Aktuelle Anamnese",
-  cases_workspace_overview_snippets_title: "Textbausteine",
-  cases_workspace_overview_snippets_description:
-    "Wiederverwendbare Fragmente zum Einfügen in den Anamnese-Text.",
-  cases_workspace_overview_snippets_empty:
-    "Keine aktiven Textbausteine vorhanden.",
-  cases_workspace_overview_snippets_insert: "Einfügen",
+  cases_workspace_overview_links: "Verknüpfungen",
+  cases_workspace_overview_patient: "Patient",
+  cases_workspace_overview_order: "Auftrag",
+  cases_workspace_overview_manager: "Manager",
+  cases_workspace_overview_intake: "Medizinischer Intake",
+  cases_workspace_overview_intake_done: "Abgeschlossen",
+  cases_workspace_overview_intake_open: "Offen",
   cases_workspace_overview_save: "Übersicht speichern",
+  cases_workspace_record_hint_title: "Patientenakte nicht verfügbar",
+  cases_workspace_record_hint_description:
+    "Die Patientenakte erscheint, sobald der Patient im Lead-Assistenten angelegt wurde.",
+  cases_workspace_record_badge: "Patientenakte",
+  cases_workspace_scope_episode: "Diese Episode",
+  cases_workspace_scope_all: "Gesamte Akte",
+  cases_workspace_scope_empty_episode: "In dieser Episode gibt es noch keine Einträge.",
+  cases_workspace_section_anamnese: "Anamnese",
+  cases_workspace_section_diagnoses: "Diagnosen",
+  cases_workspace_section_befunde: "Befunde",
+  cases_workspace_section_procedures: "Therapie",
+  cases_workspace_section_verlauf: "Verlauf",
   cases_workspace_item_save_failed:
     "Speichern fehlgeschlagen. Versuchen Sie es erneut.",
   cases_workspace_item_remove_failed: "Entfernen fehlgeschlagen.",
@@ -856,25 +894,26 @@ export const CASE_MEDICATION_TYPE_VALUES = [
 
 export const CASE_WORKSPACE_SECTION_LABEL_KEYS = {
   overview: "cases_clinical_section_overview",
-  preconditions: "cases_clinical_section_preconditions",
-  allergies: "cases_clinical_section_allergies",
-  surgeries: "cases_clinical_section_surgeries",
-  medications: "cases_clinical_section_medications",
-  pain: "cases_clinical_section_pain",
   symptoms: "cases_clinical_section_symptoms",
-  vegetative: "cases_clinical_section_vegetative",
-  impfstatus: "cases_vaccination",
+  pain: "cases_clinical_section_pain",
   cardiology: "cases_clinical_section_cardiology",
   gastroenterology: "cases_clinical_section_gastroenterology",
   orthopedics: "cases_clinical_section_orthopedics",
   neurology: "cases_clinical_section_neurology",
   pulmonology: "cases_clinical_section_pulmonology",
   urology: "cases_clinical_section_urology",
+  anamnese: "cases_workspace_section_anamnese",
+  diagnoses: "cases_workspace_section_diagnoses",
+  medications: "cases_clinical_section_medications",
+  allergies: "cases_clinical_section_allergies",
+  befunde: "cases_workspace_section_befunde",
+  procedures: "cases_workspace_section_procedures",
+  verlauf: "cases_workspace_section_verlauf",
   history: "cases_clinical_section_history",
 } as const;
 
 export const CASE_WORKSPACE_SECTION_GROUP_LABEL_KEYS = {
-  clinical: "cases_workspace_group_clinical",
-  specialty: "cases_workspace_group_specialty",
+  episode: "cases_workspace_group_episode",
+  record: "cases_workspace_group_record",
   meta: "cases_workspace_group_meta",
 } as const;

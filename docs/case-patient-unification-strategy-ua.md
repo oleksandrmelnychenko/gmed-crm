@@ -1,6 +1,6 @@
 # Стратегія об'єднання клінічної моделі: пацієнт = джерело правди, кейс = епізод (RFC)
 
-**Статус документа:** ухвалений дизайн (рішення зафіксовані в цьому документі, розд. 9)
+**Статус документа:** реалізація триває — фази 0–5 і 7 реалізовані; фаза 6A виконує недеструктивну reconciliation, а фаза 6B лише встановлює захищену owner-only операцію й не запускається під час deployment
 **Автор:** Claude (за запитом Olek)
 **Зона впливу:** `crates/server/src/routes/{cases,leads,patients,orders,drug_products,admin_compliance,e2e_support}.rs`, `crates/server/src/services/drug_matching.rs`, `crates/server/src/main.rs`, `migrations/`, `frontend/src/pages/{case-workspace,cases,leads,patients}/*`, i18n
 **Пов'язані документи:** [`clinical-redesign-plan.md`](clinical-redesign-plan.md) (пацієнтський клінічний майстер, фази 1–5 shipped), [`lead-status-strategy-ua.md`](lead-status-strategy-ua.md) (state-machine ліда, реалізовано), [`engineering/03_lead-retention-policy_ua.md`](engineering/03_lead-retention-policy_ua.md) (ретенція лідів)
@@ -212,47 +212,48 @@ open ─▶ in_progress ─▶ closed(reason)
 Конвенція як у `clinical-redesign-plan.md`: фаза = міграція (forward-only, idempotent, **застосовує Olek**) + бекенд + фронт + коміт. Кожна фаза shippable, big-bang немає.
 
 ### Фаза 0 — заморозка (без коду)
-- ☐ Правило в PR-чекліст: жодних нових фіч на кейсових клінічних таблицях (`medikamente`, `allergien`, `vorerkrankungen`, `operationen`, `vegetative_anamnese`, `impfstatus`).
+- ☑ Правило в PR-чекліст: жодних нових фіч на кейсових клінічних таблицях (`medikamente`, `allergien`, `vorerkrankungen`, `operationen`, `vegetative_anamnese`, `impfstatus`).
 
 ### Фаза 1 — паритет аудиту й ретенції (D6)
-- ☐ Міграція: `patient_clinical_versions` (+immutable trigger), `patients.clinical_retention_until`, `patients.last_clinical_update_at`.
-- ☐ `patients.rs`: version-log у всіх клінічних POST-ах; продовження retention-годинника.
-- ☐ Бекфіл `clinical_retention_until` з `cases.retention_until` по пацієнту (max).
+- ☑ Міграція: `patient_clinical_versions` (+immutable trigger), `patients.clinical_retention_until`, `patients.last_clinical_update_at`.
+- ☑ `patients.rs`: version-log у всіх клінічних POST-ах; продовження retention-годинника.
+- ☑ Бекфіл `clinical_retention_until` з `cases.retention_until` по пацієнту (max).
 
 ### Фаза 2 — гігієна кейса (D4-lifecycle, D9-частково)
-- ☐ Міграція: `cases.closed_reason`, `closed_at`, `status_changed_at`.
-- ☐ `cases.rs`: `ALLOWED_TRANSITIONS`, `POST /cases/{id}/status`, стоп скидання `intake_completed_at` у `version_log`.
-- ☐ Фронт: статус-дії у воркспейсі; видалення інлайн-редактора з `pages/cases/page.tsx`; пропозиція закриття кейса при завершенні ордера.
-- ☐ i18n: `case_status_*`, причини закриття.
+- ☑ Міграція: `cases.closed_reason`, `closed_at`, `status_changed_at`.
+- ☑ `cases.rs`: `ALLOWED_TRANSITIONS`, `POST /cases/{id}/status`, стоп скидання `intake_completed_at` у `version_log`.
+- ☑ Фронт: статус-дії у воркспейсі; видалення інлайн-редактора з `pages/cases/page.tsx`; пропозиція закриття кейса при завершенні ордера.
+- ☑ i18n: `case_status_*`, причини закриття.
 
 ### Фаза 3 — identity-first (D1, D2, D3)
-- ☐ Міграція: `patients.lifecycle_status` (+бекфіл з `is_active`), `leads.prospect_patient_id`, `leads.intake_model` (+бекфіл `'legacy'`).
-- ☐ `leads.rs`: `POST /leads/{id}/prospect` (гейт master data, дедуп-перевірка, PID, кейс на `patient_id`); активація замість копіювання для `patient_first`; `anonymize_lead_pii` + hard-delete prospect; sweeper-тести.
-- ☐ `patients.rs`: фільтри `lifecycle_status` у списках/пошуку; переходи `active ⇄ inactive`.
-- ☐ Візард: медичний крок → пацієнтські ендпоінти; UI прив'язки до наявного пацієнта при збігу.
-- ☐ E2E: prospect-flow, purge-flow, дедуп-flow.
+- ☑ Міграція: `patients.lifecycle_status` (+бекфіл з `is_active`), `leads.prospect_patient_id`, `leads.intake_model` (+бекфіл `'legacy'`).
+- ☑ `leads.rs`: `POST /leads/{id}/prospect` (гейт master data, дедуп-перевірка, PID, кейс на `patient_id`); активація замість копіювання для `patient_first`; `anonymize_lead_pii` + hard-delete prospect; sweeper-тести.
+- ☑ `patients.rs`: фільтри `lifecycle_status` у списках/пошуку; переходи `active ⇄ inactive`.
+- ☑ Візард: медичний крок → пацієнтські ендпоінти; UI прив'язки до наявного пацієнта при збігу.
+- ☑ E2E: prospect-flow, purge-flow, дедуп-flow.
 
 ### Фаза 4 — епізодна атрибуція і проєкції (D5)
-- ☐ Міграція: `case_id` на 5 пацієнтських таблицях.
-- ☐ `patients.rs`: приймання/віддача `case_id` у клінічних контрактах.
-- ☐ Воркспейс кейса: клінічні секції → проєкції пацієнтських даних (фільтр епізода); кейсові клінічні POST-и більше не викликаються фронтом.
-- ☐ Клінічний таб пацієнта: бейджі епізодів, фільтр.
-- ☐ Impfstatus: таблиця `patient_impfstatus`, секція в табі пацієнта, зникнення з кейса.
+- ☑ Міграція: `case_id` на 5 пацієнтських таблицях.
+- ☑ `patients.rs`: приймання/віддача `case_id` у клінічних контрактах.
+- ☑ Воркспейс кейса: клінічні секції → проєкції пацієнтських даних (фільтр епізода); кейсові клінічні POST-и більше не викликаються фронтом.
+- ☑ Клінічний таб пацієнта: бейджі епізодів, фільтр.
+- ☑ Impfstatus: таблиця `patient_impfstatus`, секція в табі пацієнта, зникнення з кейса.
 
 ### Фаза 5 — фармакологія на пацієнті (D7)
-- ☐ Міграція: `medication_drug_matches.patient_medication_id`, `medication_expiry_events.patient_medication_id`.
-- ☐ Роути еквівалентів/матчів під `/patients/...`; шедулер на `patient_medications.einnahme_bis`.
-- ☐ Панель еквівалентів у табі пацієнта + проєкції.
+- ☑ Міграція: `medication_drug_matches.patient_medication_id`, `medication_expiry_events.patient_medication_id`.
+- ☑ Роути еквівалентів/матчів під `/patients/...`; шедулер на `patient_medications.einnahme_bis`.
+- ☑ Панель еквівалентів у табі пацієнта + проєкції.
 
 ### Фаза 6 — реконсиліація і демонтаж (розд. 5, 6)
-- ☐ Звіт-діфф, ручне злиття `case_newer`.
-- ☐ Міграція: `cases.intake_snapshot` (бекфіл із кейсових таблиць), дроп кейсових клінічних таблиць, дроп `cases.lead_id` + XOR-констрейнта, дроп legacy-колонок drug-matches/expiry.
-- ☐ Видалення `transfer_lead_clinical_profile`, кейсових клінічних POST-ів (через `410`), мертвого коду `clinical_draft`.
-- ☐ DSGVO-експорт: `intake_snapshot` + атрибутовані дані. Демо-сид, e2e-фікстури.
+- ☑ Reconciliation ledger з `exact_match` / `copied_case_only` / `preserved_conflict` / `unmapped_subject`; `cases.intake_snapshot`; UUID-мапінг legacy-медикаментів і pharma-зв'язків.
+- ☑ Звичайний deployment не дропає таблиці, колонки чи незамаплені pharma-рядки. Legacy-кейс без пацієнта не re-home-иться автоматично, бо identity matching потребує рішення оператора.
+- ☑ Owner-only `finalize_case_clinical_demolition(approval_id)` встановлюється, але не виконується; функція перевіряє reconciliation, snapshots, mappings, pharma targets та order links.
+- ☐ Розв'язати всі `pending` / `unmapped_subject` записи з audit metadata і провести окремий data-owner review.
+- ☐ Лише після письмового approval окремо виконати guarded demolition та видалити compatibility-код.
 
 ### Фаза 7 — комерційний шов (D8)
-- ☐ Міграція: `orders.case_id` (+бекфіл), пізніше дроп `cases.onboarding_order_id`.
-- ☐ Візард/ордери: проставлення `case_id`; пов'язані записи через прямий FK.
+- ☑ Міграція: `orders.case_id` (+бекфіл), пізніше дроп `cases.onboarding_order_id`.
+- ☑ Візард/ордери: проставлення `case_id`; пов'язані записи через прямий FK.
 
 Найризиковіша фаза — 3 (реєстри, конвертація, GDPR-шляхи); найтрудомісткіша — 4 (воркспейс кейса). Фази 1–2 незалежні й дають цінність самі по собі; 4 залежить від 3 (проєкція потребує існування пацієнта в лід-фазі); 6 — від 4 і 5; 7 незалежна від 4–6, може йти паралельно.
 
@@ -281,4 +282,52 @@ open ─▶ in_progress ─▶ closed(reason)
 
 ---
 
-**Наступний крок:** Фаза 1 (міграція `patient_clinical_versions` + retention-колонки; бекенд version-log) — незалежна, безризикова, розблоковує все інше.
+**Наступний крок:** після deployment переглянути `case_clinical_reconciliation_report`. Guarded demolition не входить у звичайний release і не виконується, доки існує хоча б один `pending` або `unmapped_subject` запис.
+
+---
+
+## Додаток A — специфікація переробки воркспейса кейса (Фаза 4, деталізація)
+
+Мета: воркспейс `/cases/:caseId` перестає бути другою клінічною базою і стає **вікном епізоду поверх пацієнтської акти**. Переробка «добротна»: не приховування секцій, а нова інформаційна архітектура.
+
+### A.1 Навігація (`sections.ts` + `case-workspace-nav.tsx`) — три групи замість «Klinisch/Fachgebiete/Meta»
+
+**Група «Епізод» (дані живуть на кейсі):**
+| Секція | Зміст |
+|---|---|
+| `overview` (переробити) | Шапка епізоду: статус + дії життєвого циклу (з Фази 2, вже є), «днів у статусі»; Hauptanfragegrund + Zuweiser (редаговані, як зараз через `/cases/{id}/anamnesis` — але БЕЗ `aktuelle_anamnese`, див. A.3); менеджер; стан інтейку; пов'язаний ордер (пряме `orders.case_id` з Фази 7, лінк на O-номер); лінк на пацієнта; лічильники по секціях |
+| `symptoms`, `pain` | Без змін — епізодні дані |
+| 6 фахових опитників | Без змін — епізодні |
+
+**Група «Patientenakte» (проєкції — читання/запис у пацієнтські ендпоінти):**
+| Секція | Джерело | Епізодний фільтр |
+|---|---|---|
+| `anamnese` (нова) | `patient_clinical_narrative` | версії з `case_id` цього кейса за замовчуванням; редагування створює/оновлює версію з `case_id` |
+| `diagnoses` (заміняє `preconditions`) | `patient_diagnoses` (дерево, `DiagnosisTreeSection` реюз) | toggle «Цей епізод / Вся акта», дефолт — епізод; нові вузли отримують `case_id` |
+| `medications` (переробити) | `patient_medications` (BMP) + панель еквівалентів (Фаза 5) | БЕЗ фільтра — стан пацієнта; бейдж «Patientenakte» |
+| `allergies` (переробити) | `patient_clinical_warnings` (allergie + cave) | БЕЗ фільтра — стан пацієнта |
+| `befunde` (нова) | `patient_examinations` | toggle, дефолт — епізод |
+| `procedures` (заміняє `surgeries`) | `patient_procedures` | toggle, дефолт — епізод |
+| `verlauf` (нова) | `patient_clinical_verlauf` | toggle, дефолт — епізод |
+
+**Група «Мета»:** `history` (`case_versions`) — без змін.
+
+**Зникають із воркспейса:** `preconditions`, `surgeries`, `vegetative` (дані — в анамнез/vitals, перенесення в Фазі 6), `impfstatus` (тимчасова секція Фази 2 видаляється — Impfstatus переїжджає в клінічний таб пацієнта, A.4).
+
+### A.2 Правило для legacy-кейсів
+Кейс із `lead_id` (без `patient_id`, `intake_model='legacy'` у польоті): група «Patientenakte» прихована, старі кейсові секції показуються як зараз до ручної identity reconciliation. Міграція не створює пацієнта автоматично, щоб не породити дубль при повторному зверненні. Дискримінатор — наявність `patient_id` на кейсі.
+
+### A.3 Бекенд Фази 4
+- Міграція `20260802102000_patient_clinical_episode_attribution.sql`: `case_id UUID NULL REFERENCES cases(id) ON DELETE SET NULL` + індекс на 5 таблицях: `patient_diagnoses`, `patient_examinations`, `patient_procedures`, `patient_clinical_verlauf`, `patient_clinical_narrative`.
+- `patients.rs`: клінічні контракти (GET bundle + POST items) читають/пишуть `case_id` на рівні елемента; `patient_version_log` пише `case_id` (колонка з Фази 1 вже чекає). Валідація: `case_id` мусить належати цьому пацієнту.
+- `PATCH` семантика не потрібна — replace-all зберігається (крім медикаментів, які Фаза 5 зробила upsert-ом).
+- `cases.rs`: `POST /cases/{id}/anamnesis` перестає приймати `aktuelle_anamnese` для patient-backed кейсів (лишається Hauptanfragegrund/Zuweiser); GET-и легасі-масивів не чіпаємо до Фази 6.
+- Нова таблиця `patient_impfstatus(patient_id PK REFERENCES patients ON DELETE CASCADE, status_text TEXT, updated_at)` + `GET/POST /patients/{id}/impfstatus` (version-log секція `impfstatus`).
+
+### A.4 Клінічний таб пацієнта
+- Бейдж епізоду (C-код, клік → воркспейс) на рядках із `case_id`; фільтр-дропдаун по епізодах пацієнта.
+- Секція «Impfstatus» (фрітекст 1:1).
+- Панель еквівалентів — уже додана Фазою 5.
+
+### A.5 Що НЕ входить у Фазу 4
+Перенесення історичних даних із кейсових таблиць (Фаза 6), видалення кейсових клінічних роутів (Фаза 6), автозакриття кейсів.

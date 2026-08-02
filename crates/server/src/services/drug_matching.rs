@@ -209,18 +209,18 @@ pub async fn load_german_equivalents(
 
 pub async fn load_medication_german_equivalents(
     pool: &gmed_db::DbPool,
-    case_id: Uuid,
+    patient_id: Uuid,
     medication_id: Uuid,
     include_candidates: bool,
 ) -> Result<Option<MedicationEquivalentResult>, sqlx::Error> {
     let medication_row = sqlx::query(
         r#"SELECT id, handelsname, wirkstoff
-           FROM medikamente
+           FROM patient_medications
            WHERE id = $1
-             AND case_id = $2"#,
+             AND patient_id = $2"#,
     )
     .bind(medication_id)
-    .bind(case_id)
+    .bind(patient_id)
     .fetch_optional(pool)
     .await?;
 
@@ -241,13 +241,11 @@ pub async fn load_medication_german_equivalents(
     let matched_products = sqlx::query_scalar::<_, Uuid>(
         r#"SELECT drug_product_id
            FROM medication_drug_matches
-           WHERE case_id = $1
-             AND medication_id = $2
-             AND ($3::bool = true OR verification_status = 'verified')
+           WHERE patient_medication_id = $1
+             AND ($2::bool = true OR verification_status = 'verified')
            ORDER BY CASE verification_status WHEN 'verified' THEN 0 ELSE 1 END,
                     confidence DESC"#,
     )
-    .bind(case_id)
     .bind(medication_id)
     .bind(include_candidates)
     .fetch_all(pool)

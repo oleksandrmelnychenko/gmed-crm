@@ -44,7 +44,7 @@ function AppointmentSnapshotSection({
 
   if (detail.interpreter_name || detail.interpreter_response) {
     snapshotCards.push({
-      label: t.role_interpreter,
+      label: appointmentText("appointments_interpreter"),
       value: detail.interpreter_name || tr.common_not_set,
       meta: detail.interpreter_response
         ? responseLabel(detail.interpreter_response)

@@ -1,9 +1,13 @@
 import { useMemo, type ReactNode } from "react";
 
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import {
+  DataTablePager,
+  useDataTablePagination,
+} from "@/components/data-table/data-table-pager";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
-import { CountBadge, EmptyCell } from "@/components/ui-shell";
+import { EmptyCell } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -44,23 +48,37 @@ function taskPriorityChipClass(priority: string) {
 
 function followUpTableToolbarStart(
   title: string | undefined,
-  count: number,
   extra?: ReactNode,
 ) {
   if (!title && !extra) return undefined;
   return (
     <>
       {title ? (
-        <>
-          <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
-            {title}
-          </span>
-          <CountBadge>{count}</CountBadge>
-        </>
+        <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+          {title}
+        </span>
       ) : null}
       {extra}
       <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
     </>
+  );
+}
+
+function followUpTablePager(
+  pagination: ReturnType<typeof useDataTablePagination>,
+  tr: Record<string, string>,
+) {
+  return (
+    <DataTablePager
+      pageIndex={pagination.pageIndex}
+      pageSize={pagination.pageSize}
+      totalPages={pagination.totalPages}
+      totalRows={pagination.totalRows}
+      previousLabel={tr.pagination_previous}
+      nextLabel={tr.pagination_next}
+      onPageChange={pagination.onPageChange}
+    />
   );
 }
 
@@ -81,6 +99,10 @@ export function AppointmentRemindersTable({
 }) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const pagination = useDataTablePagination(
+    reminders as ReminderEntry[],
+    reminders.map((item) => item.id).join(":"),
+  );
   const columns = useMemo<ColumnDef<ReminderEntry>[]>(
     () => [
       {
@@ -176,12 +198,13 @@ export function AppointmentRemindersTable({
 
   return (
     <DataTableSurface
-      rows={reminders}
+      rows={pagination.pagedRows}
       columns={columns}
       rowId={(item) => item.id}
       dictionary={tr}
       emptyState={<EmptyCell>{emptyText}</EmptyCell>}
-      toolbarStart={followUpTableToolbarStart(title, reminders.length, toolbarExtra)}
+      toolbarStart={followUpTableToolbarStart(title, toolbarExtra)}
+      toolbarAfter={followUpTablePager(pagination, tr)}
       rowActions={rowActions}
       rowActionsWidth={rowActionsWidth}
     />
@@ -205,6 +228,10 @@ export function AppointmentTasksTable({
 }) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const pagination = useDataTablePagination(
+    tasks as TaskEntry[],
+    tasks.map((item) => item.id).join(":"),
+  );
   const columns = useMemo<ColumnDef<TaskEntry>[]>(
     () => [
       {
@@ -324,12 +351,13 @@ export function AppointmentTasksTable({
 
   return (
     <DataTableSurface
-      rows={tasks}
+      rows={pagination.pagedRows}
       columns={columns}
       rowId={(item) => item.id}
       dictionary={tr}
       emptyState={<EmptyCell>{emptyText}</EmptyCell>}
-      toolbarStart={followUpTableToolbarStart(title, tasks.length, toolbarExtra)}
+      toolbarStart={followUpTableToolbarStart(title, toolbarExtra)}
+      toolbarAfter={followUpTablePager(pagination, tr)}
       rowActions={rowActions}
       rowActionsWidth={rowActionsWidth}
     />

@@ -277,37 +277,49 @@ async fn ensure_patient_policy_defaults(
     state: &AppState,
     updated_by: Uuid,
 ) -> Result<u64, sqlx::Error> {
-    let mut restored = 0;
+    // One batched round-trip: per-row INSERTs took ~16s through the DEV tunnel.
+    let mut roles: Vec<String> = Vec::with_capacity(DEFAULT_PATIENT_POLICIES.len());
+    let mut fields: Vec<String> = Vec::with_capacity(DEFAULT_PATIENT_POLICIES.len());
+    let mut levels: Vec<String> = Vec::with_capacity(DEFAULT_PATIENT_POLICIES.len());
+    let mut conditions: Vec<Option<String>> = Vec::with_capacity(DEFAULT_PATIENT_POLICIES.len());
+    let mut locks: Vec<bool> = Vec::with_capacity(DEFAULT_PATIENT_POLICIES.len());
     for &(role, field_name, access_level, condition_type, is_system_locked) in
         DEFAULT_PATIENT_POLICIES
     {
-        let result = sqlx::query(
-            r#"
-            INSERT INTO field_access_policies (
-                role,
-                entity_type,
-                field_name,
-                access_level,
-                condition_type,
-                is_system_locked,
-                updated_by,
-                updated_at
-            )
-            VALUES ($1, 'patient', $2, $3, $4, $5, $6, now())
-            ON CONFLICT (role, entity_type, field_name) DO NOTHING
-            "#,
-        )
-        .bind(role)
-        .bind(field_name)
-        .bind(access_level)
-        .bind(condition_type)
-        .bind(is_system_locked)
-        .bind(updated_by)
-        .execute(&state.db)
-        .await?;
-        restored += result.rows_affected();
+        roles.push(role.to_string());
+        fields.push(field_name.to_string());
+        levels.push(access_level.to_string());
+        conditions.push(condition_type.map(str::to_string));
+        locks.push(is_system_locked);
     }
-    Ok(restored)
+
+    let result = sqlx::query(
+        r#"
+        INSERT INTO field_access_policies (
+            role,
+            entity_type,
+            field_name,
+            access_level,
+            condition_type,
+            is_system_locked,
+            updated_by,
+            updated_at
+        )
+        SELECT t.role, 'patient', t.field_name, t.access_level, t.condition_type, t.is_system_locked, $6, now()
+        FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[], $5::bool[])
+            AS t(role, field_name, access_level, condition_type, is_system_locked)
+        ON CONFLICT (role, entity_type, field_name) DO NOTHING
+        "#,
+    )
+    .bind(&roles)
+    .bind(&fields)
+    .bind(&levels)
+    .bind(&conditions)
+    .bind(&locks)
+    .bind(updated_by)
+    .execute(&state.db)
+    .await?;
+    Ok(result.rows_affected())
 }
 
 async fn list_policies(

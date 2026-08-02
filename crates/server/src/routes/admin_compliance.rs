@@ -169,10 +169,13 @@ pub(crate) async fn build_patient_export_payload(
         patient_id
     ).fetch_all(&state.db).await.unwrap_or_default();
 
-    let cases = sqlx::query!(
-        "SELECT id, case_id, status, hauptanfragegrund, notes, created_at FROM cases WHERE patient_id = $1 ORDER BY created_at DESC",
-        patient_id
-    ).fetch_all(&state.db).await.unwrap_or_default();
+    let cases = sqlx::query(
+        "SELECT id, case_id, status, hauptanfragegrund, intake_snapshot, notes, created_at FROM cases WHERE patient_id = $1 ORDER BY created_at DESC",
+    )
+    .bind(patient_id)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
 
     let orders = sqlx::query!(
         "SELECT id, order_number, phase, status, notes, created_at FROM orders WHERE patient_id = $1 ORDER BY created_at DESC",
@@ -349,9 +352,13 @@ pub(crate) async fn build_patient_export_payload(
             "location": a.location, "notes": a.notes,
         })).collect::<Vec<_>>(),
         "cases": cases.into_iter().map(|c| serde_json::json!({
-            "id": c.id, "case_id": c.case_id, "status": c.status,
-            "hauptanfragegrund": c.hauptanfragegrund,
-            "notes": c.notes, "created_at": c.created_at,
+            "id": c.try_get::<uuid::Uuid, _>("id").unwrap_or_default(),
+            "case_id": c.try_get::<String, _>("case_id").unwrap_or_default(),
+            "status": c.try_get::<String, _>("status").unwrap_or_default(),
+            "hauptanfragegrund": c.try_get::<Option<String>, _>("hauptanfragegrund").unwrap_or_default(),
+            "intake_snapshot": c.try_get::<Option<serde_json::Value>, _>("intake_snapshot").unwrap_or_default(),
+            "notes": c.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+            "created_at": c.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").ok(),
         })).collect::<Vec<_>>(),
         "orders": orders.into_iter().map(|o| serde_json::json!({
             "id": o.id, "order_number": o.order_number, "phase": o.phase,

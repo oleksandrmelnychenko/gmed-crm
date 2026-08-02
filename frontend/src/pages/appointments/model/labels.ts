@@ -84,7 +84,7 @@ const INTERPRETER_RESPONSE_LABEL_KEYS = {
   pending: "appointment_interpreter_response_pending",
   accepted: "appointment_interpreter_response_accepted",
   declined: "appointment_interpreter_response_declined",
-  discussion: "appointment_interpreter_response_discussion",
+  discussion_requested: "appointment_interpreter_response_discussion",
 } satisfies LabelKeyMap;
 
 const RECURRENCE_FREQUENCY_LABEL_KEYS = {
@@ -236,6 +236,20 @@ export function appointmentText(
   return uiText(key, getLang(), values);
 }
 
+export function appointmentPluralText(
+  key: string,
+  count: number,
+  values?: UiTextValues,
+) {
+  const mergedValues = { ...values, count };
+  const category = new Intl.PluralRules(getLang()).select(count);
+  const pluralKey = `${key}_${category}`;
+  const pluralized = appointmentText(pluralKey, mergedValues);
+  return pluralized === pluralKey
+    ? appointmentText(key, mergedValues)
+    : pluralized;
+}
+
 export function roleLabel(role?: string | null) {
   const tr = runtimeTranslations();
   if (!role) return "";
@@ -370,10 +384,7 @@ const PLURALIZED_ATTENTION_REASON_KEYS = new Set([
 function knownAttentionReasonLabel(key: string, values?: Record<string, string | number | boolean | null | undefined> | null) {
   const count = Number(values?.count);
   if (PLURALIZED_ATTENTION_REASON_KEYS.has(key) && Number.isFinite(count)) {
-    const category = new Intl.PluralRules(getLang()).select(count);
-    const pluralKey = `${key}_${category}`;
-    const pluralized = appointmentText(pluralKey, values ?? undefined);
-    if (pluralized !== pluralKey) return pluralized;
+    return appointmentPluralText(key, count, values ?? undefined);
   }
 
   const translated = appointmentText(key, values ?? undefined);

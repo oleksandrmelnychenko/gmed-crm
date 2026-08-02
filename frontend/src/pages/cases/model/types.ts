@@ -1,26 +1,5 @@
 type CaseStatus = "open" | "in_progress" | "closed";
 
-type VorerkrankungItem = {
-  erkrankung: string;
-  erstdiagnose?: string | null;
-  notiz?: string | null;
-};
-
-type AllergieItem = {
-  allergie: string;
-  reaktion?: string | null;
-};
-
-type OperationItem = {
-  datum?: string | null;
-  grund: string;
-  arzt_id?: string | null;
-  arzt?: string | null;
-  arzt_registry_name?: string | null;
-  arzt_provider_name?: string | null;
-  notiz?: string | null;
-};
-
 type CaseHistoryEntry = {
   id: number;
   section: string;
@@ -42,29 +21,6 @@ export type CaseTextSnippet = {
   updated_at: string;
   created_by_name?: string | null;
   updated_by_name?: string | null;
-};
-
-type MedikamentItem = {
-  id?: string | null;
-  handelsname: string;
-  wirkstoff?: string | null;
-  dosis?: string | null;
-  dosis_einheit?: string | null;
-  einnahmeschema?: string | null;
-  darreichungsform?: string | null;
-  einheit?: string | null;
-  anmerkung?: string | null;
-  grund?: string | null;
-  seit?: string | null;
-  verordnender_arzt_id?: string | null;
-  verordnender_arzt?: string | null;
-  verordnender_arzt_registry_name?: string | null;
-  verordnender_arzt_provider_name?: string | null;
-  med_typ?: string | null;
-  expiry_date?: string | null;
-  is_expired?: boolean;
-  pending_expiry_confirmation?: boolean;
-  pending_expiry_notification_sent_at?: string | null;
 };
 
 type PainItem = {
@@ -178,16 +134,29 @@ type UrologyAssessment = {
   notes: string;
 };
 
+export type CaseIntakeSnapshot = {
+  hauptanfragegrund?: string | null;
+  aktuelle_anamnese?: string | null;
+  vorerkrankungen?: Array<Record<string, unknown>>;
+  allergien?: Array<Record<string, unknown>>;
+  medikamente?: Array<Record<string, unknown>>;
+  operationen?: Array<Record<string, unknown>>;
+  vegetative?: Record<string, unknown> | null;
+  impfstatus?: string | null;
+  frozen_at?: string;
+};
+
 export type CaseDetail = {
   id: string;
   case_uuid?: string;
   case_id: string;
-  patient_id: string;
-  onboarding_order_id?: string | null;
+  patient_id: string | null;
+  lead_id?: string | null;
+  source_lead_id?: string | null;
   manager_id: string;
   status: CaseStatus | string;
   hauptanfragegrund: string | null;
-  aktuelle_anamnese: string | null;
+  intake_snapshot?: CaseIntakeSnapshot | null;
   zuweiser_doctor_id?: string | null;
   zuweiser: string | null;
   zuweiser_registry_name?: string | null;
@@ -198,10 +167,6 @@ export type CaseDetail = {
   retention_until?: string | null;
   last_clinical_update_at?: string | null;
   version_count?: number;
-  vorerkrankungen: VorerkrankungItem[];
-  allergien: AllergieItem[];
-  operationen: OperationItem[];
-  medikamente: MedikamentItem[];
   pain_records: PainItem[];
   symptome: SymptomItem[];
   cardiology_recommended?: boolean;
@@ -216,14 +181,6 @@ export type CaseDetail = {
   pulmonology?: Partial<PulmonologyAssessment> | null;
   urology_recommended?: boolean;
   urology?: Partial<UrologyAssessment> | null;
-  vegetative_anamnese?: {
-    appetit_durst?: string | null;
-    koerpergroesse?: number | string | null;
-    gewicht?: number | string | null;
-    gewichtsveraenderung?: string | null;
-    grund?: string | null;
-  } | null;
-  impfstatus?: string | null;
   history?: CaseHistoryEntry[];
 };
 

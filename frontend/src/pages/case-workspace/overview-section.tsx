@@ -1,24 +1,18 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { useMemo, useState, type FormEvent } from "react";
-import { LoaderCircle } from "lucide-react";
+import { useState, type FormEvent } from "react";
+import { ArrowUpRight, LoaderCircle } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { formatEnumLabelFromKeys, useLang, type Translations } from "@/lib/i18n";
-import { CASE_SNIPPET_CATEGORY_LABEL_KEYS } from "@/lib/i18n/catalogs/cases-clinical";
+import { StaffLink } from "@/components/staff-link";
+import { useLang } from "@/lib/i18n";
 import { doctorSpecialtyLabel, type SpecializationLabelLang } from "@/pages/providers/model/specialization-labels";
-import {
-  CASE_TEXT_SNIPPET_PLACEHOLDERS,
-  appendSnippetToNarrative,
-  renderCaseTextSnippet,
-  type CaseTextSnippetContext,
-} from "@/pages/cases.snippets";
 
 import {
   type CaseOverviewForm,
   type CaseWorkspaceDetail,
   type CaseWorkspaceDoctor,
-  type CaseWorkspaceSnippet,
   useCaseWorkspace,
 } from "./context";
 import {
@@ -27,7 +21,6 @@ import {
   Panel,
   inputBaseClassName,
   nativeSelectClassName,
-  textareaBaseClassName,
 } from "./primitives";
 
 function doctorOptionLabel(doctor: CaseWorkspaceDoctor, lang: SpecializationLabelLang) {
@@ -37,51 +30,27 @@ function doctorOptionLabel(doctor: CaseWorkspaceDoctor, lang: SpecializationLabe
   return `${doctor.provider_name} | ${titlePrefix}${doctor.name}${specialty}`;
 }
 
-function snippetCategoryLabel(
-  category: string,
-  translations: Translations,
-) {
-  return formatEnumLabelFromKeys(
-    category,
-    CASE_SNIPPET_CATEGORY_LABEL_KEYS,
-    translations,
-  );
-}
-
 function initialOverviewForm(
   detail: CaseWorkspaceDetail | null,
 ): CaseOverviewForm {
   if (!detail) {
     return {
       hauptanfragegrund: "",
-      aktuelle_anamnese: "",
       zuweiser_doctor_id: "",
       zuweiser: "",
     };
   }
   return {
     hauptanfragegrund: detail.hauptanfragegrund ?? "",
-    aktuelle_anamnese: detail.aktuelle_anamnese ?? "",
     zuweiser_doctor_id: detail.zuweiser_doctor_id ?? "",
     zuweiser: detail.zuweiser ?? "",
   };
 }
 
-type OverviewSectionFormProps = {
-  detail: CaseWorkspaceDetail | null;
-  doctors: CaseWorkspaceDoctor[];
-  snippets: CaseWorkspaceSnippet[];
-  canEdit: boolean;
-  busy: boolean;
-  sectionError: string;
-  saveOverview: (form: CaseOverviewForm) => Promise<boolean>;
-};
-
 export function OverviewSection() {
   const {
     detail,
     doctors,
-    snippets,
     permissions,
     sectionBusy,
     sectionError,
@@ -91,23 +60,117 @@ export function OverviewSection() {
   const revisionKey = detail?.updated_at ?? detail?.id ?? "empty";
 
   return (
-    <OverviewSectionForm
-      key={revisionKey}
-      detail={detail}
-      doctors={doctors}
-      snippets={snippets}
-      canEdit={permissions.canEdit}
-      busy={sectionBusy === "overview"}
-      sectionError={sectionError}
-      saveOverview={saveOverview}
-    />
+    <div className="space-y-6">
+      <CaseLinksPanel detail={detail} />
+      <OverviewSectionForm
+        key={revisionKey}
+        detail={detail}
+        doctors={doctors}
+        canEdit={permissions.canEdit}
+        busy={sectionBusy === "overview"}
+        sectionError={sectionError}
+        saveOverview={saveOverview}
+      />
+    </div>
   );
 }
+
+function CaseLinksPanel({ detail }: { detail: CaseWorkspaceDetail | null }) {
+  const { t } = useLang();
+  if (!detail) return null;
+
+  const patientName = [detail.patient_last_name, detail.patient_first_name]
+    .filter((value) => typeof value === "string" && value.trim().length > 0)
+    .join(", ");
+  const patientLabel = [patientName, detail.patient_pid]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <Panel title={t.cases_workspace_overview_links}>
+      <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div>
+          <dt className="text-[11.5px] font-medium text-muted-foreground">
+            {t.cases_workspace_overview_patient}
+          </dt>
+          <dd className="mt-1 text-sm text-foreground">
+            {detail.patient_id ? (
+              <StaffLink
+                to={`/patients/${detail.patient_id}`}
+                className="inline-flex items-center gap-1 font-medium text-foreground hover:underline"
+              >
+                {patientLabel || detail.patient_id}
+                <ArrowUpRight className="size-3.5 text-muted-foreground" />
+              </StaffLink>
+            ) : (
+              <span className="text-muted-foreground">{t.common_not_set}</span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-[11.5px] font-medium text-muted-foreground">
+            {t.cases_workspace_overview_order}
+          </dt>
+          <dd className="mt-1 text-sm text-foreground">
+            {detail.linked_order_id ? (
+              <StaffLink
+                to={`/orders/${detail.linked_order_id}`}
+                className="inline-flex items-center gap-1 font-medium text-foreground hover:underline"
+              >
+                {detail.linked_order_number ?? detail.linked_order_id}
+                <ArrowUpRight className="size-3.5 text-muted-foreground" />
+              </StaffLink>
+            ) : (
+              <span className="text-muted-foreground">{t.common_not_set}</span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-[11.5px] font-medium text-muted-foreground">
+            {t.cases_workspace_overview_manager}
+          </dt>
+          <dd className="mt-1 text-sm text-foreground">
+            {detail.manager_name?.trim() || (
+              <span className="text-muted-foreground">{t.common_not_set}</span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-[11.5px] font-medium text-muted-foreground">
+            {t.cases_workspace_overview_intake}
+          </dt>
+          <dd className="mt-1">
+            <Badge
+              variant="outline"
+              className={
+                detail.intake_completed_at
+                  ? "rounded-full border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "rounded-full border-amber-200 bg-amber-50 text-amber-700"
+              }
+            >
+              {detail.intake_completed_at
+                ? t.cases_workspace_overview_intake_done
+                : t.cases_workspace_overview_intake_open}
+            </Badge>
+          </dd>
+        </div>
+      </dl>
+    </Panel>
+  );
+}
+
+type OverviewSectionFormProps = {
+  detail: CaseWorkspaceDetail | null;
+  doctors: CaseWorkspaceDoctor[];
+  canEdit: boolean;
+  busy: boolean;
+  sectionError: string;
+  saveOverview: (form: CaseOverviewForm) => Promise<boolean>;
+};
 
 function OverviewSectionForm({
   detail,
   doctors,
-  snippets,
   canEdit,
   busy,
   sectionError,
@@ -118,46 +181,11 @@ function OverviewSectionForm({
     initialOverviewForm(detail),
   );
 
-  const activeSnippets = useMemo(
-    () => snippets.filter((snippet) => snippet.is_active),
-    [snippets],
-  );
-
-  const snippetContext = useMemo<CaseTextSnippetContext>(
-    () => ({
-      patientName: "",
-      patientPid: "",
-      caseId: detail?.case_id ?? "",
-      caseUuid: detail?.case_uuid ?? detail?.id ?? "",
-      hauptanfragegrund: form.hauptanfragegrund.trim(),
-      zuweiser: form.zuweiser.trim(),
-      today: new Date().toISOString().slice(0, 10),
-    }),
-    [
-      detail?.case_id,
-      detail?.case_uuid,
-      detail?.id,
-      form.hauptanfragegrund,
-      form.zuweiser,
-    ],
-  );
-
   function updateField<K extends keyof CaseOverviewForm>(
     field: K,
     value: CaseOverviewForm[K],
   ) {
     setForm((current) => ({ ...current, [field]: value }));
-  }
-
-  function insertSnippet(snippet: CaseWorkspaceSnippet) {
-    const rendered = renderCaseTextSnippet(snippet.body, snippetContext);
-    setForm((current) => ({
-      ...current,
-      aktuelle_anamnese: appendSnippetToNarrative(
-        current.aktuelle_anamnese,
-        rendered,
-      ),
-    }));
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -167,10 +195,7 @@ function OverviewSectionForm({
   }
 
   return (
-    <Panel
-      title={t.cases_clinical_section_overview}
-      description={t.cases_workspace_overview_description}
-    >
+    <Panel title={t.cases_clinical_section_overview}>
       <form onSubmit={handleSubmit} className="space-y-5">
         {sectionError ? <Banner tone="error">{sectionError}</Banner> : null}
 
@@ -219,81 +244,6 @@ function OverviewSectionForm({
               disabled={!canEdit}
             />
           </Field>
-        </div>
-
-        <Field
-          label={t.cases_workspace_overview_current_anamnesis}
-          required
-        >
-          <textarea
-            value={form.aktuelle_anamnese}
-            onChange={(event) => updateField("aktuelle_anamnese", event.target.value)}
-            className={textareaBaseClassName}
-            rows={6}
-            disabled={!canEdit}
-          />
-        </Field>
-
-        <div className="rounded-xl border border-border/50 bg-muted/25 p-3.5">
-          <div className="flex flex-wrap items-start justify-between gap-2.5">
-            <div>
-              <p className="text-sm font-medium text-foreground">
-                {t.cases_workspace_overview_snippets_title}
-              </p>
-              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                {t.cases_workspace_overview_snippets_description}
-              </p>
-            </div>
-            <code className="rounded-lg border border-border/50 bg-card px-3 py-1 text-[11px] text-muted-foreground">
-              {CASE_TEXT_SNIPPET_PLACEHOLDERS.join(" · ")}
-            </code>
-          </div>
-          {activeSnippets.length === 0 ? (
-            <p className="mt-2.5 text-sm text-muted-foreground">
-              {t.cases_workspace_overview_snippets_empty}
-            </p>
-          ) : (
-            <div className="mt-4 grid gap-2.5 lg:grid-cols-2">
-              {activeSnippets.map((snippet) => {
-                const rendered = renderCaseTextSnippet(
-                  snippet.body,
-                  snippetContext,
-                );
-                return (
-                  <div
-                    key={snippet.id}
-                    className="rounded-xl border border-border/50 bg-card p-3.5"
-                  >
-                    <div className="flex items-start justify-between gap-2.5">
-                      <div className="min-w-0">
-                        <p className="break-words text-sm font-medium text-foreground">
-                          {snippet.label}
-                        </p>
-                        <p className="break-words text-xs text-muted-foreground">
-                          {snippetCategoryLabel(snippet.category, t)}
-                        </p>
-                      </div>
-                    </div>
-                    <p className="mt-2.5 whitespace-pre-wrap text-sm text-foreground">
-                      {rendered}
-                    </p>
-                    <div className="mt-3 flex justify-end">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 rounded-lg"
-                        onClick={() => insertSnippet(snippet)}
-                        disabled={!canEdit}
-                      >
-                        {t.cases_workspace_overview_snippets_insert}
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
 
         <div className="flex justify-end border-t border-border/60 pt-4">

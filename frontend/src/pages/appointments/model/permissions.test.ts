@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { appointmentPermissions } from "./selectors";
+import { getRequiredAppointmentDetailResourceGroups } from "./detail-resource-needs";
 
 describe("appointment role contracts", () => {
   it("keeps CEO and IT admin operational controls while reserving report submission for interpreters", () => {
@@ -31,5 +32,32 @@ describe("appointment role contracts", () => {
         canSubmitReport: false,
       }),
     );
+    expect(appointmentPermissions("it_admin")).toEqual(
+      expect.objectContaining({
+        canViewTasks: false,
+        canCreateTasks: false,
+        canViewConciergeServices: false,
+        canManageConciergeServices: false,
+      }),
+    );
+  });
+
+  it("does not request task or concierge endpoints that reject IT admin", () => {
+    const permissions = appointmentPermissions("it_admin");
+
+    expect(
+      getRequiredAppointmentDetailResourceGroups(
+        "services",
+        false,
+        permissions,
+      ),
+    ).toEqual(["reminders", "report"]);
+    expect(
+      getRequiredAppointmentDetailResourceGroups(
+        "workflow",
+        false,
+        permissions,
+      ),
+    ).toEqual(["checklist", "reminders", "report"]);
   });
 });

@@ -37,14 +37,23 @@ pub fn router() -> Router<AppState> {
         )
         .route(
             "/cases/{case_id}/vorerkrankungen",
-            post(save_vorerkrankungen),
+            post(retired_case_clinical_route),
         )
-        .route("/cases/{case_id}/allergien", post(save_allergien))
-        .route("/cases/{case_id}/operationen", post(save_operationen))
-        .route("/cases/{case_id}/medikamente", post(save_medikamente))
+        .route(
+            "/cases/{case_id}/allergien",
+            post(retired_case_clinical_route),
+        )
+        .route(
+            "/cases/{case_id}/operationen",
+            post(retired_case_clinical_route),
+        )
+        .route(
+            "/cases/{case_id}/medikamente",
+            post(retired_case_clinical_route),
+        )
         .route(
             "/cases/{case_id}/medikamente/{medication_id}/expiry-confirm",
-            post(confirm_medication_expiry),
+            post(retired_case_medication_route),
         )
         .route("/cases/{case_id}/pain", post(save_pain_records))
         .route("/cases/{case_id}/symptome", post(save_symptome))
@@ -57,8 +66,30 @@ pub fn router() -> Router<AppState> {
         .route("/cases/{case_id}/neurology", post(save_neurology))
         .route("/cases/{case_id}/pulmonology", post(save_pulmonology))
         .route("/cases/{case_id}/urology", post(save_urology))
-        .route("/cases/{case_id}/vegetative", post(save_vegetative))
-        .route("/cases/{case_id}/impfstatus", post(save_impfstatus))
+        .route(
+            "/cases/{case_id}/vegetative",
+            post(retired_case_clinical_route),
+        )
+        .route(
+            "/cases/{case_id}/impfstatus",
+            post(retired_case_clinical_route),
+        )
+}
+
+async fn retired_case_clinical_route(Path(_case_uuid): Path<Uuid>) -> axum::response::Response {
+    err(
+        StatusCode::GONE,
+        "Case clinical sections moved to the patient record (/patients/{id}/...)",
+    )
+}
+
+async fn retired_case_medication_route(
+    Path((_case_uuid, _medication_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    err(
+        StatusCode::GONE,
+        "Case medications moved to the patient record (/patients/{id}/medications)",
+    )
 }
 
 #[derive(Deserialize)]
@@ -66,7 +97,6 @@ struct CreateCaseRequest {
     patient_id: Option<Uuid>,
     lead_id: Option<Uuid>,
     hauptanfragegrund: Option<String>,
-    aktuelle_anamnese: Option<String>,
     zuweiser_doctor_id: Option<Uuid>,
     zuweiser: Option<String>,
 }
@@ -74,7 +104,6 @@ struct CreateCaseRequest {
 #[derive(Deserialize)]
 struct UpdateAnamnesisRequest {
     hauptanfragegrund: Option<String>,
-    aktuelle_anamnese: Option<String>,
     zuweiser_doctor_id: Option<Uuid>,
     zuweiser: Option<String>,
 }
@@ -83,7 +112,6 @@ struct UpdateAnamnesisRequest {
 struct UpdateIntakeCompletionRequest {
     completed: bool,
     hauptanfragegrund: Option<String>,
-    aktuelle_anamnese: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -98,47 +126,6 @@ struct CaseTextSnippetRequest {
     category: Option<String>,
     body: String,
     is_active: Option<bool>,
-}
-
-#[derive(Deserialize, Serialize, Clone)]
-struct VorerkrankungItem {
-    erkrankung: String,
-    erstdiagnose: Option<String>,
-    notiz: Option<String>,
-}
-
-#[derive(Deserialize, Serialize, Clone)]
-struct AllergieItem {
-    allergie: String,
-    reaktion: Option<String>,
-}
-
-#[derive(Deserialize, Serialize, Clone)]
-struct OperationItem {
-    datum: Option<String>,
-    grund: String,
-    arzt_id: Option<Uuid>,
-    arzt: Option<String>,
-    notiz: Option<String>,
-}
-
-#[derive(Deserialize, Serialize, Clone)]
-struct MedikamentItem {
-    id: Option<Uuid>,
-    handelsname: Option<String>,
-    wirkstoff: Option<String>,
-    dosis: Option<String>,
-    dosis_einheit: Option<String>,
-    einnahmeschema: Option<String>,
-    darreichungsform: Option<String>,
-    einheit: Option<String>,
-    anmerkung: Option<String>,
-    grund: Option<String>,
-    seit: Option<String>,
-    verordnender_arzt_id: Option<Uuid>,
-    verordnender_arzt: Option<String>,
-    med_typ: Option<String>,
-    expiry_date: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -163,31 +150,16 @@ struct SymptomItem {
     fachrichtung: Option<String>,
 }
 
-#[derive(Deserialize)]
-struct VegetativeRequest {
-    appetit_durst: Option<String>,
-    koerpergroesse: Option<f64>,
-    gewicht: Option<f64>,
-    gewichtsveraenderung: Option<String>,
-    grund: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct ImpfstatusRequest {
-    status_text: Option<String>,
-}
-
-const MEDICATION_EXPIRY_CHECK_INTERVAL_SECS: u64 = 60 * 60 * 6;
-
 #[derive(Default, Clone, Copy, Debug)]
 pub struct MedicationExpiryRunSummary {
     pub events_created: u64,
     pub notifications_created: u64,
 }
 
-struct MedicationExpiryCandidate {
-    medication_id: Uuid,
-    case_id: Uuid,
+const MEDICATION_EXPIRY_CHECK_INTERVAL_SECS: u64 = 6 * 60 * 60;
+
+struct PatientMedicationExpiryCandidate {
+    patient_medication_id: Uuid,
     patient_id: Uuid,
     patient_code: String,
     patient_name: String,
@@ -363,15 +335,22 @@ async fn list_cases(
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
 
     match sqlx::query(
-        r#"SELECT c.id, c.case_id, c.patient_id, c.lead_id, c.onboarding_order_id, c.manager_id,
+        r#"SELECT c.id, c.case_id, c.patient_id, c.lead_id, c.source_lead_id, c.manager_id,
                   c.status, c.closed_reason, c.closed_at, c.status_changed_at,
                   c.hauptanfragegrund, c.created_at,
                   COALESCE(p.first_name, l.first_name) AS first_name,
                   COALESCE(p.last_name, l.last_name) AS last_name,
-                  p.patient_id AS p_pid
+                  p.patient_id AS p_pid,
+                  ord.id AS linked_order_id
            FROM cases c
            LEFT JOIN patients p ON p.id = c.patient_id
-           LEFT JOIN leads l ON l.id = c.lead_id
+           LEFT JOIN leads l ON l.id = COALESCE(c.source_lead_id, c.lead_id)
+           LEFT JOIN LATERAL (
+               SELECT o.id FROM orders o
+               WHERE o.case_id = c.id
+               ORDER BY o.created_at ASC
+               LIMIT 1
+           ) ord ON true
            WHERE ($1::text = '%%'
                   OR de_normalize(concat_ws(' ',
                        c.case_id, c.hauptanfragegrund, c.zuweiser,
@@ -385,7 +364,7 @@ async fn list_cases(
            )
              AND ($2::text IS NULL OR c.status = $2)
              AND ($3::uuid IS NULL OR c.patient_id = $3)
-             AND ($4::uuid IS NULL OR c.lead_id = $4)
+             AND ($4::uuid IS NULL OR c.lead_id = $4 OR c.source_lead_id = $4)
            ORDER BY c.created_at DESC
            LIMIT 200"#,
     )
@@ -404,6 +383,9 @@ async fn list_cases(
                     .try_get::<Option<Uuid>, _>("patient_id")
                     .unwrap_or_default();
                 let lead_id = r.try_get::<Option<Uuid>, _>("lead_id").unwrap_or_default();
+                let source_lead_id = r
+                    .try_get::<Option<Uuid>, _>("source_lead_id")
+                    .unwrap_or_default();
 
                 match can_access_case_subject(&state, &auth, case_id, patient_id, lead_id).await {
                     Ok(true) => {}
@@ -417,7 +399,8 @@ async fn list_cases(
                     "case_id": r.try_get::<String, _>("case_id").unwrap_or_default(),
                     "patient_id": patient_id,
                     "lead_id": lead_id,
-                    "onboarding_order_id": r.try_get::<Option<Uuid>, _>("onboarding_order_id").unwrap_or_default(),
+                    "source_lead_id": source_lead_id,
+                    "linked_order_id": r.try_get::<Option<Uuid>, _>("linked_order_id").unwrap_or_default(),
                     "patient_name": format!(
                         "{} {}",
                         r.try_get::<String, _>("first_name").unwrap_or_default(),
@@ -721,7 +704,9 @@ async fn create_case(
             let existing = match sqlx::query(
                 r#"SELECT id, case_id, manager_id, created_at, retention_until
                    FROM cases
-                   WHERE lead_id = $1"#,
+                   WHERE lead_id = $1 OR source_lead_id = $1
+                   ORDER BY created_at DESC, id DESC
+                   LIMIT 1"#,
             )
             .bind(lead_id)
             .fetch_optional(&state.db)
@@ -779,10 +764,10 @@ async fn create_case(
 
     let row = match sqlx::query(
         "INSERT INTO cases (
-            case_id, patient_id, lead_id, manager_id, hauptanfragegrund, aktuelle_anamnese,
+            case_id, patient_id, lead_id, manager_id, hauptanfragegrund,
             zuweiser_doctor_id, zuweiser, retention_until, last_clinical_update_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now() + ($9 * interval '1 year'), now())
+         VALUES ($1, $2, $3, $4, $5, $6, $7, now() + ($8 * interval '1 year'), now())
          RETURNING id, case_id, created_at, retention_until",
     )
     .bind(&cid)
@@ -790,7 +775,6 @@ async fn create_case(
     .bind(subject.lead_id())
     .bind(auth.user_id)
     .bind(body.hauptanfragegrund.clone())
-    .bind(body.aktuelle_anamnese.clone())
     .bind(body.zuweiser_doctor_id)
     .bind(zuweiser_label.clone())
     .bind(retention_years)
@@ -815,7 +799,6 @@ async fn create_case(
 
     let overview_snapshot = serde_json::json!({
         "hauptanfragegrund": body.hauptanfragegrund,
-        "aktuelle_anamnese": body.aktuelle_anamnese,
         "zuweiser_doctor_id": body.zuweiser_doctor_id,
         "zuweiser": zuweiser_label,
     });
@@ -881,17 +864,32 @@ async fn get_case_full(
     }
 
     let case = match sqlx::query(
-        r#"SELECT c.id, c.case_id, c.patient_id, c.lead_id, c.onboarding_order_id, c.manager_id, c.status,
+        r#"SELECT c.id, c.case_id, c.patient_id, c.lead_id, c.source_lead_id,
+                  c.manager_id, c.status,
                   c.closed_reason, c.closed_at, c.status_changed_at,
-                  c.hauptanfragegrund, c.aktuelle_anamnese, c.zuweiser_doctor_id, c.zuweiser,
+                  c.hauptanfragegrund, c.zuweiser_doctor_id, c.zuweiser, c.intake_snapshot,
                   c.notes, c.created_at, c.updated_at, c.retention_until,
                   c.last_clinical_update_at, c.version_count,
                   c.intake_completed_at, c.intake_completed_by,
                   d.name AS zuweiser_doctor_name,
-                  p.name AS zuweiser_provider_name
+                  p.name AS zuweiser_provider_name,
+                  pat.patient_id AS patient_pid,
+                  pat.first_name AS patient_first_name,
+                  pat.last_name AS patient_last_name,
+                  mgr.name AS manager_name,
+                  ord.id AS linked_order_id,
+                  ord.order_number AS linked_order_number
            FROM cases c
            LEFT JOIN provider_doctors d ON d.id = c.zuweiser_doctor_id
            LEFT JOIN providers p ON p.id = d.provider_id
+           LEFT JOIN patients pat ON pat.id = c.patient_id
+           LEFT JOIN users mgr ON mgr.id = c.manager_id
+           LEFT JOIN LATERAL (
+               SELECT o.id, o.order_number FROM orders o
+               WHERE o.case_id = c.id
+               ORDER BY o.created_at ASC
+               LIMIT 1
+           ) ord ON true
            WHERE c.id = $1"#,
     )
     .bind(case_uuid)
@@ -913,57 +911,15 @@ async fn get_case_full(
     let lead_id = case
         .try_get::<Option<Uuid>, _>("lead_id")
         .unwrap_or_default();
+    let source_lead_id = case
+        .try_get::<Option<Uuid>, _>("source_lead_id")
+        .unwrap_or_default();
     match can_access_case_subject(&state, &auth, case_id, patient_id, lead_id).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
     }
 
-    let vorerkr = sqlx::query!("SELECT erkrankung, erstdiagnose, notiz FROM vorerkrankungen WHERE case_id = $1 ORDER BY sort_order", case_uuid)
-        .fetch_all(&state.db).await.unwrap_or_default();
-    let allergien = sqlx::query!(
-        "SELECT allergie, reaktion FROM allergien WHERE case_id = $1 ORDER BY sort_order",
-        case_uuid
-    )
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
-    let ops = sqlx::query(
-        r#"SELECT o.datum, o.grund, o.doctor_id, o.arzt, o.notiz,
-                  d.name AS doctor_name,
-                  p.name AS provider_name
-           FROM operationen o
-           LEFT JOIN provider_doctors d ON d.id = o.doctor_id
-           LEFT JOIN providers p ON p.id = d.provider_id
-           WHERE o.case_id = $1
-           ORDER BY o.sort_order"#,
-    )
-    .bind(case_uuid)
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
-    let meds = sqlx::query(
-        r#"SELECT m.handelsname, m.wirkstoff, m.dosis, m.dosis_einheit,
-                  m.einnahmeschema, m.darreichungsform, m.einheit, m.anmerkung,
-                  m.grund, m.seit, m.verordnender_arzt_id, m.verordnender_arzt, m.med_typ,
-                  m.id, m.expiry_date,
-                  mee.id AS pending_expiry_event_id,
-                  mee.notification_sent_at AS pending_expiry_notification_sent_at,
-                  d.name AS doctor_name,
-                  p.name AS provider_name
-           FROM medikamente m
-           LEFT JOIN medication_expiry_events mee
-                  ON mee.medication_id = m.id
-                 AND mee.status = 'pending_confirmation'
-           LEFT JOIN provider_doctors d ON d.id = m.verordnender_arzt_id
-           LEFT JOIN providers p ON p.id = d.provider_id
-           WHERE m.case_id = $1
-           ORDER BY m.sort_order"#,
-    )
-    .bind(case_uuid)
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
     let pains = sqlx::query!("SELECT lokalisierung, seit_wann, ursache, qualitaet, kontinuitaet, entwicklung, nrs_aktuell, nrs_anfang, dauer_anfang, dauer_aktuell, ausstrahlung, auftreten FROM pain_records WHERE case_id = $1 ORDER BY sort_order", case_uuid)
         .fetch_all(&state.db).await.unwrap_or_default();
     let symptoms = sqlx::query!(
@@ -1045,66 +1001,6 @@ async fn get_case_full(
     .await
     .ok()
     .flatten();
-    let veg = sqlx::query!("SELECT appetit_durst, koerpergroesse, gewicht, gewichtsveraenderung, grund FROM vegetative_anamnese WHERE case_id = $1", case_uuid)
-        .fetch_optional(&state.db).await.ok().flatten();
-    let impf = sqlx::query!(
-        "SELECT status_text FROM impfstatus WHERE case_id = $1",
-        case_uuid
-    )
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten();
-
-    let mut vorerkr_json = Vec::new();
-    for v in vorerkr {
-        vorerkr_json.push(serde_json::json!({"erkrankung": v.erkrankung, "erstdiagnose": v.erstdiagnose, "notiz": v.notiz}));
-    }
-    let mut allergien_json = Vec::new();
-    for a in allergien {
-        allergien_json.push(serde_json::json!({"allergie": a.allergie, "reaktion": a.reaktion}));
-    }
-    let mut ops_json = Vec::new();
-    for o in ops {
-        ops_json.push(serde_json::json!({
-            "datum": o.try_get::<Option<chrono::NaiveDate>, _>("datum").unwrap_or_default().map(|value| value.to_string()),
-            "grund": o.try_get::<String, _>("grund").unwrap_or_default(),
-            "arzt_id": o.try_get::<Option<Uuid>, _>("doctor_id").unwrap_or_default(),
-            "arzt": o.try_get::<Option<String>, _>("arzt").unwrap_or_default(),
-            "arzt_registry_name": o.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
-            "arzt_provider_name": o.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
-            "notiz": o.try_get::<Option<String>, _>("notiz").unwrap_or_default()
-        }));
-    }
-    let mut meds_json = Vec::new();
-    for m in meds {
-        meds_json.push(serde_json::json!({
-            "handelsname": m.try_get::<String, _>("handelsname").unwrap_or_default(),
-            "wirkstoff": m.try_get::<Option<String>, _>("wirkstoff").unwrap_or_default(),
-            "dosis": m.try_get::<Option<String>, _>("dosis").unwrap_or_default(),
-            "dosis_einheit": m.try_get::<Option<String>, _>("dosis_einheit").unwrap_or_default(),
-            "einnahmeschema": m.try_get::<Option<String>, _>("einnahmeschema").unwrap_or_default(),
-            "darreichungsform": m.try_get::<Option<String>, _>("darreichungsform").unwrap_or_default(),
-            "einheit": m.try_get::<Option<String>, _>("einheit").unwrap_or_default(),
-            "anmerkung": m.try_get::<Option<String>, _>("anmerkung").unwrap_or_default(),
-            "grund": m.try_get::<Option<String>, _>("grund").unwrap_or_default(),
-            "seit": m.try_get::<Option<String>, _>("seit").unwrap_or_default(),
-            "verordnender_arzt_id": m.try_get::<Option<Uuid>, _>("verordnender_arzt_id").unwrap_or_default(),
-            "verordnender_arzt": m.try_get::<Option<String>, _>("verordnender_arzt").unwrap_or_default(),
-            "verordnender_arzt_registry_name": m.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
-            "verordnender_arzt_provider_name": m.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
-            "med_typ": m.try_get::<String, _>("med_typ").unwrap_or_default(),
-            "id": m.try_get::<Uuid, _>("id").unwrap_or_default(),
-            "expiry_date": m.try_get::<Option<chrono::NaiveDate>, _>("expiry_date").unwrap_or_default().map(|value| value.to_string()),
-            "is_expired": m
-                .try_get::<Option<chrono::NaiveDate>, _>("expiry_date")
-                .unwrap_or_default()
-                .map(|value| value < chrono::Utc::now().date_naive())
-                .unwrap_or(false),
-            "pending_expiry_confirmation": m.try_get::<Option<Uuid>, _>("pending_expiry_event_id").unwrap_or_default().is_some(),
-            "pending_expiry_notification_sent_at": m.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("pending_expiry_notification_sent_at").unwrap_or_default().map(|value| value.to_rfc3339())
-        }));
-    }
     let mut pains_json = Vec::new();
     for p in pains {
         pains_json.push(serde_json::json!({"lokalisierung": p.lokalisierung, "seit_wann": p.seit_wann, "ursache": p.ursache, "qualitaet": p.qualitaet, "kontinuitaet": p.kontinuitaet, "entwicklung": p.entwicklung, "nrs_aktuell": p.nrs_aktuell, "nrs_anfang": p.nrs_anfang, "dauer_anfang": p.dauer_anfang, "dauer_aktuell": p.dauer_aktuell, "ausstrahlung": p.ausstrahlung, "auftreten": p.auftreten}));
@@ -1150,14 +1046,20 @@ async fn get_case_full(
         "case_id": case.try_get::<String, _>("case_id").unwrap_or_default(),
         "patient_id": patient_id,
         "lead_id": lead_id,
-        "onboarding_order_id": case.try_get::<Option<Uuid>, _>("onboarding_order_id").unwrap_or_default(),
+        "source_lead_id": source_lead_id,
+        "patient_pid": case.try_get::<Option<String>, _>("patient_pid").unwrap_or_default(),
+        "patient_first_name": case.try_get::<Option<String>, _>("patient_first_name").unwrap_or_default(),
+        "patient_last_name": case.try_get::<Option<String>, _>("patient_last_name").unwrap_or_default(),
+        "manager_name": case.try_get::<Option<String>, _>("manager_name").unwrap_or_default(),
+        "linked_order_id": case.try_get::<Option<Uuid>, _>("linked_order_id").unwrap_or_default(),
+        "linked_order_number": case.try_get::<Option<String>, _>("linked_order_number").unwrap_or_default(),
         "manager_id": case.try_get::<Uuid, _>("manager_id").unwrap_or_default(),
         "status": case.try_get::<String, _>("status").unwrap_or_default(),
         "closed_reason": case.try_get::<Option<String>, _>("closed_reason").unwrap_or_default(),
         "closed_at": case.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("closed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "status_changed_at": case.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("status_changed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "hauptanfragegrund": case.try_get::<Option<String>, _>("hauptanfragegrund").unwrap_or_default(),
-        "aktuelle_anamnese": case.try_get::<Option<String>, _>("aktuelle_anamnese").unwrap_or_default(),
+        "intake_snapshot": case.try_get::<Option<serde_json::Value>, _>("intake_snapshot").unwrap_or_default(),
         "zuweiser_doctor_id": case.try_get::<Option<Uuid>, _>("zuweiser_doctor_id").unwrap_or_default(),
         "zuweiser": case.try_get::<Option<String>, _>("zuweiser").unwrap_or_default(),
         "zuweiser_registry_name": case.try_get::<Option<String>, _>("zuweiser_doctor_name").unwrap_or_default(),
@@ -1170,10 +1072,6 @@ async fn get_case_full(
         "version_count": case.try_get::<i32, _>("version_count").unwrap_or_default(),
         "intake_completed_at": case.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("intake_completed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "intake_completed_by": case.try_get::<Option<Uuid>, _>("intake_completed_by").unwrap_or_default(),
-        "vorerkrankungen": vorerkr_json,
-        "allergien": allergien_json,
-        "operationen": ops_json,
-        "medikamente": meds_json,
         "pain_records": pains_json,
         "symptome": symptoms_json,
         "cardiology_recommended": cardiology_recommended,
@@ -1267,8 +1165,6 @@ async fn get_case_full(
             "red_flags": item.try_get::<Option<String>, _>("red_flags").unwrap_or_default(),
             "notes": item.try_get::<Option<String>, _>("notes").unwrap_or_default(),
         })),
-        "vegetative_anamnese": veg.map(|v| serde_json::json!({"appetit_durst": v.appetit_durst, "koerpergroesse": v.koerpergroesse, "gewicht": v.gewicht, "gewichtsveraenderung": v.gewichtsveraenderung, "grund": v.grund})),
-        "impfstatus": impf.map(|i| i.status_text),
         "history": recent_history,
     })).into_response()
 }
@@ -1382,14 +1278,12 @@ async fn update_anamnesis(
     let result = sqlx::query(
         "UPDATE cases
          SET hauptanfragegrund = COALESCE($2, hauptanfragegrund),
-             aktuelle_anamnese = COALESCE($3, aktuelle_anamnese),
-             zuweiser_doctor_id = COALESCE($4, zuweiser_doctor_id),
-             zuweiser = COALESCE($5, zuweiser)
+             zuweiser_doctor_id = COALESCE($3, zuweiser_doctor_id),
+             zuweiser = COALESCE($4, zuweiser)
          WHERE id = $1",
     )
     .bind(case_uuid)
     .bind(body.hauptanfragegrund.clone())
-    .bind(body.aktuelle_anamnese.clone())
     .bind(body.zuweiser_doctor_id)
     .bind(zuweiser_label)
     .execute(&state.db)
@@ -1446,14 +1340,12 @@ async fn update_intake_completion(
 
     let row = match sqlx::query(
         r#"UPDATE cases
-           SET hauptanfragegrund = COALESCE($2, hauptanfragegrund),
-               aktuelle_anamnese = COALESCE($3, aktuelle_anamnese)
+           SET hauptanfragegrund = COALESCE($2, hauptanfragegrund)
            WHERE id = $1
-           RETURNING hauptanfragegrund, aktuelle_anamnese"#,
+           RETURNING hauptanfragegrund"#,
     )
     .bind(case_uuid)
     .bind(body.hauptanfragegrund.clone())
-    .bind(body.aktuelle_anamnese.clone())
     .fetch_optional(&mut *transaction)
     .await
     {
@@ -1604,8 +1496,7 @@ async fn update_case_status(
     }
 
     if current_status == body.status {
-        return Json(serde_json::json!({ "ok": true, "status": current_status }))
-            .into_response();
+        return Json(serde_json::json!({ "ok": true, "status": current_status })).into_response();
     }
 
     let row = match sqlx::query(
@@ -1672,360 +1563,6 @@ async fn update_case_status(
         "status_changed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("status_changed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
     }))
     .into_response()
-}
-
-async fn save_vorerkrankungen(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path(case_uuid): Path<Uuid>,
-    Json(body): Json<ItemsWrapper<VorerkrankungItem>>,
-) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
-        return e;
-    }
-    match can_access_case(&state, &auth, case_uuid, None).await {
-        Ok(true) => {}
-        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(resp) => return resp,
-    }
-    let old_value = match load_case_section_snapshot(&state.db, case_uuid, "vorerkrankungen").await
-    {
-        Ok(value) => value.unwrap_or(serde_json::json!([])),
-        Err(e) => {
-            tracing::error!(error = %e, case_id = %case_uuid, "load vorerkrankungen snapshot");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            tracing::error!(error = %e, "begin vorerkrankungen tx");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-    if let Err(e) = sqlx::query("DELETE FROM vorerkrankungen WHERE case_id = $1")
-        .bind(case_uuid)
-        .execute(&mut *tx)
-        .await
-    {
-        tracing::error!(error = %e, case_id = %case_uuid, "delete vorerkrankungen");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-    for (i, item) in body.items.iter().enumerate() {
-        if let Err(e) = sqlx::query(
-            "INSERT INTO vorerkrankungen (case_id, erkrankung, erstdiagnose, notiz, sort_order) VALUES ($1, $2, $3, $4, $5)",
-        )
-        .bind(case_uuid)
-        .bind(&item.erkrankung)
-        .bind(item.erstdiagnose.clone())
-        .bind(item.notiz.clone())
-        .bind(i as i32)
-        .execute(&mut *tx)
-        .await
-        {
-            tracing::error!(error = %e, case_id = %case_uuid, "insert vorerkrankungen");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    }
-    if let Err(e) = tx.commit().await {
-        tracing::error!(error = %e, case_id = %case_uuid, "commit vorerkrankungen");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-    let new_value = match load_case_section_snapshot(&state.db, case_uuid, "vorerkrankungen").await
-    {
-        Ok(value) => value.unwrap_or(serde_json::json!([])),
-        Err(e) => {
-            tracing::error!(error = %e, case_id = %case_uuid, "reload vorerkrankungen snapshot");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-    version_log(
-        &state,
-        case_uuid,
-        auth.user_id,
-        "vorerkrankungen",
-        old_value,
-        new_value,
-    )
-    .await;
-    Json(serde_json::json!({"ok": true, "count": body.items.len()})).into_response()
-}
-
-async fn save_allergien(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path(case_uuid): Path<Uuid>,
-    Json(body): Json<ItemsWrapper<AllergieItem>>,
-) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
-        return e;
-    }
-    match can_access_case(&state, &auth, case_uuid, None).await {
-        Ok(true) => {}
-        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(resp) => return resp,
-    }
-    let old_value = match load_case_section_snapshot(&state.db, case_uuid, "allergien").await {
-        Ok(value) => value.unwrap_or(serde_json::json!([])),
-        Err(e) => {
-            tracing::error!(error = %e, case_id = %case_uuid, "load allergien snapshot");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            tracing::error!(error = %e, "begin allergien tx");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-    if let Err(e) = sqlx::query("DELETE FROM allergien WHERE case_id = $1")
-        .bind(case_uuid)
-        .execute(&mut *tx)
-        .await
-    {
-        tracing::error!(error = %e, case_id = %case_uuid, "delete allergien");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-    for (i, item) in body.items.iter().enumerate() {
-        if let Err(e) = sqlx::query(
-            "INSERT INTO allergien (case_id, allergie, reaktion, sort_order) VALUES ($1, $2, $3, $4)",
-        )
-        .bind(case_uuid)
-        .bind(&item.allergie)
-        .bind(item.reaktion.clone())
-        .bind(i as i32)
-        .execute(&mut *tx)
-        .await
-        {
-            tracing::error!(error = %e, case_id = %case_uuid, "insert allergien");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    }
-    if let Err(e) = tx.commit().await {
-        tracing::error!(error = %e, case_id = %case_uuid, "commit allergien");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-    let new_value = match load_case_section_snapshot(&state.db, case_uuid, "allergien").await {
-        Ok(value) => value.unwrap_or(serde_json::json!([])),
-        Err(e) => {
-            tracing::error!(error = %e, case_id = %case_uuid, "reload allergien snapshot");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-    version_log(
-        &state,
-        case_uuid,
-        auth.user_id,
-        "allergien",
-        old_value,
-        new_value,
-    )
-    .await;
-    Json(serde_json::json!({"ok": true, "count": body.items.len()})).into_response()
-}
-
-async fn save_operationen(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path(case_uuid): Path<Uuid>,
-    Json(body): Json<ItemsWrapper<OperationItem>>,
-) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
-        return e;
-    }
-    match can_access_case(&state, &auth, case_uuid, None).await {
-        Ok(true) => {}
-        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(resp) => return resp,
-    }
-    let old_value = match load_case_section_snapshot(&state.db, case_uuid, "operationen").await {
-        Ok(value) => value.unwrap_or(serde_json::json!([])),
-        Err(e) => {
-            tracing::error!(error = %e, case_id = %case_uuid, "load operationen snapshot");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            tracing::error!(error = %e, "begin operationen tx");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-    if let Err(e) = sqlx::query("DELETE FROM operationen WHERE case_id = $1")
-        .bind(case_uuid)
-        .execute(&mut *tx)
-        .await
-    {
-        tracing::error!(error = %e, case_id = %case_uuid, "delete operationen");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-    for (i, item) in body.items.iter().enumerate() {
-        let doctor_label =
-            match resolve_case_doctor_label(&state, item.arzt_id, item.arzt.as_deref()).await {
-                Ok(value) => value,
-                Err(resp) => return resp,
-            };
-        let datum = item
-            .datum
-            .as_deref()
-            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
-        if let Err(e) = sqlx::query(
-            "INSERT INTO operationen (case_id, datum, grund, doctor_id, arzt, notiz, sort_order) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-        )
-        .bind(case_uuid)
-        .bind(datum)
-        .bind(&item.grund)
-        .bind(item.arzt_id)
-        .bind(doctor_label)
-        .bind(item.notiz.clone())
-        .bind(i as i32)
-        .execute(&mut *tx)
-        .await
-        {
-            tracing::error!(error = %e, case_id = %case_uuid, "insert operationen");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    }
-    if let Err(e) = tx.commit().await {
-        tracing::error!(error = %e, case_id = %case_uuid, "commit operationen");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-    let new_value = match load_case_section_snapshot(&state.db, case_uuid, "operationen").await {
-        Ok(value) => value.unwrap_or(serde_json::json!([])),
-        Err(e) => {
-            tracing::error!(error = %e, case_id = %case_uuid, "reload operationen snapshot");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-    version_log(
-        &state,
-        case_uuid,
-        auth.user_id,
-        "operationen",
-        old_value,
-        new_value,
-    )
-    .await;
-    Json(serde_json::json!({"ok": true, "count": body.items.len()})).into_response()
-}
-
-async fn save_medikamente(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path(case_uuid): Path<Uuid>,
-    Json(body): Json<ItemsWrapper<MedikamentItem>>,
-) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
-        return e;
-    }
-    match can_access_case(&state, &auth, case_uuid, None).await {
-        Ok(true) => {}
-        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(resp) => return resp,
-    }
-    if body.items.iter().any(|item| {
-        item.wirkstoff
-            .as_deref()
-            .map(str::trim)
-            .is_none_or(str::is_empty)
-    }) {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "wirkstoff is required for every medication",
-        );
-    }
-    let old_value = match load_case_section_snapshot(&state.db, case_uuid, "medikamente").await {
-        Ok(value) => value.unwrap_or(serde_json::json!([])),
-        Err(e) => {
-            tracing::error!(error = %e, case_id = %case_uuid, "load medikamente snapshot");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            tracing::error!(error = %e, "begin medikamente tx");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-    if let Err(e) = sqlx::query("DELETE FROM medikamente WHERE case_id = $1")
-        .bind(case_uuid)
-        .execute(&mut *tx)
-        .await
-    {
-        tracing::error!(error = %e, case_id = %case_uuid, "delete medikamente");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-    for (i, item) in body.items.iter().enumerate() {
-        let doctor_label = match resolve_case_doctor_label(
-            &state,
-            item.verordnender_arzt_id,
-            item.verordnender_arzt.as_deref(),
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(resp) => return resp,
-        };
-        let mt = item.med_typ.as_deref().unwrap_or("permanent");
-        let expiry_date = match parse_optional_case_date(item.expiry_date.as_deref()) {
-            Ok(value) => value,
-            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
-        };
-        if let Err(e) = sqlx::query(
-            "INSERT INTO medikamente (case_id, handelsname, wirkstoff, dosis, dosis_einheit, einnahmeschema, darreichungsform, einheit, anmerkung, grund, seit, verordnender_arzt_id, verordnender_arzt, med_typ, expiry_date, sort_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)",
-        )
-        .bind(case_uuid)
-        .bind(
-            item.handelsname
-                .as_deref()
-                .map(str::trim)
-                .unwrap_or_default(),
-        )
-        .bind(item.wirkstoff.as_deref().map(str::trim).unwrap_or_default())
-        .bind(item.dosis.clone())
-        .bind(item.dosis_einheit.clone())
-        .bind(item.einnahmeschema.clone())
-        .bind(item.darreichungsform.clone())
-        .bind(item.einheit.clone())
-        .bind(item.anmerkung.clone())
-        .bind(item.grund.clone())
-        .bind(item.seit.clone())
-        .bind(item.verordnender_arzt_id)
-        .bind(doctor_label)
-        .bind(mt)
-        .bind(expiry_date)
-        .bind(i as i32)
-        .execute(&mut *tx)
-        .await
-        {
-            tracing::error!(error = %e, case_id = %case_uuid, "insert medikamente");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    }
-    if let Err(e) = tx.commit().await {
-        tracing::error!(error = %e, case_id = %case_uuid, "commit medikamente");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-    let new_value = match load_case_section_snapshot(&state.db, case_uuid, "medikamente").await {
-        Ok(value) => value.unwrap_or(serde_json::json!([])),
-        Err(e) => {
-            tracing::error!(error = %e, case_id = %case_uuid, "reload medikamente snapshot");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-    version_log(
-        &state,
-        case_uuid,
-        auth.user_id,
-        "medikamente",
-        old_value,
-        new_value,
-    )
-    .await;
-    Json(serde_json::json!({"ok": true, "count": body.items.len()})).into_response()
 }
 
 async fn save_pain_records(
@@ -2732,113 +2269,6 @@ async fn save_urology(
     Json(serde_json::json!({"ok": true})).into_response()
 }
 
-async fn save_vegetative(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path(case_uuid): Path<Uuid>,
-    Json(body): Json<VegetativeRequest>,
-) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
-        return e;
-    }
-    match can_access_case(&state, &auth, case_uuid, None).await {
-        Ok(true) => {}
-        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(resp) => return resp,
-    }
-    let old_value = match load_case_section_snapshot(&state.db, case_uuid, "vegetative").await {
-        Ok(value) => value.unwrap_or(serde_json::Value::Null),
-        Err(e) => {
-            tracing::error!(error = %e, case_id = %case_uuid, "load vegetative snapshot");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-    let kg = body
-        .koerpergroesse
-        .and_then(|v| rust_decimal::Decimal::try_from(v).ok());
-    let gw = body
-        .gewicht
-        .and_then(|v| rust_decimal::Decimal::try_from(v).ok());
-    if let Err(e) = sqlx::query!(
-        "INSERT INTO vegetative_anamnese (case_id, appetit_durst, koerpergroesse, gewicht, gewichtsveraenderung, grund)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (case_id) DO UPDATE SET appetit_durst=$2, koerpergroesse=$3, gewicht=$4, gewichtsveraenderung=$5, grund=$6",
-        case_uuid, body.appetit_durst, kg, gw, body.gewichtsveraenderung, body.grund
-    ).execute(&state.db).await {
-        tracing::error!(error = %e, "save vegetative");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-    let new_value = match load_case_section_snapshot(&state.db, case_uuid, "vegetative").await {
-        Ok(value) => value.unwrap_or(serde_json::Value::Null),
-        Err(e) => {
-            tracing::error!(error = %e, case_id = %case_uuid, "reload vegetative snapshot");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-    version_log(
-        &state,
-        case_uuid,
-        auth.user_id,
-        "vegetative",
-        old_value,
-        new_value,
-    )
-    .await;
-    Json(serde_json::json!({"ok": true})).into_response()
-}
-
-async fn save_impfstatus(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path(case_uuid): Path<Uuid>,
-    Json(body): Json<ImpfstatusRequest>,
-) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
-        return e;
-    }
-    match can_access_case(&state, &auth, case_uuid, None).await {
-        Ok(true) => {}
-        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(resp) => return resp,
-    }
-    let old_value = match load_case_section_snapshot(&state.db, case_uuid, "impfstatus").await {
-        Ok(value) => value.unwrap_or(serde_json::Value::Null),
-        Err(e) => {
-            tracing::error!(error = %e, case_id = %case_uuid, "load impfstatus snapshot");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-    if let Err(e) = sqlx::query!(
-        "INSERT INTO impfstatus (case_id, status_text) VALUES ($1, $2)
-         ON CONFLICT (case_id) DO UPDATE SET status_text=$2",
-        case_uuid,
-        body.status_text
-    )
-    .execute(&state.db)
-    .await
-    {
-        tracing::error!(error = %e, "save impfstatus");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-    let new_value = match load_case_section_snapshot(&state.db, case_uuid, "impfstatus").await {
-        Ok(value) => value.unwrap_or(serde_json::Value::Null),
-        Err(e) => {
-            tracing::error!(error = %e, case_id = %case_uuid, "reload impfstatus snapshot");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-    version_log(
-        &state,
-        case_uuid,
-        auth.user_id,
-        "impfstatus",
-        old_value,
-        new_value,
-    )
-    .await;
-    Json(serde_json::json!({"ok": true})).into_response()
-}
-
 async fn get_case_history(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -2995,105 +2425,12 @@ async fn load_case_section_snapshot(
             sqlx::query(
                 r#"SELECT jsonb_build_object(
                         'hauptanfragegrund', hauptanfragegrund,
-                        'aktuelle_anamnese', aktuelle_anamnese,
                         'zuweiser_doctor_id', zuweiser_doctor_id,
                         'zuweiser', zuweiser,
                         'notes', notes
                     ) AS value
                    FROM cases
                    WHERE id = $1"#,
-            )
-            .bind(case_id)
-            .fetch_optional(db)
-            .await?,
-        ),
-        "vorerkrankungen" => Some(
-            sqlx::query(
-                r#"SELECT COALESCE(
-                        jsonb_agg(
-                            jsonb_build_object(
-                                'erkrankung', erkrankung,
-                                'erstdiagnose', erstdiagnose,
-                                'notiz', notiz
-                            )
-                            ORDER BY sort_order
-                        ),
-                        '[]'::jsonb
-                    ) AS value
-                   FROM vorerkrankungen
-                   WHERE case_id = $1"#,
-            )
-            .bind(case_id)
-            .fetch_optional(db)
-            .await?,
-        ),
-        "allergien" => Some(
-            sqlx::query(
-                r#"SELECT COALESCE(
-                        jsonb_agg(
-                            jsonb_build_object(
-                                'allergie', allergie,
-                                'reaktion', reaktion
-                            )
-                            ORDER BY sort_order
-                        ),
-                        '[]'::jsonb
-                    ) AS value
-                   FROM allergien
-                   WHERE case_id = $1"#,
-            )
-            .bind(case_id)
-            .fetch_optional(db)
-            .await?,
-        ),
-        "operationen" => Some(
-            sqlx::query(
-                r#"SELECT COALESCE(
-                        jsonb_agg(
-                            jsonb_build_object(
-                                'datum', datum,
-                                'grund', grund,
-                                'arzt_id', doctor_id,
-                                'arzt', arzt,
-                                'notiz', notiz
-                            )
-                            ORDER BY sort_order
-                        ),
-                        '[]'::jsonb
-                    ) AS value
-                   FROM operationen
-                   WHERE case_id = $1"#,
-            )
-            .bind(case_id)
-            .fetch_optional(db)
-            .await?,
-        ),
-        "medikamente" => Some(
-            sqlx::query(
-                r#"SELECT COALESCE(
-                        jsonb_agg(
-                            jsonb_build_object(
-                                'handelsname', handelsname,
-                                'wirkstoff', wirkstoff,
-                                'dosis', dosis,
-                                'dosis_einheit', dosis_einheit,
-                                'einnahmeschema', einnahmeschema,
-                                'darreichungsform', darreichungsform,
-                                'einheit', einheit,
-                                'anmerkung', anmerkung,
-                                'grund', grund,
-                                'seit', seit,
-                                'verordnender_arzt_id', verordnender_arzt_id,
-                                'verordnender_arzt', verordnender_arzt,
-                                'med_typ', med_typ,
-                                'expiry_date', expiry_date
-                            )
-                            ORDER BY sort_order
-                        ),
-                        '[]'::jsonb
-                    ) AS value
-                   FROM medikamente
-                   WHERE case_id = $1"#,
             )
             .bind(case_id)
             .fetch_optional(db)
@@ -3286,34 +2623,6 @@ async fn load_case_section_snapshot(
             .fetch_optional(db)
             .await?,
         ),
-        "vegetative" => Some(
-            sqlx::query(
-                r#"SELECT jsonb_build_object(
-                        'appetit_durst', appetit_durst,
-                        'koerpergroesse', koerpergroesse,
-                        'gewicht', gewicht,
-                        'gewichtsveraenderung', gewichtsveraenderung,
-                        'grund', grund
-                    ) AS value
-                   FROM vegetative_anamnese
-                   WHERE case_id = $1"#,
-            )
-            .bind(case_id)
-            .fetch_optional(db)
-            .await?,
-        ),
-        "impfstatus" => Some(
-            sqlx::query(
-                r#"SELECT jsonb_build_object(
-                        'status_text', status_text
-                    ) AS value
-                   FROM impfstatus
-                   WHERE case_id = $1"#,
-            )
-            .bind(case_id)
-            .fetch_optional(db)
-            .await?,
-        ),
         _ => None,
     };
 
@@ -3322,101 +2631,6 @@ async fn load_case_section_snapshot(
             .ok()
             .flatten()
     }))
-}
-
-fn parse_optional_case_date(
-    value: Option<&str>,
-) -> Result<Option<chrono::NaiveDate>, &'static str> {
-    match value.map(str::trim).filter(|value| !value.is_empty()) {
-        Some(raw) => chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d")
-            .map(Some)
-            .map_err(|_| "Invalid date (YYYY-MM-DD)"),
-        None => Ok(None),
-    }
-}
-
-async fn confirm_medication_expiry(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path((case_id, medication_id)): Path<(Uuid, Uuid)>,
-) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
-        return e;
-    }
-    match can_access_case(&state, &auth, case_id, None).await {
-        Ok(true) => {}
-        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(resp) => return resp,
-    }
-
-    let confirmed = match sqlx::query(
-        r#"UPDATE medication_expiry_events
-           SET status = 'confirmed',
-               confirmed_at = now(),
-               confirmed_by = $3
-           WHERE case_id = $1
-             AND medication_id = $2
-             AND status = 'pending_confirmation'
-           RETURNING id, patient_id, expiry_date"#,
-    )
-    .bind(case_id)
-    .bind(medication_id)
-    .bind(auth.user_id)
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(row)) => row,
-        Ok(None) => {
-            return err(
-                StatusCode::NOT_FOUND,
-                "No pending medication expiry confirmation found",
-            );
-        }
-        Err(error) => {
-            tracing::error!(
-                error = %error,
-                case_id = %case_id,
-                medication_id = %medication_id,
-                "confirm medication expiry",
-            );
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to confirm medication expiry",
-            );
-        }
-    };
-
-    let patient_id: Uuid = confirmed.try_get("patient_id").unwrap_or_default();
-    let expiry_date = confirmed
-        .try_get::<chrono::NaiveDate, _>("expiry_date")
-        .map(|value| value.to_string())
-        .unwrap_or_default();
-
-    state.audit_sender.try_send(audit::domain_event(
-        "confirm_medication_expiry".to_string(),
-        Some(auth.user_id),
-        "case",
-        Some(case_id),
-        serde_json::json!({
-            "patient_id": patient_id,
-            "medication_id": medication_id,
-            "expiry_date": expiry_date.clone(),
-        }),
-    ));
-    crate::realtime::publish_case_event(
-        &state,
-        Some(auth.user_id),
-        "case.medication_expiry_confirmed",
-        case_id,
-        serde_json::json!({
-            "patient_id": patient_id,
-            "medication_id": medication_id,
-            "expiry_date": expiry_date,
-        }),
-    )
-    .await;
-
-    Json(serde_json::json!({ "ok": true })).into_response()
 }
 
 async fn resolve_medication_expiry_notification_recipients(
@@ -3459,40 +2673,49 @@ async fn resolve_medication_expiry_notification_recipients(
     Ok(fallback.into_iter().collect())
 }
 
-async fn load_medication_expiry_candidates(
+async fn load_patient_medication_expiry_candidates(
     state: &AppState,
     today: chrono::NaiveDate,
-) -> Result<Vec<MedicationExpiryCandidate>, sqlx::Error> {
+) -> Result<Vec<PatientMedicationExpiryCandidate>, sqlx::Error> {
     let rows = sqlx::query(
-        r#"SELECT m.id AS medication_id,
-                  m.case_id,
-                  c.patient_id,
+        r#"SELECT m.id AS patient_medication_id,
+                  m.patient_id,
                   p.patient_id AS patient_code,
                   p.first_name,
                   p.last_name,
                   m.handelsname,
-                  m.expiry_date
-           FROM medikamente m
-           JOIN cases c ON c.id = m.case_id
-           JOIN patients p ON p.id = c.patient_id
+                  m.wirkstoff,
+                  m.einnahme_bis::date AS expiry_date
+           FROM patient_medications m
+           JOIN patients p ON p.id = m.patient_id
            LEFT JOIN medication_expiry_events mee
-                  ON mee.medication_id = m.id
+                  ON mee.patient_medication_id = m.id
                  AND mee.status = 'pending_confirmation'
-           WHERE m.med_typ = 'permanent'
-             AND m.expiry_date IS NOT NULL
-             AND m.expiry_date < $1
+           WHERE m.category = 'dauer'
+             AND m.status = 'aktiv'
+             AND m.einnahme_bis ~ '^\d{4}-\d{2}-\d{2}$'
+             AND m.einnahme_bis::date < $1
              AND mee.id IS NULL
-           ORDER BY m.expiry_date, m.created_at"#,
+           ORDER BY m.einnahme_bis, m.created_at"#,
     )
     .bind(today)
     .fetch_all(&state.db)
     .await?;
 
-    Ok(rows
-        .into_iter()
-        .map(|row| MedicationExpiryCandidate {
-            medication_id: row.try_get::<Uuid, _>("medication_id").unwrap_or_default(),
-            case_id: row.try_get::<Uuid, _>("case_id").unwrap_or_default(),
+    let mut candidates = Vec::new();
+    for row in rows {
+        let trade_name = row.try_get::<String, _>("handelsname").unwrap_or_default();
+        let medication_name = if trade_name.trim().is_empty() {
+            row.try_get::<Option<String>, _>("wirkstoff")
+                .unwrap_or_default()
+                .unwrap_or_default()
+        } else {
+            trade_name
+        };
+        candidates.push(PatientMedicationExpiryCandidate {
+            patient_medication_id: row
+                .try_get::<Uuid, _>("patient_medication_id")
+                .unwrap_or_default(),
             patient_id: row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
             patient_code: row.try_get::<String, _>("patient_code").unwrap_or_default(),
             patient_name: format!(
@@ -3502,12 +2725,13 @@ async fn load_medication_expiry_candidates(
             )
             .trim()
             .to_string(),
-            medication_name: row.try_get::<String, _>("handelsname").unwrap_or_default(),
+            medication_name,
             expiry_date: row
                 .try_get::<chrono::NaiveDate, _>("expiry_date")
                 .unwrap_or(today),
-        })
-        .collect())
+        });
+    }
+    Ok(candidates)
 }
 
 pub async fn run_medication_expiry_scheduler_once(
@@ -3516,16 +2740,15 @@ pub async fn run_medication_expiry_scheduler_once(
     let today = chrono::Utc::now().date_naive();
     let mut summary = MedicationExpiryRunSummary::default();
 
-    for candidate in load_medication_expiry_candidates(state, today).await? {
+    for candidate in load_patient_medication_expiry_candidates(state, today).await? {
         let inserted = sqlx::query(
             r#"INSERT INTO medication_expiry_events (
-                    medication_id, case_id, patient_id, expiry_date
-               ) VALUES ($1, $2, $3, $4)
+                    patient_medication_id, patient_id, expiry_date
+               ) VALUES ($1, $2, $3)
                ON CONFLICT DO NOTHING
                RETURNING id"#,
         )
-        .bind(candidate.medication_id)
-        .bind(candidate.case_id)
+        .bind(candidate.patient_medication_id)
         .bind(candidate.patient_id)
         .bind(candidate.expiry_date)
         .fetch_optional(&state.db)
@@ -3543,7 +2766,7 @@ pub async fn run_medication_expiry_scheduler_once(
         for recipient_id in recipients {
             let notification_row = sqlx::query(
                 r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-                   VALUES ($1, $2, $3, $4, 'case', $5)
+                   VALUES ($1, $2, $3, $4, 'patient', $5)
                    RETURNING id, user_id"#,
             )
             .bind(recipient_id)
@@ -3553,13 +2776,13 @@ pub async fn run_medication_expiry_scheduler_once(
                 candidate.patient_code
             ))
             .bind(format!(
-                "{} ({}) expired on {} and now requires confirmation. Patient: {}.",
+                "{} ({}) reached its intake end date {} and now requires confirmation. Patient: {}.",
                 candidate.medication_name,
                 candidate.patient_code,
                 candidate.expiry_date,
                 candidate.patient_name
             ))
-            .bind(candidate.case_id)
+            .bind(candidate.patient_id)
             .fetch_one(&state.db)
             .await?;
             let notification_id: Uuid = notification_row.try_get("id").unwrap_or_default();
@@ -3571,8 +2794,8 @@ pub async fn run_medication_expiry_scheduler_once(
                     "notification.created",
                     Some(notification_id),
                     serde_json::json!({
-                        "entity_type": "case",
-                        "entity_id": candidate.case_id,
+                        "entity_type": "patient",
+                        "entity_id": candidate.patient_id,
                     }),
                 )
                 .await;
@@ -3583,24 +2806,22 @@ pub async fn run_medication_expiry_scheduler_once(
         state.audit_sender.try_send(audit::domain_event(
             "auto_flag_medication_expiry".to_string(),
             None,
-            "case",
-            Some(candidate.case_id),
+            "patient",
+            Some(candidate.patient_id),
             serde_json::json!({
-                "patient_id": candidate.patient_id,
-                "medication_id": candidate.medication_id,
+                "patient_medication_id": candidate.patient_medication_id,
                 "medication_name": candidate.medication_name.clone(),
                 "expiry_date": candidate.expiry_date.to_string(),
             }),
         ));
-        crate::realtime::publish_case_event(
+        crate::realtime::publish_patient_event(
             state,
             None,
-            "case.medication_expiry_flagged",
-            candidate.case_id,
+            "patient.medication_expiry_flagged",
+            candidate.patient_id,
             serde_json::json!({
                 "medication_expiry_event_id": medication_expiry_event_id,
-                "patient_id": candidate.patient_id,
-                "medication_id": candidate.medication_id,
+                "patient_medication_id": candidate.patient_medication_id,
                 "medication_name": candidate.medication_name,
                 "expiry_date": candidate.expiry_date.to_string(),
             }),

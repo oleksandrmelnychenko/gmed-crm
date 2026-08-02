@@ -274,9 +274,7 @@ function useEditAppointmentSectionContentContent({
 }: EditAppointmentSectionProps) {
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const interpreterFieldLabel =
-    tr.role_interpreter ??
-    appointmentText("appointments_interpreter");
+  const interpreterFieldLabel = appointmentText("appointments_interpreter");
   const [{ form, recurrenceScope, doctors, conflicts, error, busy }, dispatchEditState] =
     useReducer(
       editAppointmentSectionReducer,
@@ -805,7 +803,7 @@ function useEditAppointmentSectionContentContent({
       <section className="rounded-lg border border-border/70 bg-card p-6">
         <div className="flex items-start justify-between gap-4">
           <h2 className={tokens.text.sectionTitle}>
-            {editOverviewTitle(t.appointments_title)}
+            {editOverviewTitle(appointmentText("appointments_appointment"))}
           </h2>
           <Button
             type="button"
@@ -875,7 +873,7 @@ function useEditAppointmentSectionContentContent({
         onOpenChange={handleSheetOpenChange}
         allowImplicitDismissal
         dirty={hasUnsavedChanges}
-        title={t.appointments_title}
+        title={appointmentText("appointments_appointment")}
         maxWidthClassName="sm:max-w-[760px]"
         onSubmit={handleSubmit}
         footerError={error || undefined}

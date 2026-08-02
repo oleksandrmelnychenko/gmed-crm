@@ -8,12 +8,13 @@ import {
   HeartPulse,
   History,
   type LucideIcon,
+  Microscope,
+  NotebookPen,
   Pill,
   Scan,
   Scissors,
   Stethoscope,
-  Syringe,
-  Thermometer,
+  TrendingUp,
   Wind,
   Zap,
 } from "lucide-react";
@@ -30,23 +31,24 @@ import {
 
 export type CaseSectionKey =
   | "overview"
-  | "preconditions"
-  | "allergies"
-  | "surgeries"
-  | "medications"
-  | "pain"
   | "symptoms"
-  | "vegetative"
-  | "impfstatus"
+  | "pain"
   | "cardiology"
   | "gastroenterology"
   | "orthopedics"
   | "neurology"
   | "pulmonology"
   | "urology"
+  | "anamnese"
+  | "diagnoses"
+  | "medications"
+  | "allergies"
+  | "befunde"
+  | "procedures"
+  | "verlauf"
   | "history";
 
-export type CaseSectionGroup = "clinical" | "specialty" | "meta";
+export type CaseSectionGroup = "episode" | "record" | "meta";
 
 export type CaseSectionDefinition = {
   key: CaseSectionKey;
@@ -57,78 +59,83 @@ export type CaseSectionDefinition = {
 export const CASE_WORKSPACE_SECTIONS: readonly CaseSectionDefinition[] = [
   {
     key: "overview",
-    group: "clinical",
+    group: "episode",
     icon: FileText,
   },
   {
-    key: "preconditions",
-    group: "clinical",
-    icon: Stethoscope,
-  },
-  {
-    key: "allergies",
-    group: "clinical",
-    icon: Ban,
-  },
-  {
-    key: "surgeries",
-    group: "clinical",
-    icon: Scissors,
-  },
-  {
-    key: "medications",
-    group: "clinical",
-    icon: Pill,
-  },
-  {
-    key: "pain",
-    group: "clinical",
-    icon: Zap,
-  },
-  {
     key: "symptoms",
-    group: "clinical",
+    group: "episode",
     icon: Activity,
   },
   {
-    key: "vegetative",
-    group: "clinical",
-    icon: Thermometer,
-  },
-  {
-    key: "impfstatus",
-    group: "clinical",
-    icon: Syringe,
+    key: "pain",
+    group: "episode",
+    icon: Zap,
   },
   {
     key: "cardiology",
-    group: "specialty",
+    group: "episode",
     icon: HeartPulse,
   },
   {
     key: "gastroenterology",
-    group: "specialty",
+    group: "episode",
     icon: Scan,
   },
   {
     key: "orthopedics",
-    group: "specialty",
+    group: "episode",
     icon: Bone,
   },
   {
     key: "neurology",
-    group: "specialty",
+    group: "episode",
     icon: Brain,
   },
   {
     key: "pulmonology",
-    group: "specialty",
+    group: "episode",
     icon: Wind,
   },
   {
     key: "urology",
-    group: "specialty",
+    group: "episode",
     icon: Droplets,
+  },
+  {
+    key: "anamnese",
+    group: "record",
+    icon: NotebookPen,
+  },
+  {
+    key: "diagnoses",
+    group: "record",
+    icon: Stethoscope,
+  },
+  {
+    key: "medications",
+    group: "record",
+    icon: Pill,
+  },
+  {
+    key: "allergies",
+    group: "record",
+    icon: Ban,
+  },
+  {
+    key: "befunde",
+    group: "record",
+    icon: Microscope,
+  },
+  {
+    key: "procedures",
+    group: "record",
+    icon: Scissors,
+  },
+  {
+    key: "verlauf",
+    group: "record",
+    icon: TrendingUp,
   },
   {
     key: "history",
@@ -141,17 +148,35 @@ const CASE_SECTION_KEYS = new Set<CaseSectionKey>(
   CASE_WORKSPACE_SECTIONS.map((item) => item.key),
 );
 
+/** Sections whose clinical facts live on the patient record (projections). */
+export const CASE_RECORD_SECTION_KEYS: readonly CaseSectionKey[] =
+  CASE_WORKSPACE_SECTIONS.filter((item) => item.group === "record").map(
+    (item) => item.key,
+  );
+
 const DEFAULT_CASE_SECTION: CaseSectionKey = "overview";
+
+/**
+ * Pre-Phase-4 deep links: the retired case-table sections map onto the
+ * patient-record projection that replaced them.
+ */
+const LEGACY_SECTION_ALIASES: Record<string, CaseSectionKey> = {
+  preconditions: "diagnoses",
+  surgeries: "procedures",
+  vegetative: "anamnese",
+  impfstatus: "overview",
+};
+
+export function normalizeCaseSectionKey(value: string | null | undefined): CaseSectionKey {
+  if (!value) return DEFAULT_CASE_SECTION;
+  if (CASE_SECTION_KEYS.has(value as CaseSectionKey)) {
+    return value as CaseSectionKey;
+  }
+  return LEGACY_SECTION_ALIASES[value] ?? DEFAULT_CASE_SECTION;
+}
 
 function normalizeLang(lang: string): Lang {
   return lang === "de" ? "de" : "ru";
-}
-
-export function normalizeCaseSectionKey(value: string | null | undefined): CaseSectionKey {
-  if (value && CASE_SECTION_KEYS.has(value as CaseSectionKey)) {
-    return value as CaseSectionKey;
-  }
-  return DEFAULT_CASE_SECTION;
 }
 
 export function caseSectionLabel(

@@ -48,7 +48,6 @@ type SpecialtySectionContentProps<T extends Record<string, unknown>> = Omit<
 
 function SpecialtySectionContent<T extends Record<string, unknown>>({
   title,
-  description,
   blankValue,
   rawValue,
   booleanFlags,
@@ -86,7 +85,7 @@ function SpecialtySectionContent<T extends Record<string, unknown>>({
   const relevantLabel = t.cases_workspace_specialty_relevant;
 
   return (
-    <Panel title={title} description={description}>
+    <Panel title={title}>
       <form onSubmit={handleSubmit} className="space-y-5">
         {sectionError ? <Banner tone="error">{sectionError}</Banner> : null}
 

@@ -61,13 +61,9 @@ import type { LeadDetail } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 import {
   completeCaseIntake,
-  createCase,
   fetchCaseDetail,
   fetchCases,
-  saveCaseAllergien,
-  saveCaseMedikamente,
   saveCaseOverview,
-  saveCaseVorerkrankungen,
 } from "@/pages/cases/data/case-api";
 import {
   createContract,
@@ -102,10 +98,16 @@ import {
 import type { Leistung, OrderSummary } from "@/pages/orders/model/types";
 import {
   fetchAllDoctors,
+  fetchPatientClinical,
+  savePatientClinicalWarnings,
+  savePatientDiagnoses,
+  savePatientMedications,
+  savePatientNarrative,
   type AllDoctorOption,
   type ClinicalDiagnosis,
   type ClinicalMedication,
   type ClinicalNarrative,
+  type PatientClinicalProfile,
   type ClinicalWarning,
 } from "@/pages/patients/data/patient-clinical";
 import { fetchProviders, fetchSpecializations } from "@/pages/providers/data/provider-api";
@@ -136,12 +138,14 @@ import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 
 import {
   createLead,
+  createLeadProspect,
   fetchLeadDetail,
   importLeadAttachments,
   resolveFailedLead,
   updateLeadStatus,
   updateLeadWizard,
   wizardConvertLead,
+  type ProspectDuplicateCandidate,
 } from "../data/leads-api";
 
 type Tx = (ru: string, de: string) => string;
@@ -649,6 +653,7 @@ function autosaveSnapshotSignature(snapshot: AutosaveSnapshot) {
 function autosavePayload(
   snapshot: AutosaveSnapshot,
   previousWizardState: Record<string, unknown>,
+  includeClinicalDraft = true,
 ) {
   const { draft, lines, paidAmount, prepayment, prepaymentAmount, step } = snapshot;
   const payload: Record<string, unknown> & { wizard_state: Record<string, unknown> } = {
@@ -708,13 +713,15 @@ function autosavePayload(
         if (comment?.trim()) comments[value] = comment;
         return comments;
       }, {}),
-      clinical_draft: {
-        narrative: draft.narrative,
-        diagnoses: draft.diagnoses,
-        medications: draft.medications,
-        allergies: draft.allergies,
-        caves: draft.caves,
-      },
+      clinical_draft: includeClinicalDraft
+        ? {
+            narrative: draft.narrative,
+            diagnoses: draft.diagnoses,
+            medications: draft.medications,
+            allergies: draft.allergies,
+            caves: draft.caves,
+          }
+        : null,
       commercial_draft: {
         lines: lines.map((line) => ({
           id: line.id,
@@ -860,8 +867,11 @@ function clinicalRowsFromLead(lead: LeadDetail) {
   const narrativeRow = asRecord(clinical["narrative"]);
   const fallbackAnamnese = lead.additional_concerns?.trim() || null;
   const narrative: ClinicalNarrative | null = narrativeRow || fallbackAnamnese
-    ? {
+      ? {
         id: narrativeRow && typeof narrativeRow.id === "string" ? narrativeRow.id : null,
+        case_id: narrativeRow
+          ? nullableString(narrativeRow, "case_id", "caseId")
+          : null,
         anamnese_aktuelle: narrativeRow
           ? nullableString(narrativeRow, "anamnese_aktuelle") ?? fallbackAnamnese
           : fallbackAnamnese,
@@ -894,6 +904,7 @@ function clinicalRowsFromLead(lead: LeadDetail) {
       const sourceMode = firstString(row, "source_mode", "sourceMode");
       return {
         id: null,
+        case_id: nullableString(row, "case_id", "caseId"),
         cid: firstString(row, "cid", "id") || `lead-diagnosis-${index + 1}`,
         parent_cid: nullableString(row, "parent_cid", "parentCid", "parent_id"),
         parent_id: null,
@@ -998,16 +1009,218 @@ function clinicalRowsFromLead(lead: LeadDetail) {
   };
 }
 
-function hasStoredClinicalDraft(lead: LeadDetail) {
-  const clinical = asRecord(lead.wizard_state?.["clinical_draft"]);
-  return Boolean(
-    clinical
-    && (
-      asRecord(clinical["narrative"])
-      || ["diagnoses", "medications", "allergies", "caves"]
-        .some((key) => Array.isArray(clinical[key]))
-    ),
-  );
+const CLINICAL_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function clinicalText(value: string | null | undefined) {
+  return value?.trim().toLowerCase().replace(/\s+/g, " ") ?? "";
+}
+
+function isPersistedClinicalId(value: string | null | undefined): value is string {
+  return Boolean(value && CLINICAL_UUID_PATTERN.test(value));
+}
+
+function diagnosisMergeKey(item: ClinicalDiagnosis) {
+  return [
+    item.kind,
+    clinicalText(item.label),
+    clinicalText(item.icd_code),
+    clinicalText(item.ops_code),
+    item.diagnosed_on ?? "",
+  ].join("|");
+}
+
+function medicationMergeKey(item: ClinicalMedication) {
+  return [
+    item.category,
+    clinicalText(item.wirkstoff),
+    clinicalText(item.handelsname),
+    clinicalText(item.staerke),
+    clinicalText(item.form),
+    clinicalText(item.einnahmeform),
+    clinicalText(item.dose_morgens),
+    clinicalText(item.dose_mittags),
+    clinicalText(item.dose_abends),
+    clinicalText(item.dose_nachts),
+    item.einnahme_von ?? "",
+  ].join("|");
+}
+
+function warningMergeKey(item: ClinicalWarning) {
+  return [item.kind, clinicalText(item.label)].join("|");
+}
+
+function mergeDiagnoses(
+  persisted: ClinicalDiagnosis[],
+  local: ClinicalDiagnosis[],
+  caseId: string,
+) {
+  const merged: ClinicalDiagnosis[] = persisted.map((item) => ({
+    ...item,
+    cid: item.cid ?? item.id ?? undefined,
+    parent_cid: item.parent_cid ?? item.parent_id ?? null,
+  }));
+  const persistedById = new Map<string, number>();
+  const persistedByKey = new Map<string, number>();
+  merged.forEach((item, index) => {
+    if (isPersistedClinicalId(item.id)) persistedById.set(item.id, index);
+    persistedByKey.set(diagnosisMergeKey(item), index);
+  });
+
+  for (const item of local) {
+    const idMatch = isPersistedClinicalId(item.id)
+      ? persistedById.get(item.id)
+      : undefined;
+    if (idMatch !== undefined) {
+      const serverItem = merged[idMatch]!;
+      merged[idMatch] = {
+        ...serverItem,
+        ...item,
+        id: serverItem.id,
+        case_id: serverItem.case_id ?? null,
+      };
+      continue;
+    }
+    if (persistedByKey.has(diagnosisMergeKey(item))) continue;
+    const next = {
+      ...item,
+      id: null,
+      case_id: caseId,
+    };
+    merged.push(next);
+    persistedByKey.set(diagnosisMergeKey(next), merged.length - 1);
+  }
+  return merged;
+}
+
+function mergeMedications(
+  persisted: ClinicalMedication[],
+  local: ClinicalMedication[],
+) {
+  const merged = persisted.map((item) => ({ ...item }));
+  const persistedById = new Map<string, number>();
+  const persistedByKey = new Set<string>();
+  merged.forEach((item, index) => {
+    if (isPersistedClinicalId(item.id)) persistedById.set(item.id, index);
+    persistedByKey.add(medicationMergeKey(item));
+  });
+
+  for (const item of local) {
+    const idMatch = isPersistedClinicalId(item.id)
+      ? persistedById.get(item.id)
+      : undefined;
+    if (idMatch !== undefined) {
+      const serverItem = merged[idMatch]!;
+      merged[idMatch] = { ...serverItem, ...item, id: serverItem.id };
+      continue;
+    }
+    const key = medicationMergeKey(item);
+    if (persistedByKey.has(key)) continue;
+    const newItem: ClinicalMedication = { ...item };
+    delete newItem.id;
+    merged.push(newItem);
+    persistedByKey.add(key);
+  }
+  return merged;
+}
+
+function mergeWarnings(
+  persisted: ClinicalWarning[],
+  local: ClinicalWarning[],
+) {
+  const merged = persisted.map((item) => ({ ...item }));
+  const persistedById = new Map<string, number>();
+  const persistedByKey = new Set<string>();
+  merged.forEach((item, index) => {
+    if (isPersistedClinicalId(item.id)) persistedById.set(item.id, index);
+    persistedByKey.add(warningMergeKey(item));
+  });
+
+  for (const item of local) {
+    const idMatch = isPersistedClinicalId(item.id)
+      ? persistedById.get(item.id)
+      : undefined;
+    if (idMatch !== undefined) {
+      const serverItem = merged[idMatch]!;
+      merged[idMatch] = { ...serverItem, ...item, id: serverItem.id };
+      continue;
+    }
+    const key = warningMergeKey(item);
+    if (persistedByKey.has(key)) continue;
+    const newItem: ClinicalWarning = { ...item };
+    delete newItem.id;
+    merged.push(newItem);
+    persistedByKey.add(key);
+  }
+  return merged;
+}
+
+const NARRATIVE_FIELDS = [
+  "anamnese_aktuelle",
+  "anamnese_vorgeschichte",
+  "anamnese_vegetative",
+  "anamnese_sozial",
+  "beurteilung",
+] as const;
+
+function mergeNarrative(
+  persisted: ClinicalNarrative | null,
+  local: ClinicalNarrative | null,
+  caseId: string,
+) {
+  if (!persisted) {
+    return local ? {
+      ...local,
+      id: null,
+      case_id: local.case_id ?? caseId,
+    } : null;
+  }
+  if (!local) return persisted;
+  if (isPersistedClinicalId(local.id) && local.id === persisted.id) {
+    return {
+      ...persisted,
+      ...local,
+      id: persisted.id,
+      case_id: persisted.case_id ?? null,
+    };
+  }
+
+  const hasIncomingChanges = NARRATIVE_FIELDS.some((field) => (
+    clinicalText(local[field])
+    && clinicalText(local[field]) !== clinicalText(persisted[field])
+  ));
+  if (!hasIncomingChanges) return persisted;
+
+  return {
+    ...persisted,
+    ...Object.fromEntries(NARRATIVE_FIELDS.map((field) => [
+      field,
+      local[field]?.trim() ? local[field] : persisted[field],
+    ])),
+    id: null,
+    case_id: caseId,
+    anamnese_at: local.anamnese_at ?? new Date().toISOString(),
+    is_active: true,
+    created_at: null,
+    updated_at: null,
+  } as ClinicalNarrative;
+}
+
+function mergePatientClinicalDraft(
+  draft: Draft,
+  persisted: PatientClinicalProfile,
+  caseId: string,
+): Draft {
+  const narrative = mergeNarrative(persisted.narrative, draft.narrative, caseId);
+  return {
+    ...draft,
+    anamnese: narrative?.anamnese_aktuelle ?? draft.anamnese,
+    narrative,
+    diagnoses: mergeDiagnoses(persisted.diagnoses, draft.diagnoses, caseId),
+    medications: mergeMedications(persisted.medications, draft.medications),
+    allergies: mergeWarnings(persisted.allergien, draft.allergies),
+    caves: mergeWarnings(persisted.cave, draft.caves),
+  };
 }
 
 function draftFromLead(lead: LeadDetail): Draft {
@@ -1971,6 +2184,12 @@ export function LeadWizard({
   const commercialGenerationInFlightRef = useRef(false);
   const reloadVersionRef = useRef(0);
   const caseIdRef = useRef<string | null>(null);
+  const prospectPatientIdRef = useRef<string | null>(null);
+  const prospectMergeOnlyRef = useRef(false);
+  const [prospectCandidates, setProspectCandidates] = useState<
+    ProspectDuplicateCandidate[] | null
+  >(null);
+  const [prospectResolutionBusy, setProspectResolutionBusy] = useState(false);
   const documentPreviewUrlRef = useRef<string | null>(null);
   const lastPersistedLeadIdRef = useRef<string | null>(null);
   // Service options that were present when the draft was hydrated. Kept so that
@@ -2178,13 +2397,24 @@ export function LeadWizard({
         );
       }
       const nextOrder = nextOrders[0] ?? null;
-      const nextCase = nextCases[0] as CaseListItem | undefined;
-      const [nextCaseDetail, nextOrderDetail] = await Promise.all([
+      const prospectId = nextLead.intake_model === "patient_first"
+        ? nextLead.prospect_patient_id
+        : null;
+      const prospectCaseId = nextLead.intake_model === "patient_first"
+        ? nextLead.prospect_case_id
+        : null;
+      const nextCase = prospectCaseId
+        ? { id: prospectCaseId } as CaseListItem
+        : nextCases[0] as CaseListItem | undefined;
+      const [nextCaseDetail, nextOrderDetail, prospectClinical] = await Promise.all([
         nextCase && hydrateDraft
           ? fetchCaseDetail(nextCase.id).catch(() => null)
           : Promise.resolve(null),
         nextOrder && (hydrateDraft || hydrateCommercial)
           ? fetchOrder(nextOrder.id).catch(() => null)
+          : Promise.resolve(null),
+        prospectId && hydrateDraft
+          ? fetchPatientClinical(prospectId).catch(() => null)
           : Promise.resolve(null),
       ]);
       if (!isCurrentReload()) return;
@@ -2198,106 +2428,14 @@ export function LeadWizard({
         contractEffectiveDate:
           storedLeadDraft.contractEffectiveDate || nextContracts[0]?.valid_from || "",
       };
-      const caseAnamnese = nextCaseDetail?.aktuelle_anamnese?.trim() || "";
-      const nextDraft: Draft = nextCaseDetail && !hasStoredClinicalDraft(nextLead) ? {
+      const caseDraft: Draft = {
         ...leadDraft,
-        concern: nextCaseDetail.hauptanfragegrund || leadDraft.concern,
-        anamnese: caseAnamnese || leadDraft.anamnese,
-        narrative: caseAnamnese
-          ? {
-              id: null,
-              anamnese_aktuelle: caseAnamnese,
-              anamnese_vorgeschichte: leadDraft.narrative?.anamnese_vorgeschichte ?? null,
-              anamnese_vegetative: leadDraft.narrative?.anamnese_vegetative ?? null,
-              anamnese_sozial: leadDraft.narrative?.anamnese_sozial ?? null,
-              beurteilung: leadDraft.narrative?.beurteilung ?? null,
-              anamnese_at: leadDraft.narrative?.anamnese_at ?? new Date().toISOString(),
-              is_active: true,
-            }
-          : leadDraft.narrative,
-        referrer: nextCaseDetail.zuweiser || leadDraft.referrer,
-        diagnoses: nextCaseDetail.vorerkrankungen.length > 0
-          ? nextCaseDetail.vorerkrankungen.map((item, itemIndex) => ({
-              id: null,
-              cid: leadDraft.diagnoses[itemIndex]?.cid ?? `case-diagnosis-${itemIndex + 1}`,
-              parent_cid: null,
-              parent_id: null,
-              label: item.erkrankung,
-              kind: leadDraft.diagnoses[itemIndex]?.kind ?? (itemIndex === 0 ? "main" : "secondary"),
-              certainty: leadDraft.diagnoses[itemIndex]?.certainty ?? "bestaetigt",
-              chronifizierung: leadDraft.diagnoses[itemIndex]?.chronifizierung ?? null,
-              icd_code: leadDraft.diagnoses[itemIndex]?.icd_code ?? null,
-              ops_code: null,
-              diagnosed_on: item.erstdiagnose ?? null,
-              note: item.notiz ?? null,
-              source_mode: "intern" as const,
-              provider_id: null,
-              provider_name: null,
-              doctor_id: null,
-              doctor_name: null,
-              doctor_title: null,
-              doctor_fachbereich: null,
-              external_clinic: null,
-              external_doctor: null,
-              external_country: null,
-              treating_doctor_id: null,
-              treating_doctor_name: null,
-              treating_doctor_title: null,
-              treating_none: false,
-            }))
-          : leadDraft.diagnoses,
-        medications: nextCaseDetail.medikamente.length > 0
-          ? nextCaseDetail.medikamente.map((item, itemIndex) => {
-              const existing = leadDraft.medications[itemIndex];
-              return {
-                id: existing?.id ?? item.id ?? `case-medication-${itemIndex + 1}`,
-                provider_id: existing?.provider_id ?? null,
-                provider_name: existing?.provider_name ?? null,
-                doctor_id: item.verordnender_arzt_id ?? existing?.doctor_id ?? null,
-                doctor_name: item.verordnender_arzt ?? existing?.doctor_name ?? null,
-                doctor_title: existing?.doctor_title ?? null,
-                doctor_fachbereich: existing?.doctor_fachbereich ?? null,
-                category: existing?.category ?? (item.med_typ === "permanent" ? "dauer" : "besondere"),
-                wirkstoff: item.wirkstoff ?? null,
-                handelsname: item.handelsname,
-                staerke: [item.dosis, item.dosis_einheit].filter(Boolean).join(" ") || null,
-                form: item.darreichungsform ?? null,
-                einnahmeform: existing?.einnahmeform ?? null,
-                dose_morgens: existing?.dose_morgens ?? item.dosis ?? null,
-                dose_mittags: existing?.dose_mittags ?? null,
-                dose_abends: existing?.dose_abends ?? null,
-                dose_nachts: existing?.dose_nachts ?? null,
-                einheit: item.einheit ?? null,
-                hinweis: [item.einnahmeschema, item.anmerkung].filter(Boolean).join("\n") || null,
-                grund: item.grund ?? null,
-                verordnet_am: existing?.verordnet_am ?? null,
-                einnahme_von: item.seit ?? null,
-                einnahme_bis: item.expiry_date ?? null,
-                status: existing?.status ?? "aktiv",
-                apothekenpflichtig: existing?.apothekenpflichtig ?? false,
-                rezeptpflichtig: existing?.rezeptpflichtig ?? false,
-                btm: existing?.btm ?? false,
-                aut_idem_sperre: existing?.aut_idem_sperre ?? false,
-                abgabebeschraenkung: existing?.abgabebeschraenkung ?? false,
-                sonstige_vermerke: existing?.sonstige_vermerke ?? null,
-                on_hold: existing?.on_hold ?? false,
-                hold_from: existing?.hold_from ?? null,
-                hold_until: existing?.hold_until ?? null,
-                hold_note: existing?.hold_note ?? null,
-              };
-            })
-          : leadDraft.medications,
-        allergies: nextCaseDetail.allergien.length > 0
-          ? nextCaseDetail.allergien.map((item, itemIndex) => ({
-              id: leadDraft.allergies[itemIndex]?.id ?? `case-allergy-${itemIndex + 1}`,
-              kind: "allergie" as const,
-              label: item.allergie,
-              reaction: item.reaktion ?? null,
-              severity: leadDraft.allergies[itemIndex]?.severity ?? null,
-              note: leadDraft.allergies[itemIndex]?.note ?? null,
-            }))
-          : leadDraft.allergies,
-      } : leadDraft;
+        concern: nextCaseDetail?.hauptanfragegrund || leadDraft.concern,
+        referrer: nextCaseDetail?.zuweiser || leadDraft.referrer,
+      };
+      const nextDraft = prospectClinical && prospectCaseId
+        ? mergePatientClinicalDraft(caseDraft, prospectClinical, prospectCaseId)
+        : caseDraft;
       const nextStep: StepId = "master_data";
       const nextLines = storedCommercialDraft?.lines.length
         ? storedCommercialDraft.lines
@@ -2316,8 +2454,11 @@ export function LeadWizard({
         : storedCommercialDraft?.paidAmount ?? "";
 
       setLead(nextLead);
-      setCases(nextCases as CaseListItem[]);
+      setCases(nextCase ? [nextCase] : nextCases as CaseListItem[]);
       caseIdRef.current = nextCase?.id ?? null;
+      prospectPatientIdRef.current = prospectId ?? null;
+      prospectMergeOnlyRef.current = nextLead.prospect_patient_lifecycle === "active"
+        || nextLead.prospect_patient_lifecycle === "inactive";
       setContracts(nextContracts);
       setOrders(nextOrders);
       setQuotes(nextQuotes);
@@ -2452,6 +2593,8 @@ export function LeadWizard({
     currentAutosaveSignatureRef.current = signature;
     lastSavedAutosaveSignatureRef.current = signature;
     caseIdRef.current = null;
+    prospectPatientIdRef.current = null;
+    prospectMergeOnlyRef.current = false;
     initialServiceOptionsRef.current = [];
   }, [createMode, leadId, open]);
 
@@ -2506,6 +2649,8 @@ export function LeadWizard({
     lastSavedAutosaveSignatureRef.current = "";
     wizardStateBaseRef.current = {};
     caseIdRef.current = null;
+    prospectPatientIdRef.current = null;
+    prospectMergeOnlyRef.current = false;
     lastPersistedLeadIdRef.current = null;
     initialServiceOptionsRef.current = [];
   }, [open, replaceDocumentPreview]);
@@ -2680,81 +2825,134 @@ export function LeadWizard({
     documents,
   ]);
 
+  const ensureProspect = useCallback(async (
+    medicalDraft: Draft,
+    options?: { attachPatientId?: string; forceCreate?: boolean },
+  ) => {
+    if (!leadId) throw new Error("Lead is not selected");
+    if (!options && prospectPatientIdRef.current && caseIdRef.current) {
+      return { patientId: prospectPatientIdRef.current, caseId: caseIdRef.current };
+    }
+    const response = await createLeadProspect(leadId, {
+      attach_patient_id: options?.attachPatientId,
+      force_create: options?.forceCreate,
+      hauptanfragegrund: medicalDraft.concern.trim(),
+      zuweiser: medicalDraft.referrer.trim(),
+    });
+    if (response.duplicate_candidates?.length) {
+      setProspectCandidates(response.duplicate_candidates);
+      throw new Error(tx(
+        "Найден существующий пациент с теми же данными — выберите: привязать или создать нового",
+        "Vorhandener Patient mit denselben Stammdaten gefunden — bitte verknüpfen oder neu anlegen",
+      ));
+    }
+    if (!response.patient_id || !response.case_id) {
+      throw new Error(tx(
+        "Не удалось создать карточку пациента",
+        "Patientenakte konnte nicht angelegt werden",
+      ));
+    }
+    prospectPatientIdRef.current = response.patient_id;
+    caseIdRef.current = response.case_id;
+    prospectMergeOnlyRef.current = response.attached === true
+      || response.lifecycle_status === "active"
+      || response.lifecycle_status === "inactive";
+    setCases([{ id: response.case_id }]);
+    setLead((current) => current ? {
+      ...current,
+      intake_model: "patient_first",
+      prospect_patient_id: response.patient_id!,
+      prospect_case_id: response.case_id!,
+    } : current);
+    return { patientId: response.patient_id, caseId: response.case_id };
+  }, [leadId, tx]);
+
+  const hydrateProspectClinical = useCallback(async (
+    patientId: string,
+    caseId: string,
+    fallbackDraft: Draft,
+  ) => {
+    let clinical: PatientClinicalProfile;
+    try {
+      clinical = await fetchPatientClinical(patientId);
+    } catch (nextError) {
+      throw new Error(tx(
+        `Не удалось безопасно загрузить медицинскую карту пациента: ${errorText(nextError, tx)}`,
+        `Die Patientenakte konnte nicht sicher geladen werden: ${errorText(nextError, tx)}`,
+      ));
+    }
+    const hydrated = mergePatientClinicalDraft(fallbackDraft, clinical, caseId);
+    setDraft((current) => current
+      ? mergePatientClinicalDraft(current, clinical, caseId)
+      : hydrated);
+    return hydrated;
+  }, [tx]);
+
   const persistMedicalDraft = useCallback(async (medicalDraft: Draft) => {
     const run = async () => {
       if (!leadId) throw new Error("Lead is not selected");
-      let id = caseIdRef.current;
-      if (!id) {
-        id = (await createCase({
-          lead_id: leadId,
-          hauptanfragegrund: medicalDraft.concern.trim(),
-          aktuelle_anamnese: medicalDraft.anamnese.trim(),
-          zuweiser: medicalDraft.referrer.trim(),
-        })).id;
-        caseIdRef.current = id;
-        setCases([{ id }]);
-      }
-      await saveCaseOverview(id, {
-        hauptanfragegrund: medicalDraft.concern.trim(),
-        aktuelle_anamnese: medicalDraft.anamnese.trim(),
-        zuweiser: medicalDraft.referrer.trim(),
+      const { patientId, caseId } = await ensureProspect(medicalDraft);
+      const latestClinical = await fetchPatientClinical(patientId).catch((nextError) => {
+        throw new Error(tx(
+          `Не удалось проверить актуальные медицинские данные перед сохранением: ${errorText(nextError, tx)}`,
+          `Die aktuellen medizinischen Daten konnten vor dem Speichern nicht geprüft werden: ${errorText(nextError, tx)}`,
+        ));
+      });
+      const safeDraft = mergePatientClinicalDraft(medicalDraft, latestClinical, caseId);
+      const saveMode = prospectMergeOnlyRef.current ? "merge" : "replace";
+      await saveCaseOverview(caseId, {
+        hauptanfragegrund: safeDraft.concern.trim(),
+        zuweiser: safeDraft.referrer.trim(),
       });
       await Promise.all([
-        saveCaseVorerkrankungen(id, {
-          items: medicalDraft.diagnoses.filter((item) => item.label.trim()).map((item) => ({
-            erkrankung: item.label.trim(),
-            erstdiagnose: item.diagnosed_on || null,
-            notiz: item.note?.trim() || null,
-          })),
-        }),
-        saveCaseAllergien(id, {
-          items: medicalDraft.allergies.filter((item) => item.label.trim()).map((item) => ({
-            allergie: item.label.trim(),
-            reaktion: item.reaction?.trim() || null,
-          })),
-        }),
-        saveCaseMedikamente(id, {
-          items: medicalDraft.medications
-            .filter((item) => item.wirkstoff?.trim())
-            .map((item) => {
-              const schedule = [
-                item.dose_morgens ? `M ${item.dose_morgens}` : "",
-                item.dose_mittags ? `Mi ${item.dose_mittags}` : "",
-                item.dose_abends ? `A ${item.dose_abends}` : "",
-                item.dose_nachts ? `N ${item.dose_nachts}` : "",
-              ].filter(Boolean).join(" · ");
-              return {
-                handelsname: item.handelsname?.trim() || "",
-                wirkstoff: item.wirkstoff!.trim(),
-                dosis: item.staerke?.trim() || null,
-                dosis_einheit: null,
-                einnahmeschema: schedule || null,
-                darreichungsform: item.form || null,
-                einheit: item.einheit?.trim() || null,
-                anmerkung: [item.hinweis, item.sonstige_vermerke]
-                  .filter(Boolean)
-                  .join("\n") || null,
-                grund: item.grund?.trim() || null,
-                seit: item.einnahme_von || null,
-                verordnender_arzt_id: item.doctor_id
-                  && allDoctors.some((doctor) => doctor.id === item.doctor_id)
-                  ? item.doctor_id
-                  : null,
-                verordnender_arzt: [item.doctor_title, item.doctor_name]
-                  .filter(Boolean)
-                  .join(" ") || null,
-                med_typ: item.category === "dauer" ? "permanent" : "temporary",
-                expiry_date: item.einnahme_bis || null,
-              };
-            }),
-        }),
+        savePatientClinicalWarnings(
+          patientId,
+          "allergie",
+          safeDraft.allergies.filter((item) => item.label.trim()),
+          saveMode,
+        ),
+        savePatientClinicalWarnings(
+          patientId,
+          "cave",
+          safeDraft.caves.filter((item) => item.label.trim()),
+          saveMode,
+        ),
+        savePatientDiagnoses(
+          patientId,
+          safeDraft.diagnoses.filter((item) => item.label.trim()),
+          saveMode,
+        ),
+        savePatientMedications(
+          patientId,
+          safeDraft.medications.filter((item) => item.wirkstoff?.trim()),
+          saveMode,
+        ),
       ]);
-      return id;
+      const narrative = safeDraft.narrative;
+      const hasNarrativeContent = Boolean(narrative && [
+        narrative.anamnese_aktuelle,
+        narrative.anamnese_vorgeschichte,
+        narrative.anamnese_vegetative,
+        narrative.anamnese_sozial,
+        narrative.beurteilung,
+      ].some((field) => field?.trim()));
+      if (narrative && (narrative.id || hasNarrativeContent)) {
+        const saved = await savePatientNarrative(patientId, {
+          ...narrative,
+          is_active: true,
+        });
+        safeDraft.narrative = saved;
+      }
+      const persistedClinical = await fetchPatientClinical(patientId);
+      setDraft((previous) => previous
+        ? mergePatientClinicalDraft(previous, persistedClinical, caseId)
+        : mergePatientClinicalDraft(safeDraft, persistedClinical, caseId));
+      return caseId;
     };
     const queued = medicalSaveQueueRef.current.then(run, run);
     medicalSaveQueueRef.current = queued.then(() => undefined, () => undefined);
     return queued;
-  }, [allDoctors, leadId]);
+  }, [ensureProspect, leadId, tx]);
 
   const persistSnapshot = useCallback((
     snapshot: AutosaveSnapshot,
@@ -2763,7 +2961,11 @@ export function LeadWizard({
   ) => {
     const signature = knownSignature ?? autosaveSnapshotSignature(snapshot);
     const previousWizardState = wizardStateBaseRef.current;
-    const payload = autosavePayload(snapshot, previousWizardState);
+    const payload = autosavePayload(
+      snapshot,
+      previousWizardState,
+      !lead?.prospect_patient_id,
+    );
 
     const run = async () => {
       if (!force && currentAutosaveSignatureRef.current !== signature) return;
@@ -2828,7 +3030,7 @@ export function LeadWizard({
       () => undefined,
     );
     return queued;
-  }, [leadId, onCreated, tx]);
+  }, [lead?.prospect_patient_id, leadId, onCreated, tx]);
 
   useEffect(() => {
     if (!open || !autosaveSnapshot || loading) return;
@@ -3196,7 +3398,6 @@ export function LeadWizard({
     const id = await persistMedicalCase();
     await completeCaseIntake(id, true, {
       hauptanfragegrund: draft.concern.trim(),
-      aktuelle_anamnese: draft.anamnese.trim(),
     });
   }
 
@@ -6320,6 +6521,108 @@ ${serviceCommentLines.join("\n")}`
             >
               {busy === "archive" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Archive className="size-3.5" />}
               {tx("Архивировать", "Archivieren")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={prospectCandidates != null}
+        onOpenChange={(open) => {
+          if (!open && !prospectResolutionBusy) setProspectCandidates(null);
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {tx("Найден существующий пациент", "Vorhandener Patient gefunden")}
+            </DialogTitle>
+            <DialogDescription>
+              {tx(
+                "Имя и дата рождения совпадают с существующей карточкой. Привязать обращение к ней или создать нового пациента?",
+                "Name und Geburtsdatum stimmen mit einer bestehenden Patientenakte überein. Anfrage mit ihr verknüpfen oder einen neuen Patienten anlegen?",
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {(prospectCandidates ?? []).map((candidate) => (
+              <div
+                key={candidate.id}
+                className="flex items-center justify-between gap-3 rounded-lg border border-border p-3"
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">
+                    {candidate.first_name} {candidate.last_name}
+                  </div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    {candidate.patient_id} · {candidate.birth_date}
+                    {candidate.email ? ` · ${candidate.email}` : ""}
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={prospectResolutionBusy}
+                  onClick={() => {
+                    void (async () => {
+                      if (!draft) return;
+                      setProspectResolutionBusy(true);
+                      setError("");
+                      try {
+                        const subject = await ensureProspect(draft, {
+                          attachPatientId: candidate.id,
+                        });
+                        await hydrateProspectClinical(
+                          subject.patientId,
+                          subject.caseId,
+                          draft,
+                        );
+                        setProspectCandidates(null);
+                      } catch (nextError) {
+                        showWizardError(nextError);
+                      } finally {
+                        setProspectResolutionBusy(false);
+                      }
+                    })();
+                  }}
+                >
+                  {tx("Привязать", "Verknüpfen")}
+                </Button>
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={prospectResolutionBusy}
+              onClick={() => setProspectCandidates(null)}
+            >
+              {tx("Отмена", "Abbrechen")}
+            </Button>
+            <Button
+              type="button"
+              disabled={prospectResolutionBusy}
+              onClick={() => {
+                void (async () => {
+                  if (!draft) return;
+                  setProspectResolutionBusy(true);
+                  setError("");
+                    try {
+                      await ensureProspect(draft, { forceCreate: true });
+                      await persistMedicalDraft(draft);
+                      setProspectCandidates(null);
+                  } catch (nextError) {
+                    showWizardError(nextError);
+                  } finally {
+                    setProspectResolutionBusy(false);
+                  }
+                })();
+              }}
+            >
+              {prospectResolutionBusy
+                ? <LoaderCircle className="size-3.5 animate-spin" />
+                : <Plus className="size-3.5" />}
+              {tx("Создать нового пациента", "Neuen Patienten anlegen")}
             </Button>
           </DialogFooter>
         </DialogContent>

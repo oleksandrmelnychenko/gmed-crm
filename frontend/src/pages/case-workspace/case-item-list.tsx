@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useState,
   type Dispatch,
   type ReactNode,
@@ -10,6 +11,9 @@ import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { CountBadge } from "@/components/ui-shell";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import { DEFAULT_DATA_TABLE_PAGE_SIZE } from "@/components/data-table/data-table-pager";
+import type { ColumnDef } from "@/components/data-table/types";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -30,7 +34,9 @@ export type CaseItemListProps<T> = {
   isValid: (form: T) => boolean;
   validate?: (form: T) => string | null;
   save: (nextItems: T[]) => Promise<boolean>;
-  cardContent: (item: T, index: number) => ReactNode;
+  cardContent?: (item: T, index: number) => ReactNode;
+  /** When provided, the section renders as a standard DataTableSurface instead of a card grid. */
+  columns?: readonly ColumnDef<T>[];
   formContent: (args: {
     form: T;
     setForm: Dispatch<SetStateAction<T>>;
@@ -73,6 +79,7 @@ export function CaseItemList<T>({
   validate,
   save,
   cardContent,
+  columns,
   formContent,
   busy,
   sectionError,
@@ -169,6 +176,111 @@ export function CaseItemList<T>({
 
   const populated = items.length > 0;
 
+  const rowIndexes = useMemo(() => {
+    const map = new Map<T, number>();
+    items.forEach((item, index) => map.set(item, index));
+    return map;
+  }, [items]);
+
+  if (columns) {
+    return (
+      <>
+        <div className="space-y-3">
+          {sectionError ? (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {sectionError}
+            </div>
+          ) : null}
+          <DataTableSurface
+            rows={items}
+            columns={columns}
+            rowId={(item) => `${rowIndexes.get(item) ?? caseItemStableKey(item)}`}
+            dictionary={t as unknown as Record<string, string>}
+            loading={busy}
+            onRowClick={
+              canEdit
+                ? (item) => {
+                    const index = rowIndexes.get(item);
+                    if (index != null) openEdit(index);
+                  }
+                : undefined
+            }
+            pagination={{
+              pageSize: DEFAULT_DATA_TABLE_PAGE_SIZE,
+              resetKey: String(items.length),
+            }}
+            emptyState={
+              <div className="px-4 py-8 text-center">
+                <p className="text-sm font-medium text-foreground">{emptyTitle}</p>
+                {emptyHint ? (
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {emptyHint}
+                  </p>
+                ) : null}
+                {canEdit ? (
+                  <Button
+                    type="button"
+                    className="mt-4 h-8 rounded-lg"
+                    onClick={openCreate}
+                    disabled={busy}
+                  >
+                    <Plus className="size-4" />
+                    {addFirstLabel}
+                  </Button>
+                ) : null}
+              </div>
+            }
+            toolbarStart={
+              <>
+                <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                  <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+                  {title}
+                </span>
+                {canEdit ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 shrink-0 self-center rounded-lg"
+                    onClick={openCreate}
+                    disabled={busy}
+                  >
+                    <Plus className="size-3.5" />
+                    {t.cases_workspace_item_add}
+                  </Button>
+                ) : null}
+                <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+              </>
+            }
+          />
+        </div>
+
+        <CaseItemEditSheet
+          open={sheet.mode !== "closed"}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) closeSheet();
+          }}
+          mode={sheet.mode === "edit" ? "edit" : "create"}
+          title={sheet.mode === "edit" ? sheetTitle.edit : sheetTitle.create}
+          description={sheetDescription}
+          busy={busy}
+          error={sheetError}
+          canSubmit={canEdit && isValid(form)}
+          canDelete={canEdit}
+          onSubmit={handleSubmit}
+          onDelete={sheet.mode === "edit" ? handleDelete : undefined}
+          width={sheetWidth}
+        >
+          {formContent({
+            form,
+            setForm,
+            updateField,
+            disabled: !canEdit || busy,
+          })}
+        </CaseItemEditSheet>
+      </>
+    );
+  }
+
   return (
     <>
       <Panel
@@ -182,7 +294,6 @@ export function CaseItemList<T>({
             {canEdit ? (
               <Button
                 type="button"
-                variant="outline"
                 size="sm"
                 className="h-8 rounded-lg"
                 onClick={openCreate}
@@ -212,7 +323,6 @@ export function CaseItemList<T>({
             {canEdit ? (
               <Button
                 type="button"
-                variant="outline"
                 className="mt-4 h-8 rounded-lg"
                 onClick={openCreate}
                 disabled={busy}
@@ -236,7 +346,7 @@ export function CaseItemList<T>({
                   "disabled:opacity-60 disabled:cursor-not-allowed",
                 )}
               >
-                {cardContent(item, index)}
+                {cardContent?.(item, index)}
               </button>
             ))}
           </div>

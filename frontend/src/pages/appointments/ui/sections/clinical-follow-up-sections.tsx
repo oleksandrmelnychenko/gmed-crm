@@ -9,10 +9,14 @@ import {
   type SetStateAction,
 } from "react";
 
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import {
+  DataTablePager,
+  useDataTablePagination,
+} from "@/components/data-table/data-table-pager";
 import type { ColumnDef } from "@/components/data-table/types";
 import {
   AppointmentRemindersTable,
@@ -311,6 +315,11 @@ function useAppointmentIncomingDataSectionContent({
     }
   }
 
+  const intakeChecklistPagination = useDataTablePagination(
+    checklist,
+    checklist.map((item) => item.id).join(":"),
+  );
+
   const intakeChecklistColumns = useMemo<ColumnDef<ChecklistItem>[]>(
     () => [
       {
@@ -545,14 +554,12 @@ function useAppointmentIncomingDataSectionContent({
         title={appointmentText("appointments_incoming_medical_data")}
         accessory={<CountBadge>{intakeStateLabel}</CountBadge>}
       >
-        <p className="text-sm text-muted-foreground">
-          {appointmentText("appointments_capture_new_medical_updates_from_patients_doctors_interp")}
-        </p>
+        {null}
       </Section>
 
       <div className="space-y-4">
         <DataTableSurface
-          rows={checklist}
+          rows={intakeChecklistPagination.pagedRows}
           columns={intakeChecklistColumns}
           rowId={(item) => item.id}
           dictionary={tr}
@@ -563,12 +570,23 @@ function useAppointmentIncomingDataSectionContent({
           }
           toolbarStart={
             <>
-              <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+              <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
                 {appointmentText("appointments_intake_checklist")}
               </span>
-              <CountBadge>{checklist.length}</CountBadge>
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
             </>
+          }
+          toolbarAfter={
+            <DataTablePager
+              pageIndex={intakeChecklistPagination.pageIndex}
+              pageSize={intakeChecklistPagination.pageSize}
+              totalPages={intakeChecklistPagination.totalPages}
+              totalRows={intakeChecklistPagination.totalRows}
+              previousLabel={t.pagination_previous}
+              nextLabel={t.pagination_next}
+              onPageChange={intakeChecklistPagination.onPageChange}
+            />
           }
           rowActions={(item) =>
             item.is_completed ? null : (
@@ -591,20 +609,21 @@ function useAppointmentIncomingDataSectionContent({
         />
 
         <div className="space-y-4">
-          <div className="flex items-center justify-end">
-            <Button
-              type="button"
-              size="sm"
-              className="h-8 rounded-lg gap-1.5"
-              onClick={() => setComposerOpen(true)}
-            >
-              {intakeComposerTitle}
-            </Button>
-          </div>
           <AppointmentRemindersTable
             reminders={reminders}
             title={appointmentText("appointments_reminders")}
             emptyText={appointmentText("appointments_no_reminders_or_tasks_exist_in_this_intake_flow_yet")}
+            toolbarExtra={
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 shrink-0 rounded-lg gap-1.5"
+                onClick={() => setComposerOpen(true)}
+              >
+                <Plus className="size-3.5" />
+                {intakeComposerTitle}
+              </Button>
+            }
           />
           <AppointmentTasksTable
             tasks={tasks}
@@ -987,6 +1006,11 @@ function useAppointmentFindingsSectionContent({
     }
   }
 
+  const findingsChecklistPagination = useDataTablePagination(
+    checklist,
+    checklist.map((item) => item.id).join(":"),
+  );
+
   const findingsChecklistColumns = useMemo<ColumnDef<ChecklistItem>[]>(
     () => [
       {
@@ -1230,7 +1254,7 @@ function useAppointmentFindingsSectionContent({
 
       <div className="space-y-4">
         <DataTableSurface
-          rows={checklist}
+          rows={findingsChecklistPagination.pagedRows}
           columns={findingsChecklistColumns}
           rowId={(item) => item.id}
           dictionary={tr}
@@ -1241,12 +1265,23 @@ function useAppointmentFindingsSectionContent({
           }
           toolbarStart={
             <>
-              <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+              <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
                 {appointmentText("appointments_follow_up_checklist")}
               </span>
-              <CountBadge>{checklist.length}</CountBadge>
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
             </>
+          }
+          toolbarAfter={
+            <DataTablePager
+              pageIndex={findingsChecklistPagination.pageIndex}
+              pageSize={findingsChecklistPagination.pageSize}
+              totalPages={findingsChecklistPagination.totalPages}
+              totalRows={findingsChecklistPagination.totalRows}
+              previousLabel={t.pagination_previous}
+              nextLabel={t.pagination_next}
+              onPageChange={findingsChecklistPagination.onPageChange}
+            />
           }
           rowActions={(item) =>
             item.is_completed ? null : (
@@ -1268,20 +1303,21 @@ function useAppointmentFindingsSectionContent({
           rowActionsWidth={130}
         />
 
-        <div className="flex items-center justify-end">
-          <Button
-            type="button"
-            size="sm"
-            className="h-8 rounded-lg gap-1.5"
-            onClick={() => setComposerOpen(true)}
-          >
-            {findingsComposerTitle}
-          </Button>
-        </div>
         <AppointmentRemindersTable
           reminders={reminders}
           title={appointmentText("appointments_reminders")}
           emptyText={appointmentText("appointments_no_reminders_or_tasks_exist_in_this_findings_follow_up_y")}
+          toolbarExtra={
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 shrink-0 rounded-lg gap-1.5"
+              onClick={() => setComposerOpen(true)}
+            >
+              <Plus className="size-3.5" />
+              {findingsComposerTitle}
+            </Button>
+          }
         />
         <AppointmentTasksTable
           tasks={tasks}

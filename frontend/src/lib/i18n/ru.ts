@@ -378,6 +378,7 @@ export const ru = {
   common_unknown: "Неизвестно",
   common_active: "Активен",
   common_inactive: "Неактивен",
+  patients_lifecycle_prospective: "Заявители",
   common_activity: "Активность",
   common_provider: "Провайдер",
   common_doctor: "Врач",

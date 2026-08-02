@@ -19,6 +19,7 @@ import {
   AppointmentTasksTable,
 } from "@/pages/appointments/ui/shared/follow-up-tables";
 import { CONFIRMED_DISMISS_REASON } from "@/components/ui/dismissal-guard";
+import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Input } from "@/components/ui/input";
 import {
   Banner,
@@ -110,6 +111,25 @@ import {
 
 const selectClassName = appointmentSelectControlClassName;
 const textareaClassName = appointmentTextareaControlClassName;
+
+const APPOINTMENT_STATUS_RANK: Partial<Record<AppointmentStatus, number>> = {
+  planned: 0,
+  confirmed: 1,
+  in_progress: 2,
+  completed: 3,
+};
+
+function canTransitionAppointmentStatus(
+  current: AppointmentStatus,
+  target: AppointmentStatus,
+) {
+  if (current === target) return true;
+  if (current === "completed" || current === "cancelled") return false;
+  if (target === "cancelled") return true;
+  const currentRank = APPOINTMENT_STATUS_RANK[current];
+  const targetRank = APPOINTMENT_STATUS_RANK[target];
+  return currentRank !== undefined && targetRank !== undefined && targetRank >= currentRank;
+}
 
 function withEllipsis(value: string | null | undefined) {
   const normalized = String(value ?? "").trim();
@@ -801,7 +821,7 @@ function InterpreterAssignmentManagement({
     () => [
       {
         id: "interpreter",
-        label: t.role_interpreter,
+        label: appointmentText("appointments_interpreter"),
         accessor: (row) => row.interpreter_name ?? "",
         required: true,
         width: 260,
@@ -814,11 +834,11 @@ function InterpreterAssignmentManagement({
       {
         id: "role",
         label: t.users_role,
-        accessor: () => t.role_interpreter,
+        accessor: () => appointmentText("appointments_interpreter"),
         width: 170,
         render: () => (
           <span className="inline-flex rounded-full border border-border/60 bg-muted/25 px-2 py-0.5 font-mono text-[10px] font-medium text-foreground">
-            {t.role_interpreter}
+            {appointmentText("appointments_interpreter")}
           </span>
         ),
       },
@@ -840,7 +860,8 @@ function InterpreterAssignmentManagement({
   return (
     <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
-        <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
+        <span className="flex shrink-0 items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
           {appointmentText("appointments_interpreter_assignment")}
         </span>
         <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
@@ -902,7 +923,7 @@ function InterpreterAssignmentManagement({
           <WorkflowSheetSection
             title={appointmentText("appointments_interpreter_assignment")}
           >
-            <Field compact label={t.role_interpreter}>
+            <Field compact label={appointmentText("appointments_interpreter")}>
               <NativeComboboxSelect
                 value={assignInterpreterId}
                 onChange={(event) => onSelect(event.target.value)}
@@ -911,7 +932,7 @@ function InterpreterAssignmentManagement({
                 <option value="">{t.common_not_set}</option>
                 {interpreters.map((member) => (
                   <option key={member.id} value={member.id}>
-                    {member.name} В· {roleLabel(member.role)}
+                    {member.name} · {roleLabel(member.role)}
                   </option>
                 ))}
               </NativeComboboxSelect>
@@ -1216,7 +1237,8 @@ function AppointmentChecklistSection({
       }
       toolbarStart={
         <>
-          <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+          <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
             {appointmentText("appointments_checklist")}
           </span>
           <Button
@@ -1459,7 +1481,7 @@ function AppointmentRemindersSection({
             {completingId === item.id ? (
               <LoaderCircle className="size-3.5 animate-spin" />
             ) : null}
-            {t.appointments_external_handoff_cancel}
+            {appointmentText("appointments_mark_complete")}
           </Button>
         )
       }
@@ -1712,12 +1734,14 @@ function AppointmentCompletionSectionContent({
 
   const canCompleteAppointment =
     detail.status !== "completed" && detail.status !== "cancelled";
+  const completionBlocked = openChecklistCount > 0;
 
   return (
     <>
     <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
       <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
-        <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
+        <span className="flex shrink-0 items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
           {appointmentText("appointments_completion_readiness")}
         </span>
         {canCompleteAppointment ? (
@@ -1727,7 +1751,7 @@ function AppointmentCompletionSectionContent({
               type="button"
               size="sm"
               className="h-8 shrink-0 rounded-lg gap-1.5"
-              disabled={Boolean(busyAction)}
+              disabled={Boolean(busyAction) || completionBlocked}
               onClick={() => setCompletionSheetOpen(true)}
             >
               <Plus className="size-3.5" />
@@ -1741,6 +1765,7 @@ function AppointmentCompletionSectionContent({
           <AppointmentStatusToggleControl
             detail={detail}
             openChecklistCount={openChecklistCount}
+            onRefresh={onRefresh}
             onError={onError}
           />
         </div>
@@ -1798,7 +1823,7 @@ function AppointmentCompletionSectionContent({
             <Button
               type="button"
               variant="outline"
-              disabled={Boolean(busyAction)}
+              disabled={Boolean(busyAction) || completionBlocked}
               onClick={handleCompleteOnly}
             >
               {t.appointments_complete_only}
@@ -1807,6 +1832,7 @@ function AppointmentCompletionSectionContent({
               type="button"
               disabled={
                 Boolean(busyAction) ||
+                completionBlocked ||
                 (selectedCompletionPresetCount > 0 && !followUpAssigneeId)
               }
               onClick={handleCompleteWithFollowUp}
@@ -1841,6 +1867,10 @@ function AppointmentStatusToggleControl({
   const [statusRecurrenceScope, setStatusRecurrenceScope] =
     useState<AppointmentRecurringActionScope>("single");
   const [busyAction, setBusyAction] = useState("");
+  const [pendingCancellation, setPendingCancellation] = useState<{
+    scope: AppointmentRecurringActionScope;
+    targetCount: number;
+  } | null>(null);
   const [optimisticStatus, setOptimisticStatus] = useState<{
     appointmentId: string;
     status: AppointmentStatus;
@@ -1883,7 +1913,7 @@ function AppointmentStatusToggleControl({
     status: AppointmentStatus,
     recurrenceScope: AppointmentRecurringActionScope = "single",
   ) {
-    if (status === visibleStatus) return;
+    if (status === visibleStatus && recurrenceScope === "single") return;
 
     const nextBusyAction = statusActionKey(detail.id, status, recurrenceScope);
     const previousStatus = visibleStatus;
@@ -1949,6 +1979,23 @@ function AppointmentStatusToggleControl({
               : "single";
             const nextBusyAction = statusActionKey(detail.id, status, recurrenceScope);
             const active = visibleStatus === status;
+            const isNoop = selectedRecurringStatusTargets.every(
+              (item) => item.status === status,
+            );
+            const transitionAllowed = selectedRecurringStatusTargets.every(
+              (item) =>
+                canTransitionAppointmentStatus(
+                  item.status as AppointmentStatus,
+                  status,
+                ),
+            );
+            const completionBlocked =
+              status === "completed" && completionScopeBlockers.length > 0;
+            const statusDisabled =
+              Boolean(busyAction) ||
+              isNoop ||
+              !transitionAllowed ||
+              completionBlocked;
             const statusOptionLabel =
               detail.recurrence_frequency && status === "cancelled"
                 ? statusRecurrenceScope === "following"
@@ -1961,10 +2008,25 @@ function AppointmentStatusToggleControl({
               <button
                 key={status}
                 type="button"
-                title={statusOptionLabel}
+                title={
+                  completionBlocked
+                    ? appointmentText("appointments_status_completion_blocked")
+                    : !transitionAllowed
+                      ? appointmentText("appointments_status_transition_not_allowed")
+                      : statusOptionLabel
+                }
                 aria-pressed={active}
-                disabled={Boolean(busyAction)}
-                onClick={() => handleStatusChange(status, recurrenceScope)}
+                disabled={statusDisabled}
+                onClick={() => {
+                  if (status === "cancelled") {
+                    setPendingCancellation({
+                      scope: recurrenceScope,
+                      targetCount: selectedRecurringStatusTargets.length,
+                    });
+                    return;
+                  }
+                  void handleStatusChange(status, recurrenceScope);
+                }}
                 className={cn(
                   "relative inline-flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-full border px-3 font-mono text-xs font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-70",
                   active
@@ -2013,6 +2075,25 @@ function AppointmentStatusToggleControl({
           ) : null}
         </div>
       ) : null}
+      <DirtyDismissConfirmDialog
+        open={pendingCancellation !== null}
+        title={appointmentText("appointments_cancel_confirmation_title")}
+        message={appointmentText("appointments_cancel_confirmation_message", {
+          count: pendingCancellation?.targetCount ?? 0,
+        })}
+        cancelLabel={t.common_cancel}
+        confirmLabel={appointmentText("appointments_cancel_confirmation_action")}
+        destructive
+        confirmDisabled={Boolean(busyAction)}
+        onCancel={() => setPendingCancellation(null)}
+        onConfirm={() => {
+          const scope = pendingCancellation?.scope;
+          setPendingCancellation(null);
+          if (scope) {
+            void handleStatusChange("cancelled", scope);
+          }
+        }}
+      />
     </div>
   );
 }
@@ -2317,7 +2398,7 @@ function AppointmentTaskEditorSheet({
                 <option value="">{tr.common_not_set}</option>
                 {assignableStaff.map((member) => (
                   <option key={member.id} value={member.id}>
-                    {member.name} В· {roleLabel(member.role)}
+                    {member.name} · {roleLabel(member.role)}
                   </option>
                 ))}
               </NativeComboboxSelect>

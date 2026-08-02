@@ -11,8 +11,9 @@ import {
   caseSectionLabel,
   normalizeCaseSectionKey,
 } from "@/pages/case-workspace/sections";
+import { useCaseSubjectKind } from "@/pages/case-workspace/subject-store";
 
-const GROUP_ORDER: readonly CaseSectionGroup[] = ["clinical", "specialty", "meta"];
+const GROUP_ORDER: readonly CaseSectionGroup[] = ["episode", "record", "meta"];
 
 export function CaseWorkspaceNav() {
   const { caseId } = useParams<{ caseId: string }>();
@@ -20,6 +21,7 @@ export function CaseWorkspaceNav() {
   const { t, lang } = useLang();
   const currentSection = normalizeCaseSectionKey(searchParams.get("section"));
   const patientContext = searchParams.get("patient");
+  const subjectKind = useCaseSubjectKind(caseId);
 
   if (!caseId) return null;
 
@@ -39,6 +41,9 @@ export function CaseWorkspaceNav() {
     items: Array<(typeof CASE_WORKSPACE_SECTIONS)[number]>;
   }> = [];
   for (const group of GROUP_ORDER) {
+    if (group === "record" && subjectKind === "lead") {
+      continue;
+    }
     const items = CASE_WORKSPACE_SECTIONS.filter((item) => item.group === group);
     if (items.length > 0) {
       groupedSections.push({ group, items });

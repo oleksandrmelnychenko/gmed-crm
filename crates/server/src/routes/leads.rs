@@ -45,6 +45,7 @@ pub fn router() -> Router<AppState> {
             post(promote_lead_to_console),
         )
         .route("/leads/{lead_id}/qualify", post(qualify_lead))
+        .route("/leads/{lead_id}/prospect", post(create_prospect_patient))
         .route("/leads/{lead_id}/convert", post(convert_lead))
         .route("/leads/{lead_id}/wizard-convert", post(wizard_convert_lead))
         .route("/leads/{lead_id}/failed-flow", post(resolve_failed_lead))
@@ -1068,6 +1069,9 @@ fn evaluate_lead_conversion_readiness(
 
     let qualification_ready = qualification_reasons.is_empty();
     let mut conversion_reasons = qualification_reasons.clone();
+    if !lead_qualified {
+        conversion_reasons.push("Lead must be qualified before conversion".to_string());
+    }
     if input.consent_healthcare && !address_present {
         conversion_reasons.push("Complete street, city and postal code".to_string());
     }
@@ -1597,7 +1601,18 @@ async fn get_lead(
                   failed_outcome_status, failed_from_status, failed_reason, failed_note,
                   failed_processed_at, failed_processed_by,
                   notes, user_agent, created_at, updated_at,
-                  requested_specialties, wizard_state, status_changed_at
+                  requested_specialties, wizard_state, status_changed_at,
+                  intake_model, prospect_patient_id,
+                  (
+                      SELECT p.lifecycle_status FROM patients p
+                      WHERE p.id = leads.prospect_patient_id
+                  ) AS prospect_patient_lifecycle,
+                  (
+                      SELECT c.id FROM cases c
+                      WHERE c.source_lead_id = leads.id
+                      ORDER BY c.created_at DESC, c.id DESC
+                      LIMIT 1
+                  ) AS prospect_case_id
            FROM leads
            WHERE id = $1"#,
     )
@@ -1919,6 +1934,37 @@ async fn get_lead(
     obj.insert(
         "converted_patient_id".into(),
         row.try_get::<Option<Uuid>, _>("converted_patient_id")
+            .ok()
+            .flatten()
+            .map(|id| json!(id))
+            .unwrap_or(Value::Null),
+    );
+    obj.insert(
+        "intake_model".into(),
+        Value::String(
+            row.try_get::<String, _>("intake_model")
+                .unwrap_or_else(|_| "legacy".to_string()),
+        ),
+    );
+    obj.insert(
+        "prospect_patient_id".into(),
+        row.try_get::<Option<Uuid>, _>("prospect_patient_id")
+            .ok()
+            .flatten()
+            .map(|id| json!(id))
+            .unwrap_or(Value::Null),
+    );
+    obj.insert(
+        "prospect_patient_lifecycle".into(),
+        row.try_get::<Option<String>, _>("prospect_patient_lifecycle")
+            .ok()
+            .flatten()
+            .map(Value::String)
+            .unwrap_or(Value::Null),
+    );
+    obj.insert(
+        "prospect_case_id".into(),
+        row.try_get::<Option<Uuid>, _>("prospect_case_id")
             .ok()
             .flatten()
             .map(|id| json!(id))
@@ -2609,477 +2655,6 @@ async fn qualify_lead(
     }
 }
 
-fn parse_lead_clinical_timestamp(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    chrono::DateTime::parse_from_rfc3339(trimmed)
-        .map(|value| value.with_timezone(&chrono::Utc))
-        .or_else(|_| {
-            chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M")
-                .map(|value| value.and_utc())
-        })
-        .or_else(|_| {
-            chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S")
-                .map(|value| value.and_utc())
-        })
-        .or_else(|_| {
-            chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S%.f")
-                .map(|value| value.and_utc())
-        })
-        .ok()
-}
-
-fn lead_narrative_timestamp(wizard_state: &Value) -> chrono::DateTime<chrono::Utc> {
-    wizard_state
-        .pointer("/clinical_draft/narrative/anamnese_at")
-        .or_else(|| wizard_state.pointer("/clinical_draft/narrative/anamneseAt"))
-        .and_then(Value::as_str)
-        .and_then(parse_lead_clinical_timestamp)
-        .unwrap_or_else(chrono::Utc::now)
-}
-
-async fn transfer_lead_clinical_profile(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    lead_id: Uuid,
-    patient_id: Uuid,
-    wizard_state: &Value,
-) -> Result<(), sqlx::Error> {
-    let wizard_state_json = wizard_state.to_string();
-    let anamnese_at = lead_narrative_timestamp(wizard_state);
-
-    sqlx::query(
-        r#"INSERT INTO patient_clinical_narrative
-                  (patient_id, anamnese_aktuelle, anamnese_vorgeschichte,
-                   anamnese_vegetative, anamnese_sozial, beurteilung, anamnese_at, is_active)
-           SELECT $2,
-                  COALESCE(
-                      NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_aktuelle}'), ''),
-                      NULLIF(btrim(case_data.aktuelle_anamnese), ''),
-                      NULLIF(btrim(lead.additional_concerns), '')
-                  ),
-                  NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_vorgeschichte}'), ''),
-                  NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_vegetative}'), ''),
-                  NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_sozial}'), ''),
-                  NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,beurteilung}'), ''),
-                  $4,
-                  true
-           FROM leads lead
-           LEFT JOIN LATERAL (
-               SELECT aktuelle_anamnese
-               FROM cases
-               WHERE lead_id = lead.id
-               ORDER BY created_at
-               LIMIT 1
-           ) case_data ON true
-           WHERE lead.id = $1
-             AND (
-                 COALESCE(
-                     NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_aktuelle}'), ''),
-                     NULLIF(btrim(case_data.aktuelle_anamnese), ''),
-                     NULLIF(btrim(lead.additional_concerns), '')
-                 ) IS NOT NULL
-                 OR NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_vorgeschichte}'), '') IS NOT NULL
-                 OR NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_vegetative}'), '') IS NOT NULL
-                 OR NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,anamnese_sozial}'), '') IS NOT NULL
-                 OR NULLIF(btrim($3::jsonb #>> '{clinical_draft,narrative,beurteilung}'), '') IS NOT NULL
-             )"#,
-    )
-    .bind(lead_id)
-    .bind(patient_id)
-    .bind(&wizard_state_json)
-    .bind(anamnese_at)
-    .execute(&mut **tx)
-    .await?;
-
-    sqlx::query(
-        r#"WITH draft AS MATERIALIZED (
-               SELECT uuid_generate_v4() AS id,
-                      entry.value,
-                      entry.ordinality,
-                      COALESCE(
-                          NULLIF(btrim(entry.value->>'cid'), ''),
-                          NULLIF(btrim(entry.value->>'id'), ''),
-                          'lead-diagnosis-' || entry.ordinality::text
-                      ) AS cid,
-                      NULLIF(btrim(COALESCE(
-                          entry.value->>'parent_cid',
-                          entry.value->>'parentCid',
-                          entry.value->>'parent_id'
-                      )), '') AS parent_cid,
-                      CASE
-                          WHEN entry.value->>'kind' IN ('main', 'secondary', 'prozedur')
-                          THEN entry.value->>'kind'
-                          WHEN entry.ordinality = 1 THEN 'main'
-                          ELSE 'secondary'
-                      END AS kind,
-                      CASE
-                          WHEN COALESCE(entry.value->>'provider_id', entry.value->>'providerId', '')
-                               ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-                          THEN COALESCE(entry.value->>'provider_id', entry.value->>'providerId')::uuid
-                          ELSE NULL
-                      END AS provider_uuid,
-                      CASE
-                          WHEN COALESCE(entry.value->>'doctor_id', entry.value->>'doctorId', '')
-                               ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-                          THEN COALESCE(entry.value->>'doctor_id', entry.value->>'doctorId')::uuid
-                          ELSE NULL
-                      END AS doctor_uuid,
-                      CASE
-                          WHEN COALESCE(entry.value->>'treating_doctor_id', entry.value->>'treatingDoctorId', '')
-                               ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-                          THEN COALESCE(entry.value->>'treating_doctor_id', entry.value->>'treatingDoctorId')::uuid
-                          ELSE NULL
-                      END AS treating_uuid
-               FROM jsonb_array_elements(
-                   COALESCE($2::jsonb #> '{clinical_draft,diagnoses}', '[]'::jsonb)
-               ) WITH ORDINALITY AS entry(value, ordinality)
-               WHERE btrim(COALESCE(entry.value->>'label', '')) <> ''
-           )
-           INSERT INTO patient_diagnoses
-                  (id, patient_id, parent_id, provider_id, doctor_id, kind, label,
-                   icd_code, ops_code, certainty, chronifizierung, status,
-                   diagnosed_on, note, sort_order, source_mode, external_clinic,
-                   external_doctor, external_country, treating_doctor_id, treating_none)
-           SELECT draft.id,
-                  $1,
-                  CASE WHEN draft.kind = 'main' THEN NULL ELSE parent.id END,
-                  CASE
-                      WHEN COALESCE(draft.value->>'source_mode', draft.value->>'sourceMode') = 'extern'
-                      THEN NULL
-                      ELSE COALESCE(
-                          provider.id,
-                          CASE WHEN doctor_provider.id IS NOT NULL THEN doctor.provider_id END
-                      )
-                  END,
-                  CASE
-                      WHEN COALESCE(draft.value->>'source_mode', draft.value->>'sourceMode') = 'extern'
-                      THEN NULL
-                      WHEN doctor_provider.id IS NOT NULL
-                           AND (provider.id IS NULL OR doctor_link.doctor_id IS NOT NULL)
-                      THEN doctor.id
-                      ELSE NULL
-                  END,
-                  draft.kind,
-                  btrim(draft.value->>'label'),
-                  NULLIF(btrim(COALESCE(draft.value->>'icd_code', draft.value->>'icdCode')), ''),
-                  NULLIF(btrim(COALESCE(draft.value->>'ops_code', draft.value->>'opsCode')), ''),
-                  CASE
-                      WHEN draft.kind = 'prozedur' THEN NULL
-                      WHEN draft.value->>'certainty' IN ('verdacht', 'bestaetigt', 'zustand_nach')
-                      THEN draft.value->>'certainty'
-                      ELSE 'bestaetigt'
-                  END,
-                  CASE
-                      WHEN COALESCE(draft.value->>'chronifizierung', draft.value->>'chronification')
-                           IN ('akut', 'chronisch', 'rezidivierend')
-                      THEN COALESCE(draft.value->>'chronifizierung', draft.value->>'chronification')
-                      ELSE NULL
-                  END,
-                  CASE
-                      WHEN draft.value->>'status' IN ('active', 'chronic', 'resolved')
-                      THEN draft.value->>'status'
-                      WHEN COALESCE(draft.value->>'chronifizierung', draft.value->>'chronification') = 'chronisch'
-                      THEN 'chronic'
-                      ELSE 'active'
-                  END,
-                  NULLIF(btrim(COALESCE(draft.value->>'diagnosed_on', draft.value->>'diagnosedOn')), ''),
-                  NULLIF(btrim(draft.value->>'note'), ''),
-                  (draft.ordinality - 1)::int,
-                  CASE
-                      WHEN COALESCE(draft.value->>'source_mode', draft.value->>'sourceMode') = 'extern'
-                      THEN 'extern'
-                      ELSE 'intern'
-                  END,
-                  CASE
-                      WHEN COALESCE(draft.value->>'source_mode', draft.value->>'sourceMode') = 'extern'
-                      THEN NULLIF(btrim(COALESCE(draft.value->>'external_clinic', draft.value->>'externalClinic')), '')
-                      ELSE NULL
-                  END,
-                  CASE
-                      WHEN COALESCE(draft.value->>'source_mode', draft.value->>'sourceMode') = 'extern'
-                      THEN NULLIF(btrim(COALESCE(draft.value->>'external_doctor', draft.value->>'externalDoctor')), '')
-                      ELSE NULL
-                  END,
-                  CASE
-                      WHEN COALESCE(draft.value->>'source_mode', draft.value->>'sourceMode') = 'extern'
-                      THEN NULLIF(btrim(COALESCE(draft.value->>'external_country', draft.value->>'externalCountry')), '')
-                      ELSE NULL
-                  END,
-                  CASE
-                      WHEN COALESCE(draft.value->>'treating_none', draft.value->>'treatingNone', 'false') = 'true'
-                      THEN NULL
-                      WHEN treating_provider.id IS NOT NULL THEN treating.id
-                      ELSE NULL
-                  END,
-                  COALESCE(draft.value->>'treating_none', draft.value->>'treatingNone', 'false') = 'true'
-           FROM draft
-           LEFT JOIN draft parent ON parent.cid = draft.parent_cid
-           LEFT JOIN providers provider
-                  ON provider.id = draft.provider_uuid
-                 AND provider.provider_type = 'medical'
-           LEFT JOIN provider_doctors doctor ON doctor.id = draft.doctor_uuid
-           LEFT JOIN providers doctor_provider
-                  ON doctor_provider.id = doctor.provider_id
-                 AND doctor_provider.provider_type = 'medical'
-           LEFT JOIN provider_doctor_links doctor_link
-                  ON doctor_link.provider_id = provider.id
-                 AND doctor_link.doctor_id = doctor.id
-           LEFT JOIN provider_doctors treating ON treating.id = draft.treating_uuid
-           LEFT JOIN providers treating_provider
-                  ON treating_provider.id = treating.provider_id
-                 AND treating_provider.provider_type = 'medical'
-           WHERE draft.kind <> 'prozedur' OR parent.id IS NOT NULL"#,
-    )
-    .bind(patient_id)
-    .bind(&wizard_state_json)
-    .execute(&mut **tx)
-    .await?;
-
-    sqlx::query(
-        r#"INSERT INTO patient_diagnoses
-                  (patient_id, kind, label, certainty, status, diagnosed_on,
-                   note, sort_order, source_mode)
-           SELECT $2,
-                  CASE WHEN condition.sort_order = 0 THEN 'main' ELSE 'secondary' END,
-                  condition.erkrankung,
-                  'bestaetigt',
-                  'active',
-                  condition.erstdiagnose,
-                  condition.notiz,
-                  condition.sort_order,
-                  'intern'
-           FROM cases case_row
-           JOIN vorerkrankungen condition ON condition.case_id = case_row.id
-           WHERE case_row.lead_id = $1
-             AND NOT EXISTS (
-                 SELECT 1
-                 FROM jsonb_array_elements(
-                     COALESCE($3::jsonb #> '{clinical_draft,diagnoses}', '[]'::jsonb)
-                 ) AS draft(value)
-                 WHERE btrim(COALESCE(draft.value->>'label', '')) <> ''
-             )
-           ORDER BY condition.sort_order"#,
-    )
-    .bind(lead_id)
-    .bind(patient_id)
-    .bind(&wizard_state_json)
-    .execute(&mut **tx)
-    .await?;
-
-    sqlx::query(
-        r#"WITH draft AS (
-               SELECT entry.value,
-                      entry.ordinality,
-                      CASE
-                          WHEN COALESCE(entry.value->>'provider_id', entry.value->>'providerId', '')
-                               ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-                          THEN COALESCE(entry.value->>'provider_id', entry.value->>'providerId')::uuid
-                          ELSE NULL
-                      END AS provider_uuid,
-                      CASE
-                          WHEN COALESCE(
-                                   entry.value->>'doctor_id',
-                                   entry.value->>'doctorId',
-                                   entry.value->>'prescriberId',
-                                   ''
-                               ) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-                          THEN COALESCE(
-                              entry.value->>'doctor_id',
-                              entry.value->>'doctorId',
-                              entry.value->>'prescriberId'
-                          )::uuid
-                          ELSE NULL
-                      END AS doctor_uuid
-               FROM jsonb_array_elements(
-                   COALESCE($2::jsonb #> '{clinical_draft,medications}', '[]'::jsonb)
-               ) WITH ORDINALITY AS entry(value, ordinality)
-               WHERE btrim(COALESCE(
-                   entry.value->>'wirkstoff', entry.value->>'activeIngredient',
-                   entry.value->>'handelsname', entry.value->>'name', ''
-               )) <> ''
-           )
-           INSERT INTO patient_medications
-                  (patient_id, provider_id, doctor_id, category, wirkstoff,
-                   handelsname, staerke, form, einheit, hinweis, grund,
-                   einnahmeform, dose_morgens, dose_mittags, dose_abends,
-                   dose_nachts, verordnet_am, einnahme_von, einnahme_bis,
-                   status, apothekenpflichtig, rezeptpflichtig, btm,
-                   aut_idem_sperre, abgabebeschraenkung,
-                   sonstige_vermerke, on_hold, hold_from, hold_until, hold_note, sort_order)
-           SELECT $1,
-                  COALESCE(
-                      provider.id,
-                      CASE WHEN doctor_provider.id IS NOT NULL THEN doctor.provider_id END
-                  ),
-                  CASE
-                      WHEN doctor_provider.id IS NOT NULL
-                           AND (provider.id IS NULL OR doctor_link.doctor_id IS NOT NULL)
-                      THEN doctor.id
-                      ELSE NULL
-                  END,
-                  CASE
-                      WHEN draft.value->>'category' IN ('dauer', 'besondere', 'selbst')
-                      THEN draft.value->>'category'
-                      WHEN draft.value->>'medicationType' = 'permanent' THEN 'dauer'
-                      ELSE 'besondere'
-                  END,
-                   btrim(COALESCE(
-                       draft.value->>'wirkstoff', draft.value->>'activeIngredient',
-                       draft.value->>'handelsname', draft.value->>'name'
-                   )),
-                   btrim(COALESCE(draft.value->>'handelsname', draft.value->>'name', '')),
-                  COALESCE(
-                      NULLIF(btrim(draft.value->>'staerke'), ''),
-                      NULLIF(btrim(concat_ws(' ', draft.value->>'dose', draft.value->>'doseUnit')), '')
-                  ),
-                  NULLIF(btrim(draft.value->>'form'), ''),
-                  NULLIF(btrim(COALESCE(draft.value->>'einheit', draft.value->>'unit')), ''),
-                  NULLIF(btrim(COALESCE(draft.value->>'hinweis', draft.value->>'schedule')), ''),
-                  NULLIF(btrim(COALESCE(draft.value->>'grund', draft.value->>'reason')), ''),
-                  NULLIF(btrim(COALESCE(draft.value->>'einnahmeform', draft.value->>'route')), ''),
-                  NULLIF(btrim(COALESCE(draft.value->>'dose_morgens', draft.value->>'doseMorning')), ''),
-                  NULLIF(btrim(COALESCE(draft.value->>'dose_mittags', draft.value->>'doseNoon')), ''),
-                  NULLIF(btrim(COALESCE(draft.value->>'dose_abends', draft.value->>'doseEvening')), ''),
-                  NULLIF(btrim(COALESCE(draft.value->>'dose_nachts', draft.value->>'doseNight')), ''),
-                  NULLIF(btrim(COALESCE(draft.value->>'verordnet_am', draft.value->>'prescribedOn')), ''),
-                  NULLIF(btrim(COALESCE(draft.value->>'einnahme_von', draft.value->>'since')), ''),
-                  NULLIF(btrim(COALESCE(draft.value->>'einnahme_bis', draft.value->>'expiryDate')), ''),
-                  CASE
-                      WHEN draft.value->>'status' IN ('aktiv', 'pausiert', 'abgesetzt', 'geplant')
-                      THEN draft.value->>'status'
-                      ELSE 'aktiv'
-                  END,
-                  COALESCE(draft.value->>'apothekenpflichtig', draft.value->>'pharmacyOnly', 'false') = 'true',
-                  COALESCE(draft.value->>'rezeptpflichtig', draft.value->>'prescriptionOnly', 'false') = 'true',
-                  COALESCE(draft.value->>'btm', 'false') = 'true',
-                  COALESCE(draft.value->>'aut_idem_sperre', draft.value->>'autIdemBlocked', 'false') = 'true',
-                  COALESCE(draft.value->>'abgabebeschraenkung', draft.value->>'dispensingRestricted', 'false') = 'true',
-                  COALESCE(
-                      NULLIF(btrim(draft.value->>'sonstige_vermerke'), ''),
-                      NULLIF(btrim(concat_ws(E'\n', draft.value->>'note', draft.value->>'otherNotes')), '')
-                  ),
-                  COALESCE(draft.value->>'on_hold', draft.value->>'onHold', 'false') = 'true',
-                  NULLIF(btrim(COALESCE(draft.value->>'hold_from', draft.value->>'holdFrom')), ''),
-                  NULLIF(btrim(COALESCE(draft.value->>'hold_until', draft.value->>'holdUntil')), ''),
-                  NULLIF(btrim(COALESCE(draft.value->>'hold_note', draft.value->>'holdNote')), ''),
-                  (draft.ordinality - 1)::int
-           FROM draft
-           LEFT JOIN providers provider
-                  ON provider.id = draft.provider_uuid
-                 AND provider.provider_type = 'medical'
-           LEFT JOIN provider_doctors doctor ON doctor.id = draft.doctor_uuid
-           LEFT JOIN providers doctor_provider
-                  ON doctor_provider.id = doctor.provider_id
-                 AND doctor_provider.provider_type = 'medical'
-           LEFT JOIN provider_doctor_links doctor_link
-                  ON doctor_link.provider_id = provider.id
-                 AND doctor_link.doctor_id = doctor.id"#,
-    )
-    .bind(patient_id)
-    .bind(&wizard_state_json)
-    .execute(&mut **tx)
-    .await?;
-
-    sqlx::query(
-        r#"INSERT INTO patient_medications
-                  (patient_id, provider_id, doctor_id, category, wirkstoff,
-                   handelsname, staerke, form, einheit, hinweis, grund,
-                   einnahme_von, einnahme_bis, status, sonstige_vermerke, sort_order)
-           SELECT $2,
-                  doctor.provider_id,
-                  medication.verordnender_arzt_id,
-                  CASE WHEN medication.med_typ = 'permanent' THEN 'dauer' ELSE 'besondere' END,
-                  medication.wirkstoff,
-                  medication.handelsname,
-                  NULLIF(btrim(concat_ws(' ', medication.dosis, medication.dosis_einheit)), ''),
-                  medication.darreichungsform,
-                  medication.einheit,
-                  medication.einnahmeschema,
-                  medication.grund,
-                  medication.seit,
-                  medication.expiry_date::text,
-                  'aktiv',
-                  medication.anmerkung,
-                  medication.sort_order
-           FROM cases case_row
-           JOIN medikamente medication ON medication.case_id = case_row.id
-           LEFT JOIN provider_doctors doctor ON doctor.id = medication.verordnender_arzt_id
-           WHERE case_row.lead_id = $1
-             AND NOT EXISTS (
-                 SELECT 1
-                 FROM jsonb_array_elements(
-                     COALESCE($3::jsonb #> '{clinical_draft,medications}', '[]'::jsonb)
-                 ) AS draft(value)
-                  WHERE btrim(COALESCE(
-                      draft.value->>'wirkstoff', draft.value->>'activeIngredient',
-                      draft.value->>'handelsname', draft.value->>'name', ''
-                  )) <> ''
-             )
-           ORDER BY medication.sort_order"#,
-    )
-    .bind(lead_id)
-    .bind(patient_id)
-    .bind(&wizard_state_json)
-    .execute(&mut **tx)
-    .await?;
-
-    sqlx::query(
-        r#"WITH draft_warnings AS (
-               SELECT 'allergie'::text AS kind, entry.value, entry.ordinality
-               FROM jsonb_array_elements(
-                   COALESCE($2::jsonb #> '{clinical_draft,allergies}', '[]'::jsonb)
-               ) WITH ORDINALITY AS entry(value, ordinality)
-               UNION ALL
-               SELECT 'cave'::text AS kind, entry.value, entry.ordinality
-               FROM jsonb_array_elements(
-                   COALESCE($2::jsonb #> '{clinical_draft,caves}', '[]'::jsonb)
-               ) WITH ORDINALITY AS entry(value, ordinality)
-           )
-           INSERT INTO patient_clinical_warnings
-                  (patient_id, kind, label, reaction, severity, note, sort_order)
-           SELECT $1,
-                  warning.kind,
-                  btrim(warning.value->>'label'),
-                  CASE WHEN warning.kind = 'allergie' THEN NULLIF(btrim(warning.value->>'reaction'), '') ELSE NULL END,
-                  CASE WHEN warning.kind = 'allergie' THEN NULLIF(btrim(warning.value->>'severity'), '') ELSE NULL END,
-                  NULLIF(btrim(warning.value->>'note'), ''),
-                  (warning.ordinality - 1)::int
-           FROM draft_warnings warning
-           WHERE btrim(COALESCE(warning.value->>'label', '')) <> ''"#,
-    )
-    .bind(patient_id)
-    .bind(&wizard_state_json)
-    .execute(&mut **tx)
-    .await?;
-
-    sqlx::query(
-        r#"INSERT INTO patient_clinical_warnings
-                  (patient_id, kind, label, reaction, sort_order)
-           SELECT $2, 'allergie', allergy.allergie, allergy.reaktion, allergy.sort_order
-           FROM cases case_row
-           JOIN allergien allergy ON allergy.case_id = case_row.id
-           WHERE case_row.lead_id = $1
-             AND NOT EXISTS (
-                 SELECT 1
-                 FROM jsonb_array_elements(
-                     COALESCE($3::jsonb #> '{clinical_draft,allergies}', '[]'::jsonb)
-                 ) AS draft(value)
-                 WHERE btrim(COALESCE(draft.value->>'label', '')) <> ''
-             )
-           ORDER BY allergy.sort_order"#,
-    )
-    .bind(lead_id)
-    .bind(patient_id)
-    .bind(&wizard_state_json)
-    .execute(&mut **tx)
-    .await?;
-
-    Ok(())
-}
-
 #[derive(Debug, PartialEq, Eq)]
 struct LeadPatientContact {
     contact_kind: &'static str,
@@ -3418,6 +2993,671 @@ async fn import_lead_attachments(
     }
 }
 
+#[derive(Deserialize)]
+struct ProspectRequest {
+    attach_patient_id: Option<Uuid>,
+    force_create: Option<bool>,
+    hauptanfragegrund: Option<String>,
+    zuweiser: Option<String>,
+}
+
+async fn ensure_prospect_case(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    patient_id: Uuid,
+    manager_id: Uuid,
+    concern: &str,
+    zuweiser: &str,
+    retention_years: i64,
+) -> Result<(Uuid, String), sqlx::Error> {
+    let existing = sqlx::query(
+        "SELECT id, case_id FROM cases WHERE source_lead_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1",
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if let Some(row) = existing {
+        let id: Uuid = row.try_get("id")?;
+        let code: String = row.try_get("case_id")?;
+        sqlx::query(
+            r#"UPDATE cases
+               SET patient_id = $2,
+                   lead_id = NULL,
+                   source_lead_id = $1,
+                   hauptanfragegrund = COALESCE(NULLIF(btrim($3), ''), hauptanfragegrund),
+                   zuweiser = COALESCE(NULLIF(btrim($4), ''), zuweiser),
+                   retention_until = GREATEST(
+                       COALESCE(retention_until, now()),
+                       now() + make_interval(years => $5::int)
+                   ),
+                   updated_at = now()
+               WHERE id = $6"#,
+        )
+        .bind(lead_id)
+        .bind(patient_id)
+        .bind(concern)
+        .bind(zuweiser)
+        .bind(retention_years as i32)
+        .bind(id)
+        .execute(&mut **tx)
+        .await?;
+        return Ok((id, code));
+    }
+
+    let seq: i64 = sqlx::query_scalar::<_, i64>("SELECT nextval('case_id_seq')")
+        .fetch_one(&mut **tx)
+        .await?;
+    let code = format!("C-{}-{:04}", chrono::Utc::now().format("%Y%m%d"), seq);
+    let id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO cases (case_id, patient_id, source_lead_id, manager_id,
+                              hauptanfragegrund, zuweiser, retention_until)
+           VALUES ($1, $2, $3, $4, NULLIF(btrim($5), ''),
+                   NULLIF(btrim($6), ''), now() + make_interval(years => $7::int))
+           RETURNING id"#,
+    )
+    .bind(&code)
+    .bind(patient_id)
+    .bind(lead_id)
+    .bind(manager_id)
+    .bind(concern)
+    .bind(zuweiser)
+    .bind(retention_years as i32)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok((id, code))
+}
+
+async fn ensure_prospect_assignments(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_id: Uuid,
+    case_id: Uuid,
+    actor_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+           SELECT $1, $2, $2
+           UNION
+           SELECT $1, c.manager_id, $2
+           FROM cases c
+           WHERE c.id = $3
+           ON CONFLICT (patient_id, user_id) DO UPDATE
+           SET assigned_by = EXCLUDED.assigned_by,
+               assigned_at = now(),
+               revoked_at = NULL"#,
+    )
+    .bind(patient_id)
+    .bind(actor_id)
+    .bind(case_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+fn prospect_case_response(
+    patient_id: Uuid,
+    patient_pid: &str,
+    case_id: Uuid,
+    case_code: &str,
+    lifecycle_status: &str,
+    already_exists: bool,
+    attached: bool,
+) -> axum::response::Response {
+    Json(json!({
+        "patient_id": patient_id,
+        "patient_pid": patient_pid,
+        "case_id": case_id,
+        "case_code": case_code,
+        "lifecycle_status": lifecycle_status,
+        "already_exists": already_exists,
+        "attached": attached,
+    }))
+    .into_response()
+}
+
+async fn create_prospect_patient(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+    Json(body): Json<ProspectRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
+        return e;
+    }
+
+    let retention_years =
+        crate::routes::patients::load_patient_clinical_retention_years(&state, 30).await;
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, lead_id = %lead_id, "begin prospect creation");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    let lead = match sqlx::query(
+        r#"SELECT id, first_name, middle_name, last_name, suffix,
+                  date_of_birth, legal_sex, email, phone, phones, whatsapp_number,
+                  country, primary_language, locale,
+                  has_insurance, insurance_provider, insurance_number, insurance_type,
+                  trusted_contact_name, trusted_contact_phone, trusted_contact_relation,
+                  street_address, city, zip_code, notes,
+                  primary_concern_text, additional_concerns,
+                  qualification_status, converted_patient_id, failed_outcome_status,
+                  prospect_patient_id, intake_model, wizard_state,
+                  to_jsonb(leads) AS lead_snapshot
+           FROM leads WHERE id = $1
+           FOR UPDATE"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
+        Err(error) => {
+            tracing::error!(error = %error, lead_id = %lead_id, "load lead for prospect creation");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    if lead
+        .try_get::<Option<Uuid>, _>("converted_patient_id")
+        .unwrap_or_default()
+        .is_some()
+    {
+        return err(StatusCode::CONFLICT, "Lead already converted");
+    }
+    let failed_outcome_status: String = lead
+        .try_get("failed_outcome_status")
+        .unwrap_or_else(|_| "none".to_string());
+    if failed_outcome_status != "none" {
+        return err(
+            StatusCode::CONFLICT,
+            "Failed leads cannot receive a prospect patient",
+        );
+    }
+    let intake_model: String = lead
+        .try_get("intake_model")
+        .unwrap_or_else(|_| "legacy".to_string());
+    if intake_model != "patient_first" {
+        return err(
+            StatusCode::CONFLICT,
+            "Legacy leads keep the copy-on-convert intake flow",
+        );
+    }
+
+    let concern = body
+        .hauptanfragegrund
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .or_else(|| {
+            lead.try_get::<Option<String>, _>("primary_concern_text")
+                .ok()
+                .flatten()
+        })
+        .unwrap_or_default();
+    let zuweiser = body
+        .zuweiser
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
+
+    if let Some(existing) = lead
+        .try_get::<Option<Uuid>, _>("prospect_patient_id")
+        .ok()
+        .flatten()
+    {
+        let patient =
+            match sqlx::query("SELECT patient_id, lifecycle_status FROM patients WHERE id = $1")
+                .bind(existing)
+                .fetch_optional(&mut *tx)
+                .await
+            {
+                Ok(Some(row)) => row,
+                Ok(None) => return err(StatusCode::CONFLICT, "Prospect patient no longer exists"),
+                Err(error) => {
+                    tracing::error!(error = %error, lead_id = %lead_id, "load existing prospect");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            };
+        let (case_uuid, case_code) = match ensure_prospect_case(
+            &mut tx,
+            lead_id,
+            existing,
+            auth.user_id,
+            &concern,
+            &zuweiser,
+            retention_years,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(error = %error, lead_id = %lead_id, "ensure prospect case");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+        if let Err(error) =
+            ensure_prospect_assignments(&mut tx, existing, case_uuid, auth.user_id).await
+        {
+            tracing::error!(error = %error, lead_id = %lead_id, patient_id = %existing, "assign existing prospect patient");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        if let Err(error) = tx.commit().await {
+            tracing::error!(error = %error, lead_id = %lead_id, "commit prospect lookup");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        let pid: String = patient.try_get("patient_id").unwrap_or_default();
+        let lifecycle: String = patient.try_get("lifecycle_status").unwrap_or_default();
+        return prospect_case_response(
+            existing, &pid, case_uuid, &case_code, &lifecycle, true, false,
+        );
+    }
+
+    let first_name = [
+        lead.try_get::<String, _>("first_name").unwrap_or_default(),
+        lead.try_get::<Option<String>, _>("middle_name")
+            .unwrap_or_default()
+            .unwrap_or_default(),
+    ]
+    .into_iter()
+    .filter(|value| !value.trim().is_empty())
+    .collect::<Vec<_>>()
+    .join(" ");
+    let last_name = [
+        lead.try_get::<String, _>("last_name").unwrap_or_default(),
+        lead.try_get::<Option<String>, _>("suffix")
+            .unwrap_or_default()
+            .unwrap_or_default(),
+    ]
+    .into_iter()
+    .filter(|value| !value.trim().is_empty())
+    .collect::<Vec<_>>()
+    .join(" ");
+    let date_of_birth: Option<NaiveDate> = lead.try_get("date_of_birth").ok().flatten();
+    let legal_sex: Option<String> = lead.try_get("legal_sex").ok().flatten();
+    let gender = match legal_sex.as_deref() {
+        Some("female") => Some("female"),
+        Some("male") => Some("male"),
+        Some("diverse") | Some("no_entry") => Some("diverse"),
+        Some(_) | None => None,
+    };
+
+    let mut missing = Vec::new();
+    if first_name.trim().is_empty() {
+        missing.push("first_name");
+    }
+    if last_name.trim().is_empty() {
+        missing.push("last_name");
+    }
+    if date_of_birth.is_none() {
+        missing.push("date_of_birth");
+    }
+    if gender.is_none() {
+        missing.push("legal_sex");
+    }
+    if !missing.is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "Lead master data is incomplete for a prospect patient",
+                "missing": missing,
+            })),
+        )
+            .into_response();
+    }
+    let Some(birth_date) = date_of_birth else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Lead is missing date_of_birth",
+        );
+    };
+    let Some(gender) = gender else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Lead is missing legal_sex",
+        );
+    };
+
+    if let Some(attach_id) = body.attach_patient_id {
+        let attachable = match sqlx::query(
+            r#"SELECT patient_id, lifecycle_status
+               FROM patients
+               WHERE id = $1
+                 AND lifecycle_status IN ('active', 'inactive')
+                 AND lower(btrim(first_name)) = lower(btrim($2))
+                 AND lower(btrim(last_name)) = lower(btrim($3))
+                 AND birth_date = $4
+               FOR UPDATE"#,
+        )
+        .bind(attach_id)
+        .bind(&first_name)
+        .bind(&last_name)
+        .bind(birth_date)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(Some(row)) => row,
+            Ok(None) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Patient to attach was not found or is not attachable",
+                );
+            }
+            Err(error) => {
+                tracing::error!(error = %error, lead_id = %lead_id, "validate attach patient");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+        if let Err(error) = sqlx::query("UPDATE leads SET prospect_patient_id = $2 WHERE id = $1")
+            .bind(lead_id)
+            .bind(attach_id)
+            .execute(&mut *tx)
+            .await
+        {
+            tracing::error!(error = %error, lead_id = %lead_id, "attach prospect patient");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        let (case_uuid, case_code) = match ensure_prospect_case(
+            &mut tx,
+            lead_id,
+            attach_id,
+            auth.user_id,
+            &concern,
+            &zuweiser,
+            retention_years,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(error = %error, lead_id = %lead_id, "create case for attached patient");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+        if let Err(error) =
+            ensure_prospect_assignments(&mut tx, attach_id, case_uuid, auth.user_id).await
+        {
+            tracing::error!(error = %error, lead_id = %lead_id, patient_id = %attach_id, "assign attached patient");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        if let Err(error) = tx.commit().await {
+            tracing::error!(error = %error, lead_id = %lead_id, "commit prospect attach");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        state.audit_sender.try_send(audit::domain_event(
+            "attach_prospect_patient",
+            Some(auth.user_id),
+            "lead",
+            Some(lead_id),
+            json!({ "patient_id": attach_id, "case_id": case_uuid }),
+        ));
+        crate::realtime::publish_lead_event(
+            &state,
+            Some(auth.user_id),
+            "lead.updated",
+            lead_id,
+            json!({ "prospect_patient_id": attach_id }),
+        )
+        .await;
+        let pid: String = attachable.try_get("patient_id").unwrap_or_default();
+        let lifecycle: String = attachable.try_get("lifecycle_status").unwrap_or_default();
+        return prospect_case_response(
+            attach_id, &pid, case_uuid, &case_code, &lifecycle, false, true,
+        );
+    }
+
+    if !body.force_create.unwrap_or(false) {
+        let candidates = match sqlx::query(
+            r#"SELECT id, patient_id, first_name, last_name, birth_date,
+                      lifecycle_status, email, residence_country
+               FROM patients
+               WHERE lifecycle_status IN ('active', 'inactive')
+                 AND lower(btrim(first_name)) = lower(btrim($1))
+                 AND lower(btrim(last_name)) = lower(btrim($2))
+                 AND birth_date = $3
+               ORDER BY created_at DESC
+               LIMIT 5"#,
+        )
+        .bind(&first_name)
+        .bind(&last_name)
+        .bind(birth_date)
+        .fetch_all(&mut *tx)
+        .await
+        {
+            Ok(rows) => rows,
+            Err(error) => {
+                tracing::error!(error = %error, lead_id = %lead_id, "search duplicate patients");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+        if !candidates.is_empty() {
+            let mut payload = Vec::with_capacity(candidates.len());
+            for row in candidates {
+                payload.push(json!({
+                    "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                    "patient_id": row.try_get::<String, _>("patient_id").unwrap_or_default(),
+                    "first_name": row.try_get::<String, _>("first_name").unwrap_or_default(),
+                    "last_name": row.try_get::<String, _>("last_name").unwrap_or_default(),
+                    "birth_date": row
+                        .try_get::<chrono::NaiveDate, _>("birth_date")
+                        .map(|value| value.to_string())
+                        .unwrap_or_default(),
+                    "lifecycle_status": row
+                        .try_get::<String, _>("lifecycle_status")
+                        .unwrap_or_default(),
+                    "email": row.try_get::<Option<String>, _>("email").unwrap_or_default(),
+                    "residence_country": row
+                        .try_get::<Option<String>, _>("residence_country")
+                        .unwrap_or_default(),
+                }));
+            }
+            return Json(json!({ "duplicate_candidates": payload })).into_response();
+        }
+    }
+
+    let email: Option<String> = lead.try_get("email").ok().flatten();
+    let phone: Option<String> = lead.try_get("phone").ok().flatten();
+    let lead_country: Option<String> = lead.try_get("country").ok().flatten();
+    let country = patient_country(lead_country.as_deref());
+    let primary_language: Option<String> = lead.try_get("primary_language").ok().flatten();
+    let locale: Option<String> = lead.try_get("locale").ok().flatten();
+    let languages: Vec<String> =
+        normalize_intake_language(primary_language.as_deref(), locale.as_deref())
+            .into_iter()
+            .collect();
+    let has_insurance: Option<bool> = lead.try_get("has_insurance").ok().flatten();
+    let explicit_insurance_type: Option<String> = lead
+        .try_get::<Option<String>, _>("insurance_type")
+        .ok()
+        .flatten();
+    let insurance_type = match has_insurance {
+        Some(false) => Some("self_pay".to_string()),
+        Some(true) => explicit_insurance_type
+            .or_else(|| (country.as_deref() != Some("Germany")).then(|| "foreign".to_string())),
+        None => explicit_insurance_type,
+    };
+    let wizard_state: Value = lead.try_get("wizard_state").unwrap_or_else(|_| json!({}));
+    let lead_snapshot: Value = lead.try_get("lead_snapshot").unwrap_or_else(|_| json!({}));
+    let lead_notes: Option<String> = lead.try_get("notes").ok().flatten();
+
+    let seq: i64 = match sqlx::query_scalar::<_, i64>("SELECT nextval('patient_id_seq')")
+        .fetch_one(&mut *tx)
+        .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, lead_id = %lead_id, "allocate prospect patient id");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let pid = format!("P-{}-{:04}", chrono::Utc::now().format("%Y%m%d"), seq);
+
+    let patient_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender,
+                                 email, phone_primary, residence_country, languages,
+                                 address_street, address_city, address_zip, address_country,
+                                 insurance_provider, insurance_number, insurance_type,
+                                 emergency_contact_name, emergency_contact_phone,
+                                 emergency_contact_relation, intake_profile, legal_status,
+                                 notes, source_lead_id, lead_snapshot, created_by,
+                                 lifecycle_status, is_active)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                   $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25,
+                   'prospective', false)
+           RETURNING id"#,
+    )
+    .bind(&pid)
+    .bind(&first_name)
+    .bind(&last_name)
+    .bind(birth_date)
+    .bind(gender)
+    .bind(email)
+    .bind(phone.as_deref())
+    .bind(country.as_deref())
+    .bind(&languages)
+    .bind(
+        lead.try_get::<Option<String>, _>("street_address")
+            .ok()
+            .flatten(),
+    )
+    .bind(lead.try_get::<Option<String>, _>("city").ok().flatten())
+    .bind(lead.try_get::<Option<String>, _>("zip_code").ok().flatten())
+    .bind(country.as_deref())
+    .bind(
+        lead.try_get::<Option<String>, _>("insurance_provider")
+            .ok()
+            .flatten(),
+    )
+    .bind(
+        lead.try_get::<Option<String>, _>("insurance_number")
+            .ok()
+            .flatten(),
+    )
+    .bind(insurance_type)
+    .bind(
+        lead.try_get::<Option<String>, _>("trusted_contact_name")
+            .ok()
+            .flatten(),
+    )
+    .bind(
+        lead.try_get::<Option<String>, _>("trusted_contact_phone")
+            .ok()
+            .flatten(),
+    )
+    .bind(
+        lead.try_get::<Option<String>, _>("trusted_contact_relation")
+            .ok()
+            .flatten(),
+    )
+    .bind(json!({ "source": "lead_prospect", "source_lead_id": lead_id }))
+    .bind(json!({
+        "dsgvo_signed": false,
+        "confidentiality_release_signed": false,
+        "identity_verified": false,
+        "document_pack_complete": false,
+        "compliance_completed": false,
+        "contract_status": "pending",
+        "aml_enhanced_due_diligence_required": lead_requires_enhanced_due_diligence(
+            lead_country.as_deref(),
+            &wizard_state,
+        ),
+        "aml_enhanced_due_diligence": wizard_state
+            .get("aml_enhanced_due_diligence")
+            .cloned()
+            .unwrap_or_else(|| json!({})),
+        "notes": null,
+    }))
+    .bind(lead_notes.as_deref())
+    .bind(lead_id)
+    .bind(lead_snapshot)
+    .bind(auth.user_id)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(id) => id,
+        Err(error) => {
+            tracing::error!(error = %error, lead_id = %lead_id, "create prospect patient");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    if let Err(error) = sqlx::query("UPDATE leads SET prospect_patient_id = $2 WHERE id = $1")
+        .bind(lead_id)
+        .bind(patient_id)
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(error = %error, lead_id = %lead_id, "store prospect pointer");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    let (case_uuid, case_code) = match ensure_prospect_case(
+        &mut tx,
+        lead_id,
+        patient_id,
+        auth.user_id,
+        &concern,
+        &zuweiser,
+        retention_years,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, lead_id = %lead_id, "create prospect case");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    if let Err(error) =
+        ensure_prospect_assignments(&mut tx, patient_id, case_uuid, auth.user_id).await
+    {
+        tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "assign prospect patient");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, lead_id = %lead_id, "commit prospect creation");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "create_prospect_patient",
+        Some(auth.user_id),
+        "lead",
+        Some(lead_id),
+        json!({
+            "patient_id": patient_id,
+            "patient_pid": pid.clone(),
+            "case_id": case_uuid,
+        }),
+    ));
+    crate::realtime::publish_lead_event(
+        &state,
+        Some(auth.user_id),
+        "lead.updated",
+        lead_id,
+        json!({ "prospect_patient_id": patient_id }),
+    )
+    .await;
+    tracing::info!(by = %auth.user_id, lead = %lead_id, patient = %patient_id, "Prospect patient created");
+
+    prospect_case_response(
+        patient_id,
+        &pid,
+        case_uuid,
+        &case_code,
+        "prospective",
+        false,
+        false,
+    )
+}
+
 async fn convert_lead(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -3487,6 +3727,7 @@ async fn convert_lead(
                   preferred_location, visit_timing, message,
                   date_of_birth, legal_sex, qualification_status, converted_patient_id,
                   failed_outcome_status, street_address, city, zip_code, notes,
+                  intake_model, prospect_patient_id,
                   wizard_state, to_jsonb(leads) AS lead_snapshot
            FROM leads WHERE id = $1
            FOR UPDATE"#,
@@ -3551,17 +3792,20 @@ async fn convert_lead(
         }
     };
 
-    let seq: i64 = match sqlx::query_scalar::<_, i64>(r#"SELECT nextval('patient_id_seq')"#)
-        .fetch_one(&mut *tx)
-        .await
-    {
-        Ok(value) => value,
-        Err(error) => {
-            tracing::error!(error = %error, lead_id = %lead_id, "allocate patient id");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
+    let intake_model: String = lead
+        .try_get("intake_model")
+        .unwrap_or_else(|_| "legacy".to_string());
+    let prospect_patient_id: Option<Uuid> = lead.try_get("prospect_patient_id").ok().flatten();
+    if intake_model == "patient_first" && prospect_patient_id.is_none() {
+        return err(
+            StatusCode::CONFLICT,
+            "Patient-first lead requires a prospect patient before conversion",
+        );
+    }
+    let activation_patient_id = match intake_model.as_str() {
+        "patient_first" => prospect_patient_id,
+        _ => None,
     };
-    let pid = format!("P-{}-{:04}", chrono::Utc::now().format("%Y%m%d"), seq);
 
     let first_name = [
         lead.try_get::<String, _>("first_name").unwrap_or_default(),
@@ -3819,40 +4063,7 @@ async fn convert_lead(
         .find(|contact| contact.contact_kind == "phone" && !contact.is_primary)
         .map(|contact| contact.value.as_str());
 
-    let patient_id = match sqlx::query_scalar::<_, Uuid>(
-        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender,
-                                 email, phone_primary, phone_secondary, residence_country,
-                                 languages, address_street, address_city, address_zip,
-                                 address_country, insurance_provider, insurance_number,
-                                 insurance_type, emergency_contact_name, emergency_contact_phone,
-                                 emergency_contact_relation, intake_profile, legal_status, notes,
-                                 source_lead_id, lead_snapshot, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                   $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
-           RETURNING id"#,
-    )
-    .bind(&pid)
-    .bind(&first_name)
-    .bind(&last_name)
-    .bind(birth_date)
-    .bind(gender)
-    .bind(email)
-    .bind(phone.as_deref())
-    .bind(phone_secondary)
-    .bind(country.as_deref())
-    .bind(&languages)
-    .bind(street_address)
-    .bind(city)
-    .bind(zip_code)
-    .bind(country.as_deref())
-    .bind(insurance_provider)
-    .bind(insurance_number)
-    .bind(insurance_type)
-    .bind(trusted_contact_name)
-    .bind(trusted_contact_phone)
-    .bind(trusted_contact_relation)
-    .bind(intake_profile)
-    .bind(json!({
+    let legal_status = json!({
         "dsgvo_signed": true,
         "confidentiality_release_signed": true,
         "identity_verified": true,
@@ -3868,18 +4079,203 @@ async fn convert_lead(
             .cloned()
             .unwrap_or_else(|| json!({})),
         "notes": null,
-    }))
-    .bind(lead_notes.as_deref())
-    .bind(lead_id)
-    .bind(lead_snapshot)
-    .bind(auth.user_id)
-    .fetch_one(&mut *tx)
-    .await
-    {
-        Ok(id) => id,
-        Err(e) => {
-            tracing::error!(error = %e, "create patient from lead");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    });
+
+    let (patient_id, pid) = match activation_patient_id {
+        Some(prospect_id) => {
+            let patient_lifecycle = match sqlx::query(
+                "SELECT patient_id, lifecycle_status FROM patients WHERE id = $1 FOR UPDATE",
+            )
+            .bind(prospect_id)
+            .fetch_optional(&mut *tx)
+            .await
+            {
+                Ok(Some(row)) => row,
+                Ok(None) => {
+                    return err(StatusCode::CONFLICT, "Prospect patient no longer exists");
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, patient_id = %prospect_id, "lock prospect patient");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            };
+            let lifecycle_status: String = patient_lifecycle
+                .try_get("lifecycle_status")
+                .unwrap_or_default();
+            let activated_pid = if lifecycle_status == "prospective" {
+                match sqlx::query_scalar::<_, String>(
+                    r#"UPDATE patients
+                       SET first_name = $2, last_name = $3, birth_date = $4, gender = $5,
+                           email = $6, phone_primary = $7, phone_secondary = $8,
+                           residence_country = $9, languages = $10,
+                           address_street = $11, address_city = $12, address_zip = $13,
+                           address_country = $14, insurance_provider = $15,
+                           insurance_number = $16, insurance_type = $17,
+                           emergency_contact_name = $18, emergency_contact_phone = $19,
+                           emergency_contact_relation = $20, intake_profile = $21,
+                           legal_status = $22,
+                           notes = COALESCE(NULLIF(btrim(notes), ''), $23),
+                           source_lead_id = $24, lead_snapshot = $25,
+                           lifecycle_status = 'active', is_active = true, updated_at = now()
+                       WHERE id = $1 AND lifecycle_status = 'prospective'
+                       RETURNING patient_id"#,
+                )
+                .bind(prospect_id)
+                .bind(&first_name)
+                .bind(&last_name)
+                .bind(birth_date)
+                .bind(gender)
+                .bind(email)
+                .bind(phone.as_deref())
+                .bind(phone_secondary)
+                .bind(country.as_deref())
+                .bind(&languages)
+                .bind(street_address)
+                .bind(city)
+                .bind(zip_code)
+                .bind(country.as_deref())
+                .bind(insurance_provider)
+                .bind(insurance_number)
+                .bind(insurance_type)
+                .bind(trusted_contact_name)
+                .bind(trusted_contact_phone)
+                .bind(trusted_contact_relation)
+                .bind(&intake_profile)
+                .bind(&legal_status)
+                .bind(lead_notes.as_deref())
+                .bind(lead_id)
+                .bind(&lead_snapshot)
+                .fetch_optional(&mut *tx)
+                .await
+                {
+                    Ok(Some(value)) => value,
+                    Ok(None) => {
+                        return err(
+                            StatusCode::CONFLICT,
+                            "Prospect patient changed concurrently",
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, patient_id = %prospect_id, "activate prospect patient");
+                        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                    }
+                }
+            } else if matches!(lifecycle_status.as_str(), "active" | "inactive") {
+                match sqlx::query_scalar::<_, String>(
+                    r#"UPDATE patients
+                       SET lifecycle_status = 'active',
+                           is_active = true,
+                           intake_profile = jsonb_set(
+                               COALESCE(intake_profile, '{}'::jsonb),
+                               '{lead_intakes}',
+                               CASE
+                                   WHEN jsonb_typeof(intake_profile->'lead_intakes') = 'array'
+                                   THEN intake_profile->'lead_intakes'
+                                   ELSE '[]'::jsonb
+                               END
+                                   || jsonb_build_array(jsonb_build_object(
+                                       'lead_id', $2,
+                                       'captured_at', now(),
+                                       'profile', $3::jsonb,
+                                       'snapshot', $4::jsonb
+                                   )),
+                               true
+                           ),
+                           legal_status = COALESCE(legal_status, '{}'::jsonb) || $5::jsonb,
+                           notes = COALESCE(NULLIF(btrim(notes), ''), $6),
+                           updated_at = now()
+                       WHERE id = $1 AND lifecycle_status IN ('active', 'inactive')
+                       RETURNING patient_id"#,
+                )
+                .bind(prospect_id)
+                .bind(lead_id)
+                .bind(&intake_profile)
+                .bind(&lead_snapshot)
+                .bind(&legal_status)
+                .bind(lead_notes.as_deref())
+                .fetch_optional(&mut *tx)
+                .await
+                {
+                    Ok(Some(value)) => value,
+                    Ok(None) => {
+                        return err(
+                            StatusCode::CONFLICT,
+                            "Attached patient changed concurrently",
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, patient_id = %prospect_id, "activate attached patient");
+                        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                    }
+                }
+            } else {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Patient is not convertible from this lead",
+                );
+            };
+            (prospect_id, activated_pid)
+        }
+        None => {
+            let seq: i64 = match sqlx::query_scalar::<_, i64>(r#"SELECT nextval('patient_id_seq')"#)
+                .fetch_one(&mut *tx)
+                .await
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    tracing::error!(error = %error, lead_id = %lead_id, "allocate patient id");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            };
+            let pid = format!("P-{}-{:04}", chrono::Utc::now().format("%Y%m%d"), seq);
+            let inserted = match sqlx::query_scalar::<_, Uuid>(
+                r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender,
+                                         email, phone_primary, phone_secondary, residence_country,
+                                         languages, address_street, address_city, address_zip,
+                                         address_country, insurance_provider, insurance_number,
+                                         insurance_type, emergency_contact_name, emergency_contact_phone,
+                                         emergency_contact_relation, intake_profile, legal_status, notes,
+                                         source_lead_id, lead_snapshot, created_by)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                           $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+                   RETURNING id"#,
+            )
+            .bind(&pid)
+            .bind(&first_name)
+            .bind(&last_name)
+            .bind(birth_date)
+            .bind(gender)
+            .bind(email)
+            .bind(phone.as_deref())
+            .bind(phone_secondary)
+            .bind(country.as_deref())
+            .bind(&languages)
+            .bind(street_address)
+            .bind(city)
+            .bind(zip_code)
+            .bind(country.as_deref())
+            .bind(insurance_provider)
+            .bind(insurance_number)
+            .bind(insurance_type)
+            .bind(trusted_contact_name)
+            .bind(trusted_contact_phone)
+            .bind(trusted_contact_relation)
+            .bind(intake_profile)
+            .bind(legal_status)
+            .bind(lead_notes.as_deref())
+            .bind(lead_id)
+            .bind(lead_snapshot)
+            .bind(auth.user_id)
+            .fetch_one(&mut *tx)
+            .await
+            {
+                Ok(id) => id,
+                Err(e) => {
+                    tracing::error!(error = %e, "create patient from lead");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            };
+            (inserted, pid)
         }
     };
 
@@ -3887,7 +4283,13 @@ async fn convert_lead(
         if let Err(error) = sqlx::query(
             r#"INSERT INTO patient_contacts
                       (patient_id, contact_kind, contact_type, value, is_primary, notes)
-               VALUES ($1, $2, $3, $4, $5, $6)"#,
+               SELECT $1, $2, $3, $4, $5, $6
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM patient_contacts existing
+                   WHERE existing.patient_id = $1
+                     AND existing.contact_kind = $2
+                     AND existing.value = $4
+               )"#,
         )
         .bind(patient_id)
         .bind(contact.contact_kind)
@@ -3942,7 +4344,14 @@ async fn convert_lead(
             r#"INSERT INTO patient_relations (
                     patient_id, related_name, relation_type,
                     is_emergency_contact, phone, notes
-               ) VALUES ($1, $2, $3, true, $4, $5)"#,
+               )
+               SELECT $1, $2, $3, true, $4, $5
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM patient_relations existing
+                   WHERE existing.patient_id = $1
+                     AND existing.related_name = $2
+                     AND existing.relation_type = $3
+               )"#,
         )
         .bind(patient_id)
         .bind(name)
@@ -3957,13 +4366,6 @@ async fn convert_lead(
         }
     }
 
-    if let Err(error) =
-        transfer_lead_clinical_profile(&mut tx, lead_id, patient_id, &wizard_state).await
-    {
-        tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "transfer lead clinical profile");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-
     if !selected_work_type_ids.is_empty()
         && let Err(error) = sqlx::query(
             r#"INSERT INTO patient_requested_work_types (
@@ -3974,7 +4376,7 @@ async fn convert_lead(
                       (
                           SELECT c.id
                           FROM cases c
-                          WHERE c.lead_id = $2
+                          WHERE c.lead_id = $2 OR c.source_lead_id = $2
                           ORDER BY c.created_at DESC, c.id DESC
                           LIMIT 1
                       ),
@@ -4016,22 +4418,13 @@ async fn convert_lead(
         r#"WITH moved_cases AS (
                UPDATE cases
                SET patient_id = $2,
+                   source_lead_id = COALESCE(source_lead_id, $1),
                    lead_id = NULL,
-                   onboarding_order_id = COALESCE(
-                       onboarding_order_id,
-                       (
-                           SELECT o.id
-                           FROM orders o
-                           WHERE o.source_lead_id = $1
-                           ORDER BY o.created_at DESC, o.id DESC
-                           LIMIT 1
-                       )
-                   ),
                    notes = COALESCE(
                        NULLIF(btrim(notes), ''),
                        NULLIF(btrim($3), '')
                    )
-               WHERE lead_id = $1
+               WHERE lead_id = $1 OR source_lead_id = $1
                RETURNING id
            ), moved_documents AS (
                UPDATE documents
@@ -4428,7 +4821,7 @@ async fn resolve_failed_lead(
         .execute(&state.db)
         .await
     } else {
-        let deleted_result = anonymize_lead_pii(
+        let deleted_result = purge_lead_and_prospect(
             &state.db,
             lead_id,
             Some(current_status.clone()),
@@ -4438,16 +4831,31 @@ async fn resolve_failed_lead(
         )
         .await;
 
-        if let Ok(result) = &deleted_result
-            && result.rows_affected() > 0
-        {
-            let _ = sqlx::query("DELETE FROM lead_attachments WHERE lead_id = $1")
-                .bind(lead_id)
-                .execute(&state.db)
-                .await;
+        match deleted_result {
+            Ok((result, purged_prospect)) => {
+                if result.rows_affected() > 0 {
+                    let _ = sqlx::query("DELETE FROM lead_attachments WHERE lead_id = $1")
+                        .bind(lead_id)
+                        .execute(&state.db)
+                        .await;
+                }
+                if let Some(prospect_id) = purged_prospect {
+                    state.audit_sender.try_send(audit::domain_event(
+                        "purge_prospect_patient",
+                        Some(auth.user_id),
+                        "patient",
+                        Some(prospect_id),
+                        json!({
+                            "reason": "storage_limitation_retention",
+                            "source_lead_id": lead_id,
+                            "gdpr_article": "5(1)(e)",
+                        }),
+                    ));
+                }
+                Ok(result)
+            }
+            Err(error) => Err(error),
         }
-
-        deleted_result
     };
 
     match update_result {
@@ -5114,7 +5522,7 @@ pub struct LeadPurgeReport {
 /// both the manual `resolve_failed_lead` handler and the background
 /// sweeper funnel through it.
 async fn anonymize_lead_pii(
-    pool: &gmed_db::DbPool,
+    executor: impl sqlx::PgExecutor<'_>,
     lead_id: Uuid,
     failed_from_status: Option<String>,
     reason: &str,
@@ -5180,6 +5588,7 @@ async fn anonymize_lead_pii(
                remote_ip = NULL,
                user_agent = NULL,
                notes = NULL,
+               wizard_state = wizard_state - 'clinical_draft',
                qualification_status = 'deleted',
                status_changed_at = now(),
                failed_outcome_status = 'delete_anonymized',
@@ -5195,8 +5604,64 @@ async fn anonymize_lead_pii(
     .bind(reason)
     .bind(note)
     .bind(processed_by)
-    .execute(pool)
+    .execute(executor)
     .await
+}
+
+/// Anonymise the lead and, in the same transaction, hard-delete its prospect
+/// patient when that patient is still `prospective` and the lead never
+/// converted. A prospect has no independent retention basis (GDPR Art.
+/// 5(1)(e)); the CASCADE removes its clinical record and funnel case. Active
+/// or attached patients are never touched — the guard is in the WHERE clause.
+async fn purge_lead_and_prospect(
+    pool: &gmed_db::DbPool,
+    lead_id: Uuid,
+    failed_from_status: Option<String>,
+    reason: &str,
+    note: Option<&str>,
+    processed_by: Option<Uuid>,
+) -> Result<(sqlx::postgres::PgQueryResult, Option<Uuid>), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let purge_candidate: Option<Uuid> = sqlx::query_scalar(
+        r#"SELECT p.id
+           FROM leads l
+           JOIN patients p ON p.id = l.prospect_patient_id
+           WHERE l.id = $1
+             AND p.lifecycle_status = 'prospective'
+             AND l.converted_patient_id IS NULL
+           FOR UPDATE OF l, p"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let purged_prospect = if let Some(patient_id) = purge_candidate {
+        // The audit trigger permits this only while the locked patient is still
+        // prospective and its source lead is unconverted. Delete explicitly so
+        // the subsequent patient cascade never collides with audit immutability.
+        sqlx::query("DELETE FROM patient_clinical_versions WHERE patient_id = $1")
+            .bind(patient_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query_scalar(
+            "DELETE FROM patients WHERE id = $1 AND lifecycle_status = 'prospective' RETURNING id",
+        )
+        .bind(patient_id)
+        .fetch_optional(&mut *tx)
+        .await?
+    } else {
+        None
+    };
+    let result = anonymize_lead_pii(
+        &mut *tx,
+        lead_id,
+        failed_from_status,
+        reason,
+        note,
+        processed_by,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok((result, purged_prospect))
 }
 
 /// Load the retention window from `system_settings`. Falls back to
@@ -5240,6 +5705,13 @@ pub(crate) fn should_auto_purge(
     is_archivable && !already_anonymized && stale
 }
 
+/// Pure mirror of the prospect-deletion guard in `purge_lead_and_prospect`:
+/// only a still-`prospective` patient of a never-converted lead is deleted.
+#[cfg(test)]
+pub(crate) fn should_purge_prospect(lifecycle_status: &str, lead_converted: bool) -> bool {
+    lifecycle_status == "prospective" && !lead_converted
+}
+
 /// Run one purge sweep: find every lead that has been sitting in an
 /// archived/failed state past the retention window, anonymise it, delete
 /// its attachments, and emit an `auto_purge_lead` audit event for each
@@ -5274,7 +5746,7 @@ pub async fn auto_purge_stale_archived(
     };
 
     for lead_id in candidates {
-        match anonymize_lead_pii(
+        match purge_lead_and_prospect(
             &state.db,
             lead_id,
             None,
@@ -5284,7 +5756,7 @@ pub async fn auto_purge_stale_archived(
         )
         .await
         {
-            Ok(result) if result.rows_affected() > 0 => {
+            Ok((result, purged_prospect)) if result.rows_affected() > 0 => {
                 report.anonymized += 1;
                 let _ = sqlx::query("DELETE FROM lead_attachments WHERE lead_id = $1")
                     .bind(lead_id)
@@ -5301,6 +5773,19 @@ pub async fn auto_purge_stale_archived(
                         "gdpr_article": "5(1)(e)",
                     }),
                 ));
+                if let Some(prospect_id) = purged_prospect {
+                    state.audit_sender.try_send(audit::domain_event(
+                        "purge_prospect_patient",
+                        None,
+                        "patient",
+                        Some(prospect_id),
+                        json!({
+                            "reason": "storage_limitation_retention",
+                            "source_lead_id": lead_id,
+                            "gdpr_article": "5(1)(e)",
+                        }),
+                    ));
+                }
             }
             Ok(_) => {
                 // Row was concurrently anonymised between SELECT and
@@ -5513,6 +5998,11 @@ mod lead_conversion_readiness_tests {
         );
 
         input.enhanced_due_diligence_document_generated = true;
+        assert_eq!(
+            evaluate_lead_conversion_readiness(&input).conversion_reasons,
+            vec!["Enhanced due diligence document is not signed".to_string()]
+        );
+        input.enhanced_due_diligence_document_signed = true;
         assert!(evaluate_lead_conversion_readiness(&input).conversion_ready);
     }
 
@@ -5615,6 +6105,32 @@ mod auto_purge_tests {
 
     fn now() -> chrono::DateTime<chrono::Utc> {
         Utc::now()
+    }
+
+    #[test]
+    fn prospect_of_unconverted_lead_is_purged() {
+        assert!(should_purge_prospect("prospective", false));
+    }
+
+    #[test]
+    fn prospect_of_converted_lead_is_never_purged() {
+        assert!(!should_purge_prospect("prospective", true));
+    }
+
+    #[test]
+    fn active_patient_is_never_purged() {
+        assert!(!should_purge_prospect("active", false));
+        assert!(!should_purge_prospect("active", true));
+    }
+
+    #[test]
+    fn inactive_patient_is_never_purged() {
+        assert!(!should_purge_prospect("inactive", false));
+    }
+
+    #[test]
+    fn deleted_patient_is_never_purged_again() {
+        assert!(!should_purge_prospect("deleted", false));
     }
 
     #[test]

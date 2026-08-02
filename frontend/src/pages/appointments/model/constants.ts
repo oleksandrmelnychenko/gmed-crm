@@ -39,7 +39,7 @@ export const INTERPRETER_RESPONSE_OPTIONS: InterpreterResponse[] = [
   "pending",
   "accepted",
   "declined",
-  "discussion",
+  "discussion_requested",
 ];
 
 export const CHECKLIST_PHASES = ["preparation", "execution", "followup", "done"] as const;

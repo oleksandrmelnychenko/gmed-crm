@@ -62,7 +62,10 @@ export function usePatientsListViewState() {
       ...DEFAULT_FILTERS,
       search: tableState.search ?? "",
       activeOnly:
-        activeParam === "" || activeParam === "false" || activeParam === "true"
+        activeParam === ""
+        || activeParam === "false"
+        || activeParam === "true"
+        || activeParam === "prospective"
           ? activeParam
           : persistedFilters.activeOnly,
       providerId: providerParam ?? persistedFilters.providerId,

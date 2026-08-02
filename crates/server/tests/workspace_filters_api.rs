@@ -7030,13 +7030,85 @@ async fn concierge_cannot_access_communications_for_blocked_medical_slots() {
 }
 
 #[tokio::test]
+async fn it_admin_can_load_and_manage_appointment_workflow_resources() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("appointment-it-admin-workflow");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let it_admin_id = seed_user(&pool, &tag, "it_admin").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("Appointment {tag}"),
+        "confirmed",
+        "2026-08-10",
+    )
+    .await;
+    let bearer = auth_header_for(it_admin_id, "it_admin");
+
+    for path in [
+        format!("/api/v1/appointments/{appointment_id}/checklist"),
+        format!("/api/v1/appointments/{appointment_id}/reminders"),
+        format!("/api/v1/appointments/{appointment_id}/communications"),
+        format!("/api/v1/appointments/{appointment_id}/report"),
+    ] {
+        let (status, _) = json_request(&app, "GET", &path, &bearer, None).await;
+        assert_eq!(status, StatusCode::OK, "failed endpoint: {path}");
+    }
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/status"),
+        &bearer,
+        Some(json!({ "status": "in_progress" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/reminders"),
+        &bearer,
+        Some(json!({
+            "user_id": billing_id,
+            "remind_at": "2026-08-10T12:00:00Z",
+            "title": "IT admin workflow reminder"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let reminder_id = body["id"].as_str().expect("reminder id");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/reminders/{reminder_id}/complete"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn attention_endpoint_flags_past_visit_with_unprocessed_follow_up() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
     };
 
     let tag = unique_tag("attention-past");
-    let today = chrono::Utc::now().date_naive();
+    let today = chrono::Utc::now()
+        .with_timezone(&chrono_tz::Europe::Berlin)
+        .date_naive();
     let appointment_date = (today - chrono::Days::new(1)).to_string();
     let reminder_at = format!("{}T08:00:00+00:00", today - chrono::Days::new(1));
 
@@ -7257,6 +7329,143 @@ async fn attention_endpoint_excludes_resolved_completed_visits() {
     assert_eq!(status, StatusCode::OK);
     let items = body.as_array().unwrap();
     assert!(items.is_empty());
+}
+
+#[tokio::test]
+async fn attention_endpoint_keeps_overdue_follow_up_after_appointment_completion() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("attention-completed-overdue");
+    let today = chrono::Utc::now()
+        .with_timezone(&chrono_tz::Europe::Berlin)
+        .date_naive();
+    let appointment_date = (today - chrono::Days::new(3)).to_string();
+    let reminder_at = format!("{}T08:00:00+00:00", today - chrono::Days::new(1));
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        &format!("Appointment {tag}"),
+        "completed",
+        &appointment_date,
+    )
+    .await;
+    sqlx::query(
+        r#"INSERT INTO reminders (appointment_id, user_id, remind_at, title)
+           VALUES ($1, $2, $3, 'Post-completion follow-up')"#,
+    )
+    .bind(appointment_id)
+    .bind(pm_id)
+    .bind(parse_utc_datetime(&reminder_at))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/meta/attention?patient_id={patient_id}"),
+        &auth_header_for(pm_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let item = body
+        .as_array()
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|item| item["id"] == appointment_id.to_string())
+        })
+        .expect("completed appointment with overdue follow-up remains actionable");
+    assert!(
+        item["reason_details"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| {
+                reason["key"] == "appointments_attention_reason_overdue_reminders_count"
+            })
+    );
+}
+
+#[tokio::test]
+async fn attention_endpoint_does_not_treat_future_follow_up_as_overdue_work() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("attention-future-follow-up");
+    let today = chrono::Utc::now()
+        .with_timezone(&chrono_tz::Europe::Berlin)
+        .date_naive();
+    let appointment_date = (today - chrono::Days::new(1)).to_string();
+    let reminder_at = format!("{}T08:00:00+00:00", today + chrono::Days::new(7));
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        &format!("Appointment {tag}"),
+        "confirmed",
+        &appointment_date,
+    )
+    .await;
+    sqlx::query(
+        r#"INSERT INTO reminders (appointment_id, user_id, remind_at, title)
+           VALUES ($1, $2, $3, 'Planned future follow-up')"#,
+    )
+    .bind(appointment_id)
+    .bind(pm_id)
+    .bind(parse_utc_datetime(&reminder_at))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/meta/attention?patient_id={patient_id}"),
+        &auth_header_for(pm_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let item = body
+        .as_array()
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|item| item["id"] == appointment_id.to_string())
+        })
+        .expect("past unclosed appointment remains actionable");
+    assert!(
+        !item["reason_details"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| {
+                reason["key"] == "appointments_attention_reason_active_reminders_count"
+                    || reason["key"] == "appointments_attention_reason_overdue_reminders_count"
+            })
+    );
 }
 
 #[tokio::test]

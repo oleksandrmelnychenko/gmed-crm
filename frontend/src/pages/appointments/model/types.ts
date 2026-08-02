@@ -82,7 +82,7 @@ export type InterpreterResponse =
   | "pending"
   | "accepted"
   | "declined"
-  | "discussion";
+  | "discussion_requested";
 
 export type AppointmentRecurrenceFrequency = "daily" | "weekly" | "monthly";
 

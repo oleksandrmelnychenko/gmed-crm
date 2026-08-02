@@ -160,6 +160,8 @@ export function usePatientsListData({
           : filters.activeOnly === "true"
             ? items.filter((patient) => patient.is_active)
           : items;
+        // "prospective" and "" pass through untouched — the server already
+        // scoped the lifecycle for those.
         startTransition(() => {
           dispatchListState({
             patients: filtered,

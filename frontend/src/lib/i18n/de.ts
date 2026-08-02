@@ -378,6 +378,7 @@ export const de = {
   common_unknown: "Unbekannt",
   common_active: "Aktiv",
   common_inactive: "Inaktiv",
+  patients_lifecycle_prospective: "Interessenten",
   common_activity: "Aktivität",
   common_provider: "Provider",
   common_doctor: "Arzt",

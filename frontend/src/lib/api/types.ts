@@ -184,6 +184,10 @@ export interface LeadDetail extends Lead {
   raw_payload: unknown;
   locale: string | null;
   converted_patient_id: string | null;
+  intake_model: "legacy" | "patient_first";
+  prospect_patient_id: string | null;
+  prospect_patient_lifecycle: "prospective" | "active" | "inactive" | null;
+  prospect_case_id: string | null;
   notes: string | null;
   user_agent: string | null;
   updated_at: string;

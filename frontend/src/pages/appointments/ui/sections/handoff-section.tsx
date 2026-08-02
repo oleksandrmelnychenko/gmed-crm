@@ -14,7 +14,7 @@ import type { ColumnDef } from "@/components/data-table/types";
 import { formatUiText, useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
-import { appointmentMiniPillClassName } from "@/pages/appointments/appearance/surface-appearance";
+import { cn } from "@/lib/utils";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
 import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import { formatAppointmentSlotLabel as slotLabel } from "@/pages/appointments/model/runtime-formatters";
@@ -31,6 +31,25 @@ import type {
 } from "@/pages/appointments/model/types";
 import { FOLLOW_UP_PRESETS } from "@/pages/appointments/model/constants";
 import { EmptyState } from "@/pages/appointments/ui/shared/workspace-primitives";
+
+const HANDOFF_BADGE_CHIP_TONES = [
+  "border-sky-200 bg-sky-50 text-sky-700",
+  "border-emerald-200 bg-emerald-50 text-emerald-700",
+  "border-amber-200 bg-amber-50 text-amber-700",
+  "border-violet-200 bg-violet-50 text-violet-700",
+  "border-rose-200 bg-rose-50 text-rose-700",
+  "border-teal-200 bg-teal-50 text-teal-700",
+  "border-indigo-200 bg-indigo-50 text-indigo-700",
+  "border-orange-200 bg-orange-50 text-orange-700",
+] as const;
+
+function handoffBadgeChipTone(text: string) {
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) | 0;
+  }
+  return HANDOFF_BADGE_CHIP_TONES[Math.abs(hash) % HANDOFF_BADGE_CHIP_TONES.length];
+}
 
 type AppointmentHandoffSectionProps = {
   detail: AppointmentDetail;
@@ -108,7 +127,9 @@ function AppointmentHandoffSectionContent({
         sortable: true,
         width: 180,
         render: (peer) => (
-          <span className={appointmentMiniPillClassName}>{roleLabel(peer.role)}</span>
+          <span className="inline-flex rounded-full border border-border/60 bg-muted/25 px-2 py-0.5 font-mono text-[10px] font-medium text-foreground">
+            {roleLabel(peer.role)}
+          </span>
         ),
       },
       {
@@ -121,7 +142,13 @@ function AppointmentHandoffSectionContent({
           peer.badges.length > 0 ? (
             <span className="flex flex-wrap items-center gap-1">
               {peer.badges.map((badge) => (
-                <span key={badge} className={appointmentMiniPillClassName}>
+                <span
+                  key={badge}
+                  className={cn(
+                    "inline-flex rounded-full border px-2 py-0.5 font-mono text-[10px] font-medium",
+                    handoffBadgeChipTone(badge),
+                  )}
+                >
                   {badge}
                 </span>
               ))}
@@ -179,7 +206,8 @@ function AppointmentHandoffSectionContent({
   return (
     <section className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
       <div className="relative z-30 flex flex-nowrap items-end gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
-        <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+        <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
           {t.appointments_handoff_title}
         </span>
         {canManageReminders ? (

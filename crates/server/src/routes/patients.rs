@@ -8,7 +8,7 @@ use axum::{
 use chrono::Datelike;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::access;
@@ -74,6 +74,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/patients/{patient_id}/clinical-warnings",
             post(save_patient_clinical_warnings),
+        )
+        .route(
+            "/patients/{patient_id}/impfstatus",
+            get(get_patient_impfstatus).post(save_patient_impfstatus),
         )
         .route(
             "/patients/{patient_id}/clinical.pdf",
@@ -318,6 +322,7 @@ struct ListQuery {
     active_only: Option<bool>,
     provider_id: Option<Uuid>,
     doctor_id: Option<Uuid>,
+    lifecycle: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1072,15 +1077,47 @@ async fn list_patients(
     let search_pattern = format!("%{search}%");
     let provider_id = query.provider_id;
     let doctor_id = query.doctor_id;
+    let lifecycle = query
+        .lifecycle
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(value) = lifecycle {
+        match value {
+            "prospective" | "active" | "inactive" | "deleted" => {}
+            _ => {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Invalid lifecycle filter",
+                ));
+            }
+        }
+        match auth.role {
+            Role::PatientManager | Role::Ceo | Role::ItAdmin => {}
+            _ => {
+                return Err(err(
+                    StatusCode::FORBIDDEN,
+                    "Insufficient permissions for lifecycle filter",
+                ));
+            }
+        }
+    }
 
     let rows = sqlx::query(
         r#"SELECT p.id, p.patient_id, p.title, p.first_name, p.last_name,
                   p.birth_date, p.gender, p.nationality, p.residence_country,
                   p.languages, p.functional_labels, p.phone_primary, p.email,
                   p.insurance_provider, p.insurance_type,
-                  p.is_active, p.created_at
+                  p.is_active, p.lifecycle_status, p.created_at
            FROM patients p
-           WHERE ($1::bool = false OR p.is_active = true)
+           WHERE (
+                ($5::text IS NOT NULL AND p.lifecycle_status = $5)
+                OR (
+                    $5::text IS NULL
+                    AND p.lifecycle_status NOT IN ('prospective', 'deleted')
+                    AND ($1::bool = false OR p.is_active = true)
+                )
+             )
              AND ($2::text = '%%'
                   OR de_normalize(concat_ws(' ',
                        p.first_name, p.last_name, p.patient_id,
@@ -1130,6 +1167,7 @@ async fn list_patients(
     .bind(search_pattern)
     .bind(provider_id)
     .bind(doctor_id)
+    .bind(lifecycle)
     .fetch_all(&state.db)
     .await;
 
@@ -1176,6 +1214,9 @@ async fn list_patients(
                         insurance_provider: r.try_get("insurance_provider").unwrap_or_default(),
                         insurance_type: r.try_get("insurance_type").unwrap_or_default(),
                         is_active: r.try_get("is_active").unwrap_or(true),
+                        lifecycle_status: r
+                            .try_get("lifecycle_status")
+                            .unwrap_or_else(|_| "active".to_string()),
                         created_at: r.try_get("created_at").map_err(|_| {
                             err(
                                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1222,7 +1263,8 @@ async fn get_patient(
                   emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
                   passport_number, passport_expiry,
                   intake_profile, source_lead_id, lead_snapshot,
-                  legal_status, clinical_warnings, notes, is_active, created_at, updated_at
+                  legal_status, clinical_warnings, notes, is_active, lifecycle_status,
+                  created_at, updated_at
            FROM patients WHERE id = $1"#,
     )
     .bind(patient_uuid)
@@ -1419,6 +1461,9 @@ async fn get_patient(
                             "Failed to decode patient",
                         )
                     })?,
+                    lifecycle_status: r
+                        .try_get("lifecycle_status")
+                        .unwrap_or_else(|_| "active".to_string()),
                     created_at: r.try_get("created_at").map_err(|_| {
                         err(
                             StatusCode::INTERNAL_SERVER_ERROR,
@@ -5768,7 +5813,8 @@ async fn get_patient_timeline(
                    c.created_at AS happened_at,
                    c.case_id AS source_label
             FROM cases c
-            LEFT JOIN leads source_lead ON source_lead.id = c.lead_id
+            LEFT JOIN leads source_lead
+                   ON source_lead.id = COALESCE(c.source_lead_id, c.lead_id)
             WHERE COALESCE(c.patient_id, source_lead.converted_patient_id) = $1
 
             UNION ALL
@@ -6175,6 +6221,20 @@ async fn get_patient_timeline(
 
             UNION ALL
 
+            SELECT 'assignment'::text AS entity_type,
+                   assignment.user_id AS entity_id,
+                   assigned_user.name AS title,
+                   'care'::text AS category,
+                   CASE WHEN assignment.revoked_at IS NULL THEN 'active' ELSE 'revoked' END AS status,
+                   COALESCE(assignment.revoked_at, assignment.assigned_at) AS happened_at,
+                   concat_ws(' · ', assigned_by_user.name, assigned_user.role) AS source_label
+            FROM patient_assignments assignment
+            JOIN users assigned_user ON assigned_user.id = assignment.user_id
+            LEFT JOIN users assigned_by_user ON assigned_by_user.id = assignment.assigned_by
+            WHERE assignment.patient_id = $1
+
+            UNION ALL
+
             SELECT 'medical_order'::text AS entity_type,
                    mo.id AS entity_id,
                    mo.title AS title,
@@ -6472,72 +6532,6 @@ async fn get_patient_timeline(
             UNION ALL
 
             SELECT 'clinical'::text AS entity_type,
-                   legacy_medication.id AS entity_id,
-                   concat_ws(
-                       ' · ',
-                       COALESCE(legacy_medication.handelsname, legacy_medication.wirkstoff, 'Medication'),
-                       legacy_medication.dosis,
-                       legacy_medication.dosis_einheit
-                   ) AS title,
-                   'medication'::text AS category,
-                   'recorded'::text AS status,
-                   legacy_medication.created_at AS happened_at,
-                   legacy_medication.verordnender_arzt AS source_label
-            FROM medikamente legacy_medication
-            JOIN cases legacy_case ON legacy_case.id = legacy_medication.case_id
-            LEFT JOIN leads legacy_lead ON legacy_lead.id = legacy_case.lead_id
-            WHERE COALESCE(legacy_case.patient_id, legacy_lead.converted_patient_id) = $1
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM patient_medications medication
-                  WHERE medication.patient_id = $1
-                    AND LOWER(BTRIM(COALESCE(medication.handelsname, medication.wirkstoff, ''))) =
-                        LOWER(BTRIM(COALESCE(legacy_medication.handelsname, legacy_medication.wirkstoff, '')))
-              )
-
-            UNION ALL
-
-            SELECT 'clinical'::text AS entity_type,
-                   legacy_diagnosis.id AS entity_id,
-                   legacy_diagnosis.erkrankung AS title,
-                   'diagnosis'::text AS category,
-                   'recorded'::text AS status,
-                   legacy_diagnosis.created_at AS happened_at,
-                   legacy_case.case_id AS source_label
-            FROM vorerkrankungen legacy_diagnosis
-            JOIN cases legacy_case ON legacy_case.id = legacy_diagnosis.case_id
-            LEFT JOIN leads legacy_lead ON legacy_lead.id = legacy_case.lead_id
-            WHERE COALESCE(legacy_case.patient_id, legacy_lead.converted_patient_id) = $1
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM patient_diagnoses diagnosis
-                  WHERE diagnosis.patient_id = $1
-                    AND LOWER(BTRIM(diagnosis.label)) = LOWER(BTRIM(legacy_diagnosis.erkrankung))
-              )
-
-            UNION ALL
-
-            SELECT 'clinical'::text AS entity_type,
-                   legacy_allergy.id AS entity_id,
-                   concat_ws(' · ', legacy_allergy.allergie, legacy_allergy.reaktion) AS title,
-                   'allergy'::text AS category,
-                   'active'::text AS status,
-                   legacy_allergy.created_at AS happened_at,
-                   legacy_case.case_id AS source_label
-            FROM allergien legacy_allergy
-            JOIN cases legacy_case ON legacy_case.id = legacy_allergy.case_id
-            LEFT JOIN leads legacy_lead ON legacy_lead.id = legacy_case.lead_id
-            WHERE COALESCE(legacy_case.patient_id, legacy_lead.converted_patient_id) = $1
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM patient_clinical_warnings warning
-                  WHERE warning.patient_id = $1
-                    AND LOWER(BTRIM(warning.label)) = LOWER(BTRIM(legacy_allergy.allergie))
-              )
-
-            UNION ALL
-
-            SELECT 'clinical'::text AS entity_type,
                    symptom.id AS entity_id,
                    symptom.beschreibung AS title,
                    'symptom'::text AS category,
@@ -6546,28 +6540,9 @@ async fn get_patient_timeline(
                    concat_ws(' · ', legacy_case.case_id, symptom.fachrichtung) AS source_label
             FROM symptome symptom
             JOIN cases legacy_case ON legacy_case.id = symptom.case_id
-            LEFT JOIN leads legacy_lead ON legacy_lead.id = legacy_case.lead_id
+            LEFT JOIN leads legacy_lead
+                   ON legacy_lead.id = COALESCE(legacy_case.source_lead_id, legacy_case.lead_id)
             WHERE COALESCE(legacy_case.patient_id, legacy_lead.converted_patient_id) = $1
-
-            UNION ALL
-
-            SELECT 'clinical'::text AS entity_type,
-                   legacy_procedure.id AS entity_id,
-                   legacy_procedure.grund AS title,
-                   'procedure'::text AS category,
-                   'recorded'::text AS status,
-                   legacy_procedure.created_at AS happened_at,
-                   legacy_procedure.arzt AS source_label
-            FROM operationen legacy_procedure
-            JOIN cases legacy_case ON legacy_case.id = legacy_procedure.case_id
-            LEFT JOIN leads legacy_lead ON legacy_lead.id = legacy_case.lead_id
-            WHERE COALESCE(legacy_case.patient_id, legacy_lead.converted_patient_id) = $1
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM patient_procedures procedure
-                  WHERE procedure.patient_id = $1
-                    AND LOWER(BTRIM(procedure.label)) = LOWER(BTRIM(legacy_procedure.grund))
-              )
 
             UNION ALL
 
@@ -7265,6 +7240,7 @@ struct PatientSummaryInput {
     insurance_provider: Option<String>,
     insurance_type: Option<String>,
     is_active: bool,
+    lifecycle_status: String,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -7304,6 +7280,7 @@ struct PatientDetailInput {
     clinical_warnings: Option<String>,
     notes: Option<String>,
     is_active: bool,
+    lifecycle_status: String,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -7318,6 +7295,10 @@ fn build_patient_summary_json(
     data.insert("patient_id".to_string(), Value::String(patient.patient_id));
     data.insert("gender".to_string(), Value::String(patient.gender));
     data.insert("is_active".to_string(), Value::Bool(patient.is_active));
+    data.insert(
+        "lifecycle_status".to_string(),
+        Value::String(patient.lifecycle_status),
+    );
     data.insert(
         "created_at".to_string(),
         Value::String(patient.created_at.to_rfc3339()),
@@ -7380,6 +7361,7 @@ fn build_patient_detail_json(
             insurance_provider: patient.insurance_provider.clone(),
             insurance_type: patient.insurance_type.clone(),
             is_active: patient.is_active,
+            lifecycle_status: patient.lifecycle_status.clone(),
             created_at: patient.created_at,
         },
     );
@@ -7879,10 +7861,12 @@ async fn activate_patient(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
         return e;
     }
-    match sqlx::query!(
-        "UPDATE patients SET is_active = true, updated_at = now() WHERE id = $1 AND NOT is_active",
-        patient_id
+    match sqlx::query(
+        r#"UPDATE patients
+           SET lifecycle_status = 'active', is_active = true, updated_at = now()
+           WHERE id = $1 AND lifecycle_status = 'inactive'"#,
     )
+    .bind(patient_id)
     .execute(&state.db)
     .await
     {
@@ -7905,7 +7889,22 @@ async fn activate_patient(
             .await;
             Json(serde_json::json!({"ok": true})).into_response()
         }
-        Ok(_) => err(StatusCode::NOT_FOUND, "Patient not found or already active"),
+        Ok(_) => {
+            let lifecycle: Option<String> =
+                sqlx::query_scalar("SELECT lifecycle_status FROM patients WHERE id = $1")
+                    .bind(patient_id)
+                    .fetch_optional(&state.db)
+                    .await
+                    .unwrap_or_default();
+            match lifecycle.as_deref() {
+                Some("prospective") => err(
+                    StatusCode::CONFLICT,
+                    "Prospective patients are activated through lead conversion",
+                ),
+                Some(_) => err(StatusCode::NOT_FOUND, "Patient not found or already active"),
+                None => err(StatusCode::NOT_FOUND, "Patient not found or already active"),
+            }
+        }
         Err(e) => {
             tracing::error!(error = %e, "Failed to activate patient");
             err(
@@ -7924,10 +7923,12 @@ async fn deactivate_patient(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
         return e;
     }
-    match sqlx::query!(
-        "UPDATE patients SET is_active = false, updated_at = now() WHERE id = $1 AND is_active",
-        patient_id
+    match sqlx::query(
+        r#"UPDATE patients
+           SET lifecycle_status = 'inactive', is_active = false, updated_at = now()
+           WHERE id = $1 AND lifecycle_status = 'active'"#,
     )
+    .bind(patient_id)
     .execute(&state.db)
     .await
     {
@@ -7950,10 +7951,28 @@ async fn deactivate_patient(
             .await;
             Json(serde_json::json!({"ok": true})).into_response()
         }
-        Ok(_) => err(
-            StatusCode::NOT_FOUND,
-            "Patient not found or already inactive",
-        ),
+        Ok(_) => {
+            let lifecycle: Option<String> =
+                sqlx::query_scalar("SELECT lifecycle_status FROM patients WHERE id = $1")
+                    .bind(patient_id)
+                    .fetch_optional(&state.db)
+                    .await
+                    .unwrap_or_default();
+            match lifecycle.as_deref() {
+                Some("prospective") => err(
+                    StatusCode::CONFLICT,
+                    "Prospective patients follow the lead lifecycle",
+                ),
+                Some(_) => err(
+                    StatusCode::NOT_FOUND,
+                    "Patient not found or already inactive",
+                ),
+                None => err(
+                    StatusCode::NOT_FOUND,
+                    "Patient not found or already inactive",
+                ),
+            }
+        }
         Err(e) => {
             tracing::error!(error = %e, "Failed to deactivate patient");
             err(
@@ -8009,10 +8028,25 @@ struct PatientClinicalItems<T> {
     items: Vec<T>,
 }
 
+#[derive(Default, Deserialize)]
+struct PatientClinicalSaveQuery {
+    mode: Option<String>,
+}
+
+impl PatientClinicalSaveQuery {
+    fn merge_only(&self) -> bool {
+        self.mode.as_deref() == Some("merge")
+    }
+}
+
 #[derive(Deserialize)]
 struct PatientDiagnosisInput {
     #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
     cid: Option<String>,
+    #[serde(default)]
+    case_id: Option<String>,
     #[serde(default)]
     parent_cid: Option<String>,
     #[serde(default)]
@@ -8057,6 +8091,8 @@ struct PatientDiagnosisInput {
 
 #[derive(Deserialize)]
 struct PatientMedicationInput {
+    #[serde(default)]
+    id: Option<String>,
     #[serde(default)]
     provider_id: Option<String>,
     #[serde(default)]
@@ -8119,6 +8155,8 @@ struct PatientMedicationInput {
 
 #[derive(Deserialize)]
 struct PatientExaminationInput {
+    #[serde(default)]
+    case_id: Option<String>,
     #[serde(default)]
     provider_id: Option<String>,
     #[serde(default)]
@@ -8200,6 +8238,7 @@ fn clinical_parse_date(
 fn narrative_version_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
     json!({
         "id": row.get::<Uuid, _>("id").to_string(),
+        "case_id": row.try_get::<Option<Uuid>, _>("case_id").unwrap_or_default(),
         "anamnese_aktuelle": row.get::<Option<String>, _>("anamnese_aktuelle"),
         "anamnese_vorgeschichte": row.get::<Option<String>, _>("anamnese_vorgeschichte"),
         "anamnese_vegetative": row.get::<Option<String>, _>("anamnese_vegetative"),
@@ -8215,6 +8254,7 @@ fn narrative_version_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
 fn verlauf_row_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
     json!({
         "id": row.get::<Uuid, _>("id"),
+        "case_id": row.try_get::<Option<Uuid>, _>("case_id").unwrap_or_default(),
         "provider_id": row.get::<Option<Uuid>, _>("provider_id"),
         "provider_name": row.get::<Option<String>, _>("provider_name"),
         "doctor_id": row.get::<Option<Uuid>, _>("doctor_id"),
@@ -8405,7 +8445,7 @@ async fn get_patient_clinical(
     };
 
     let diag_rows = sqlx::query(
-        r#"SELECT d.id, d.parent_id, d.kind, d.label, d.icd_code, d.ops_code, d.grade, d.laterality,
+        r#"SELECT d.id, d.case_id, d.parent_id, d.kind, d.label, d.icd_code, d.ops_code, d.grade, d.laterality,
                   d.status, d.certainty, d.chronifizierung, d.diagnosed_on, d.note,
                   d.source_mode, d.external_clinic, d.external_doctor, d.external_country,
                   d.provider_id, p.name AS provider_name,
@@ -8451,7 +8491,7 @@ async fn get_patient_clinical(
     })?;
 
     let exam_rows = sqlx::query(
-        r#"SELECT e.id, e.kind, e.title, e.performed_on, e.status, e.result, e.note,
+        r#"SELECT e.id, e.case_id, e.kind, e.title, e.performed_on, e.status, e.result, e.note,
                   e.provider_id, p.name AS provider_name,
                   e.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
            FROM patient_examinations e
@@ -8475,6 +8515,7 @@ async fn get_patient_clinical(
             json!({
                 "id": id,
                 "cid": id,
+                "case_id": row.get::<Option<Uuid>, _>("case_id"),
                 "parent_id": row.get::<Option<Uuid>, _>("parent_id"),
                 "kind": row.get::<String, _>("kind"),
                 "label": row.get::<String, _>("label"),
@@ -8552,6 +8593,7 @@ async fn get_patient_clinical(
         .map(|row| {
             json!({
                 "id": row.get::<Uuid, _>("id"),
+                "case_id": row.get::<Option<Uuid>, _>("case_id"),
                 "kind": row.get::<Option<String>, _>("kind"),
                 "title": row.get::<String, _>("title"),
                 "performed_on": row.get::<Option<String>, _>("performed_on"),
@@ -8569,7 +8611,7 @@ async fn get_patient_clinical(
         .collect::<Vec<_>>();
 
     let proc_rows = sqlx::query(
-        r#"SELECT p2.id, p2.label, p2.ops_code, p2.performed_on, p2.note,
+        r#"SELECT p2.id, p2.case_id, p2.label, p2.ops_code, p2.performed_on, p2.note,
                   p2.provider_id, pv.name AS provider_name,
                   p2.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
            FROM patient_procedures p2
@@ -8591,6 +8633,7 @@ async fn get_patient_clinical(
         .map(|row| {
             json!({
                 "id": row.get::<Uuid, _>("id"),
+                "case_id": row.get::<Option<Uuid>, _>("case_id"),
                 "label": row.get::<String, _>("label"),
                 "ops_code": row.get::<Option<String>, _>("ops_code"),
                 "performed_on": row.get::<Option<String>, _>("performed_on"),
@@ -8642,7 +8685,7 @@ async fn get_patient_clinical(
         .collect::<Vec<_>>();
 
     let verlauf_rows = sqlx::query(
-        r#"SELECT v.id, v.provider_id, p.name AS provider_name,
+        r#"SELECT v.id, v.case_id, v.provider_id, p.name AS provider_name,
                   v.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich,
                   v.occurred_on, v.note
            FROM patient_clinical_verlauf v
@@ -8665,7 +8708,7 @@ async fn get_patient_clinical(
 
     // The active version of the patient's Anamnese (one row per patient is active).
     let narrative_row = sqlx::query(
-        r#"SELECT id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
+        r#"SELECT id, case_id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
                   beurteilung, anamnese_at, is_active, created_at, updated_at
            FROM patient_clinical_narrative
            WHERE patient_id = $1 AND is_active
@@ -8682,6 +8725,22 @@ async fn get_patient_clinical(
 
     let narrative = narrative_row.map(|row| narrative_version_json(&row));
 
+    let impfstatus_row =
+        sqlx::query("SELECT status_text, updated_at FROM patient_impfstatus WHERE patient_id = $1")
+            .bind(patient_uuid)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, patient_id = %patient_uuid, "load patient impfstatus");
+                load_fail()
+            })?;
+    let impfstatus = impfstatus_row.map(|row| {
+        json!({
+            "status_text": row.get::<Option<String>, _>("status_text"),
+            "updated_at": row.get::<chrono::DateTime<chrono::Utc>, _>("updated_at").to_rfc3339(),
+        })
+    });
+
     Ok(Json(json!({
         "diagnoses": diagnoses,
         "medications": medications,
@@ -8691,6 +8750,7 @@ async fn get_patient_clinical(
         "cave": cave,
         "verlauf": verlauf,
         "narrative": narrative,
+        "impfstatus": impfstatus,
     })))
 }
 
@@ -8746,6 +8806,7 @@ enum PatientClinicalSection {
     Verlauf,
     Procedures,
     ClinicalWarnings,
+    Impfstatus,
 }
 
 impl PatientClinicalSection {
@@ -8758,6 +8819,7 @@ impl PatientClinicalSection {
             PatientClinicalSection::Verlauf => "verlauf",
             PatientClinicalSection::Procedures => "procedures",
             PatientClinicalSection::ClinicalWarnings => "clinical_warnings",
+            PatientClinicalSection::Impfstatus => "impfstatus",
         }
     }
 
@@ -8793,8 +8855,51 @@ impl PatientClinicalSection {
                 r#"SELECT COALESCE(jsonb_agg((to_jsonb(t) - 'patient_id') ORDER BY t.kind, t.sort_order, t.created_at), '[]'::jsonb) AS value
                    FROM patient_clinical_warnings t WHERE t.patient_id = $1"#
             }
+            PatientClinicalSection::Impfstatus => {
+                r#"SELECT COALESCE(jsonb_agg(to_jsonb(t) - 'patient_id'), '[]'::jsonb) AS value
+                   FROM patient_impfstatus t WHERE t.patient_id = $1"#
+            }
         }
     }
+}
+
+/// Parse and validate an episode attribution: the case must exist and belong to
+/// this patient (422 otherwise). NULL/empty attribution is always valid.
+async fn resolve_patient_case_attribution(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_uuid: Uuid,
+    value: Option<String>,
+) -> Result<Option<Uuid>, axum::response::Response> {
+    let Some(case_id) = clinical_parse_uuid(value)? else {
+        return Ok(None);
+    };
+    let belongs = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM cases WHERE id = $1 AND patient_id = $2)",
+    )
+    .bind(case_id)
+    .bind(patient_uuid)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_uuid, case_id = %case_id, "validate case attribution");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })?;
+    if !belongs {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Case does not belong to this patient",
+        ));
+    }
+    Ok(Some(case_id))
+}
+
+/// The episode to stamp on a section's version-log entry: the single distinct
+/// attribution used by the save, or NULL when mixed or absent.
+fn version_log_case_id(used: &std::collections::HashSet<Uuid>) -> Option<Uuid> {
+    if used.len() != 1 {
+        return None;
+    }
+    used.iter().next().copied()
 }
 
 async fn load_patient_section_snapshot(
@@ -8809,7 +8914,7 @@ async fn load_patient_section_snapshot(
     Ok(row.get::<serde_json::Value, _>("value"))
 }
 
-async fn load_patient_clinical_retention_years(state: &AppState, default: i64) -> i64 {
+pub(crate) async fn load_patient_clinical_retention_years(state: &AppState, default: i64) -> i64 {
     match sqlx::query(r#"SELECT value::TEXT AS value_text FROM system_settings WHERE key = $1"#)
         .bind("clinical_case_retention_years")
         .fetch_optional(&state.db)
@@ -8832,17 +8937,19 @@ async fn patient_version_log(
     patient_uuid: Uuid,
     user_id: Uuid,
     section: PatientClinicalSection,
+    case_id: Option<Uuid>,
     retention_years: i64,
     old_value: serde_json::Value,
     new_value: serde_json::Value,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO patient_clinical_versions (patient_id, changed_by, section, old_value, new_value)
-         VALUES ($1, $2, $3, $4, $5)",
+        "INSERT INTO patient_clinical_versions (patient_id, changed_by, section, case_id, old_value, new_value)
+         VALUES ($1, $2, $3, $4, $5, $6)",
     )
     .bind(patient_uuid)
     .bind(user_id)
     .bind(section.key())
+    .bind(case_id)
     .bind(old_value)
     .bind(new_value)
     .execute(&mut **tx)
@@ -8867,6 +8974,7 @@ async fn save_patient_diagnoses(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
+    Query(query): Query<PatientClinicalSaveQuery>,
     Json(body): Json<PatientClinicalItems<PatientDiagnosisInput>>,
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
@@ -8898,24 +9006,56 @@ async fn save_patient_diagnoses(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    if let Err(e) = sqlx::query("DELETE FROM patient_diagnoses WHERE patient_id = $1")
-        .bind(patient_uuid)
-        .execute(&mut *tx)
-        .await
-    {
-        tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient diagnoses");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
+    let merge_only = query.merge_only();
+    let existing_ids: HashSet<Uuid> = if merge_only {
+        match sqlx::query_scalar("SELECT id FROM patient_diagnoses WHERE patient_id = $1")
+            .bind(patient_uuid)
+            .fetch_all(&mut *tx)
+            .await
+        {
+            Ok(ids) => ids.into_iter().collect(),
+            Err(e) => {
+                tracing::error!(error = %e, patient_id = %patient_uuid, "load patient diagnosis ids");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    } else {
+        if let Err(e) = sqlx::query("DELETE FROM patient_diagnoses WHERE patient_id = $1")
+            .bind(patient_uuid)
+            .execute(&mut *tx)
+            .await
+        {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient diagnoses");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        HashSet::new()
+    };
     // Items arrive ordered parent-before-child. We map each item's client id
     // (cid) onto the freshly generated server uuid so a child can resolve its
     // parent_id from parent_cid, and track each node's kind to enforce nesting.
     let mut cid_to_id: HashMap<String, Uuid> = HashMap::new();
     let mut cid_to_kind: HashMap<String, String> = HashMap::new();
+    let mut used_cases: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
     let mut saved = 0i32;
     for item in body.items {
+        let row_id = item
+            .id
+            .as_deref()
+            .and_then(|value| Uuid::parse_str(value.trim()).ok())
+            .filter(|value| existing_ids.contains(value));
         let Some(label) = clinical_opt_text(item.label) else {
             continue;
         };
+        let item_case_id =
+            match resolve_patient_case_attribution(&mut tx, patient_uuid, item.case_id.clone())
+                .await
+            {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+        if let Some(case_id) = item_case_id {
+            used_cases.insert(case_id);
+        }
         let kind = clinical_one_of(item.kind, &["main", "secondary", "prozedur"])
             .unwrap_or_else(|| "secondary".to_string());
 
@@ -8996,13 +9136,43 @@ async fn save_patient_diagnoses(
                 Err(resp) => return resp,
             }
         };
-        let new_id = Uuid::new_v4();
+        let new_id = row_id.unwrap_or_else(Uuid::new_v4);
         if let Err(e) = sqlx::query(
-            "INSERT INTO patient_diagnoses (id, patient_id, parent_id, provider_id, doctor_id, kind, label, icd_code, ops_code, certainty, chronifizierung, grade, laterality, status, diagnosed_on, note, sort_order, source_mode, external_clinic, external_doctor, external_country, treating_doctor_id, treating_none)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)",
+            r#"INSERT INTO patient_diagnoses AS diagnosis
+                    (id, patient_id, case_id, parent_id, provider_id, doctor_id, kind, label,
+                     icd_code, ops_code, certainty, chronifizierung, grade, laterality, status,
+                     diagnosed_on, note, sort_order, source_mode, external_clinic, external_doctor,
+                     external_country, treating_doctor_id, treating_none)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                       $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+               ON CONFLICT (id) DO UPDATE SET
+                   case_id = EXCLUDED.case_id,
+                   parent_id = EXCLUDED.parent_id,
+                   provider_id = EXCLUDED.provider_id,
+                   doctor_id = EXCLUDED.doctor_id,
+                   kind = EXCLUDED.kind,
+                   label = EXCLUDED.label,
+                   icd_code = EXCLUDED.icd_code,
+                   ops_code = EXCLUDED.ops_code,
+                   certainty = EXCLUDED.certainty,
+                   chronifizierung = EXCLUDED.chronifizierung,
+                   grade = EXCLUDED.grade,
+                   laterality = EXCLUDED.laterality,
+                   status = EXCLUDED.status,
+                   diagnosed_on = EXCLUDED.diagnosed_on,
+                   note = EXCLUDED.note,
+                   sort_order = EXCLUDED.sort_order,
+                   source_mode = EXCLUDED.source_mode,
+                   external_clinic = EXCLUDED.external_clinic,
+                   external_doctor = EXCLUDED.external_doctor,
+                   external_country = EXCLUDED.external_country,
+                   treating_doctor_id = EXCLUDED.treating_doctor_id,
+                   treating_none = EXCLUDED.treating_none
+               WHERE diagnosis.patient_id = EXCLUDED.patient_id"#,
         )
         .bind(new_id)
         .bind(patient_uuid)
+        .bind(item_case_id)
         .bind(parent_id)
         .bind(provider_id)
         .bind(doctor_id)
@@ -9019,9 +9189,21 @@ async fn save_patient_diagnoses(
         .bind(clinical_opt_text(item.note))
         .bind(saved)
         .bind(&source_mode)
-        .bind(if source_mode == "extern" { external_clinic } else { None })
-        .bind(if source_mode == "extern" { external_doctor } else { None })
-        .bind(if source_mode == "extern" { external_country } else { None })
+        .bind(if source_mode == "extern" {
+            external_clinic
+        } else {
+            None
+        })
+        .bind(if source_mode == "extern" {
+            external_doctor
+        } else {
+            None
+        })
+        .bind(if source_mode == "extern" {
+            external_country
+        } else {
+            None
+        })
         .bind(treating_doctor_id)
         .bind(treating_none)
         .execute(&mut *tx)
@@ -9059,6 +9241,7 @@ async fn save_patient_diagnoses(
         patient_uuid,
         auth.user_id,
         PatientClinicalSection::Diagnoses,
+        version_log_case_id(&used_cases),
         retention_years,
         old_value,
         new_value,
@@ -9094,6 +9277,7 @@ async fn save_patient_medications(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
+    Query(query): Query<PatientClinicalSaveQuery>,
     Json(body): Json<PatientClinicalItems<PatientMedicationInput>>,
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
@@ -9137,18 +9321,33 @@ async fn save_patient_medications(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    if let Err(e) = sqlx::query("DELETE FROM patient_medications WHERE patient_id = $1")
-        .bind(patient_uuid)
-        .execute(&mut *tx)
-        .await
+    let existing_ids = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM patient_medications WHERE patient_id = $1",
+    )
+    .bind(patient_uuid)
+    .fetch_all(&mut *tx)
+    .await
     {
-        tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient medications");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        Ok(ids) => ids,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "load patient medication ids");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let mut existing: HashSet<Uuid> = HashSet::new();
+    for id in existing_ids {
+        existing.insert(id);
     }
+    let mut written_ids: Vec<Uuid> = Vec::new();
     let mut saved = 0i32;
     let mut on_hold_count = 0i32;
     let mut scheduled_end_count = 0i32;
     for item in body.items {
+        let row_id = item
+            .id
+            .as_deref()
+            .and_then(|value| Uuid::parse_str(value.trim()).ok())
+            .filter(|value| existing.contains(value));
         let wirkstoff = clinical_opt_text(item.wirkstoff)
             .expect("medication active ingredient validated before transaction");
         let handelsname = clinical_opt_text(item.handelsname).unwrap_or_default();
@@ -9203,46 +9402,68 @@ async fn save_patient_medications(
                 Ok(pair) => pair,
                 Err(resp) => return resp,
             };
-        if let Err(e) = sqlx::query(
-            "INSERT INTO patient_medications (patient_id, provider_id, doctor_id, category, wirkstoff, handelsname, staerke, form, dose_morgens, dose_mittags, dose_abends, dose_nachts, einheit, hinweis, grund, einnahmeform, verordnet_am, einnahme_von, einnahme_bis, status, apothekenpflichtig, rezeptpflichtig, btm, aut_idem_sperre, abgabebeschraenkung, sonstige_vermerke, on_hold, hold_from, hold_until, hold_note, sort_order)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)",
-        )
-        .bind(patient_uuid)
-        .bind(provider_id)
-        .bind(doctor_id)
-        .bind(&category)
-        .bind(&wirkstoff)
-        .bind(&handelsname)
-        .bind(clinical_opt_text(item.staerke))
-        .bind(clinical_opt_text(item.form))
-        .bind(clinical_opt_text(item.dose_morgens))
-        .bind(clinical_opt_text(item.dose_mittags))
-        .bind(clinical_opt_text(item.dose_abends))
-        .bind(clinical_opt_text(item.dose_nachts))
-        .bind(clinical_opt_text(item.einheit))
-        .bind(clinical_opt_text(item.hinweis))
-        .bind(clinical_opt_text(item.grund))
-        .bind(clinical_opt_text(item.einnahmeform))
-        .bind(verordnet_am)
-        .bind(einnahme_von)
-        .bind(einnahme_bis.as_deref())
-        .bind(&status)
-        .bind(item.apothekenpflichtig.unwrap_or(false))
-        .bind(item.rezeptpflichtig.unwrap_or(false))
-        .bind(item.btm.unwrap_or(false))
-        .bind(item.aut_idem_sperre.unwrap_or(false))
-        .bind(item.abgabebeschraenkung.unwrap_or(false))
-        .bind(clinical_opt_text(item.sonstige_vermerke))
-        .bind(on_hold)
-        .bind(hold_from)
-        .bind(hold_until)
-        .bind(clinical_opt_text(item.hold_note))
-        .bind(saved)
-        .execute(&mut *tx)
-        .await
-        {
-            tracing::error!(error = %e, patient_id = %patient_uuid, "insert patient medication");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        let statement = match row_id {
+            Some(_) => {
+                r#"UPDATE patient_medications
+                   SET provider_id = $2, doctor_id = $3, category = $4, wirkstoff = $5,
+                       handelsname = $6, staerke = $7, form = $8, dose_morgens = $9,
+                       dose_mittags = $10, dose_abends = $11, dose_nachts = $12, einheit = $13,
+                       hinweis = $14, grund = $15, einnahmeform = $16, verordnet_am = $17,
+                       einnahme_von = $18, einnahme_bis = $19, status = $20,
+                       apothekenpflichtig = $21, rezeptpflichtig = $22, btm = $23,
+                       aut_idem_sperre = $24, abgabebeschraenkung = $25, sonstige_vermerke = $26,
+                       on_hold = $27, hold_from = $28, hold_until = $29, hold_note = $30,
+                       sort_order = $31
+                   WHERE id = $32 AND patient_id = $1
+                   RETURNING id"#
+            }
+            None => {
+                r#"INSERT INTO patient_medications (patient_id, provider_id, doctor_id, category, wirkstoff, handelsname, staerke, form, dose_morgens, dose_mittags, dose_abends, dose_nachts, einheit, hinweis, grund, einnahmeform, verordnet_am, einnahme_von, einnahme_bis, status, apothekenpflichtig, rezeptpflichtig, btm, aut_idem_sperre, abgabebeschraenkung, sonstige_vermerke, on_hold, hold_from, hold_until, hold_note, sort_order)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)
+                   RETURNING id"#
+            }
+        };
+        let mut query = sqlx::query_scalar::<_, Uuid>(statement)
+            .bind(patient_uuid)
+            .bind(provider_id)
+            .bind(doctor_id)
+            .bind(&category)
+            .bind(&wirkstoff)
+            .bind(&handelsname)
+            .bind(clinical_opt_text(item.staerke))
+            .bind(clinical_opt_text(item.form))
+            .bind(clinical_opt_text(item.dose_morgens))
+            .bind(clinical_opt_text(item.dose_mittags))
+            .bind(clinical_opt_text(item.dose_abends))
+            .bind(clinical_opt_text(item.dose_nachts))
+            .bind(clinical_opt_text(item.einheit))
+            .bind(clinical_opt_text(item.hinweis))
+            .bind(clinical_opt_text(item.grund))
+            .bind(clinical_opt_text(item.einnahmeform))
+            .bind(verordnet_am)
+            .bind(einnahme_von)
+            .bind(einnahme_bis.as_deref())
+            .bind(&status)
+            .bind(item.apothekenpflichtig.unwrap_or(false))
+            .bind(item.rezeptpflichtig.unwrap_or(false))
+            .bind(item.btm.unwrap_or(false))
+            .bind(item.aut_idem_sperre.unwrap_or(false))
+            .bind(item.abgabebeschraenkung.unwrap_or(false))
+            .bind(clinical_opt_text(item.sonstige_vermerke))
+            .bind(on_hold)
+            .bind(hold_from)
+            .bind(hold_until)
+            .bind(clinical_opt_text(item.hold_note))
+            .bind(saved);
+        if let Some(id) = row_id {
+            query = query.bind(id);
+        }
+        match query.fetch_one(&mut *tx).await {
+            Ok(id) => written_ids.push(id),
+            Err(e) => {
+                tracing::error!(error = %e, patient_id = %patient_uuid, "save patient medication");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
         }
         if on_hold {
             on_hold_count += 1;
@@ -9251,6 +9472,18 @@ async fn save_patient_medications(
             scheduled_end_count += 1;
         }
         saved += 1;
+    }
+    if !query.merge_only() {
+        if let Err(e) =
+            sqlx::query("DELETE FROM patient_medications WHERE patient_id = $1 AND id <> ALL($2)")
+                .bind(patient_uuid)
+                .bind(&written_ids)
+                .execute(&mut *tx)
+                .await
+        {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "prune patient medications");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
     }
     let new_value = match load_patient_section_snapshot(
         &mut tx,
@@ -9270,6 +9503,7 @@ async fn save_patient_medications(
         patient_uuid,
         auth.user_id,
         PatientClinicalSection::Medications,
+        None,
         retention_years,
         old_value,
         new_value,
@@ -9349,11 +9583,22 @@ async fn save_patient_examinations(
         tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient examinations");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    let mut used_cases: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
     let mut saved = 0i32;
     for item in body.items {
         let Some(title) = clinical_opt_text(item.title) else {
             continue;
         };
+        let item_case_id =
+            match resolve_patient_case_attribution(&mut tx, patient_uuid, item.case_id.clone())
+                .await
+            {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+        if let Some(case_id) = item_case_id {
+            used_cases.insert(case_id);
+        }
         let kind = clinical_one_of(
             item.kind,
             &[
@@ -9375,10 +9620,11 @@ async fn save_patient_examinations(
                 Err(resp) => return resp,
             };
         if let Err(e) = sqlx::query(
-            "INSERT INTO patient_examinations (patient_id, provider_id, doctor_id, kind, title, performed_on, status, result, note, sort_order)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+            "INSERT INTO patient_examinations (patient_id, case_id, provider_id, doctor_id, kind, title, performed_on, status, result, note, sort_order)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         )
         .bind(patient_uuid)
+        .bind(item_case_id)
         .bind(provider_id)
         .bind(doctor_id)
         .bind(kind)
@@ -9414,6 +9660,7 @@ async fn save_patient_examinations(
         patient_uuid,
         auth.user_id,
         PatientClinicalSection::Examinations,
+        version_log_case_id(&used_cases),
         retention_years,
         old_value,
         new_value,
@@ -9451,6 +9698,9 @@ struct PatientNarrativeInput {
     /// matching row (scoped to this patient).
     #[serde(default)]
     id: Option<String>,
+    /// Episode this anamnesis version was taken in, if any.
+    #[serde(default)]
+    case_id: Option<String>,
     #[serde(default)]
     anamnese_aktuelle: Option<String>,
     #[serde(default)]
@@ -9543,6 +9793,12 @@ async fn save_patient_narrative(
         }
     };
 
+    let narrative_case_id =
+        match resolve_patient_case_attribution(&mut tx, patient_uuid, body.case_id).await {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+
     // At most one active version per patient: deactivate the rest first.
     if want_active
         && let Err(e) = sqlx::query(
@@ -9567,8 +9823,9 @@ async fn save_patient_narrative(
                        beurteilung = $5,
                        anamnese_at = $6,
                        is_active = $7,
+                       case_id = COALESCE($8, case_id),
                        updated_at = now()
-                   WHERE id = $8 AND patient_id = $9"#,
+                   WHERE id = $9 AND patient_id = $10"#,
             )
             .bind(&aktuelle)
             .bind(&vorgeschichte)
@@ -9577,6 +9834,7 @@ async fn save_patient_narrative(
             .bind(&beurteilung)
             .bind(anamnese_at)
             .bind(want_active)
+            .bind(narrative_case_id)
             .bind(id)
             .bind(patient_uuid)
             .execute(&mut *tx)
@@ -9597,12 +9855,13 @@ async fn save_patient_narrative(
             let new_id = Uuid::new_v4();
             if let Err(e) = sqlx::query(
                 r#"INSERT INTO patient_clinical_narrative
-                       (id, patient_id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative,
+                       (id, patient_id, case_id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative,
                         anamnese_sozial, beurteilung, anamnese_at, is_active)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#,
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"#,
             )
             .bind(new_id)
             .bind(patient_uuid)
+            .bind(narrative_case_id)
             .bind(&aktuelle)
             .bind(&vorgeschichte)
             .bind(&vegetative)
@@ -9623,7 +9882,7 @@ async fn save_patient_narrative(
     // Re-select the saved version inside the same transaction so the response is
     // consistent with what was committed.
     let saved_row = match sqlx::query(
-        r#"SELECT id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
+        r#"SELECT id, case_id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
                   beurteilung, anamnese_at, is_active, created_at, updated_at
            FROM patient_clinical_narrative
            WHERE id = $1"#,
@@ -9658,6 +9917,7 @@ async fn save_patient_narrative(
         patient_uuid,
         auth.user_id,
         PatientClinicalSection::Narrative,
+        narrative_case_id,
         retention_years,
         old_value,
         new_value,
@@ -9711,7 +9971,7 @@ async fn list_patient_narrative_history(
     }
 
     let rows = match sqlx::query(
-        r#"SELECT id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
+        r#"SELECT id, case_id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
                   beurteilung, anamnese_at, is_active, created_at, updated_at
            FROM patient_clinical_narrative
            WHERE patient_id = $1
@@ -9800,7 +10060,7 @@ async fn delete_patient_narrative(
         .to_rfc3339();
 
     let active_row = match sqlx::query(
-        r#"SELECT id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
+        r#"SELECT id, case_id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
                   beurteilung, anamnese_at, is_active, created_at, updated_at
            FROM patient_clinical_narrative
            WHERE patient_id = $1 AND is_active = true
@@ -9866,6 +10126,7 @@ async fn delete_patient_narrative(
         patient_uuid,
         auth.user_id,
         PatientClinicalSection::Narrative,
+        None,
         retention_years,
         old_value,
         new_value,
@@ -9910,6 +10171,8 @@ struct PatientVerlaufSave {
 #[derive(Deserialize)]
 struct PatientVerlaufItem {
     #[serde(default)]
+    case_id: Option<String>,
+    #[serde(default)]
     provider_id: Option<String>,
     #[serde(default)]
     doctor_id: Option<String>,
@@ -9943,19 +10206,16 @@ async fn save_patient_verlauf(
         }
     };
 
-    let old_value = match load_patient_section_snapshot(
-        &mut tx,
-        patient_uuid,
-        PatientClinicalSection::Verlauf,
-    )
-    .await
-    {
-        Ok(value) => value,
-        Err(e) => {
-            tracing::error!(error = %e, patient_id = %patient_uuid, "snapshot patient verlauf");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
+    let old_value =
+        match load_patient_section_snapshot(&mut tx, patient_uuid, PatientClinicalSection::Verlauf)
+            .await
+        {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::error!(error = %e, patient_id = %patient_uuid, "snapshot patient verlauf");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
     if let Err(e) = sqlx::query("DELETE FROM patient_clinical_verlauf WHERE patient_id = $1")
         .bind(patient_uuid)
         .execute(&mut *tx)
@@ -9965,11 +10225,22 @@ async fn save_patient_verlauf(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 
+    let mut used_cases: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
     let mut saved = 0i32;
     for item in body.items {
         let Some(note) = clinical_opt_text(item.note) else {
             continue;
         };
+        let item_case_id =
+            match resolve_patient_case_attribution(&mut tx, patient_uuid, item.case_id.clone())
+                .await
+            {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+        if let Some(case_id) = item_case_id {
+            used_cases.insert(case_id);
+        }
         let occurred_on = match clinical_parse_date(item.occurred_on, "occurred_on") {
             Ok(value) => value,
             Err(resp) => return resp,
@@ -9982,10 +10253,11 @@ async fn save_patient_verlauf(
 
         if let Err(e) = sqlx::query(
             r#"INSERT INTO patient_clinical_verlauf
-                   (patient_id, provider_id, doctor_id, occurred_on, note, sort_order)
-               VALUES ($1, $2, $3, $4, $5, $6)"#,
+                   (patient_id, case_id, provider_id, doctor_id, occurred_on, note, sort_order)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
         )
         .bind(patient_uuid)
+        .bind(item_case_id)
         .bind(provider_id)
         .bind(doctor_id)
         .bind(occurred_on)
@@ -10018,6 +10290,7 @@ async fn save_patient_verlauf(
         patient_uuid,
         auth.user_id,
         PatientClinicalSection::Verlauf,
+        version_log_case_id(&used_cases),
         retention_years,
         old_value,
         new_value,
@@ -10054,6 +10327,8 @@ async fn save_patient_verlauf(
 #[derive(Deserialize)]
 struct PatientProcedureInput {
     #[serde(default)]
+    case_id: Option<String>,
+    #[serde(default)]
     provider_id: Option<String>,
     #[serde(default)]
     doctor_id: Option<String>,
@@ -10072,6 +10347,8 @@ struct PatientProcedureInput {
 /// allergy-only and ignored for CAVE rows.
 #[derive(Deserialize)]
 struct PatientClinicalWarningInput {
+    #[serde(default)]
+    id: Option<String>,
     #[serde(default)]
     label: Option<String>,
     #[serde(default)]
@@ -10136,21 +10413,33 @@ async fn save_patient_procedures(
         tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient procedures");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    let mut used_cases: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
     let mut saved = 0i32;
     for item in body.items {
         let Some(label) = clinical_opt_text(item.label) else {
             continue;
         };
+        let item_case_id =
+            match resolve_patient_case_attribution(&mut tx, patient_uuid, item.case_id.clone())
+                .await
+            {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+        if let Some(case_id) = item_case_id {
+            used_cases.insert(case_id);
+        }
         let (provider_id, doctor_id) =
             match clinical_resolve_attribution(&state, item.provider_id, item.doctor_id).await {
                 Ok(pair) => pair,
                 Err(resp) => return resp,
             };
         if let Err(e) = sqlx::query(
-            "INSERT INTO patient_procedures (patient_id, provider_id, doctor_id, label, ops_code, performed_on, note, sort_order)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            "INSERT INTO patient_procedures (patient_id, case_id, provider_id, doctor_id, label, ops_code, performed_on, note, sort_order)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         )
         .bind(patient_uuid)
+        .bind(item_case_id)
         .bind(provider_id)
         .bind(doctor_id)
         .bind(&label)
@@ -10184,6 +10473,7 @@ async fn save_patient_procedures(
         patient_uuid,
         auth.user_id,
         PatientClinicalSection::Procedures,
+        version_log_case_id(&used_cases),
         retention_years,
         old_value,
         new_value,
@@ -10223,6 +10513,7 @@ async fn save_patient_clinical_warnings(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
+    Query(query): Query<PatientClinicalSaveQuery>,
     Json(body): Json<PatientClinicalWarningsBody>,
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
@@ -10260,18 +10551,40 @@ async fn save_patient_clinical_warnings(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    if let Err(e) =
-        sqlx::query("DELETE FROM patient_clinical_warnings WHERE patient_id = $1 AND kind = $2")
-            .bind(patient_uuid)
-            .bind(&kind)
-            .execute(&mut *tx)
-            .await
+    let merge_only = query.merge_only();
+    let existing_ids: HashSet<Uuid> = match sqlx::query_scalar(
+        "SELECT id FROM patient_clinical_warnings WHERE patient_id = $1 AND kind = $2",
+    )
+    .bind(patient_uuid)
+    .bind(&kind)
+    .fetch_all(&mut *tx)
+    .await
     {
-        tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient clinical warnings");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        Ok(ids) => ids.into_iter().collect(),
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "load patient clinical warning ids");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if !merge_only {
+        if let Err(e) =
+            sqlx::query("DELETE FROM patient_clinical_warnings WHERE patient_id = $1 AND kind = $2")
+                .bind(patient_uuid)
+                .bind(&kind)
+                .execute(&mut *tx)
+                .await
+        {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient clinical warnings");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
     }
     let mut saved = 0i32;
     for item in body.items {
+        let row_id = item
+            .id
+            .as_deref()
+            .and_then(|value| Uuid::parse_str(value.trim()).ok())
+            .filter(|value| merge_only && existing_ids.contains(value));
         let Some(label) = clinical_opt_text(item.label) else {
             continue;
         };
@@ -10286,10 +10599,21 @@ async fn save_patient_clinical_warnings(
         } else {
             None
         };
+        let new_id = row_id.unwrap_or_else(Uuid::new_v4);
         if let Err(e) = sqlx::query(
-            "INSERT INTO patient_clinical_warnings (patient_id, kind, label, reaction, severity, note, sort_order)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            "INSERT INTO patient_clinical_warnings AS warning
+                 (id, patient_id, kind, label, reaction, severity, note, sort_order)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (id) DO UPDATE SET
+                 label = EXCLUDED.label,
+                 reaction = EXCLUDED.reaction,
+                 severity = EXCLUDED.severity,
+                 note = EXCLUDED.note,
+                 sort_order = EXCLUDED.sort_order
+             WHERE warning.patient_id = EXCLUDED.patient_id
+               AND warning.kind = EXCLUDED.kind",
         )
+        .bind(new_id)
         .bind(patient_uuid)
         .bind(&kind)
         .bind(&label)
@@ -10323,6 +10647,7 @@ async fn save_patient_clinical_warnings(
         patient_uuid,
         auth.user_id,
         PatientClinicalSection::ClinicalWarnings,
+        None,
         retention_years,
         old_value,
         new_value,
@@ -10352,6 +10677,148 @@ async fn save_patient_clinical_warnings(
     )
     .await;
     Json(json!({ "ok": true, "count": saved })).into_response()
+}
+
+#[derive(Deserialize)]
+struct PatientImpfstatusInput {
+    #[serde(default)]
+    status_text: Option<String>,
+}
+
+async fn get_patient_impfstatus(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+        return e;
+    }
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+    let row = match sqlx::query(
+        "SELECT status_text, updated_at FROM patient_impfstatus WHERE patient_id = $1",
+    )
+    .bind(patient_uuid)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "load patient impfstatus");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let payload = row.map(|row| {
+        json!({
+            "status_text": row.get::<Option<String>, _>("status_text"),
+            "updated_at": row.get::<chrono::DateTime<chrono::Utc>, _>("updated_at").to_rfc3339(),
+        })
+    });
+    Json(json!({ "impfstatus": payload })).into_response()
+}
+
+/// Upsert the patient's Impfstatus (free-text 1:1 state, moved from the case
+/// per RFC D4). Empty text clears the record but keeps the row for the trail.
+async fn save_patient_impfstatus(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+    Json(body): Json<PatientImpfstatusInput>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+        return e;
+    }
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+    let status_text = clinical_opt_text(body.status_text);
+    let retention_years = load_patient_clinical_retention_years(&state, 30).await;
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin patient impfstatus tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let old_value = match load_patient_section_snapshot(
+        &mut tx,
+        patient_uuid,
+        PatientClinicalSection::Impfstatus,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "snapshot patient impfstatus");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(e) = sqlx::query(
+        "INSERT INTO patient_impfstatus (patient_id, status_text, updated_at)
+         VALUES ($1, $2, now())
+         ON CONFLICT (patient_id) DO UPDATE SET status_text = $2, updated_at = now()",
+    )
+    .bind(patient_uuid)
+    .bind(&status_text)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "save patient impfstatus");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    let new_value = match load_patient_section_snapshot(
+        &mut tx,
+        patient_uuid,
+        PatientClinicalSection::Impfstatus,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "resnapshot patient impfstatus");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(e) = patient_version_log(
+        &mut tx,
+        patient_uuid,
+        auth.user_id,
+        PatientClinicalSection::Impfstatus,
+        None,
+        retention_years,
+        old_value,
+        new_value,
+    )
+    .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "log patient impfstatus version");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "commit patient impfstatus");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    state.audit_sender.try_send(audit::domain_event(
+        "save_patient_impfstatus",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({}),
+    ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.clinical_updated",
+        patient_uuid,
+        json!({ "section": "impfstatus" }),
+    )
+    .await;
+    Json(json!({ "ok": true })).into_response()
 }
 
 // ---------------------------------------------------------------------------

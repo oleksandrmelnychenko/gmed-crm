@@ -83,6 +83,7 @@ import {
   appointmentSectionCardClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
 import {
+  appointmentPluralText,
   appointmentText,
   appointmentTypeLabel,
   patientName,
@@ -896,6 +897,14 @@ function useStaffAppointmentsPageContent() {
       detail?.interpreter_id && !interpreterReportReady
         ? appointmentText("appointments_billing_is_waiting_for_an_approved_interpreter_report")
         : "",
+      detailReport?.approval_status === "approved" &&
+      detailReport.billing_sync_status === "missing_order"
+        ? t.appointments_billing_sync_missing_order
+        : "",
+      detailReport?.approval_status === "approved" &&
+      detailReport.billing_sync_status === "missing_catalog"
+        ? t.appointments_billing_sync_missing_catalog
+        : "",
       detail?.type === "non_medical" && serviceInFlightCount > 0
         ? appointmentText("appointments_concierge_services_operational_open", {
             count: serviceInFlightCount,
@@ -913,19 +922,16 @@ function useStaffAppointmentsPageContent() {
     ].filter(Boolean);
     const completionWarnings = [
       openChecklistCount > 0
-        ? appointmentText("appointments_open_checklist_count_warning", {
-            count: openChecklistCount,
-          })
+        ? appointmentPluralText(
+            "appointments_open_checklist_count_warning",
+            openChecklistCount,
+          )
         : "",
       openIncomingDataChecklistCount > 0
-        ? appointmentText("appointments_open_incoming_data_count_warning", {
-            count: openIncomingDataChecklistCount,
-          })
-        : "",
-      openTaskCount > 0
-        ? appointmentText("appointments_open_operational_task_count_warning", {
-            count: openTaskCount,
-          })
+        ? appointmentPluralText(
+            "appointments_open_incoming_data_count_warning",
+            openIncomingDataChecklistCount,
+          )
         : "",
       !interpreterReportReady && detail?.interpreter_id
         ? appointmentText("appointments_interpreter_report_or_approval_is_still_pending")
@@ -974,6 +980,7 @@ function useStaffAppointmentsPageContent() {
       detailCommunications,
     detailReminders,
     detailReport?.approval_status,
+    detailReport?.billing_sync_status,
     detailServices,
     detailTasks,
     permissions.canManageConciergeBilling,
@@ -982,6 +989,8 @@ function useStaffAppointmentsPageContent() {
       tr.patients_assign_owner,
       tr.role_interpreter,
       shouldBuildExtendedDetailDerivedState,
+      t.appointments_billing_sync_missing_catalog,
+      t.appointments_billing_sync_missing_order,
     ]);
   const canResubmitRejectedReport =
     permissions.canSubmitReport &&
