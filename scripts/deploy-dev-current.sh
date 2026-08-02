@@ -18,6 +18,18 @@ RELEASE_ENV="${RELEASE_ENV:-$REPO_DIR/release.env}"
 CADDY_HOSTNAME_VALUE="${CADDY_HOSTNAME_VALUE:-console-dev.gmed-health.com}"
 GMED_CORS_ORIGIN_VALUE="${GMED_CORS_ORIGIN_VALUE:-https://console-dev.gmed-health.com}"
 LOG_FILE="${LOG_FILE:-$DEPLOY_DIR/deploy-dev-current.log}"
+STAGING_DIR=""
+PRESERVED_ENV=""
+
+cleanup() {
+  if [[ -n "${STAGING_DIR:-}" && -d "$STAGING_DIR" ]]; then
+    rm -rf -- "$STAGING_DIR"
+  fi
+  if [[ -n "${PRESERVED_ENV:-}" && -f "$PRESERVED_ENV" ]]; then
+    rm -f -- "$PRESERVED_ENV"
+  fi
+}
+trap cleanup EXIT
 
 mkdir -p "$REPO_DIR" "$BACKUP_DIR" "$(dirname "$LOG_FILE")"
 touch "$LOG_FILE"
@@ -36,9 +48,38 @@ if [[ -f "$RELEASE_ENV" ]]; then
   cp "$RELEASE_ENV" "$backup"
   chmod 600 "$backup"
   echo "release.env backup: $backup"
+else
+  echo "ERROR: $RELEASE_ENV must exist before refreshing the release tree." >&2
+  exit 1
 fi
 
-tar -xzf "$ARCHIVE" -C "$REPO_DIR"
+STAGING_DIR="$(mktemp -d "$DEPLOY_DIR/gmed-crm-release.XXXXXX")"
+PRESERVED_ENV="$(mktemp "$DEPLOY_DIR/release.env.active.XXXXXX")"
+cp "$RELEASE_ENV" "$PRESERVED_ENV"
+chmod 600 "$PRESERVED_ENV"
+
+tar -xzf "$ARCHIVE" -C "$STAGING_DIR"
+
+if [[ ! -f "$STAGING_DIR/Cargo.toml" || ! -d "$STAGING_DIR/frontend" ]]; then
+  echo "ERROR: archive does not contain a valid GMED release tree." >&2
+  exit 1
+fi
+
+repo_real="$(realpath -m "$REPO_DIR")"
+case "$repo_real" in
+  /home/gmed/*) ;;
+  *)
+    echo "ERROR: refusing to replace unexpected release path: $repo_real" >&2
+    exit 1
+    ;;
+esac
+
+# Replace the release tree instead of overlaying it. Overlay extraction leaves
+# files deleted by the new commit behind and can make the remote build differ
+# from the locally verified archive.
+find "$repo_real" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+cp -a "$STAGING_DIR"/. "$repo_real"/
+install -m 600 "$PRESERVED_ENV" "$RELEASE_ENV"
 
 if [[ ! -f "$RELEASE_ENV" ]]; then
   echo "ERROR: $RELEASE_ENV missing after extraction." >&2
