@@ -28,7 +28,6 @@ import {
   CountBadge,
   EmptyCell,
   Section,
-  StatCard,
 } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
@@ -933,13 +932,6 @@ function useAppointmentFindingsSectionContent({
         value,
       ),
     );
-  const openChecklistCount = checklist.filter((item) => !item.is_completed).length;
-  const findingsStateLabel =
-    openChecklistCount === 0 && checklist.length > 0
-      ? appointmentText("appointments_follow_up_ready")
-      : appointmentText("appointments_open_count", {
-          count: openChecklistCount,
-        });
   const translationRequiredLabel = appointmentText("appointments_written_translation_required");
   const sendToPatientLabel = appointmentText("appointments_send_package_to_patient");
   const findingsComposerTitle = appointmentText("appointments_create_findings_follow_up");
@@ -1222,36 +1214,6 @@ function useAppointmentFindingsSectionContent({
 
   return (
     <div className="space-y-4">
-      <Section
-        title={appointmentText("appointments_arztbrief_and_written_findings")}
-        accessory={<CountBadge>{findingsStateLabel}</CountBadge>}
-      >
-        <p className="text-sm text-muted-foreground">
-          {appointmentText("appointments_track_missing_findings_translation_needs_and_patient_del")}
-        </p>
-        <div className="grid gap-3 md:grid-cols-3">
-          <StatCard
-            label={appointmentText("appointments_checklist")}
-            value={checklist.length}
-            description={
-              checklist.length === 0
-                ? appointmentText("appointments_not_started_yet")
-                : findingsStateLabel
-            }
-          />
-          <StatCard
-            label={appointmentText("appointments_reminders")}
-            value={reminders.length}
-            description={appointmentText("appointments_timing_for_requests_translation_and_document_handling")}
-          />
-          <StatCard
-            label={appointmentText("appointments_tasks")}
-            value={tasks.length}
-            description={appointmentText("appointments_operational_ownership_for_requesting_translating_and_sen")}
-          />
-        </div>
-      </Section>
-
       <div className="space-y-4">
         <DataTableSurface
           rows={findingsChecklistPagination.pagedRows}

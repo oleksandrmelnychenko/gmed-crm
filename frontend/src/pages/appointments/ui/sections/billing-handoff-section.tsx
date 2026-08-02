@@ -11,7 +11,7 @@ import { LoaderCircle, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Banner, checkboxClass } from "@/components/ui-shell";
-import { getLang, useLang } from "@/lib/i18n";
+import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
 import {
@@ -54,7 +54,6 @@ import {
   BILLING_HANDOFF_PREFIX,
   TASK_PRIORITY_OPTIONS,
 } from "@/pages/appointments/model/constants";
-import { ContextCard } from "@/pages/appointments/ui/shared/context-card";
 import {
   AppointmentRemindersTable,
   AppointmentTasksTable,
@@ -105,14 +104,6 @@ function defaultBillingHandoffDueAt(
   return appointmentDueAt > nextDay ? appointmentDueAt : nextDay;
 }
 
-function countLabel(
-  key: "appointments_open_tasks_count" | "appointments_reminders_linked_count",
-  count: number,
-) {
-  const category = new Intl.PluralRules(getLang()).select(count);
-  return appointmentTextBase(`${key}_${category}`, { count });
-}
-
 function AppointmentBillingHandoffSection(props: AppointmentBillingHandoffSectionProps) {
   const defaultDueAtKey = appointmentAnchorDateTime(props.detail);
   return (
@@ -132,13 +123,9 @@ function AppointmentBillingHandoffSection(props: AppointmentBillingHandoffSectio
 function useAppointmentBillingHandoffSectionContentContent({
   detail,
   detailReport,
-  reportReviewMeta,
-  interpreterReportReady,
-  serviceCount,
   billingStaff,
   reminders,
   tasks,
-  openTasks,
   readyServices,
   settledServices,
   warnings,
@@ -331,54 +318,6 @@ function useAppointmentBillingHandoffSectionContentContent({
             {appointmentText("appointments_create_billing_handoff")}
           </Button>
         ) : null}
-      </div>
-
-      <div className="mt-4 grid gap-3 xl:grid-cols-3">
-        <ContextCard
-          label={appointmentText("appointments_interpreter")}
-          value={
-            detail.interpreter_id
-              ? interpreterReportReady && detailReport
-                ? appointmentText("appointments_report_hours_approved", {
-                    hours: detailReport.hours,
-                  })
-                : appointmentText("appointments_pending_approval")
-              : appointmentText("appointments_not_required")
-          }
-          meta={
-            detail.interpreter_id
-              ? detailReport
-                ? reportReviewMeta || reportApprovalLabel(detailReport.approval_status)
-                : appointmentText("appointments_no_report_submitted")
-              : appointmentText("appointments_no_interpreter_on_this_appointment")
-          }
-        />
-        <ContextCard
-          label={tr.role_concierge}
-          value={
-            detail.type === "non_medical"
-              ? appointmentText("appointments_billing_services_status_summary", {
-                  ready: readyServices.length,
-                  settled: settledServices.length,
-                })
-              : appointmentText("appointments_not_applicable")
-          }
-          meta={
-            detail.type === "non_medical"
-              ? appointmentText("appointments_services_linked_count", {
-                  count: serviceCount,
-                })
-              : appointmentText("appointments_medical_appointment")
-          }
-        />
-        <ContextCard
-          label={tr.role_billing}
-          value={countLabel("appointments_open_tasks_count", openTasks.length)}
-          meta={countLabel(
-            "appointments_reminders_linked_count",
-            reminders.length,
-          )}
-        />
       </div>
 
       {warnings.length > 0 ? (

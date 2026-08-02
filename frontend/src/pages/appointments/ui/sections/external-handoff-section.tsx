@@ -5,25 +5,25 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useState,
   type FormEvent,
   type SetStateAction,
 } from "react";
 
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { checkboxClass } from "@/components/ui-shell";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import { DEFAULT_DATA_TABLE_PAGE_SIZE } from "@/components/data-table/data-table-pager";
+import type { ColumnDef } from "@/components/data-table/types";
 import { formatUiText, useLang, type UiTextValues } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
-  appointmentElevatedSectionCardClassName,
-  appointmentMetaPillClassName,
   appointmentSelectControlClassName,
-  appointmentSoftPanelClassName,
-  appointmentSoftRowClassName,
   appointmentTextareaControlClassName,
   appointmentToggleCardClassName,
   appointmentWhiteInputClassName,
@@ -43,7 +43,6 @@ import {
   communicationTargetLabel,
   roleLabel,
   taskPriorityLabel,
-  taskStatusLabel,
 } from "@/pages/appointments/model/labels";
 import {
   appointmentAnchorDateTime,
@@ -68,8 +67,11 @@ import {
 } from "@/pages/appointments/model/constants";
 import { appointmentCommunicationStatusBadgeClassName } from "@/pages/appointments/appearance/status-appearance";
 import {
-  AppointmentDotLabel,
-  AppointmentSectionHeading,
+  AppointmentRemindersTable,
+  AppointmentTasksTable,
+} from "@/pages/appointments/ui/shared/follow-up-tables";
+import {
+  AppointmentEditorSheet,
   EmptyState,
   Field,
 } from "@/pages/appointments/ui/shared/workspace-primitives";
@@ -88,7 +90,6 @@ type AppointmentExternalHandoffSectionProps = {
   onError: (message: string) => void;
 };
 
-const sectionCardClass = appointmentElevatedSectionCardClassName;
 const selectClassName = appointmentSelectControlClassName;
 const textareaClassName = appointmentTextareaControlClassName;
 
@@ -344,6 +345,7 @@ function useAppointmentExternalHandoffSectionContent({
           form.target,
         ),
       );
+      setSheetOpen(false);
       onRefresh();
     } catch (error) {
       onError(appointmentActionErrorMessage(error, tr.common_failed_create));
@@ -373,193 +375,252 @@ function useAppointmentExternalHandoffSectionContent({
     }
   }
 
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  const trailReminders = useMemo(
+    () =>
+      reminders.map((item) => ({
+        ...item,
+        title: item.title.replace(`${EXTERNAL_HANDOFF_PREFIX} `, ""),
+      })),
+    [reminders],
+  );
+  const trailTasks = useMemo(
+    () =>
+      tasks.map((task) => ({
+        ...task,
+        title: task.title.replace(`${EXTERNAL_HANDOFF_PREFIX} `, ""),
+      })),
+    [tasks],
+  );
+
+  const communicationColumns = useMemo<ColumnDef<AppointmentCommunicationEntry>[]>(
+    () => [
+      {
+        id: "subject",
+        label: tr.appointments_title_col ?? tr.appointments_title,
+        accessor: (item) => item.subject,
+        filterType: "text",
+        searchable: true,
+        sortable: true,
+        required: true,
+        width: 260,
+        render: (item) => (
+          <span className="block truncate text-xs font-medium text-foreground" title={item.subject}>
+            {item.subject}
+          </span>
+        ),
+      },
+      {
+        id: "target",
+        label: appointmentText("appointments_communication_target"),
+        accessor: (item) => communicationTargetLabel(item.target_type, detail),
+        filterType: "enum",
+        filterOptions: (rows) =>
+          [...new Set(rows.map((item) => communicationTargetLabel(item.target_type, detail)))].map(
+            (label) => ({ value: label, label }),
+          ),
+        sortable: true,
+        width: 190,
+        render: (item) => (
+          <span className="inline-flex rounded-full border border-border/60 bg-muted/25 px-2 py-0.5 font-mono text-[10px] font-medium text-foreground">
+            {communicationTargetLabel(item.target_type, detail)}
+          </span>
+        ),
+      },
+      {
+        id: "channel",
+        label: tr.documents_source,
+        accessor: (item) =>
+          `${communicationDirectionLabel(item.direction)} · ${communicationChannelLabel(item.channel)}`,
+        filterType: "text",
+        sortable: true,
+        width: 200,
+        render: (item) => (
+          <span className="block truncate font-mono text-xs text-foreground">
+            {communicationDirectionLabel(item.direction)} · {communicationChannelLabel(item.channel)}
+          </span>
+        ),
+      },
+      {
+        id: "contact",
+        label: appointmentText("appointments_contact_person"),
+        accessor: (item) => item.contact_name ?? "",
+        filterType: "text",
+        width: 170,
+        render: (item) =>
+          item.contact_name?.trim() ? (
+            <span className="block truncate font-mono text-xs text-foreground">
+              {item.contact_name}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">{tr.common_not_set}</span>
+          ),
+      },
+      {
+        id: "created_by",
+        label: appointmentText("appointments_communication_author"),
+        accessor: (item) => item.created_by_name,
+        filterType: "text",
+        sortable: true,
+        width: 180,
+        render: (item) => (
+          <span className="block truncate font-mono text-xs text-foreground">
+            {item.created_by_name}
+          </span>
+        ),
+      },
+      {
+        id: "due_at",
+        label: t.appointments_common_due,
+        accessor: (item) => item.due_at ?? "",
+        filterType: "date",
+        sortable: true,
+        width: 170,
+        render: (item) =>
+          item.due_at ? (
+            <span className="whitespace-nowrap font-mono text-xs tabular-nums text-foreground">
+              {formatDateTimeLabel(item.due_at)}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">{tr.common_not_set}</span>
+          ),
+      },
+      {
+        id: "status",
+        label: tr.users_status,
+        accessor: (item) => communicationStatusLabel(item.status),
+        filterType: "enum",
+        filterOptions: () =>
+          COMMUNICATION_STATUS_OPTIONS.map((value) => ({
+            value: communicationStatusLabel(value),
+            label: communicationStatusLabel(value),
+          })),
+        sortable: true,
+        width: 150,
+        render: (item) => (
+          <span
+            className={cn(
+              "inline-flex rounded-full border px-2 py-0.5 font-mono text-[10px] font-medium",
+              appointmentCommunicationStatusBadgeClassName(item.status),
+            )}
+          >
+            {communicationStatusLabel(item.status)}
+          </span>
+        ),
+      },
+      {
+        id: "message",
+        label: tr.patients_notes,
+        accessor: (item) => item.message ?? "",
+        filterType: "text",
+        searchable: true,
+        width: 280,
+        render: (item) => (
+          <span className="block truncate text-xs text-foreground" title={item.message ?? undefined}>
+            {item.message?.trim() || tr.common_not_set}
+          </span>
+        ),
+      },
+    ],
+    [appointmentText, detail, t, tr],
+  );
+
   return (
-    <section className={sectionCardClass}>
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <AppointmentSectionHeading
+    <div className="space-y-4">
+      <DataTableSurface
+        rows={communications}
+        columns={communicationColumns}
+        rowId={(item) => item.id}
+        dictionary={tr}
+        pagination={{
+          pageSize: DEFAULT_DATA_TABLE_PAGE_SIZE,
+          resetKey: String(communications.length),
+        }}
+        emptyState={<EmptyState text={tr.common_not_set} />}
+        toolbarStart={
+          <>
+            <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+              {t.appointments_external_handoff_title}
+            </span>
+            {canManageCommunications ? (
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 shrink-0 self-center rounded-lg gap-1.5"
+                onClick={() => setSheetOpen(true)}
+              >
+                <Plus className="size-3.5" />
+                {appointmentText("appointments_log_communication")}
+              </Button>
+            ) : null}
+            <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+          </>
+        }
+        rowActions={
+          canManageCommunications
+            ? (item) => (
+                <NativeComboboxSelect
+                  value={item.status}
+                  onChange={(event) =>
+                    void handleCommunicationStatusUpdate(
+                      item.id,
+                      event.target.value as AppointmentCommunicationStatus,
+                    )
+                  }
+                  className="h-7 w-[150px] rounded-md bg-field text-xs"
+                  disabled={actionBusy.startsWith(`communication:${item.id}:`)}
+                >
+                  {COMMUNICATION_STATUS_OPTIONS.map((value) => (
+                    <option key={value} value={value}>
+                      {communicationStatusLabel(value)}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              )
+            : undefined
+        }
+        rowActionsWidth={canManageCommunications ? 170 : undefined}
+      />
+
+      {canViewReminders ? (
+        <>
+          <AppointmentRemindersTable
+            reminders={trailReminders}
+            title={`${t.appointments_external_handoff_internal_trail} · ${appointmentText("appointments_reminders")}`}
+            emptyText={tr.common_not_set}
+          />
+          <AppointmentTasksTable
+            tasks={trailTasks}
+            title={`${t.appointments_external_handoff_internal_trail} · ${appointmentText("appointments_tasks")}`}
+            emptyText={tr.common_not_set}
+          />
+        </>
+      ) : null}
+
+      {canManageCommunications ? (
+        <AppointmentEditorSheet
+          open={sheetOpen}
+          onOpenChange={setSheetOpen}
           title={t.appointments_external_handoff_title}
           description={t.appointments_external_handoff_description}
-        />
-        <span className={appointmentMetaPillClassName}>
-          {communications.length}{" "}
-          {communications.length === 1
-            ? t.appointments_common_communication
-            : t.appointments_common_communications}
-        </span>
-      </div>
-      <div className="mt-4 grid gap-4 xl:grid-cols-2">
-        <div className="space-y-3">
-          {communications.length === 0 &&
-          reminders.length === 0 &&
-          tasks.length === 0 ? (
-            <EmptyState text={tr.common_not_set} />
-          ) : (
-            <>
-              {communications.map((item) => (
-                <div
-                  key={item.id}
-                  className={appointmentSoftRowClassName}
-                >
-                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-900">
-                        {item.subject}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {item.created_by_name} · {communicationDirectionLabel(item.direction)}{" "}
-                        {t.appointments_common_via}{" "}
-                        {communicationChannelLabel(item.channel)} ·{" "}
-                        {communicationTargetLabel(item.target_type, detail)}
-                        {item.contact_name ? ` · ${item.contact_name}` : ""}
-                        {item.due_at
-                          ? ` · ${t.appointments_common_due} ${formatDateTimeLabel(item.due_at)}`
-                          : ""}
-                      </p>
-                    </div>
-                    <span
-                      className={cn(
-                        "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em]",
-                        appointmentCommunicationStatusBadgeClassName(item.status),
-                      )}
-                    >
-                      {communicationStatusLabel(item.status)}
-                    </span>
-                  </div>
-                  {item.message ? (
-                    <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                      {item.message}
-                    </p>
-                  ) : null}
-                  {canManageCommunications ? (
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {item.status !== "answered" &&
-                      item.status !== "closed" &&
-                      item.status !== "cancelled" ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={
-                            actionBusy === `communication:${item.id}:answered`
-                          }
-                          onClick={() =>
-                            void handleCommunicationStatusUpdate(
-                              item.id,
-                              "answered",
-                            )
-                          }
-                        >
-                          {actionBusy === `communication:${item.id}:answered` ? (
-                            <LoaderCircle className="size-4 animate-spin" />
-                          ) : null}
-                          {t.appointments_external_handoff_mark_answered}
-                        </Button>
-                      ) : null}
-                      {item.status !== "closed" && item.status !== "cancelled" ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={actionBusy === `communication:${item.id}:closed`}
-                          onClick={() =>
-                            void handleCommunicationStatusUpdate(item.id, "closed")
-                          }
-                        >
-                          {actionBusy === `communication:${item.id}:closed` ? (
-                            <LoaderCircle className="size-4 animate-spin" />
-                          ) : null}
-                          {t.appointments_external_handoff_close}
-                        </Button>
-                      ) : null}
-                      {item.status !== "cancelled" ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={
-                            actionBusy === `communication:${item.id}:cancelled`
-                          }
-                          onClick={() =>
-                            void handleCommunicationStatusUpdate(
-                              item.id,
-                              "cancelled",
-                            )
-                          }
-                        >
-                          {actionBusy === `communication:${item.id}:cancelled` ? (
-                            <LoaderCircle className="size-4 animate-spin" />
-                          ) : null}
-                          {t.appointments_external_handoff_cancel}
-                        </Button>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-              {canViewReminders && (reminders.length > 0 || tasks.length > 0) ? (
-                <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-4">
-                  <AppointmentDotLabel>
-                    {t.appointments_external_handoff_internal_trail}
-                  </AppointmentDotLabel>
-                  <div className="mt-3 space-y-3">
-                    {reminders.map((item) => (
-                      <div
-                        key={item.id}
-                        className={appointmentSoftRowClassName}
-                      >
-                        <p className="text-sm font-medium text-slate-900">
-                          {item.title.replace(`${EXTERNAL_HANDOFF_PREFIX} `, "")}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {item.user_name} · {formatDateTimeLabel(item.remind_at)}
-                        </p>
-                        {item.description ? (
-                          <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                            {item.description}
-                          </p>
-                        ) : null}
-                      </div>
-                    ))}
-                    {tasks.map((task) => (
-                      <div
-                        key={task.id}
-                        className={appointmentSoftRowClassName}
-                      >
-                        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                          <p className="text-sm font-medium text-slate-900">
-                            {task.title.replace(`${EXTERNAL_HANDOFF_PREFIX} `, "")}
-                          </p>
-                          <span className="text-xs text-slate-500">
-                            {taskStatusLabel(task.status)} ·{" "}
-                            {taskPriorityLabel(task.priority)}
-                          </span>
-                        </div>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {task.assigned_to_name}
-                          {task.due_date
-                            ? ` · ${formatDateTimeLabel(task.due_date)}`
-                            : ""}
-                        </p>
-                        {task.description ? (
-                          <p className="mt-3 whitespace-pre-line text-sm text-slate-600">
-                            {task.description}
-                          </p>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </>
-          )}
-        </div>
-        {canManageCommunications ? (
-          <form
-            onSubmit={handleSubmit}
-            className={cn("space-y-4", appointmentSoftPanelClassName)}
-          >
+          maxWidthClassName="sm:max-w-[720px]"
+          footer={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={() => setSheetOpen(false)}
+            >
+              {t.common_cancel}
+            </Button>
+          }
+        >
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
-              <Field label={tr.patients_assign_owner}>
+              <Field label={appointmentText("appointments_communication_target")}>
                 <NativeComboboxSelect
                   value={form.target}
                   onChange={(event) =>
@@ -581,7 +642,7 @@ function useAppointmentExternalHandoffSectionContent({
                   </option>
                 </NativeComboboxSelect>
               </Field>
-              <Field label={tr.documents_source}>
+              <Field label={appointmentText("appointments_communication_channel")}>
                 <NativeComboboxSelect
                   value={form.channel}
                   onChange={(event) =>
@@ -601,7 +662,7 @@ function useAppointmentExternalHandoffSectionContent({
               </Field>
             </div>
             <div className="grid gap-4 md:grid-cols-3">
-              <Field label={tr.documents_source}>
+              <Field label={appointmentText("appointments_communication_direction")}>
                 <NativeComboboxSelect
                   value={form.direction}
                   onChange={(event) =>
@@ -670,7 +731,7 @@ function useAppointmentExternalHandoffSectionContent({
                 required
               />
             </Field>
-            <Field label={tr.field_phone}>
+            <Field label={appointmentText("appointments_contact_person")}>
               <Input
                 value={form.contactName}
                 onChange={(event) =>
@@ -685,7 +746,7 @@ function useAppointmentExternalHandoffSectionContent({
                 className={appointmentWhiteInputClassName}
               />
             </Field>
-            <Field label={tr.invoices_due_at}>
+            <Field label={t.appointments_common_due}>
               <Input
                 type="datetime-local"
                 value={form.dueAt}
@@ -729,7 +790,7 @@ function useAppointmentExternalHandoffSectionContent({
                   {t.appointments_external_handoff_mirror_task}
                 </span>
               </label>
-              <Field label={tr.appointments_title_col}>
+              <Field label={appointmentText("appointments_task_priority")}>
                 <NativeComboboxSelect
                   value={form.taskPriority}
                   onChange={(event) =>
@@ -767,9 +828,9 @@ function useAppointmentExternalHandoffSectionContent({
               </Button>
             </div>
           </form>
-        ) : null}
-      </div>
-    </section>
+        </AppointmentEditorSheet>
+      ) : null}
+    </div>
   );
 }
 

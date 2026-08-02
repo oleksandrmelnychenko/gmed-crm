@@ -482,7 +482,7 @@ export const adminSystemRu: AdminSystemTranslations = {
   activity_event_approved: "одобрено",
   activity_event_assigned: "назначено",
   activity_event_assignment_revoked: "назначение отозвано",
-  activity_event_billing_ready: "готово к биллингу",
+  activity_event_billing_ready: "готово к расчёту",
   activity_event_cancelled: "отменено",
   activity_event_completed: "завершено",
   activity_event_confirmed: "подтверждено",

@@ -421,10 +421,10 @@ export const clinicalRu: ClinicalTranslations = {
   appointments_workflow_occurrence: "приёмом",
   appointments_workflow_occurrences: "приёмами",
   appointments_workflow_add_task: "Добавить задачу",
-  appointments_billing_mirror_task: "Отразить эту передачу в биллинг как задачу",
-  appointments_billing_select_assignee: "Выберите ответственного из биллинга",
-  appointments_billing_open_chat: "Открыть черновик чата с биллингом",
-  appointments_billing_create_handoff: "Создать передачу в биллинг",
+  appointments_billing_mirror_task: "Отразить эту передачу в бухгалтерию как задачу",
+  appointments_billing_select_assignee: "Выберите ответственного из бухгалтерии",
+  appointments_billing_open_chat: "Открыть черновик чата с бухгалтерией",
+  appointments_billing_create_handoff: "Создать передачу в бухгалтерию",
   appointments_overview_concierge_limited_warning: "Вид консьержа намеренно ограничен для медицинских слотов. Клинические заметки и детали провайдера здесь скрыты.",
 };
 

@@ -597,7 +597,7 @@ export const operationsRu: OperationsTranslations = {
   orders_service_group_split_title: "Разделение услуги по врачам",
   orders_service_group_participants: "участников",
   orders_service_group_summary:
-    "{count} врачей создают {count} строк биллинга. Существующие строки определяются по связи с участником.",
+    "{count} врачей создают {count} строк расчёта. Существующие строки определяются по связи с участником.",
   orders_service_group_vat: "НДС",
   orders_service_group_generated: "сгенерировано",
   orders_service_group_duplicate_safe: "без дублей",
@@ -611,10 +611,10 @@ export const operationsRu: OperationsTranslations = {
   orders_service_group_preview_skip_duplicates_metric: "Пропустить дубли",
   orders_service_group_existing_line: "Существующая строка",
   orders_service_group_preview_new_line_hint:
-    "Только предпросмотр: будет создана новая строка биллинга.",
+    "Только предпросмотр: будет создана новая строка расчёта.",
   orders_service_group_generated_line: "Сгенерированная строка",
   orders_service_group_preview_participant_line_hint:
-    "Только предпросмотр: по этому участнику будет создана строка биллинга.",
+    "Только предпросмотр: по этому участнику будет создана строка расчёта.",
   orders_service_group_wizard_title_required: "Название группы обязательно.",
   orders_service_group_wizard_doctor_required:
     "Нужен минимум один врач-участник.",
@@ -624,7 +624,7 @@ export const operationsRu: OperationsTranslations = {
   orders_service_group_wizard_close: "Закрыть мастер",
   orders_service_group_wizard_create: "Создать группу услуг",
   orders_service_group_wizard_steps:
-    "Шаг 1: задайте группу. Шаг 2: добавьте врачей. Шаг 3: проверьте предпросмотр. Шаг 4: создайте строки биллинга по участникам.",
+    "Шаг 1: задайте группу. Шаг 2: добавьте врачей. Шаг 3: проверьте предпросмотр. Шаг 4: создайте строки расчёта по участникам.",
   orders_service_group_title: "Название группы",
   orders_service_group_title_placeholder: "Кардиологический консилиум",
   orders_service_group_service_date: "Дата услуги",
@@ -644,7 +644,7 @@ export const operationsRu: OperationsTranslations = {
   orders_service_group_remove: "Удалить",
   orders_service_group_preview: "Предпросмотр",
   orders_service_group_wizard_preview_summary:
-    "{count} выбранных врачей создадут такое же количество строк биллинга.",
+    "{count} выбранных врачей создадут такое же количество строк расчёта.",
   orders_service_group_duplicates: "Дубли",
   orders_service_group_ready: "Готово",
   orders_service_group_creating: "Создание...",
@@ -667,7 +667,7 @@ export const operationsRu: OperationsTranslations = {
   staff_services_source_care_team: "Команда сопровождения",
   staff_services_column_service: "Сервис",
   staff_services_column_status: "Статус",
-  staff_services_column_billing: "Биллинг",
+  staff_services_column_billing: "Бухгалтерия",
   staff_services_column_patient: "Пациент",
   staff_services_column_kind: "Тип",
   staff_services_column_source: "Источник",
@@ -688,7 +688,7 @@ export const operationsRu: OperationsTranslations = {
   staff_services_title: "Консьерж-сервисы",
   staff_services_add_service: "Добавить сервис",
   staff_services_stat_active: "Активные",
-  staff_services_stat_billing_ready: "Готовы к биллингу",
+  staff_services_stat_billing_ready: "Готовы к расчёту",
   staff_services_stat_portal_requests: "Запросы портала",
   staff_services_search_placeholder: "Пациент, провайдер, бронь...",
   staff_services_mine: "Мои",
@@ -715,7 +715,7 @@ export const operationsRu: OperationsTranslations = {
   staff_services_form_vendor: "Поставщик",
   staff_services_form_vendor_contact: "Контакт поставщика",
   staff_services_form_service_notes: "Заметки по сервису",
-  staff_services_form_billing_notes: "Заметки по биллингу",
+  staff_services_form_billing_notes: "Заметки по расчётам",
   staff_services_select: "Выбрать",
   staff_services_optional: "Опционально",
   staff_services_unassigned: "Не назначен",
@@ -747,7 +747,7 @@ export const operationsRu: OperationsTranslations = {
     "Привязанные к провайдеру и врачу услуги внутри текущего заказа.",
   orders_add_service: "Добавить услугу",
   orders_services_empty_description:
-    "Используйте позиции, привязанные к провайдеру, чтобы собрать объём исполнения заказа и дать биллингу достаточный контекст.",
+    "Используйте позиции, привязанные к провайдеру, чтобы собрать объём исполнения заказа и дать бухгалтерии достаточный контекст.",
   orders_approve: "Утвердить",
   orders_external_invoices_title: "Внешние счета",
   orders_external_invoices_description:

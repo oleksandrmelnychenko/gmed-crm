@@ -16,8 +16,6 @@ import {
   ArrowUpRight,
   CalendarClock,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Copy,
   LoaderCircle,
   Mail,
@@ -33,8 +31,15 @@ import {
   X,
   UsersRound,
   BadgeCheck,
+  ExternalLink,
 } from "lucide-react";
 
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import {
+  DataTablePager,
+  useDataTablePagination,
+} from "@/components/data-table/data-table-pager";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -2820,11 +2825,6 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       setDoctorError(t.uiText.providers_doctor_name_required ?? t.common_failed_update);
       return;
     }
-    if (!doctorForm.id && providerType === "medical" && !payload.title) {
-      setDoctorError(t.uiText.providers_doctor_title_required ?? t.common_failed_update);
-      return;
-    }
-
     setDoctorBusy(true);
     setDoctorError("");
 
@@ -4811,38 +4811,9 @@ function PatientProfileLink({
   );
 }
 
-function LinkedPatientCard({
-  patient,
-  className,
-}: {
-  patient: LinkedPatient;
-  className?: string;
-}) {
-  const { t, lang } = useLang();
-  const l = (key: string) => t.uiText[key] ?? key;
-  const address = linkedPatientAddress(patient, lang);
-
-  return (
-    <div className={cn("rounded-lg border border-border/70 bg-card px-3 py-2.5", className)}>
-      <PatientProfileLink patient={patient} className="max-w-full text-sm">
-        {patientLabel(patient)}
-      </PatientProfileLink>
-      {address ? (
-        <p className="mt-1 text-xs leading-5 text-foreground">
-          {address}
-        </p>
-      ) : null}
-      <p className="mt-1 text-xs text-muted-foreground">
-        {l("providers_last_interaction")}: {compactDateTime(patient.last_interaction_at, t.common_not_set)}
-      </p>
-    </div>
-  );
-}
-
 function PaginatedLinkedPatientsGrid({
   patients,
   className,
-  cardClassName,
   pageSize = LINKED_PATIENTS_PAGE_SIZE,
 }: {
   patients: LinkedPatient[];
@@ -4850,67 +4821,106 @@ function PaginatedLinkedPatientsGrid({
   cardClassName?: string;
   pageSize?: number;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
   const [pageIndex, setPageIndex] = useState(0);
   const totalPages = Math.max(1, Math.ceil(patients.length / pageSize));
   const safePageIndex = Math.min(pageIndex, totalPages - 1);
   const pageStart = safePageIndex * pageSize;
   const pagePatients = patients.slice(pageStart, pageStart + pageSize);
-  const pageEnd = pageStart + pagePatients.length;
+
+  const columns = useMemo<ColumnDef<LinkedPatient>[]>(
+    () => [
+      {
+        id: "patient",
+        label: t.orders_patient,
+        accessor: (patient) => patientLabel(patient),
+        sortable: true,
+        searchable: true,
+        required: true,
+        width: 230,
+        render: (patient) => (
+          <PatientProfileLink patient={patient} className="max-w-full font-mono text-xs">
+            {patientLabel(patient)}
+          </PatientProfileLink>
+        ),
+      },
+      {
+        id: "address",
+        label: l("patients_address"),
+        accessor: (patient) => linkedPatientAddress(patient, lang) ?? "",
+        searchable: true,
+        width: 260,
+        render: (patient) => {
+          const address = linkedPatientAddress(patient, lang);
+          return address ? (
+            <span className="block truncate text-xs text-foreground" title={address}>
+              {address}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+          );
+        },
+      },
+      {
+        id: "appointments",
+        label: t.appointments_title,
+        accessor: (patient) => patient.appointment_count,
+        sortable: true,
+        width: 110,
+        render: (patient) => (
+          <span className="block text-right font-mono text-xs tabular-nums text-foreground">
+            {patient.appointment_count}
+          </span>
+        ),
+      },
+      {
+        id: "leistungen",
+        label: t.providers_services,
+        accessor: (patient) => patient.leistung_count,
+        sortable: true,
+        width: 110,
+        render: (patient) => (
+          <span className="block text-right font-mono text-xs tabular-nums text-foreground">
+            {patient.leistung_count}
+          </span>
+        ),
+      },
+      {
+        id: "last_interaction",
+        label: l("providers_last_interaction"),
+        accessor: (patient) => patient.last_interaction_at,
+        sortable: true,
+        width: 170,
+        render: (patient) => (
+          <span className="font-mono text-xs tabular-nums text-muted-foreground">
+            {compactDateTime(patient.last_interaction_at, t.common_not_set)}
+          </span>
+        ),
+      },
+    ],
+    [l, lang, t],
+  );
 
   return (
     <div className={className}>
-      <div className="grid gap-2 sm:grid-cols-2">
-        {pagePatients.map((patient) => (
-          <LinkedPatientCard
-            key={patient.id}
-            patient={patient}
-            className={cardClassName}
+      <DataTableSurface
+        rows={pagePatients}
+        columns={columns}
+        rowId={(patient) => patient.id}
+        dictionary={t as unknown as Record<string, string>}
+        toolbarAfter={
+          <DataTablePager
+            pageIndex={safePageIndex}
+            pageSize={pageSize}
+            totalPages={totalPages}
+            totalRows={patients.length}
+            previousLabel={t.pagination_previous}
+            nextLabel={t.pagination_next}
+            onPageChange={setPageIndex}
           />
-        ))}
-      </div>
-      {totalPages > 1 ? (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs font-medium text-muted-foreground">
-            {pageStart + 1}-{pageEnd} / {patients.length}
-          </span>
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              className="h-8 w-8 rounded-lg bg-card"
-              disabled={safePageIndex === 0}
-              aria-label={t.pagination_previous}
-              title={t.pagination_previous}
-              onClick={(event) => {
-                event.stopPropagation();
-                setPageIndex(Math.max(0, safePageIndex - 1));
-              }}
-            >
-              <ChevronLeft className="size-3.5" />
-            </Button>
-            <span className="min-w-14 text-center text-xs font-semibold text-foreground">
-              {safePageIndex + 1} / {totalPages}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              className="h-8 w-8 rounded-lg bg-card"
-              disabled={safePageIndex >= totalPages - 1}
-              aria-label={t.pagination_next}
-              title={t.pagination_next}
-              onClick={(event) => {
-                event.stopPropagation();
-                setPageIndex(Math.min(totalPages - 1, safePageIndex + 1));
-              }}
-            >
-              <ChevronRight className="size-3.5" />
-            </Button>
-          </div>
-        </div>
-      ) : null}
+        }
+      />
     </div>
   );
 }
@@ -4928,7 +4938,7 @@ function CollapsibleLinkedPatientsPanel({
 }) {
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
 
   return (
     <div>
@@ -6601,9 +6611,6 @@ function DoctorSection({
           <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
             {title}
           </h3>
-          <span className="shrink-0 text-xs font-medium text-muted-foreground">
-            {detail.doctors.length}
-          </span>
         </div>
         {canManage ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -6628,39 +6635,371 @@ function DoctorSection({
             text={isMedicalProvider ? t.providers_no_patients : t.providers_no_contacts}
           />
         </div>
+      ) : isMedicalProvider ? (
+        <div className="mt-4">
+          <ProviderDoctorsTable
+            doctors={detail.doctors}
+            busy={busy}
+            canManage={canManage}
+            relationshipBusy={relationshipBusy}
+            onOpen={onOpen}
+            onDelete={onDelete}
+            onDeleteRelationship={onDeleteRelationship}
+            onEdit={onEdit}
+            onEditRelationship={onEditRelationship}
+            onOpenProvider={onOpenProvider}
+            onNewRelationship={onNewRelationship}
+          />
+        </div>
       ) : (
         <div className="mt-4 space-y-3">
           {detail.doctors.map((doctor) => (
-            isMedicalProvider ? (
-              <DoctorCard
-                key={doctor.id}
-                doctor={doctor}
-                busy={busy}
-                canManage={canManage}
-                relationshipBusy={relationshipBusy}
-                onOpen={onOpen}
-                onDelete={onDelete}
-                onDeleteRelationship={onDeleteRelationship}
-                onEdit={onEdit}
-                onEditRelationship={onEditRelationship}
-                onOpenProvider={onOpenProvider}
-                onNewRelationship={onNewRelationship}
-              />
-            ) : (
-              <ContactPersonCard
-                key={doctor.id}
-                contact={doctor}
-                busy={busy}
-                canManage={canManage}
-                onOpen={onOpen}
-                onDelete={onDelete}
-                onEdit={onEdit}
-              />
-            )
+            <ContactPersonCard
+              key={doctor.id}
+              contact={doctor}
+              busy={busy}
+              canManage={canManage}
+              onOpen={onOpen}
+              onDelete={onDelete}
+              onEdit={onEdit}
+            />
           ))}
         </div>
       )}
     </section>
+  );
+}
+
+
+type ProviderDoctorTableRow = {
+  key: string;
+  kind: "doctor" | "relationship";
+  doctor: DoctorSummary;
+  rel?: DoctorRelationship;
+};
+
+function ProviderDoctorsTable({
+  doctors,
+  busy,
+  canManage,
+  relationshipBusy,
+  onOpen,
+  onOpenProvider,
+  onDelete,
+  onDeleteRelationship,
+  onEdit,
+  onEditRelationship,
+  onNewRelationship,
+}: {
+  doctors: DoctorSummary[];
+  busy: boolean;
+  canManage: boolean;
+  relationshipBusy: boolean;
+  onOpen: (doctor: DoctorSummary) => void;
+  onOpenProvider: (providerId: string) => void;
+  onDelete: (doctorId: string, doctorName: string) => void;
+  onDeleteRelationship: (sourceDoctorId: string, relationshipId: string, doctorName: string) => void;
+  onEdit: (doctor: DoctorSummary) => void;
+  onEditRelationship: (sourceDoctorId: string, relationship: DoctorRelationship) => void;
+  onNewRelationship: (sourceDoctorId: string) => void;
+}) {
+  const { t, lang } = useLang();
+  const l = (key: string) => t.uiText[key] ?? key;
+
+  const rows = useMemo<ProviderDoctorTableRow[]>(
+    () =>
+      doctors.map((doctor) => ({
+        key: doctor.id,
+        kind: "doctor" as const,
+        doctor,
+      })),
+    [doctors],
+  );
+  const pagination = useDataTablePagination(
+    rows,
+    rows.map((row) => row.key).join(":"),
+  );
+
+  const expandRow = useCallback(
+    (row: ProviderDoctorTableRow) =>
+      row.kind === "doctor" && row.doctor.relationships.length > 0
+        ? row.doctor.relationships.map((rel) => ({
+            key: `${row.doctor.id}:${rel.id}`,
+            kind: "relationship" as const,
+            doctor: row.doctor,
+            rel,
+          }))
+        : null,
+    [],
+  );
+
+  const columns = useMemo<ColumnDef<ProviderDoctorTableRow>[]>(
+    () => [
+      {
+        id: "name",
+        label: t.users_name,
+        accessor: (row) =>
+          row.kind === "doctor"
+            ? doctorListDisplayName(row.doctor)
+            : row.rel?.target_provider_name ?? "",
+        sortable: true,
+        searchable: true,
+        required: true,
+        width: 280,
+        render: (row) =>
+          row.kind === "doctor" ? (
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate font-mono text-xs font-medium text-foreground">
+                {doctorListDisplayName(row.doctor)}
+              </span>
+              {row.doctor.role_label || row.doctor.role_code ? (
+                <Badge variant="outline" className="rounded-full font-mono text-[10px]">
+                  {row.doctor.role_label ||
+                    (row.doctor.role_code ? doctorRoleLabel(row.doctor.role_code) : "")}
+                </Badge>
+              ) : null}
+            </div>
+          ) : (
+            <div className="flex min-w-0 items-center gap-1.5 pl-5">
+              <span aria-hidden className="text-muted-foreground/60">↳</span>
+              <button
+                type="button"
+                className="truncate font-mono text-xs font-medium text-sky-700 hover:underline"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (row.rel) onOpenProvider(row.rel.target_provider_id);
+                }}
+              >
+                {row.rel?.target_provider_name}
+              </button>
+              <Badge variant="outline" className="rounded-full font-mono text-[10px]">
+                {doctorRelationshipTypeLabel(row.rel?.relationship_type)}
+              </Badge>
+            </div>
+          ),
+      },
+      {
+        id: "specializations",
+        label: l("providers_doctor_specializations"),
+        accessor: (row) =>
+          row.kind === "doctor"
+            ? specializationText(row.doctor.specializations, row.doctor.fachbereich, lang)
+            : row.rel?.description ?? "",
+        searchable: true,
+        width: 260,
+        render: (row) => {
+          const text =
+            row.kind === "doctor"
+              ? specializationText(row.doctor.specializations, row.doctor.fachbereich, lang)
+              : row.rel?.description ?? "";
+          return text ? (
+            <span className="block truncate text-xs text-foreground" title={text}>
+              {text}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+          );
+        },
+      },
+      {
+        id: "languages",
+        label: t.patients_languages,
+        accessor: (row) =>
+          row.kind === "doctor" ? row.doctor.languages.join(" ") : "",
+        width: 190,
+        render: (row) =>
+          row.kind === "doctor" && row.doctor.languages.length > 0 ? (
+            <span className="flex flex-wrap items-center gap-1">
+              {row.doctor.languages.map((language) => (
+                <Badge
+                  key={`${row.doctor.id}-${language}`}
+                  variant="outline"
+                  className="rounded-full border-amber-200 bg-amber-50 font-mono text-[10px] text-amber-700"
+                >
+                  {languageLabel(language, lang)}
+                </Badge>
+              ))}
+            </span>
+          ) : row.kind === "relationship" ? (
+            <Badge
+              variant="outline"
+              className={cn(
+                "rounded-full font-mono text-[10px]",
+                row.rel?.is_active
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-border bg-muted/40 text-muted-foreground",
+              )}
+            >
+              {row.rel?.is_active ? t.common_active : t.common_inactive}
+            </Badge>
+          ) : (
+            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+          ),
+      },
+      {
+        id: "contacts",
+        label: l("providers_contacts"),
+        accessor: (row) =>
+          row.kind === "doctor"
+            ? contactSummary(row.doctor.contacts, row.doctor.phone, row.doctor.email)
+            : row.rel?.notes ?? "",
+        searchable: true,
+        width: 260,
+        render: (row) => {
+          const text =
+            row.kind === "doctor"
+              ? contactSummary(row.doctor.contacts, row.doctor.phone, row.doctor.email)
+              : row.rel?.notes ?? "";
+          return text ? (
+            <span className="block truncate font-mono text-xs text-muted-foreground" title={text}>
+              {text}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+          );
+        },
+      },
+      {
+        id: "patients",
+        label: l("providers_patients"),
+        accessor: (row) => (row.kind === "doctor" ? row.doctor.patient_count : -1),
+        sortable: true,
+        width: 110,
+        render: (row) =>
+          row.kind === "doctor" ? (
+            <span className="block text-right font-mono text-xs tabular-nums text-foreground">
+              {row.doctor.patient_count}
+            </span>
+          ) : null,
+      },
+      {
+        id: "appointments",
+        label: t.appointments_title,
+        accessor: (row) => (row.kind === "doctor" ? row.doctor.appointment_count : -1),
+        sortable: true,
+        width: 110,
+        render: (row) =>
+          row.kind === "doctor" ? (
+            <span className="block text-right font-mono text-xs tabular-nums text-foreground">
+              {row.doctor.appointment_count}
+            </span>
+          ) : null,
+      },
+    ],
+    [l, lang, onOpenProvider, t],
+  );
+
+  return (
+    <DataTableSurface
+      rows={pagination.pagedRows}
+      columns={columns}
+      rowId={(row) => row.key}
+      dictionary={t as unknown as Record<string, string>}
+      expandRow={expandRow}
+      toolbarAfter={
+        <DataTablePager
+          pageIndex={pagination.pageIndex}
+          pageSize={pagination.pageSize}
+          totalPages={pagination.totalPages}
+          totalRows={pagination.totalRows}
+          previousLabel={t.pagination_previous}
+          nextLabel={t.pagination_next}
+          onPageChange={pagination.onPageChange}
+        />
+      }
+      onRowClick={(row) => {
+        if (row.kind === "doctor") onOpen(row.doctor);
+      }}
+      rowActions={(row) =>
+        row.kind === "doctor" ? (
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+              onClick={() => onOpen(row.doctor)}
+              aria-label={t.providers_open}
+              title={t.providers_open}
+            >
+              <ExternalLink className="size-3.5" />
+            </Button>
+            {canManage ? (
+              <>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                  onClick={() => onEdit(row.doctor)}
+                  aria-label={t.common_edit}
+                  title={t.common_edit}
+                >
+                  <Pencil className="size-3.5" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                  onClick={() => onNewRelationship(row.doctor.id)}
+                  aria-label={l("providers_relationship_add")}
+                  title={l("providers_relationship_add")}
+                >
+                  <Plus className="size-3.5" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-7 rounded-full text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                  disabled={busy}
+                  onClick={() => onDelete(row.doctor.id, doctorListDisplayName(row.doctor))}
+                  aria-label={t.common_delete}
+                  title={t.common_delete}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </>
+            ) : null}
+          </div>
+        ) : canManage && row.rel ? (
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+              disabled={relationshipBusy}
+              onClick={() => onEditRelationship(row.doctor.id, row.rel as DoctorRelationship)}
+              aria-label={t.common_edit}
+              title={t.common_edit}
+            >
+              <Pencil className="size-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="size-7 rounded-full text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+              disabled={relationshipBusy}
+              onClick={() =>
+                onDeleteRelationship(
+                  row.doctor.id,
+                  (row.rel as DoctorRelationship).id,
+                  doctorListDisplayName(row.doctor),
+                )
+              }
+              aria-label={t.common_delete}
+              title={t.common_delete}
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
+          </div>
+        ) : null
+      }
+      rowActionsWidth={150}
+    />
   );
 }
 
@@ -6766,506 +7105,6 @@ function ContactPersonCard({
   );
 }
 
-function DoctorCard({
-  doctor,
-  busy,
-  canManage,
-  relationshipBusy,
-  onOpen,
-  onOpenProvider,
-  onDelete,
-  onDeleteRelationship,
-  onEdit,
-  onEditRelationship,
-  onNewRelationship,
-}: {
-  doctor: DoctorSummary;
-  busy: boolean;
-  canManage: boolean;
-  relationshipBusy: boolean;
-  onOpen: (doctor: DoctorSummary) => void;
-  onOpenProvider: (providerId: string) => void;
-  onDelete: (doctorId: string, doctorName: string) => void;
-  onDeleteRelationship: (sourceDoctorId: string, relationshipId: string, doctorName: string) => void;
-  onEdit: (doctor: DoctorSummary) => void;
-  onEditRelationship: (sourceDoctorId: string, relationship: DoctorRelationship) => void;
-  onNewRelationship: (sourceDoctorId: string) => void;
-}) {
-  const { t, lang } = useLang();
-  const specializations = specializationText(doctor.specializations, doctor.fachbereich, lang);
-  const insuranceCoverage = insuranceCoverageSummary(doctor.insurance_providers, t);
-  const contacts = contactSummary(doctor.contacts, doctor.phone, doctor.email);
-  const roleLabel = doctor.role_label || (doctor.role_code ? doctorRoleLabel(doctor.role_code) : "");
-  const subrole = doctor.subrole?.trim() ?? "";
-
-  return (
-    <div className="overflow-hidden rounded-[1.4rem] border border-border bg-card">
-      <details className="group">
-        <DoctorCardSummary
-          busy={busy}
-          canManage={canManage}
-          contacts={contacts}
-          doctor={doctor}
-          roleLabel={roleLabel}
-          specializations={specializations}
-          insuranceProviderCount={insuranceCoverage.count}
-          insuranceProviders={insuranceCoverage.text}
-          subrole={subrole}
-          onOpen={onOpen}
-          onDelete={onDelete}
-          onEdit={onEdit}
-          onNewRelationship={onNewRelationship}
-        />
-        <DoctorMetrics
-          doctor={doctor}
-          specializations={specializations}
-          insuranceProviderCount={insuranceCoverage.count}
-          insuranceProviders={insuranceCoverage.text}
-        />
-        <DoctorRelationships
-          canManage={canManage}
-          doctor={doctor}
-          relationshipBusy={relationshipBusy}
-          onDeleteRelationship={onDeleteRelationship}
-          onEditRelationship={onEditRelationship}
-          onOpenProvider={onOpenProvider}
-          onNewRelationship={onNewRelationship}
-        />
-      </details>
-      <DoctorCardLinkedPatients patients={doctor.linked_patients ?? []} />
-    </div>
-  );
-}
-
-function DoctorCardSummary({
-  busy,
-  canManage,
-  contacts,
-  doctor,
-  insuranceProviderCount,
-  roleLabel,
-  specializations,
-  insuranceProviders,
-  subrole,
-  onOpen,
-  onDelete,
-  onEdit,
-  onNewRelationship,
-}: {
-  busy: boolean;
-  canManage: boolean;
-  contacts: string;
-  doctor: DoctorSummary;
-  insuranceProviderCount: number;
-  roleLabel: string;
-  specializations: string;
-  insuranceProviders: string;
-  subrole: string;
-  onOpen: (doctor: DoctorSummary) => void;
-  onDelete: (doctorId: string, doctorName: string) => void;
-  onEdit: (doctor: DoctorSummary) => void;
-  onNewRelationship: (sourceDoctorId: string) => void;
-}) {
-  const { t, lang } = useLang();
-  const l = (key: string) => t.uiText[key] ?? key;
-
-  return (
-    <summary
-      className="grid cursor-pointer list-none gap-3 p-3.5 transition hover:bg-muted/20 md:grid-cols-[minmax(0,1fr)_160px] [&::-webkit-details-marker]:hidden"
-      onClick={(event) => {
-        if ((event.target as HTMLElement).closest("button")) return;
-        event.preventDefault();
-        onOpen(doctor);
-      }}
-    >
-      <div className="flex min-w-0 gap-3">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted/30 text-sm font-medium text-muted-foreground">
-          <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-foreground">
-            {doctorListDisplayName(doctor)}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            <Badge
-              variant="outline"
-              className="max-w-full rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-            >
-              <span className="truncate">{specializations || t.common_not_set}</span>
-            </Badge>
-            {roleLabel ? (
-              <Badge
-                variant="outline"
-                className="rounded-full border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700"
-              >
-                {roleLabel}
-              </Badge>
-            ) : null}
-            {insuranceProviders ? (
-              <Badge
-                variant="outline"
-                className="max-w-full gap-1.5 rounded-full border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"
-              >
-                <span className="truncate">{insuranceProviders}</span>
-                <span className="rounded-full bg-white/75 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-emerald-800">
-                  {insuranceProviderCount}
-                </span>
-              </Badge>
-            ) : null}
-            {subrole ? (
-              <Badge
-                variant="outline"
-                className="rounded-full border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700"
-              >
-                {subrole}
-              </Badge>
-            ) : null}
-            <Badge
-              variant="outline"
-              className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-            >
-              {personGenderLabel(doctor.gender)}
-            </Badge>
-            {doctor.languages.map((language) => (
-              <Badge
-                key={`${doctor.id}-${language}`}
-                variant="outline"
-                className="rounded-full border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
-              >
-                {languageLabel(language, lang)}
-              </Badge>
-            ))}
-          </div>
-          <p className="mt-2 text-xs leading-snug text-muted-foreground">
-            {contacts || t.common_not_set}
-          </p>
-          {doctor.opening_hours ? (
-            <div className="mt-2">
-              <p className="mb-1 text-[11px] font-medium leading-tight text-muted-foreground">
-                {l("providers_opening_hours")}
-              </p>
-              <WeeklyAvailabilityBadgeList value={doctor.opening_hours} />
-            </div>
-          ) : null}
-        </div>
-      </div>
-      <DoctorSummaryActions
-        busy={busy}
-        canManage={canManage}
-        doctor={doctor}
-        onDelete={onDelete}
-        onEdit={onEdit}
-        onNewRelationship={onNewRelationship}
-      />
-    </summary>
-  );
-}
-
-function DoctorSummaryActions({
-  busy,
-  canManage,
-  doctor,
-  onDelete,
-  onEdit,
-  onNewRelationship,
-}: {
-  busy: boolean;
-  canManage: boolean;
-  doctor: DoctorSummary;
-  onDelete: (doctorId: string, doctorName: string) => void;
-  onEdit: (doctor: DoctorSummary) => void;
-  onNewRelationship: (sourceDoctorId: string) => void;
-}) {
-  const { t } = useLang();
-  const l = (key: string) => t.uiText[key] ?? key;
-
-  return (
-    <div className="flex flex-col items-stretch justify-end gap-2 border-t border-dashed border-border pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
-      {canManage ? (
-        <>
-          <Button
-            type="button"
-            variant="default"
-            size="sm"
-            className={cn(providerPrimaryActionButtonClassName, "w-full justify-center")}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onEdit(doctor);
-            }}
-          >
-            {l("patients_edit")}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 w-full justify-center rounded-lg bg-muted/20"
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onNewRelationship(doctor.id);
-            }}
-          >
-            <Plus className="size-3.5" />
-            {l("providers_relationship_add_short")}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 w-full justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
-            disabled={busy}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onDelete(doctor.id, doctor.name);
-            }}
-          >
-            <Trash2 className="size-3.5" />
-            {l("patients_delete")}
-          </Button>
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-function DoctorMetrics({
-  doctor,
-  insuranceProviderCount,
-  specializations,
-  insuranceProviders,
-}: {
-  doctor: DoctorSummary;
-  insuranceProviderCount: number;
-  specializations: string;
-  insuranceProviders: string;
-}) {
-  const { t } = useLang();
-  const l = (key: string) => t.uiText[key] ?? key;
-  const linkedPatientCount = doctor.linked_patients?.length ?? doctor.patient_count;
-
-  return (
-    <div className="grid border-t border-border bg-muted/10 sm:grid-cols-2 lg:grid-cols-[1.1fr_1fr_1fr_1fr_0.5fr_0.5fr]">
-      <div className="border-b border-border px-4 py-3 sm:border-r lg:border-b-0">
-        <p className="text-xs text-muted-foreground">{l("providers_doctor_specializations")}</p>
-        <p className="mt-1 text-sm font-semibold text-foreground">
-          {specializations || t.common_not_set}
-        </p>
-      </div>
-      <div className="border-b border-border px-4 py-3 sm:border-r lg:border-b-0">
-        <div className="flex items-center gap-1.5">
-          <p className="text-xs text-muted-foreground">{t.patients_insurance_type}</p>
-          {insuranceProviderCount > 0 ? (
-            <span className="rounded-full border border-border bg-card px-1.5 py-0.5 text-[10px] font-semibold leading-none text-foreground">
-              {insuranceProviderCount}
-            </span>
-          ) : null}
-        </div>
-        <p className="mt-1 text-sm font-semibold text-foreground">
-          {insuranceProviders || t.common_not_set}
-        </p>
-      </div>
-      <div className="border-b border-border px-4 py-3 sm:border-r lg:border-b-0">
-        <p className="text-xs text-muted-foreground">{l("providers_license")}</p>
-        <div className="mt-1 flex flex-wrap items-center gap-2">
-          <span className="text-sm font-semibold text-foreground">
-            {doctor.license_number || t.common_not_set}
-          </span>
-          <Badge
-            variant="outline"
-            className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-          >
-            {doctor.licensing_country || t.common_not_set}
-          </Badge>
-        </div>
-      </div>
-      <div className="border-b border-border px-4 py-3 lg:border-b-0 lg:border-r">
-        <p className="text-xs text-muted-foreground">{l("providers_valid_until")}</p>
-        <p className="mt-1 text-sm font-semibold text-foreground">
-          {compactDate(doctor.licensing_valid_until, t.common_not_set)}
-        </p>
-      </div>
-      <div className="border-b border-border px-4 py-3 sm:border-b-0 sm:border-r">
-        <p className="text-xs text-muted-foreground">{l("providers_patients")}</p>
-        <p className="mt-1 text-sm font-semibold text-foreground">{linkedPatientCount}</p>
-      </div>
-      <div className="px-4 py-3">
-        <p className="text-xs text-muted-foreground">{l("providers_slots")}</p>
-        <p className="mt-1 text-sm font-semibold text-foreground">{doctor.appointment_count}</p>
-      </div>
-    </div>
-  );
-}
-
-function DoctorCardLinkedPatients({ patients }: { patients: LinkedPatient[] }) {
-  return (
-    <div className="border-t border-border bg-card px-4 py-3">
-      <CollapsibleLinkedPatientsPanel
-        patients={patients}
-        cardClassName="bg-muted/10"
-      />
-    </div>
-  );
-}
-
-function DoctorRelationships({
-  canManage,
-  doctor,
-  relationshipBusy,
-  onDeleteRelationship,
-  onEditRelationship,
-  onOpenProvider,
-  onNewRelationship,
-}: {
-  canManage: boolean;
-  doctor: DoctorSummary;
-  relationshipBusy: boolean;
-  onDeleteRelationship: (sourceDoctorId: string, relationshipId: string, doctorName: string) => void;
-  onEditRelationship: (sourceDoctorId: string, relationship: DoctorRelationship) => void;
-  onOpenProvider: (providerId: string) => void;
-  onNewRelationship: (sourceDoctorId: string) => void;
-}) {
-  const { t } = useLang();
-  const l = (key: string) => t.uiText[key] ?? key;
-
-  return (
-    <div className="border-t border-border bg-card px-4 py-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-medium text-muted-foreground">
-          {l("providers_doctor_relationships")}
-        </p>
-        {canManage ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 rounded-lg bg-muted/20"
-            onClick={() => onNewRelationship(doctor.id)}
-          >
-            <Plus className="size-3.5" />
-            {l("providers_relationship_add")}
-          </Button>
-        ) : null}
-      </div>
-      {doctor.relationships.length === 0 ? (
-        <p className="mt-2 text-sm text-muted-foreground">
-          {l("providers_relationships_empty")}
-        </p>
-      ) : (
-        <div className="mt-2 space-y-2">
-          {doctor.relationships.map((relationship) => (
-            <DoctorRelationshipCard
-              key={relationship.id}
-              doctorId={doctor.id}
-              canManage={canManage}
-              relationship={relationship}
-              relationshipBusy={relationshipBusy}
-              onDeleteRelationship={onDeleteRelationship}
-              onEditRelationship={onEditRelationship}
-              onOpenProvider={onOpenProvider}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DoctorRelationshipCard({
-  doctorId,
-  canManage,
-  relationship,
-  relationshipBusy,
-  onDeleteRelationship,
-  onEditRelationship,
-  onOpenProvider,
-}: {
-  doctorId: string;
-  canManage: boolean;
-  relationship: DoctorRelationship;
-  relationshipBusy: boolean;
-  onDeleteRelationship: (sourceDoctorId: string, relationshipId: string, doctorName: string) => void;
-  onEditRelationship: (sourceDoctorId: string, relationship: DoctorRelationship) => void;
-  onOpenProvider: (providerId: string) => void;
-}) {
-  const { t } = useLang();
-  const l = (key: string) => t.uiText[key] ?? key;
-
-  return (
-    <div className="grid gap-3 rounded-lg border border-border/70 bg-muted/10 p-3 md:grid-cols-[minmax(0,1fr)_160px]">
-      <button
-        type="button"
-        className="min-w-0 rounded-md text-left transition hover:bg-card/70 focus:outline-none focus:ring-2 focus:ring-ring/30"
-        title={`${l("providers_open_provider")}: ${relationship.target_provider_name}`}
-        onClick={() => onOpenProvider(relationship.target_provider_id)}
-      >
-        <p className="text-sm font-semibold text-foreground">
-          {relationship.target_doctor_title ? `${relationship.target_doctor_title} ` : ""}
-          {relationship.target_doctor_name}
-        </p>
-        <div className="mt-1 flex flex-wrap gap-1.5">
-          <Badge
-            variant="outline"
-            className="rounded-full border-border bg-card px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-          >
-            {relationship.target_provider_name}
-          </Badge>
-          <Badge
-            variant="outline"
-            className="rounded-full border-border bg-card px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-          >
-            {doctorRelationshipTypeLabel(relationship.relationship_type)}
-          </Badge>
-          {!relationship.is_active ? (
-            <Badge
-              variant="outline"
-              className="rounded-full border-border bg-card px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-            >
-              {t.common_inactive}
-            </Badge>
-          ) : null}
-        </div>
-        <p className="mt-2 text-xs leading-snug text-muted-foreground">
-          {relationship.description || relationship.notes || t.common_not_set}
-        </p>
-      </button>
-      {canManage ? (
-        <div className="flex flex-col justify-end gap-2 border-t border-dashed border-border pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
-          <Button
-            type="button"
-            variant="default"
-            size="sm"
-            className={cn(providerPrimaryActionButtonClassName, "w-full justify-center")}
-            disabled={relationshipBusy}
-            onClick={() => onEditRelationship(doctorId, relationship)}
-          >
-            {l("patients_edit")}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 w-full justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
-            disabled={relationshipBusy}
-            onClick={() =>
-              onDeleteRelationship(
-                doctorId,
-                relationship.id,
-                relationship.target_doctor_name,
-              )
-            }
-          >
-            <Trash2 className="size-3.5" />
-            {l("patients_delete")}
-          </Button>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function StaffSection({
   detail,
   busy,
@@ -7290,6 +7129,103 @@ function StaffSection({
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
 
+  const staffColumns = useMemo<ColumnDef<ProviderStaff>[]>(
+    () => [
+      {
+        id: "name",
+        label: t.users_name,
+        accessor: (staff) => staff.display_name,
+        sortable: true,
+        searchable: true,
+        required: true,
+        width: 220,
+        render: (staff) => (
+          <span className="block truncate font-mono text-xs font-medium text-foreground">
+            {staff.display_name}
+          </span>
+        ),
+      },
+      {
+        id: "role",
+        label: t.users_role,
+        accessor: (staff) => staffRoleLabel(staff.role, staffRoles, lang),
+        sortable: true,
+        width: 180,
+        render: (staff) => (
+          <Badge variant="outline" className="rounded-full font-mono text-[10px]">
+            {staffRoleLabel(staff.role, staffRoles, lang)}
+          </Badge>
+        ),
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (staff) => humanizeCode(staff.status),
+        sortable: true,
+        width: 140,
+        render: (staff) => (
+          <Badge
+            variant="outline"
+            className={cn(
+              "rounded-full font-mono text-[10px]",
+              staff.status === "active"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-border bg-muted/40 text-muted-foreground",
+            )}
+          >
+            {humanizeCode(staff.status)}
+          </Badge>
+        ),
+      },
+      {
+        id: "department",
+        label: l("providers_staff_department"),
+        accessor: (staff) => staff.department ?? "",
+        searchable: true,
+        width: 170,
+        render: (staff) =>
+          staff.department ? (
+            <span className="block truncate text-xs text-foreground">{staff.department}</span>
+          ) : (
+            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+          ),
+      },
+      {
+        id: "contacts",
+        label: l("providers_contacts"),
+        accessor: (staff) => contactSummary(staff.contacts),
+        searchable: true,
+        width: 240,
+        render: (staff) => {
+          const contacts = contactSummary(staff.contacts);
+          return contacts ? (
+            <span className="block truncate font-mono text-xs text-muted-foreground" title={contacts}>
+              {contacts}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+          );
+        },
+      },
+      {
+        id: "notes",
+        label: l("providers_staff_notes"),
+        accessor: (staff) => staff.notes ?? "",
+        searchable: true,
+        width: 240,
+        render: (staff) => (
+          <span
+            className="block truncate text-xs text-muted-foreground"
+            title={staff.notes ?? undefined}
+          >
+            {staff.notes || t.common_not_set}
+          </span>
+        ),
+      },
+    ],
+    [l, lang, staffRoles, t],
+  );
+
   return (
     <section className={providerDetailPanelClassName}>
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -7298,9 +7234,6 @@ function StaffSection({
           <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
             {l("providers_staff")}
           </h3>
-          <span className="shrink-0 text-xs font-medium text-muted-foreground">
-            {detail.staff.length}
-          </span>
         </div>
         {canManage ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -7336,110 +7269,46 @@ function StaffSection({
           />
         </div>
       ) : (
-        <div className="mt-4 space-y-3">
-          {detail.staff.map((staff) => {
-            const contacts = contactSummary(staff.contacts);
-            return (
-              <div
-                key={staff.id}
-                role="button"
-                tabIndex={0}
-                className="overflow-hidden rounded-[1.4rem] border border-border bg-card text-left transition hover:bg-muted/20"
-                onClick={() => onOpen(staff)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onOpen(staff);
-                  }
-                }}
-              >
-                <div className="grid gap-3 p-3.5 lg:grid-cols-[minmax(0,1fr)_180px_160px]">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-foreground">{staff.display_name}</p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      <Badge
-                        variant="outline"
-                        className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                      >
-                        {staffRoleLabel(staff.role, staffRoles, lang)}
-                      </Badge>
-                      <Badge
-                        variant="outline"
-                        className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                      >
-                        {humanizeCode(staff.status)}
-                      </Badge>
-                      <Badge
-                        variant="outline"
-                        className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                      >
-                        {personGenderLabel(staff.gender)}
-                      </Badge>
-                      {staff.department ? (
-                        <Badge
-                          variant="outline"
-                          className="rounded-full border-border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                        >
-                          {staff.department}
-                        </Badge>
-                      ) : null}
-                    </div>
-                    <p className="mt-2 text-xs leading-snug text-muted-foreground">
-                      {contacts || t.common_not_set}
-                    </p>
-                    {staff.opening_hours ? (
-                      <div className="mt-2">
-                        <p className="mb-1 text-[11px] font-medium leading-tight text-muted-foreground">
-                          {l("providers_opening_hours")}
-                        </p>
-                        <WeeklyAvailabilityBadgeList value={staff.opening_hours} />
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="rounded-xl border border-border/70 px-3 py-2">
-                    <span className="text-xs text-muted-foreground">
-                      {l("providers_staff_notes")}
-                    </span>
-                    <p className="mt-1 break-words text-sm text-foreground">
-                      {staff.notes || t.common_not_set}
-                    </p>
-                  </div>
-
-                  {canManage ? (
-                    <div className="flex flex-col justify-end gap-2 border-t border-dashed border-border pt-3 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+        <div className="mt-4">
+          <DataTableSurface
+            rows={detail.staff}
+            columns={staffColumns}
+            rowId={(staff) => staff.id}
+            dictionary={t as unknown as Record<string, string>}
+            onRowClick={(staff) => onOpen(staff)}
+            rowActions={
+              canManage
+                ? (staff) => (
+                    <div className="flex items-center gap-1">
                       <Button
                         type="button"
-                        variant="default"
-                        size="sm"
-                        className={cn(providerPrimaryActionButtonClassName, "w-full justify-center")}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onEdit(staff);
-                        }}
+                        variant="ghost"
+                        size="icon-sm"
+                        className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                        onClick={() => onEdit(staff)}
+                        aria-label={l("patients_edit")}
+                        title={l("patients_edit")}
                       >
-                        {l("patients_edit")}
+                        <Pencil className="size-3.5" />
                       </Button>
                       <Button
                         type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 w-full justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="size-7 rounded-full text-rose-600 hover:bg-rose-50 hover:text-rose-700"
                         disabled={busy}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onDelete(staff.id, staff.display_name);
-                        }}
+                        onClick={() => onDelete(staff.id, staff.display_name)}
+                        aria-label={l("patients_delete")}
+                        title={l("patients_delete")}
                       >
                         <Trash2 className="size-3.5" />
-                        {l("patients_delete")}
                       </Button>
                     </div>
-                  ) : null}
-                </div>
-              </div>
-            );
-          })}
+                  )
+                : undefined
+            }
+            rowActionsWidth={100}
+          />
         </div>
       )}
     </section>
@@ -7856,6 +7725,127 @@ function InteractionHistorySection({
 }) {
   const { lang, t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
+  type InteractionRow = ProviderDetail["interactions"][number];
+  const pagination = useDataTablePagination(
+    detail.interactions,
+    detail.interactions.map((item) => item.id).join(":"),
+  );
+
+  const columns = useMemo<ColumnDef<InteractionRow>[]>(
+    () => [
+      {
+        id: "occurred_at",
+        label: t.appointments_date,
+        accessor: (item) => item.occurred_at,
+        sortable: true,
+        filterType: "date",
+        required: true,
+        width: 160,
+        render: (item) => (
+          <span className="font-mono text-xs tabular-nums text-foreground">
+            {compactDateTime(item.occurred_at, t.common_not_set)}
+          </span>
+        ),
+      },
+      {
+        id: "title",
+        label: t.appointments_title_col,
+        accessor: (item) => item.title,
+        sortable: true,
+        searchable: true,
+        width: 260,
+        render: (item) => (
+          <span className="block truncate text-xs font-medium text-foreground" title={item.title}>
+            {item.title}
+          </span>
+        ),
+      },
+      {
+        id: "kind",
+        label: t.providers_type,
+        accessor: (item) => interactionKindLabel(item.kind, t),
+        sortable: true,
+        width: 200,
+        render: (item) => (
+          <div className="flex min-w-0 items-center gap-1.5">
+            <Badge variant="outline" className="rounded-full font-mono text-[10px]">
+              {interactionKindLabel(item.kind, t)}
+            </Badge>
+            {item.appointment_type ? (
+              <Badge
+                variant="outline"
+                className="rounded-full border-violet-200 bg-violet-50 font-mono text-[10px] text-violet-700"
+              >
+                {interactionTypeLabel(item.appointment_type, t)}
+              </Badge>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (item) => interactionStatusLabel(item.status, t),
+        sortable: true,
+        width: 150,
+        render: (item) => (
+          <Badge variant="outline" className="rounded-full font-mono text-[10px]">
+            {interactionStatusLabel(item.status, t)}
+          </Badge>
+        ),
+      },
+      {
+        id: "patient",
+        label: t.orders_patient,
+        accessor: (item) => `${item.patient_name} ${item.patient_id}`,
+        searchable: true,
+        sortable: true,
+        width: 210,
+        render: (item) => (
+          <span
+            className="block truncate font-mono text-xs text-foreground"
+            title={item.patient_id}
+          >
+            {item.patient_name}
+          </span>
+        ),
+      },
+      {
+        id: "doctor",
+        label: l("providers_doctor"),
+        accessor: (item) => item.doctor_name ?? "",
+        searchable: true,
+        width: 190,
+        render: (item) =>
+          item.doctor_name ? (
+            <span className="block truncate font-mono text-xs text-foreground">
+              {item.doctor_name}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+          ),
+      },
+      {
+        id: "notes",
+        label: l("patients_note"),
+        accessor: (item) => interactionNoteLabel(item.notes, lang) ?? "",
+        searchable: true,
+        width: 260,
+        render: (item) => {
+          const notes = interactionNoteLabel(item.notes, lang);
+          return notes ? (
+            <span className="block truncate text-xs text-muted-foreground" title={notes}>
+              {notes}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">{t.common_not_set}</span>
+          );
+        },
+      },
+    ],
+    [l, lang, t],
+  );
+
   return (
     <section className={providerDetailPanelClassName}>
       <div className="flex items-center justify-between gap-3">
@@ -7864,11 +7854,7 @@ function InteractionHistorySection({
           <h3 className="truncate text-[13px] font-semibold tracking-tight text-foreground">
             {l("providers_interaction_history")}
           </h3>
-          <span className="shrink-0 text-xs font-medium text-muted-foreground">
-            {detail.interactions.length}
-          </span>
         </div>
-
       </div>
 
       {detail.interactions.length === 0 ? (
@@ -7879,71 +7865,24 @@ function InteractionHistorySection({
           />
         </div>
       ) : (
-        <div className="mt-4 space-y-3 pl-6">
-          {detail.interactions.map((item, index) => {
-            const notes = interactionNoteLabel(item.notes, lang);
-            return (
-              <div
-                key={item.id}
-                className={cn(
-                  "relative",
-                  index < detail.interactions.length - 1 &&
-                    "before:absolute before:-bottom-5 before:-left-4 before:top-3 before:w-px before:bg-border",
-                )}
-              >
-                <span className="absolute -left-[1.125rem] top-1.5 z-10 size-2 rounded-full bg-muted-foreground ring-4 ring-background" />
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <div className="text-sm font-semibold text-foreground">
-                    {item.title}
-                  </div>
-                  <span className="text-xs text-muted-foreground">
-                    {compactDateTime(item.occurred_at, t.common_not_set)}
-                  </span>
-                </div>
-                <div className="rounded-[1.4rem] border border-slate-200 p-4">
-                  <div className="grid gap-4">
-                    <div className="min-w-0 space-y-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline" className="rounded-full border-slate-200 text-slate-700">
-                          {interactionKindLabel(item.kind, t)}
-                        </Badge>
-                        <Badge variant="outline" className="rounded-full border-slate-200 text-slate-700">
-                          {interactionStatusLabel(item.status, t)}
-                        </Badge>
-                        {item.appointment_type ? (
-                          <Badge variant="outline" className="rounded-full border-slate-200 text-slate-700">
-                            {interactionTypeLabel(item.appointment_type, t)}
-                          </Badge>
-                        ) : null}
-                      </div>
-
-                      <div className="grid gap-3 text-sm md:grid-cols-2">
-                        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-                          <span className="text-xs text-muted-foreground">{l("orders_patient")}</span>
-                          <span className="font-medium text-foreground">{item.patient_name}</span>
-                          <span className="text-xs text-muted-foreground">ID</span>
-                          <span className="font-medium text-foreground">{item.patient_id}</span>
-                        </div>
-                        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-                          <span className="text-xs text-muted-foreground">{l("providers_doctor")}</span>
-                          <span className="font-medium text-foreground">{item.doctor_name || t.common_not_set}</span>
-                          <span className="text-xs text-muted-foreground">{l("providers_location")}</span>
-                          <span className="font-medium text-foreground">{item.location || t.common_not_set}</span>
-                        </div>
-                      </div>
-
-                      {notes ? (
-                        <div className="rounded-xl border border-border/60 px-3 py-2 text-sm leading-6 text-slate-700">
-                          <span className="mb-1 block text-xs text-muted-foreground">{l("patients_note")}</span>
-                          {notes}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+        <div className="mt-4">
+          <DataTableSurface
+            rows={pagination.pagedRows}
+            columns={columns}
+            rowId={(item) => item.id}
+            dictionary={t as unknown as Record<string, string>}
+            toolbarAfter={
+              <DataTablePager
+                pageIndex={pagination.pageIndex}
+                pageSize={pagination.pageSize}
+                totalPages={pagination.totalPages}
+                totalRows={pagination.totalRows}
+                previousLabel={t.pagination_previous}
+                nextLabel={t.pagination_next}
+                onPageChange={pagination.onPageChange}
+              />
+            }
+          />
         </div>
       )}
     </section>
@@ -8826,7 +8765,7 @@ function DoctorProfileFields({
             placeholder={l("patients_display_name")}
           />
         </Field>
-        <Field label={t.providers_doctor_title} required={!form.id}>
+        <Field label={t.providers_doctor_title}>
           <DoctorTitleMultiSelect
             value={form.title}
             onChange={(nextValue) => onChange("title", nextValue)}

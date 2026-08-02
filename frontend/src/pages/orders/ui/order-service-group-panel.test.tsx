@@ -39,7 +39,7 @@ describe("OrderServiceGroupPanel", () => {
       />,
     );
 
-    expect(html).toContain("3 врачей создают 3 строк биллинга");
+    expect(html).toContain("3 врачей создают 3 строк расчёта");
     expect(html).toContain("Только предпросмотр");
     expect(html).toContain("Dr. One");
     expect(html).toContain("Dr. Two");

@@ -555,7 +555,7 @@ const revenueReportsTextRu: RevenueReportsText = {
           service_types: "Отчёт по типам услуг",
           medical_providers: "Медицинские провайдеры",
           provider_costs: "Динамика стоимости провайдеров",
-          billing_kpis: "KPI биллинга",
+          billing_kpis: "KPI бухгалтерии",
           doctors: "Детализация по врачам",
           non_medical_providers: "Немедицинские провайдеры",
           sales_kpis: "KPI продаж",
@@ -573,7 +573,7 @@ const revenueReportsTextRu: RevenueReportsText = {
           deliveredServiceVolume: "Объём оказанных услуг",
         },
         billing: {
-          title: "Сводка KPI биллинга",
+          title: "Сводка KPI бухгалтерии",
           description:
             "Пропускная способность счетов, платёжная дисциплина и структура плательщиков из текущей модели расчётов.",
           trackedInvoices: (count: number) => `${count} отслеживаемых счетов`,
@@ -896,7 +896,7 @@ export const revenueRu: RevenueTranslations = {
   revenue_filter_all_orders: "Все заказы",
 
   revenue_contracts_access_denied:
-    "Договоры и предложения доступны только CEO, ассистенту CEO, пациент-менеджерам и биллингу.",
+    "Договоры и предложения доступны только CEO, ассистенту CEO, пациент-менеджерам и бухгалтерии.",
   revenue_contracts_workspace_title: "Договоры и предложения",
   revenue_contracts_refresh: "Обновить",
   revenue_contracts_new_contract: "Новый договор",
