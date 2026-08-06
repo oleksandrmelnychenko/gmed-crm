@@ -6048,10 +6048,7 @@ ${serviceCommentLines.join("\n")}`
                       type="button"
                       size="sm"
                       className="h-8 rounded-lg"
-                      disabled={
-                        isBusy
-                        || selectedCostEstimateWorkTypes.length === 0
-                      }
+                      disabled={isBusy}
                       onClick={() => void generateCommercialDocument("cost_estimate")}
                     >
                       {busy === "generate-cost_estimate" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
