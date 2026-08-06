@@ -2160,7 +2160,7 @@ export function LeadWizard({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [commercialSaveFeedback, setCommercialSaveFeedback] = useState<{
-    tone: "error" | "success";
+    tone: "error" | "success" | "warning";
     message: string;
   } | null>(null);
   const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("idle");
@@ -2505,6 +2505,7 @@ export function LeadWizard({
         setAutosaveError("");
         setAutosaveStatus("saved");
       }
+      return nextLead;
     } catch (nextError) {
       if (isCurrentReload()) showWizardError(nextError);
     } finally {
@@ -3773,11 +3774,33 @@ ${serviceCommentLines.join("\n")}`
     setBusy("commercial");
     try {
       await ensureCommercial();
-      await reload(false, true);
-      setCommercialSaveFeedback({
-        tone: "success",
-        message: tx("Договор и заказ сохранены", "Vertrag und Auftrag wurden gespeichert"),
-      });
+      const nextLead = await reload(false, true);
+      const commercialReady = nextLead?.readiness.steps.some(
+        (item) => item.key === "commercial" && item.ready,
+      ) ?? false;
+      if (commercialReady) {
+        setCommercialSaveFeedback({
+          tone: "success",
+          message: tx(
+            "Договор и заказ сохранены и завершены",
+            "Vertrag und Auftrag wurden gespeichert und abgeschlossen",
+          ),
+        });
+      } else {
+        const remaining = (nextLead?.readiness.blocking_reasons ?? [])
+          .filter((reason) => readinessReasonStep(reason) === "commercial")
+          .map((reason) => readinessReasonLabel(reason, tx));
+        setCommercialSaveFeedback({
+          tone: "warning",
+          message: remaining.length > 0
+            ? tx("Данные сохранены. Для завершения: ", "Daten gespeichert. Zum Abschluss: ")
+              + remaining.join("; ")
+            : tx(
+                "Данные сохранены. Этап ещё не завершён — проверьте документы, подписи и смету.",
+                "Daten gespeichert. Der Schritt ist noch nicht abgeschlossen – prüfen Sie Dokumente, Unterschriften und Kostenvoranschlag.",
+              ),
+        });
+      }
     } catch (nextError) {
       setCommercialSaveFeedback({ tone: "error", message: errorText(nextError, tx) });
       showWizardError(nextError);
@@ -6068,7 +6091,9 @@ ${serviceCommentLines.join("\n")}`
                       "rounded-lg border px-3 py-2 text-xs",
                       commercialSaveFeedback.tone === "error"
                         ? "border-destructive/30 bg-destructive/10 text-destructive"
-                        : "border-emerald-200 bg-emerald-50 text-emerald-700",
+                        : commercialSaveFeedback.tone === "warning"
+                          ? "border-amber-200 bg-amber-50 text-amber-700"
+                          : "border-emerald-200 bg-emerald-50 text-emerald-700",
                     )}
                   >
                     {commercialSaveFeedback.message}
