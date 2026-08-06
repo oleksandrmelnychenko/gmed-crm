@@ -5455,7 +5455,10 @@ ${serviceCommentLines.join("\n")}`
                   {tx("Загружаются каталоги специализаций и услуг…", "Fachrichtungs- und Leistungskataloge werden geladen…")}
                 </div>
               ) : null}
-              <Section title={tx("Период программы", "Programmzeitraum")}>
+              <Section
+                className={WIZARD_DOCUMENT_SECTION_CLASS}
+                title={tx("Период программы", "Programmzeitraum")}
+              >
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field
                     label={tx("Начало программы", "Programmbeginn")}
@@ -5496,7 +5499,10 @@ ${serviceCommentLines.join("\n")}`
                   </Field>
                 </div>
               </Section>
-              <Section title={tx("Специализации", "Fachrichtungen")}>
+              <Section
+                className={WIZARD_DOCUMENT_SECTION_CLASS}
+                title={tx("Специализации", "Fachrichtungen")}
+              >
                 <Field
                   label={tx("Добавить специализацию", "Fachrichtung hinzufügen")}
                   required
