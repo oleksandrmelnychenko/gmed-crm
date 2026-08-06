@@ -30,6 +30,8 @@ import {
 } from "lucide-react";
 
 import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
+import { DataTable } from "@/components/data-table/data-table";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect, countryLabel } from "@/components/ui/country-select";
@@ -460,6 +462,7 @@ const SERVICE_SPECIALTIES_ID = "lead-wizard-specialties";
 const MEDICAL_ANAMNESE_ID = "lead-wizard-anamnese";
 const ORDER_DATE_FROM_ID = "lead-wizard-program-date-from";
 const ORDER_DATE_TO_ID = "lead-wizard-program-date-to";
+const ORDER_SERVICE_SELECT_ID = "lead-wizard-order-service-select";
 const PRIVACY_CONSENT_ID = "lead-wizard-privacy-consent";
 const HEALTHCARE_CONSENT_ID = "lead-wizard-healthcare-consent";
 const CONFIDENTIALITY_RELEASE_ID = "lead-wizard-confidentiality-release";
@@ -470,6 +473,7 @@ const COST_THRESHOLD_ID = "lead-wizard-cost-threshold";
 const ORDER_DOCUMENT_ID = "lead-wizard-order-document";
 const ORDER_COST_ESTIMATE_DOCUMENT_ID = "lead-wizard-order-cost-estimate-document";
 const COST_ESTIMATE_DOCUMENT_ID = "lead-wizard-cost-estimate-document";
+const WIZARD_DOCUMENT_SECTION_CLASS = "rounded-xl border border-border/70 bg-card p-4";
 
 const DISCOVERY_SOURCE_OPTIONS = [
   { value: "customer_referral", ru: "Рекомендация клиента", de: "Empfehlung eines Kunden" },
@@ -2155,6 +2159,10 @@ export function LeadWizard({
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [commercialSaveFeedback, setCommercialSaveFeedback] = useState<{
+    tone: "error" | "success";
+    message: string;
+  } | null>(null);
   const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("idle");
   const [autosaveError, setAutosaveError] = useState("");
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
@@ -3750,11 +3758,28 @@ ${serviceCommentLines.join("\n")}`
   }
 
   async function prepareCommercial() {
+    setCommercialSaveFeedback(null);
+    if (!lines.some(validLine)) {
+      const message = tx(
+        "Выберите услугу и укажите количество больше нуля",
+        "Wählen Sie eine Leistung und geben Sie eine Menge größer als null ein",
+      );
+      setCommercialSaveFeedback({ tone: "error", message });
+      window.requestAnimationFrame(() => {
+        document.getElementById(ORDER_SERVICE_SELECT_ID)?.focus();
+      });
+      return;
+    }
     setBusy("commercial");
     try {
       await ensureCommercial();
       await reload(false, true);
+      setCommercialSaveFeedback({
+        tone: "success",
+        message: tx("Договор и заказ сохранены", "Vertrag und Auftrag wurden gespeichert"),
+      });
     } catch (nextError) {
+      setCommercialSaveFeedback({ tone: "error", message: errorText(nextError, tx) });
       showWizardError(nextError);
     } finally {
       setBusy(null);
@@ -4116,6 +4141,7 @@ ${serviceCommentLines.join("\n")}`
   function addAgencyService(serviceId: string) {
     const service = agencyServiceById.get(serviceId);
     if (!service) return;
+    setCommercialSaveFeedback(null);
     setLines((current) => {
       if (current.some((line) => line.agencyServiceId === service.id)) return current;
       return [
@@ -4136,6 +4162,19 @@ ${serviceCommentLines.join("\n")}`
     if (!issue.fieldId) return;
     window.requestAnimationFrame(() => {
       document.getElementById(issue.fieldId ?? "")?.focus();
+    });
+  }
+
+  function openReadinessReason(reason: string) {
+    if (reason === "Lead must be qualified before conversion") {
+      void finishIntake("release");
+      return;
+    }
+    openValidationIssue({
+      key: reason,
+      step: readinessReasonStep(reason),
+      message: readinessReasonLabel(reason, tx),
+      fieldId: readinessReasonFieldId(reason, draft),
     });
   }
 
@@ -4178,8 +4217,97 @@ ${serviceCommentLines.join("\n")}`
     return `${money(line.price).toFixed(2)} EUR${unit ? `/${unit}` : ""}`;
   }
 
-  if (!leadId && !createMode) return null;
   const isBusy = busy !== null || commercialFlagsBusyCount > 0;
+  const serviceLineColumns: ColumnDef<ServiceLine>[] = [
+    {
+      id: "service",
+      label: tx("Услуга", "Leistung"),
+      accessor: (line) => line.description,
+      sortable: false,
+      required: true,
+      pinned: "left",
+      width: 310,
+      render: (line) => {
+        const catalogService = line.agencyServiceId
+          ? agencyServiceById.get(line.agencyServiceId)
+          : undefined;
+        return (
+          <div className="min-w-0">
+            <div className="truncate font-medium text-foreground">{line.description}</div>
+            {catalogService?.unit_label ? (
+              <div className="truncate text-[11px] text-muted-foreground">{catalogService.unit_label}</div>
+            ) : null}
+          </div>
+        );
+      },
+    },
+    {
+      id: "quantity",
+      label: tx("Количество", "Menge"),
+      accessor: (line) => money(line.quantity),
+      sortable: false,
+      align: "right",
+      width: 130,
+      cellClassName: "overflow-visible",
+      render: (line) => (
+        <Input
+          name={`service_quantity_${line.id}`}
+          autoComplete="off"
+          inputMode="decimal"
+          aria-label={`${tx("Количество", "Menge")}: ${line.description}`}
+          className="h-7 rounded-md bg-field text-right font-mono text-xs tabular-nums"
+          value={line.quantity}
+          disabled={isBusy}
+          onChange={(event) => {
+            setCommercialSaveFeedback(null);
+            updateLine(line.id, { quantity: event.target.value });
+          }}
+        />
+      ),
+    },
+    {
+      id: "unit_price",
+      label: tx("Цена за единицу", "Einzelpreis"),
+      accessor: (line) => money(line.price),
+      sortable: false,
+      align: "right",
+      width: 150,
+      render: (line) => {
+        const currency = line.agencyServiceId
+          ? agencyServiceById.get(line.agencyServiceId)?.currency || "EUR"
+          : "EUR";
+        return <span className="whitespace-nowrap">{formatMoneyValue(money(line.price), lang)} {currency}</span>;
+      },
+    },
+    {
+      id: "vat",
+      label: tx("НДС", "MwSt."),
+      accessor: (line) => money(line.vat),
+      sortable: false,
+      align: "right",
+      width: 100,
+      render: (line) => <span className="whitespace-nowrap">{formatMoneyValue(money(line.vat), lang)}%</span>,
+    },
+    {
+      id: "total",
+      label: tx("Сумма", "Gesamt"),
+      accessor: (line) => money(line.quantity) * money(line.price),
+      sortable: false,
+      align: "right",
+      width: 150,
+      render: (line) => {
+        const currency = line.agencyServiceId
+          ? agencyServiceById.get(line.agencyServiceId)?.currency || "EUR"
+          : "EUR";
+        return (
+          <span className="whitespace-nowrap font-semibold">
+            {formatMoneyValue(money(line.quantity) * money(line.price), lang)} {currency}
+          </span>
+        );
+      },
+    },
+  ];
+  if (!leadId && !createMode) return null;
   const autosaveIsDirty = autosaveStatus === "dirty"
     || autosaveStatus === "saving"
     || autosaveStatus === "error";
@@ -5024,6 +5152,7 @@ ${serviceCommentLines.join("\n")}`
             <section className="space-y-5">
               {amlRequired || wizardDocuments.enhanced_due_diligence.length > 0 ? (
                 <Section
+                  className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Усиленная AML-проверка", "Verstärkte Sorgfaltspflichten (§ 15 GwG)")}
                   accessory={amlRequired ? (
                     <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={openAmlSheet}>
@@ -5051,6 +5180,7 @@ ${serviceCommentLines.join("\n")}`
               ) : null}
               <div id={CONFIDENTIALITY_RELEASE_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
+                  className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Освобождение от медицинской тайны", "Schweigepflichtsentbindung")}
                   accessory={(
                     <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("confidentiality_release")}>
@@ -5083,6 +5213,7 @@ ${serviceCommentLines.join("\n")}`
 
               <div id={PRIVACY_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
+                  className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Согласие на использование и передачу персональных и медицинских данных", "Einverständniserklärung zur Datenübermittlung")}
                   accessory={(
                     <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_consents")}>
@@ -5183,6 +5314,7 @@ ${serviceCommentLines.join("\n")}`
               </div>
 
               <Section
+                className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Информационный лист о защите персональных данных", "Informationsblatt zum Datenschutz")}
                 accessory={(
                   <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_information")}>
@@ -5205,6 +5337,7 @@ ${serviceCommentLines.join("\n")}`
               </Section>
 
               <Section
+                className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Документ, удостоверяющий личность", "Ausweisdokument")}
                 accessory={(
                   <span className="inline-flex">
@@ -5251,7 +5384,7 @@ ${serviceCommentLines.join("\n")}`
                 />
               </Section>
               {supplementaryDocuments.length > 0 ? (
-                <Section title={tx("Другие документы", "Weitere Dokumente")}>
+                <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Другие документы", "Weitere Dokumente")}>
                   <WizardDocumentRows
                     documents={supplementaryDocuments}
                     emptyLabel=""
@@ -5521,6 +5654,7 @@ ${serviceCommentLines.join("\n")}`
               ) : null}
               <div id={FRAMEWORK_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
+                  className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Рамочный договор", "Rahmenvertrag")}
                   accessory={(
                     <div className="flex flex-wrap items-center gap-2">
@@ -5585,6 +5719,7 @@ ${serviceCommentLines.join("\n")}`
                 </Section>
               </div>
               <Section
+                className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Позиции заказа", "Auftragspositionen")}
                 accessory={<CountBadge>{lines.length}</CountBadge>}
               >
@@ -5600,6 +5735,7 @@ ${serviceCommentLines.join("\n")}`
                   />
                 ) : null}
                 <NativeComboboxSelect
+                  id={ORDER_SERVICE_SELECT_ID}
                   aria-label={tx("Выбрать услугу из каталога", "Leistung aus dem Katalog auswählen")}
                   name="agency_service"
                   value=""
@@ -5620,124 +5756,56 @@ ${serviceCommentLines.join("\n")}`
                 {lines.length === 0 ? (
                   <p className="text-xs text-muted-foreground">{tx("Услуги не выбраны", "Keine Leistungen ausgewählt")}</p>
                 ) : (
-                  <div className={cn("overflow-hidden rounded-lg", tokens.surface.card)}>
-                    <div className="overflow-x-auto">
-                      <table
-                        aria-label={tx("Позиции заказа", "Auftragspositionen")}
-                        className="w-full min-w-[760px] border-collapse text-sm"
+                  <DataTable
+                    rows={lines}
+                    columns={serviceLineColumns}
+                    rowId={(line) => line.id}
+                    density="comfortable"
+                    rowHeightOverrides={{ comfortable: 46 }}
+                    storageKey="lead-wizard-order-lines"
+                    rowActionsWidth={48}
+                    rowActionsLabel={tx("Действия", "Aktionen")}
+                    rowActions={(line) => (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        disabled={isBusy}
+                        title={tx("Удалить услугу", "Leistung entfernen")}
+                        aria-label={`${tx("Удалить услугу", "Leistung entfernen")}: ${line.description}`}
+                        onClick={() => {
+                          setCommercialSaveFeedback(null);
+                          setLines((current) => current.filter((item) => item.id !== line.id));
+                        }}
                       >
-                      <caption className="sr-only">
-                        {tx("Позиции заказа", "Auftragspositionen")}
-                      </caption>
-                      <thead className="bg-muted/40 text-[11px] uppercase tracking-wide text-muted-foreground">
-                        <tr>
-                          <th scope="col" className="px-3 py-2 text-left font-medium">
-                            {tx("Услуга", "Leistung")}
-                          </th>
-                          <th scope="col" className="w-28 px-3 py-2 text-right font-medium">
-                            {tx("Количество", "Menge")}
-                          </th>
-                          <th scope="col" className="w-36 px-3 py-2 text-right font-medium">
-                            {tx("Цена за единицу", "Einzelpreis")}
-                          </th>
-                          <th scope="col" className="w-24 px-3 py-2 text-right font-medium">
-                            {tx("НДС", "MwSt.")}
-                          </th>
-                          <th scope="col" className="w-36 px-3 py-2 text-right font-medium">
-                            {tx("Сумма", "Gesamt")}
-                          </th>
-                          <th scope="col" className="w-14 px-2 py-2">
-                            <span className="sr-only">{tx("Действия", "Aktionen")}</span>
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border/70 bg-card">
-                        {lines.map((line) => {
-                          const catalogService = line.agencyServiceId
-                            ? agencyServiceById.get(line.agencyServiceId)
-                            : undefined;
-                          const currency = catalogService?.currency || "EUR";
-                          const lineTotal = money(line.quantity) * money(line.price);
-                          return (
-                            <tr key={line.id} className="align-middle hover:bg-muted/30">
-                              <th scope="row" className="min-w-60 px-3 py-2.5 text-left font-normal">
-                                <div className="break-words font-medium text-foreground">{line.description}</div>
-                                {catalogService?.unit_label ? (
-                                  <div className="mt-0.5 text-xs text-muted-foreground">{catalogService.unit_label}</div>
-                                ) : null}
-                              </th>
-                              <td className="px-3 py-2">
-                                <Input
-                                  name={`service_quantity_${line.id}`}
-                                  autoComplete="off"
-                                  inputMode="decimal"
-                                  aria-label={`${tx("Количество", "Menge")}: ${line.description}`}
-                                  className="h-8 text-right font-mono tabular-nums"
-                                  value={line.quantity}
-                                  onChange={(event) => updateLine(line.id, { quantity: event.target.value })}
-                                />
-                              </td>
-                              <td className="whitespace-nowrap px-3 py-2 text-right font-mono tabular-nums text-foreground">
-                                {formatMoneyValue(money(line.price), lang)} {currency}
-                              </td>
-                              <td className="whitespace-nowrap px-3 py-2 text-right font-mono tabular-nums text-foreground">
-                                {formatMoneyValue(money(line.vat), lang)}%
-                              </td>
-                              <td className="whitespace-nowrap px-3 py-2 text-right font-mono font-medium tabular-nums text-foreground">
-                                {formatMoneyValue(lineTotal, lang)} {currency}
-                              </td>
-                              <td className="px-2 py-2 text-center">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon-sm"
-                                  title={tx("Удалить услугу", "Leistung entfernen")}
-                                  aria-label={`${tx("Удалить услугу", "Leistung entfernen")}: ${line.description}`}
-                                  onClick={() => setLines((current) => current.filter((item) => item.id !== line.id))}
-                                >
-                                  <X className="size-3.5" />
-                                </Button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                      </table>
-                    </div>
-                    <dl
-                      aria-label={tx("Итоги заказа", "Auftragssummen")}
-                      className="grid grid-cols-3 divide-x divide-border/70 border-t border-border/70 bg-muted/30"
-                    >
-                      <div className="min-w-0 px-2 py-2.5 text-right sm:px-3">
-                        <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                          {tx("Нетто", "Netto")}
-                        </dt>
-                        <dd className="mt-0.5 whitespace-nowrap font-mono text-xs tabular-nums text-foreground sm:text-sm">
-                          {formatMoneyValue(estimate.net, lang)} EUR
-                        </dd>
-                      </div>
-                      <div className="min-w-0 px-2 py-2.5 text-right sm:px-3">
-                        <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                          {tx("НДС", "MwSt.")}
-                        </dt>
-                        <dd className="mt-0.5 whitespace-nowrap font-mono text-xs tabular-nums text-foreground sm:text-sm">
-                          {formatMoneyValue(estimate.vat, lang)} EUR
-                        </dd>
-                      </div>
-                      <div className="min-w-0 px-2 py-2.5 text-right sm:px-3">
-                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-foreground">
-                          {tx("Итого", "Gesamt")}
-                        </dt>
-                        <dd className="mt-0.5 whitespace-nowrap font-mono text-xs font-semibold tabular-nums text-foreground sm:text-sm">
-                          {formatMoneyValue(estimate.gross, lang)} EUR
-                        </dd>
-                      </div>
-                    </dl>
-                  </div>
+                        <X className="size-3.5" />
+                      </Button>
+                    )}
+                    footer={(
+                      <dl
+                        aria-label={tx("Итоги заказа", "Auftragssummen")}
+                        className="grid grid-cols-3 gap-x-5 text-right"
+                      >
+                        <div className="min-w-0">
+                          <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{tx("Нетто", "Netto")}</dt>
+                          <dd className="whitespace-nowrap font-mono text-xs tabular-nums text-foreground">{formatMoneyValue(estimate.net, lang)} EUR</dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{tx("НДС", "MwSt.")}</dt>
+                          <dd className="whitespace-nowrap font-mono text-xs tabular-nums text-foreground">{formatMoneyValue(estimate.vat, lang)} EUR</dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-[10px] font-semibold uppercase tracking-wide text-foreground">{tx("Итого", "Gesamt")}</dt>
+                          <dd className="whitespace-nowrap font-mono text-xs font-semibold tabular-nums text-foreground">{formatMoneyValue(estimate.gross, lang)} EUR</dd>
+                        </div>
+                      </dl>
+                    )}
+                  />
                 )}
               </Section>
               <div id={ORDER_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
+                  className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Документ заказа", "Einzelauftrag")}
                   accessory={(
                     <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("single_order")}>
@@ -5759,7 +5827,7 @@ ${serviceCommentLines.join("\n")}`
                 />
                 </Section>
               </div>
-              <Section title={tx("Подписи", "Unterschriften")}>
+              <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Подписи", "Unterschriften")}>
                 <div>
                 <ToggleRow
                   checked={signedPatient}
@@ -5788,6 +5856,7 @@ ${serviceCommentLines.join("\n")}`
                 </div>
               </Section>
               <Section
+                className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Смета и предоплата", "Kostenvoranschlag und Vorauszahlung")}
                 accessory={(
                   <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void createOrAcceptQuote(false)}>
@@ -5925,6 +5994,7 @@ ${serviceCommentLines.join("\n")}`
               </Section>
               <div id={ORDER_COST_ESTIMATE_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
+                  className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Смета к заказу", "Kostenvoranschlag zum Einzelauftrag")}
                   accessory={(
                     <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("order_cost_estimate")}>
@@ -5948,6 +6018,7 @@ ${serviceCommentLines.join("\n")}`
               </div>
               <div id={COST_ESTIMATE_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
+                  className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Предварительный расчёт расходов", "Vorläufige Kostenkalkulation")}
                   accessory={(
                     <Button
@@ -5978,15 +6049,31 @@ ${serviceCommentLines.join("\n")}`
                 />
                 </Section>
               </div>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <StateMark
-                  done={Boolean(readiness.get("commercial"))}
-                  label={readiness.get("commercial") ? tx("Договор и заказ завершены", "Vertrag und Auftrag abgeschlossen") : tx("Договор и заказ ещё не завершены", "Vertrag und Auftrag noch nicht abgeschlossen")}
-                />
-                <Button type="button" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={isBusy || !lines.some(validLine)} onClick={() => void prepareCommercial()}>
-                  {busy === "commercial" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
-                  {tx("Сохранить договор и заказ", "Vertrag und Auftrag speichern")}
-                </Button>
+              <div className={cn(WIZARD_DOCUMENT_SECTION_CLASS, "space-y-3")}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <StateMark
+                    done={Boolean(readiness.get("commercial"))}
+                    label={readiness.get("commercial") ? tx("Договор и заказ завершены", "Vertrag und Auftrag abgeschlossen") : tx("Договор и заказ ещё не завершены", "Vertrag und Auftrag noch nicht abgeschlossen")}
+                  />
+                  <Button type="button" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={isBusy} onClick={() => void prepareCommercial()}>
+                    {busy === "commercial" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
+                    {tx("Сохранить договор и заказ", "Vertrag und Auftrag speichern")}
+                  </Button>
+                </div>
+                {commercialSaveFeedback ? (
+                  <div
+                    role={commercialSaveFeedback.tone === "error" ? "alert" : "status"}
+                    aria-live="polite"
+                    className={cn(
+                      "rounded-lg border px-3 py-2 text-xs",
+                      commercialSaveFeedback.tone === "error"
+                        ? "border-destructive/30 bg-destructive/10 text-destructive"
+                        : "border-emerald-200 bg-emerald-50 text-emerald-700",
+                    )}
+                  >
+                    {commercialSaveFeedback.message}
+                  </div>
+                ) : null}
               </div>
             </section>
           ) : null}
@@ -6010,7 +6097,18 @@ ${serviceCommentLines.join("\n")}`
                 <Banner tone="warning">
                   <div className="font-medium">{tx("Что осталось заполнить", "Was noch fehlt")}</div>
                   <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5">
-                    {lead.readiness.blocking_reasons.map((reason) => <li key={reason}>{readinessReasonLabel(reason, tx)}</li>)}
+                    {lead.readiness.blocking_reasons.map((reason) => (
+                      <li key={reason}>
+                        <button
+                          type="button"
+                          className="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          disabled={isBusy}
+                          onClick={() => openReadinessReason(reason)}
+                        >
+                          {readinessReasonLabel(reason, tx)}
+                        </button>
+                      </li>
+                    ))}
                     {!conversionConfirmed ? (
                       <li>{tx(
                         "Подтвердите, что данные проверены и пациента можно создать",
@@ -6020,15 +6118,12 @@ ${serviceCommentLines.join("\n")}`
                   </ul>
                 </Banner>
               ) : null}
-              <label className={cn(
-                "flex items-start gap-3 rounded-lg border border-border bg-card px-4 py-3",
-                (!lead.readiness.conversion_ready || !quoteAndPrepaymentReady) && "opacity-60",
-              )}>
+              <label className="flex items-start gap-3 rounded-lg border border-border bg-card px-4 py-3">
                 <input
                   type="checkbox"
                   className={cn(checkboxClass, "mt-0.5")}
                   checked={conversionConfirmed}
-                  disabled={isBusy || !lead.readiness.conversion_ready || !quoteAndPrepaymentReady}
+                  disabled={isBusy}
                   onChange={(event) => setConversionConfirmed(event.target.checked)}
                 />
                 <span className="text-sm leading-5 text-foreground">
