@@ -2017,15 +2017,20 @@ function ToggleRow({
   label,
   onChange,
   disabled,
+  withDivider = true,
 }: {
   id?: string;
   checked: boolean;
   label: string;
   onChange: (checked: boolean) => void;
   disabled?: boolean;
+  withDivider?: boolean;
 }) {
   return (
-    <label className="flex cursor-pointer items-center gap-3 border-b border-border/70 py-3 last:border-b-0">
+    <label className={cn(
+      "flex cursor-pointer items-center gap-3 py-3",
+      withDivider && "border-b border-border/70 last:border-b-0",
+    )}>
       <input id={id} type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className={checkboxClass} />
       <span className="text-sm text-foreground">{label}</span>
     </label>
@@ -5265,9 +5270,9 @@ ${serviceCommentLines.join("\n")}`
                     </Button>
                   )}
                 >
-                <div className="border-y border-border/70">
-                  <ToggleRow id={PRIVACY_CONSENT_ID} checked={draft.privacyConsent} disabled={isBusy} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} />
-                  <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={draft.healthcareConsent} disabled={isBusy} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} />
+                <div>
+                  <ToggleRow id={PRIVACY_CONSENT_ID} checked={draft.privacyConsent} disabled={isBusy} withDivider={false} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} />
+                  <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={draft.healthcareConsent} disabled={isBusy} withDivider={false} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} />
                 </div>
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -5278,12 +5283,6 @@ ${serviceCommentLines.join("\n")}`
                         </span>
                         <CountBadge>{draft.trustedContacts.length}</CountBadge>
                       </div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {tx(
-                          "Все контакты будут отдельными строками подставлены в согласие на передачу данных.",
-                          "Alle Kontakte werden als separate Einträge in die Datenübermittlungserklärung übernommen.",
-                        )}
-                      </p>
                     </div>
                     <Button type="button" variant="outline" size="sm" onClick={openNewTrustedContact}>
                       <Plus aria-hidden="true" className="size-3.5" />
