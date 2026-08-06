@@ -2163,6 +2163,7 @@ export function LeadWizard({
     tone: "error" | "success" | "warning";
     message: string;
   } | null>(null);
+  const [costEstimateError, setCostEstimateError] = useState("");
   const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("idle");
   const [autosaveError, setAutosaveError] = useState("");
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
@@ -2536,13 +2537,15 @@ export function LeadWizard({
   const refreshCommercialState = useCallback(async () => {
     if (!leadId) return [];
     const targetLeadId = leadId;
-    const [nextDocuments, nextContracts, nextOrders, nextQuotes] = await Promise.all([
+    const [nextLead, nextDocuments, nextContracts, nextOrders, nextQuotes] = await Promise.all([
+      fetchLeadDetail(targetLeadId),
       fetchDocuments(`/documents?lead_id=${encodeURIComponent(targetLeadId)}`),
       fetchContracts(`/framework-contracts?lead_id=${encodeURIComponent(targetLeadId)}`),
       fetchOrders(`/orders?lead_id=${encodeURIComponent(targetLeadId)}`),
       fetchQuotes(`/quotes?lead_id=${encodeURIComponent(targetLeadId)}`),
     ]);
     if (hydrated.current !== targetLeadId) return [];
+    setLead(nextLead);
     setDocuments(nextDocuments);
     setContracts(nextContracts);
     setOrders(nextOrders);
@@ -2591,6 +2594,7 @@ export function LeadWizard({
     setPaidAmount("");
     setLoading(false);
     setError("");
+    setCostEstimateError("");
     setAutosaveError("");
     setAutosaveStatus("idle");
     setTouchedMasterFields(new Set());
@@ -2636,6 +2640,7 @@ export function LeadWizard({
     setOrders([]);
     setQuotes([]);
     setError("");
+    setCostEstimateError("");
     setAutosaveError("");
     setAutosaveStatus("idle");
     setMedicalLookupsLoading(false);
@@ -3963,18 +3968,24 @@ ${serviceCommentLines.join("\n")}`
 
   async function generateCommercialDocument(templateId: CommercialDocumentKind) {
     if (!leadId || !draft || commercialGenerationInFlightRef.current) return;
-    if (templateId === "cost_estimate" && selectedCostEstimateWorkTypes.length === 0) {
-      setError(
-        tx(
-          "Выберите хотя бы один вид работы.",
-          "Wählen Sie mindestens eine Leistungsart aus.",
-        ),
-      );
+    const validServiceLines = lines.filter(validLine);
+    const usesSpecializationWorkTypes = selectedCostEstimateWorkTypes.length > 0;
+    if (
+      templateId === "cost_estimate"
+      && !usesSpecializationWorkTypes
+      && validServiceLines.length === 0
+    ) {
+      setError("");
+      setCostEstimateError(tx(
+        "Добавьте хотя бы одну позицию заказа или выберите вид работы на этапе «Оформление заказа».",
+        "Fügen Sie mindestens eine Auftragsposition hinzu oder wählen Sie im Schritt „Auftragserfassung“ eine Leistungsart aus.",
+      ));
       return;
     }
     commercialGenerationInFlightRef.current = true;
     setBusy(`generate-${templateId}`);
     setError("");
+    if (templateId === "cost_estimate") setCostEstimateError("");
     try {
       const documentLanguage = templateId === "cost_estimate"
         ? costEstimateDocumentLanguage(draft.costEstimateAdditionalLanguage)
@@ -4018,16 +4029,16 @@ ${serviceCommentLines.join("\n")}`
           period_from: draft.programDateFrom || undefined,
           period_to: draft.programDateTo || undefined,
           estimate_total: templateId === "cost_estimate"
-            ? costEstimateTotalRange(
-                selectedCostEstimateWorkTypes,
-              )
+            ? usesSpecializationWorkTypes
+              ? costEstimateTotalRange(selectedCostEstimateWorkTypes)
+              : `${formatMoneyValue(estimate.gross, "de")} EUR`
             : `${estimate.gross.toFixed(2)} EUR`,
-          service_lines: templateId === "cost_estimate"
+          service_lines: templateId === "cost_estimate" && usesSpecializationWorkTypes
             ? costEstimateServiceLines(
                 selectedCostEstimateWorkTypes,
                 draft.costEstimateAdditionalLanguage,
               )
-            : lines.filter(validLine).map((line) => ({
+            : validServiceLines.map((line) => ({
                 description: serviceDocumentDescription(line),
                 quantity: line.quantity,
                 fee: serviceDocumentFee(line),
@@ -4042,10 +4053,12 @@ ${serviceCommentLines.join("\n")}`
         nextDocuments = await refreshCommercialState();
       } catch {
         setValidationContext(null);
-        setError(tx(
+        const message = tx(
           "Документ создан, но список документов не обновился. Закройте и снова откройте обращение.",
           "Das Dokument wurde erstellt, die Dokumentenliste konnte jedoch nicht aktualisiert werden. Schließen und öffnen Sie den Lead erneut.",
-        ));
+        );
+        if (templateId === "cost_estimate") setCostEstimateError(message);
+        else setError(message);
         return;
       }
       const generatedDocument = nextDocuments.find((document) => document.id === generated.id);
@@ -4053,13 +4066,20 @@ ${serviceCommentLines.join("\n")}`
         await openOrDownloadDocument(generatedDocument, true);
       } else {
         setValidationContext(null);
-        setError(tx(
+        const message = tx(
           "Документ создан, но пока не появился в списке. Обновите обращение и откройте его из документов.",
           "Das Dokument wurde erstellt, ist aber noch nicht in der Liste verfügbar. Aktualisieren Sie den Lead und öffnen Sie es über die Dokumente.",
-        ));
+        );
+        if (templateId === "cost_estimate") setCostEstimateError(message);
+        else setError(message);
       }
     } catch (nextError) {
-      showWizardError(nextError);
+      if (templateId === "cost_estimate") {
+        setValidationContext(null);
+        setCostEstimateError(errorText(nextError, tx));
+      } else {
+        showWizardError(nextError);
+      }
     } finally {
       commercialGenerationInFlightRef.current = false;
       setBusy(null);
@@ -6067,6 +6087,26 @@ ${serviceCommentLines.join("\n")}`
                   onDownload={(document) => void downloadDocument(document)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                 />
+                {costEstimateError ? (
+                  <div
+                    role="alert"
+                    aria-live="polite"
+                    className="mt-3 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+                  >
+                    <CircleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+                    <span>{costEstimateError}</span>
+                  </div>
+                ) : null}
+                {!costEstimateError
+                  && selectedCostEstimateWorkTypes.length === 0
+                  && lines.some(validLine) ? (
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      {tx(
+                        "Расчёт будет создан на основании позиций заказа, поскольку для выбранных специализаций нет активных видов работ.",
+                        "Die Kalkulation wird anhand der Auftragspositionen erstellt, da für die ausgewählten Fachrichtungen keine aktiven Leistungsarten vorhanden sind.",
+                      )}
+                    </p>
+                  ) : null}
                 </Section>
               </div>
               <div className={cn(WIZARD_DOCUMENT_SECTION_CLASS, "space-y-3")}>
