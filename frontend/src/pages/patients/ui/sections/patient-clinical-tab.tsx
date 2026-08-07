@@ -1939,10 +1939,10 @@ export function PatientClinicalTab({
           <button
             type="button"
             className={cn(
-              "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+              "rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
               activeSpecializationId === null
-                ? "border-orange-500 bg-orange-500 text-white"
-                : "border-border/70 bg-background text-muted-foreground hover:text-foreground",
+                ? "border-amber-400 bg-amber-100 text-amber-900 ring-1 ring-amber-300/70"
+                : "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:text-amber-900",
             )}
             aria-pressed={activeSpecializationId === null}
             onClick={() => setSelectedSpecializationId(null)}
@@ -1956,10 +1956,10 @@ export function PatientClinicalTab({
                 key={item.id}
                 type="button"
                 className={cn(
-                  "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                  "rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
                   selected
-                    ? "border-orange-500 bg-orange-500 text-white"
-                    : "border-border/70 bg-background text-muted-foreground hover:text-foreground",
+                    ? "border-amber-400 bg-amber-100 text-amber-900 ring-1 ring-amber-300/70"
+                    : "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:text-amber-900",
                 )}
                 aria-pressed={selected}
                 onClick={() => setSelectedSpecializationId(item.id)}
