@@ -209,6 +209,7 @@ function blankNode(kind: DiagnosisKind, parentCid: string | null): WorkingNode {
     ops_code: null,
     diagnosed_on: null,
     note: null,
+    red_flags: null,
     source_mode: "intern",
     provider_id: null,
     provider_name: null,
@@ -470,7 +471,11 @@ function DiagnosisSpecializationsField({
               const item = availableItems.find((candidate) => candidate.id === id);
               if (!item) return null;
               return (
-                <Badge key={id} variant="secondary" className="gap-1 py-1 pr-1">
+                <Badge
+                  key={id}
+                  variant="outline"
+                  className="gap-1 border-amber-300 bg-amber-50 py-1 pr-1 font-semibold text-amber-700"
+                >
                   {specializationLabelForItem(item, labelLang)}
                   <button
                     type="button"
@@ -539,20 +544,34 @@ function DiagnosisRow({
         )}
       >
         <div className="min-w-0 space-y-1">
-          <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-            {node.certainty === "verdacht" ? (
-              <span className="shrink-0 text-sm font-medium text-amber-700">V.a.</span>
-            ) : null}
-            {node.certainty === "zustand_nach" ? (
-              <span className="shrink-0 text-sm font-medium text-foreground">Z.n.</span>
-            ) : null}
-            <span className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
-              {node.label}
-            </span>
-            {code ? (
-              <span className="min-w-0 max-w-full break-words font-mono text-[11px] text-muted-foreground">
-                ({code})
+          <div className="min-w-0">
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+              {node.certainty === "verdacht" ? (
+                <span className="shrink-0 text-sm font-medium text-amber-700">V.a.</span>
+              ) : null}
+              {node.certainty === "zustand_nach" ? (
+                <span className="shrink-0 text-sm font-medium text-foreground">Z.n.</span>
+              ) : null}
+              <span className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
+                {node.label}
               </span>
+              {code ? (
+                <span className="min-w-0 max-w-full break-words font-mono text-[11px] text-muted-foreground">
+                  ({code})
+                </span>
+              ) : null}
+            </div>
+            {(node.specializations ?? []).length > 0 ? (
+              <div className="mt-1.5 flex min-w-0 flex-col items-start gap-1">
+                {(node.specializations ?? []).map((specialization) => (
+                  <span
+                    key={specialization.id}
+                    className="inline-flex max-w-full rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold leading-tight text-amber-700"
+                  >
+                    {specializationLabelForItem(specialization, lang === "de" ? "de" : "ru")}
+                  </span>
+                ))}
+              </div>
             ) : null}
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -582,20 +601,13 @@ function DiagnosisRow({
               </span>
             ) : null}
           </div>
-          {(node.specializations ?? []).length > 0 ? (
-            <div className="flex min-w-0 flex-wrap gap-1">
-              {(node.specializations ?? []).map((specialization) => (
-                <span
-                  key={specialization.id}
-                  className="rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[10px] text-muted-foreground"
-                >
-                  {specializationLabelForItem(specialization, lang === "de" ? "de" : "ru")}
-                </span>
-              ))}
-            </div>
-          ) : null}
           {node.note ? (
             <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{node.note}</p>
+          ) : null}
+          {node.red_flags ? (
+            <p className="min-w-0 max-w-full break-words rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-800">
+              <span className="font-semibold">Red flags:</span> {node.red_flags}
+            </p>
           ) : null}
           {attribution ? (
             <p className="mt-0.5 min-w-0 max-w-full break-words text-[11px] text-muted-foreground">
@@ -874,6 +886,20 @@ function DiagnosisForm({
           className={inputClass}
         />
       </Field>
+
+      {isDiagnosis ? (
+        <Field label="Red flags">
+          <textarea
+            value={draft.red_flags ?? ""}
+            onChange={(e) => set({ red_flags: blankToNull(e.target.value) })}
+            className={cn(inputClass, "h-24 py-2")}
+            placeholder={tx(
+              "Тревожные признаки и особые риски",
+              "Warnzeichen und besondere Risiken",
+            )}
+          />
+        </Field>
+      ) : null}
 
       {isDiagnosis ? (
         <div className="space-y-2 rounded-lg border border-border/50 p-3">

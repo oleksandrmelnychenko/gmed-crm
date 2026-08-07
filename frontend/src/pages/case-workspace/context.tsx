@@ -11,9 +11,22 @@ import {
 
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import type {
+  ClinicalDiagnosis,
+  ClinicalExamination,
+  ClinicalNarrative,
+  PatientClinicalProfile,
+} from "@/pages/patients/data/patient-clinical";
 import type { SpecializationItem } from "@/pages/providers/model/types";
 
-import { publishCaseSubject } from "./subject-store";
+import {
+  collectClinicalSpecializations,
+  diagnosesForCase,
+} from "./case-specializations";
+import {
+  publishCaseSpecializations,
+  publishCaseSubject,
+} from "./subject-store";
 
 export type PainItem = {
   lokalisierung: string;
@@ -209,6 +222,9 @@ type SectionBusyKey =
 type CaseWorkspaceContextValue = {
   caseId: string;
   detail: CaseWorkspaceDetail | null;
+  clinicalDiagnoses: ClinicalDiagnosis[];
+  clinicalExaminations: ClinicalExamination[];
+  clinicalNarratives: ClinicalNarrative[];
   doctors: CaseWorkspaceDoctor[];
   loading: boolean;
   error: string;
@@ -230,6 +246,9 @@ type CaseWorkspaceContextValue = {
 
 type CaseWorkspaceState = {
   detail: CaseWorkspaceDetail | null;
+  clinicalDiagnoses: ClinicalDiagnosis[];
+  clinicalExaminations: ClinicalExamination[];
+  clinicalNarratives: ClinicalNarrative[];
   doctors: CaseWorkspaceDoctor[];
   loading: boolean;
   error: string;
@@ -293,6 +312,9 @@ function resolvePermissions(role: string | undefined): CaseWorkspacePermissions 
 function createCaseWorkspaceState(): CaseWorkspaceState {
   return {
     detail: null,
+    clinicalDiagnoses: [],
+    clinicalExaminations: [],
+    clinicalNarratives: [],
     doctors: [],
     loading: true,
     error: "",
@@ -329,6 +351,9 @@ function useCaseWorkspaceProviderContent({
   );
   const {
     detail,
+    clinicalDiagnoses,
+    clinicalExaminations,
+    clinicalNarratives,
     doctors,
     loading,
     error,
@@ -380,14 +405,76 @@ function useCaseWorkspaceProviderContent({
         );
         dispatchWorkspaceState({
           detail: result,
+          clinicalDiagnoses: [],
+          clinicalExaminations: [],
+          clinicalNarratives: [],
           loading: false,
         });
+
+        if (!result.patient_id) {
+          publishCaseSpecializations(caseId, []);
+          return;
+        }
+
+        Promise.all([
+          apiFetch<PatientClinicalProfile>(`/patients/${result.patient_id}/clinical`, {
+            signal,
+          }),
+          apiFetch<ClinicalNarrative[]>(`/patients/${result.patient_id}/narrative/history`, {
+            signal,
+          }).catch(() => []),
+        ])
+          .then(([clinical, narrativeHistory]) => {
+            if (signal.aborted) return;
+            // The case workspace is only a projection of patient-owned records;
+            // never copy or expose records attributed to another case.
+            const diagnoses = diagnosesForCase(
+              clinical.diagnoses ?? [],
+              result.id,
+            );
+            const examinations = (clinical.examinations ?? []).filter(
+              (examination) => examination.case_id === result.id,
+            );
+            const narratives = (
+              narrativeHistory.length > 0
+                ? narrativeHistory
+                : clinical.narrative
+                  ? [clinical.narrative]
+                  : []
+            ).filter((narrative) => narrative.case_id === result.id);
+            publishCaseSpecializations(
+              caseId,
+              collectClinicalSpecializations([
+                ...diagnoses,
+                ...examinations,
+                ...narratives,
+              ]),
+            );
+            dispatchWorkspaceState({
+              clinicalDiagnoses: diagnoses,
+              clinicalExaminations: examinations,
+              clinicalNarratives: narratives,
+            });
+          })
+          .catch(() => {
+            if (signal.aborted) return;
+            publishCaseSpecializations(caseId, []);
+            dispatchWorkspaceState({
+              clinicalDiagnoses: [],
+              clinicalExaminations: [],
+              clinicalNarratives: [],
+            });
+          });
       })
       .catch((err: unknown) => {
         if (signal.aborted) return;
         publishCaseSubject(caseId, "unknown");
+        publishCaseSpecializations(caseId, []);
         dispatchWorkspaceState({
           detail: null,
+          clinicalDiagnoses: [],
+          clinicalExaminations: [],
+          clinicalNarratives: [],
           error: err instanceof Error ? err.message : String(err),
           loading: false,
         });
@@ -588,6 +675,9 @@ function useCaseWorkspaceProviderContent({
     () => ({
       caseId,
       detail,
+      clinicalDiagnoses,
+      clinicalExaminations,
+      clinicalNarratives,
       doctors,
       loading,
       error,
@@ -609,6 +699,9 @@ function useCaseWorkspaceProviderContent({
     [
       caseId,
       detail,
+      clinicalDiagnoses,
+      clinicalExaminations,
+      clinicalNarratives,
       doctors,
       error,
       loading,

@@ -45,7 +45,9 @@ import {
   CaseRecordVerlaufSection,
 } from "./patient-record-sections";
 import { PulmonologySection } from "./pulmonology-section";
+import { SpecializationDiagnosesSection } from "./specialization-diagnoses-section";
 import { SymptomsSection } from "./symptoms-section";
+import { useSelectedCaseSpecialization } from "./subject-store";
 import { UrologySection } from "./urology-section";
 import {
   CASE_RECORD_SECTION_KEYS,
@@ -172,6 +174,7 @@ function CaseWorkspaceContent() {
     updateStatus,
   } = useCaseWorkspace();
   const activeSection = normalizeCaseSectionKey(searchParams.get("section"));
+  const selectedSpecializationId = useSelectedCaseSpecialization(caseId);
   const activePatientId = detail?.patient_id ?? null;
 
   const [patient, setPatient] = useState<CasePatientSummary | null>(null);
@@ -361,6 +364,10 @@ function CaseWorkspaceContent() {
           <LoaderCircle className="mr-2 size-4 animate-spin" />
           {t.common_loading}
         </div>
+      ) : selectedSpecializationId ? (
+        <SpecializationDiagnosesSection
+          specializationId={selectedSpecializationId}
+        />
       ) : !activePatientId && CASE_RECORD_SECTION_KEYS.includes(activeSection) ? (
         <RecordUnavailableHint />
       ) : (

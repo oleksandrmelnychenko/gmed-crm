@@ -144,6 +144,16 @@ export const CASE_WORKSPACE_SECTIONS: readonly CaseSectionDefinition[] = [
   },
 ];
 
+/**
+ * Static entries shown in the case rail. Specialty entries are generated from
+ * the patient's diagnoses, and patient-record sections live only in the
+ * patient workspace now.
+ */
+export const CASE_WORKSPACE_NAV_SECTIONS: readonly CaseSectionDefinition[] =
+  CASE_WORKSPACE_SECTIONS.filter((item) =>
+    ["overview", "symptoms", "pain", "history"].includes(item.key),
+  );
+
 const CASE_SECTION_KEYS = new Set<CaseSectionKey>(
   CASE_WORKSPACE_SECTIONS.map((item) => item.key),
 );

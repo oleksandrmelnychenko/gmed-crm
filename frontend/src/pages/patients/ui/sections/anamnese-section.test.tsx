@@ -21,6 +21,18 @@ function narrative(overrides: Partial<ClinicalNarrative> = {}): ClinicalNarrativ
   };
 }
 
+const cardiology = {
+  id: "specialization-1",
+  code: "CARD",
+  name_en: "Cardiology",
+  name_de: "Kardiologie",
+  name_ru: "Кардиология",
+  is_active: true,
+  sort_order: 1,
+  narrative_text: "Belastungsdyspnoe.",
+  assessment_text: "Kardiologische Abklärung.",
+};
+
 describe("AnamneseSection", () => {
   it("copies an existing narrative into a new active version draft", () => {
     const source = narrative({ id: "old-version", is_active: false });
@@ -52,5 +64,27 @@ describe("AnamneseSection", () => {
     expect(html).toContain("Удалить анамнез");
     expect(html).toContain("Актуальный анамнез");
     expect(html).toContain("Дата и время анамнеза");
+  });
+
+  it("renders red flags and per-specialization narrative details", () => {
+    const html = renderToStaticMarkup(
+      <AnamneseSection
+        active={narrative({
+          red_flags: "Synkope bei Belastung",
+          specialization_ids: [cardiology.id],
+          specializations: [cardiology],
+        })}
+        canManage
+        lang="de"
+        loadHistory={async () => []}
+        onSave={async () => undefined}
+      />,
+    );
+
+    expect(html).toContain("Red flags");
+    expect(html).toContain("Synkope bei Belastung");
+    expect(html).toContain("Kardiologie");
+    expect(html).toContain("Fachspezifische Anamnese");
+    expect(html).toContain("Kardiologische Abklärung");
   });
 });

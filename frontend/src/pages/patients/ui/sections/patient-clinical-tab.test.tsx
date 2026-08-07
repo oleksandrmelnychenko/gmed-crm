@@ -389,6 +389,8 @@ describe("DiagnosisTreeSection", () => {
 
     expect(html).toContain("Кардиология");
     expect(html).toContain("Неврология");
+    expect(html).toContain("mt-1.5 flex min-w-0 flex-col items-start gap-1");
+    expect(html.indexOf("Hypertonie")).toBeLessThan(html.indexOf("Кардиология"));
   });
 });
 

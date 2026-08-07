@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   CASE_RECORD_SECTION_KEYS,
+  CASE_WORKSPACE_NAV_SECTIONS,
   CASE_WORKSPACE_SECTIONS,
   normalizeCaseSectionKey,
 } from "./sections";
@@ -21,6 +22,15 @@ describe("case workspace section registry", () => {
       "befunde",
       "procedures",
       "verlauf",
+    ]);
+  });
+
+  it("shows only overview, symptoms, pain and history as static rail entries", () => {
+    expect(CASE_WORKSPACE_NAV_SECTIONS.map((section) => section.key)).toEqual([
+      "overview",
+      "symptoms",
+      "pain",
+      "history",
     ]);
   });
 

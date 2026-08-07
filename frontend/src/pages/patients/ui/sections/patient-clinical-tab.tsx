@@ -27,7 +27,10 @@ import { PauseCircle, Pencil, PlayCircle, Plus, Trash2 } from "lucide-react";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import type { DoctorOption } from "@/pages/appointments/model/types";
 import { fetchProviders, fetchSpecializations } from "@/pages/providers/data/provider-api";
-import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
+import {
+  specializationLabelForItem,
+  specializationLabelForValue,
+} from "@/pages/providers/model/specialization-labels";
 import type { ProviderSummary, SpecializationItem } from "@/pages/providers/model/types";
 import type {
   PatientRiskScore,
@@ -90,6 +93,7 @@ import { MedicationEquivalentsPanel } from "@/pages/case-workspace/medication-eq
 
 import { AnamneseSection } from "./anamnese-section";
 import { DiagnosisTreeSection } from "./diagnosis-tree";
+import { ClinicalSpecializationsField } from "./clinical-specializations-field";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 const loadPatientVitalsSheet = () => import("../sheets/patient-vitals-sheet");
@@ -283,6 +287,9 @@ function blankExamination(): ClinicalExamination {
     status: "final",
     result: null,
     note: null,
+    red_flags: null,
+    specialization_ids: [],
+    specializations: [],
   };
 }
 
@@ -2132,6 +2139,7 @@ export function PatientClinicalTab({
       {/* ---- Anamnese (versioned) ---- */}
       <AnamneseSection
         active={narrative}
+        specializations={specializations}
         canManage={canManage}
         lang={lang}
         onSave={async (next) => {
@@ -2568,6 +2576,23 @@ export function PatientClinicalTab({
             {e.result ? (
               <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{e.result}</p>
             ) : null}
+            {(e.specializations ?? []).length > 0 ? (
+              <div className="flex flex-wrap gap-1">
+                {(e.specializations ?? []).map((item) => (
+                  <span
+                    key={item.id}
+                    className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
+                  >
+                    {specializationLabelForItem(item, lang === "de" ? "de" : "ru")}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {e.red_flags ? (
+              <p className="min-w-0 max-w-full break-words rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-800">
+                <span className="font-semibold">Red flags:</span> {e.red_flags}
+              </p>
+            ) : null}
             {attributionRow(e)}
           </div>
         )}
@@ -2628,6 +2653,32 @@ export function PatientClinicalTab({
                 onChange={(e) => set({ result: blankToNull(e.target.value) })}
                 className={cn(inputClass, "h-[136px] py-2")}
                 placeholder={tx("Описание результата", "Befundtext")}
+              />
+            </Field>
+            <Field label={tx("Специализации", "Spezialisierungen")}>
+              <ClinicalSpecializationsField
+                ids={draft.specialization_ids ?? []}
+                selected={draft.specializations ?? []}
+                options={specializations}
+                lang={lang}
+                tx={tx}
+                onChange={(specializationIds, selectedItems) =>
+                  set({
+                    specialization_ids: specializationIds,
+                    specializations: selectedItems,
+                  })
+                }
+              />
+            </Field>
+            <Field label="Red flags">
+              <textarea
+                value={draft.red_flags ?? ""}
+                onChange={(e) => set({ red_flags: blankToNull(e.target.value) })}
+                className={cn(inputClass, "h-24 py-2")}
+                placeholder={tx(
+                  "Тревожные признаки и особые риски",
+                  "Warnzeichen und besondere Risiken",
+                )}
               />
             </Field>
             <ProviderDoctorFields

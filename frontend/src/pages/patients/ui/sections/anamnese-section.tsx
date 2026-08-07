@@ -8,6 +8,9 @@ import { Copy, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { PatientSheetScaffold } from "@/pages/patients/ui/shared/patient-sheet-scaffold";
 import type { ClinicalNarrative } from "@/pages/patients/data/patient-clinical";
+import { specializationLabelForItem } from "@/pages/providers/model/specialization-labels";
+import type { SpecializationItem } from "@/pages/providers/model/types";
+import { ClinicalSpecializationsField } from "./clinical-specializations-field";
 
 type Bilingual = (ru: string, de: string) => string;
 
@@ -43,6 +46,9 @@ function blankVersion(): ClinicalNarrative {
     anamnese_vegetative: null,
     anamnese_sozial: null,
     beurteilung: null,
+    red_flags: null,
+    specialization_ids: [],
+    specializations: [],
     anamnese_at: new Date().toISOString(),
     is_active: true,
     created_at: null,
@@ -110,6 +116,7 @@ function toLocalDateTimeInput(value: string | null | undefined): string {
 
 export function AnamneseSection({
   active,
+  specializations = [],
   canManage,
   lang,
   onDelete,
@@ -118,6 +125,7 @@ export function AnamneseSection({
   requireCurrent = false,
 }: {
   active: ClinicalNarrative | null;
+  specializations?: SpecializationItem[];
   canManage: boolean;
   lang: string;
   onDelete?: (id: string) => Promise<unknown>;
@@ -344,6 +352,65 @@ export function AnamneseSection({
                 {tx("Пока нет анамнеза", "Noch keine Anamnese")}
               </p>
             )}
+            {(active.specializations ?? []).length > 0 ? (
+              <div className="space-y-2">
+                <p className="mb-1 text-[11px] font-medium text-muted-foreground">
+                  {tx("Специализации", "Spezialisierungen")}
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {(active.specializations ?? []).map((item) => (
+                    <span
+                      key={item.id}
+                      className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
+                    >
+                      {specializationLabelForItem(item, lang === "de" ? "de" : "ru")}
+                    </span>
+                  ))}
+                </div>
+                {(active.specializations ?? [])
+                  .filter((item) => item.narrative_text || item.assessment_text)
+                  .map((item) => (
+                    <div key={`${item.id}-details`} className="rounded-lg border border-border/60 p-3">
+                      <p className="text-xs font-semibold text-foreground">
+                        {specializationLabelForItem(item, lang === "de" ? "de" : "ru")}
+                      </p>
+                      <dl className="mt-2 grid gap-2 md:grid-cols-2">
+                        {item.narrative_text ? (
+                          <div>
+                            <dt className="text-[10px] font-medium text-muted-foreground">
+                              {tx("Анамнез по специализации", "Fachspezifische Anamnese")}
+                            </dt>
+                            <dd className="mt-0.5 whitespace-pre-line text-sm text-foreground">
+                              {item.narrative_text}
+                            </dd>
+                          </div>
+                        ) : null}
+                        {item.assessment_text ? (
+                          <div>
+                            <dt className="text-[10px] font-medium text-muted-foreground">
+                              {tx(
+                                "Оценка / заключение специалиста",
+                                "Fachärztliche Beurteilung / Stellungnahme",
+                              )}
+                            </dt>
+                            <dd className="mt-0.5 whitespace-pre-line text-sm text-foreground">
+                              {item.assessment_text}
+                            </dd>
+                          </div>
+                        ) : null}
+                      </dl>
+                    </div>
+                  ))}
+              </div>
+            ) : null}
+            {active.red_flags ? (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
+                <p className="text-[11px] font-semibold text-rose-800">Red flags</p>
+                <p className="mt-1 whitespace-pre-line break-words text-sm text-rose-900">
+                  {active.red_flags}
+                </p>
+              </div>
+            ) : null}
           </div>
         ) : (
           <p className="px-1 py-4 text-center text-xs text-muted-foreground">
@@ -535,6 +602,116 @@ export function AnamneseSection({
                 </label>
               ))}
             </div>
+            <div>
+              <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
+                {tx("Специализации", "Spezialisierungen")}
+              </span>
+              <ClinicalSpecializationsField
+                ids={editing.specialization_ids ?? []}
+                selected={editing.specializations ?? []}
+                options={specializations}
+                lang={lang}
+                tx={tx}
+                onChange={(specializationIds, selectedItems) =>
+                  setEditing((current) => {
+                    if (!current) return current;
+                    const previous = new Map(
+                      (current.specializations ?? []).map((item) => [item.id, item]),
+                    );
+                    return {
+                      ...current,
+                      specialization_ids: specializationIds,
+                      specializations: selectedItems.map((item) => ({
+                        ...item,
+                        narrative_text: previous.get(item.id)?.narrative_text ?? null,
+                        assessment_text: previous.get(item.id)?.assessment_text ?? null,
+                      })),
+                    };
+                  })
+                }
+              />
+            </div>
+            {(editing.specializations ?? []).map((specialization) => (
+              <div
+                key={specialization.id}
+                className="space-y-3 rounded-lg border border-border/60 bg-background p-3"
+              >
+                <p className="text-sm font-semibold text-foreground">
+                  {specializationLabelForItem(specialization, lang === "de" ? "de" : "ru")}
+                </p>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
+                      {tx("Анамнез по специализации", "Fachspezifische Anamnese")}
+                    </span>
+                    <textarea
+                      value={specialization.narrative_text ?? ""}
+                      onChange={(event) =>
+                        setEditing((current) =>
+                          current
+                            ? {
+                                ...current,
+                                specializations: (current.specializations ?? []).map((item) =>
+                                  item.id === specialization.id
+                                    ? { ...item, narrative_text: event.target.value || null }
+                                    : item,
+                                ),
+                              }
+                            : current,
+                        )
+                      }
+                      className={cn(inputClass, "h-28 py-2")}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
+                      {tx(
+                        "Оценка / заключение специалиста",
+                        "Fachärztliche Beurteilung / Stellungnahme",
+                      )}
+                    </span>
+                    <textarea
+                      value={specialization.assessment_text ?? ""}
+                      onChange={(event) =>
+                        setEditing((current) =>
+                          current
+                            ? {
+                                ...current,
+                                specializations: (current.specializations ?? []).map((item) =>
+                                  item.id === specialization.id
+                                    ? { ...item, assessment_text: event.target.value || null }
+                                    : item,
+                                ),
+                              }
+                            : current,
+                        )
+                      }
+                      className={cn(inputClass, "h-28 py-2")}
+                    />
+                  </label>
+                </div>
+              </div>
+            ))}
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
+                Red flags
+              </span>
+              <textarea
+                value={editing.red_flags ?? ""}
+                onChange={(event) =>
+                  setEditing((current) =>
+                    current
+                      ? { ...current, red_flags: event.target.value || null }
+                      : current,
+                  )
+                }
+                className={cn(inputClass, "h-24 py-2")}
+                placeholder={tx(
+                  "Тревожные признаки и особые риски",
+                  "Warnzeichen und besondere Risiken",
+                )}
+              />
+            </label>
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"

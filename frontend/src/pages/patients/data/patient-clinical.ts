@@ -91,6 +91,8 @@ export type ClinicalDiagnosis = ClinicalAttribution & {
   ops_code: string | null;
   diagnosed_on: string | null;
   note: string | null;
+  /** Free-text warning signs requiring special attention. */
+  red_flags?: string | null;
   source_mode: "intern" | "extern";
   /** Extern attribution; external_country is an ISO 3166-1 alpha-2 code. */
   external_clinic: string | null;
@@ -155,6 +157,9 @@ export type ClinicalExamination = ClinicalAttribution & {
   status: ExaminationStatus;
   result: string | null;
   note: string | null;
+  red_flags?: string | null;
+  specialization_ids?: string[];
+  specializations?: import("@/pages/providers/model/types").SpecializationItem[];
 };
 
 export type ClinicalProcedure = ClinicalAttribution & {
@@ -177,6 +182,9 @@ export type ClinicalNarrative = {
   anamnese_vegetative: string | null;
   anamnese_sozial: string | null;
   beurteilung: string | null;
+  red_flags?: string | null;
+  specialization_ids?: string[];
+  specializations?: ClinicalNarrativeSpecialization[];
   /** Clinical date and time of this anamnesis version (RFC 3339). */
   anamnese_at?: string | null;
   /** Whether this is the active version for the patient. */
@@ -185,6 +193,12 @@ export type ClinicalNarrative = {
   created_at?: string | null;
   updated_at?: string | null;
 };
+
+export type ClinicalNarrativeSpecialization =
+  import("@/pages/providers/model/types").SpecializationItem & {
+    narrative_text: string | null;
+    assessment_text: string | null;
+  };
 
 export type ClinicalVerlaufEntry = ClinicalAttribution & {
   /** Server uuid; null/absent for a newly added entry. */

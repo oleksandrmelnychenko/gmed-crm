@@ -980,6 +980,7 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
                     "provider_id": provider_id.to_string(),
                     "doctor_id": doctor_id.to_string(),
                     "specialization_ids": diagnosis_specialization_ids,
+                    "red_flags": "Dyspnoe in Ruhe",
                 },
                 {
                     "kind": "secondary",
@@ -1041,6 +1042,8 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
                     "status": "pending",
                     "result": "Befund ausstehend",
                     "provider_id": provider_id.to_string(),
+                    "specialization_ids": diagnosis_specialization_ids,
+                    "red_flags": "Akute Entsättigung",
                 },
             ],
         })),
@@ -1067,6 +1070,7 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
     assert_eq!(diagnoses[0]["provider_id"], provider_id.to_string());
     assert_eq!(diagnoses[0]["provider_name"], format!("Provider {tag}"));
     assert_eq!(diagnoses[0]["doctor_name"], format!("Doctor {tag}"));
+    assert_eq!(diagnoses[0]["red_flags"], "Dyspnoe in Ruhe");
     assert_eq!(
         diagnoses[0]["specialization_ids"],
         json!(diagnosis_specialization_ids)
@@ -1103,6 +1107,15 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
     assert_eq!(examinations[0]["status"], "pending");
     assert_eq!(examinations[0]["kind"], "radiology");
     assert_eq!(examinations[0]["provider_name"], format!("Provider {tag}"));
+    assert_eq!(
+        examinations[0]["specialization_ids"],
+        json!(diagnosis_specialization_ids)
+    );
+    assert_eq!(
+        examinations[0]["specializations"][0]["code"],
+        diagnosis_specializations[0].1
+    );
+    assert_eq!(examinations[0]["red_flags"], "Akute Entsättigung");
 
     // ---- Replace-all clears the diagnoses section without touching the others ----
     let (status, _) = json_request(
@@ -1439,6 +1452,20 @@ async fn patient_clinical_narrative_upserts() {
     let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let narrative_specializations = sqlx::query_as::<_, (Uuid, String)>(
+        "SELECT id, code FROM medical_specializations
+         WHERE deleted_at IS NULL AND is_active = TRUE
+         ORDER BY sort_order, code
+         LIMIT 2",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("load narrative specializations");
+    assert_eq!(narrative_specializations.len(), 2);
+    let narrative_specialization_ids = narrative_specializations
+        .iter()
+        .map(|(id, _)| id.to_string())
+        .collect::<Vec<_>>();
 
     // Before any save the narrative is absent.
     let (status, body) = json_request(
@@ -1466,6 +1493,19 @@ async fn patient_clinical_narrative_upserts() {
             "anamnese_aktuelle": "Fieber und Husten seit zwei Tagen.",
             "anamnese_sozial": "Lebt allein, mobil mit Gehstock.",
             "beurteilung": "Verdacht auf ambulant erworbene Pneumonie.",
+            "red_flags": "Nächtliche Dyspnoe",
+            "specializations": [
+                {
+                    "specialization_id": narrative_specialization_ids[0],
+                    "narrative_text": "Belastungsdyspnoe seit drei Tagen.",
+                    "assessment_text": "Zeitnahe kardiologische Abklärung."
+                },
+                {
+                    "specialization_id": narrative_specialization_ids[1],
+                    "narrative_text": "Persistierender produktiver Husten.",
+                    "assessment_text": "Pulmonologische Verlaufskontrolle."
+                }
+            ],
         })),
     )
     .await;
@@ -1491,6 +1531,23 @@ async fn patient_clinical_narrative_upserts() {
     assert_eq!(
         body["narrative"]["beurteilung"],
         "Verdacht auf ambulant erworbene Pneumonie."
+    );
+    assert_eq!(body["narrative"]["red_flags"], "Nächtliche Dyspnoe");
+    assert_eq!(
+        body["narrative"]["specialization_ids"],
+        json!(narrative_specialization_ids)
+    );
+    assert_eq!(
+        body["narrative"]["specializations"][1]["code"],
+        narrative_specializations[1].1
+    );
+    assert_eq!(
+        body["narrative"]["specializations"][0]["narrative_text"],
+        "Belastungsdyspnoe seit drei Tagen."
+    );
+    assert_eq!(
+        body["narrative"]["specializations"][0]["assessment_text"],
+        "Zeitnahe kardiologische Abklärung."
     );
     assert!(
         !body["narrative"]
@@ -1616,6 +1673,23 @@ async fn patient_clinical_narrative_upserts() {
     assert_eq!(status, StatusCode::OK);
     let versions = body.as_array().expect("narrative history array");
     assert_eq!(versions.len(), 2);
+    let historical = versions
+        .iter()
+        .find(|version| version["anamnese_aktuelle"] == "Fieber und Husten seit zwei Tagen.")
+        .expect("historical narrative");
+    assert_eq!(historical["red_flags"], "Nächtliche Dyspnoe");
+    assert_eq!(
+        historical["specialization_ids"],
+        json!(narrative_specialization_ids)
+    );
+    assert_eq!(
+        historical["specializations"][1]["narrative_text"],
+        "Persistierender produktiver Husten."
+    );
+    assert_eq!(
+        historical["specializations"][1]["assessment_text"],
+        "Pulmonologische Verlaufskontrolle."
+    );
     let active_id = versions
         .iter()
         .find(|version| version["is_active"].as_bool() == Some(true))
@@ -1643,6 +1717,11 @@ async fn patient_clinical_narrative_upserts() {
     assert_eq!(
         body["anamnese_aktuelle"],
         "Fieber und Husten seit zwei Tagen."
+    );
+    assert_eq!(body["red_flags"], "Nächtliche Dyspnoe");
+    assert_eq!(
+        body["specialization_ids"],
+        json!(narrative_specialization_ids)
     );
 
     let (status, body) = json_request(

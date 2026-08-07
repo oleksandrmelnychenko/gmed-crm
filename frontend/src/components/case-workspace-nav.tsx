@@ -1,19 +1,29 @@
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Stethoscope } from "lucide-react";
 import { useParams, useSearchParams } from "react-router-dom";
 
 import { StaffLink } from "@/components/staff-link";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
-  CASE_WORKSPACE_SECTIONS,
+  CASE_WORKSPACE_NAV_SECTIONS,
   type CaseSectionGroup,
   caseSectionGroupLabel,
   caseSectionLabel,
   normalizeCaseSectionKey,
 } from "@/pages/case-workspace/sections";
-import { useCaseSubjectKind } from "@/pages/case-workspace/subject-store";
+import {
+  selectCaseSpecialization,
+  useCaseSpecializations,
+  useSelectedCaseSpecialization,
+} from "@/pages/case-workspace/subject-store";
+import { specializationLabelForItem } from "@/pages/providers/model/specialization-labels";
 
-const GROUP_ORDER: readonly CaseSectionGroup[] = ["episode", "record", "meta"];
+const GROUP_ORDER: readonly CaseSectionGroup[] = ["episode", "meta"];
+
+const SPECIALIZATION_GROUP_LABEL = {
+  de: "Spezialisierungen",
+  ru: "Специализации",
+} as const;
 
 export function CaseWorkspaceNav() {
   const { caseId } = useParams<{ caseId: string }>();
@@ -21,7 +31,9 @@ export function CaseWorkspaceNav() {
   const { t, lang } = useLang();
   const currentSection = normalizeCaseSectionKey(searchParams.get("section"));
   const patientContext = searchParams.get("patient");
-  const subjectKind = useCaseSubjectKind(caseId);
+  const specializations = useCaseSpecializations(caseId);
+  const selectedSpecializationId = useSelectedCaseSpecialization(caseId);
+  const labelLang = lang === "de" ? "de" : "ru";
 
   if (!caseId) return null;
 
@@ -38,13 +50,10 @@ export function CaseWorkspaceNav() {
 
   const groupedSections: Array<{
     group: CaseSectionGroup;
-    items: Array<(typeof CASE_WORKSPACE_SECTIONS)[number]>;
+    items: Array<(typeof CASE_WORKSPACE_NAV_SECTIONS)[number]>;
   }> = [];
   for (const group of GROUP_ORDER) {
-    if (group === "record" && subjectKind === "lead") {
-      continue;
-    }
-    const items = CASE_WORKSPACE_SECTIONS.filter((item) => item.group === group);
+    const items = CASE_WORKSPACE_NAV_SECTIONS.filter((item) => item.group === group);
     if (items.length > 0) {
       groupedSections.push({ group, items });
     }
@@ -78,7 +87,8 @@ export function CaseWorkspaceNav() {
             </div>
             <div className="space-y-1">
               {items.map((item) => {
-                const isActive = currentSection === item.key;
+                const isActive =
+                  selectedSpecializationId === null && currentSection === item.key;
                 const Icon = item.icon;
                 const to = buildSectionLink(item.key);
                 return (
@@ -86,6 +96,7 @@ export function CaseWorkspaceNav() {
                     key={item.key}
                     replace
                     to={to}
+                    onClick={() => selectCaseSpecialization(caseId, null)}
                     aria-current={isActive ? "page" : undefined}
                     className={cn(
                       "group relative flex items-center gap-3 rounded-lg px-3 h-10 text-sm transition-colors",
@@ -110,6 +121,50 @@ export function CaseWorkspaceNav() {
                 );
               })}
             </div>
+            {group === "episode" && specializations.length > 0 ? (
+              <div className="mt-4">
+                <div className="mx-3 mb-2 h-px bg-border/60" aria-hidden />
+                <div className="px-3 pb-1.5">
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
+                    {SPECIALIZATION_GROUP_LABEL[labelLang]}
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  {specializations.map((specialization) => {
+                    const isActive = selectedSpecializationId === specialization.id;
+                    return (
+                      <button
+                        key={specialization.id}
+                        type="button"
+                        aria-current={isActive ? "page" : undefined}
+                        className={cn(
+                          "group relative flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm transition-colors",
+                          isActive
+                            ? "bg-muted/60 font-semibold text-foreground before:absolute before:bottom-1.5 before:left-0 before:top-1.5 before:w-[3px] before:rounded-r-full before:bg-[var(--brand)]"
+                            : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                        )}
+                        onClick={() =>
+                          selectCaseSpecialization(caseId, specialization.id)
+                        }
+                      >
+                        <Stethoscope
+                          className={cn(
+                            "size-[18px] shrink-0 transition-colors",
+                            isActive
+                              ? "text-foreground"
+                              : "text-muted-foreground group-hover:text-foreground",
+                          )}
+                          strokeWidth={isActive ? 1.85 : 1.7}
+                        />
+                        <span className="truncate font-medium leading-5">
+                          {specializationLabelForItem(specialization, labelLang)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
           </div>
         ))}
       </div>
