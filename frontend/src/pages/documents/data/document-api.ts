@@ -79,8 +79,11 @@ function post(path: string) {
   return apiFetch<{ ok: boolean }>(path, { method: "POST" });
 }
 
-async function fetchDocumentBlob(id: string) {
-  return apiFetchFile(`/documents/${id}/download`);
+async function fetchDocumentBlob(id: string, noStore = false) {
+  return apiFetchFile(
+    `/documents/${id}/download`,
+    noStore ? { cache: "no-store" } : {},
+  );
 }
 
 function writePreviewWindow(previewWindow: Window | null, html?: string) {
@@ -115,7 +118,7 @@ function downloadFilename(filename: string, contentType: string) {
 }
 
 export async function downloadDocumentFile(id: string, filename: string) {
-  const { blob, contentType } = await fetchDocumentBlob(id);
+  const { blob, contentType } = await fetchDocumentBlob(id, true);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -134,7 +137,7 @@ export async function openDocumentPreview(
   popupBlockedMessage: string,
   previewWindow?: Window | null,
 ) {
-  const { blob, contentType } = await fetchDocumentBlob(id);
+  const { blob, contentType } = await fetchDocumentBlob(id, true);
   if (contentType.startsWith("text/html")) {
     const html = await blob.text();
     const opened = writePreviewWindow(
@@ -158,7 +161,7 @@ export async function openDocumentPreview(
 export async function createDocumentPreviewObjectUrl(
   id: string,
 ): Promise<DocumentPreviewObjectUrl> {
-  const { blob, contentType } = await fetchDocumentBlob(id);
+  const { blob, contentType } = await fetchDocumentBlob(id, true);
   const previewBlob = contentType.startsWith("text/html")
     ? new Blob([await blob.text()], { type: contentType || "text/html" })
     : blob;

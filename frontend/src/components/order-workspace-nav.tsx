@@ -1,9 +1,12 @@
 import { ArrowLeft } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 
 import { StaffLink } from "@/components/staff-link";
 import { useLang } from "@/lib/i18n";
+import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import type { OrderDetail } from "@/pages/orders/model/types";
 import {
   ORDER_WORKSPACE_SECTIONS,
   type OrderSectionGroup,
@@ -26,6 +29,33 @@ export function OrderWorkspaceNav() {
   const patientContext = searchParams.get("patient");
   const providerContext = searchParams.get("provider");
   const doctorContext = searchParams.get("doctor");
+  const [orderPhase, setOrderPhase] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!orderId) return;
+    let active = true;
+
+    void apiFetch<OrderDetail>(`/orders/${orderId}`)
+      .then((order) => {
+        if (active) setOrderPhase(order.phase);
+      })
+      .catch(() => {
+        if (active) setOrderPhase(null);
+      });
+
+    const handlePhaseChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ orderId?: string; phase?: string }>).detail;
+      if (detail?.orderId === orderId && detail.phase) {
+        setOrderPhase(detail.phase);
+      }
+    };
+    window.addEventListener("gmed:order-phase-changed", handlePhaseChange);
+
+    return () => {
+      active = false;
+      window.removeEventListener("gmed:order-phase-changed", handlePhaseChange);
+    };
+  }, [orderId]);
 
   if (!orderId) return null;
 
@@ -42,11 +72,23 @@ export function OrderWorkspaceNav() {
   const backHref = patientContext ? `/patients/${patientContext}?tab=orders` : "/orders";
   const backLabel = patientContext ? t.patients_col_patient : t.orders_title;
 
+  const phaseIndex = orderPhase
+    ? ["discovery", "intake", "execution", "closure", "followup"].indexOf(orderPhase)
+    : -1;
+  const isSectionVisible = (sectionKey: string) => {
+    if (sectionKey === "planning") return phaseIndex < 0 || phaseIndex >= 1;
+    if (sectionKey === "execution") return phaseIndex < 0 || phaseIndex >= 2;
+    if (sectionKey === "followup") return phaseIndex < 0 || phaseIndex >= 3;
+    return true;
+  };
+
   const groupedSections = GROUP_ORDER.reduce<Array<{
     group: OrderSectionGroup;
     items: Array<(typeof ORDER_WORKSPACE_SECTIONS)[number]>;
   }>>((acc, group) => {
-    const items = ORDER_WORKSPACE_SECTIONS.filter((item) => item.group === group);
+    const items = ORDER_WORKSPACE_SECTIONS.filter(
+      (item) => item.group === group && isSectionVisible(item.key),
+    );
     if (items.length > 0) {
       acc.push({ group, items });
     }

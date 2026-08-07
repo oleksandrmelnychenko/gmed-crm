@@ -1,7 +1,6 @@
 import {
   Activity,
   CalendarClock,
-  CheckCircle2,
   ClipboardList,
   FileText,
   RefreshCw,
@@ -65,12 +64,6 @@ export const ORDER_WORKSPACE_SECTIONS: readonly OrderSectionDefinition[] = [
     labelKey: "orders_section_followup",
   },
   {
-    key: "phase",
-    group: "workflow",
-    icon: CheckCircle2,
-    labelKey: "orders_section_phase",
-  },
-  {
     key: "workflow",
     group: "workflow",
     icon: ClipboardList,
@@ -99,6 +92,7 @@ export const DEFAULT_ORDER_SECTION: OrderSectionKey = "overview";
 export function normalizeOrderSectionKey(
   value: string | null | undefined,
 ): OrderSectionKey {
+  if (value === "phase") return "gates";
   if (value && ORDER_SECTION_KEYS.has(value as OrderSectionKey)) {
     return value as OrderSectionKey;
   }

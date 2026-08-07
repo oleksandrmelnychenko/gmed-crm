@@ -47,7 +47,9 @@ describe("document preview API", () => {
 
     const preview = await createDocumentPreviewObjectUrl("document-1");
 
-    expect(apiFetchFileMock).toHaveBeenCalledWith("/documents/document-1/download");
+    expect(apiFetchFileMock).toHaveBeenCalledWith("/documents/document-1/download", {
+      cache: "no-store",
+    });
     expect(openSpy).not.toHaveBeenCalled();
     expect(preview).toEqual({
       contentType: "application/pdf",

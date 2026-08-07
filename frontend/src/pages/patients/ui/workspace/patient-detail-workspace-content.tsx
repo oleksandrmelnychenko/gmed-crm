@@ -1,6 +1,17 @@
-import { lazy, Suspense, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
 
-import { SquarePen } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+  FileText,
+  FileUp,
+  History,
+  LoaderCircle,
+  SquarePen,
+} from "lucide-react";
 
 import { TabLoader } from "@/components/record-workspace";
 import { StatusActionPill } from "@/components/status-action-pill";
@@ -39,6 +50,11 @@ import type {
 } from "../../model/detail-tab-types";
 import type { PatientLegalStatus } from "../../model/legal-status";
 import type { PatientAssignment, PatientDetail, PatientsDictionary, StaffOption } from "../../model/list-model";
+import {
+  fetchClinicalDocumentImports,
+  type ClinicalDocumentImportStatus,
+  type ClinicalDocumentImportSummary,
+} from "../../data/clinical-document-import";
 import {
   functionalLabelChipClass,
   humanizeFunctionalLabel,
@@ -186,6 +202,21 @@ type WorkspaceTab = {
   key: string;
   label: string;
 };
+
+const clinicalImportStatusTone: Record<ClinicalDocumentImportStatus, string> = {
+  queued: "border-slate-200 bg-slate-50 text-slate-700",
+  processing: "border-sky-200 bg-sky-50 text-sky-700",
+  review_required: "border-amber-200 bg-amber-50 text-amber-800",
+  applied: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  failed: "border-rose-200 bg-rose-50 text-rose-700",
+};
+
+function ClinicalImportStatusIcon({ status }: { status: ClinicalDocumentImportStatus }) {
+  if (status === "processing") return <LoaderCircle className="size-3.5 animate-spin" />;
+  if (status === "queued") return <Clock3 className="size-3.5" />;
+  if (status === "failed") return <AlertTriangle className="size-3.5" />;
+  return <CheckCircle2 className="size-3.5" />;
+}
 
 type PatientDetailWorkspaceContentProps = {
   activeTab: string;
@@ -510,14 +541,72 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     workspaceTabs,
   } = props;
 
+  const [clinicalDocumentImportOpen, setClinicalDocumentImportOpen] = useState(false);
+  const [clinicalImportListOpen, setClinicalImportListOpen] = useState(false);
+  const [clinicalImports, setClinicalImports] = useState<ClinicalDocumentImportSummary[]>([]);
+  const [clinicalImportsLoading, setClinicalImportsLoading] = useState(false);
+  const [clinicalImportsError, setClinicalImportsError] = useState(false);
+
+  const clinicalImportAttentionCount = clinicalImports.filter((item) =>
+    ["queued", "processing", "review_required"].includes(item.status),
+  ).length;
+
+  useEffect(() => {
+    if (!id || !canManageDocuments) return;
+    let cancelled = false;
+
+    const refreshClinicalImports = () => {
+      void fetchClinicalDocumentImports(id)
+        .then(({ items }) => {
+          if (cancelled) return;
+          setClinicalImports(items);
+          setClinicalImportsError(false);
+        })
+        .catch(() => {
+          if (!cancelled) setClinicalImportsError(true);
+        })
+        .finally(() => {
+          if (!cancelled) setClinicalImportsLoading(false);
+        });
+    };
+
+    refreshClinicalImports();
+    const timer = window.setInterval(refreshClinicalImports, 5_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [canManageDocuments, id]);
+
   function handleWorkspaceTabChange(nextTab: string) {
     preloadPatientWorkspaceTab(nextTab);
     handleTabChange(nextTab);
   }
 
+  function openClinicalDocumentImport() {
+    preloadPatientWorkspaceTab("clinical");
+    if (activeTab !== "clinical") handleTabChange("clinical");
+    setClinicalImportListOpen(false);
+    setClinicalDocumentImportOpen(true);
+  }
+
+  function toggleClinicalImportList() {
+    setClinicalImportListOpen((current) => !current);
+    if (!clinicalImportListOpen && id) {
+      setClinicalImportsLoading(true);
+      void fetchClinicalDocumentImports(id)
+        .then(({ items }) => {
+          setClinicalImports(items);
+          setClinicalImportsError(false);
+        })
+        .catch(() => setClinicalImportsError(true))
+        .finally(() => setClinicalImportsLoading(false));
+    }
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center justify-center size-10 shrink-0 rounded-full bg-[var(--brand)] text-[12px] font-semibold text-white">
           {initials}
         </div>
@@ -566,6 +655,117 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             <SquarePen className="size-3.5" />
             {l("patients_edit_profile")}
           </Button>
+        ) : null}
+        {canManageDocuments ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-9 rounded-lg gap-1.5 px-3.5"
+            onClick={openClinicalDocumentImport}
+          >
+            <FileUp className="size-3.5" />
+            {l("patients_upload_document")}
+          </Button>
+        ) : null}
+        {canManageDocuments ? (
+          <div className="relative">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-9 min-w-9 rounded-lg gap-1.5 px-2 2xl:px-3.5"
+              aria-label={l("patients_document_processing")}
+              aria-expanded={clinicalImportListOpen}
+              aria-haspopup="dialog"
+              onClick={toggleClinicalImportList}
+            >
+              <History className="size-3.5" />
+              <span className="hidden 2xl:inline">{l("patients_document_processing")}</span>
+              {clinicalImportAttentionCount > 0 ? (
+                <span className="flex min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 text-[10px] font-semibold leading-5 text-amber-800">
+                  {clinicalImportAttentionCount}
+                </span>
+              ) : null}
+              <ChevronDown className={cn("hidden size-3.5 transition-transform 2xl:block", clinicalImportListOpen && "rotate-180")} />
+            </Button>
+
+            {clinicalImportListOpen ? (
+              <>
+                <button
+                  type="button"
+                  className="fixed inset-0 z-40 cursor-default"
+                  aria-label={l("patients_document_processing_close")}
+                  onClick={() => setClinicalImportListOpen(false)}
+                />
+                <section
+                  role="dialog"
+                  aria-label={l("patients_document_processing_history")}
+                  className="fixed right-4 top-20 z-50 w-[min(390px,calc(100vw-32px))] overflow-hidden rounded-2xl border border-border/70 bg-background shadow-xl"
+                >
+                  <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-semibold">{l("patients_document_processing_history")}</p>
+                      <p className="text-xs text-muted-foreground">{l("patients_document_processing_snapshots")}</p>
+                    </div>
+                    {clinicalImportsLoading ? <LoaderCircle className="size-4 animate-spin text-muted-foreground" /> : null}
+                  </header>
+
+                  {clinicalImportsError ? (
+                    <p className="m-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                      {l("patients_document_processing_load_error")}
+                    </p>
+                  ) : clinicalImportsLoading && clinicalImports.length === 0 ? (
+                    <div className="flex items-center justify-center gap-2 px-4 py-8 text-sm text-muted-foreground">
+                      <LoaderCircle className="size-4 animate-spin" />
+                      {l("patients_document_processing_loading")}
+                    </div>
+                  ) : clinicalImports.length === 0 ? (
+                    <div className="px-4 py-8 text-center">
+                      <FileText className="mx-auto size-7 text-muted-foreground/50" />
+                      <p className="mt-2 text-sm font-medium">{l("patients_document_processing_empty")}</p>
+                    </div>
+                  ) : (
+                    <div className="max-h-[340px] divide-y divide-border/60 overflow-y-auto">
+                      {clinicalImports.slice(0, 6).map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40"
+                          onClick={openClinicalDocumentImport}
+                        >
+                          <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-xl border", clinicalImportStatusTone[item.status])}>
+                            <ClinicalImportStatusIcon status={item.status} />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium">
+                              {item.document_name ?? l("patients_document_processing_medical_document")}
+                            </span>
+                            <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                              <span className={cn("rounded-full border px-1.5 py-0.5 font-medium", clinicalImportStatusTone[item.status])}>
+                                {l(`patients_document_processing_status_${item.status}`)}
+                              </span>
+                              <span>{formatDateTime(item.created_at)}</span>
+                              <span>{item.candidate_count} {l("patients_document_processing_objects")}</span>
+                            </span>
+                          </span>
+                          <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-center gap-1.5 border-t border-border/60 px-4 py-3 text-xs font-medium text-primary transition-colors hover:bg-muted/35"
+                    onClick={openClinicalDocumentImport}
+                  >
+                    {l("patients_document_processing_open_all")}
+                    <ChevronRight className="size-3.5" />
+                  </button>
+                </section>
+              </>
+            ) : null}
+          </div>
         ) : null}
       </div>
 
@@ -704,7 +904,12 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
           ) : null}
 
           {activeTab === "clinical" && id ? (
-            <LazyPatientClinicalTab patientId={id} canManage={canManageDocuments} />
+            <LazyPatientClinicalTab
+              patientId={id}
+              canManage={canManageDocuments}
+              documentImportOpen={clinicalDocumentImportOpen}
+              onDocumentImportOpenChange={setClinicalDocumentImportOpen}
+            />
           ) : null}
 
           {activeTab === "documents" ? (

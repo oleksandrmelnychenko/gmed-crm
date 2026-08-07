@@ -14,15 +14,18 @@ import {
 import { useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowUpRight,
+  AlertTriangle,
   CalendarClock,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Circle,
   ClipboardList,
   LoaderCircle,
   Plus,
   RefreshCw,
   Search,
+  ShieldCheck,
   UserRound,
   X,
 } from "lucide-react";
@@ -2138,6 +2141,11 @@ function useOrdersPageContent() {
     setPhaseError(null);
     try {
       await updateOrderPhase(selectedOrderId, phaseDraft);
+      window.dispatchEvent(
+        new CustomEvent("gmed:order-phase-changed", {
+          detail: { orderId: selectedOrderId, phase: phaseDraft },
+        }),
+      );
       triggerReload();
     } catch (error) {
       setPhaseError(
@@ -2156,6 +2164,11 @@ function useOrdersPageContent() {
     setPhaseDraft(phase);
     await updateOrderPhase(orderDetail.id, phase)
       .then(() => {
+        window.dispatchEvent(
+          new CustomEvent("gmed:order-phase-changed", {
+            detail: { orderId: orderDetail.id, phase },
+          }),
+        );
         setPhaseError(null);
         triggerReload();
       })
@@ -3131,18 +3144,17 @@ function useOrdersPageContent() {
               />
             ) : (
               <div className="space-y-4 rounded-xl">
-                <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
-                  <div className="relative p-4">
+                <section className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+                  <div className="relative p-5">
                     <span
                       className={cn(
-                        "absolute left-0 top-4 h-12 w-1 rounded-r-full",
+                        "absolute bottom-5 left-0 top-5 w-1 rounded-r-full",
                         orderAccentClass(orderDetail.phase, orderDetail.status),
                       )}
                     />
-                    <div className="grid gap-4 pl-3 2xl:grid-cols-[minmax(0,1fr)_190px]">
+                    <div className="grid gap-5 pl-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="h-px w-8 bg-border" />
                           <StatusBadge tone={orderPhaseTone(orderDetail.phase)}>
                             {phaseLabel(orderDetail.phase)}
                           </StatusBadge>
@@ -3150,28 +3162,27 @@ function useOrdersPageContent() {
                             {orderStatusLabel(orderDetail.status)}
                           </StatusBadge>
                         </div>
-                        <h3 className="mt-2 min-w-0 max-w-full break-words text-lg font-semibold leading-snug text-foreground">
+                        <h1 className="mt-2 min-w-0 max-w-full break-words text-xl font-semibold leading-snug text-foreground">
                           {detailSubjectName}
-                        </h3>
-                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                        </h1>
+                        <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
                           {[orderDetail.order_number, detailSubjectReference]
                             .filter(Boolean)
                             .join(" - ")}
                         </p>
-                        <div className="mt-3 flex flex-wrap gap-2">
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
                           <Badge variant="outline" className="rounded-full">
                             {formatMoney(orderDetail.total_estimated)}
                           </Badge>
                           <Badge variant="outline" className="rounded-full">
                             {leistungMetrics.total} {tx.providers_services}
                           </Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {l("orders_aktualisiert")}: {formatDateTimeLabel(orderDetail.updated_at)}
+                          </span>
                         </div>
                       </div>
-                      <div className="flex flex-col justify-between gap-4 border-t border-dashed border-border pt-4 2xl:border-l 2xl:border-t-0 2xl:pl-4 2xl:pt-0">
-                        <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                          {l("orders_context_heading")}
-                        </span>
-                        <div className="flex flex-col gap-2">
+                      <div className="flex flex-wrap gap-2 xl:justify-end">
                           <Button
                             type="button"
                             variant="outline"
@@ -3207,32 +3218,127 @@ function useOrdersPageContent() {
                             <ArrowUpRight className="size-3.5" />
                             {l("orders_dokumente")}
                           </Button>
-                        </div>
                       </div>
                     </div>
+                  </div>
+
+                  <div className="border-t border-border/70 bg-slate-50/70 px-5 py-4">
+                    <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <ShieldCheck className="size-4 text-amber-600" />
+                          <span className="text-sm font-semibold text-foreground">
+                            {lang === "de" ? "Prozessstatus" : "Статус процесса"}
+                          </span>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "rounded-full",
+                              nextLifecycleTransition?.blocked
+                                ? "border-amber-200 bg-amber-50 text-amber-800"
+                                : "border-emerald-200 bg-emerald-50 text-emerald-700",
+                            )}
+                          >
+                            {nextLifecycleTransition?.blocked
+                              ? l("orders_blockiert_2")
+                              : orderDetail.lifecycle?.next_stage
+                                ? l("orders_bereit_2")
+                                : lang === "de"
+                                  ? "Abgeschlossen"
+                                  : "Завершено"}
+                          </Badge>
+                        </div>
+                        <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+                          {nextLifecycleTransition?.blocked
+                            ? lang === "de"
+                              ? `${nextLifecycleTransition.reasons.length} Blocker vor dem nächsten Schritt`
+                              : `${nextLifecycleTransition.reasons.length} блокирующих пунктов перед следующим шагом`
+                            : orderDetail.lifecycle?.next_stage
+                              ? `${l("orders_nachste_phase")}: ${phaseLabel(orderDetail.lifecycle.next_stage)}`
+                              : lang === "de"
+                                ? "Keine weitere Phase erforderlich"
+                                : "Следующий этап не требуется"}
+                        </p>
+                      </div>
+                      {permissions.canManagePhase &&
+                      !detailRequiresPatient &&
+                      orderDetail.lifecycle?.next_stage ? (
+                        <Button
+                          type="button"
+                          className="h-9 shrink-0 rounded-lg"
+                          onClick={() => void handleAdvancePhase()}
+                          disabled={phaseSaving || Boolean(nextLifecycleTransition?.blocked)}
+                        >
+                          {phaseSaving ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                          {l("orders_weiter_zu")} {phaseLabel(orderDetail.lifecycle.next_stage)}
+                          <ChevronRight className="size-4" />
+                        </Button>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-4 grid gap-2 sm:grid-cols-5">
+                      {ORDER_PHASES.map((phase, index) => {
+                        const currentIndex = ORDER_PHASES.indexOf(orderDetail.phase as (typeof ORDER_PHASES)[number]);
+                        const isCurrent = phase === orderDetail.phase;
+                        const isCompleted = currentIndex >= 0 && index < currentIndex;
+                        const isNext = orderDetail.lifecycle?.next_stage === phase;
+                        return (
+                          <div
+                            key={phase}
+                            className={cn(
+                              "flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2",
+                              isCurrent
+                                ? "border-orange-200 bg-orange-50 text-orange-900"
+                                : isCompleted
+                                  ? "border-emerald-200 bg-emerald-50/70 text-emerald-900"
+                                  : isNext
+                                    ? "border-border bg-white text-foreground"
+                                    : "border-transparent bg-white/50 text-muted-foreground",
+                            )}
+                          >
+                            {isCompleted ? (
+                              <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
+                            ) : isCurrent ? (
+                              <CheckCircle2 className="size-4 shrink-0 text-orange-600" />
+                            ) : (
+                              <Circle className="size-4 shrink-0 text-muted-foreground/50" />
+                            )}
+                            <span className="min-w-0 truncate text-xs font-medium">
+                              {phaseLabel(phase)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {nextLifecycleTransition?.blocked ? (
+                      <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
+                        <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                        <div className="min-w-0">
+                          <span className="font-semibold">{l("orders_blockierende_grunde")}:</span>{" "}
+                          <span>
+                            {nextLifecycleTransition.reasons
+                              .slice(0, 3)
+                              .map(localizedBlockingReason)
+                              .join("; ")}
+                            {nextLifecycleTransition.reasons.length > 3
+                              ? ` +${nextLifecycleTransition.reasons.length - 3}`
+                              : ""}
+                          </span>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 </section>
 
                 {shouldRenderOrderSection("overview") ? (
                   <>
                     <section className="rounded-lg border border-border/70 bg-card p-6">
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                        <div>
-                          <h2 className={tokens.text.sectionTitle}>
-                            {titleWithDot(tx.orders_title)}
-                          </h2>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <StatusBadge tone={orderPhaseTone(orderDetail.phase)}>
-                            {phaseLabel(orderDetail.phase)}
-                          </StatusBadge>
-                          <StatusBadge tone={orderStatusTone(orderDetail.status)}>
-                            {orderStatusLabel(orderDetail.status)}
-                          </StatusBadge>
-                        </div>
-                      </div>
-                      <div className="mt-5 space-y-5">
-                        <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+                      <h2 className={tokens.text.sectionTitle}>
+                        {titleWithDot(tx.orders_title)}
+                      </h2>
+                      <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                        <div className="space-y-1">
                           <OrderSummaryLine
                             label={detailSubjectLabel}
                             value={
@@ -3242,20 +3348,8 @@ function useOrdersPageContent() {
                             }
                           />
                           <OrderSummaryLine
-                            label={t.orders_phase}
-                            value={phaseLabel(orderDetail.phase)}
-                          />
-                          <OrderSummaryLine
                             label={tx.patients_created}
                             value={formatDateTimeLabel(orderDetail.created_at)}
-                          />
-                          <OrderSummaryLine
-                            label={t.invoices_status}
-                            value={orderStatusLabel(orderDetail.status)}
-                          />
-                          <OrderSummaryLine
-                            label={l("orders_aktualisiert")}
-                            value={formatDateTimeLabel(orderDetail.updated_at)}
                           />
                           <OrderSummaryLine
                             label={tx.contracts_signed}
@@ -3266,14 +3360,6 @@ function useOrdersPageContent() {
                             }`}
                           />
                           <OrderSummaryLine
-                            label={tx.invoices_subtotal}
-                            value={formatMoney(orderDetail.total_estimated)}
-                          />
-                          <OrderSummaryLine
-                            label={tx.invoices_total}
-                            value={formatMoney(orderDetail.total_actual)}
-                          />
-                          <OrderSummaryLine
                             label={tx.providers_services}
                             value={l("orders_leistung_metrics_summary", {
                               total: leistungMetrics.total,
@@ -3282,15 +3368,11 @@ function useOrdersPageContent() {
                             })}
                           />
                         </div>
-                        <div className="space-y-3">
-                          <div className="flex items-start justify-between gap-4">
-                            <div>
-                              <h2 className={tokens.text.sectionTitle}>
-                                {titleWithDot(t.leads_needs)}
-                              </h2>
-                            </div>
-                          </div>
-                          <div className="rounded-xl border border-border bg-background/60 p-4 text-sm leading-snug text-muted-foreground">
+                        <div className="rounded-xl border border-border bg-slate-50/60 p-4">
+                          <h3 className="text-sm font-semibold text-foreground">
+                            {t.leads_needs}
+                          </h3>
+                          <div className="mt-2 text-sm leading-6 text-muted-foreground">
                             {orderDetail.needs_description || tx.common_not_set}
                           </div>
                         </div>

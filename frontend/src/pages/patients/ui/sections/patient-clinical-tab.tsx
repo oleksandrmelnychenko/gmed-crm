@@ -83,8 +83,13 @@ import {
   type GermanEquivalent,
 } from "@/lib/api/clinical";
 import { MedicationEquivalentsPanel } from "@/pages/case-workspace/medication-equivalents-panel";
+import type {
+  ClinicalDocumentImport,
+  ClinicalDocumentImportCandidate,
+} from "@/pages/patients/data/clinical-document-import";
 
 import { AnamneseSection } from "./anamnese-section";
+import { ClinicalDocumentImportSheet } from "./clinical-document-import-sheet";
 import { DiagnosisTreeSection } from "./diagnosis-tree";
 import { ClinicalSpecializationsField } from "./clinical-specializations-field";
 import { PatientSymptomsPainSections } from "./patient-symptoms-pain-sections";
@@ -1641,10 +1646,14 @@ function ClinicalWrapper({
 export function PatientClinicalTab({
   patientId,
   canManage,
+  documentImportOpen,
+  onDocumentImportOpenChange,
   embedded = false,
 }: {
   patientId: string;
   canManage: boolean;
+  documentImportOpen: boolean;
+  onDocumentImportOpenChange: (open: boolean) => void;
   embedded?: boolean;
 }) {
   const { lang } = useLang();
@@ -1777,6 +1786,198 @@ export function PatientClinicalTab({
         hold_note: medication.hold_note ?? null,
       },
     });
+  }
+
+  async function applyClinicalDocumentCandidates(
+    documentImport: ClinicalDocumentImport,
+    candidates: ClinicalDocumentImportCandidate[],
+    sourceCountry: string,
+  ): Promise<Record<string, number>> {
+    const counts: Record<string, number> = {};
+    const importMarker = (candidateId: string) =>
+      `[clinical-import:${documentImport.id}:${candidateId}]`;
+    const importedDiagnoses = candidates
+      .filter((item) => item.target === "diagnosis" && item.value.trim())
+      .filter(
+        (item) =>
+          !diagnoses.some((existing) => existing.note?.includes(importMarker(item.id))),
+      )
+      .map((item): ClinicalDiagnosis => ({
+        cid: `import-${documentImport.id}-${item.id}`,
+        parent_cid: null,
+        parent_id: null,
+        kind: item.normalized.kind === "main" ? "main" : "secondary",
+        label: item.value.trim(),
+        specialization_ids: [],
+        specializations: [],
+        certainty: item.normalized.certainty === "verdacht" ? "verdacht" : "bestaetigt",
+        chronifizierung: null,
+        icd_code: typeof item.normalized.icd_code === "string" ? item.normalized.icd_code : null,
+        ops_code: null,
+        diagnosed_on: null,
+        note: `Import: ${documentImport.document_name ?? documentImport.document_id}\n${importMarker(item.id)}`,
+        red_flags: null,
+        source_mode: "extern",
+        external_clinic: null,
+        external_doctor: null,
+        external_country: sourceCountry,
+        provider_id: null,
+        provider_name: null,
+        doctor_id: null,
+        doctor_name: null,
+        doctor_title: null,
+        doctor_fachbereich: null,
+        treating_doctor_id: null,
+        treating_doctor_name: null,
+        treating_doctor_title: null,
+        treating_none: true,
+      }));
+    if (importedDiagnoses.length > 0) {
+      await savePatientDiagnoses(patientId, importedDiagnoses, "merge");
+      setDiagnoses((current) => [...current, ...importedDiagnoses]);
+      counts.diagnoses = importedDiagnoses.length;
+    }
+
+    const importedMedications = candidates
+      .filter((item) => item.target === "medication" && item.value.trim())
+      .filter(
+        (item) =>
+          !medications.some((existing) => existing.hinweis?.includes(importMarker(item.id))),
+      )
+      .map((item): ClinicalMedication => ({
+        category: "dauer",
+        wirkstoff: item.value.trim(),
+        handelsname:
+          typeof item.normalized.handelsname === "string" ? item.normalized.handelsname : "",
+        staerke: typeof item.normalized.staerke === "string" ? item.normalized.staerke : null,
+        form: typeof item.normalized.form === "string" ? item.normalized.form : null,
+        einnahmeform:
+          typeof item.normalized.einnahmeform === "string" ? item.normalized.einnahmeform : null,
+        dose_morgens: null,
+        dose_mittags: null,
+        dose_abends: null,
+        dose_nachts: null,
+        einheit: null,
+        hinweis: `Import: ${documentImport.document_name ?? documentImport.document_id}\n${importMarker(item.id)}`,
+        grund: null,
+        verordnet_am: null,
+        einnahme_von: null,
+        einnahme_bis: null,
+        status: "aktiv",
+        apothekenpflichtig: false,
+        rezeptpflichtig: false,
+        btm: false,
+        aut_idem_sperre: false,
+        abgabebeschraenkung: false,
+        sonstige_vermerke: null,
+        on_hold: false,
+        hold_from: null,
+        hold_until: null,
+        hold_note: null,
+        provider_id: null,
+        provider_name: null,
+        doctor_id: null,
+        doctor_name: null,
+        doctor_title: null,
+        doctor_fachbereich: null,
+      }));
+    if (importedMedications.length > 0) {
+      await savePatientMedications(patientId, importedMedications, "merge");
+      setMedications((current) => [...current, ...importedMedications]);
+      counts.medications = importedMedications.length;
+    }
+
+    const importedExaminations = candidates
+      .filter((item) => item.target === "examination" && item.value.trim())
+      .filter(
+        (item) =>
+          !examinations.some((existing) => existing.note?.includes(importMarker(item.id))),
+      )
+      .map((item): ClinicalExamination => ({
+        kind: "other",
+        title:
+          typeof item.normalized.title === "string" && item.normalized.title.trim()
+            ? item.normalized.title.trim()
+            : item.source.section,
+        performed_on: null,
+        status: "final",
+        result: item.value.trim(),
+        note: `Import: ${documentImport.document_name ?? documentImport.document_id}\n${importMarker(item.id)}`,
+        red_flags: null,
+        specialization_ids: [],
+        specializations: [],
+        provider_id: null,
+        provider_name: null,
+        doctor_id: null,
+        doctor_name: null,
+        doctor_title: null,
+        doctor_fachbereich: null,
+      }));
+    if (importedExaminations.length > 0) {
+      const next = [...examinations, ...importedExaminations];
+      await savePatientExaminations(patientId, next);
+      setExaminations(next);
+      counts.examinations = importedExaminations.length;
+    }
+
+    const importedAnamnesis = candidates
+      .filter((item) => item.target === "anamnesis" && item.value.trim())
+      .map((item) => item.value.trim())
+      .filter((value, index, values) => values.indexOf(value) === index);
+    const currentAnamnesis = narrative?.anamnese_aktuelle ?? "";
+    const unseenAnamnesis = importedAnamnesis
+      .filter((value) => !currentAnamnesis.includes(value));
+    const mergedAnamnesis = currentAnamnesis.trim()
+      ? `${currentAnamnesis}\n\n${unseenAnamnesis.join("\n\n")}`
+      : unseenAnamnesis.join("\n\n");
+    if (unseenAnamnesis.length > 0) {
+      const saved = await savePatientNarrative(patientId, {
+        ...(narrative ?? {
+          id: null,
+          case_id: null,
+          anamnese_vorgeschichte: null,
+          anamnese_vegetative: null,
+          anamnese_sozial: null,
+          beurteilung: null,
+          red_flags: null,
+          specialization_ids: [],
+          specializations: [],
+          anamnese_at: new Date().toISOString(),
+        }),
+        anamnese_aktuelle: mergedAnamnesis,
+        is_active: true,
+      });
+      setNarrative(saved);
+      counts.anamnesis = 1;
+    }
+
+    const importedRecommendations = candidates
+      .filter((item) => item.target === "recommendation" && item.value.trim())
+      .filter(
+        (item) =>
+          !recommendations.some(
+            (existing) =>
+              existing.source_document_id === documentImport.document_id &&
+              existing.description === item.value.trim(),
+          ),
+      );
+    for (const item of importedRecommendations) {
+      const saved = await createPatientRecommendation(patientId, {
+        title: lang === "de" ? "Empfehlung aus Dokument" : "Рекомендация из документа",
+        description: item.value.trim(),
+        recommendation_type: "follow_up",
+        priority: "normal",
+        lifecycle_status: "aktiv",
+        source_document_id: documentImport.document_id,
+      });
+      setRecommendations((current) => [...current, saved]);
+    }
+    if (importedRecommendations.length > 0) {
+      counts.recommendations = importedRecommendations.length;
+    }
+
+    setVersion((current) => current + 1);
+    return counts;
   }
 
   function updateMedicationHoldDraft(patch: Partial<MedicationHoldDraft>) {
@@ -2104,6 +2305,49 @@ export function PatientClinicalTab({
           await savePatientDiagnoses(patientId, merged);
           setDiagnoses(merged);
         }}
+      />
+
+      <ClinicalDocumentImportSheet
+        key={patientId}
+        open={documentImportOpen}
+        onOpenChange={onDocumentImportOpenChange}
+        patientId={patientId}
+        lang={lang}
+        existingItems={{
+          diagnosis: diagnoses.map((item, index) => ({
+            id: item.id ?? item.cid ?? `diagnosis-${index}`,
+            primary: item.label,
+            secondary: item.icd_code,
+          })),
+          anamnesis: narrative
+            ? [
+                {
+                  id: narrative.id ?? "active-anamnesis",
+                  primary:
+                    narrative.anamnese_aktuelle ??
+                    narrative.anamnese_vorgeschichte ??
+                    tx("Активная версия анамнеза", "Aktive Anamneseversion"),
+                  secondary: narrative.beurteilung,
+                },
+              ]
+            : [],
+          medication: medications.map((item, index) => ({
+            id: item.id ?? `medication-${index}`,
+            primary: [item.handelsname, item.wirkstoff].filter(Boolean).join(" · "),
+            secondary: [item.staerke, item.form].filter(Boolean).join(" · ") || null,
+          })),
+          examination: examinations.map((item, index) => ({
+            id: item.id ?? `examination-${index}`,
+            primary: item.title,
+            secondary: item.result,
+          })),
+          recommendation: recommendations.map((item) => ({
+            id: item.id,
+            primary: item.title,
+            secondary: item.description,
+          })),
+        }}
+        onApply={applyClinicalDocumentCandidates}
       />
 
       {/* ---- Therapie / Procedures (OPS) ---- */}

@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "synthetic-cardio-001",
+      "reference": {
+        "raw_text": "Diagnosen\nLeichte Hypertonie\nAnamnese\nKontrolltermin ohne Beschwerden.",
+        "candidates": [
+          {
+            "target": "diagnosis",
+            "value": "Leichte Hypertonie",
+            "assertion": "confirmed"
+          },
+          {
+            "target": "anamnesis",
+            "value": "Kontrolltermin ohne Beschwerden."
+          }
+        ]
+      },
+      "section_rules": [
+        { "section": "Diagnosen", "allowed_targets": ["diagnosis"] },
+        { "section": "Anamnese", "allowed_targets": ["anamnesis"] }
+      ],
+      "forbidden_diagnoses": [
+        { "value": "Keine Herzinsuffizienz", "reason": "negated finding" }
+      ]
+    }
+  ]
+}

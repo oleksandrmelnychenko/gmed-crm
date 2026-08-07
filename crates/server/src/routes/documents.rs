@@ -18879,6 +18879,8 @@ fn document_attachment_response(
     match axum::response::Response::builder()
         .header("content-type", mime_type)
         .header("content-disposition", disposition)
+        .header("cache-control", "private, no-store, max-age=0")
+        .header("pragma", "no-cache")
         .body(Body::from(data))
     {
         Ok(response) => response.into_response(),
@@ -19702,6 +19704,14 @@ async fn upload_document(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Document must be linked to lead, patient, order or appointment",
         );
+    }
+
+    if let Some(document_patient_id) = patient_id
+        && access::requires_patient_assignment(auth.role)
+        && let Err(resp) =
+            require_generated_document_patient_access(&state, &auth, document_patient_id).await
+    {
+        return resp;
     }
 
     if lead_id.is_some() && !matches!(auth.role, Role::PatientManager | Role::Ceo | Role::ItAdmin) {
@@ -21727,8 +21737,9 @@ mod tests {
         build_enhanced_due_diligence_pdf, build_framework_contract_pdf,
         build_manual_generated_text_pdf, build_order_cost_estimate_pdf, build_patient_sticker_pdf,
         build_single_order_pdf, compute_line_item_totals, consent_type_for_compliance_kind,
-        cost_coverage_money_cell, cost_estimate_price_text, document_satisfies_compliance_kind,
-        document_template_by_id, finalize_admin_pdf, generated_binding_snapshot,
+        cost_coverage_money_cell, cost_estimate_price_text, document_attachment_response,
+        document_satisfies_compliance_kind, document_template_by_id, finalize_admin_pdf,
+        generated_binding_snapshot,
         generated_cost_estimate_document_number, generated_document_number_for_template,
         generated_typed_document_number, german_document_country, is_fixed_legal_document_template,
         is_lead_allowed_document_template, legal_agency_block_lines, legal_document_reference,
@@ -21751,6 +21762,30 @@ mod tests {
     const LEGAL_EMAIL: &str = "office@gmed-health.com";
     const LEGAL_WEBSITE: &str = "gmed-health.com";
     const LEGAL_DATA_CONTROLLER_STATEMENT: &str = "Verantwortlich für die Verarbeitung Ihrer Daten ist Configured Owner, Teststraße 1, Deutschland";
+
+    #[test]
+    fn document_attachment_response_disables_caching() {
+        let response = document_attachment_response(
+            "application/pdf",
+            "attachment; filename=\"report.pdf\"".to_string(),
+            b"%PDF-1.7\n".to_vec(),
+        );
+
+        assert_eq!(
+            response
+                .headers()
+                .get("cache-control")
+                .and_then(|value| value.to_str().ok()),
+            Some("private, no-store, max-age=0")
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get("pragma")
+                .and_then(|value| value.to_str().ok()),
+            Some("no-cache")
+        );
+    }
 
     fn legal_test_agency() -> AgencyContractSettings {
         AgencyContractSettings {

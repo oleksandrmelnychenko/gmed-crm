@@ -67,12 +67,7 @@ export function WorkspaceRailResolver({ workspaceRailKind }: WorkspaceRailResolv
     case "order":
       return <OrderWorkspaceNav />;
     case "patient-order":
-      return (
-        <>
-          <PatientWorkspaceNav />
-          <OrderWorkspaceNav />
-        </>
-      );
+      return <OrderWorkspaceNav />;
     case "appointment":
       return <AppointmentWorkspaceNav />;
     case "documents":

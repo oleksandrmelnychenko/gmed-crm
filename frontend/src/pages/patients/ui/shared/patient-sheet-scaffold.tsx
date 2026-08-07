@@ -28,6 +28,7 @@ export function PatientSheetScaffold({
   footer,
   headerClassName,
   bodyClassName,
+  bodyWrapperClassName,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -40,6 +41,7 @@ export function PatientSheetScaffold({
   footer?: ReactNode;
   headerClassName?: string;
   bodyClassName?: string;
+  bodyWrapperClassName?: string;
 }) {
   const content = (
     <AdminSheetScaffold
@@ -51,6 +53,7 @@ export function PatientSheetScaffold({
         bodyClassName,
         "space-y-4 px-5 py-4",
       )}
+      bodyWrapperClassName={bodyWrapperClassName}
       footer={footer ? <SheetActionsFooter>{footer}</SheetActionsFooter> : undefined}
     >
       {children}

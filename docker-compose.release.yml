@@ -35,6 +35,35 @@ services:
     volumes:
       - uploads:/app/uploads
 
+  clinical-document-parser:
+    build:
+      context: ./services/clinical-document-parser
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "${GMED_DATABASE_URL:-postgres://gmed:gmed@postgres:5432/gmed}"
+      GMED_UPLOAD_DIR: "/app/uploads/documents"
+      PARSER_POLL_SECONDS: "${GMED_PARSER_POLL_SECONDS:-2}"
+      PARSER_MAX_FILE_BYTES: "${GMED_PARSER_MAX_FILE_BYTES:-26214400}"
+      PARSER_MAX_PDF_PAGES: "${GMED_PARSER_MAX_PDF_PAGES:-80}"
+      PARSER_MAX_IMAGE_PIXELS: "${GMED_PARSER_MAX_IMAGE_PIXELS:-50000000}"
+      PARSER_MAX_EXTRACTED_TEXT_CHARS: "${GMED_PARSER_MAX_EXTRACTED_TEXT_CHARS:-500000}"
+      PARSER_MAX_DRAFT_CANDIDATES: "${GMED_PARSER_MAX_DRAFT_CANDIDATES:-500}"
+      PARSER_MAX_SOURCE_EVIDENCE_CHARS: "${GMED_PARSER_MAX_SOURCE_EVIDENCE_CHARS:-20000}"
+      PARSER_MAX_SERIALIZED_DRAFT_BYTES: "${GMED_PARSER_MAX_SERIALIZED_DRAFT_BYTES:-2097152}"
+      PARSER_LEASE_SECONDS: "${GMED_PARSER_LEASE_SECONDS:-1200}"
+      PARSER_OCR_ENGINE: "${GMED_PARSER_OCR_ENGINE:-paddle}"
+      PARSER_OCR_PAGE_TIMEOUT_SECONDS: "${GMED_PARSER_OCR_PAGE_TIMEOUT_SECONDS:-45}"
+      PARSER_OCR_DOCUMENT_TIMEOUT_SECONDS: "${GMED_PARSER_OCR_DOCUMENT_TIMEOUT_SECONDS:-300}"
+    restart: unless-stopped
+    mem_limit: "${GMED_PARSER_MEMORY_LIMIT:-3g}"
+    cpus: "${GMED_PARSER_CPUS:-3.0}"
+    pids_limit: 256
+    volumes:
+      - uploads:/app/uploads:ro
+
   frontend:
     build:
       context: ./frontend

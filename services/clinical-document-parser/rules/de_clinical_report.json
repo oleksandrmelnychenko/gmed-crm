@@ -1,0 +1,83 @@
+{
+  "section_aliases": {
+    "diagnosis": [
+      "Diagnosen",
+      "Diagnose",
+      "Beurteilung / Diagnosen",
+      "Aufnahmediagnosen",
+      "Entlassungsdiagnosen",
+      "Hauptdiagnosen",
+      "Nebendiagnosen",
+      "Onkologische Diagnosen",
+      "Nichtonkologische Diagnosen"
+    ],
+    "anamnesis": [
+      "Anamnese",
+      "Aktuelle Anamnese",
+      "Eigenanamnese",
+      "Familienanamnese",
+      "Sozialanamnese",
+      "Vorgeschichte",
+      "Klinische Angaben",
+      "Indikation",
+      "Fragestellung",
+      "Vorstellungsgrund",
+      "Untersuchungsanlass",
+      "Aktuell"
+    ],
+    "medication": [
+      "Medikation",
+      "Aktuelle Medikation",
+      "Dauermedikation",
+      "Entlassungsmedikation",
+      "Häusliche Medikation",
+      "Medikamente",
+      "Therapie"
+    ],
+    "examination": [
+      "Befund",
+      "Klinischer Befund",
+      "Beurteilung",
+      "Untersuchungen",
+      "Untersuchungsbefunde",
+      "Zusatzdiagnostik",
+      "Sonographie",
+      "Carotisduplex",
+      "Echokardiographie",
+      "Abdomensonographie",
+      "Labor",
+      "Labor vom",
+      "Körpermaße",
+      "Karnofsky-Index",
+      "Chronologie",
+      "EKG"
+    ],
+    "recommendation": [
+      "Empfehlung",
+      "Empfehlungen",
+      "Procedere",
+      "Weiteres Procedere",
+      "Therapieempfehlung",
+      "Zusammenfassende Beurteilung"
+    ]
+  },
+  "document_type_hints": {
+    "oncology_report": [
+      "Onkologie",
+      "Onkologische Diagnosen",
+      "Nichtonkologische Diagnosen",
+      "Tumorboard",
+      "Immuntherapie"
+    ],
+    "radiology_report": [
+      "Radiologie",
+      "Klinische Angaben",
+      "Befund",
+      "Beurteilung",
+      "Magnetresonanztomographie"
+    ],
+    "cardiology_report": ["Kardiologie", "Echokardiographie", "LV-EF", "Carotisduplex"],
+    "discharge_summary": ["Entlassungsbrief", "Entlassungsdiagnosen", "stationärer Aufenthalt"],
+    "laboratory_report": ["Laborbefund", "Referenzbereich", "Messwert"]
+  }
+}

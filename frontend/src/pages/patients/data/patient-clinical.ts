@@ -261,6 +261,7 @@ export type PatientRecommendation = {
   outcome_at: string | null;
   /** Internal staff-only note. */
   note_intern: string | null;
+  source_document_id?: string | null;
 };
 
 /** Writable fields accepted by create/update; all optional on update. */
@@ -283,7 +284,11 @@ export type PatientRecommendationInput = Partial<
     | "outcome_at"
     | "note_intern"
   >
->;
+> & {
+  source_document_id?: string | null;
+  source_appointment_id?: string | null;
+  source_order_id?: string | null;
+};
 
 /** A doctor at any active provider, used for the diagnosis "treating doctor" picker. */
 export type AllDoctorOption = {

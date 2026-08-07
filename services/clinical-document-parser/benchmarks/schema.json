@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gmed.local/schemas/clinical-parser-benchmark-v1.json",
+  "title": "GMED clinical parser benchmark ground truth",
+  "type": "object",
+  "required": ["schema_version", "cases"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["case_id", "reference"],
+        "properties": {
+          "case_id": { "type": "string", "minLength": 1 },
+          "document": {
+            "type": "object",
+            "required": ["path"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "mime_type": { "type": "string" },
+              "existing_text_path": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          "reference": {
+            "type": "object",
+            "properties": {
+              "raw_text": { "type": "string" },
+              "candidates": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/candidate" }
+              }
+            },
+            "additionalProperties": false,
+            "minProperties": 1
+          },
+          "section_rules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["section", "allowed_targets"],
+              "properties": {
+                "section": { "type": "string", "minLength": 1 },
+                "allowed_targets": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/target" },
+                  "uniqueItems": true
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "forbidden_diagnoses": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                { "type": "string", "minLength": 1 },
+                {
+                  "type": "object",
+                  "required": ["value"],
+                  "properties": {
+                    "value": { "type": "string", "minLength": 1 },
+                    "reason": { "type": "string" }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "$defs": {
+    "target": {
+      "enum": ["diagnosis", "anamnesis", "medication", "examination", "recommendation"]
+    },
+    "candidate": {
+      "type": "object",
+      "required": ["target", "value"],
+      "properties": {
+        "target": { "$ref": "#/$defs/target" },
+        "value": { "type": "string", "minLength": 1 },
+        "assertion": {
+          "enum": ["confirmed", "suspected", "negated", "historical", "family", "active"]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,21 @@
+{
+  "cases": {
+    "synthetic-cardio-001": {
+      "raw_text": "Diagnosen\nLeichte Hypertonie\nAnamnese\nKontrolltermin ohne Beschwerden.",
+      "candidates": [
+        {
+          "target": "diagnosis",
+          "value": "Leichte Hypertonie",
+          "normalized": { "certainty": "bestaetigt" },
+          "source": { "section": "Diagnosen" }
+        },
+        {
+          "target": "anamnesis",
+          "value": "Kontrolltermin ohne Beschwerden.",
+          "normalized": {},
+          "source": { "section": "Anamnese" }
+        }
+      ]
+    }
+  }
+}
