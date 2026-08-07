@@ -1,19 +1,21 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect, countryLabel } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import type { DoctorOption } from "@/pages/appointments/model/types";
 import type {
   AllDoctorOption,
   ClinicalDiagnosis,
 } from "@/pages/patients/data/patient-clinical";
-import type { ProviderSummary } from "@/pages/providers/model/types";
+import { specializationLabelForItem } from "@/pages/providers/model/specialization-labels";
+import type { ProviderSummary, SpecializationItem } from "@/pages/providers/model/types";
 
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
@@ -199,6 +201,8 @@ function blankNode(kind: DiagnosisKind, parentCid: string | null): WorkingNode {
     parent_id: null,
     kind,
     label: "",
+    specialization_ids: [],
+    specializations: [],
     certainty: kind === "prozedur" ? null : "bestaetigt",
     chronifizierung: null,
     icd_code: null,
@@ -230,6 +234,8 @@ function nodesFromItems(items: ClinicalDiagnosis[]): WorkingNode[] {
     parent_cid: item.parent_id ?? item.parent_cid ?? null,
     id: item.id ?? null,
     parent_id: item.parent_id ?? null,
+    specialization_ids: item.specialization_ids ?? [],
+    specializations: item.specializations ?? [],
   }));
 }
 
@@ -401,6 +407,93 @@ function attributionLine(node: WorkingNode, lang: string): string | null {
 
 type EditingState = { mode: "add" | "edit"; draft: WorkingNode };
 
+function DiagnosisSpecializationsField({
+  draft,
+  options,
+  lang,
+  tx,
+  set,
+}: {
+  draft: WorkingNode;
+  options: SpecializationItem[];
+  lang: string;
+  tx: Bilingual;
+  set: (patch: Partial<WorkingNode>) => void;
+}) {
+  const labelLang = lang === "de" ? "de" : "ru";
+  const selectedIds = draft.specialization_ids ?? [];
+  const selectedItems = draft.specializations ?? [];
+  const availableItems = useMemo(() => {
+    const byId = new Map<string, SpecializationItem>();
+    for (const item of [...options, ...selectedItems]) byId.set(item.id, item);
+    return Array.from(byId.values());
+  }, [options, selectedItems]);
+
+  function addSpecialization(id: string) {
+    if (!id || selectedIds.includes(id)) return;
+    const selected = availableItems.find((item) => item.id === id);
+    if (!selected) return;
+    set({
+      specialization_ids: [...selectedIds, id],
+      specializations: [...selectedItems, selected],
+    });
+  }
+
+  function removeSpecialization(id: string) {
+    set({
+      specialization_ids: selectedIds.filter((value) => value !== id),
+      specializations: selectedItems.filter((item) => item.id !== id),
+    });
+  }
+
+  return (
+    <Field label={tx("Специализации", "Spezialisierungen")}>
+      <div className="space-y-2 rounded-lg border border-border/60 p-2.5">
+        <NativeComboboxSelect
+          value=""
+          aria-label={tx("Добавить специализацию", "Spezialisierung hinzufügen")}
+          className={inputClass}
+          onChange={(event) => addSpecialization(event.target.value)}
+        >
+          <option value="">
+            {tx("Добавить специализацию…", "Spezialisierung hinzufügen…")}
+          </option>
+          {availableItems.map((item) => (
+            <option key={item.id} value={item.id} disabled={selectedIds.includes(item.id)}>
+              {specializationLabelForItem(item, labelLang)}
+            </option>
+          ))}
+        </NativeComboboxSelect>
+        {selectedIds.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {selectedIds.map((id) => {
+              const item = availableItems.find((candidate) => candidate.id === id);
+              if (!item) return null;
+              return (
+                <Badge key={id} variant="secondary" className="gap-1 py-1 pr-1">
+                  {specializationLabelForItem(item, labelLang)}
+                  <button
+                    type="button"
+                    className="rounded p-0.5 hover:bg-foreground/10"
+                    aria-label={`${tx("Удалить", "Entfernen")}: ${specializationLabelForItem(item, labelLang)}`}
+                    onClick={() => removeSpecialization(id)}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </Badge>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="px-1 text-xs text-muted-foreground">
+            {tx("Специализации не выбраны", "Keine Spezialisierungen ausgewählt")}
+          </p>
+        )}
+      </div>
+    </Field>
+  );
+}
+
 function DiagnosisRow({
   node,
   depth,
@@ -489,6 +582,18 @@ function DiagnosisRow({
               </span>
             ) : null}
           </div>
+          {(node.specializations ?? []).length > 0 ? (
+            <div className="flex min-w-0 flex-wrap gap-1">
+              {(node.specializations ?? []).map((specialization) => (
+                <span
+                  key={specialization.id}
+                  className="rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[10px] text-muted-foreground"
+                >
+                  {specializationLabelForItem(specialization, lang === "de" ? "de" : "ru")}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {node.note ? (
             <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{node.note}</p>
           ) : null}
@@ -566,6 +671,7 @@ function DiagnosisForm({
   nodes,
   providers,
   allDoctors,
+  specializations,
   lang,
   tx,
   parentLabel,
@@ -575,6 +681,7 @@ function DiagnosisForm({
   nodes: WorkingNode[];
   providers: ProviderSummary[];
   allDoctors: AllDoctorOption[];
+  specializations: SpecializationItem[];
   lang: string;
   tx: Bilingual;
   parentLabel: string | null;
@@ -682,6 +789,16 @@ function DiagnosisForm({
           }
         />
       </Field>
+
+      {isDiagnosis ? (
+        <DiagnosisSpecializationsField
+          draft={draft}
+          options={specializations}
+          lang={lang}
+          tx={tx}
+          set={set}
+        />
+      ) : null}
 
       {isDiagnosis ? (
         <div className="grid gap-2 md:grid-cols-2">
@@ -888,6 +1005,7 @@ export function DiagnosisTreeSection({
   items,
   providers,
   allDoctors,
+  specializations = [],
   canManage,
   lang,
   onSave,
@@ -895,6 +1013,7 @@ export function DiagnosisTreeSection({
   items: ClinicalDiagnosis[];
   providers: ProviderSummary[];
   allDoctors: AllDoctorOption[];
+  specializations?: SpecializationItem[];
   canManage: boolean;
   lang: string;
   onSave: (next: ClinicalDiagnosis[]) => Promise<unknown>;
@@ -1082,6 +1201,7 @@ export function DiagnosisTreeSection({
               nodes={nodes}
               providers={providers}
               allDoctors={allDoctors}
+              specializations={specializations}
               lang={lang}
               tx={tx}
               parentLabel={editingParentLabel}

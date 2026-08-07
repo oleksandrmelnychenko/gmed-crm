@@ -948,6 +948,20 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
 
     let provider_id = seed_provider(&pool, &tag).await;
     let doctor_id = seed_provider_doctor(&pool, provider_id, &tag).await;
+    let diagnosis_specializations = sqlx::query_as::<_, (Uuid, String)>(
+        "SELECT id, code FROM medical_specializations
+         WHERE deleted_at IS NULL AND is_active = TRUE
+         ORDER BY sort_order, code
+         LIMIT 2",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("load diagnosis specializations");
+    assert_eq!(diagnosis_specializations.len(), 2);
+    let diagnosis_specialization_ids = diagnosis_specializations
+        .iter()
+        .map(|(id, _)| id.to_string())
+        .collect::<Vec<_>>();
 
     // ---- Diagnoses (main with ICD + provider/doctor, plus a secondary) ----
     let (status, _) = json_request(
@@ -965,6 +979,7 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
                     "diagnosed_on": "ED 03/2017",
                     "provider_id": provider_id.to_string(),
                     "doctor_id": doctor_id.to_string(),
+                    "specialization_ids": diagnosis_specialization_ids,
                 },
                 {
                     "kind": "secondary",
@@ -1052,6 +1067,18 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
     assert_eq!(diagnoses[0]["provider_id"], provider_id.to_string());
     assert_eq!(diagnoses[0]["provider_name"], format!("Provider {tag}"));
     assert_eq!(diagnoses[0]["doctor_name"], format!("Doctor {tag}"));
+    assert_eq!(
+        diagnoses[0]["specialization_ids"],
+        json!(diagnosis_specialization_ids)
+    );
+    assert_eq!(
+        diagnoses[0]["specializations"][0]["code"],
+        diagnosis_specializations[0].1
+    );
+    assert_eq!(
+        diagnoses[0]["specializations"][1]["code"],
+        diagnosis_specializations[1].1
+    );
     assert_eq!(diagnoses[1]["kind"], "secondary");
     assert_eq!(diagnoses[1]["grade"], "Grad 1");
 

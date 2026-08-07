@@ -8058,6 +8058,8 @@ struct PatientDiagnosisInput {
     #[serde(default)]
     label: Option<String>,
     #[serde(default)]
+    specialization_ids: Vec<String>,
+    #[serde(default)]
     icd_code: Option<String>,
     #[serde(default)]
     ops_code: Option<String>,
@@ -8450,11 +8452,30 @@ async fn get_patient_clinical(
                   d.source_mode, d.external_clinic, d.external_doctor, d.external_country,
                   d.provider_id, p.name AS provider_name,
                   d.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich,
-                  d.treating_doctor_id, d.treating_none, td.name AS treating_doctor_name, td.title AS treating_doctor_title
+                  d.treating_doctor_id, d.treating_none, td.name AS treating_doctor_name, td.title AS treating_doctor_title,
+                  COALESCE(ds.specialization_ids, ARRAY[]::uuid[]) AS specialization_ids,
+                  COALESCE(ds.specializations, '[]'::jsonb) AS specializations
            FROM patient_diagnoses d
            LEFT JOIN providers p ON p.id = d.provider_id
            LEFT JOIN provider_doctors dr ON dr.id = d.doctor_id
            LEFT JOIN provider_doctors td ON td.id = d.treating_doctor_id
+           LEFT JOIN LATERAL (
+               SELECT array_agg(ms.id ORDER BY pds.sort_order) AS specialization_ids,
+                      jsonb_agg(
+                          jsonb_build_object(
+                              'id', ms.id,
+                              'code', ms.code,
+                              'name_en', ms.name_en,
+                              'name_de', ms.name_de,
+                              'name_ru', ms.name_ru,
+                              'is_active', ms.is_active,
+                              'sort_order', ms.sort_order
+                          ) ORDER BY pds.sort_order
+                      ) AS specializations
+               FROM patient_diagnosis_specializations pds
+               JOIN medical_specializations ms ON ms.id = pds.specialization_id
+               WHERE pds.diagnosis_id = d.id
+           ) ds ON TRUE
            WHERE d.patient_id = $1
            ORDER BY d.sort_order, d.created_at"#,
     )
@@ -8519,6 +8540,8 @@ async fn get_patient_clinical(
                 "parent_id": row.get::<Option<Uuid>, _>("parent_id"),
                 "kind": row.get::<String, _>("kind"),
                 "label": row.get::<String, _>("label"),
+                "specialization_ids": row.get::<Vec<Uuid>, _>("specialization_ids"),
+                "specializations": row.get::<serde_json::Value, _>("specializations"),
                 "icd_code": row.get::<Option<String>, _>("icd_code"),
                 "ops_code": row.get::<Option<String>, _>("ops_code"),
                 "certainty": row.get::<Option<String>, _>("certainty"),
@@ -8828,7 +8851,20 @@ impl PatientClinicalSection {
     fn snapshot_sql(self) -> &'static str {
         match self {
             PatientClinicalSection::Diagnoses => {
-                r#"SELECT COALESCE(jsonb_agg((to_jsonb(t) - 'patient_id') ORDER BY t.sort_order, t.created_at), '[]'::jsonb) AS value
+                r#"SELECT COALESCE(
+                       jsonb_agg(
+                           (to_jsonb(t) - 'patient_id') || jsonb_build_object(
+                               'specialization_ids', COALESCE(
+                                   (SELECT jsonb_agg(s.specialization_id ORDER BY s.sort_order)
+                                    FROM patient_diagnosis_specializations s
+                                    WHERE s.diagnosis_id = t.id),
+                                   '[]'::jsonb
+                               )
+                           )
+                           ORDER BY t.sort_order, t.created_at
+                       ),
+                       '[]'::jsonb
+                   ) AS value
                    FROM patient_diagnoses t WHERE t.patient_id = $1"#
             }
             PatientClinicalSection::Medications => {
@@ -9059,6 +9095,51 @@ async fn save_patient_diagnoses(
         let kind = clinical_one_of(item.kind, &["main", "secondary", "prozedur"])
             .unwrap_or_else(|| "secondary".to_string());
 
+        let mut specialization_ids = Vec::new();
+        let mut seen_specialization_ids = HashSet::new();
+        for raw_id in &item.specialization_ids {
+            let specialization_id = match Uuid::parse_str(raw_id.trim()) {
+                Ok(value) => value,
+                Err(_) => {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "Invalid medical specialization id",
+                    )
+                }
+            };
+            if seen_specialization_ids.insert(specialization_id) {
+                specialization_ids.push(specialization_id);
+            }
+        }
+        if kind == "prozedur" && !specialization_ids.is_empty() {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Procedure entries cannot have medical specializations",
+            );
+        }
+        if !specialization_ids.is_empty() {
+            let existing_specialization_count = match sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM medical_specializations
+                 WHERE id = ANY($1) AND deleted_at IS NULL",
+            )
+            .bind(&specialization_ids)
+            .fetch_one(&mut *tx)
+            .await
+            {
+                Ok(value) => value,
+                Err(e) => {
+                    tracing::error!(error = %e, patient_id = %patient_uuid, "validate diagnosis specializations");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            };
+            if existing_specialization_count != specialization_ids.len() as i64 {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Medical specialization not found",
+                );
+            }
+        }
+
         let parent_cid = item
             .parent_cid
             .as_ref()
@@ -9211,6 +9292,32 @@ async fn save_patient_diagnoses(
         {
             tracing::error!(error = %e, patient_id = %patient_uuid, "insert patient diagnosis");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        if let Err(e) = sqlx::query(
+            "DELETE FROM patient_diagnosis_specializations WHERE diagnosis_id = $1",
+        )
+        .bind(new_id)
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = %e, diagnosis_id = %new_id, "clear diagnosis specializations");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        if !specialization_ids.is_empty() {
+            if let Err(e) = sqlx::query(
+                r#"INSERT INTO patient_diagnosis_specializations
+                       (diagnosis_id, specialization_id, sort_order)
+                   SELECT $1, specialization_id, ordinality::integer - 1
+                   FROM UNNEST($2::uuid[]) WITH ORDINALITY AS selected(specialization_id, ordinality)"#,
+            )
+            .bind(new_id)
+            .bind(&specialization_ids)
+            .execute(&mut *tx)
+            .await
+            {
+                tracing::error!(error = %e, diagnosis_id = %new_id, "save diagnosis specializations");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
         }
         if let Some(cid) = item
             .cid

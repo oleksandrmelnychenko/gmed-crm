@@ -82,6 +82,9 @@ export type ClinicalDiagnosis = ClinicalAttribution & {
   parent_id?: string | null;
   kind: DiagnosisNodeKind;
   label: string;
+  /** Shared medical-specialization directory entries assigned to this diagnosis. */
+  specialization_ids?: string[];
+  specializations?: import("@/pages/providers/model/types").SpecializationItem[];
   certainty: DiagnosisCertainty | null;
   chronifizierung: DiagnosisChronification | null;
   icd_code: string | null;

@@ -26,9 +26,9 @@ import { cachedDateTimeFormat } from "@/lib/intl-cache";
 import { PauseCircle, Pencil, PlayCircle, Plus, Trash2 } from "lucide-react";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import type { DoctorOption } from "@/pages/appointments/model/types";
-import { fetchProviders } from "@/pages/providers/data/provider-api";
+import { fetchProviders, fetchSpecializations } from "@/pages/providers/data/provider-api";
 import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
-import type { ProviderSummary } from "@/pages/providers/model/types";
+import type { ProviderSummary, SpecializationItem } from "@/pages/providers/model/types";
 import type {
   PatientRiskScore,
   PatientVitalMeasurement,
@@ -1656,6 +1656,7 @@ export function PatientClinicalTab({
   const [riskScores, setRiskScores] = useState<PatientRiskScore[]>([]);
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
   const [allDoctors, setAllDoctors] = useState<AllDoctorOption[]>([]);
+  const [specializations, setSpecializations] = useState<SpecializationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [version, setVersion] = useState(0);
@@ -1685,6 +1686,7 @@ export function PatientClinicalTab({
       fetchPatientRecommendations(patientId).catch(() => [] as PatientRecommendation[]),
       fetchProviders(CLINICAL_PROVIDER_QUERY).catch(() => [] as ProviderSummary[]),
       fetchAllDoctors().catch(() => [] as AllDoctorOption[]),
+      fetchSpecializations().catch(() => [] as SpecializationItem[]),
       apiFetch<{ items: PatientVitalMeasurement[] }>(`/patients/${patientId}/vitals`).catch(() => ({
         items: [] as PatientVitalMeasurement[],
       })),
@@ -1695,7 +1697,7 @@ export function PatientClinicalTab({
         () => [] as PatientCaseRef[],
       ),
     ])
-      .then(([clinical, recs, providerRows, doctorRows, vitals, scores, caseRefs]) => {
+      .then(([clinical, recs, providerRows, doctorRows, specializationRows, vitals, scores, caseRefs]) => {
         if (!active) return;
         setAllergien(clinical.allergien ?? []);
         setCave(clinical.cave ?? []);
@@ -1711,6 +1713,7 @@ export function PatientClinicalTab({
         setRecommendations(recs ?? []);
         setProviders(clinicalMedicalProviderRows(providerRows ?? []));
         setAllDoctors(doctorRows ?? []);
+        setSpecializations(specializationRows ?? []);
         setVitalsHistory(Array.isArray(vitals?.items) ? vitals.items : []);
         setRiskScores(Array.isArray(scores?.items) ? scores.items : []);
         setError("");
@@ -2038,6 +2041,7 @@ export function PatientClinicalTab({
         items={diagnoses}
         providers={providers}
         allDoctors={allDoctors}
+        specializations={specializations}
         canManage={canManage}
         lang={lang}
         onSave={async (next) => {
