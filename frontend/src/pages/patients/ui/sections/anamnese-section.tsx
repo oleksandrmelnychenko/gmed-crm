@@ -59,11 +59,21 @@ function blankVersion(): ClinicalNarrative {
 export function copyNarrativeVersion(version: ClinicalNarrative): ClinicalNarrative {
   return {
     ...version,
+    specialization_ids: [...(version.specialization_ids ?? [])],
+    specializations: (version.specializations ?? []).map((item) => ({ ...item })),
     id: null,
     anamnese_at: new Date().toISOString(),
     is_active: true,
     created_at: null,
     updated_at: null,
+  };
+}
+
+export function editNarrativeVersion(version: ClinicalNarrative): ClinicalNarrative {
+  return {
+    ...version,
+    specialization_ids: [...(version.specialization_ids ?? [])],
+    specializations: (version.specializations ?? []).map((item) => ({ ...item })),
   };
 }
 
@@ -189,7 +199,23 @@ export function AnamneseSection({
 
   function openEdit(version: ClinicalNarrative) {
     setEditingMode("edit");
-    setEditing(version);
+    setEditing(editNarrativeVersion(version));
+  }
+
+  function removeSpecialization(specializationId: string) {
+    setEditing((current) =>
+      current
+        ? {
+            ...current,
+            specialization_ids: (current.specialization_ids ?? []).filter(
+              (id) => id !== specializationId,
+            ),
+            specializations: (current.specializations ?? []).filter(
+              (item) => item.id !== specializationId,
+            ),
+          }
+        : current,
+    );
   }
 
   async function submit() {
@@ -286,7 +312,7 @@ export function AnamneseSection({
                     type="button"
                     size="sm"
                     className="h-8 rounded-lg"
-                    onClick={() => openEdit({ ...active })}
+                    onClick={() => openEdit(active)}
                   >
                     <Pencil className="size-3.5" />
                     {tx("Редактировать", "Bearbeiten")}
@@ -490,7 +516,7 @@ export function AnamneseSection({
                             className="size-7 rounded-md p-0"
                             aria-label={tx("Редактировать", "Bearbeiten")}
                             title={tx("Редактировать", "Bearbeiten")}
-                            onClick={() => openEdit({ ...version })}
+                            onClick={() => openEdit(version)}
                           >
                             <Pencil className="size-3.5" />
                           </Button>
@@ -636,9 +662,29 @@ export function AnamneseSection({
                 key={specialization.id}
                 className="space-y-3 rounded-lg border border-border/60 bg-background p-3"
               >
-                <p className="text-sm font-semibold text-foreground">
-                  {specializationLabelForItem(specialization, lang === "de" ? "de" : "ru")}
-                </p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-foreground">
+                    {specializationLabelForItem(specialization, lang === "de" ? "de" : "ru")}
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="size-7 shrink-0 rounded-md p-0 text-rose-700 hover:bg-rose-50"
+                    aria-label={`${lang === "de" ? "Entfernen" : "Удалить"}: ${specializationLabelForItem(
+                      specialization,
+                      lang === "de" ? "de" : "ru",
+                    )}`}
+                    title={
+                      lang === "de"
+                        ? "Spezialisierung entfernen"
+                        : "Удалить специализацию"
+                    }
+                    onClick={() => removeSpecialization(specialization.id)}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </div>
                 <div className="grid gap-3 md:grid-cols-2">
                   <label className="block">
                     <span className="mb-1 block text-[11px] font-medium text-muted-foreground">

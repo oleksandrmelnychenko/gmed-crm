@@ -373,8 +373,15 @@ export function savePatientClinicalWarnings(
   );
 }
 
-export function savePatientNarrative(patientId: string, narrative: ClinicalNarrative) {
-  return postJson<ClinicalNarrative>(`/patients/${patientId}/narrative`, {
+export function patientNarrativePayload(narrative: ClinicalNarrative): JsonPayload {
+  const selectedById = new Map(
+    (narrative.specializations ?? []).map((item) => [item.id, item]),
+  );
+  const specializationIds =
+    narrative.specialization_ids ??
+    (narrative.specializations ?? []).map((item) => item.id);
+
+  return {
     id: narrative.id ?? null,
     case_id: narrative.case_id ?? null,
     anamnese_aktuelle: narrative.anamnese_aktuelle,
@@ -382,9 +389,26 @@ export function savePatientNarrative(patientId: string, narrative: ClinicalNarra
     anamnese_vegetative: narrative.anamnese_vegetative,
     anamnese_sozial: narrative.anamnese_sozial,
     beurteilung: narrative.beurteilung,
+    red_flags: narrative.red_flags ?? null,
+    specialization_ids: specializationIds,
+    specializations: specializationIds.map((specializationId) => {
+      const item = selectedById.get(specializationId);
+      return {
+        specialization_id: specializationId,
+        narrative_text: item?.narrative_text ?? null,
+        assessment_text: item?.assessment_text ?? null,
+      };
+    }),
     anamnese_at: narrative.anamnese_at ?? null,
     is_active: narrative.is_active,
-  });
+  };
+}
+
+export function savePatientNarrative(patientId: string, narrative: ClinicalNarrative) {
+  return postJson<ClinicalNarrative>(
+    `/patients/${patientId}/narrative`,
+    patientNarrativePayload(narrative),
+  );
 }
 
 export function deletePatientNarrative(patientId: string, narrativeId: string) {

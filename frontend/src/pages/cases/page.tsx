@@ -12,7 +12,6 @@ import {
 import {
   LoaderCircle,
   NotebookPen,
-  Plus,
   RefreshCw,
   Search,
 } from "lucide-react";
@@ -970,20 +969,6 @@ function useCasesPageContent() {
                   {t.cases_snippets_title}
                 </Button>
               ) : null}
-              {permissions.canCreate ? (
-                <Button
-                  type="button"
-                  className="h-9 rounded-lg gap-1.5 px-3.5"
-                  onClick={() => {
-                    setCreateError("");
-                    setCreateForm(DEFAULT_CREATE_FORM);
-                    setCreateOpen(true);
-                  }}
-                >
-                  <Plus className="size-3.5" />
-                  {t.cases_new}
-                </Button>
-              ) : null}
             </>
           )}
         />
@@ -1085,22 +1070,6 @@ function useCasesPageContent() {
                 <EmptyPanel
                   title={t.cases_no_match}
                   text={t.cases_no_match}
-                  action={
-                    permissions.canCreate ? (
-                      <Button
-                        type="button"
-                        className="h-9 rounded-lg px-3.5"
-                        onClick={() => {
-                          setCreateError("");
-                          setCreateForm(DEFAULT_CREATE_FORM);
-                          setCreateOpen(true);
-                        }}
-                      >
-                        <Plus className="size-4" />
-                        {t.cases_new}
-                      </Button>
-                    ) : undefined
-                  }
                 />
           )}
         />

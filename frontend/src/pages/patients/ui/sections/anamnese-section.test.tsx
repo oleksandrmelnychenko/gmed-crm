@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 
 import type { ClinicalNarrative } from "@/pages/patients/data/patient-clinical";
 
-import { AnamneseSection, copyNarrativeVersion } from "./anamnese-section";
+import {
+  AnamneseSection,
+  copyNarrativeVersion,
+  editNarrativeVersion,
+} from "./anamnese-section";
 
 function narrative(overrides: Partial<ClinicalNarrative> = {}): ClinicalNarrative {
   return {
@@ -39,12 +43,28 @@ describe("AnamneseSection", () => {
 
     expect(copyNarrativeVersion(source)).toEqual({
       ...source,
+      specialization_ids: [],
+      specializations: [],
       id: null,
       anamnese_at: expect.any(String),
       is_active: true,
       created_at: null,
       updated_at: null,
     });
+  });
+
+  it("creates an isolated edit draft for specialization CRUD", () => {
+    const source = narrative({
+      specialization_ids: [cardiology.id],
+      specializations: [cardiology],
+    });
+    const draft = editNarrativeVersion(source);
+
+    expect(draft).toEqual(source);
+    expect(draft).not.toBe(source);
+    expect(draft.specialization_ids).not.toBe(source.specialization_ids);
+    expect(draft.specializations).not.toBe(source.specializations);
+    expect(draft.specializations?.[0]).not.toBe(source.specializations?.[0]);
   });
 
   it("renders active version metadata and the copy action", () => {
