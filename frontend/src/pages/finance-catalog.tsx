@@ -1634,7 +1634,6 @@ function useFinanceCatalogPageContent() {
               <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
               {t.revenue_agency_service_catalog_items}
             </span>
-            <CountBadge>{agencyServices.length}</CountBadge>
             <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
             <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
                 <div className="relative">
