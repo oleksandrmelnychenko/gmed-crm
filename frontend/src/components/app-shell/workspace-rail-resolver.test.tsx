@@ -13,24 +13,14 @@ describe("resolveWorkspaceRailKind", () => {
     ).toBe("patient");
   });
 
-  it("returns the case rail for case workspace routes", () => {
+  it("does not mount a case rail while legacy case routes redirect", () => {
     expect(
       resolveWorkspaceRailKind({
         pathname: "/cases/case-1",
         search: "",
         userRole: "doctor",
       }),
-    ).toBe("case");
-  });
-
-  it("returns patient and case rails for patient-bound case workspace routes", () => {
-    expect(
-      resolveWorkspaceRailKind({
-        pathname: "/cases/case-1",
-        search: "?patient=patient-1",
-        userRole: "doctor",
-      }),
-    ).toBe("patient-case");
+    ).toBeNull();
   });
 
   it("returns the order rail for order workspace routes", () => {

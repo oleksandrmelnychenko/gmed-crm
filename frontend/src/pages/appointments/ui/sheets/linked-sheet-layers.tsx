@@ -1,7 +1,6 @@
 import { Suspense, lazy } from "react";
 
 import type { PatientDetailSheetProps } from "@/pages/patients";
-import type { LinkedCasesSheetProps } from "@/pages/appointments/ui/sheets/linked-cases-sheet";
 import type { LinkedDocumentsSheetProps } from "@/pages/appointments/ui/sheets/linked-documents-sheet";
 import type { LinkedProviderSheetProps } from "@/pages/appointments/ui/sheets/linked-provider-sheet";
 import type { LinkedRecordsSheetProps } from "@/pages/appointments/ui/sheets/linked-records-sheet";
@@ -11,8 +10,6 @@ import { AppointmentPreviewSheetLoadingState } from "@/pages/appointments/ui/sha
 const loadPatientDetailSheet = () => import("@/pages/patients");
 const loadLinkedProviderSheet = () =>
   import("@/pages/appointments/ui/sheets/linked-provider-sheet");
-const loadLinkedCasesSheet = () =>
-  import("@/pages/appointments/ui/sheets/linked-cases-sheet");
 const loadLinkedDocumentsSheet = () =>
   import("@/pages/appointments/ui/sheets/linked-documents-sheet");
 const loadLinkedRecordsSheet = () =>
@@ -26,11 +23,6 @@ const LazyPatientDetailSheet = lazy(async () => {
 const LazyLinkedProviderSheet = lazy(async () => {
   const mod = await loadLinkedProviderSheet();
   return { default: mod.MemoizedLinkedProviderSheet };
-});
-
-const LazyLinkedCasesSheet = lazy(async () => {
-  const mod = await loadLinkedCasesSheet();
-  return { default: mod.MemoizedLinkedCasesSheet };
 });
 
 const LazyLinkedDocumentsSheet = lazy(async () => {
@@ -49,10 +41,6 @@ export function preloadLinkedPatientSheet() {
 
 export function preloadLinkedProviderSheet() {
   void loadLinkedProviderSheet();
-}
-
-export function preloadLinkedCasesSheet() {
-  void loadLinkedCasesSheet();
 }
 
 export function preloadLinkedDocumentsSheet() {
@@ -79,7 +67,6 @@ type LinkedPatientSheetLayerProps = Pick<
   | "onAssign"
   | "onOpenChange"
   | "onRefresh"
-  | "onOpenCases"
   | "onOpenOrders"
   | "onOpenAppointments"
   | "onOpenContracts"
@@ -144,45 +131,6 @@ export function LinkedProviderSheetLayer({
         loading={loading}
         error={error}
         fallbackTitle={fallbackTitle}
-        formatDateTimeLabel={formatDateTimeLabel}
-      />
-    </Suspense>
-  );
-}
-
-type LinkedCasesSheetLayerProps = LinkedCasesSheetProps;
-
-export function LinkedCasesSheetLayer({
-  open,
-  onOpenChange,
-  loading,
-  error,
-  items,
-  patientId,
-  formatDateTimeLabel,
-}: LinkedCasesSheetLayerProps) {
-  if (!open) return null;
-
-  return (
-    <Suspense
-      fallback={
-        <AppointmentPreviewSheetLoadingState
-          open={open}
-          onOpenChange={onOpenChange}
-          title={appointmentText("appointments_cases_2")}
-          description={appointmentText("appointments_loading_case_context")}
-          maxWidthClassName="sm:max-w-[980px]"
-          loadingLabel={appointmentText("appointments_loading_cases")}
-        />
-      }
-    >
-      <LazyLinkedCasesSheet
-        open={open}
-        onOpenChange={onOpenChange}
-        loading={loading}
-        error={error}
-        items={items}
-        patientId={patientId}
         formatDateTimeLabel={formatDateTimeLabel}
       />
     </Suspense>

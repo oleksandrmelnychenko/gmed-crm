@@ -200,7 +200,6 @@ const PATIENT_CONTRACT_SURFACE_ROLES = new Set([
 const PATIENT_INVOICE_SURFACE_ROLES = PATIENT_CONTRACT_SURFACE_ROLES;
 const PATIENT_OPERATIONAL_TAB_KEYS = new Set([
   "relations",
-  "cases",
   "orders",
   "appointments",
   "workflow",
@@ -273,6 +272,9 @@ export function canViewPatientInvoicesSurface(role?: string) {
 
 export function normalizePatientDetailTab(tab: string | null | undefined, access: PatientTabAccess) {
   const requestedTab = (tab ?? "profile").trim() || "profile";
+  if (requestedTab === "cases") {
+    return access.canViewClinical ? "clinical" : "profile";
+  }
   if (PATIENT_OPERATIONAL_TAB_KEYS.has(requestedTab) && !access.canViewOperationalSurface) {
     return "profile";
   }
@@ -299,10 +301,9 @@ export function resolvePatientTimelineRoute(
     case "patient":
       return access.patientId ? `/patients/${access.patientId}` : null;
     case "case":
-      if (access.patientId) {
-        return `/cases/${item.entity_id}?patient=${access.patientId}`;
-      }
-      return `/cases?case=${item.entity_id}`;
+      return access.patientId
+        ? `/patients/${access.patientId}?tab=clinical`
+        : null;
     case "order":
       if (access.patientId) {
         return `/orders/${item.entity_id}?patient=${access.patientId}`;

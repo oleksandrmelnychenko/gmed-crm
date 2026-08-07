@@ -367,7 +367,6 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/cases",
     roles: ROLES_CASES,
-    nav: { section: "medicine", labelKey: "cases_title" },
   },
   {
     id: "sops",

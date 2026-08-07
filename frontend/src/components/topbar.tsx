@@ -138,7 +138,7 @@ function notificationHref(item: Notification) {
   if (item.entity_type === "invoice") return `/invoices?invoice=${item.entity_id}`;
   if (item.entity_type === "privacy_request") return "/admin/compliance";
   if (item.entity_type === "feedback") return "/feedback";
-  if (item.entity_type === "case") return `/cases?case=${item.entity_id}`;
+  if (item.entity_type === "case") return "/patients";
   return null;
 }
 

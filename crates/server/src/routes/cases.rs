@@ -57,6 +57,18 @@ pub fn router() -> Router<AppState> {
         )
         .route("/cases/{case_id}/pain", post(save_pain_records))
         .route("/cases/{case_id}/symptome", post(save_symptome))
+        .route(
+            "/patients/{patient_id}/pain",
+            get(get_patient_pain_records).post(save_patient_pain_records),
+        )
+        .route(
+            "/patients/{patient_id}/symptoms",
+            get(get_patient_symptoms).post(save_patient_symptoms),
+        )
+        .route(
+            "/patients/{patient_id}/symptome",
+            get(get_patient_symptoms).post(save_patient_symptoms),
+        )
         .route("/cases/{case_id}/cardiology", post(save_cardiology))
         .route(
             "/cases/{case_id}/gastroenterology",
@@ -1563,6 +1575,336 @@ async fn update_case_status(
         "status_changed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("status_changed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
     }))
     .into_response()
+}
+
+async fn require_patient_clinical_access(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    if let Err(response) =
+        auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin])
+    {
+        return Err(response);
+    }
+    let exists = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
+        .bind(patient_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, patient_id = %patient_id, "load patient subject");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        })?;
+    if !exists {
+        return Err(err(StatusCode::NOT_FOUND, "Patient not found"));
+    }
+    ensure_patient_access(state, auth, patient_id).await
+}
+
+async fn load_patient_owned_case_section<'e, E>(
+    executor: E,
+    patient_id: Uuid,
+    section: &str,
+) -> Result<serde_json::Value, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    let sql = match section {
+        "pain_records" => {
+            r#"SELECT COALESCE(
+                   jsonb_agg((to_jsonb(entry) - 'patient_id') ORDER BY entry.sort_order, entry.created_at, entry.id),
+                   '[]'::jsonb
+               )
+               FROM pain_records entry
+               WHERE entry.patient_id = $1"#
+        }
+        "symptome" => {
+            r#"SELECT COALESCE(
+                   jsonb_agg((to_jsonb(entry) - 'patient_id') ORDER BY entry.sort_order, entry.created_at, entry.id),
+                   '[]'::jsonb
+               )
+               FROM symptome entry
+               WHERE entry.patient_id = $1"#
+        }
+        _ => return Ok(serde_json::json!([])),
+    };
+    sqlx::query_scalar(sql).bind(patient_id).fetch_one(executor).await
+}
+
+async fn append_patient_owned_version(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_id: Uuid,
+    user_id: Uuid,
+    section: &str,
+    retention_years: i64,
+    old_value: serde_json::Value,
+    new_value: serde_json::Value,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO patient_clinical_versions
+             (patient_id, changed_by, section, old_value, new_value)
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(patient_id)
+    .bind(user_id)
+    .bind(section)
+    .bind(old_value)
+    .bind(new_value)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "UPDATE patients
+         SET last_clinical_update_at = now(),
+             clinical_retention_until = GREATEST(
+                 COALESCE(clinical_retention_until, now()),
+                 now() + ($2 * interval '1 year')
+             )
+         WHERE id = $1",
+    )
+    .bind(patient_id)
+    .bind(retention_years.max(1))
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn get_patient_pain_records(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(response) = require_patient_clinical_access(&state, &auth, patient_id).await {
+        return response;
+    }
+    match load_patient_owned_case_section(&state.db, patient_id, "pain_records").await {
+        Ok(items) => Json(serde_json::json!({ "items": items })).into_response(),
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_id, "load patient pain records");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
+    }
+}
+
+async fn save_patient_pain_records(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_id): Path<Uuid>,
+    Json(body): Json<ItemsWrapper<PainItem>>,
+) -> axum::response::Response {
+    if let Err(response) = require_patient_clinical_access(&state, &auth, patient_id).await {
+        return response;
+    }
+    for item in &body.items {
+        if item.nrs_aktuell.is_some_and(|value| !(0..=10).contains(&value))
+            || item.nrs_anfang.is_some_and(|value| !(0..=10).contains(&value))
+        {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "NRS values must be whole numbers from 0 to 10",
+            );
+        }
+    }
+    let retention_years = load_case_retention_years(&state, 30).await;
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_id, "begin patient pain tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let old_value = match load_patient_owned_case_section(&mut *tx, patient_id, "pain_records").await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_id, "snapshot patient pain");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(error) = sqlx::query("DELETE FROM pain_records WHERE patient_id = $1")
+        .bind(patient_id)
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(error = %error, patient_id = %patient_id, "replace patient pain");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    for (sort_order, item) in body.items.iter().enumerate() {
+        if let Err(error) = sqlx::query(
+            "INSERT INTO pain_records
+                 (patient_id, case_id, lokalisierung, seit_wann, ursache, qualitaet,
+                  kontinuitaet, entwicklung, nrs_aktuell, nrs_anfang, dauer_anfang,
+                  dauer_aktuell, ausstrahlung, auftreten, sort_order)
+             VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+        )
+        .bind(patient_id)
+        .bind(&item.lokalisierung)
+        .bind(&item.seit_wann)
+        .bind(&item.ursache)
+        .bind(&item.qualitaet)
+        .bind(&item.kontinuitaet)
+        .bind(&item.entwicklung)
+        .bind(item.nrs_aktuell)
+        .bind(item.nrs_anfang)
+        .bind(&item.dauer_anfang)
+        .bind(&item.dauer_aktuell)
+        .bind(&item.ausstrahlung)
+        .bind(&item.auftreten)
+        .bind(sort_order as i32)
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = %error, patient_id = %patient_id, "insert patient pain");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
+    let new_value = match load_patient_owned_case_section(&mut *tx, patient_id, "pain_records").await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_id, "resnapshot patient pain");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(error) = append_patient_owned_version(
+        &mut tx,
+        patient_id,
+        auth.user_id,
+        "pain_records",
+        retention_years,
+        old_value,
+        new_value,
+    )
+    .await
+    {
+        tracing::error!(error = %error, patient_id = %patient_id, "version patient pain");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, patient_id = %patient_id, "commit patient pain");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    state.audit_sender.try_send(audit::domain_event(
+        "save_patient_pain_records",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_id),
+        serde_json::json!({ "count": body.items.len() }),
+    ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.clinical_updated",
+        patient_id,
+        serde_json::json!({ "section": "pain_records" }),
+    )
+    .await;
+    Json(serde_json::json!({ "ok": true, "count": body.items.len() })).into_response()
+}
+
+async fn get_patient_symptoms(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(response) = require_patient_clinical_access(&state, &auth, patient_id).await {
+        return response;
+    }
+    match load_patient_owned_case_section(&state.db, patient_id, "symptome").await {
+        Ok(items) => Json(serde_json::json!({ "items": items })).into_response(),
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_id, "load patient symptoms");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
+    }
+}
+
+async fn save_patient_symptoms(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_id): Path<Uuid>,
+    Json(body): Json<ItemsWrapper<SymptomItem>>,
+) -> axum::response::Response {
+    if let Err(response) = require_patient_clinical_access(&state, &auth, patient_id).await {
+        return response;
+    }
+    let retention_years = load_case_retention_years(&state, 30).await;
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_id, "begin patient symptoms tx");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let old_value = match load_patient_owned_case_section(&mut *tx, patient_id, "symptome").await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_id, "snapshot patient symptoms");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(error) = sqlx::query("DELETE FROM symptome WHERE patient_id = $1")
+        .bind(patient_id)
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(error = %error, patient_id = %patient_id, "replace patient symptoms");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    for (sort_order, item) in body.items.iter().enumerate() {
+        if let Err(error) = sqlx::query(
+            "INSERT INTO symptome (patient_id, case_id, beschreibung, fachrichtung, sort_order)
+             VALUES ($1, NULL, $2, $3, $4)",
+        )
+        .bind(patient_id)
+        .bind(&item.beschreibung)
+        .bind(&item.fachrichtung)
+        .bind(sort_order as i32)
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = %error, patient_id = %patient_id, "insert patient symptoms");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
+    let new_value = match load_patient_owned_case_section(&mut *tx, patient_id, "symptome").await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_id, "resnapshot patient symptoms");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(error) = append_patient_owned_version(
+        &mut tx,
+        patient_id,
+        auth.user_id,
+        "symptoms",
+        retention_years,
+        old_value,
+        new_value,
+    )
+    .await
+    {
+        tracing::error!(error = %error, patient_id = %patient_id, "version patient symptoms");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, patient_id = %patient_id, "commit patient symptoms");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    state.audit_sender.try_send(audit::domain_event(
+        "save_patient_symptoms",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_id),
+        serde_json::json!({ "count": body.items.len() }),
+    ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.clinical_updated",
+        patient_id,
+        serde_json::json!({ "section": "symptoms" }),
+    )
+    .await;
+    Json(serde_json::json!({ "ok": true, "count": body.items.len() })).into_response()
 }
 
 async fn save_pain_records(

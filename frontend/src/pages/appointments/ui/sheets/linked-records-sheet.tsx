@@ -255,14 +255,7 @@ function LinkedRecordsSheet({
                   "document_id",
                   "id",
                 ])
-              : kind === "cases"
-                ? readLinkedPreviewValue(item, [
-                    "case_id",
-                    "title",
-                    "hauptanfragegrund",
-                    "id",
-                  ])
-                : readLinkedPreviewValue(item, ["title", "name", "id"]);
+              : readLinkedPreviewValue(item, ["title", "name", "id"]);
           const meta = [
             linkedStatusLabel(item.status, t),
             linkedCategoryLabel(item.category, t),

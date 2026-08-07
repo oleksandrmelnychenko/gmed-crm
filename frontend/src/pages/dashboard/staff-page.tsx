@@ -77,7 +77,6 @@ export function StaffDashboardPageNew() {
         newPatientsThisMonth={newPatientsThisMonth}
         openTasksCount={openTasksCount}
         overview={overview}
-        onOpenCases={() => staffGo("/cases")}
         onOpenLeads={() => staffGo("/leads")}
         onOpenOrders={() => staffGo("/orders")}
         onOpenPatients={() => staffGo("/patients")}

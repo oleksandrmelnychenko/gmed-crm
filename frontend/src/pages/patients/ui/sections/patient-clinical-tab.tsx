@@ -1,7 +1,6 @@
 import { Fragment, lazy, Suspense, useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { apiFetch } from "@/lib/api";
-import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CountBadge, EmptyCell } from "@/components/ui-shell";
@@ -77,12 +76,6 @@ import {
   type RecommendationLifecycleStatus,
 } from "@/pages/patients/data/patient-clinical";
 
-/** Case reference for episode chips, from GET /patients/{id}/cases. */
-type PatientCaseRef = {
-  id: string;
-  case_id: string;
-};
-
 import {
   searchDrugProducts,
   verifyDrugEquivalent,
@@ -94,6 +87,17 @@ import { MedicationEquivalentsPanel } from "@/pages/case-workspace/medication-eq
 import { AnamneseSection } from "./anamnese-section";
 import { DiagnosisTreeSection } from "./diagnosis-tree";
 import { ClinicalSpecializationsField } from "./clinical-specializations-field";
+import { PatientSymptomsPainSections } from "./patient-symptoms-pain-sections";
+import {
+  collectAttachedClinicalSpecializations,
+  clinicalSpecializationFilterAllowsEditing,
+  filterClinicalDiagnosisTree,
+  filterClinicalNarrative,
+  filterClinicalRecords,
+  mergeFilteredClinicalNarrative,
+  mergeFilteredClinicalRecords,
+  patientSpecializationRecords,
+} from "./clinical-specialization-filter";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 const loadPatientVitalsSheet = () => import("../sheets/patient-vitals-sheet");
@@ -1657,13 +1661,13 @@ export function PatientClinicalTab({
   const [impfstatus, setImpfstatus] = useState<PatientImpfstatus | null>(null);
   const [impfstatusDraft, setImpfstatusDraft] = useState("");
   const [impfstatusBusy, setImpfstatusBusy] = useState(false);
-  const [patientCases, setPatientCases] = useState<PatientCaseRef[]>([]);
   const [recommendations, setRecommendations] = useState<PatientRecommendation[]>([]);
   const [vitalsHistory, setVitalsHistory] = useState<PatientVitalMeasurement[]>([]);
   const [riskScores, setRiskScores] = useState<PatientRiskScore[]>([]);
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
   const [allDoctors, setAllDoctors] = useState<AllDoctorOption[]>([]);
   const [specializations, setSpecializations] = useState<SpecializationItem[]>([]);
+  const [selectedSpecializationId, setSelectedSpecializationId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [version, setVersion] = useState(0);
@@ -1676,6 +1680,10 @@ export function PatientClinicalTab({
   const [clinicalDeleteBusy, setClinicalDeleteBusy] = useState(false);
   const [medicationHoldEditor, setMedicationHoldEditor] = useState<MedicationHoldEditor | null>(null);
   const [medicationHoldBusy, setMedicationHoldBusy] = useState(false);
+
+  useEffect(() => {
+    setSelectedSpecializationId(null);
+  }, [patientId]);
 
   // Refetch when another client edits this patient's clinical record.
   useDebouncedRealtimeSubscription(["patient.clinical_updated"], (_event, events) => {
@@ -1700,11 +1708,8 @@ export function PatientClinicalTab({
       apiFetch<{ items: PatientRiskScore[] }>(`/patients/${patientId}/risk-scores`).catch(() => ({
         items: [] as PatientRiskScore[],
       })),
-      apiFetch<PatientCaseRef[]>(`/patients/${patientId}/cases`).catch(
-        () => [] as PatientCaseRef[],
-      ),
     ])
-      .then(([clinical, recs, providerRows, doctorRows, specializationRows, vitals, scores, caseRefs]) => {
+      .then(([clinical, recs, providerRows, doctorRows, specializationRows, vitals, scores]) => {
         if (!active) return;
         setAllergien(clinical.allergien ?? []);
         setCave(clinical.cave ?? []);
@@ -1716,7 +1721,6 @@ export function PatientClinicalTab({
         setNarrative(clinical.narrative ?? null);
         setImpfstatus(clinical.impfstatus ?? null);
         setImpfstatusDraft(clinical.impfstatus?.status_text ?? "");
-        setPatientCases(Array.isArray(caseRefs) ? caseRefs : []);
         setRecommendations(recs ?? []);
         setProviders(clinicalMedicalProviderRows(providerRows ?? []));
         setAllDoctors(doctorRows ?? []);
@@ -1760,23 +1764,6 @@ export function PatientClinicalTab({
         {tx("Провайдер", "Anbieter")}: {item.provider_name}
       </p>
     ) : null;
-  };
-
-  // Episode attribution chip: C-code of the case that established the entry,
-  // linking into the case workspace.
-  const episodeChip = (caseId: string | null | undefined) => {
-    if (!caseId) return null;
-    const caseRef = patientCases.find((candidate) => candidate.id === caseId);
-    if (!caseRef) return null;
-    return (
-      <StaffLink
-        to={`/cases/${caseRef.id}?patient=${patientId}`}
-        onClick={(event) => event.stopPropagation()}
-        className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 font-mono text-[10px] font-medium text-violet-700 hover:bg-violet-100"
-      >
-        {caseRef.case_id}
-      </StaffLink>
-    );
   };
 
   function openMedicationHoldEditor(index: number, medication: ClinicalMedication) {
@@ -1887,6 +1874,19 @@ export function PatientClinicalTab({
     }
   }
 
+  const attachedSpecializations = collectAttachedClinicalSpecializations(
+    patientSpecializationRecords({ diagnoses, examinations, narrative }),
+    specializations,
+  );
+  const activeSpecializationId = attachedSpecializations.some(
+    (item) => item.id === selectedSpecializationId,
+  )
+    ? selectedSpecializationId
+    : null;
+  const visibleDiagnoses = filterClinicalDiagnosisTree(diagnoses, activeSpecializationId);
+  const visibleExaminations = filterClinicalRecords(examinations, activeSpecializationId);
+  const visibleNarrative = filterClinicalNarrative(narrative, activeSpecializationId);
+
   if (loading) {
     return (
       <ClinicalWrapper embedded={embedded} className={embedded ? "min-h-[120px]" : "mt-4 min-h-[400px]"}>
@@ -1930,6 +1930,46 @@ export function PatientClinicalTab({
           {error}
         </div>
       ) : null}
+
+      <section
+        aria-label={tx("Фильтр специализаций", "Spezialisierungsfilter")}
+        className="rounded-xl border border-border/70 bg-card px-3 py-2.5"
+      >
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            className={cn(
+              "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+              activeSpecializationId === null
+                ? "border-orange-500 bg-orange-500 text-white"
+                : "border-border/70 bg-background text-muted-foreground hover:text-foreground",
+            )}
+            aria-pressed={activeSpecializationId === null}
+            onClick={() => setSelectedSpecializationId(null)}
+          >
+            {tx("Все специализации", "Alle Spezialisierungen")}
+          </button>
+          {attachedSpecializations.map((item) => {
+            const selected = activeSpecializationId === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={cn(
+                  "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                  selected
+                    ? "border-orange-500 bg-orange-500 text-white"
+                    : "border-border/70 bg-background text-muted-foreground hover:text-foreground",
+                )}
+                aria-pressed={selected}
+                onClick={() => setSelectedSpecializationId(item.id)}
+              >
+                {specializationLabelForItem(item, lang === "de" ? "de" : "ru")}
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
       {/* ---- Allergien ---- */}
       <ClinicalSection<ClinicalWarning>
@@ -2043,17 +2083,26 @@ export function PatientClinicalTab({
         )}
       />
 
+      <PatientSymptomsPainSections
+        patientId={patientId}
+        canManage={canManage}
+        refreshKey={version}
+      />
+
       {/* ---- Diagnoses (tree) ---- */}
       <DiagnosisTreeSection
-        items={diagnoses}
+        items={visibleDiagnoses}
         providers={providers}
         allDoctors={allDoctors}
         specializations={specializations}
-        canManage={canManage}
+        canManage={canManage && clinicalSpecializationFilterAllowsEditing(activeSpecializationId)}
         lang={lang}
         onSave={async (next) => {
-          await savePatientDiagnoses(patientId, next);
-          setDiagnoses(next);
+          const merged = activeSpecializationId
+            ? mergeFilteredClinicalRecords(diagnoses, visibleDiagnoses, next)
+            : next;
+          await savePatientDiagnoses(patientId, merged);
+          setDiagnoses(merged);
         }}
       />
 
@@ -2083,7 +2132,6 @@ export function PatientClinicalTab({
                   ({p.ops_code})
                 </span>
               ) : null}
-              {episodeChip(p.case_id)}
             </div>
             {p.note ? (
               <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{p.note}</p>
@@ -2138,12 +2186,17 @@ export function PatientClinicalTab({
 
       {/* ---- Anamnese (versioned) ---- */}
       <AnamneseSection
-        active={narrative}
+        active={visibleNarrative}
         specializations={specializations}
         canManage={canManage}
         lang={lang}
         onSave={async (next) => {
-          const saved = await savePatientNarrative(patientId, next);
+          const merged = mergeFilteredClinicalNarrative(
+            narrative,
+            next,
+            activeSpecializationId,
+          );
+          const saved = await savePatientNarrative(patientId, merged);
           setNarrative(saved);
           setVersion((current) => current + 1);
         }}
@@ -2184,7 +2237,6 @@ export function PatientClinicalTab({
                   {item.occurred_on}
                 </span>
               ) : null}
-              {episodeChip(item.case_id)}
             </div>
             <p className="min-w-0 max-w-full whitespace-pre-line break-words text-sm text-foreground">
               {item.note}
@@ -2548,14 +2600,17 @@ export function PatientClinicalTab({
       {/* ---- Examinations / Befunde ---- */}
       <ClinicalSection<ClinicalExamination>
         title={tx("Обследования", "Befunde")}
-        items={examinations}
+        items={visibleExaminations}
         blank={blankExamination}
         isValid={(e) => e.title.trim() !== ""}
         canManage={canManage}
         tx={tx}
         onSave={async (next) => {
-          await savePatientExaminations(patientId, next);
-          setExaminations(next);
+          const merged = activeSpecializationId
+            ? mergeFilteredClinicalRecords(examinations, visibleExaminations, next)
+            : next;
+          await savePatientExaminations(patientId, merged);
+          setExaminations(merged);
         }}
         rowView={(e) => (
           <div className="min-w-0 space-y-1">
@@ -2571,7 +2626,6 @@ export function PatientClinicalTab({
                   {tx("Ожидается", "Ausstehend")}
                 </Badge>
               ) : null}
-              {episodeChip(e.case_id)}
             </div>
             {e.result ? (
               <p className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">{e.result}</p>

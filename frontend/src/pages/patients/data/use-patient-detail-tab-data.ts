@@ -11,7 +11,6 @@ import type {
 } from "../model/detail-model";
 import type {
   AppointmentItem,
-  CaseItem,
   ContractItem,
   DocumentAlerts,
   DocumentItem,
@@ -43,7 +42,6 @@ type UsePatientDetailTabDataArgs = {
 
 type TabState = {
   appointments: AppointmentItem[];
-  cases: CaseItem[];
   contracts: ContractItem[];
   documentAlerts: DocumentAlerts | null;
   documents: DocumentItem[];
@@ -71,7 +69,6 @@ type InvoiceListResponse = {
 
 const REMOTE_PATIENT_DETAIL_TABS = new Set([
   "relations",
-  "cases",
   "orders",
   "appointments",
   "documents",
@@ -83,7 +80,6 @@ const REMOTE_PATIENT_DETAIL_TABS = new Set([
 
 const EMPTY_TAB_STATE: TabState = {
   appointments: [],
-  cases: [],
   contracts: [],
   documentAlerts: null,
   documents: [],
@@ -170,7 +166,6 @@ export function usePatientDetailTabData({
     (activeTab === "contracts" && !canViewContracts) ||
     (activeTab === "invoices" && !canViewInvoices) ||
     ((activeTab === "relations" ||
-      activeTab === "cases" ||
       activeTab === "orders" ||
       activeTab === "appointments" ||
       activeTab === "workflow" ||
@@ -207,18 +202,6 @@ export function usePatientDetailTabData({
                 type: "settle",
                 requestKey,
                 update: (current) => ({ ...current, relations: result }),
-              });
-            });
-            break;
-          }
-          case "cases": {
-            const result = await apiFetch<CaseItem[]>(`/patients/${id}/cases`, { signal });
-            if (signal.aborted) return;
-            startTransition(() => {
-              dispatchTabData({
-                type: "settle",
-                requestKey,
-                update: (current) => ({ ...current, cases: result }),
               });
             });
             break;
@@ -396,8 +379,6 @@ export function usePatientDetailTabData({
               switch (activeTab) {
                 case "relations":
                   return { ...current, relations: [] };
-                case "cases":
-                  return { ...current, cases: [] };
                 case "orders":
                   return { ...current, orders: [] };
                 case "appointments":

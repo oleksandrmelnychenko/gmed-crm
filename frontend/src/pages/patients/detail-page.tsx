@@ -1203,7 +1203,6 @@ function usePatientDetailPageContent() {
   const assignableStaff = useMemo(() => staff.filter((s) => canAssignTarget(user?.role, s.role)), [staff, user?.role]);
   const {
     appointments,
-    cases,
     contracts,
     documentAlerts,
     documents,
@@ -1256,12 +1255,6 @@ function usePatientDetailPageContent() {
       ? {
           key: "relations",
           label: t.patients_relations,
-        }
-      : null,
-    canViewOperationalSurface
-      ? {
-          key: "cases",
-          label: t.cases_title,
         }
       : null,
     canViewOperationalSurface
@@ -1679,6 +1672,7 @@ function usePatientDetailPageContent() {
     activeTab,
     applyActiveTab,
     canViewContracts,
+    canViewClinical,
     canViewDocuments,
     canViewInvoices,
     canViewOperationalSurface,
@@ -1898,10 +1892,6 @@ function usePatientDetailPageContent() {
     setDocumentUploadOpen(true);
   }
 
-  function openCaseWorkspace(caseId: string) {
-    staffGo(`/cases/${caseId}?patient=${id}`);
-  }
-
   async function handleSaveInvoiceStatus(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!invoiceManageId) return;
@@ -2075,7 +2065,6 @@ function usePatientDetailPageContent() {
         canViewContracts={canViewContracts}
         canViewDocuments={canViewDocuments}
         canViewInvoices={canViewInvoices}
-        cases={cases}
         complianceExportBusy={complianceExportBusy}
         contractExpiringSoonCount={contractExpiringSoonCount}
         contractPendingCount={contractPendingCount}
@@ -2093,7 +2082,6 @@ function usePatientDetailPageContent() {
         usersStatusLabel={t.users_status}
         patientsAssignedByLabel={t.patients_assigned_by}
         usersCreatedLabel={t.users_created}
-        emptyCasesLabel={t.cases_no_match}
         emptyOrdersLabel={l("patients_no_orders_have_been_recorded_for_this_patient_yet")}
         emptyAppointmentsLabel={l("patients_no_appointments_are_scheduled_for_this_patient_yet")}
         fieldValue={fieldVal}
@@ -2143,7 +2131,6 @@ function usePatientDetailPageContent() {
         onManageInvoice={openInvoiceManager}
         onNotesSheetOpenChange={setNotesSheetOpen}
         onOpenAppointment={(appointmentId) => { staffGo(`/appointments?appointment=${appointmentId}`); }}
-        onOpenCase={openCaseWorkspace}
         onOpenContract={(contractId) => {
           window.open(`/contracts?contract=${contractId}`, "_blank", "noopener,noreferrer");
         }}

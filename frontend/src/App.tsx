@@ -21,6 +21,7 @@ import { AppLayout } from "@/components/layout";
 import { LoginPage } from "@/pages/login";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
+import { LegacyCasesRedirect } from "@/pages/cases/legacy-cases-redirect";
 
 const STALE_CHUNK_RELOAD_KEY = "gmed:stale-chunk-reload";
 const STALE_CHUNK_ERROR_PATTERNS = [
@@ -127,18 +128,6 @@ const InvoicesPage = lazy(() =>
 const FinanceCatalogPage = lazy(() =>
   import("@/pages/finance-catalog").then((module) => ({
     default: module.FinanceCatalogPage,
-  })),
-);
-
-const CasesPage = lazy(() =>
-  import("@/pages/cases").then((module) => ({
-    default: module.CasesPage,
-  })),
-);
-
-const CaseWorkspacePage = lazy(() =>
-  import("@/pages/case-workspace").then((module) => ({
-    default: module.CaseWorkspacePage,
   })),
 );
 
@@ -368,8 +357,8 @@ function AppRoutes() {
             <Route path="services" element={<ServicesPage />} />
             <Route path="feedback" element={<FeedbackPage />} />
             <Route path="privacy" element={<PrivacyPage />} />
-            <Route path="cases" element={<CasesPage />} />
-            <Route path="cases/:caseId" element={<CaseWorkspacePage />} />
+            <Route path="cases" element={<LegacyCasesRedirect />} />
+            <Route path="cases/:caseId" element={<LegacyCasesRedirect />} />
             <Route path="appointments" element={<AppointmentsPage />} />
             <Route path="interpreters" element={<InterpretersPage />} />
             <Route path="interpreters/:interpreterId" element={<InterpretersPage />} />

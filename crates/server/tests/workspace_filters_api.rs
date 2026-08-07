@@ -12214,6 +12214,117 @@ async fn case_pain_records_section_round_trip_with_all_twelve_fields_via_api() {
 }
 
 #[tokio::test]
+async fn patient_owned_pain_and_symptoms_do_not_require_a_case() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-owned-pain-symptoms");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/pain"),
+        &pm_bearer,
+        Some(json!({
+            "items": [{
+                "lokalisierung": "Right shoulder",
+                "nrs_aktuell": 6,
+                "nrs_anfang": 3
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["count"], 1);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/symptoms"),
+        &pm_bearer,
+        Some(json!({
+            "items": [{
+                "beschreibung": "Intermittent numbness",
+                "fachrichtung": "Neurology"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["count"], 1);
+
+    let (status, pain) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/pain"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{pain}");
+    assert_eq!(pain["items"][0]["lokalisierung"], "Right shoulder");
+    assert!(pain["items"][0]["case_id"].is_null());
+
+    let (status, symptoms) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/symptoms"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{symptoms}");
+    assert_eq!(symptoms["items"][0]["beschreibung"], "Intermittent numbness");
+    assert!(symptoms["items"][0]["case_id"].is_null());
+
+    let pain_owner: (Uuid, Option<Uuid>) = sqlx::query_as(
+        "SELECT patient_id, case_id FROM pain_records WHERE patient_id = $1",
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(pain_owner, (patient_id, None));
+
+    let symptom_owner: (Uuid, Option<Uuid>) = sqlx::query_as(
+        "SELECT patient_id, case_id FROM symptome WHERE patient_id = $1",
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(symptom_owner, (patient_id, None));
+
+    let sections: Vec<String> = sqlx::query_scalar(
+        "SELECT section FROM patient_clinical_versions
+         WHERE patient_id = $1 AND section IN ('pain_records', 'symptoms')
+         ORDER BY section",
+    )
+    .bind(patient_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(sections, vec!["pain_records", "symptoms"]);
+
+    let unrelated_pm_id = seed_user(&pool, &unique_tag("unrelated-pm"), "patient_manager").await;
+    let unrelated_bearer = auth_header_for(unrelated_pm_id, "patient_manager");
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/pain"),
+        &unrelated_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+}
+
+#[tokio::test]
 async fn case_text_snippets_support_create_list_update() {
     let Some((app, pool, _admin_id, _)) = test_context().await else {
         return;

@@ -12,7 +12,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import { formatUnknownValue, type Translations } from "@/lib/i18n";
+import type { Translations } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import {
@@ -25,7 +25,6 @@ import {
 } from "../../model/detail-model";
 import type {
   AppointmentItem,
-  CaseItem,
   ContractItem,
   DocumentAlerts,
   DocumentItem,
@@ -49,7 +48,6 @@ import { PatientOverviewCard } from "../sections/patient-overview-card";
 const loadPatientProfileTab = () => import("../sections/patient-profile-section");
 const loadPatientCuratorsTab = () => import("../sections/patient-curators-tab");
 const loadPatientRelationsTab = () => import("../sections/patient-relations-tab");
-const loadPatientCasesTab = () => import("../sections/patient-cases-tab");
 const loadPatientOrdersTab = () => import("../sections/patient-orders-tab");
 const loadPatientAppointmentsTab = () => import("../sections/patient-appointments-tab");
 const loadPatientClinicalTab = () => import("../sections/patient-clinical-tab");
@@ -72,11 +70,6 @@ const LazyPatientCuratorsTab = lazy(async () => {
 const LazyPatientRelationsTab = lazy(async () => {
   const mod = await loadPatientRelationsTab();
   return { default: mod.PatientRelationsTab };
-});
-
-const LazyPatientCasesTab = lazy(async () => {
-  const mod = await loadPatientCasesTab();
-  return { default: mod.PatientCasesTab };
 });
 
 const LazyPatientOrdersTab = lazy(async () => {
@@ -129,9 +122,6 @@ function preloadPatientWorkspaceTab(tab: string) {
       break;
     case "relations":
       void loadPatientRelationsTab();
-      break;
-    case "cases":
-      void loadPatientCasesTab();
       break;
     case "orders":
       void loadPatientOrdersTab();
@@ -222,7 +212,6 @@ type PatientDetailWorkspaceContentProps = {
   canViewContracts: boolean;
   canViewDocuments: boolean;
   canViewInvoices: boolean;
-  cases: CaseItem[];
   complianceExportBusy: boolean;
   contractExpiringSoonCount: number;
   contractPendingCount: number;
@@ -240,7 +229,6 @@ type PatientDetailWorkspaceContentProps = {
   usersStatusLabel: string;
   patientsAssignedByLabel: string;
   usersCreatedLabel: string;
-  emptyCasesLabel: string;
   emptyOrdersLabel: string;
   emptyAppointmentsLabel: string;
   fieldValue: FieldValueFn;
@@ -294,7 +282,6 @@ type PatientDetailWorkspaceContentProps = {
   onManageInvoice: (invoice: InvoiceItem) => void;
   onNotesSheetOpenChange: (open: boolean) => void;
   onOpenAppointment: (appointmentId: string) => void;
-  onOpenCase: (caseId: string) => void;
   onOpenContract: (contractId: string) => void;
   onOpenInvoice: (invoiceId: string) => void;
   onOpenOrder: (orderId: string) => void;
@@ -389,7 +376,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     canViewContracts,
     canViewDocuments,
     canViewInvoices,
-    cases,
     complianceExportBusy,
     contractExpiringSoonCount,
     contractPendingCount,
@@ -407,7 +393,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     usersStatusLabel,
     patientsAssignedByLabel,
     usersCreatedLabel,
-    emptyCasesLabel,
     emptyOrdersLabel,
     emptyAppointmentsLabel,
     fieldValue,
@@ -457,7 +442,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     onManageInvoice,
     onNotesSheetOpenChange,
     onOpenAppointment,
-    onOpenCase,
     onOpenContract,
     onOpenInvoice,
     onOpenOrder,
@@ -681,19 +665,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               onOpenPatient={onOpenPatient}
               relationTypeLabel={relationTypeLabel}
               relations={relations}
-              tabLoading={tabLoading}
-            />
-          ) : null}
-
-          {activeTab === "cases" ? (
-            <LazyPatientCasesTab
-              cases={cases}
-              emptyLabel={emptyCasesLabel}
-              formatDate={formatDate}
-              onOpenCase={onOpenCase}
-              statusColors={statusColors}
-              statusLabel={(status) => tr[`cases_${status}`] ?? formatUnknownValue(status, t)}
-              t={t}
               tabLoading={tabLoading}
             />
           ) : null}

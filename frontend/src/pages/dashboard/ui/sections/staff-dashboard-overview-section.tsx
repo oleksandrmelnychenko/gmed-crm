@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { ArrowRight, ClipboardList, Stethoscope, UserPlus, Users as UsersIcon } from "lucide-react";
+import { ArrowRight, ClipboardList, UserPlus, Users as UsersIcon } from "lucide-react";
 
 import { numberOrDash } from "../../model/staff-dashboard-formatters";
 import type {
@@ -82,7 +82,6 @@ export function StaffDashboardOverviewSection({
   newPatientsThisMonth,
   openTasksCount,
   overview,
-  onOpenCases,
   onOpenLeads,
   onOpenOrders,
   onOpenPatients,
@@ -97,7 +96,6 @@ export function StaffDashboardOverviewSection({
   newPatientsThisMonth: number;
   openTasksCount: number;
   overview: OverviewStats | null;
-  onOpenCases: () => void;
   onOpenLeads: () => void;
   onOpenOrders: () => void;
   onOpenPatients: () => void;
@@ -119,7 +117,7 @@ export function StaffDashboardOverviewSection({
         <PeriodSwitcher value={period} onChange={onPeriodChange} tr={tr} />
       </div>
 
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
         <DashKpi
           label={tr.patients_title ?? tr.common_unknown}
           value={numberOrDash(overview?.patients)}
@@ -133,13 +131,6 @@ export function StaffDashboardOverviewSection({
           hint={tr.dash_this_month ?? tr.common_unknown}
           icon={UserPlus}
           onClick={onOpenPatients}
-        />
-        <DashKpi
-          label={tr.cases_title ?? tr.common_unknown}
-          value={numberOrDash(overview?.cases)}
-          hint={tr.common_active?.toLowerCase() ?? tr.common_unknown}
-          icon={Stethoscope}
-          onClick={onOpenCases}
         />
         <DashKpi
           label={tr.orders_title ?? tr.common_unknown}

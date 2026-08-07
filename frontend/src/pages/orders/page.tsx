@@ -2636,15 +2636,6 @@ function useOrdersPageContent() {
   const detailProvidersHref = detailPatientId
     ? `/providers?patient=${encodeURIComponent(detailPatientId)}`
     : "/providers";
-  const detailCaseId = orderDetail?.case_id ?? null;
-  const detailCaseCode = orderDetail?.case_code?.trim() || "";
-  const detailCaseHref = detailCaseId
-    ? `/cases/${encodeURIComponent(detailCaseId)}${
-        detailPatientId ? `?patient=${encodeURIComponent(detailPatientId)}` : ""
-      }`
-    : detailPatientId
-      ? `/patients/${detailPatientId}?tab=cases`
-      : "";
   const detailRequiresPatient = Boolean(
     orderDetail && !detailPatientId && detailLeadId,
   );
@@ -2661,17 +2652,6 @@ function useOrdersPageContent() {
                 : detailSubjectName,
               href: detailSubjectHref,
             }]
-          : []),
-        ...(detailCaseHref
-          ? [
-              {
-                label: l("orders_falle"),
-                description: detailCaseCode
-                  ? detailCaseCode
-                  : l("orders_fallkontext_dieses_patienten_offnen"),
-                href: detailCaseHref,
-              },
-            ]
           : []),
         ...(detailPatientId
           ? [

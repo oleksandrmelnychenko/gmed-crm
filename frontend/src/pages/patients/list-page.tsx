@@ -489,7 +489,6 @@ export function PatientsPage() {
             onAssign: handleAssignPatient,
             onOpenChange: handleDetailOpenChange,
             onRefresh: handleDetailSaved,
-            onOpenCases: () => detail ? staffGo(`/cases?patient=${detail.id}`) : undefined,
             onOpenOrders: () => detail ? staffGo(`/orders?patient=${detail.id}`) : undefined,
             onOpenAppointments: () => detail ? staffGo(`/appointments?patient=${detail.id}`) : undefined,
             onOpenContracts: () => detail ? staffGo(`/contracts?patient=${detail.id}`) : undefined,

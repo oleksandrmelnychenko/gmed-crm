@@ -373,7 +373,7 @@ describe("resolvePatientTimelineRoute", () => {
     ).toBe("/admin/compliance");
   });
 
-  it("keeps case and order timeline links inside the patient workspace context", () => {
+  it("routes legacy case timeline entries into the patient clinical profile", () => {
     expect(
       resolvePatientTimelineRoute(
         { entity_type: "case", entity_id: "case-1" },
@@ -385,7 +385,7 @@ describe("resolvePatientTimelineRoute", () => {
           canOpenComplianceWorkspace: true,
         }
       )
-    ).toBe("/cases/case-1?patient=patient-1");
+    ).toBe("/patients/patient-1?tab=clinical");
     expect(
       resolvePatientTimelineRoute(
         { entity_type: "order", entity_id: "order-1" },
@@ -455,6 +455,18 @@ describe("resolvePatientTimelineRoute", () => {
 });
 
 describe("normalizePatientDetailTab", () => {
+  it("maps the retired cases tab to the clinical profile", () => {
+    expect(
+      normalizePatientDetailTab("cases", {
+        canViewOperationalSurface: true,
+        canViewClinical: true,
+        canViewDocuments: true,
+        canViewContracts: true,
+        canViewInvoices: true,
+      }),
+    ).toBe("clinical");
+  });
+
   it("redirects forbidden patient-detail tabs back to profile", () => {
     expect(
       normalizePatientDetailTab("documents", {

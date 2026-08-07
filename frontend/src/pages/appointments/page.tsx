@@ -110,12 +110,10 @@ import {
 import type { QueueScheduleDraft } from "@/pages/appointments/ui/sheets/queue-sheet";
 import { CreateSheetLayer, preloadCreateSheetLayer } from "@/pages/appointments/ui/sheets/create-sheet-layer";
 import {
-  LinkedCasesSheetLayer,
   LinkedDocumentsSheetLayer,
   LinkedPatientSheetLayer,
   LinkedProviderSheetLayer,
   LinkedRecordsSheetLayer,
-  preloadLinkedCasesSheet,
   preloadLinkedDocumentsSheet,
   preloadLinkedPatientSheet,
   preloadLinkedProviderSheet,
@@ -431,7 +429,6 @@ function useStaffAppointmentsPageContent() {
     linkedPatientVersion,
     linkedProviderOpen,
     linkedProviderId,
-    linkedCasesOpen,
     linkedDocumentsOpen,
     refreshLinkedPatient,
     resetLinkedSheetState,
@@ -439,7 +436,6 @@ function useStaffAppointmentsPageContent() {
     handleLinkedPreviewOpenChange,
     handleLinkedPatientOpenChange,
     handleLinkedProviderOpenChange,
-    handleLinkedCasesOpenChange,
     handleLinkedDocumentsOpenChange,
   } = useAppointmentLinkedSheetState({
     detailId: detail?.id ?? null,
@@ -449,7 +445,6 @@ function useStaffAppointmentsPageContent() {
     staffGo,
     preloadPatientSheet: preloadLinkedPatientSheet,
     preloadProviderSheet: preloadLinkedProviderSheet,
-    preloadCasesSheet: preloadLinkedCasesSheet,
     preloadDocumentsSheet: preloadLinkedDocumentsSheet,
     preloadLinkedRecordsSheet,
   });
@@ -485,9 +480,6 @@ function useStaffAppointmentsPageContent() {
     linkedProviderDetailLoading,
     linkedProviderDetailError,
     linkedProviderDetail,
-    linkedCasesLoading,
-    linkedCasesError,
-    linkedCasesItems,
     linkedDocumentsLoading,
     linkedDocumentsError,
     linkedDocumentsItems,
@@ -497,7 +489,6 @@ function useStaffAppointmentsPageContent() {
     linkedPreviewKind,
     linkedProviderOpen,
     linkedProviderId,
-    linkedCasesOpen,
     linkedDocumentsOpen,
     failedLoadMessage: t.common_failed_load,
   });
@@ -734,8 +725,8 @@ function useStaffAppointmentsPageContent() {
 
     const handoffStakeholders =
       detail && !detail.is_blocked
-        ? buildHandoffStakeholders(detail, detailAssignments, {
-            cases_title: tr.cases_title,
+          ? buildHandoffStakeholders(detail, detailAssignments, {
+            patients_title: tr.patients_title,
             patients_assign_owner: tr.patients_assign_owner,
             role_interpreter: tr.role_interpreter,
           })
@@ -985,7 +976,7 @@ function useStaffAppointmentsPageContent() {
     detailTasks,
     permissions.canManageConciergeBilling,
       taskAssignableStaff,
-      tr.cases_title,
+      tr.patients_title,
       tr.patients_assign_owner,
       tr.role_interpreter,
       shouldBuildExtendedDetailDerivedState,
@@ -1879,7 +1870,6 @@ function useStaffAppointmentsPageContent() {
         onAssigneeChange={setLinkedPatientSelectedAssignee}
         onAssign={handleAssignLinkedPatient}
         onRefresh={refreshLinkedPatient}
-        onOpenCases={() => undefined}
         onOpenOrders={() => undefined}
         onOpenAppointments={() => undefined}
         onOpenContracts={() => undefined}
@@ -1893,16 +1883,6 @@ function useStaffAppointmentsPageContent() {
         loading={linkedProviderDetailLoading}
         error={linkedProviderDetailError}
         fallbackTitle={t.providers_detail}
-        formatDateTimeLabel={formatDateTimeLabel}
-      />
-
-      <LinkedCasesSheetLayer
-        open={linkedCasesOpen}
-        onOpenChange={handleLinkedCasesOpenChange}
-        loading={linkedCasesLoading}
-        error={linkedCasesError}
-        items={linkedCasesItems}
-        patientId={detail?.patient_id ?? null}
         formatDateTimeLabel={formatDateTimeLabel}
       />
 

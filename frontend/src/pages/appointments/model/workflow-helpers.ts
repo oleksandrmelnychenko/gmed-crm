@@ -58,7 +58,7 @@ export function buildHandoffStakeholders(
   assignments: PatientAssignment[],
   tr?: Record<string, string>,
 ): HandoffStakeholder[] {
-  const caseBadge = tr?.cases_title ?? appointmentText("appointments_handoff_case_assignment");
+  const patientBadge = tr?.patients_title ?? appointmentText("appointments_patient");
   const ownerBadge = tr?.patients_assign_owner ?? appointmentText("appointments_handoff_appointment_owner");
   const interpreterBadge = tr?.role_interpreter ?? appointmentText("appointments_schedule_scope_interpreter");
   const items = new Map<string, HandoffStakeholder>();
@@ -71,7 +71,7 @@ export function buildHandoffStakeholders(
       id: assignment.user_id,
       name: assignment.user_name,
       role: assignment.user_role,
-      badges: [caseBadge],
+      badges: [patientBadge],
     });
   }
 

@@ -1,6 +1,5 @@
 import { useEffect, useReducer } from "react";
 
-import type { CaseRosterItem } from "@/components/cases-roster-section";
 import { apiFetch } from "@/lib/api";
 import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import { normalizeLinkedPreviewPayload } from "@/pages/appointments/model/linked-preview";
@@ -20,7 +19,6 @@ type UseAppointmentLinkedRecordsOptions = {
   linkedPreviewKind: LinkedPreviewKind | null;
   linkedProviderOpen: boolean;
   linkedProviderId: string;
-  linkedCasesOpen: boolean;
   linkedDocumentsOpen: boolean;
   failedLoadMessage: string;
 };
@@ -32,9 +30,6 @@ type LinkedRecordsState = {
   linkedProviderDetailLoading: boolean;
   linkedProviderDetailError: string;
   linkedProviderDetail: ProviderSheetDetail | null;
-  linkedCasesLoading: boolean;
-  linkedCasesError: string;
-  linkedCasesItems: CaseRosterItem[];
   linkedDocumentsLoading: boolean;
   linkedDocumentsError: string;
   linkedDocumentsItems: LinkedDocumentItem[];
@@ -52,9 +47,6 @@ function createLinkedRecordsState(): LinkedRecordsState {
     linkedProviderDetailLoading: false,
     linkedProviderDetailError: "",
     linkedProviderDetail: null,
-    linkedCasesLoading: false,
-    linkedCasesError: "",
-    linkedCasesItems: [],
     linkedDocumentsLoading: false,
     linkedDocumentsError: "",
     linkedDocumentsItems: [],
@@ -71,34 +63,12 @@ function linkedRecordsReducer(
   };
 }
 
-async function resolveOrderCaseId(orderId: string | null): Promise<string | null> {
-  if (!orderId) return null;
-  try {
-    const order = await apiFetch<{ case_id?: string | null }>(`/orders/${orderId}`);
-    return order.case_id ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function narrowToOrderCase(
-  items: CaseRosterItem[],
-  orderCaseId: string | null,
-): CaseRosterItem[] {
-  if (!orderCaseId) return items;
-  const matched = items.filter(
-    (item) => item.id === orderCaseId || item.case_uuid === orderCaseId,
-  );
-  return matched.length > 0 ? matched : items;
-}
-
 export function useAppointmentLinkedRecords({
   detail,
   linkedPreviewOpen,
   linkedPreviewKind,
   linkedProviderOpen,
   linkedProviderId,
-  linkedCasesOpen,
   linkedDocumentsOpen,
   failedLoadMessage,
 }: UseAppointmentLinkedRecordsOptions) {
@@ -114,9 +84,6 @@ export function useAppointmentLinkedRecords({
     linkedProviderDetailLoading,
     linkedProviderDetailError,
     linkedProviderDetail,
-    linkedCasesLoading,
-    linkedCasesError,
-    linkedCasesItems,
     linkedDocumentsLoading,
     linkedDocumentsError,
     linkedDocumentsItems,
@@ -161,20 +128,9 @@ export function useAppointmentLinkedRecords({
         } else if (linkedPreviewKind === "documents") {
           endpoint = `/documents?appointment_id=${currentDetail.id}&patient_id=${currentDetail.patient_id}`;
         } else {
-          const orderCaseId = await resolveOrderCaseId(
-            currentDetail.order_id ?? null,
+          throw new Error(
+            appointmentText("appointments_failed_to_load_linked_records"),
           );
-          const cases = await apiFetch<CaseRosterItem[]>(
-            `/cases?patient_id=${currentDetail.patient_id}`,
-          );
-          if (!active) return;
-          dispatchLinkedRecordsState({
-            linkedPreviewPayload: normalizeLinkedPreviewPayload(
-              narrowToOrderCase(cases, orderCaseId),
-            ),
-            linkedPreviewLoading: false,
-          });
-          return;
         }
 
         const payload = await apiFetch<unknown>(endpoint);
@@ -243,54 +199,6 @@ export function useAppointmentLinkedRecords({
   }, [failedLoadMessage, linkedProviderId, linkedProviderOpen]);
 
   useEffect(() => {
-    if (!linkedCasesOpen || !detail?.patient_id) {
-      dispatchLinkedRecordsState({
-        linkedCasesLoading: false,
-        linkedCasesError: "",
-        linkedCasesItems: [],
-      });
-      return;
-    }
-
-    let active = true;
-    dispatchLinkedRecordsState({
-      linkedCasesLoading: true,
-      linkedCasesError: "",
-    });
-
-    const orderId = detail.order_id ?? null;
-    const patientId = detail.patient_id;
-
-    async function loadLinkedCases() {
-      const orderCaseId = await resolveOrderCaseId(orderId);
-      const items = await apiFetch<CaseRosterItem[]>(
-        `/cases?patient_id=${patientId}`,
-      );
-      if (!active) return;
-      dispatchLinkedRecordsState({
-        linkedCasesItems: narrowToOrderCase(items, orderCaseId),
-        linkedCasesLoading: false,
-      });
-    }
-
-    loadLinkedCases().catch((error) => {
-      if (!active) return;
-      dispatchLinkedRecordsState({
-        linkedCasesItems: [],
-        linkedCasesError: appointmentActionErrorMessage(
-          error,
-          failedLoadMessage,
-        ),
-        linkedCasesLoading: false,
-      });
-    });
-
-    return () => {
-      active = false;
-    };
-  }, [detail?.order_id, detail?.patient_id, failedLoadMessage, linkedCasesOpen]);
-
-  useEffect(() => {
     if (!linkedDocumentsOpen || !detail?.id || !detail.patient_id) {
       dispatchLinkedRecordsState({
         linkedDocumentsLoading: false,
@@ -343,9 +251,6 @@ export function useAppointmentLinkedRecords({
     linkedProviderDetailLoading,
     linkedProviderDetailError,
     linkedProviderDetail,
-    linkedCasesLoading,
-    linkedCasesError,
-    linkedCasesItems,
     linkedDocumentsLoading,
     linkedDocumentsError,
     linkedDocumentsItems,

@@ -492,8 +492,7 @@ export type LinkedPreviewKind =
   | "patient"
   | "order"
   | "provider"
-  | "documents"
-  | "cases";
+  | "documents";
 
 export type LinkedPreviewRecord = Record<string, unknown>;
 

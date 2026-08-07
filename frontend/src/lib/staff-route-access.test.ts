@@ -207,6 +207,12 @@ describe("canAccessStaffRoute", () => {
     expect(canAccessStaffRoute("sales", "/cases")).toBe(false);
   });
 
+  it("keeps legacy case routes accessible for redirects but out of global navigation", () => {
+    expect(canAccessStaffRoute("patient_manager", "/cases/case-1")).toBe(true);
+    expect(listStaffNavItems("patient_manager").some((item) => item.id === "cases")).toBe(false);
+    expect(listStaffNavItems("ceo").some((item) => item.id === "cases")).toBe(false);
+  });
+
   it("blocks non-order roles from /orders", () => {
     expect(canAccessStaffRoute("patient_manager", "/orders")).toBe(true);
     expect(

@@ -75,7 +75,6 @@ export type PatientDetailSheetProps = {
   onAssign: () => void;
   onOpenChange: (open: boolean) => void;
   onRefresh: () => void;
-  onOpenCases: () => void;
   onOpenOrders: () => void;
   onOpenAppointments: () => void;
   onOpenContracts: () => void;
@@ -84,7 +83,6 @@ export type PatientDetailSheetProps = {
 
 type PatientOverviewSectionProps = {
   detail: PatientDetail;
-  onOpenCases: () => void;
   onOpenOrders: () => void;
   onOpenAppointments: () => void;
   onOpenContracts: () => void;
@@ -94,7 +92,6 @@ type PatientOverviewSectionProps = {
 
 function PatientOverviewSection({
   detail,
-  onOpenCases,
   onOpenOrders,
   onOpenAppointments,
   onOpenContracts,
@@ -159,9 +156,6 @@ function PatientOverviewSection({
 
       {!hideActions ? (
         <div className="flex flex-wrap gap-1.5 pt-1">
-          <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={onOpenCases}>
-            {t.cases_title}
-          </Button>
           <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" onClick={onOpenOrders}>
             {t.orders_title}
           </Button>
@@ -350,7 +344,6 @@ function PatientDetailSheet({
   onAssign,
   onOpenChange,
   onRefresh,
-  onOpenCases,
   onOpenOrders,
   onOpenAppointments,
   onOpenContracts,
@@ -509,7 +502,6 @@ function PatientDetailSheet({
           {error ? <Banner tone="error">{error}</Banner> : null}
           <PatientOverviewSection
             detail={detail}
-            onOpenCases={onOpenCases}
             onOpenOrders={onOpenOrders}
             onOpenAppointments={onOpenAppointments}
             onOpenContracts={onOpenContracts}

@@ -1,4 +1,4 @@
-import { ArrowLeft, BadgeCheck, CalendarClock, ClipboardList, FileHeart, FileSignature, FolderOpen, History, ReceiptText, ShieldCheck, Stethoscope, type LucideIcon, UserRound, UsersRound } from "lucide-react";
+import { ArrowLeft, BadgeCheck, CalendarClock, ClipboardList, FileSignature, FolderOpen, History, ReceiptText, ShieldCheck, Stethoscope, type LucideIcon, UserRound, UsersRound } from "lucide-react";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 
 import { StaffLink } from "@/components/staff-link";
@@ -36,9 +36,7 @@ export function PatientWorkspaceNav() {
   const canViewInvoices = canViewPatientInvoicesSurface(user?.role);
   const contextualTab = location.pathname.startsWith("/orders/")
     ? "orders"
-    : location.pathname.startsWith("/cases/")
-      ? "cases"
-      : searchParams.get("tab");
+    : searchParams.get("tab");
   const currentTab = routeId
     ? normalizePatientDetailTab(searchParams.get("tab"), {
         canViewOperationalSurface,
@@ -75,13 +73,6 @@ export function PatientWorkspaceNav() {
           key: "relations",
           label: t.patients_relations,
           icon: UsersRound,
-        }
-      : null,
-    canViewOperationalSurface
-      ? {
-          key: "cases",
-          label: l("patients_cases"),
-          icon: FileHeart,
         }
       : null,
     canViewOperationalSurface

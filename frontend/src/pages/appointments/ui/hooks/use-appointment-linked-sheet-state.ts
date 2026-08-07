@@ -11,7 +11,6 @@ type UseAppointmentLinkedSheetStateOptions = {
   staffGo: (href: string) => void;
   preloadPatientSheet: () => void;
   preloadProviderSheet: () => void;
-  preloadCasesSheet: () => void;
   preloadDocumentsSheet: () => void;
   preloadLinkedRecordsSheet: () => void;
 };
@@ -24,7 +23,6 @@ export function useAppointmentLinkedSheetState({
   staffGo,
   preloadPatientSheet,
   preloadProviderSheet,
-  preloadCasesSheet,
   preloadDocumentsSheet,
   preloadLinkedRecordsSheet,
 }: UseAppointmentLinkedSheetStateOptions) {
@@ -37,7 +35,6 @@ export function useAppointmentLinkedSheetState({
   const [linkedPatientVersion, setLinkedPatientVersion] = useState(0);
   const [linkedProviderOpen, setLinkedProviderOpen] = useState(false);
   const [linkedProviderId, setLinkedProviderId] = useState("");
-  const [linkedCasesOpen, setLinkedCasesOpen] = useState(false);
   const [linkedDocumentsOpen, setLinkedDocumentsOpen] = useState(false);
 
   const refreshLinkedPatient = useCallback(() => {
@@ -53,7 +50,6 @@ export function useAppointmentLinkedSheetState({
     setLinkedPatientVersion(0);
     setLinkedProviderOpen(false);
     setLinkedProviderId("");
-    setLinkedCasesOpen(false);
     setLinkedDocumentsOpen(false);
   }, []);
 
@@ -66,7 +62,6 @@ export function useAppointmentLinkedSheetState({
       setLinkedPreviewLabel("");
       setLinkedProviderOpen(false);
       setLinkedProviderId("");
-      setLinkedCasesOpen(false);
       setLinkedDocumentsOpen(false);
       setLinkedPatientId(patientId);
       setLinkedPatientVersion((current) => current + 1);
@@ -85,27 +80,12 @@ export function useAppointmentLinkedSheetState({
       setLinkedPatientOpen(false);
       setLinkedPatientId("");
       setLinkedPatientVersion(0);
-      setLinkedCasesOpen(false);
       setLinkedDocumentsOpen(false);
       setLinkedProviderId(providerId);
       setLinkedProviderOpen(true);
     },
     [preloadProviderSheet],
   );
-
-  const openLinkedCasesSheet = useCallback(() => {
-    preloadCasesSheet();
-    setLinkedPreviewOpen(false);
-    setLinkedPreviewKind(null);
-    setLinkedPreviewLabel("");
-    setLinkedPatientOpen(false);
-    setLinkedPatientId("");
-    setLinkedPatientVersion(0);
-    setLinkedProviderOpen(false);
-    setLinkedProviderId("");
-    setLinkedDocumentsOpen(false);
-    setLinkedCasesOpen(true);
-  }, [preloadCasesSheet]);
 
   const openLinkedDocumentsSheet = useCallback(() => {
     if (!detailId || !detailPatientId) return;
@@ -118,7 +98,6 @@ export function useAppointmentLinkedSheetState({
     setLinkedPatientVersion(0);
     setLinkedProviderOpen(false);
     setLinkedProviderId("");
-    setLinkedCasesOpen(false);
     setLinkedDocumentsOpen(true);
   }, [detailId, detailPatientId, preloadDocumentsSheet]);
 
@@ -137,10 +116,6 @@ export function useAppointmentLinkedSheetState({
         openLinkedProviderById(detailProviderId ?? "");
         return;
       }
-      if (kind === "cases") {
-        openLinkedCasesSheet();
-        return;
-      }
       if (kind === "documents") {
         openLinkedDocumentsSheet();
         return;
@@ -150,7 +125,6 @@ export function useAppointmentLinkedSheetState({
       setLinkedPatientVersion(0);
       setLinkedProviderOpen(false);
       setLinkedProviderId("");
-      setLinkedCasesOpen(false);
       setLinkedDocumentsOpen(false);
       preloadLinkedRecordsSheet();
       setLinkedPreviewKind(kind);
@@ -161,7 +135,6 @@ export function useAppointmentLinkedSheetState({
       detailPatientId,
       detailOrderId,
       detailProviderId,
-      openLinkedCasesSheet,
       openLinkedDocumentsSheet,
       openLinkedPatientById,
       openLinkedProviderById,
@@ -193,10 +166,6 @@ export function useAppointmentLinkedSheetState({
     }
   }, []);
 
-  const handleLinkedCasesOpenChange = useCallback((open: boolean) => {
-    setLinkedCasesOpen(open);
-  }, []);
-
   const handleLinkedDocumentsOpenChange = useCallback((open: boolean) => {
     setLinkedDocumentsOpen(open);
   }, []);
@@ -210,7 +179,6 @@ export function useAppointmentLinkedSheetState({
     linkedPatientVersion,
     linkedProviderOpen,
     linkedProviderId,
-    linkedCasesOpen,
     linkedDocumentsOpen,
     refreshLinkedPatient,
     resetLinkedSheetState,
@@ -219,7 +187,6 @@ export function useAppointmentLinkedSheetState({
     handleLinkedPreviewOpenChange,
     handleLinkedPatientOpenChange,
     handleLinkedProviderOpenChange,
-    handleLinkedCasesOpenChange,
     handleLinkedDocumentsOpenChange,
   };
 }

@@ -23,19 +23,17 @@ function AppointmentLinksSection({
     order: l("appointments_linked_tile_order_description"),
     clinic: l("appointments_linked_tile_clinic_description"),
     documents: l("appointments_linked_tile_documents_description"),
-    cases: l("appointments_linked_tile_cases_description"),
   };
   const patientLabel = appointmentText("appointments_patient");
   const orderLabel = appointmentText("appointments_order");
   const clinicLabel = appointmentText("appointments_clinic");
   const documentsLabel = appointmentText("appointments_documents");
-  const casesLabel = appointmentText("appointments_cases");
 
   return (
     <Section
       title={t.compliance_col_linked_records}
     >
-      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
         <LinkedRecordTile
           title={patientLabel}
           description={descriptions.patient}
@@ -59,11 +57,6 @@ function AppointmentLinksSection({
           title={documentsLabel}
           description={descriptions.documents}
           onClick={() => onOpenPreview("documents", documentsLabel)}
-        />
-        <LinkedRecordTile
-          title={casesLabel}
-          description={descriptions.cases}
-          onClick={() => onOpenPreview("cases", casesLabel)}
         />
       </div>
     </Section>
