@@ -350,6 +350,46 @@ describe("DiagnosisTreeSection", () => {
     expect(html).toContain("shrink-0 text-sm font-medium text-foreground");
     expect(html).not.toContain("border-indigo-300 bg-indigo-50 text-indigo-800");
   });
+
+  it("renders all medical specializations assigned to a diagnosis", () => {
+    const html = renderToStaticMarkup(
+      <DiagnosisTreeSection
+        allDoctors={[]}
+        canManage
+        items={[
+          diagnosis({
+            specialization_ids: ["spec-cardio", "spec-neuro"],
+            specializations: [
+              {
+                id: "spec-cardio",
+                code: "cardiology",
+                name_en: "Cardiology",
+                name_de: "Kardiologie",
+                name_ru: "Кардиология",
+                is_active: true,
+                sort_order: 10,
+              },
+              {
+                id: "spec-neuro",
+                code: "neurology",
+                name_en: "Neurology",
+                name_de: "Neurologie",
+                name_ru: "Неврология",
+                is_active: true,
+                sort_order: 20,
+              },
+            ],
+          }),
+        ]}
+        lang="ru"
+        onSave={async () => undefined}
+        providers={[]}
+      />,
+    );
+
+    expect(html).toContain("Кардиология");
+    expect(html).toContain("Неврология");
+  });
 });
 
 describe("PatientRecommendationsSection", () => {
