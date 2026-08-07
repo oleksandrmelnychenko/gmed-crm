@@ -26,6 +26,8 @@ type ProviderTimelineVisualNode = {
 };
 
 type FlattenProviderTimelineOptions = {
+  collapsedNodeIds?: ReadonlySet<string>;
+  /** @deprecated Use collapsedNodeIds. Kept for compatible callers. */
   collapsedRootIds?: ReadonlySet<string>;
 };
 
@@ -205,7 +207,7 @@ export function buildProviderTimelineTree(
   return sortNodes(roots.map((node) => cloneWithoutCycles(node, new Set())));
 }
 
-const EMPTY_COLLAPSED_ROOT_IDS = new Set<string>();
+const EMPTY_COLLAPSED_NODE_IDS = new Set<string>();
 
 export function flattenProviderTimelineTree(
   nodes: readonly ProviderTimelineNode[],
@@ -213,11 +215,14 @@ export function flattenProviderTimelineTree(
   depth = 0,
   ancestorHasNext: boolean[] = [],
 ): ProviderTimelineVisualNode[] {
-  const collapsedRootIds = options.collapsedRootIds ?? EMPTY_COLLAPSED_ROOT_IDS;
+  const collapsedNodeIds =
+    options.collapsedNodeIds ??
+    options.collapsedRootIds ??
+    EMPTY_COLLAPSED_NODE_IDS;
 
   return nodes.flatMap((node, index) => {
     const isLast = index === nodes.length - 1;
-    const isCollapsedRoot = depth === 0 && collapsedRootIds.has(node.provider.id);
+    const isCollapsed = collapsedNodeIds.has(node.provider.id);
     return [
       {
         ancestorHasNext,
@@ -226,7 +231,7 @@ export function flattenProviderTimelineTree(
         isLast,
         node,
       },
-      ...(isCollapsedRoot
+      ...(isCollapsed
         ? []
         : flattenProviderTimelineTree(
             node.children,
@@ -255,7 +260,7 @@ export function ProviderHierarchyTimeline({
   selectedProviderId,
   tr,
 }: ProviderHierarchyTimelineProps) {
-  const [collapsedRootIds, setCollapsedRootIds] = useState<Set<string>>(() => new Set());
+  const [collapsedNodeIds, setCollapsedNodeIds] = useState<Set<string>>(() => new Set());
   const [pageIndex, setPageIndex] = useState(0);
   const tree = useMemo(() => buildProviderTimelineTree(providers), [providers]);
   const totalPages = Math.max(1, Math.ceil(tree.length / TIMELINE_ROOTS_PAGE_SIZE));
@@ -266,11 +271,11 @@ export function ProviderHierarchyTimeline({
     [pageStart, tree],
   );
   const timelineItems = useMemo(
-    () => flattenProviderTimelineTree(pagedTree, { collapsedRootIds }),
-    [collapsedRootIds, pagedTree],
+    () => flattenProviderTimelineTree(pagedTree, { collapsedNodeIds }),
+    [collapsedNodeIds, pagedTree],
   );
-  const toggleRootCollapsed = (providerId: string) => {
-    setCollapsedRootIds((current) => {
+  const toggleNodeCollapsed = (providerId: string) => {
+    setCollapsedNodeIds((current) => {
       const next = new Set(current);
       if (next.has(providerId)) {
         next.delete(providerId);
@@ -310,10 +315,10 @@ export function ProviderHierarchyTimeline({
               <Fragment key={item.node.provider.id}>
                 <TimelineNode
                   item={item}
-                  isCollapsed={item.depth === 0 && collapsedRootIds.has(item.node.provider.id)}
+                  isCollapsed={collapsedNodeIds.has(item.node.provider.id)}
                   lang={lang}
                   onProviderClick={onProviderClick}
-                  onToggleRootCollapsed={toggleRootCollapsed}
+                  onToggleCollapsed={toggleNodeCollapsed}
                   selectedProviderId={selectedProviderId}
                   tr={tr}
                 />
@@ -395,7 +400,7 @@ type TimelineNodeProps = {
   item: ProviderTimelineVisualNode;
   lang: Lang;
   onProviderClick: (providerId: string) => void;
-  onToggleRootCollapsed: (providerId: string) => void;
+  onToggleCollapsed: (providerId: string) => void;
   selectedProviderId?: string | null;
   tr: Record<string, string>;
 };
@@ -424,7 +429,7 @@ function TimelineNode({
   item,
   lang,
   onProviderClick,
-  onToggleRootCollapsed,
+  onToggleCollapsed,
   selectedProviderId,
   tr,
 }: TimelineNodeProps) {
@@ -440,7 +445,7 @@ function TimelineNode({
   const specializationText = providerSpecializationText(provider, lang);
   const connectorWidth = (depth + 1) * CONNECTOR_STEP;
   const currentCenter = depth * CONNECTOR_STEP + CONNECTOR_CENTER;
-  const canToggleRoot = depth === 0 && hasChildren;
+  const canToggle = hasChildren;
 
   return (
     <div className="relative flex min-w-0 items-stretch">
@@ -495,7 +500,7 @@ function TimelineNode({
           active && "border-primary/55 bg-white shadow-[inset_3px_0_0_var(--primary),0_1px_3px_rgba(15,23,42,0.08)]",
         )}
       >
-        {canToggleRoot ? (
+        {canToggle ? (
           <button
             type="button"
             aria-expanded={!isCollapsed}
@@ -513,7 +518,7 @@ function TimelineNode({
               "relative flex size-7 shrink-0 items-center justify-center rounded-full border bg-background transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
               tone.dot,
             )}
-            onClick={() => onToggleRootCollapsed(provider.id)}
+            onClick={() => onToggleCollapsed(provider.id)}
           >
             <ProviderCategoryIcon
               providerType={provider.provider_type}

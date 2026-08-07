@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import type { ProviderOrganizationLevel, ProviderSummary } from "../model/types";
-import { buildProviderTimelineTree, flattenProviderTimelineTree } from "./provider-hierarchy-timeline";
+import {
+  buildProviderTimelineTree,
+  flattenProviderTimelineTree,
+  ProviderHierarchyTimeline,
+} from "./provider-hierarchy-timeline";
 
 function provider(
   id: string,
@@ -63,7 +69,7 @@ describe("buildProviderTimelineTree", () => {
     expect(tree[0].children).toEqual([]);
   });
 
-  it("hides descendants of collapsed root providers", () => {
+  it("hides descendants of collapsed providers at every tree depth", () => {
     const tree = buildProviderTimelineTree([
       provider("root", "TUM", "organization"),
       provider("clinic", "Cardiology", "clinic", "root"),
@@ -81,8 +87,34 @@ describe("buildProviderTimelineTree", () => {
     ]);
     expect(
       flattenProviderTimelineTree(tree, {
-        collapsedRootIds: new Set(["root"]),
+        collapsedNodeIds: new Set(["root"]),
       }).map((item) => item.node.provider.id),
     ).toEqual(["external", "external-child", "root"]);
+
+    expect(
+      flattenProviderTimelineTree(tree, {
+        collapsedNodeIds: new Set(["clinic"]),
+      }).map((item) => item.node.provider.id),
+    ).toEqual(["external", "external-child", "root", "clinic"]);
+  });
+
+  it("renders expand controls for every node that has children", () => {
+    const html = renderToStaticMarkup(
+      createElement(ProviderHierarchyTimeline, {
+        lang: "ru",
+        onProviderClick: () => undefined,
+        providers: [
+          provider("root", "TUM", "organization"),
+          provider("clinic", "Cardiology", "clinic", "root"),
+          provider("unit", "Cath Lab", "unit", "clinic"),
+        ],
+        tr: {
+          providers_tree_collapse: "Свернуть ветку провайдера",
+          providers_tree_expand: "Развернуть ветку провайдера",
+        },
+      }),
+    );
+
+    expect(html.match(/aria-expanded="true"/g)).toHaveLength(2);
   });
 });
