@@ -1574,86 +1574,69 @@ function useFinanceCatalogPageContent() {
         </Banner>
       ) : null}
 
-      <Section
-        title={t.finance_catalog_tax_profiles}
-        accessory={
-          <div className="flex items-center gap-2">
+      <DataTableSurface
+        loading={loading}
+        rows={taxProfiles}
+        columns={taxProfileColumns}
+        dictionary={t as unknown as Record<string, string>}
+        rowId={(profile) => profile.id}
+        emptyState={<EmptyCell>{t.finance_catalog_empty_tax_profiles}</EmptyCell>}
+        toolbarStart={
+          <>
+            <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+              {t.finance_catalog_tax_profiles}
+            </span>
+            <CountBadge>{taxProfiles.length}</CountBadge>
+            <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
             {canManageTaxProfiles ? (
               <Button
                 type="button"
-                className={createButtonClassName}
+                className="h-8 rounded-md px-3"
                 onClick={openCreateTaxProfile}
               >
                 <Plus className="size-4" />
                 {t.finance_catalog_new_tax_profile}
               </Button>
             ) : null}
-          </div>
+          </>
         }
-      >
-        {!loading && taxProfiles.length === 0 ? (
-          <EmptyCell>{t.finance_catalog_empty_tax_profiles}</EmptyCell>
-        ) : (
-          <DataTableSurface
-            loading={loading}
-            rows={taxProfiles}
-            columns={taxProfileColumns}
-            dictionary={t as unknown as Record<string, string>}
-            rowId={(profile) => profile.id}
-            emptyState={<EmptyCell>{t.finance_catalog_empty_tax_profiles}</EmptyCell>}
-            rowActions={
-              canManageTaxProfiles
-                ? (profile) => (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      className="size-7 rounded-full text-muted-foreground hover:text-foreground"
-                      onClick={() => openEditTaxProfile(profile)}
-                      aria-label={t.finance_catalog_edit}
-                      title={t.finance_catalog_edit}
-                    >
-                      <Pencil className="size-3.5" />
-                    </Button>
-                  )
-                : undefined
-            }
-          />
-        )}
-      </Section>
+        rowActions={
+          canManageTaxProfiles
+            ? (profile) => (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                  onClick={() => openEditTaxProfile(profile)}
+                  aria-label={t.finance_catalog_edit}
+                  title={t.finance_catalog_edit}
+                >
+                  <Pencil className="size-3.5" />
+                </Button>
+              )
+            : undefined
+        }
+      />
 
-      <Section
-        title={t.revenue_agency_service_catalog_items}
-        accessory={
-          <div className="flex items-center gap-2">
+      <DataTableSurface
+        loading={loading}
+        rows={agencyServicesPagination.pagedRows}
+        columns={agencyServiceColumns}
+        dictionary={t as unknown as Record<string, string>}
+        rowId={(item) => item.id}
+        emptyState={<EmptyCell>{t.revenue_agency_service_empty_title}</EmptyCell>}
+        tableClassName="max-h-[560px]"
+        toolbarStart={
+          <>
+            <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+              {t.revenue_agency_service_catalog_items}
+            </span>
             <CountBadge>{agencyServices.length}</CountBadge>
-            {canManageTaxProfiles ? (
-              <Button
-                type="button"
-                className={createButtonClassName}
-                onClick={openCreateAgencyService}
-              >
-                <Plus className="size-4" />
-                {t.revenue_agency_service_new_title}
-              </Button>
-            ) : null}
-          </div>
-        }
-      >
-        {!loading && agencyServices.length === 0 ? (
-          <EmptyCell>{t.revenue_agency_service_empty_title}</EmptyCell>
-        ) : (
-          <DataTableSurface
-            loading={loading}
-            rows={agencyServicesPagination.pagedRows}
-            columns={agencyServiceColumns}
-            dictionary={t as unknown as Record<string, string>}
-            rowId={(item) => item.id}
-            emptyState={<EmptyCell>{t.revenue_agency_service_empty_title}</EmptyCell>}
-            tableClassName="max-h-[560px]"
-            toolbarStart={
-              <>
-                <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
+            <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+            <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -1671,51 +1654,59 @@ function useFinanceCatalogPageContent() {
                     aria-label={t.common_search}
                   />
                 </div>
-                </ToolbarField>
-                {catalogSearch ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setCatalogSearch("")}
-                  >
-                    <X className="size-3.5" />
-                    {t.common_reset}
-                  </Button>
-                ) : null}
-              </>
-            }
-            toolbarAfter={
-              <DataTablePager
-                pageIndex={agencyServicesPagination.pageIndex}
-                pageSize={agencyServicesPagination.pageSize}
-                totalPages={agencyServicesPagination.totalPages}
-                totalRows={agencyServicesPagination.totalRows}
-                previousLabel={t.pagination_previous}
-                nextLabel={t.pagination_next}
-                onPageChange={agencyServicesPagination.onPageChange}
-              />
-            }
-            rowActions={
-              canManageTaxProfiles
-                ? (item) => (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      className="size-7 rounded-full text-muted-foreground hover:text-foreground"
-                      onClick={() => openEditAgencyService(item)}
-                      aria-label={t.finance_catalog_edit}
-                      title={t.finance_catalog_edit}
-                    >
-                      <Pencil className="size-3.5" />
-                    </Button>
-                  )
-                : undefined
-            }
+            </ToolbarField>
+            {canManageTaxProfiles ? (
+              <Button
+                type="button"
+                className="h-8 rounded-md px-3"
+                onClick={openCreateAgencyService}
+              >
+                <Plus className="size-4" />
+                {t.revenue_agency_service_new_title}
+              </Button>
+            ) : null}
+            {catalogSearch ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setCatalogSearch("")}
+              >
+                <X className="size-3.5" />
+                {t.common_reset}
+              </Button>
+            ) : null}
+          </>
+        }
+        toolbarAfter={
+          <DataTablePager
+            pageIndex={agencyServicesPagination.pageIndex}
+            pageSize={agencyServicesPagination.pageSize}
+            totalPages={agencyServicesPagination.totalPages}
+            totalRows={agencyServicesPagination.totalRows}
+            previousLabel={t.pagination_previous}
+            nextLabel={t.pagination_next}
+            onPageChange={agencyServicesPagination.onPageChange}
           />
-        )}
-      </Section>
+        }
+        rowActions={
+          canManageTaxProfiles
+            ? (item) => (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                  onClick={() => openEditAgencyService(item)}
+                  aria-label={t.finance_catalog_edit}
+                  title={t.finance_catalog_edit}
+                >
+                  <Pencil className="size-3.5" />
+                </Button>
+              )
+            : undefined
+        }
+      />
 
       <Section
         title={t.finance_catalog_service_package_catalog}
