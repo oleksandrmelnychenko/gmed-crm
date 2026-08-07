@@ -270,7 +270,9 @@ describe("DiagnosisTreeSection", () => {
       />,
     );
 
-    expect(html).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(html).toContain(
+      "lg:grid-cols-[minmax(0,1fr)_minmax(8rem,max-content)_auto]",
+    );
     expect(html).toContain("break-words text-sm font-medium");
     expect(html).toContain("break-words font-mono");
     expect(html).toContain("break-words text-[11px] text-muted-foreground");
@@ -389,7 +391,11 @@ describe("DiagnosisTreeSection", () => {
 
     expect(html).toContain("Кардиология");
     expect(html).toContain("Неврология");
-    expect(html).toContain("mt-1.5 flex min-w-0 flex-col items-start gap-1");
+    expect(html).toContain('data-slot="diagnosis-specializations"');
+    expect(html).toContain(
+      "lg:grid-cols-[minmax(0,1fr)_minmax(8rem,max-content)_auto]",
+    );
+    expect(html).toContain("flex min-w-0 flex-col items-start gap-1 lg:pt-0.5");
     expect(html.indexOf("Hypertonie")).toBeLessThan(html.indexOf("Кардиология"));
   });
 });

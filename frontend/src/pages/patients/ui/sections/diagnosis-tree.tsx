@@ -539,7 +539,7 @@ function DiagnosisRow({
       ) : null}
       <div
         className={cn(
-          "grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-lg border px-3 py-2",
+          "grid grid-cols-1 items-start gap-3 rounded-lg border px-3 py-2 lg:grid-cols-[minmax(0,1fr)_minmax(8rem,max-content)_auto]",
           diagnosisRowClass(node.kind),
         )}
       >
@@ -561,18 +561,6 @@ function DiagnosisRow({
                 </span>
               ) : null}
             </div>
-            {(node.specializations ?? []).length > 0 ? (
-              <div className="mt-1.5 flex min-w-0 flex-col items-start gap-1">
-                {(node.specializations ?? []).map((specialization) => (
-                  <span
-                    key={specialization.id}
-                    className="inline-flex max-w-full rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold leading-tight text-amber-700"
-                  >
-                    {specializationLabelForItem(specialization, lang === "de" ? "de" : "ru")}
-                  </span>
-                ))}
-              </div>
-            ) : null}
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <span
@@ -615,6 +603,23 @@ function DiagnosisRow({
             </p>
           ) : null}
         </div>
+        {(node.specializations ?? []).length > 0 ? (
+          <div
+            className="flex min-w-0 flex-col items-start gap-1 lg:pt-0.5"
+            data-slot="diagnosis-specializations"
+          >
+            {(node.specializations ?? []).map((specialization) => (
+              <span
+                key={specialization.id}
+                className="inline-flex max-w-full rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold leading-tight text-amber-700"
+              >
+                {specializationLabelForItem(specialization, lang === "de" ? "de" : "ru")}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <div aria-hidden="true" className="hidden lg:block" />
+        )}
         {canManage ? (
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
             {childKinds.map((childKind) => (
