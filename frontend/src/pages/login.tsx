@@ -10,6 +10,7 @@ import { ArrowRight, Globe, AlertCircle, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth, PendingLoginError } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { getBuildLoginDefaults } from "@/pages/login-defaults";
 
 function LogoMark() {
   return (
@@ -48,9 +49,11 @@ type LoginStatePatch =
   | ((current: LoginState) => Partial<LoginState>);
 
 function createLoginState(): LoginState {
+  const defaults = getBuildLoginDefaults();
+
   return {
-    email: "admin@gmed.de",
-    password: "admin123",
+    email: defaults.email,
+    password: defaults.password,
     error: "",
     loading: false,
     fieldErrors: {},

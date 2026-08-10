@@ -22,6 +22,13 @@
 #     up -d --build
 
 services:
+  frontend:
+    build:
+      args:
+        VITE_ENABLE_DEV_LOGIN_DEFAULTS: "true"
+        VITE_DEV_LOGIN_EMAIL: "admin@gmed.de"
+        VITE_DEV_LOGIN_PASSWORD: "admin123"
+
   backend:
     # Publish the metrics-only listener so monitoring's Prometheus can
     # scrape `gmed-dev:9091` via tailnet. The main API port (3000)
