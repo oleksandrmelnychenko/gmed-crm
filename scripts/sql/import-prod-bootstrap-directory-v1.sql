@@ -283,7 +283,32 @@ WHERE lower(email) = lower(:'admin_email')
   AND is_active = true;
 
 DO $$
+DECLARE
+  actual_counts text;
 BEGIN
+  SELECT concat_ws('|',
+    (SELECT count(*) FROM providers),
+    (SELECT count(*) FROM provider_doctors),
+    (SELECT count(*) FROM patients),
+    (SELECT count(*) FROM provider_contacts),
+    (SELECT count(*) FROM provider_person_contacts),
+    (SELECT count(*) FROM provider_doctor_links),
+    (SELECT count(*) FROM provider_specializations),
+    (SELECT count(*) FROM provider_doctor_specializations),
+    (SELECT count(*) FROM provider_taxonomy_assignments),
+    (SELECT count(*) FROM provider_insurances),
+    (SELECT count(*) FROM provider_doctor_insurances),
+    (SELECT count(*) FROM provider_doctor_relationships),
+    (SELECT count(*) FROM users),
+    (SELECT count(*) FROM users
+       WHERE lower(email) = lower((SELECT admin_email FROM bootstrap_context))
+         AND role = 'ceo'
+         AND is_active = true),
+    (SELECT count(*) FROM audit_log
+       WHERE action = 'bootstrap_directory_import'
+         AND entity_type = 'system')
+  ) INTO actual_counts;
+
   IF (SELECT count(*) FROM providers) <> 191
      OR (SELECT count(*) FROM provider_doctors) <> 60
      OR (SELECT count(*) FROM patients) <> 6
@@ -313,7 +338,9 @@ BEGIN
        'P-20260709-0023',
        'P-20260719-0025'
      ]::text[] THEN
-    RAISE EXCEPTION 'post-import production invariant failed';
+    RAISE EXCEPTION
+      'post-import production invariant failed (providers|doctors|patients|provider_contacts|doctor_contacts|provider_links|provider_specializations|doctor_specializations|taxonomy|provider_insurances|doctor_insurances|doctor_relationships|users|approved_ceo|import_audit=%)',
+      actual_counts;
   END IF;
 END $$;
 
