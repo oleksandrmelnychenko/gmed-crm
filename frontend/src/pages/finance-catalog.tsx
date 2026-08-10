@@ -686,7 +686,7 @@ function useFinanceCatalogPageContent() {
         required: true,
         width: 280,
         render: (row) => (
-          <span className="truncate text-xs text-foreground">
+          <span className="truncate font-mono text-xs text-foreground">
             {agencyServiceNameLabel(row.service_key, row.service_name, t)}
           </span>
         ),
@@ -751,7 +751,10 @@ function useFinanceCatalogPageContent() {
               {profile.name}
             </span>
             {profile.is_default ? (
-              <Badge variant="outline" className="shrink-0 rounded-full">
+              <Badge
+                variant="outline"
+                className="shrink-0 rounded-full border-sky-200 bg-sky-50 text-sky-700"
+              >
                 {t.finance_catalog_default_badge}
               </Badge>
             ) : null}
@@ -1038,7 +1041,7 @@ function useFinanceCatalogPageContent() {
         sortable: true,
         searchable: true,
         required: true,
-        width: 260,
+        width: 360,
         render: (item) => (
           <span
             className="truncate font-mono text-xs text-foreground"

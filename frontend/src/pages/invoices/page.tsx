@@ -192,6 +192,12 @@ const ACCOUNTING_DIRECTION_LABEL_KEYS = {
   expense: "revenue_accounting_direction_expense",
 } satisfies Partial<Record<string, TranslationKey>>;
 
+const ACCOUNTING_CATEGORY_LABEL_KEYS = {
+  service_revenue: "revenue_accounting_category_service_revenue",
+  cost_passthrough_revenue: "revenue_accounting_category_cost_passthrough_revenue",
+  provider_expense: "revenue_accounting_category_provider_expense",
+} satisfies Partial<Record<string, TranslationKey>>;
+
 const REDACTION_REASON_LABEL_KEYS = {
   invoice_hidden_from_patient: "revenue_invoices_redaction_invoice_hidden",
   amounts_hidden_from_patient: "revenue_invoices_redaction_amounts_hidden",
@@ -479,6 +485,8 @@ function useStaffInvoicesPageContent() {
     formatEnumLabelFromKeys(level, DUNNING_LEVEL_LABEL_KEYS, t);
   const accountingDirectionLabel = (direction: string) =>
     formatEnumLabelFromKeys(direction, ACCOUNTING_DIRECTION_LABEL_KEYS, t);
+  const accountingCategoryLabel = (category: string) =>
+    formatEnumLabelFromKeys(category, ACCOUNTING_CATEGORY_LABEL_KEYS, t);
   const redactionReasonLabel = (reason: string | null | undefined) =>
     formatEnumLabelFromKeys(reason, REDACTION_REASON_LABEL_KEYS, t);
   const vatSourceLabel = (source: string | null | undefined) =>
@@ -816,7 +824,9 @@ function useStaffInvoicesPageContent() {
         required: true,
         pinned: "left",
         width: 220,
-        render: (row) => <span className="text-xs text-foreground">{row.patient_name}</span>,
+        render: (row) => (
+          <span className="font-mono text-xs text-foreground">{row.patient_name}</span>
+        ),
       },
       {
         id: "patient_pid",
@@ -993,17 +1003,24 @@ function useStaffInvoicesPageContent() {
       pinned: "left",
       width: 260,
       render: (row) => (
-        <span className="block truncate text-xs text-foreground">{row.description}</span>
+        <span className="block truncate font-mono text-xs text-foreground">
+          {row.description}
+        </span>
       ),
     },
     {
       id: "category",
       label: text.ledgerCategory,
-      accessor: (row) => row.category,
+      accessor: (row) => accountingCategoryLabel(row.category),
       filterType: "text",
       group: "accounting",
       sortable: true,
       width: 150,
+      render: (row) => (
+        <span className="block truncate text-xs text-foreground">
+          {accountingCategoryLabel(row.category)}
+        </span>
+      ),
     },
     {
       id: "order_number",

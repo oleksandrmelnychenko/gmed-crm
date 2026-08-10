@@ -210,11 +210,12 @@ export function buildPatientColumns(
       required: true,
       pinned: "left",
       width: 240,
-      cellClassName: "min-w-0 whitespace-normal",
+      align: "left",
+      cellClassName: "min-w-0 whitespace-normal text-left",
       group: "identity",
       render: (p: PatientSummary) => (
-        <div className="flex h-full min-w-0 items-center justify-center overflow-hidden">
-          <div className="line-clamp-2 min-w-0 break-words text-center font-mono text-xs font-medium text-foreground">
+        <div className="flex h-full min-w-0 items-center justify-start overflow-hidden">
+          <div className="line-clamp-2 min-w-0 break-words text-left font-mono text-xs font-normal text-foreground">
             {patientDisplayName(p)}
           </div>
         </div>

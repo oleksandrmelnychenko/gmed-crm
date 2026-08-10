@@ -435,7 +435,7 @@ export function SpecializationsPage() {
         </Banner>
       ) : null}
 
-      <div className="grid min-h-[620px] overflow-hidden rounded-lg border border-border/70 bg-card lg:min-h-0 lg:flex-1 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]">
+      <div className="grid min-h-[620px] overflow-hidden rounded-lg border border-border/70 bg-card lg:min-h-0 lg:flex-1 lg:grid-cols-[380px_minmax(0,1fr)] xl:grid-cols-[420px_minmax(0,1fr)]">
         <aside className="flex min-h-0 flex-col overflow-hidden border-b border-border/70 lg:border-r lg:border-b-0">
           <div className="border-b border-border/70 p-3">
             <div className="relative">
@@ -469,32 +469,28 @@ export function SpecializationsPage() {
                       type="button"
                       onClick={() => setSelectedSpecializationId(item.id)}
                       className={cn(
-                        "relative flex w-full min-w-0 items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
+                        "relative flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors",
                         selected
-                          ? "bg-muted/70 text-foreground before:absolute before:top-2 before:bottom-2 before:left-0 before:w-[3px] before:rounded-r-full before:bg-[var(--brand)]"
+                          ? "bg-muted/70 text-foreground before:absolute before:top-1.5 before:bottom-1.5 before:left-0 before:w-[3px] before:rounded-r-full before:bg-[var(--brand)]"
                           : "text-muted-foreground hover:bg-muted/45 hover:text-foreground",
                       )}
                     >
-                      <BriefcaseMedical className="mt-0.5 size-4 shrink-0" />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-semibold">
-                          {specializationName(item, lang)}
-                        </span>
-                        <span className="mt-1 flex min-w-0 items-center gap-1.5">
-                          <span className="inline-flex max-w-full items-center truncate rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-mono text-[10px] font-medium text-sky-700">
-                            {item.code}
-                          </span>
-                          <span
-                            className="inline-flex shrink-0 items-center rounded-full border border-border/60 bg-background px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums text-foreground"
-                            title={tx("Количество видов работ", "Anzahl der Leistungsarten")}
-                          >
-                            {item.work_type_count ?? 0}
-                          </span>
-                        </span>
+                      <BriefcaseMedical className="size-3.5 shrink-0" />
+                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
+                        {specializationName(item, lang)}
+                      </span>
+                      <span className="inline-flex max-w-24 shrink-0 items-center truncate rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-mono text-[9px] font-medium text-sky-700">
+                        {item.code}
+                      </span>
+                      <span
+                        className="inline-flex shrink-0 items-center rounded-full border border-border/60 bg-background px-1.5 py-0.5 font-mono text-[9px] font-semibold tabular-nums text-foreground"
+                        title={tx("Количество видов работ", "Anzahl der Leistungsarten")}
+                      >
+                        {item.work_type_count ?? 0}
                       </span>
                       {!item.is_active ? (
                         <span
-                          className="mt-1 size-2 shrink-0 rounded-full bg-slate-400"
+                          className="size-2 shrink-0 rounded-full bg-slate-400"
                           title={tx("Неактивно", "Inaktiv")}
                         />
                       ) : null}

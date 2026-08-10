@@ -64,14 +64,15 @@ describe("buildPatientColumns", () => {
     expect(providerHtml).toContain("AOK Bayern");
   });
 
-  it("allows the patient cell to render multiline content safely", () => {
+  it("renders multiline patient names safely and left-aligned", () => {
     const columns = buildPatientColumns(translations, []);
     const patientColumn = columns.find((column) => column.id === "patient");
 
     expect(patientColumn?.cellClassName).toContain("whitespace-normal");
     const html = renderToStaticMarkup(<>{patientColumn?.render?.(patient())}</>);
     expect(html).toContain("line-clamp-2");
-    expect(html).toContain("justify-center");
+    expect(html).toContain("justify-start");
+    expect(html).toContain("text-left");
   });
 
   it("renders patient labels in a separate visible column", () => {

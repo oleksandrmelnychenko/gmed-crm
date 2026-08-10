@@ -280,6 +280,9 @@ export interface RevenueTranslations {
   revenue_dunning_level_collections: string;
   revenue_accounting_direction_income: string;
   revenue_accounting_direction_expense: string;
+  revenue_accounting_category_service_revenue: string;
+  revenue_accounting_category_cost_passthrough_revenue: string;
+  revenue_accounting_category_provider_expense: string;
 }
 
 const revenueReportsTextDe = {
@@ -1095,6 +1098,9 @@ export const revenueRu: RevenueTranslations = {
   revenue_dunning_level_collections: "Передано на взыскание",
   revenue_accounting_direction_income: "Доход",
   revenue_accounting_direction_expense: "Расход",
+  revenue_accounting_category_service_revenue: "Выручка по услугам",
+  revenue_accounting_category_cost_passthrough_revenue: "Выручка по проходным расходам",
+  revenue_accounting_category_provider_expense: "Расходы провайдера",
 };
 
 export const revenueDe: RevenueTranslations = {
@@ -1425,4 +1431,7 @@ export const revenueDe: RevenueTranslations = {
   revenue_dunning_level_collections: "Inkasso",
   revenue_accounting_direction_income: "Einnahme",
   revenue_accounting_direction_expense: "Ausgabe",
+  revenue_accounting_category_service_revenue: "Leistungsumsatz",
+  revenue_accounting_category_cost_passthrough_revenue: "Umsatz aus Durchlaufkosten",
+  revenue_accounting_category_provider_expense: "Provider-Ausgabe",
 };
