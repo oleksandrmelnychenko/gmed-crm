@@ -8,8 +8,8 @@
 //   route: `crates/server/src/routes/cases.rs:351` (create_case)
 //   format: `crates/server/src/routes/cases.rs:253` (gen_case_id → C-YYYYMMDD-NNNN)
 //
-// - T-016 Erste Anamneseerhebung: головна скарга, поточний анамнез, направляючий лікар
-//   route: `crates/server/src/routes/cases.rs:879` (update_anamnesis)
+// - T-016 Erste Anamneseerhebung: case overview plus patient-owned narrative
+//   routes: `POST /cases/{id}/anamnesis`, `POST /patients/{id}/narrative`
 //
 // - T-017 Pain block із NRS, локалізацією, динамікою та причиною
 //   route: `crates/server/src/routes/cases.rs:1284` (save_pain_records)
@@ -17,17 +17,17 @@
 // - T-018 Symptome: опис скарги + вибір фахового напрямку
 //   route: `crates/server/src/routes/cases.rs:1644` (save_symptome)
 //
-// - T-019 Попередні захворювання: діагноз + дата + нотатка
-//   route: `crates/server/src/routes/cases.rs:951` (save_vorerkrankungen)
+// - T-019 Попередні захворювання: patient-owned diagnosis + date + note
+//   route: `POST /patients/{id}/diagnoses`
 //
-// - T-021 Алергії: алерген + реакція
-//   route: `crates/server/src/routes/cases.rs:1028` (save_allergien)
+// - T-021 Алергії: patient-owned clinical warning + reaction
+//   route: `POST /patients/{id}/clinical-warnings`
 //
 // - T-022 Вакцинація як вільний текст
-//   route: `crates/server/src/routes/cases.rs:2029` (save_impfstatus)
+//   route: `POST /patients/{id}/impfstatus`
 //
-// - T-023 Медикаменти: повний повторюваний блок із дозуванням і схемою
-//   route: `crates/server/src/routes/cases.rs:1188` (save_medikamente)
+// - T-023 Медикаменти: patient-owned Medikationsplan fields and dose schedule
+//   route: `POST /patients/{id}/medications`
 //
 // Gaps closed (per `docs/testing/full-docs-backlog-reconciliation_ua.md`
 // EPIC 1 row 2 / EPIC 2):
@@ -137,6 +137,19 @@ async fn fetch_case(app: &axum::Router, bearer: &str, case_uuid: Uuid) -> Value 
     body
 }
 
+async fn fetch_patient_clinical(app: &axum::Router, bearer: &str, patient_id: Uuid) -> Value {
+    let (status, body) = json_request(
+        app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "get patient clinical body: {body}");
+    body
+}
+
 fn matches_case_id_format(case_code: &str) -> bool {
     // C-YYYYMMDD-NNNN — fixed length 15
     if case_code.len() != 15 {
@@ -203,7 +216,7 @@ async fn create_case_assigns_format_c_yyyymmdd_nnnn_and_is_unique() {
 }
 
 #[tokio::test]
-async fn lead_case_completes_anamnesis_without_creating_patient() {
+async fn lead_case_completes_intake_without_creating_patient() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
@@ -231,10 +244,7 @@ async fn lead_case_completes_anamnesis_without_creating_patient() {
         "POST",
         "/api/v1/cases",
         &bearer,
-        Some(json!({
-            "lead_id": lead_id,
-            "hauptanfragegrund": "Knee pain",
-        })),
+        Some(json!({ "lead_id": lead_id })),
     )
     .await;
     assert_eq!(create_status, StatusCode::CREATED, "create body: {created}");
@@ -263,7 +273,7 @@ async fn lead_case_completes_anamnesis_without_creating_patient() {
     )
     .await;
     assert_eq!(blocked_status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(blocked["blocking_fields"], json!(["aktuelle_anamnese"]));
+    assert_eq!(blocked["blocking_fields"], json!(["hauptanfragegrund"]));
 
     let (complete_status, completed) = json_request(
         &app,
@@ -272,7 +282,7 @@ async fn lead_case_completes_anamnesis_without_creating_patient() {
         &bearer,
         Some(json!({
             "completed": true,
-            "aktuelle_anamnese": "Pain for six months after a sports injury.",
+            "hauptanfragegrund": "Pain for six months after a sports injury.",
         })),
     )
     .await;
@@ -288,7 +298,7 @@ async fn lead_case_completes_anamnesis_without_creating_patient() {
     assert_eq!(detail["lead_id"], lead_id.to_string());
     assert!(detail["patient_id"].is_null());
     assert_eq!(
-        detail["aktuelle_anamnese"],
+        detail["hauptanfragegrund"],
         "Pain for six months after a sports injury."
     );
     assert!(detail["intake_completed_at"].is_string());
@@ -301,11 +311,11 @@ async fn lead_case_completes_anamnesis_without_creating_patient() {
 }
 
 // ============================================================================
-// EPIC 2 T-016 — update_anamnesis overview round-trip
+// EPIC 2 T-016 — case overview and patient narrative round-trip
 // ============================================================================
 
 #[tokio::test]
-async fn update_anamnesis_overview_round_trips_hauptanfragegrund_aktuelle_zuweiser() {
+async fn update_case_overview_and_patient_narrative_round_trip() {
     let Some((app, _pool, admin_id)) = test_context().await else {
         return;
     };
@@ -322,7 +332,6 @@ async fn update_anamnesis_overview_round_trips_hauptanfragegrund_aktuelle_zuweis
         &bearer,
         Some(json!({
             "hauptanfragegrund": "Severe chest pain radiating to left arm",
-            "aktuelle_anamnese": "Onset 2 weeks ago, exertional dyspnea added recently.",
             "zuweiser": "Hausarzt Praxis Müller",
         })),
     )
@@ -334,19 +343,39 @@ async fn update_anamnesis_overview_round_trips_hauptanfragegrund_aktuelle_zuweis
         case["hauptanfragegrund"].as_str(),
         Some("Severe chest pain radiating to left arm")
     );
+    assert_eq!(case["zuweiser"].as_str(), Some("Hausarzt Praxis Müller"));
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/narrative"),
+        &bearer,
+        Some(json!({
+            "case_id": case_uuid,
+            "anamnese_aktuelle": "Onset 2 weeks ago, exertional dyspnea added recently.",
+        })),
+    )
+    .await;
     assert_eq!(
-        case["aktuelle_anamnese"].as_str(),
+        status,
+        StatusCode::OK,
+        "save patient narrative body: {body}"
+    );
+
+    let clinical = fetch_patient_clinical(&app, &bearer, patient_id).await;
+    assert_eq!(
+        clinical["narrative"]["anamnese_aktuelle"].as_str(),
         Some("Onset 2 weeks ago, exertional dyspnea added recently.")
     );
-    assert_eq!(case["zuweiser"].as_str(), Some("Hausarzt Praxis Müller"));
+    assert_eq!(clinical["narrative"]["case_id"], case_uuid.to_string());
 }
 
 // ============================================================================
-// EPIC 2 T-019 — vorerkrankungen repeat block (diagnosis + date + note)
+// EPIC 2 T-019 — patient diagnoses repeat block (diagnosis + date + note)
 // ============================================================================
 
 #[tokio::test]
-async fn save_vorerkrankungen_replaces_full_block_with_three_items() {
+async fn save_patient_diagnoses_replaces_full_block_with_three_items() {
     let Some((app, _pool, admin_id)) = test_context().await else {
         return;
     };
@@ -354,29 +383,31 @@ async fn save_vorerkrankungen_replaces_full_block_with_three_items() {
 
     let tag = unique_tag("case-vorerkr");
     let patient_id = create_patient(&app, &bearer, &tag).await;
-    let case_uuid = create_case(&app, &bearer, patient_id).await;
 
     let (status, body) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_uuid}/vorerkrankungen"),
+        &format!("/api/v1/patients/{patient_id}/diagnoses"),
         &bearer,
         Some(json!({
             "items": [
                 {
-                    "erkrankung": "Arterielle Hypertonie",
-                    "erstdiagnose": "2018-03-12",
-                    "notiz": "Stage 2, well-controlled on ACE inhibitor"
+                    "kind": "secondary",
+                    "label": "Arterielle Hypertonie",
+                    "diagnosed_on": "2018-03-12",
+                    "note": "Stage 2, well-controlled on ACE inhibitor"
                 },
                 {
-                    "erkrankung": "Type 2 Diabetes mellitus",
-                    "erstdiagnose": "2020-09-04",
-                    "notiz": "HbA1c 7.1%"
+                    "kind": "secondary",
+                    "label": "Type 2 Diabetes mellitus",
+                    "diagnosed_on": "2020-09-04",
+                    "note": "HbA1c 7.1%"
                 },
                 {
-                    "erkrankung": "Asthma bronchiale",
-                    "erstdiagnose": null,
-                    "notiz": null
+                    "kind": "secondary",
+                    "label": "Asthma bronchiale",
+                    "diagnosed_on": null,
+                    "note": null
                 }
             ]
         })),
@@ -385,57 +416,57 @@ async fn save_vorerkrankungen_replaces_full_block_with_three_items() {
     assert_eq!(status, StatusCode::OK, "save body: {body}");
     assert_eq!(body["count"].as_u64(), Some(3));
 
-    let case = fetch_case(&app, &bearer, case_uuid).await;
-    let vorerkr = case["vorerkrankungen"].as_array().unwrap();
-    assert_eq!(vorerkr.len(), 3);
+    let clinical = fetch_patient_clinical(&app, &bearer, patient_id).await;
+    let diagnoses = clinical["diagnoses"].as_array().unwrap();
+    assert_eq!(diagnoses.len(), 3);
     assert_eq!(
-        vorerkr[0]["erkrankung"].as_str(),
+        diagnoses[0]["label"].as_str(),
         Some("Arterielle Hypertonie")
     );
-    assert_eq!(vorerkr[0]["erstdiagnose"].as_str(), Some("2018-03-12"));
+    assert_eq!(diagnoses[0]["diagnosed_on"].as_str(), Some("2018-03-12"));
     assert_eq!(
-        vorerkr[0]["notiz"].as_str(),
+        diagnoses[0]["note"].as_str(),
         Some("Stage 2, well-controlled on ACE inhibitor")
     );
     assert_eq!(
-        vorerkr[1]["erkrankung"].as_str(),
+        diagnoses[1]["label"].as_str(),
         Some("Type 2 Diabetes mellitus")
     );
-    assert_eq!(vorerkr[2]["erkrankung"].as_str(), Some("Asthma bronchiale"));
+    assert_eq!(diagnoses[2]["label"].as_str(), Some("Asthma bronchiale"));
 
     // Save again with only one item — verify replace semantics, not append.
     let (status, _) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_uuid}/vorerkrankungen"),
+        &format!("/api/v1/patients/{patient_id}/diagnoses"),
         &bearer,
         Some(json!({
             "items": [
-                { "erkrankung": "Only diagnosis after replace" }
+                { "kind": "secondary", "label": "Only diagnosis after replace" }
             ]
         })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let case_after = fetch_case(&app, &bearer, case_uuid).await;
-    let vorerkr_after = case_after["vorerkrankungen"].as_array().unwrap();
+    let clinical_after = fetch_patient_clinical(&app, &bearer, patient_id).await;
+    let diagnoses_after = clinical_after["diagnoses"].as_array().unwrap();
     assert_eq!(
-        vorerkr_after.len(),
+        diagnoses_after.len(),
         1,
-        "vorerkrankungen save must REPLACE, not append"
+        "patient diagnoses save must REPLACE, not append"
     );
     assert_eq!(
-        vorerkr_after[0]["erkrankung"].as_str(),
+        diagnoses_after[0]["label"].as_str(),
         Some("Only diagnosis after replace")
     );
 }
 
 // ============================================================================
-// EPIC 2 T-021 — allergien round-trip (allergen + reaction)
+// EPIC 2 T-021 — patient allergies round-trip (allergen + reaction)
 // ============================================================================
 
 #[tokio::test]
-async fn save_allergien_round_trips_allergen_and_reaction() {
+async fn save_patient_allergies_round_trip_allergen_and_reaction() {
     let Some((app, _pool, admin_id)) = test_context().await else {
         return;
     };
@@ -443,39 +474,39 @@ async fn save_allergien_round_trips_allergen_and_reaction() {
 
     let tag = unique_tag("case-allerg");
     let patient_id = create_patient(&app, &bearer, &tag).await;
-    let case_uuid = create_case(&app, &bearer, patient_id).await;
 
     let (status, _) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_uuid}/allergien"),
+        &format!("/api/v1/patients/{patient_id}/clinical-warnings"),
         &bearer,
         Some(json!({
+            "kind": "allergie",
             "items": [
-                { "allergie": "Penicillin", "reaktion": "Generalised urticaria" },
-                { "allergie": "Latex", "reaktion": "Contact dermatitis" },
-                { "allergie": "Erdnüsse", "reaktion": null }
+                { "label": "Penicillin", "reaction": "Generalised urticaria" },
+                { "label": "Latex", "reaction": "Contact dermatitis" },
+                { "label": "Erdnüsse", "reaction": null }
             ]
         })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let case = fetch_case(&app, &bearer, case_uuid).await;
-    let allergien = case["allergien"].as_array().unwrap();
+    let clinical = fetch_patient_clinical(&app, &bearer, patient_id).await;
+    let allergien = clinical["allergien"].as_array().unwrap();
     assert_eq!(allergien.len(), 3);
-    assert_eq!(allergien[0]["allergie"].as_str(), Some("Penicillin"));
+    assert_eq!(allergien[0]["label"].as_str(), Some("Penicillin"));
     assert_eq!(
-        allergien[0]["reaktion"].as_str(),
+        allergien[0]["reaction"].as_str(),
         Some("Generalised urticaria")
     );
-    assert_eq!(allergien[1]["allergie"].as_str(), Some("Latex"));
+    assert_eq!(allergien[1]["label"].as_str(), Some("Latex"));
     assert_eq!(
-        allergien[1]["reaktion"].as_str(),
+        allergien[1]["reaction"].as_str(),
         Some("Contact dermatitis")
     );
-    assert_eq!(allergien[2]["allergie"].as_str(), Some("Erdnüsse"));
-    assert!(allergien[2]["reaktion"].is_null());
+    assert_eq!(allergien[2]["label"].as_str(), Some("Erdnüsse"));
+    assert!(allergien[2]["reaction"].is_null());
 }
 
 // ============================================================================
@@ -668,11 +699,11 @@ async fn save_symptome_round_trips_description_and_fachrichtung() {
 }
 
 // ============================================================================
-// EPIC 2 T-022 — impfstatus free-text round-trip
+// EPIC 2 T-022 — patient impfstatus free-text round-trip
 // ============================================================================
 
 #[tokio::test]
-async fn save_impfstatus_round_trips_free_text() {
+async fn save_patient_impfstatus_round_trips_free_text() {
     let Some((app, _pool, admin_id)) = test_context().await else {
         return;
     };
@@ -680,29 +711,36 @@ async fn save_impfstatus_round_trips_free_text() {
 
     let tag = unique_tag("case-impf");
     let patient_id = create_patient(&app, &bearer, &tag).await;
-    let case_uuid = create_case(&app, &bearer, patient_id).await;
 
     let body_text = "Tetanus 2022, MMR 2018, FSME 2024 (3 doses), COVID-19 4x bis 2023.";
     let (status, _) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_uuid}/impfstatus"),
+        &format!("/api/v1/patients/{patient_id}/impfstatus"),
         &bearer,
         Some(json!({ "status_text": body_text })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let case = fetch_case(&app, &bearer, case_uuid).await;
-    assert_eq!(case["impfstatus"].as_str(), Some(body_text));
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/impfstatus"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "get impfstatus body: {body}");
+    assert_eq!(body["impfstatus"]["status_text"].as_str(), Some(body_text));
 }
 
 // ============================================================================
-// EPIC 2 T-023 — medikamente full repeat-block (handelsname/wirkstoff/dosis/schema)
+// EPIC 2 T-023 — patient medications repeat block (current Medikationsplan schema)
 // ============================================================================
 
 #[tokio::test]
-async fn save_medikamente_round_trips_full_repeat_block_fields() {
+async fn save_patient_medications_round_trip_full_repeat_block_fields() {
     let Some((app, _pool, admin_id)) = test_context().await else {
         return;
     };
@@ -710,36 +748,37 @@ async fn save_medikamente_round_trips_full_repeat_block_fields() {
 
     let tag = unique_tag("case-meds");
     let patient_id = create_patient(&app, &bearer, &tag).await;
-    let case_uuid = create_case(&app, &bearer, patient_id).await;
 
     let (status, _) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_uuid}/medikamente"),
+        &format!("/api/v1/patients/{patient_id}/medications"),
         &bearer,
         Some(json!({
             "items": [
                 {
                     "handelsname": "Ramipril",
                     "wirkstoff": "Ramipril",
-                    "dosis": "5",
-                    "dosis_einheit": "mg",
-                    "einnahmeschema": "1-0-0",
-                    "darreichungsform": "AMP",
+                    "staerke": "5 mg",
+                    "dose_morgens": "1",
+                    "dose_mittags": "0",
+                    "dose_abends": "0",
+                    "form": "AMP",
                     "einheit": "Ampulle",
-                    "anmerkung": "morgens nüchtern",
+                    "hinweis": "morgens nüchtern",
                     "grund": "arterielle Hypertonie",
-                    "seit": "2018-04",
-                    "med_typ": "permanent"
+                    "einnahme_von": "2018-04-01",
+                    "category": "dauer"
                 },
                 {
                     "handelsname": "Metformin",
                     "wirkstoff": "Metformin",
-                    "dosis": "1000",
-                    "dosis_einheit": "mg",
-                    "einnahmeschema": "1-0-1",
-                    "darreichungsform": "TABL",
-                    "med_typ": "permanent"
+                    "staerke": "1000 mg",
+                    "dose_morgens": "1",
+                    "dose_mittags": "0",
+                    "dose_abends": "1",
+                    "form": "TABL",
+                    "category": "dauer"
                 }
             ]
         })),
@@ -747,27 +786,30 @@ async fn save_medikamente_round_trips_full_repeat_block_fields() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let case = fetch_case(&app, &bearer, case_uuid).await;
-    let meds = case["medikamente"].as_array().unwrap();
+    let clinical = fetch_patient_clinical(&app, &bearer, patient_id).await;
+    let meds = clinical["medications"].as_array().unwrap();
     assert_eq!(meds.len(), 2);
 
     let first = &meds[0];
     assert_eq!(first["handelsname"].as_str(), Some("Ramipril"));
     assert_eq!(first["wirkstoff"].as_str(), Some("Ramipril"));
-    assert_eq!(first["dosis"].as_str(), Some("5"));
-    assert_eq!(first["dosis_einheit"].as_str(), Some("mg"));
-    assert_eq!(first["einnahmeschema"].as_str(), Some("1-0-0"));
-    assert_eq!(first["darreichungsform"].as_str(), Some("AMP"));
-    assert_eq!(first["anmerkung"].as_str(), Some("morgens nüchtern"));
+    assert_eq!(first["staerke"].as_str(), Some("5 mg"));
+    assert_eq!(first["dose_morgens"].as_str(), Some("1"));
+    assert_eq!(first["dose_mittags"].as_str(), Some("0"));
+    assert_eq!(first["dose_abends"].as_str(), Some("0"));
+    assert_eq!(first["form"].as_str(), Some("AMP"));
+    assert_eq!(first["einheit"].as_str(), Some("Ampulle"));
+    assert_eq!(first["hinweis"].as_str(), Some("morgens nüchtern"));
     assert_eq!(first["grund"].as_str(), Some("arterielle Hypertonie"));
-    assert_eq!(first["seit"].as_str(), Some("2018-04"));
-    assert_eq!(first["med_typ"].as_str(), Some("permanent"));
+    assert_eq!(first["einnahme_von"].as_str(), Some("2018-04-01"));
+    assert_eq!(first["category"].as_str(), Some("dauer"));
 
     let second = &meds[1];
     assert_eq!(second["handelsname"].as_str(), Some("Metformin"));
-    assert_eq!(second["dosis"].as_str(), Some("1000"));
-    assert_eq!(second["einnahmeschema"].as_str(), Some("1-0-1"));
-    assert_eq!(second["darreichungsform"].as_str(), Some("TABL"));
+    assert_eq!(second["staerke"].as_str(), Some("1000 mg"));
+    assert_eq!(second["dose_morgens"].as_str(), Some("1"));
+    assert_eq!(second["dose_abends"].as_str(), Some("1"));
+    assert_eq!(second["form"].as_str(), Some("TABL"));
 }
 
 #[tokio::test]
@@ -778,31 +820,30 @@ async fn medication_requires_active_ingredient_but_not_trade_name() {
     let bearer = auth_header_for(admin_id, "ceo");
     let tag = unique_tag("case-meds-required-ingredient");
     let patient_id = create_patient(&app, &bearer, &tag).await;
-    let case_uuid = create_case(&app, &bearer, patient_id).await;
 
     let (status, body) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_uuid}/medikamente"),
+        &format!("/api/v1/patients/{patient_id}/medications"),
         &bearer,
         Some(json!({
             "items": [{
                 "wirkstoff": "Ibuprofen",
                 "handelsname": "",
-                "med_typ": "permanent"
+                "category": "dauer"
             }]
         })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body:?}");
-    let case = fetch_case(&app, &bearer, case_uuid).await;
-    assert_eq!(case["medikamente"][0]["wirkstoff"], "Ibuprofen");
-    assert_eq!(case["medikamente"][0]["handelsname"], "");
+    let clinical = fetch_patient_clinical(&app, &bearer, patient_id).await;
+    assert_eq!(clinical["medications"][0]["wirkstoff"], "Ibuprofen");
+    assert_eq!(clinical["medications"][0]["handelsname"], "");
 
     let (status, body) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_uuid}/medikamente"),
+        &format!("/api/v1/patients/{patient_id}/medications"),
         &bearer,
         Some(json!({
             "items": [{ "handelsname": "Optional brand only" }]
@@ -815,17 +856,17 @@ async fn medication_requires_active_ingredient_but_not_trade_name() {
         "wirkstoff is required for every medication"
     );
 
-    let case = fetch_case(&app, &bearer, case_uuid).await;
-    assert_eq!(case["medikamente"].as_array().unwrap().len(), 1);
-    assert_eq!(case["medikamente"][0]["wirkstoff"], "Ibuprofen");
+    let clinical = fetch_patient_clinical(&app, &bearer, patient_id).await;
+    assert_eq!(clinical["medications"].as_array().unwrap().len(), 1);
+    assert_eq!(clinical["medications"][0]["wirkstoff"], "Ibuprofen");
 }
 
 // ============================================================================
-// EPIC 2 RBAC — interpreter cannot create or update case (anamnesis is PM/Ceo only)
+// EPIC 2 RBAC — interpreter cannot create a case or update patient clinical data
 // ============================================================================
 
 #[tokio::test]
-async fn interpreter_cannot_create_case_or_save_vorerkrankungen() {
+async fn interpreter_cannot_create_case_or_save_patient_diagnoses() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
@@ -833,7 +874,6 @@ async fn interpreter_cannot_create_case_or_save_vorerkrankungen() {
 
     let tag = unique_tag("case-rbac");
     let patient_id = create_patient(&app, &pm_bearer, &tag).await;
-    let case_uuid = create_case(&app, &pm_bearer, patient_id).await;
 
     let interpreter_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO users (email, password_hash, name, role)
@@ -865,10 +905,10 @@ async fn interpreter_cannot_create_case_or_save_vorerkrankungen() {
     let (save_status, _) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_uuid}/vorerkrankungen"),
+        &format!("/api/v1/patients/{patient_id}/diagnoses"),
         &interpreter_bearer,
         Some(json!({
-            "items": [{ "erkrankung": "Should not save" }]
+            "items": [{ "kind": "secondary", "label": "Should not save" }]
         })),
     )
     .await;
@@ -876,11 +916,11 @@ async fn interpreter_cannot_create_case_or_save_vorerkrankungen() {
 }
 
 // ============================================================================
-// EPIC 2 T-020 — operationen round-trip (datum + grund + arzt + notiz)
+// EPIC 2 T-020 — patient procedures round-trip (date + label + note)
 // ============================================================================
 
 #[tokio::test]
-async fn save_operationen_round_trips_datum_grund_arzt_notiz() {
+async fn save_patient_procedures_round_trip_date_label_and_note() {
     let Some((app, _pool, admin_id)) = test_context().await else {
         return;
     };
@@ -888,26 +928,23 @@ async fn save_operationen_round_trips_datum_grund_arzt_notiz() {
 
     let tag = unique_tag("case-ops");
     let patient_id = create_patient(&app, &bearer, &tag).await;
-    let case_uuid = create_case(&app, &bearer, patient_id).await;
 
     let (status, body) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_uuid}/operationen"),
+        &format!("/api/v1/patients/{patient_id}/procedures"),
         &bearer,
         Some(json!({
             "items": [
                 {
-                    "datum": "2019-06-15",
-                    "grund": "Cholezystektomie laparoskopisch",
-                    "arzt": "Dr. Schmidt (extern)",
-                    "notiz": "Komplikationslos, 2 Tage stationär"
+                    "performed_on": "2019-06-15",
+                    "label": "Cholezystektomie laparoskopisch",
+                    "note": "Komplikationslos, 2 Tage stationär"
                 },
                 {
-                    "datum": null,
-                    "grund": "Appendektomie (Kindheit)",
-                    "arzt": null,
-                    "notiz": null
+                    "performed_on": null,
+                    "label": "Appendektomie (Kindheit)",
+                    "note": null
                 }
             ]
         })),
@@ -916,51 +953,50 @@ async fn save_operationen_round_trips_datum_grund_arzt_notiz() {
     assert_eq!(status, StatusCode::OK, "save body: {body}");
     assert_eq!(body["count"].as_u64(), Some(2));
 
-    let case = fetch_case(&app, &bearer, case_uuid).await;
-    let ops = case["operationen"].as_array().unwrap();
+    let clinical = fetch_patient_clinical(&app, &bearer, patient_id).await;
+    let ops = clinical["procedures"].as_array().unwrap();
     assert_eq!(ops.len(), 2);
 
-    assert_eq!(ops[0]["datum"].as_str(), Some("2019-06-15"));
+    assert_eq!(ops[0]["performed_on"].as_str(), Some("2019-06-15"));
     assert_eq!(
-        ops[0]["grund"].as_str(),
+        ops[0]["label"].as_str(),
         Some("Cholezystektomie laparoskopisch")
     );
-    assert_eq!(ops[0]["arzt"].as_str(), Some("Dr. Schmidt (extern)"));
     assert_eq!(
-        ops[0]["notiz"].as_str(),
+        ops[0]["note"].as_str(),
         Some("Komplikationslos, 2 Tage stationär")
     );
 
-    assert!(ops[1]["datum"].is_null());
-    assert_eq!(ops[1]["grund"].as_str(), Some("Appendektomie (Kindheit)"));
-    assert!(ops[1]["arzt"].as_str().unwrap_or_default().is_empty());
+    assert!(ops[1]["performed_on"].is_null());
+    assert_eq!(ops[1]["label"].as_str(), Some("Appendektomie (Kindheit)"));
 
     // Replace semantics: save just one item — list shrinks.
     let (status_replace, _) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_uuid}/operationen"),
+        &format!("/api/v1/patients/{patient_id}/procedures"),
         &bearer,
         Some(json!({
-            "items": [{ "grund": "Replaced single op" }]
+            "items": [{ "label": "Replaced single procedure" }]
         })),
     )
     .await;
     assert_eq!(status_replace, StatusCode::OK);
-    let case_after = fetch_case(&app, &bearer, case_uuid).await;
-    let ops_after = case_after["operationen"].as_array().unwrap();
+    let clinical_after = fetch_patient_clinical(&app, &bearer, patient_id).await;
+    let ops_after = clinical_after["procedures"].as_array().unwrap();
     assert_eq!(ops_after.len(), 1);
-    assert_eq!(ops_after[0]["grund"].as_str(), Some("Replaced single op"));
+    assert_eq!(
+        ops_after[0]["label"].as_str(),
+        Some("Replaced single procedure")
+    );
 }
 
 // ============================================================================
-// EPIC 2 T-024 — vegetative anamnese round-trip (height/weight/grund)
-// Source: cases.rs:1974 save_vegetative
-// Schema: migrations/20260408000006_medical_case.sql:113-117
+// EPIC 2 T-024 — patient-owned vegetative narrative round-trip
 // ============================================================================
 
 #[tokio::test]
-async fn save_vegetative_round_trips_appetit_height_weight_changes_and_reason() {
+async fn save_patient_vegetative_narrative_round_trips_full_text() {
     let Some((app, _pool, admin_id)) = test_context().await else {
         return;
     };
@@ -968,50 +1004,24 @@ async fn save_vegetative_round_trips_appetit_height_weight_changes_and_reason() 
 
     let tag = unique_tag("case-veg");
     let patient_id = create_patient(&app, &bearer, &tag).await;
-    let case_uuid = create_case(&app, &bearer, patient_id).await;
+
+    let vegetative = "Appetit reduziert seit 3 Wochen, Durst normal. Körpergröße 175 cm, Gewicht 78,5 kg; Gewichtsveränderung: abgenommen. Grund: Appetitlosigkeit nach Anstrengung.";
 
     let (status, _) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_uuid}/vegetative"),
+        &format!("/api/v1/patients/{patient_id}/narrative"),
         &bearer,
-        Some(json!({
-            "appetit_durst": "Appetit reduziert seit 3 Wochen, Durst normal",
-            "koerpergroesse": 175.0,
-            "gewicht": 78.5,
-            "gewichtsveraenderung": "abgenommen",
-            "grund": "Appetitlosigkeit nach Anstrengung"
-        })),
+        Some(json!({ "anamnese_vegetative": vegetative })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let case = fetch_case(&app, &bearer, case_uuid).await;
-    let veg = &case["vegetative_anamnese"];
-    assert!(!veg.is_null(), "vegetative_anamnese must be present");
+    let clinical = fetch_patient_clinical(&app, &bearer, patient_id).await;
     assert_eq!(
-        veg["appetit_durst"].as_str(),
-        Some("Appetit reduziert seit 3 Wochen, Durst normal")
+        clinical["narrative"]["anamnese_vegetative"].as_str(),
+        Some(vegetative)
     );
-    assert_eq!(veg["gewichtsveraenderung"].as_str(), Some("abgenommen"));
-    assert_eq!(
-        veg["grund"].as_str(),
-        Some("Appetitlosigkeit nach Anstrengung")
-    );
-    let groesse = veg["koerpergroesse"]
-        .as_f64()
-        .or_else(|| {
-            veg["koerpergroesse"]
-                .as_str()
-                .and_then(|s| s.parse::<f64>().ok())
-        })
-        .expect("koerpergroesse must serialize as number or numeric string");
-    assert!((groesse - 175.0).abs() < 0.001);
-    let gewicht = veg["gewicht"]
-        .as_f64()
-        .or_else(|| veg["gewicht"].as_str().and_then(|s| s.parse::<f64>().ok()))
-        .expect("gewicht must serialize as number or numeric string");
-    assert!((gewicht - 78.5).abs() < 0.001);
 }
 
 // ============================================================================
