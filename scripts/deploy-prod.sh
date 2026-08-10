@@ -42,6 +42,7 @@ TMP_ENV=""
 COSIGN_CERT_IDENTITY_REGEXP="${COSIGN_CERT_IDENTITY_REGEXP:-^https://github\.com/oleksandrmelnychenko/gmed-crm/\.github/workflows/release\.yml@refs/.*$}"
 COSIGN_OIDC_ISSUER="${COSIGN_OIDC_ISSUER:-https://token.actions.githubusercontent.com}"
 COSIGN_VERSION="${COSIGN_VERSION:-v2.4.1}"
+RCLONE_VERSION="${RCLONE_VERSION:-v1.75.0}"
 
 # Run as root: needs to read /etc/gmed/age.key and run `docker compose`.
 if [[ "$(id -u)" -ne 0 ]]; then
@@ -136,7 +137,48 @@ fi
 # Ensure backup tooling is present. rclone and age are tiny; apt-get
 # install is a fast no-op when already installed.
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-  rclone age >/dev/null
+  age ca-certificates unzip >/dev/null
+
+# Ubuntu 24.04 currently ships an old rclone. Install a checksum-verified,
+# pinned upstream binary so the S3 backend's `versioning` command is always
+# available and backup behavior does not depend on the host apt snapshot.
+if [[ ! -x /usr/local/bin/rclone ]] || ! /usr/local/bin/rclone version 2>/dev/null | grep -q "${RCLONE_VERSION}"; then
+  RCLONE_ARCH="$(dpkg --print-architecture)" # amd64 | arm64
+  RCLONE_ARCHIVE="rclone-${RCLONE_VERSION}-linux-${RCLONE_ARCH}.zip"
+  (
+    RCLONE_TMP_DIR="$(mktemp -d)"
+    trap 'rm -rf "$RCLONE_TMP_DIR"' EXIT
+    cd "$RCLONE_TMP_DIR"
+    curl -fsSLO "https://downloads.rclone.org/${RCLONE_VERSION}/${RCLONE_ARCHIVE}"
+    curl -fsSLO "https://downloads.rclone.org/${RCLONE_VERSION}/SHA256SUMS"
+    grep " ${RCLONE_ARCHIVE}$" SHA256SUMS > rclone.checksum
+    sha256sum -c rclone.checksum
+    unzip -q "$RCLONE_ARCHIVE"
+    install -o root -g root -m 755 \
+      "${RCLONE_ARCHIVE%.zip}/rclone" /usr/local/bin/rclone
+  )
+fi
+
+# Backups are encrypted client-side, and bucket versioning protects against
+# accidental overwrite/delete. Fail the deploy if the configured backup
+# bucket cannot be put into the required state.
+if [[ -n "${BACKUP_S3_ENDPOINT:-}" && -n "${BACKUP_S3_BUCKET:-}" && \
+      -n "${BACKUP_S3_ACCESS_KEY:-}" && -n "${BACKUP_S3_SECRET_KEY:-}" ]]; then
+  export RCLONE_CONFIG_GMEDBACKUP_TYPE=s3
+  export RCLONE_CONFIG_GMEDBACKUP_PROVIDER=Other
+  export RCLONE_CONFIG_GMEDBACKUP_ENDPOINT="$BACKUP_S3_ENDPOINT"
+  export RCLONE_CONFIG_GMEDBACKUP_ACCESS_KEY_ID="$BACKUP_S3_ACCESS_KEY"
+  export RCLONE_CONFIG_GMEDBACKUP_SECRET_ACCESS_KEY="$BACKUP_S3_SECRET_KEY"
+  export RCLONE_CONFIG_GMEDBACKUP_REGION="${BACKUP_S3_REGION:-auto}"
+
+  VERSIONING_STATUS="$(rclone backend versioning \
+    "gmedbackup:${BACKUP_S3_BUCKET}" Enabled)"
+  if ! grep -q 'Enabled' <<<"$VERSIONING_STATUS"; then
+    echo "ERROR: failed to confirm versioning on backup bucket ${BACKUP_S3_BUCKET}." >&2
+    exit 1
+  fi
+  echo "Backup bucket versioning: Enabled"
+fi
 
 # Install cosign from upstream releases (Ubuntu apt does not ship it).
 # Pinned by version + verified by the binary's own self-test on first

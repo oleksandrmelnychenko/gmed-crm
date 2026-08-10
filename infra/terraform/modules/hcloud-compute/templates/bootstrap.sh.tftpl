@@ -75,8 +75,12 @@ systemctl restart docker
 ADMIN_USER='${admin_username}'
 
 if ! id "$ADMIN_USER" >/dev/null 2>&1; then
-  useradd --create-home --shell /bin/bash --groups sudo,docker "$ADMIN_USER"
+  useradd --create-home --shell /bin/bash --groups sudo "$ADMIN_USER"
 fi
+
+# Docker group membership is equivalent to root access. Remove it even when
+# upgrading a host created by an older bootstrap revision.
+gpasswd --delete "$ADMIN_USER" docker >/dev/null 2>&1 || true
 
 install -d -m 700 -o "$ADMIN_USER" -g "$ADMIN_USER" "/home/$ADMIN_USER/.ssh"
 if [[ -f /root/.ssh/authorized_keys ]]; then
@@ -84,10 +88,11 @@ if [[ -f /root/.ssh/authorized_keys ]]; then
     /root/.ssh/authorized_keys "/home/$ADMIN_USER/.ssh/authorized_keys"
 fi
 
-# Passwordless sudo for the deploy-relevant docker subcommands only.
-# Anything more privileged requires an interactive session.
+# The repository is cloned root-owned during the one-time production setup.
+# The operator may run only that reviewed deploy entrypoint as root; direct
+# Docker access would be equivalent to unrestricted root.
 cat > "/etc/sudoers.d/$ADMIN_USER" <<EOF
-$ADMIN_USER ALL=(ALL) NOPASSWD: /usr/bin/docker, /usr/bin/docker compose
+$ADMIN_USER ALL=(root) NOPASSWD: /opt/gmed/repo/scripts/deploy-prod.sh
 EOF
 chmod 440 "/etc/sudoers.d/$ADMIN_USER"
 

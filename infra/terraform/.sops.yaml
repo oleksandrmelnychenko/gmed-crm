@@ -25,7 +25,7 @@ creation_rules:
   # Replace the placeholder with the PROD age recipient. Distinct from
   # DEV so a leaked DEV key cannot decrypt PROD secrets.
   - path_regex: environments/prod-hetzner/.*\.sops\.yaml$
-    age: age1prodplaceholderxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    age: age18gxnzmcjkd2ee9wnqpjwzpp5clf5ksgd7kfyahqj2q8eemylparq0rrkta
 
   # Replace the placeholder with the MONITORING age recipient. Distinct
   # from PROD so an observability-host compromise cannot decrypt app
