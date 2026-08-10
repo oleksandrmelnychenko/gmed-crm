@@ -33,6 +33,11 @@ services:
       POSTGRES_DB: "${POSTGRES_DB:-gmed}"
       POSTGRES_USER: "${POSTGRES_USER:?Set POSTGRES_USER in release.env (sops)}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in release.env (sops)}"
+      # The ext4 volume root contains lost+found. PostgreSQL refuses to
+      # initialize directly in a non-empty mount root, so keep the cluster
+      # in its own child directory while the whole protected volume remains
+      # mounted at /var/lib/postgresql/data.
+      PGDATA: /var/lib/postgresql/data/pgdata
     # !override replaces the inherited volume list from docker-compose.yml
     # (which uses the named `pgdata` docker volume) with a bind mount
     # pointing at the Hetzner Volume mounted by cloud-init at
