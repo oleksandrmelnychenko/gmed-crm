@@ -302,7 +302,14 @@ wait_for_compose_service_healthy() {
 }
 
 compose_up_or_diagnose() {
-  if "${compose_cmd[@]}" up -d --remove-orphans; then
+  local compose_rc=0
+
+  set +e
+  "${compose_cmd[@]}" up -d --remove-orphans
+  compose_rc=$?
+  set -e
+
+  if [[ "$compose_rc" -eq 0 ]]; then
     return 0
   fi
 
@@ -312,7 +319,7 @@ compose_up_or_diagnose() {
   # Its logs do not contain the configured password and are the most
   # useful first diagnostic when Compose reports a dependency failure.
   "${compose_cmd[@]}" logs --no-color --tail=150 postgres || true
-  return 1
+  return "$compose_rc"
 }
 
 # Bring (or keep) services up. No --build: PROD pulls cosign-verified
