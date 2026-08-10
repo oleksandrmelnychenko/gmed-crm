@@ -704,7 +704,7 @@ async fn ensure_patient_medication(
     medication_id: Uuid,
 ) -> Result<(), axum::response::Response> {
     let found = sqlx::query_scalar::<_, i32>(
-        "SELECT 1 FROM patient_medications WHERE id = $1 AND patient_id = $2",
+        "SELECT 1 FROM patient_medications WHERE id = $1 AND patient_id = $2 AND superseded_at IS NULL",
     )
     .bind(medication_id)
     .bind(patient_id)

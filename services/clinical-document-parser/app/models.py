@@ -6,7 +6,14 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-Target = Literal["diagnosis", "anamnesis", "medication", "examination", "recommendation"]
+Target = Literal[
+    "diagnosis",
+    "anamnesis",
+    "medication",
+    "examination",
+    "lab_result",
+    "recommendation",
+]
 ExtractionSource = Literal["native", "ocr", "native_fallback", "existing", "text"]
 MAX_DRAFT_CANDIDATES = int(os.environ.get("PARSER_MAX_DRAFT_CANDIDATES", "500"))
 MAX_SOURCE_EVIDENCE_CHARS = int(os.environ.get("PARSER_MAX_SOURCE_EVIDENCE_CHARS", "20000"))

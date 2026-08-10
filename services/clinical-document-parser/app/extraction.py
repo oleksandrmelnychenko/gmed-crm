@@ -1390,12 +1390,27 @@ def _outcome_from_tesseract_data(data: dict[str, Any], languages: str) -> _OcrOu
 
 def _join_ocr_words(words: list[dict[str, Any]]) -> str:
     result = ""
+    previous: dict[str, Any] | None = None
     for word in words:
         token = str(word["text"])
         if not result or token[:1] in ".,;:!?%)]}" or result[-1:] in "([{":
             result += token
         else:
-            result += " " + token
+            gap = int(word["left"]) - (
+                int(previous["left"]) + int(previous["width"])
+                if previous is not None
+                else int(word["left"])
+            )
+            typical_height = max(
+                1,
+                int(word["height"]),
+                int(previous["height"]) if previous is not None else 1,
+            )
+            # A wide horizontal gap on one OCR baseline is a table-cell
+            # boundary. Preserve it as a tab for the clinical parser.
+            separator = "\t" if gap > max(24, typical_height * 1.8) else " "
+            result += separator + token
+        previous = word
     return result
 
 

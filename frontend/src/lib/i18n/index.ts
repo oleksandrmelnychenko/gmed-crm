@@ -65,6 +65,13 @@ export interface Translations
   login_mfa_pending_msg: string;
   login_mfa_checking: string;
   login_sign_in_subtitle: string;
+  login_brand_tagline: string;
+  login_back_home: string;
+  login_show_password: string;
+  login_hide_password: string;
+  login_confidentiality_notice: string;
+  login_pay_with_mollie: string;
+  login_secure_payments: string;
 
   users_title: string;
   users_subtitle: string;

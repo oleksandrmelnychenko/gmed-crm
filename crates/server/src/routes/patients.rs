@@ -15,6 +15,7 @@ use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::pdf_text::{add_unicode_pdf_fonts, pdf_text_save_options, unicode_show_text_op};
+use crate::routes::documents::is_iso_country_code;
 use crate::state::AppState;
 use gmed_domain::role::Role;
 use printpdf::{
@@ -39,6 +40,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/patients/{patient_id}/vitals/{measurement_id}/delete",
             post(delete_patient_vital_measurement),
+        )
+        .route(
+            "/patients/{patient_id}/lab-results",
+            get(list_patient_lab_results).post(create_patient_lab_result),
         )
         .route("/patients/{patient_id}/clinical", get(get_patient_clinical))
         .route("/doctors", get(list_all_doctors))
@@ -269,6 +274,151 @@ struct CreatePatientVitalMeasurementRequest {
     height_cm: Option<f64>,
     bmi: Option<f64>,
     notes: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreatePatientLabResultRequest {
+    measured_at: String,
+    panel: Option<String>,
+    analyte_name: String,
+    result_text: String,
+    numeric_result: Option<f64>,
+    comparator: Option<String>,
+    unit: Option<String>,
+    reference_text: Option<String>,
+    reference_low: Option<f64>,
+    reference_high: Option<f64>,
+    abnormal_flag: Option<String>,
+    source_country: Option<String>,
+    source_import_id: Option<Uuid>,
+    source_candidate_id: Option<String>,
+    source_page: Option<i32>,
+}
+
+pub(crate) struct NormalizedPatientLabResult {
+    measured_at: chrono::DateTime<chrono::Utc>,
+    panel: Option<String>,
+    analyte_name: String,
+    result_text: String,
+    numeric_result: Option<f64>,
+    comparator: Option<String>,
+    unit: Option<String>,
+    reference_text: Option<String>,
+    reference_low: Option<f64>,
+    reference_high: Option<f64>,
+    abnormal_flag: String,
+    pub(crate) source_country: Option<String>,
+    pub(crate) source_import_id: Option<Uuid>,
+    pub(crate) source_candidate_id: Option<String>,
+    source_page: Option<i32>,
+}
+
+#[allow(clippy::result_large_err)]
+pub(crate) fn normalize_patient_lab_result_payload(
+    raw_body: &Value,
+) -> Result<NormalizedPatientLabResult, axum::response::Response> {
+    let body = serde_json::from_value::<CreatePatientLabResultRequest>(raw_body.clone()).map_err(
+        |_| {
+            err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid lab result payload",
+            )
+        },
+    )?;
+    let measured_at = parse_clinical_timestamp(&body.measured_at, "measured_at")?;
+    let analyte_name = body.analyte_name.trim().to_string();
+    let result_text = body.result_text.trim().to_string();
+    if analyte_name.is_empty() || analyte_name.len() > 160 {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid analyte_name",
+        ));
+    }
+    if result_text.is_empty() || result_text.len() > 160 {
+        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid result_text"));
+    }
+    let panel = normalize_optional_text(body.panel, "panel", 160)?;
+    let unit = normalize_optional_text(body.unit, "unit", 80)?;
+    let reference_text = normalize_optional_text(body.reference_text, "reference_text", 240)?;
+    let source_candidate_id =
+        normalize_optional_text(body.source_candidate_id, "source_candidate_id", 128)?;
+    if body.numeric_result.is_some_and(|value| !value.is_finite())
+        || body.reference_low.is_some_and(|value| !value.is_finite())
+        || body.reference_high.is_some_and(|value| !value.is_finite())
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Laboratory numbers must be finite",
+        ));
+    }
+    if matches!((body.reference_low, body.reference_high), (Some(low), Some(high)) if low > high) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid reference range",
+        ));
+    }
+    let comparator = match body.comparator.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(value @ ("<" | "<=" | "=" | ">=" | ">")) => Some(value.to_string()),
+        Some(_) => {
+            return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid comparator"));
+        }
+    };
+    let abnormal_flag = body.abnormal_flag.as_deref().unwrap_or("unknown").trim();
+    if !matches!(
+        abnormal_flag,
+        "normal" | "low" | "high" | "abnormal" | "unknown"
+    ) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid abnormal_flag",
+        ));
+    }
+    if body.source_page.is_some_and(|page| page <= 0) {
+        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid source_page"));
+    }
+    let source_country = match body.source_country {
+        Some(value) => {
+            let normalized = value.trim();
+            if normalized != value
+                || normalized.len() != 2
+                || !normalized.bytes().all(|byte| byte.is_ascii_uppercase())
+                || !is_iso_country_code(normalized)
+            {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Invalid source_country",
+                ));
+            }
+            Some(normalized.to_string())
+        }
+        None => None,
+    };
+    if body.source_import_id.is_some() != source_candidate_id.is_some() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "source_import_id and source_candidate_id are required together",
+        ));
+    }
+
+    Ok(NormalizedPatientLabResult {
+        measured_at,
+        panel,
+        analyte_name,
+        result_text,
+        numeric_result: body.numeric_result,
+        comparator,
+        unit,
+        reference_text,
+        reference_low: body.reference_low,
+        reference_high: body.reference_high,
+        abnormal_flag: abnormal_flag.to_string(),
+        source_country,
+        source_import_id: body.source_import_id,
+        source_candidate_id,
+        source_page: body.source_page,
+    })
 }
 
 #[derive(Deserialize)]
@@ -2386,6 +2536,276 @@ async fn update_patient(
     }
 }
 
+async fn list_patient_lab_results(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+) -> impl IntoResponse {
+    auth.require_any_role(PATIENT_CLINICAL_ROLES)?;
+    if !has_patient_access(&state, &auth, patient_uuid).await? {
+        return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+    }
+
+    let rows = sqlx::query(
+        r#"SELECT lr.id, lr.measured_at, lr.panel, lr.analyte_name, lr.result_text,
+                  lr.numeric_result, lr.comparator, lr.unit, lr.reference_text,
+                  lr.reference_low, lr.reference_high, lr.abnormal_flag, lr.source_country,
+                  lr.source_document_id, lr.source_import_id, lr.source_candidate_id,
+                  lr.source_page, lr.recorded_by, lr.created_at,
+                  u.name AS recorded_by_name, d.original_filename AS source_document_name
+           FROM patient_lab_results lr
+           LEFT JOIN users u ON u.id = lr.recorded_by
+           LEFT JOIN documents d ON d.id = lr.source_document_id
+           WHERE lr.patient_id = $1
+           ORDER BY lr.measured_at DESC, lr.panel NULLS LAST, lr.created_at, lr.analyte_name"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, patient_id = %patient_uuid, "Failed to load patient lab results");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load patient lab results",
+        )
+    })?;
+
+    let items = rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "id": row.get::<Uuid, _>("id"),
+                "measured_at": row.get::<chrono::DateTime<chrono::Utc>, _>("measured_at").to_rfc3339(),
+                "panel": row.get::<Option<String>, _>("panel"),
+                "analyte_name": row.get::<String, _>("analyte_name"),
+                "result_text": row.get::<String, _>("result_text"),
+                "numeric_result": row.get::<Option<f64>, _>("numeric_result"),
+                "comparator": row.get::<Option<String>, _>("comparator"),
+                "unit": row.get::<Option<String>, _>("unit"),
+                "reference_text": row.get::<Option<String>, _>("reference_text"),
+                "reference_low": row.get::<Option<f64>, _>("reference_low"),
+                "reference_high": row.get::<Option<f64>, _>("reference_high"),
+                "abnormal_flag": row.get::<String, _>("abnormal_flag"),
+                "source_country": row.get::<Option<String>, _>("source_country"),
+                "source_document_id": row.get::<Option<Uuid>, _>("source_document_id"),
+                "source_document_name": row.get::<Option<String>, _>("source_document_name"),
+                "source_import_id": row.get::<Option<Uuid>, _>("source_import_id"),
+                "source_candidate_id": row.get::<Option<String>, _>("source_candidate_id"),
+                "source_page": row.get::<Option<i32>, _>("source_page"),
+                "recorded_by": row.get::<Option<Uuid>, _>("recorded_by"),
+                "recorded_by_name": row.get::<Option<String>, _>("recorded_by_name"),
+                "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let count = items.len();
+    Ok(Json(json!({ "items": items, "count": count })))
+}
+
+async fn create_patient_lab_result(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+    Json(raw_body): Json<Value>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+        return response;
+    }
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(_) => {
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate patient access",
+            );
+        }
+    }
+    let lab = match normalize_patient_lab_result_payload(&raw_body) {
+        Ok(lab) => lab,
+        Err(response) => return response,
+    };
+
+    let source_document_id = if let Some(import_id) = lab.source_import_id {
+        match sqlx::query(
+            r#"SELECT document_id, prepared_source_country, reviewed_draft,
+                      prepared_candidate_payloads
+               FROM clinical_document_imports
+               WHERE id = $1 AND patient_id = $2 AND status = 'applying'
+                 AND deleted_at IS NULL"#,
+        )
+        .bind(import_id)
+        .bind(patient_uuid)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(Some(import)) => {
+                let selected = import
+                    .get::<Option<Value>, _>("reviewed_draft")
+                    .and_then(|draft| draft.get("candidates").and_then(Value::as_array).cloned())
+                    .is_some_and(|candidates| {
+                        candidates.iter().any(|candidate| {
+                            candidate.get("id").and_then(Value::as_str)
+                                == lab.source_candidate_id.as_deref()
+                                && candidate.get("target").and_then(Value::as_str)
+                                    == Some("lab_result")
+                                && candidate.get("selected").and_then(Value::as_bool) == Some(true)
+                        })
+                    });
+                if !selected {
+                    return err(
+                        StatusCode::CONFLICT,
+                        "Lab candidate is not selected in the prepared review",
+                    );
+                }
+                if import
+                    .get::<Option<String>, _>("prepared_source_country")
+                    .as_deref()
+                    != lab.source_country.as_deref()
+                {
+                    return err(
+                        StatusCode::CONFLICT,
+                        "Lab source_country differs from the prepared import country",
+                    );
+                }
+                if import
+                    .get::<Value, _>("prepared_candidate_payloads")
+                    .get(lab.source_candidate_id.as_deref().unwrap_or_default())
+                    != Some(&raw_body)
+                {
+                    return err(
+                        StatusCode::CONFLICT,
+                        "Lab payload differs from the immutable prepared candidate payload",
+                    );
+                }
+                Some(import.get::<Uuid, _>("document_id"))
+            }
+            Ok(None) => {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Clinical import must be prepared before lab persistence",
+                );
+            }
+            Err(error) => {
+                tracing::error!(error = %error, import_id = %import_id, "Failed to validate lab import provenance");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to record lab result",
+                );
+            }
+        }
+    } else {
+        None
+    };
+
+    let row = match sqlx::query(
+        r#"INSERT INTO patient_lab_results (
+                patient_id, measured_at, panel, analyte_name, result_text,
+                numeric_result, comparator, unit, reference_text, reference_low,
+                reference_high, abnormal_flag, source_country, source_document_id,
+                source_import_id, source_candidate_id, source_page, recorded_by
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+           ON CONFLICT (source_import_id, source_candidate_id)
+             WHERE source_import_id IS NOT NULL AND source_candidate_id IS NOT NULL
+           DO UPDATE SET updated_at = patient_lab_results.updated_at
+             WHERE (
+                 patient_lab_results.patient_id,
+                 patient_lab_results.measured_at,
+                 patient_lab_results.panel,
+                 patient_lab_results.analyte_name,
+                 patient_lab_results.result_text,
+                 patient_lab_results.numeric_result,
+                 patient_lab_results.comparator,
+                 patient_lab_results.unit,
+                 patient_lab_results.reference_text,
+                 patient_lab_results.reference_low,
+                 patient_lab_results.reference_high,
+                 patient_lab_results.abnormal_flag,
+                 patient_lab_results.source_country,
+                 patient_lab_results.source_document_id,
+                 patient_lab_results.source_page
+             ) IS NOT DISTINCT FROM (
+                 EXCLUDED.patient_id,
+                 EXCLUDED.measured_at,
+                 EXCLUDED.panel,
+                 EXCLUDED.analyte_name,
+                 EXCLUDED.result_text,
+                 EXCLUDED.numeric_result,
+                 EXCLUDED.comparator,
+                 EXCLUDED.unit,
+                 EXCLUDED.reference_text,
+                 EXCLUDED.reference_low,
+                 EXCLUDED.reference_high,
+                 EXCLUDED.abnormal_flag,
+                 EXCLUDED.source_country,
+                 EXCLUDED.source_document_id,
+                 EXCLUDED.source_page
+             )
+           RETURNING id, created_at"#,
+    )
+    .bind(patient_uuid)
+    .bind(lab.measured_at)
+    .bind(&lab.panel)
+    .bind(&lab.analyte_name)
+    .bind(&lab.result_text)
+    .bind(lab.numeric_result)
+    .bind(&lab.comparator)
+    .bind(&lab.unit)
+    .bind(&lab.reference_text)
+    .bind(lab.reference_low)
+    .bind(lab.reference_high)
+    .bind(&lab.abnormal_flag)
+    .bind(&lab.source_country)
+    .bind(source_document_id)
+    .bind(lab.source_import_id)
+    .bind(&lab.source_candidate_id)
+    .bind(lab.source_page)
+    .bind(auth.user_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return err(
+                StatusCode::CONFLICT,
+                "This prepared lab candidate was already persisted with different reviewed fields",
+            );
+        }
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_uuid, "Failed to record patient lab result");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record lab result");
+        }
+    };
+    let lab_result_id = row.get::<Uuid, _>("id");
+    state.audit_sender.try_send(audit::domain_event(
+        "record_patient_lab_result",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({
+            "lab_result_id": lab_result_id,
+            "source_import_id": lab.source_import_id,
+            "has_reference_range": lab.reference_low.is_some() || lab.reference_high.is_some(),
+            "abnormal_flag": lab.abnormal_flag,
+        }),
+    ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.clinical_updated",
+        patient_uuid,
+        json!({ "section": "lab_results", "action": "upsert", "lab_result_id": lab_result_id }),
+    )
+    .await;
+
+    Json(json!({
+        "id": lab_result_id,
+        "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+        "ok": true,
+    }))
+    .into_response()
+}
+
 async fn list_patient_vitals(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -3699,6 +4119,15 @@ fn parse_clinical_timestamp(
         })
         .or_else(|_| {
             chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S%.f")
+                .map(|value| value.and_utc())
+        })
+        .or_else(|_| {
+            chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
+                .map(|value| {
+                    value
+                        .and_hms_opt(0, 0, 0)
+                        .expect("midnight is a valid time")
+                })
                 .map(|value| value.and_utc())
         })
         .map_err(|_| {
@@ -6423,6 +6852,7 @@ async fn get_patient_timeline(
                    ) AS title,
                    'medication'::text AS category,
                    CASE
+                       WHEN medication.superseded_at IS NOT NULL THEN 'superseded'
                        WHEN medication.on_hold THEN 'on_hold'
                        WHEN LOWER(COALESCE(medication.status, '')) IN ('aktiv', 'active') THEN 'active'
                        WHEN LOWER(COALESCE(medication.status, '')) IN ('abgesetzt', 'discontinued', 'stopped') THEN 'discontinued'
@@ -6561,6 +6991,7 @@ async fn get_patient_timeline(
                        END,
                        CASE WHEN vital.heart_rate IS NOT NULL THEN concat('HR ', vital.heart_rate) END,
                        CASE WHEN vital.weight_kg IS NOT NULL THEN concat(trim(to_char(vital.weight_kg, 'FM999990.##')), ' kg') END,
+                       CASE WHEN vital.height_cm IS NOT NULL THEN concat(trim(to_char(vital.height_cm, 'FM999990.##')), ' cm') END,
                        CASE WHEN vital.bmi IS NOT NULL THEN concat('BMI ', trim(to_char(vital.bmi, 'FM999990.##'))) END
                    ) AS title,
                    'clinical'::text AS category,
@@ -8545,12 +8976,15 @@ async fn get_patient_clinical(
                   m.apothekenpflichtig, m.rezeptpflichtig, m.btm, m.aut_idem_sperre,
                   m.abgabebeschraenkung, m.sonstige_vermerke,
                   m.on_hold, m.hold_from, m.hold_until, m.hold_note,
+                  m.medication_series_id, m.supersedes_medication_id,
+                  m.regimen_fingerprint, m.source_country, m.source_date, m.source_page,
+                  m.source_document_id, m.source_import_id, m.source_candidate_id,
                   m.provider_id, p.name AS provider_name,
                   m.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
            FROM patient_medications m
            LEFT JOIN providers p ON p.id = m.provider_id
            LEFT JOIN provider_doctors dr ON dr.id = m.doctor_id
-           WHERE m.patient_id = $1
+           WHERE m.patient_id = $1 AND m.superseded_at IS NULL
            ORDER BY m.sort_order, m.created_at"#,
     )
     .bind(patient_uuid)
@@ -8671,6 +9105,15 @@ async fn get_patient_clinical(
                 "hold_from": row.get::<Option<String>, _>("hold_from"),
                 "hold_until": row.get::<Option<String>, _>("hold_until"),
                 "hold_note": row.get::<Option<String>, _>("hold_note"),
+                "medication_series_id": row.get::<Uuid, _>("medication_series_id"),
+                "supersedes_medication_id": row.get::<Option<Uuid>, _>("supersedes_medication_id"),
+                "regimen_fingerprint": row.get::<Option<String>, _>("regimen_fingerprint"),
+                "source_country": row.get::<Option<String>, _>("source_country"),
+                "source_date": row.get::<Option<chrono::NaiveDate>, _>("source_date"),
+                "source_page": row.get::<Option<i32>, _>("source_page"),
+                "source_document_id": row.get::<Option<Uuid>, _>("source_document_id"),
+                "source_import_id": row.get::<Option<Uuid>, _>("source_import_id"),
+                "source_candidate_id": row.get::<Option<String>, _>("source_candidate_id"),
                 "provider_id": row.get::<Option<Uuid>, _>("provider_id"),
                 "provider_name": row.get::<Option<String>, _>("provider_name"),
                 "doctor_id": row.get::<Option<Uuid>, _>("doctor_id"),
@@ -8962,7 +9405,11 @@ impl PatientClinicalSection {
                    FROM patient_diagnoses t WHERE t.patient_id = $1"#
             }
             PatientClinicalSection::Medications => {
-                r#"SELECT COALESCE(jsonb_agg((to_jsonb(t) - 'patient_id') ORDER BY t.sort_order, t.created_at), '[]'::jsonb) AS value
+                r#"SELECT COALESCE(jsonb_agg(
+                       (to_jsonb(t) - 'patient_id' - 'source_raw_text'
+                                    - 'source_identifiers' - 'source_field_confidence')
+                       ORDER BY t.sort_order, t.created_at
+                   ), '[]'::jsonb) AS value
                    FROM patient_medications t WHERE t.patient_id = $1"#
             }
             PatientClinicalSection::Examinations => {
@@ -9560,7 +10007,7 @@ async fn save_patient_medications(
         }
     };
     let existing_ids = match sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM patient_medications WHERE patient_id = $1",
+        "SELECT id FROM patient_medications WHERE patient_id = $1 AND superseded_at IS NULL",
     )
     .bind(patient_uuid)
     .fetch_all(&mut *tx)
@@ -9651,7 +10098,7 @@ async fn save_patient_medications(
                        apothekenpflichtig = $21, rezeptpflichtig = $22, btm = $23,
                        aut_idem_sperre = $24, abgabebeschraenkung = $25, sonstige_vermerke = $26,
                        on_hold = $27, hold_from = $28, hold_until = $29, hold_note = $30,
-                       sort_order = $31
+                       sort_order = $31, regimen_fingerprint = NULL
                    WHERE id = $32 AND patient_id = $1
                    RETURNING id"#
             }
@@ -9713,7 +10160,9 @@ async fn save_patient_medications(
     }
     if !query.merge_only()
         && let Err(e) =
-            sqlx::query("DELETE FROM patient_medications WHERE patient_id = $1 AND id <> ALL($2)")
+            sqlx::query(
+                "DELETE FROM patient_medications WHERE patient_id = $1 AND superseded_at IS NULL AND id <> ALL($2)",
+            )
                 .bind(patient_uuid)
                 .bind(&written_ids)
                 .execute(&mut *tx)
@@ -11506,7 +11955,8 @@ async fn get_patient_clinical_pdf(
            FROM patient_medications m
            LEFT JOIN providers pv ON pv.id = m.provider_id
            LEFT JOIN provider_doctors dr ON dr.id = m.doctor_id
-           WHERE m.patient_id = $1 ORDER BY m.sort_order, m.created_at"#,
+           WHERE m.patient_id = $1 AND m.superseded_at IS NULL
+           ORDER BY m.sort_order, m.created_at"#,
     )
     .bind(patient_uuid)
     .fetch_all(&state.db)
@@ -12099,7 +12549,8 @@ async fn get_patient_medikationsplan_pdf(
         r#"SELECT category, wirkstoff, handelsname, staerke, form,
                   dose_morgens, dose_mittags, dose_abends, dose_nachts, einheit, hinweis, grund
            FROM patient_medications
-           WHERE patient_id = $1 AND NOT COALESCE(on_hold, false)
+           WHERE patient_id = $1 AND superseded_at IS NULL
+             AND status = 'aktiv' AND NOT COALESCE(on_hold, false)
            ORDER BY sort_order, created_at"#,
     )
     .bind(patient_uuid)

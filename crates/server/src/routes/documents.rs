@@ -755,6 +755,10 @@ fn german_iso_country_name(code: &str) -> Option<&'static str> {
     }
 }
 
+pub(crate) fn is_iso_country_code(code: &str) -> bool {
+    german_iso_country_name(code).is_some()
+}
+
 fn german_document_country(value: &str) -> String {
     let value = value.trim();
     let normalized = value.to_ascii_uppercase();
@@ -12022,6 +12026,7 @@ async fn generate_document(
                    LEFT JOIN provider_doctors d ON d.id = m.doctor_id
                    WHERE m.patient_id = $1
                      AND m.status IN ('aktiv', 'pausiert')
+                     AND m.superseded_at IS NULL
                    ORDER BY CASE m.category
                        WHEN 'dauer' THEN 0
                        WHEN 'besondere' THEN 1

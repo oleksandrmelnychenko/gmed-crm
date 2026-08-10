@@ -86,6 +86,7 @@ python -m benchmarks.run `
   --minimum-cohort-ocr-similarity 0.90 `
   --required-cohort arztbrief `
   --required-cohort laboratory `
+  --required-cohort medication `
   --required-cohort smartphone_photo `
   --required-cohort fax_scan `
   --required-cohort cyrillic `
@@ -109,7 +110,7 @@ counts, ratios, and ordinal case references. Never add a debug mode that emits
 source or candidate text in CI logs.
 
 `cohorts` accepts only the fixed PHI-safe labels `arztbrief`, `laboratory`,
-`smartphone_photo`, `fax_scan`, `cyrillic`, and `negative`. Cohort gates prevent
+`medication`, `smartphone_photo`, `fax_scan`, `cyrillic`, and `negative`. Cohort gates prevent
 a strong majority category from hiding a regression in a smaller document
 class. Pass every expected category with repeated `--required-cohort` flags;
 the gate then fails if a category silently disappears from the corpus. Do not

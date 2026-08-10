@@ -410,6 +410,24 @@ class ExtractionLimitsTest(unittest.TestCase):
             "Hemoglobin\t12.4\tg/dL\nLeukocytes\t7.1\tG/L\nCRP\t3.0\tmg/L",
         )
 
+    def test_tesseract_geometry_preserves_lab_column_boundaries(self) -> None:
+        outcome = _outcome_from_tesseract_data(
+            {
+                "text": ["Leukocytes", "6,4", "G/L", "3,7", "-", "9,9"],
+                "conf": ["95"] * 6,
+                "block_num": [1] * 6,
+                "par_num": [1] * 6,
+                "line_num": [1] * 6,
+                "left": [10, 260, 390, 520, 555, 580],
+                "top": [10] * 6,
+                "width": [120, 35, 40, 30, 10, 30],
+                "height": [20] * 6,
+            },
+            "deu+eng",
+        )
+
+        self.assertEqual(outcome.text, "Leukocytes\t6,4\tG/L\t3,7 - 9,9")
+
     def test_paddle_boxes_are_scaled_back_to_ocr_image_coordinates(self) -> None:
         outcome = _outcome_from_paddle_results([fake_paddle_result()])
         source = SimpleNamespace(size=(2560, 1280))

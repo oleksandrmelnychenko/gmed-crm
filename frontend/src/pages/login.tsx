@@ -1,6 +1,7 @@
 import {
   useEffect,
   useReducer,
+  useRef,
   type FormEvent,
   type SetStateAction,
 } from "react";
@@ -9,6 +10,7 @@ import {
   AlertCircle,
   ArrowRight,
   ArrowUpLeft,
+  CircleDollarSign,
   Clock,
   Eye,
   EyeOff,
@@ -19,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth, PendingLoginError } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { getBuildLoginDefaults } from "@/pages/login-defaults";
+import { resolveRequestedLoginLanguage } from "@/pages/login-language";
 import "./login.css";
 
 type LoginFieldErrors = {
@@ -85,6 +88,7 @@ export function LoginPage() {
     showPassword,
   } = loginState;
   const { lang, setLang: switchLang, t: tr } = useLang();
+  const appliedLanguageParam = useRef<string | null>(null);
 
   const setPendingLogin = (nextValue: SetStateAction<PendingLoginState>) => {
     dispatchLoginState((current) => ({
@@ -106,9 +110,12 @@ export function LoginPage() {
   const requestedLanguage = new URLSearchParams(location.search).get("lang");
 
   useEffect(() => {
-    if (!requestedLanguage) return;
+    if (appliedLanguageParam.current === requestedLanguage) return;
 
-    const nextLanguage = requestedLanguage.toLowerCase() === "ru" ? "ru" : "de";
+    appliedLanguageParam.current = requestedLanguage;
+    const nextLanguage = resolveRequestedLoginLanguage(requestedLanguage);
+    if (!nextLanguage) return;
+
     if (nextLanguage !== lang) {
       switchLang(nextLanguage);
     }
@@ -218,10 +225,10 @@ export function LoginPage() {
   return (
     <main className="gmed-login-page">
       <section className="gmed-login-shell">
-        <a className="gmed-login-brand" href="https://gmed-health.com/" aria-label="GMED home">
-          <img src="/gmed-logo.png" alt="GMED Medical Concierge Agency" />
+        <a className="gmed-login-brand" href="https://gmed-health.com/" aria-label={tr.login_back_home}>
+          <img src="/gmed-logo.png" alt={`GMED ${tr.login_brand_tagline}`} />
         </a>
-        <p className="gmed-login-tagline">Medical Concierge Agency</p>
+        <p className="gmed-login-tagline">{tr.login_brand_tagline}</p>
 
         <div className="gmed-login-card">
           <form onSubmit={handleSubmit} className="gmed-login-form" noValidate>
@@ -273,7 +280,7 @@ export function LoginPage() {
                 <button
                   type="button"
                   className="gmed-login-password-toggle"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-label={showPassword ? tr.login_hide_password : tr.login_show_password}
                   onClick={() => dispatchLoginState((current) => ({ showPassword: !current.showPassword }))}
                 >
                   {showPassword ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
@@ -297,9 +304,28 @@ export function LoginPage() {
 
           <a className="gmed-login-home" href="https://gmed-health.com/">
             <ArrowUpLeft aria-hidden="true" />
-            <span>Back to home</span>
+            <span>{tr.login_back_home}</span>
           </a>
-          <p className="gmed-login-security">Your data is secure and will be kept strictly confidential.</p>
+          <p className="gmed-login-security">{tr.login_confidentiality_notice}</p>
+
+          <div className="gmed-login-mollie">
+            <a
+              className="gmed-login-mollie-button"
+              href="https://www.mollie.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <CircleDollarSign aria-hidden="true" />
+              <span>{tr.login_pay_with_mollie}</span>
+            </a>
+            <p>
+              {tr.login_secure_payments}{" "}
+              <a href="https://www.mollie.com/" target="_blank" rel="noopener noreferrer">
+                Mollie
+              </a>
+            </p>
+          </div>
+
           <button type="button" onClick={toggleLang} className="gmed-login-language">
             <Globe aria-hidden="true" />
             {tr.common_lang_native}

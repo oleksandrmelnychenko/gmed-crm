@@ -59,6 +59,14 @@ export const de = {
   login_mfa_checking: "Prüfung läuft...",
   login_sign_in_subtitle:
     "Weiter zum operativen Arbeitsbereich für Kliniken, Ärzte und Termine.",
+  login_brand_tagline: "Medizinische Concierge-Agentur",
+  login_back_home: "Zur Startseite",
+  login_show_password: "Passwort anzeigen",
+  login_hide_password: "Passwort ausblenden",
+  login_confidentiality_notice:
+    "Ihre Daten werden verschlüsselt übertragen und streng vertraulich behandelt.",
+  login_pay_with_mollie: "Mit Mollie bezahlen",
+  login_secure_payments: "Sichere Zahlungen —",
 
   users_title: "Benutzerverwaltung",
   users_subtitle: "Benutzer, Rollen und Zugriffsrechte verwalten",

@@ -217,7 +217,8 @@ pub async fn load_medication_german_equivalents(
         r#"SELECT id, handelsname, wirkstoff
            FROM patient_medications
            WHERE id = $1
-             AND patient_id = $2"#,
+             AND patient_id = $2
+             AND superseded_at IS NULL"#,
     )
     .bind(medication_id)
     .bind(patient_id)

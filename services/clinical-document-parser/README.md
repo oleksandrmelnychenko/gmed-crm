@@ -1,7 +1,7 @@
 # GMED clinical document parser
 
-This service never writes diagnoses, medications, examinations, or anamnesis
-directly. It claims `clinical_document_imports` jobs, performs OCR and
+This service never writes diagnoses, medications, examinations, laboratory
+observations, or anamnesis directly. It claims `clinical_document_imports` jobs, performs OCR and
 rule-based structure extraction, and stores a review draft. The Rust API owns
 authorization, audit, human confirmation, and clinical persistence.
 
@@ -54,7 +54,23 @@ the post-orientation/post-deskew OCR image. `orientation_rotation` and
 geometrically ordered and handles the common two-column medical-letter layout.
 Repeated aligned numeric cells are treated as a table and kept in row-major
 order with tab-separated cells, so laboratory names remain attached to values
-and units.
+and units. Tabular laboratory drafts emit one `lab_result` candidate per
+analyte, retaining the original value, unit, reference range, date, page, and
+abnormal marker for human review and longitudinal storage.
+Medication sections and BMP-like tables emit one structured `medication`
+candidate per row. The draft preserves the raw row and extracts explicitly
+supported active/trade names, strength, form, route, four-slot dose schedule,
+unit, PRN instructions, prescription/intake dates, lifecycle/hold state,
+country markers, and ATC/PZN identifiers with field-level confidence and
+evidence. A brand-only or ambiguous row never guesses an active ingredient and
+is left unselected until a reviewer supplies or confirms it. Paused and stopped
+medications also require explicit lifecycle confirmation before persistence.
+Likewise, the absence of a pause/stop term never proves that a medication is
+active. An implicit `aktiv` value always remains unselected, including in a
+structured BMP or a current-medication section. Those contexts are retained as
+review evidence only. Automatic selection requires an explicit or semantically
+explicit active-status statement in addition to an active ingredient and all
+other safety checks.
 During draft enrichment, candidate source evidence is matched to these blocks
 in memory. Review confidence then uses the matching blocks instead of a noisy
 page-wide average; only block numbers and aggregate confidence are persisted.

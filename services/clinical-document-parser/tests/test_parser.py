@@ -107,11 +107,190 @@ def test_explicit_no_medication_does_not_create_a_drug() -> None:
     assert any("negation" in warning.lower() for warning in draft.warnings)
 
 
+def test_no_regular_medication_does_not_hide_a_separate_prn_row() -> None:
+    draft = parse_clinical_text(
+        "Medikation\nKeine Dauermedikation\nPainAway (Ibuprofen) 400 mg bei Bedarf"
+    )
+
+    medications = [item for item in draft.candidates if item.target == "medication"]
+    assert len(medications) == 1
+    assert medications[0].normalized["wirkstoff"] == "Ibuprofen"
+    assert medications[0].normalized["as_needed"] is True
+
+
+def test_bmp_medication_table_creates_structured_safe_candidates() -> None:
+    text = """
+Deutschland
+Bundeseinheitlicher Medikationsplan vom 01.08.2026
+Wirkstoff\tHandelsname\tStärke\tForm\tMorgens\tMittags\tAbends\tNachts\tEinheit\tATC\tPZN
+Metformin\tGlucophage\t500 mg\tTablette\t1\t0\t1\t0\tStück\tA10BA02\t01234567
+"""
+
+    draft = parse_clinical_text(text)
+    medications = [item for item in draft.candidates if item.target == "medication"]
+
+    assert len(medications) == 1
+    row = medications[0]
+    assert row.selected is False
+    assert row.normalized["raw_text"].startswith("Metformin\tGlucophage")
+    assert row.normalized["wirkstoff"] == "Metformin"
+    assert row.normalized["handelsname"] == "Glucophage"
+    assert row.normalized["staerke"] == "500 mg"
+    assert row.normalized["form"] == "Tablette"
+    assert row.normalized["einnahmeform"] == "oral"
+    assert [
+        row.normalized["dose_morgens"],
+        row.normalized["dose_mittags"],
+        row.normalized["dose_abends"],
+        row.normalized["dose_nachts"],
+    ] == ["1", "0", "1", "0"]
+    assert row.normalized["einheit"] == "Stück"
+    assert row.normalized["source_date"] == "2026-08-01"
+    assert row.normalized["source_country"] == "DE"
+    assert row.normalized["identifiers"] == {"atc": "A10BA02", "pzn": "01234567"}
+    assert row.normalized["field_confidence"]["wirkstoff"] == 0.98
+    assert row.normalized["field_evidence"]["wirkstoff"] == "labeled_table_cell"
+    assert row.normalized["auto_select"] is False
+    assert row.normalized["field_confidence"]["status"] == 0.65
+    assert row.normalized["field_evidence"]["status"] == (
+        "structured_current_medication_table_without_explicit_status"
+    )
+    assert "medication_active_status_requires_confirmation" in row.normalized["review_reasons"]
+    assert not [item for item in draft.candidates if item.target == "lab_result"]
+
+
+def test_brand_only_medication_requires_active_ingredient_review() -> None:
+    draft = parse_clinical_text("Medikation\nBeispielpräparat 20 mg 1-0-0")
+
+    row = next(item for item in draft.candidates if item.target == "medication")
+    assert row.normalized["wirkstoff"] is None
+    assert row.normalized["handelsname"] == "Beispielpräparat"
+    assert row.normalized["dose_morgens"] == "1"
+    assert row.normalized["auto_select"] is False
+    assert row.selected is False
+    assert "active_ingredient_requires_confirmation" in row.normalized["review_reasons"]
+    assert "medication_active_status_requires_confirmation" in row.normalized["review_reasons"]
+
+
+def test_medication_parenthetical_ingredient_prn_and_lifecycle_are_preserved() -> None:
+    text = """
+Medikation
+CardioX (Bisoprolol) 5 mg 1-0-0-0, pausiert seit 03.08.2026 bis 10.08.2026
+PainAway (Ibuprofen) 400 mg bei Bedarf, abgesetzt am 02.08.2026
+"""
+
+    draft = parse_clinical_text(text)
+    medications = [item for item in draft.candidates if item.target == "medication"]
+
+    assert len(medications) == 2
+    paused, stopped = medications
+    assert paused.normalized["wirkstoff"] == "Bisoprolol"
+    assert paused.normalized["status"] == "pausiert"
+    assert paused.normalized["on_hold"] is True
+    assert paused.normalized["hold_from"] == "2026-08-03"
+    assert paused.normalized["hold_until"] == "2026-08-10"
+    assert paused.selected is False
+    assert stopped.normalized["wirkstoff"] == "Ibuprofen"
+    assert stopped.normalized["status"] == "abgesetzt"
+    assert stopped.normalized["einnahme_bis"] == "2026-08-02"
+    assert stopped.normalized["as_needed"] is True
+    assert stopped.normalized["category"] == "besondere"
+    assert stopped.selected is False
+
+
+def test_medication_free_text_dates_and_identifiers_are_structured() -> None:
+    text = """
+Medikation
+Wirkstoff: Apixaban, Handelsname: Eliquis, 5 mg, verordnet am 01.07.2026, Einnahmebeginn 02.07.2026, ATC: B01AF02, PZN: 01234567
+"""
+
+    draft = parse_clinical_text(text)
+    row = next(item for item in draft.candidates if item.target == "medication")
+
+    assert row.normalized["wirkstoff"] == "Apixaban"
+    assert row.normalized["handelsname"] == "Eliquis"
+    assert row.normalized["verordnet_am"] == "2026-07-01"
+    assert row.normalized["einnahme_von"] == "2026-07-02"
+    assert row.normalized["identifiers"] == {"atc": "B01AF02", "pzn": "01234567"}
+    assert row.normalized["auto_select"] is False
+    assert row.selected is False
+    assert row.normalized["field_evidence"]["status"] == "active_status_inferred_only_by_absence"
+    assert "medication_active_status_requires_confirmation" in row.normalized["review_reasons"]
+
+
+def test_explicit_active_medication_status_can_be_safely_selected() -> None:
+    draft = parse_clinical_text(
+        "Medikation\nCardioX (Bisoprolol) 5 mg 1-0-0-0, Status: aktiv"
+    )
+
+    row = next(item for item in draft.candidates if item.target == "medication")
+    assert row.normalized["wirkstoff"] == "Bisoprolol"
+    assert row.normalized["status"] == "aktiv"
+    assert row.normalized["field_confidence"]["status"] == 0.97
+    assert row.normalized["field_evidence"]["status"] == "explicit_active_status"
+    assert "medication_active_status_requires_confirmation" not in row.normalized["review_reasons"]
+    assert row.normalized["auto_select"] is True
+    assert row.selected is True
+
+
+def test_current_medication_heading_without_explicit_status_stays_unselected() -> None:
+    draft = parse_clinical_text(
+        "Aktuelle Medikation\nCardio Aktiv (Bisoprolol) 5 mg 1-0-0-0"
+    )
+
+    row = next(item for item in draft.candidates if item.target == "medication")
+    assert row.normalized["wirkstoff"] == "Bisoprolol"
+    assert row.normalized["status"] == "aktiv"
+    assert row.normalized["field_evidence"]["status"] == (
+        "explicit_current_medication_section_without_explicit_status"
+    )
+    assert "medication_active_status_requires_confirmation" in row.normalized["review_reasons"]
+    assert row.normalized["auto_select"] is False
+    assert row.selected is False
+
+
 def test_unknown_layout_is_reviewable_instead_of_guessing() -> None:
     draft = parse_clinical_text("Freier Text ohne bekannte medizinische Abschnittsüberschriften")
 
     assert draft.candidates == []
     assert draft.warnings
+
+
+def test_tabular_laboratory_report_creates_structured_observations() -> None:
+    text = """
+Laborbefund vom 08.08.2026
+Kleines Blutbild
+Parameter\tErgebnis\tEinheit\tReferenzbereich
+Leukozyten\t6,4\tG/l\t(3,7 - 9,9)
+Hämoglobin\t11,2*\tg/dl\t(12,0 - 16,0)
+Immunologie
+Antikörper-Screening\tnegativ\t\tnegativ
+Nierenfunktion\nGeschätzte GFR\t> 60\tml/min\t(> 60)
+"""
+
+    draft = parse_clinical_text(text)
+    rows = [item for item in draft.candidates if item.target == "lab_result"]
+
+    assert len(rows) == 4
+    assert rows[0].normalized["analyte_name"] == "Leukozyten"
+    assert rows[0].normalized["numeric_result"] == 6.4
+    assert rows[0].normalized["reference_low"] == 3.7
+    assert rows[0].normalized["reference_high"] == 9.9
+    assert rows[0].normalized["abnormal_flag"] == "normal"
+    assert rows[0].normalized["measured_on"] == "2026-08-08"
+    assert rows[1].normalized["abnormal_flag"] == "abnormal"
+    assert rows[2].normalized["result_text"] == "negativ"
+    assert rows[3].normalized["comparator"] == ">"
+    assert rows[3].source.page == 1
+
+
+def test_laboratory_observation_without_date_requires_review() -> None:
+    draft = parse_clinical_text("Parameter\tErgebnis\tEinheit\nCRP\t2,1\tmg/l")
+
+    row = next(item for item in draft.candidates if item.target == "lab_result")
+    assert row.selected is False
+    assert row.normalized["measured_on"] is None
+    assert "laboratory_date_requires_confirmation" in row.normalized["review_reasons"]
 
 
 def test_oncology_report_folds_wrapped_diagnoses_and_keeps_inline_chronology_labels() -> None:

@@ -123,6 +123,8 @@ jobs:
           --minimum-cohort-candidate-f1 0.90
           --minimum-cohort-ocr-similarity 0.95
           --required-cohort arztbrief
+          --required-cohort laboratory
+          --required-cohort medication
           --minimum-required-cohort-cases 1
 
   containers:

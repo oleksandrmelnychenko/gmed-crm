@@ -1,0 +1,5 @@
+Deutschland
+Bundeseinheitlicher Medikationsplan vom 01.08.2026
+Wirkstoff	Handelsname	Stärke	Form	Morgens	Mittags	Abends	Nachts	Einheit	ATC	PZN
+Metformin	Beispiel-Metformin	500 mg	Tablette	1	0	1	0	Stück	A10BA02	01234567
+Bisoprolol	Beispiel-Cardio	5 mg	Tablette	1	0	0	0	Stück	C07AB07	07654321

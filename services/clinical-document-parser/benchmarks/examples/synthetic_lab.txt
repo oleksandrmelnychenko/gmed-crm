@@ -1,0 +1,5 @@
+Laborbefund vom 08.08.2026
+Kleines Blutbild
+Parameter	Ergebnis	Einheit	Referenzbereich
+Leukozyten	6,4	G/l	(3,7 - 9,9)
+Hämoglobin	11,2*	g/dl	(12,0 - 16,0)

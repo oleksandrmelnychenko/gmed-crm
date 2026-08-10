@@ -30,23 +30,44 @@ import {
 } from "@/pages/documents/data/document-api";
 import {
   completeClinicalDocumentImport,
+  clinicalImportNeedsSourceCountry,
   createClinicalDocumentImport,
   deleteClinicalDocumentImport,
   fetchClinicalDocumentImport,
   fetchClinicalDocumentImports,
+  prepareClinicalDocumentImport,
   retryClinicalDocumentImport,
   type ClinicalDocumentImport,
   type ClinicalDocumentImportCandidate,
+  type ClinicalDocumentCandidatePayloads,
   type ClinicalDocumentImportDraft,
   type ClinicalDocumentImportStatus,
   type ClinicalDocumentImportSummary,
   type ClinicalDocumentImportTarget,
 } from "@/pages/patients/data/clinical-document-import";
+import {
+  buildClinicalDocumentCandidatePayloads,
+  deriveClinicalImportSourceCountry,
+  isCanonicalClinicalImportSourceCountry,
+} from "@/pages/patients/data/clinical-document-import-payloads";
+import {
+  medicationCandidateNeedsWirkstoff,
+  medicationCandidateReviewBlockReason,
+  medicationCandidateDisplay,
+  medicationFieldConfidence,
+  medicationIdentifiers,
+  partitionMedicationReviewSelection,
+  updateMedicationCandidateField,
+} from "@/pages/patients/data/medication-document-import";
 import { cn } from "@/lib/utils";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 type ApplyResult = Record<string, number>;
 type BuilderTab = "all" | "source" | ClinicalDocumentImportTarget;
+type Bilingual = (ru: string, de: string) => string;
+type MedicationReviewDisposition = "blocked" | "ready";
+
+const CREATE_NEW_MEDICATION_SERIES = "__create_new_medication_series__";
 
 const MAX_IMPORT_FILE_BYTES = 25 * 1024 * 1024;
 const IMPORT_MIME_TYPES = new Set(["application/pdf", "image/png", "image/jpeg"]);
@@ -60,6 +81,8 @@ export type ExistingClinicalImportItem = {
   id: string;
   primary: string;
   secondary?: string | null;
+  medicationSeriesId?: string | null;
+  medicationIdentity?: string | null;
 };
 
 export type ExistingClinicalImportItems = Record<
@@ -72,6 +95,7 @@ const targetOrder: ClinicalDocumentImportTarget[] = [
   "anamnesis",
   "medication",
   "examination",
+  "lab_result",
   "recommendation",
 ];
 
@@ -80,6 +104,7 @@ const targetLabels: Record<ClinicalDocumentImportTarget, { ru: string; de: strin
   anamnesis: { ru: "Анамнез", de: "Anamnese" },
   medication: { ru: "Медикаменты", de: "Medikation" },
   examination: { ru: "Обследования", de: "Befunde" },
+  lab_result: { ru: "Анализы", de: "Laborwerte" },
   recommendation: { ru: "Рекомендации", de: "Empfehlungen" },
 };
 
@@ -88,6 +113,7 @@ const targetTone: Record<ClinicalDocumentImportTarget, string> = {
   anamnesis: "border-violet-200 bg-violet-50 text-violet-700",
   medication: "border-sky-200 bg-sky-50 text-sky-700",
   examination: "border-amber-200 bg-amber-50 text-amber-800",
+  lab_result: "border-cyan-200 bg-cyan-50 text-cyan-800",
   recommendation: "border-emerald-200 bg-emerald-50 text-emerald-700",
 };
 
@@ -96,10 +122,85 @@ const targetCardTone: Record<ClinicalDocumentImportTarget, string> = {
   anamnesis: "border-violet-200 bg-violet-50/35",
   medication: "border-sky-200 bg-sky-50/35",
   examination: "border-amber-200 bg-amber-50/35",
+  lab_result: "border-cyan-200 bg-cyan-50/35",
   recommendation: "border-emerald-200 bg-emerald-50/35",
 };
 
+function localizedLabNumber(value: string): number | null {
+  const compact = value.trim().replace(/\s/g, "");
+  if (!compact) return null;
+  const normalized = compact.includes(",")
+    ? compact.replace(/\./g, "").replace(",", ".")
+    : compact;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function labCandidateDisplay(normalized: Record<string, unknown>): string {
+  const analyte = typeof normalized.analyte_name === "string" ? normalized.analyte_name.trim() : "";
+  const result = typeof normalized.result_text === "string" ? normalized.result_text.trim() : "";
+  const unit = typeof normalized.unit === "string" ? normalized.unit.trim() : "";
+  const reference = typeof normalized.reference_text === "string" ? normalized.reference_text.trim() : "";
+  return `${analyte}: ${result}${unit ? ` ${unit}` : ""}${reference ? ` (Referenz: ${reference})` : ""}`.trim();
+}
+
 const reviewReasonLabels: Record<string, { ru: string; de: string }> = {
+  medication_brand_without_active_ingredient: {
+    ru: "У документі є торгова назва, але діючу речовину треба вказати вручну",
+    de: "Handelsname erkannt, Wirkstoff muss manuell ergänzt werden",
+  },
+  active_ingredient_requires_confirmation: {
+    ru: "Вкажіть і перевірте діючу речовину",
+    de: "Wirkstoff ergänzen und prüfen",
+  },
+  medication_name_requires_confirmation: {
+    ru: "Не вдалося надійно визначити назву препарату",
+    de: "Arzneimittelname konnte nicht sicher bestimmt werden",
+  },
+  medication_lifecycle_change_requires_confirmation: {
+    ru: "Зміну статусу препарату потрібно підтвердити вручну",
+    de: "Änderung des Medikationsstatus manuell bestätigen",
+  },
+  hold_end_requires_confirmation: {
+    ru: "Перевірте дату завершення паузи",
+    de: "Ende der Einnahmepause prüfen",
+  },
+  conflicting_medication_status: {
+    ru: "У документі знайдено суперечливі статуси препарату",
+    de: "Im Dokument wurden widersprüchliche Medikationsstatus erkannt",
+  },
+  pzn_requires_confirmation: {
+    ru: "Перевірте розпізнаний PZN",
+    de: "Erkannte PZN prüfen",
+  },
+  dose_schedule_requires_confirmation: {
+    ru: "Перевірте розпізнану схему дозування",
+    de: "Erkanntes Dosierschema prüfen",
+  },
+  medication_active_ingredient_requires_confirmation: {
+    ru: "Перевірте діючу речовину за оригіналом документа",
+    de: "Wirkstoff mit dem Originaldokument abgleichen",
+  },
+  medication_regimen_requires_confirmation: {
+    ru: "Перевірте дозування та схему прийому",
+    de: "Dosierung und Einnahmeschema prüfen",
+  },
+  medication_status_requires_confirmation: {
+    ru: "Перевірте статус і дати прийому",
+    de: "Status und Einnahmedaten prüfen",
+  },
+  medication_country_requires_confirmation: {
+    ru: "Перевірте країну походження препарату",
+    de: "Ursprungsland des Arzneimittels prüfen",
+  },
+  source_date_requires_confirmation: {
+    ru: "Перевірте дату документа або дату набуття чинності схеми",
+    de: "Dokument- bzw. Wirksamkeitsdatum des Schemas prüfen",
+  },
+  laboratory_date_requires_confirmation: {
+    ru: "Проверьте и укажите дату лабораторного исследования",
+    de: "Datum der Laboruntersuchung prüfen und ergänzen",
+  },
   suspected_diagnosis_requires_confirmation: {
     ru: "Подозрение — требуется подтверждение",
     de: "Verdacht – Bestätigung erforderlich",
@@ -158,6 +259,7 @@ const importStatusLabels: Record<
   queued: { ru: "В очереди", de: "In Warteschlange" },
   processing: { ru: "Обрабатывается", de: "Wird verarbeitet" },
   review_required: { ru: "Готово к проверке", de: "Bereit zur Prüfung" },
+  applying: { ru: "Застосування зафіксовано", de: "Übernahme vorbereitet" },
   applied: { ru: "Добавлено в карту", de: "Übernommen" },
   failed: { ru: "Ошибка", de: "Fehlgeschlagen" },
 };
@@ -166,6 +268,7 @@ const importStatusTone: Record<ClinicalDocumentImportStatus, string> = {
   queued: "border-slate-200 bg-slate-50 text-slate-700",
   processing: "border-sky-200 bg-sky-50 text-sky-700",
   review_required: "border-amber-200 bg-amber-50 text-amber-800",
+  applying: "border-violet-200 bg-violet-50 text-violet-800",
   applied: "border-emerald-200 bg-emerald-50 text-emerald-700",
   failed: "border-rose-200 bg-rose-50 text-rose-700",
 };
@@ -201,6 +304,314 @@ function isRiskyCandidate(candidate: ClinicalDocumentImportCandidate) {
   );
 }
 
+function medicationDispositionLabel(
+  disposition: MedicationReviewDisposition,
+  tx: Bilingual,
+) {
+  if (disposition === "blocked") {
+    return tx(
+      "Вкажіть діючу речовину — без неї запис не можна імпортувати",
+      "Wirkstoff ergänzen – ohne Wirkstoff ist kein Import möglich",
+    );
+  }
+  return tx(
+    "Перевірте всі поля — дублювання, зміни схеми та статусу визначить система під час збереження",
+    "Alle Felder prüfen – Deduplizierung, Schema- und Statusänderungen werden beim Speichern ermittelt",
+  );
+}
+
+function MedicationCandidateEditor({
+  candidate,
+  disabled,
+  disposition,
+  defaultSourceCountry,
+  onSourceCountryChange,
+  seriesOptions,
+  requiresExplicitSeries,
+  tx,
+  onPatch,
+  onFocus,
+}: {
+  candidate: ClinicalDocumentImportCandidate;
+  disabled: boolean;
+  disposition: MedicationReviewDisposition;
+  defaultSourceCountry: string;
+  onSourceCountryChange: (country: string) => void;
+  seriesOptions: ExistingClinicalImportItem[];
+  requiresExplicitSeries: boolean;
+  tx: Bilingual;
+  onPatch: (patch: Partial<ClinicalDocumentImportCandidate>) => void;
+  onFocus: () => void;
+}) {
+  const normalizedValue = (field: string) => {
+    if (field === "source_date") {
+      const value = candidate.normalized.source_date ?? candidate.normalized.effective_date;
+      return typeof value === "string" ? value : "";
+    }
+    const value = candidate.normalized[field];
+    return typeof value === "string" ? value : "";
+  };
+  const update = (field: string, value: string | boolean) => {
+    onPatch(updateMedicationCandidateField(candidate, field, value));
+  };
+  const confidence = (field: string) => medicationFieldConfidence(candidate, field);
+  const identifiers = medicationIdentifiers(candidate);
+  const field = (
+    key: string,
+    label: string,
+    options: { type?: "text" | "date"; className?: string; required?: boolean } = {},
+  ) => {
+    const score = confidence(key);
+    return (
+      <label className={cn("space-y-1", options.className)}>
+        <span className="flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span>{label}{options.required ? " *" : ""}</span>
+          {score !== null ? (
+            <span className={cn(score < 0.7 && "text-amber-700")}>
+              OCR {Math.round(score * 100)}%
+            </span>
+          ) : null}
+        </span>
+        <Input
+          type={options.type ?? "text"}
+          value={normalizedValue(key)}
+          disabled={disabled}
+          aria-required={options.required}
+          aria-invalid={options.required && !normalizedValue(key).trim()}
+          className={cn(
+            "h-11 bg-white",
+            options.required && !normalizedValue(key).trim() && "border-amber-400",
+          )}
+          onFocus={onFocus}
+          onChange={(event) => update(key, event.target.value)}
+        />
+      </label>
+    );
+  };
+  const onHold = candidate.normalized.on_hold === true || candidate.normalized.on_hold === "true";
+  const asNeeded = candidate.normalized.as_needed === true || candidate.normalized.as_needed === "true";
+  const country = defaultSourceCountry;
+  const start = normalizedValue("einnahme_von");
+  const end = normalizedValue("einnahme_bis");
+  const invalidDateRange = Boolean(start && end && end < start);
+  const selectedSeriesId = normalizedValue("medication_series_id");
+  const createsNewSeries = candidate.normalized.create_new_series === true;
+  const seriesSelection = createsNewSeries ? CREATE_NEW_MEDICATION_SERIES : selectedSeriesId;
+  const ambiguousSeries = requiresExplicitSeries && !selectedSeriesId && !createsNewSeries;
+  const updateSeriesSelection = (selection: string) => {
+    const normalized = { ...candidate.normalized };
+    delete normalized.medication_series_id;
+    delete normalized.create_new_series;
+    if (selection === CREATE_NEW_MEDICATION_SERIES) {
+      normalized.create_new_series = true;
+    } else if (selection) {
+      normalized.medication_series_id = selection;
+    }
+    onPatch({ normalized, value: medicationCandidateDisplay(normalized) });
+  };
+
+  return (
+    <div
+      data-clinical-import-candidate-editor
+      className="space-y-4 rounded-lg border border-white/70 bg-white/55 p-4"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <div
+        className={cn(
+          "flex items-start gap-2 rounded-lg border px-3 py-2.5 text-xs leading-5",
+          disposition === "blocked"
+            ? "border-amber-200 bg-amber-50 text-amber-900"
+            : "border-slate-200 bg-slate-50 text-slate-700",
+        )}
+      >
+        <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+        <div>
+          <p className="font-medium">{medicationDispositionLabel(disposition, tx)}</p>
+          <p className="text-[11px] opacity-80">
+            {tx(
+              "OCR не підтверджує препарат і не підбирає заміну автоматично.",
+              "OCR bestätigt das Arzneimittel nicht und führt keine automatische Substitution durch.",
+            )}
+          </p>
+        </div>
+      </div>
+
+      {seriesOptions.length > 0 || requiresExplicitSeries ? (
+        <label className="block space-y-1 rounded-lg border border-sky-200 bg-sky-50/70 p-3">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-sky-900">
+            {tx("Лінія медикаменту", "Medikationsserie")}{requiresExplicitSeries ? " *" : ""}
+          </span>
+          <select
+            value={seriesSelection}
+            disabled={disabled}
+            aria-required={requiresExplicitSeries}
+            aria-invalid={ambiguousSeries}
+            className={cn(
+              "h-11 w-full rounded-md border bg-white px-3 text-sm",
+              ambiguousSeries ? "border-amber-400" : "border-input",
+            )}
+            onChange={(event) => updateSeriesSelection(event.target.value)}
+          >
+            <option value="">
+              {requiresExplicitSeries
+                ? tx("Оберіть відповідну лінію", "Passende Medikationsserie auswählen")
+                : tx("Визначити під час збереження", "Beim Speichern zuordnen")}
+            </option>
+            {seriesOptions.map((option) => (
+              <option key={option.medicationSeriesId ?? option.id} value={option.medicationSeriesId ?? ""}>
+                {option.primary}{option.secondary ? ` · ${option.secondary}` : ""}
+              </option>
+            ))}
+            <option value={CREATE_NEW_MEDICATION_SERIES}>
+              {tx("Створити нову лінію", "Neue Medikationsserie erstellen")}
+            </option>
+          </select>
+          {ambiguousSeries ? (
+            <span className="block text-[11px] text-amber-800">
+              {tx(
+                "Є кілька поточних або вибраних записів із цією діючою речовиною. Виберіть лінію вручну — система не буде вгадувати.",
+                "Mehrere aktuelle oder ausgewählte Einträge haben diesen Wirkstoff. Serie manuell wählen; es erfolgt keine automatische Zuordnung.",
+              )}
+            </span>
+          ) : null}
+          {createsNewSeries ? (
+            <span className="block text-[11px] text-sky-800">
+              {tx(
+                "Буде створено окрему паралельну лінію; наявні схеми не перезаписуються.",
+                "Es wird eine eigene parallele Serie erstellt; bestehende Schemata werden nicht überschrieben.",
+              )}
+            </span>
+          ) : null}
+        </label>
+      ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {field("wirkstoff", tx("Діюча речовина", "Wirkstoff"), { required: true, className: "xl:col-span-2" })}
+        {field("handelsname", tx("Торгова назва", "Handelsname"), { className: "xl:col-span-2" })}
+        {field("staerke", tx("Сила / концентрація", "Stärke / Konzentration"))}
+        {field("form", tx("Лікарська форма", "Darreichungsform"))}
+        {field("einnahmeform", tx("Шлях введення", "Einnahmeform / Applikationsweg"), { className: "sm:col-span-2" })}
+      </div>
+
+      <div className="rounded-lg border border-sky-100 bg-sky-50/60 p-3">
+        <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-sky-800">
+          {tx("Схема прийому", "Einnahmeschema")}
+        </p>
+        <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">
+          {field("dose_morgens", tx("Ранок", "Morgens"))}
+          {field("dose_mittags", tx("День", "Mittags"))}
+          {field("dose_abends", tx("Вечір", "Abends"))}
+          {field("dose_nachts", tx("Ніч", "Nachts"))}
+          {field("einheit", tx("Одиниця", "Einheit"), { className: "col-span-2 sm:col-span-1 xl:col-span-2" })}
+        </div>
+        <label className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-sky-950">
+          <input
+            type="checkbox"
+            checked={asNeeded}
+            disabled={disabled}
+            className="size-4 rounded border-sky-300 accent-sky-600"
+            onChange={(event) => update("as_needed", event.target.checked)}
+          />
+          {tx("За потреби (PRN)", "Bei Bedarf (PRN)")}
+        </label>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        {field("source_date", tx("Дата документа / дії", "Dokument- / Wirksamkeitsdatum"), { type: "date" })}
+        {field("verordnet_am", tx("Призначено", "Verordnet am"), { type: "date" })}
+        {field("einnahme_von", tx("Прийом від", "Einnahme von"), { type: "date" })}
+        {field("einnahme_bis", tx("Прийом до", "Einnahme bis"), { type: "date" })}
+        <label className="space-y-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {tx("Статус", "Status")}
+          </span>
+          <select
+            value={normalizedValue("status") || "aktiv"}
+            disabled={disabled}
+            className="h-11 w-full rounded-md border border-input bg-white px-3 text-sm"
+            onChange={(event) => update("status", event.target.value)}
+          >
+            <option value="aktiv">{tx("Активний", "Aktiv")}</option>
+            <option value="pausiert">{tx("Призупинений", "Pausiert")}</option>
+            <option value="abgesetzt">{tx("Скасований", "Abgesetzt")}</option>
+            <option value="geplant">{tx("Запланований", "Geplant")}</option>
+          </select>
+        </label>
+      </div>
+      {invalidDateRange ? (
+        <p className="text-xs font-medium text-destructive">
+          {tx("Дата завершення раніше дати початку.", "Das Enddatum liegt vor dem Startdatum.")}
+        </p>
+      ) : null}
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        <label className="space-y-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {tx("Вказівки", "Hinweise")}
+          </span>
+          <textarea
+            value={normalizedValue("hinweis")}
+            disabled={disabled}
+            className="min-h-24 w-full resize-y rounded-md border border-input bg-white px-3 py-2 text-sm outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+            onFocus={onFocus}
+            onChange={(event) => update("hinweis", event.target.value)}
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {tx("Показання / причина", "Grund / Indikation")}
+          </span>
+          <textarea
+            value={normalizedValue("grund")}
+            disabled={disabled}
+            className="min-h-24 w-full resize-y rounded-md border border-input bg-white px-3 py-2 text-sm outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+            onFocus={onFocus}
+            onChange={(event) => update("grund", event.target.value)}
+          />
+        </label>
+      </div>
+
+      <div className="grid gap-3 rounded-lg border border-border/60 bg-white/70 p-3 sm:grid-cols-2 xl:grid-cols-4">
+        <label className="space-y-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {tx("Країна джерела", "Ursprungsland")}
+          </span>
+          <Input
+            value={country}
+            maxLength={2}
+            disabled={disabled}
+            className="h-11 bg-white uppercase"
+            onChange={(event) => {
+              const country = event.target.value.toUpperCase().replace(/[^A-Z]/g, "");
+              onSourceCountryChange(country);
+            }}
+          />
+        </label>
+        <label className="flex items-center gap-2 self-end pb-3 text-xs font-medium">
+          <input
+            type="checkbox"
+            checked={onHold}
+            disabled={disabled}
+            className="size-4 rounded border-border accent-orange-500"
+            onChange={(event) => update("on_hold", event.target.checked)}
+          />
+          {tx("Прийом на паузі", "Einnahme pausiert")}
+        </label>
+        {onHold ? field("hold_from", tx("Пауза від", "Pause von"), { type: "date" }) : null}
+        {onHold ? field("hold_until", tx("Пауза до", "Pause bis"), { type: "date" }) : null}
+        {onHold ? field("hold_note", tx("Причина паузи", "Pausengrund"), { className: "sm:col-span-2 xl:col-span-4" }) : null}
+      </div>
+
+      {identifiers ? (
+        <p className="break-words rounded-md border border-border/60 bg-white px-3 py-2 text-[11px] text-muted-foreground">
+          <span className="font-semibold text-foreground">{tx("Ідентифікатори", "Kennungen")}:</span>{" "}
+          {identifiers}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function mergeReviewCandidates(
   incoming: ClinicalDocumentImportCandidate[],
   current: ClinicalDocumentImportCandidate[],
@@ -212,9 +623,15 @@ function mergeReviewCandidates(
     return {
       ...item,
       value: existing?.value ?? item.value,
+      normalized: existing?.normalized ?? item.normalized,
       selected:
         existing?.selected ??
-        (item.selected !== false && !lowConfidenceDiagnosis && !isRiskyCandidate(item)),
+        (
+          item.selected !== false &&
+          !lowConfidenceDiagnosis &&
+          !isRiskyCandidate(item) &&
+          !medicationCandidateNeedsWirkstoff(item)
+        ),
     };
   });
 }
@@ -236,6 +653,7 @@ export function ClinicalDocumentImportSheet({
     documentImport: ClinicalDocumentImport,
     candidates: ClinicalDocumentImportCandidate[],
     sourceCountry: string,
+    candidatePayloads: ClinicalDocumentCandidatePayloads,
   ) => Promise<ApplyResult>;
 }) {
   const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
@@ -244,7 +662,7 @@ export function ClinicalDocumentImportSheet({
   const [file, setFile] = useState<File | null>(null);
   const [documentImport, setDocumentImport] = useState<ClinicalDocumentImport | null>(null);
   const [candidates, setCandidates] = useState<ClinicalDocumentImportCandidate[]>([]);
-  const [sourceCountry, setSourceCountry] = useState("DE");
+  const [sourceCountry, setSourceCountry] = useState("");
   const [activeTab, setActiveTab] = useState<BuilderTab>("all");
   const [manualTarget, setManualTarget] = useState<ClinicalDocumentImportTarget>("diagnosis");
   const [manualValue, setManualValue] = useState("");
@@ -317,7 +735,7 @@ export function ClinicalDocumentImportSheet({
       setFile(null);
       setDocumentImport(null);
       setCandidates([]);
-      setSourceCountry("DE");
+      setSourceCountry("");
       setActiveTab("all");
       setManualTarget("diagnosis");
       setManualValue("");
@@ -384,14 +802,20 @@ export function ClinicalDocumentImportSheet({
     try {
       const detail = await fetchClinicalDocumentImport(patientId, item.id);
       const snapshotCandidates = detail.reviewed_draft?.candidates ?? detail.draft.candidates;
+      const nextCandidates = detail.reviewed_draft
+        ? snapshotCandidates
+        : mergeReviewCandidates(snapshotCandidates, []);
       setDocumentImport(detail);
-      setCandidates(
-        detail.reviewed_draft
-          ? snapshotCandidates
-          : mergeReviewCandidates(snapshotCandidates, []),
-      );
+      setCandidates(nextCandidates);
       setActiveCandidateId(snapshotCandidates[0]?.id ?? null);
       setActiveTab("all");
+      if (detail.status === "applying" || detail.status === "applied") {
+        setSourceCountry(detail.prepared_source_country ?? "");
+      } else if (detail.status === "review_required") {
+        setSourceCountry(deriveClinicalImportSourceCountry(nextCandidates));
+      } else {
+        setSourceCountry("");
+      }
       await loadPreview(detail.document_id);
     } catch (error) {
       toast.error(
@@ -407,6 +831,16 @@ export function ClinicalDocumentImportSheet({
   async function deleteHistoryImport() {
     const target = deleteTarget;
     if (!target || deleteBusy) return;
+    if (target.status === "applying") {
+      setDeleteTarget(null);
+      toast.error(
+        tx(
+          "Зафіксоване застосування не можна видалити. Відкрийте його та завершіть імпорт.",
+          "Eine vorbereitete Übernahme kann nicht gelöscht werden. Öffnen und schließen Sie den Import ab.",
+        ),
+      );
+      return;
+    }
 
     setDeleteBusy(true);
     setHistoryBusyId(target.id);
@@ -440,6 +874,7 @@ export function ClinicalDocumentImportSheet({
     setCandidates([]);
     setActiveCandidateId(null);
     setActiveTab("all");
+    setSourceCountry("");
     setFile(null);
     if (fileRef.current) fileRef.current.value = "";
     void refreshHistory(true);
@@ -476,6 +911,7 @@ export function ClinicalDocumentImportSheet({
         }
         if (next.status === "review_required") {
           setCandidates((current) => mergeReviewCandidates(next.draft.candidates, current));
+          setSourceCountry(deriveClinicalImportSourceCountry(next.draft.candidates));
           setActiveCandidateId((activeId) =>
             activeId && next.draft.candidates.some((item) => item.id === activeId)
               ? activeId
@@ -512,14 +948,58 @@ export function ClinicalDocumentImportSheet({
     };
   }, [pollingImportId, shouldPoll, patientId, lang]);
 
-  const selected = useMemo(() => candidates.filter((item) => item.selected), [candidates]);
+  const medicationDispositionFor = (candidate: ClinicalDocumentImportCandidate) =>
+    candidate.target === "medication"
+      ? medicationCandidateNeedsWirkstoff(candidate) ? "blocked" as const : "ready" as const
+      : null;
+  const medicationSeriesOptionsFor = (candidate: ClinicalDocumentImportCandidate) => {
+    if (candidate.target !== "medication") return [];
+    const identity = normalizedString(candidate, "wirkstoff")?.trim().toLocaleLowerCase("de-DE");
+    if (!identity) return [];
+    const matches = existingItems.medication.filter(
+      (item) =>
+        Boolean(item.medicationSeriesId) &&
+        item.medicationIdentity?.trim().toLocaleLowerCase("de-DE") === identity,
+    );
+    return Array.from(
+      new Map(matches.map((item) => [item.medicationSeriesId as string, item])).values(),
+    );
+  };
+  const matchingBatchMedicationCountFor = (candidate: ClinicalDocumentImportCandidate) => {
+    if (candidate.target !== "medication") return 0;
+    const identity = normalizedString(candidate, "wirkstoff")
+      ?.trim()
+      .toLocaleLowerCase("de-DE")
+      .replace(/\s+/g, " ");
+    if (!identity) return 0;
+    return candidates.filter((item) => {
+      if (item.target !== "medication" || (!item.selected && item.id !== candidate.id)) return false;
+      return normalizedString(item, "wirkstoff")
+        ?.trim()
+        .toLocaleLowerCase("de-DE")
+        .replace(/\s+/g, " ") === identity;
+    }).length;
+  };
+  const candidateSelectionBlocked = (candidate: ClinicalDocumentImportCandidate) => {
+    const seriesOptions = medicationSeriesOptionsFor(candidate);
+    return medicationCandidateReviewBlockReason(
+      candidate,
+      seriesOptions.length,
+      matchingBatchMedicationCountFor(candidate),
+    ) !== null;
+  };
+  const { selected, blockedSelected } = partitionMedicationReviewSelection(
+    candidates,
+    (candidate) => medicationSeriesOptionsFor(candidate).length,
+    matchingBatchMedicationCountFor,
+  );
   const visibleCandidates = useMemo(
     () => candidates.filter((item) => activeTab === "all" || item.target === activeTab),
     [activeTab, candidates],
   );
   const activeCandidate = candidates.find((item) => item.id === activeCandidateId) ?? null;
   const activePage = activeCandidate?.source.page ?? 1;
-  const hasExternalDiagnosis = selected.some((item) => item.target === "diagnosis");
+  const hasCountryScopedCandidate = clinicalImportNeedsSourceCountry(selected);
   const newCount = (target: ClinicalDocumentImportTarget) =>
     candidates.filter((item) => item.target === target).length;
   const selectedCount = (target: ClinicalDocumentImportTarget) =>
@@ -593,7 +1073,36 @@ export function ClinicalDocumentImportSheet({
 
   async function apply() {
     if (!documentImport || selected.length === 0) return;
-    if (hasExternalDiagnosis && !/^[A-Z]{2}$/.test(sourceCountry)) {
+    if (documentImport.status === "review_required" && blockedSelected.length > 0) {
+      const blocked = blockedSelected[0];
+      const reason = medicationCandidateReviewBlockReason(
+        blocked,
+        medicationSeriesOptionsFor(blocked).length,
+        matchingBatchMedicationCountFor(blocked),
+      );
+      setActiveCandidateId(blocked.id);
+      setActiveTab(blocked.target);
+      window.requestAnimationFrame(() => {
+        const card = Array.from(
+          document.querySelectorAll<HTMLElement>("[data-clinical-import-candidate-id]"),
+        ).find((element) => element.dataset.clinicalImportCandidateId === blocked.id);
+        card?.focus();
+        card?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+      toast.error(
+        reason === "missing_wirkstoff"
+          ? tx(
+              "Вибраний медикамент не має діючої речовини. Заповніть Wirkstoff перед імпортом.",
+              "Für das ausgewählte Medikament fehlt der Wirkstoff. Bitte vor dem Import ergänzen.",
+            )
+          : tx(
+              "Для вибраного медикаменту потрібно обрати наявну лінію або створити нову.",
+              "Für das ausgewählte Medikament muss eine bestehende Serie gewählt oder eine neue erstellt werden.",
+            ),
+      );
+      return;
+    }
+    if (hasCountryScopedCandidate && !isCanonicalClinicalImportSourceCountry(sourceCountry)) {
       toast.error(
         tx(
           "Укажите страну документа кодом ISO",
@@ -610,17 +1119,74 @@ export function ClinicalDocumentImportSheet({
         toast.success(tx("Импорт уже был завершён", "Der Import wurde bereits abgeschlossen"));
         return;
       }
-      if (latestImport.status !== "review_required") {
+      if (latestImport.status !== "review_required" && latestImport.status !== "applying") {
         throw new Error(tx("Черновик ещё не готов к подтверждению", "Der Entwurf ist noch nicht zur Prüfung bereit"));
       }
-      const appliedCounts = await onApply(documentImport, selected, sourceCountry);
-      const reviewedDraft: ClinicalDocumentImportDraft = {
-        ...documentImport.draft,
-        candidates,
-      };
+
+      let reviewedDraft: ClinicalDocumentImportDraft;
+      let preparedCountry: string;
+      let preparedImport: ClinicalDocumentImport = latestImport;
+      if (latestImport.status === "applying") {
+        if (!latestImport.reviewed_draft) {
+          throw new Error(tx("Зафіксований імпорт не має знімка перевірки", "Vorbereiteter Import enthält keinen Prüfsnapshot"));
+        }
+        reviewedDraft = latestImport.reviewed_draft;
+        preparedCountry = latestImport.prepared_source_country ?? "";
+      } else {
+        reviewedDraft = {
+          ...latestImport.draft,
+          candidates,
+        };
+        preparedCountry = hasCountryScopedCandidate ? sourceCountry : "";
+      }
+      const { candidatePayloads, invalidCandidate } = buildClinicalDocumentCandidatePayloads(
+        reviewedDraft.candidates,
+        preparedCountry,
+        latestImport.id,
+      );
+      if (invalidCandidate) {
+        setActiveCandidateId(invalidCandidate.id);
+        setActiveTab(invalidCandidate.target);
+        throw new Error(
+          invalidCandidate.target === "lab_result"
+            ? tx(
+                "Для вибраного аналізу потрібні показник, значення, дата та підтверджена країна.",
+                "Für den ausgewählten Laborwert sind Parameter, Wert, Datum und ein bestätigtes Land erforderlich.",
+              )
+            : tx(
+                "Для вибраного медикаменту потрібні Wirkstoff і підтверджена країна.",
+                "Für das ausgewählte Medikament sind Wirkstoff und ein bestätigtes Land erforderlich.",
+              ),
+        );
+      }
+      const prepared = await prepareClinicalDocumentImport(
+        patientId,
+        latestImport.id,
+        reviewedDraft,
+        candidatePayloads,
+        preparedCountry || null,
+      );
+      if (latestImport.status === "review_required") {
+        preparedImport = {
+          ...latestImport,
+          status: "applying",
+          reviewed_draft: reviewedDraft,
+          prepared_source_country: prepared.source_country,
+          prepared_at: new Date().toISOString(),
+        };
+        setDocumentImport(preparedImport);
+        setCandidates(reviewedDraft.candidates);
+      }
+      const preparedCandidates = reviewedDraft.candidates.filter((candidate) => candidate.selected);
+      const appliedCounts = await onApply(
+        preparedImport,
+        preparedCandidates,
+        preparedCountry,
+        candidatePayloads,
+      );
       const completed = await completeClinicalDocumentImport(
         patientId,
-        documentImport.id,
+        preparedImport.id,
         reviewedDraft,
         appliedCounts,
       );
@@ -649,9 +1215,30 @@ export function ClinicalDocumentImportSheet({
     );
   }
 
+  function updateSourceCountry(country: string) {
+    setSourceCountry(country);
+    setCandidates((current) =>
+      current.map((candidate) =>
+        ["diagnosis", "lab_result", "medication"].includes(candidate.target)
+          ? {
+              ...candidate,
+              normalized: { ...candidate.normalized, source_country: country },
+            }
+          : candidate,
+      ),
+    );
+  }
+
   function addManualCandidate() {
     const value = manualValue.trim();
     if (!value || snapshotReadOnly) return;
+    const manualLabParts = manualTarget === "lab_result"
+      ? value.split("|").map((part) => part.trim())
+      : [];
+    if (manualTarget === "lab_result" && (manualLabParts.length < 2 || !manualLabParts[0] || !manualLabParts[1])) {
+      toast.error(tx("Для анализа укажите: показатель | значение | единица | референс", "Laborwert angeben als: Parameter | Wert | Einheit | Referenz"));
+      return;
+    }
     const id = `manual:${crypto.randomUUID()}`;
     const normalized: Record<string, unknown> = (() => {
       if (manualTarget === "diagnosis") {
@@ -681,6 +1268,28 @@ export function ClinicalDocumentImportSheet({
       if (manualTarget === "medication") {
         return {
           wirkstoff: value,
+          handelsname: "",
+          staerke: null,
+          form: null,
+          einnahmeform: null,
+          dose_morgens: null,
+          dose_mittags: null,
+          dose_abends: null,
+          dose_nachts: null,
+          einheit: null,
+          hinweis: null,
+          grund: null,
+          verordnet_am: null,
+          einnahme_von: null,
+          einnahme_bis: null,
+          source_date: null,
+          status: "aktiv",
+          on_hold: false,
+          hold_from: null,
+          hold_until: null,
+          hold_note: null,
+          as_needed: false,
+          source_country: sourceCountry,
           assertion: "reported",
           semantic_role: "manual_review",
           auto_select: true,
@@ -697,6 +1306,26 @@ export function ClinicalDocumentImportSheet({
           section_role: "manual",
           assertion: "reported",
           semantic_role: "manual_review",
+          auto_select: true,
+          review_reasons: [],
+          confidence_kind: "manual_user_entry",
+        };
+      }
+      if (manualTarget === "lab_result") {
+        const [analyteName, resultText, unit, referenceText] = manualLabParts;
+        return {
+          panel: tx("Ручной ввод", "Manuelle Eingabe"),
+          analyte_name: analyteName,
+          result_text: resultText,
+          numeric_result: localizedLabNumber(resultText.replace(/^(?:<=|>=|<|>|=)\s*/, "")),
+          comparator: resultText.match(/^(<=|>=|<|>|=)/)?.[1] ?? null,
+          unit: unit || null,
+          reference_text: referenceText || null,
+          reference_low: null,
+          reference_high: null,
+          abnormal_flag: "unknown",
+          measured_on: new Date().toISOString().slice(0, 10),
+          semantic_role: "laboratory_observation",
           auto_select: true,
           review_reasons: [],
           confidence_kind: "manual_user_entry",
@@ -738,20 +1367,23 @@ export function ClinicalDocumentImportSheet({
     const visibleIds = new Set(visibleCandidates.map((item) => item.id));
     setCandidates((current) =>
       current.map((item) =>
-        visibleIds.has(item.id) ? { ...item, selected: selectedState } : item,
+        visibleIds.has(item.id)
+          ? { ...item, selected: selectedState && !candidateSelectionBlocked(item) }
+          : item,
       ),
     );
   }
 
   const reviewReady = documentImport?.status === "review_required";
-  const snapshotReady = reviewReady || documentImport?.status === "applied";
-  const snapshotReadOnly = documentImport?.status === "applied";
+  const applyingReady = documentImport?.status === "applying";
+  const snapshotReady = reviewReady || applyingReady || documentImport?.status === "applied";
+  const snapshotReadOnly = applyingReady || documentImport?.status === "applied";
 
   return (
     <PatientSheetScaffold
       open={open}
       onOpenChange={handleOpenChange}
-      maxWidthClassName="sm:!top-2 sm:!bottom-2 sm:!right-2 sm:!w-[calc(100vw-16px)] sm:!max-w-[calc(100vw-16px)] sm:rounded-xl"
+      maxWidthClassName="sm:!top-1 sm:!bottom-1 sm:!right-1 sm:!w-[calc(100vw-8px)] sm:!max-w-[calc(100vw-8px)] sm:rounded-xl"
       title={tx("Конструктор импорта медицинского документа", "Builder für medizinischen Dokumentimport")}
       description={tx(
         "Проверяйте предложения системы рядом с оригиналом.",
@@ -761,24 +1393,43 @@ export function ClinicalDocumentImportSheet({
       bodyClassName="!space-y-0 !overflow-hidden !bg-white !p-0"
       bodyWrapperClassName="h-full min-h-0"
       footer={
-        reviewReady ? (
+        reviewReady || applyingReady ? (
           <>
-            <div className="mr-auto flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="font-semibold text-foreground">{selected.length}</span>
-              {tx("объектов выбрано", "Objekte ausgewählt")}
+            <div className="mr-auto space-y-0.5 text-xs text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-foreground">{selected.length}</span>
+                {tx("объектов выбрано", "Objekte ausgewählt")}
+              </div>
+              {reviewReady && blockedSelected.length > 0 ? (
+                <p className="font-medium text-amber-700">
+                  {tx(
+                    `${blockedSelected.length} медикамент(и) потребують перевірки перед застосуванням`,
+                    `${blockedSelected.length} Medikament(e) müssen vor der Übernahme geprüft werden`,
+                  )}
+                </p>
+              ) : applyingReady ? (
+                <p className="font-medium text-violet-700">
+                  {tx("Вибір зафіксовано — імпорт можна безпечно продовжити", "Auswahl ist eingefroren – Import kann sicher fortgesetzt werden")}
+                </p>
+              ) : null}
             </div>
             <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
               {tx("Отмена", "Abbrechen")}
             </Button>
             <Button type="button" disabled={busy || selected.length === 0} onClick={apply}>
               {busy ? <LoaderCircle className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
-              {tx("Подтвердить и добавить", "Prüfen und übernehmen")}
+              {applyingReady
+                ? tx("Продовжити й завершити", "Fortsetzen und abschließen")
+                : tx("Подтвердить и добавить", "Prüfen und übernehmen")}
             </Button>
           </>
         ) : undefined
       }
     >
-      <div className="grid h-full min-h-0 grid-cols-1 bg-white lg:grid-cols-[minmax(520px,58fr)_minmax(400px,42fr)]">
+      <div
+        data-clinical-import-workspace
+        className="grid h-full min-h-0 grid-cols-1 bg-white lg:grid-cols-[minmax(520px,58fr)_minmax(400px,42fr)] xl:grid-cols-[minmax(680px,62fr)_minmax(420px,38fr)]"
+      >
         <section className="flex min-h-0 flex-col border-r border-border/70 bg-white">
           {!documentImport ? (
             <div className="min-h-0 flex-1 overflow-y-auto p-5">
@@ -954,10 +1605,16 @@ export function ClinicalDocumentImportSheet({
                               size="icon-sm"
                               variant="ghost"
                               className="mr-3 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                              disabled={deleteBusy || historyBusyId === item.id}
-                              onClick={() => setDeleteTarget(item)}
+                              disabled={deleteBusy || historyBusyId === item.id || item.status === "applying"}
+                              onClick={() => {
+                                if (item.status !== "applying") setDeleteTarget(item);
+                              }}
                               aria-label={tx("Удалить обработку", "Verarbeitung löschen")}
-                              title={tx("Удалить обработку", "Verarbeitung löschen")}
+                              title={
+                                item.status === "applying"
+                                  ? tx("Спочатку завершіть зафіксований імпорт", "Vorbereitete Übernahme zuerst abschließen")
+                                  : tx("Удалить обработку", "Verarbeitung löschen")
+                              }
                             >
                               <Trash2 className="size-4" />
                             </Button>
@@ -1093,8 +1750,8 @@ export function ClinicalDocumentImportSheet({
                 </Tabs>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                {snapshotReadOnly ? (
+              <div className="min-h-0 flex-1 overflow-y-auto p-4 xl:p-5">
+                {documentImport.status === "applied" ? (
                   <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-emerald-900">
                     <div className="flex items-center gap-2">
                       <CheckCircle2 className="size-4" />
@@ -1111,6 +1768,27 @@ export function ClinicalDocumentImportSheet({
                     </div>
                     <Badge variant="outline" className="border-emerald-300 bg-white/60 text-emerald-800">
                       {appliedObjectCount(documentImport)} {tx("объектов", "Objekte")}
+                    </Badge>
+                  </div>
+                ) : null}
+                {documentImport.status === "applying" ? (
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-violet-200 bg-violet-50 p-3 text-violet-900">
+                    <div className="flex items-center gap-2">
+                      <Clock3 className="size-4" />
+                      <div>
+                        <p className="text-xs font-semibold">
+                          {tx("Перевірений вибір зафіксовано", "Geprüfte Auswahl ist eingefroren")}
+                        </p>
+                        <p className="text-[11px] text-violet-800/80">
+                          {tx(
+                            "Редагування вимкнено. Продовжіть, щоб безпечно завершити всі записи.",
+                            "Bearbeitung ist gesperrt. Fortsetzen, um alle Einträge sicher abzuschließen.",
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                    <Badge variant="outline" className="border-violet-300 bg-white/60 text-violet-800">
+                      {selected.length} {tx("вибрано", "ausgewählt")}
                     </Badge>
                   </div>
                 ) : null}
@@ -1141,7 +1819,7 @@ export function ClinicalDocumentImportSheet({
                       <textarea
                         readOnly
                         value={documentImport.draft.raw_text}
-                        className="min-h-[420px] w-full resize-y rounded-xl border border-border/70 bg-slate-50/70 p-4 font-mono text-[12px] leading-5 text-foreground outline-none selection:bg-orange-200 focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+                        className="min-h-[560px] max-h-[72vh] w-full resize-y rounded-xl border border-border/70 bg-slate-50/70 p-5 font-mono text-[13px] leading-6 text-foreground outline-none selection:bg-orange-200 focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
                         onSelect={(event) => {
                           if (!reviewReady) return;
                           const field = event.currentTarget;
@@ -1165,7 +1843,7 @@ export function ClinicalDocumentImportSheet({
                     )}
 
                     {reviewReady ? (
-                      <div className="rounded-xl border border-border/70 bg-white p-4">
+                      <div className="rounded-xl border border-border/70 bg-white p-5">
                         <div className="mb-3 flex items-center gap-2">
                           <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
                           <div>
@@ -1177,7 +1855,7 @@ export function ClinicalDocumentImportSheet({
                             </p>
                           </div>
                         </div>
-                        <div className="grid gap-3 lg:grid-cols-[190px_minmax(0,1fr)_auto] lg:items-end">
+                        <div className="grid gap-4 lg:grid-cols-[210px_minmax(0,1fr)_auto] lg:items-end">
                           <label className="space-y-1">
                             <span className="text-xs font-medium">
                               {tx("Тип объекта", "Objekttyp")}
@@ -1202,7 +1880,7 @@ export function ClinicalDocumentImportSheet({
                             </span>
                             <textarea
                               value={manualValue}
-                              className="min-h-24 w-full resize-y rounded-lg border border-border bg-white px-3 py-2 text-sm leading-relaxed outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+                              className="min-h-36 max-h-[50vh] w-full resize-y rounded-lg border border-border bg-white px-4 py-3 text-sm leading-6 outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
                               placeholder={tx("Выделите текст выше или введите его здесь…", "Oben Text markieren oder hier eingeben…")}
                               onChange={(event) => setManualValue(event.target.value)}
                             />
@@ -1222,7 +1900,7 @@ export function ClinicalDocumentImportSheet({
                   </section>
                 ) : null}
 
-                {activeTab !== "source" && hasExternalDiagnosis && (activeTab === "all" || activeTab === "diagnosis") ? (
+                {activeTab !== "source" && hasCountryScopedCandidate && (activeTab === "all" || activeTab === "diagnosis" || activeTab === "lab_result" || activeTab === "medication") ? (
                   <div className="mb-4 flex items-end gap-3 rounded-xl border border-border/70 bg-muted/20 p-3">
                     <label className="block space-y-1">
                       <span className="text-xs font-medium">
@@ -1231,19 +1909,28 @@ export function ClinicalDocumentImportSheet({
                       <Input
                         value={sourceCountry}
                         maxLength={2}
-                        className="w-24 uppercase"
+                        disabled={snapshotReadOnly}
+                        aria-invalid={!isCanonicalClinicalImportSourceCountry(sourceCountry)}
+                        className={cn(
+                          "w-24 uppercase",
+                          !isCanonicalClinicalImportSourceCountry(sourceCountry) && "border-amber-400",
+                        )}
                         onChange={(event) =>
-                          setSourceCountry(
+                          updateSourceCountry(
                             event.target.value.toUpperCase().replace(/[^A-Z]/g, ""),
                           )
                         }
-                        placeholder="DE"
+                        placeholder="UA"
                       />
                     </label>
                     <p className="pb-2 text-xs text-muted-foreground">
                       {tx(
-                        "Нужно для внешних диагнозов; позже возьмём автоматически из реквизитов клиники.",
-                        "Für externe Diagnosen erforderlich; später automatisch aus den Klinikdaten.",
+                        isCanonicalClinicalImportSourceCountry(sourceCountry)
+                          ? "Єдина підтверджена країна буде застосована до всіх вибраних діагнозів, аналізів і медикаментів."
+                          : "Країна в документі відсутня або суперечлива. Підтвердьте ISO-код перед застосуванням.",
+                        isCanonicalClinicalImportSourceCountry(sourceCountry)
+                          ? "Das bestätigte Land gilt für alle ausgewählten Diagnosen, Laborwerte und Medikamente."
+                          : "Das Dokument enthält kein eindeutiges Land. ISO-Code vor der Übernahme bestätigen.",
                       )}
                     </p>
                   </div>
@@ -1254,7 +1941,7 @@ export function ClinicalDocumentImportSheet({
                   const proposedItems = visibleCandidates.filter((item) => item.target === target);
                   if (activeTab === "all" && proposedItems.length === 0) return null;
                   return (
-                    <section key={target} className="mb-5 space-y-3">
+                    <section key={target} className="mb-8 space-y-4">
                       <div className="flex items-center justify-between gap-3">
                         <div>
                           <h4 className="text-sm font-semibold">
@@ -1277,11 +1964,11 @@ export function ClinicalDocumentImportSheet({
                           <summary className="cursor-pointer px-3 py-2.5 text-xs font-medium text-muted-foreground">
                             {tx("Текущие данные пациента", "Aktuelle Patientendaten")} ({currentItems.length})
                           </summary>
-                          <div className="space-y-2 border-t border-border/50 p-2">
+                          <div className="space-y-3 border-t border-border/50 p-3">
                             {currentItems.map((item) => (
                               <div
                                 key={item.id}
-                                className={cn("rounded-lg border px-3 py-2.5", targetCardTone[target])}
+                                className={cn("rounded-lg border px-4 py-3.5", targetCardTone[target])}
                               >
                                 <p className="whitespace-pre-wrap break-words text-sm font-medium leading-relaxed text-foreground">
                                   {item.primary}
@@ -1308,9 +1995,12 @@ export function ClinicalDocumentImportSheet({
                         </details>
                       ) : null}
 
-                      <div className="space-y-2">
+                      <div className="space-y-3">
                         {proposedItems.map((candidate) => {
                           const active = candidate.id === activeCandidateId;
+                          const medicationDisposition = medicationDispositionFor(candidate);
+                          const selectionBlocked = candidateSelectionBlocked(candidate);
+                          const candidateSelected = candidate.selected;
                           const reviewReasons = normalizedStringArray(candidate, "review_reasons");
                           const semanticKey =
                             normalizedString(candidate, "semantic_role") ??
@@ -1321,13 +2011,16 @@ export function ClinicalDocumentImportSheet({
                           return (
                             <article
                               key={candidate.id}
+                              data-clinical-import-candidate-card
+                              data-clinical-import-candidate-id={candidate.id}
+                              tabIndex={-1}
                               className={cn(
-                                "rounded-lg border px-3 py-2.5 transition-all",
+                                "rounded-xl border px-4 py-4 transition-all",
                                 targetCardTone[candidate.target],
                                 active
                                   ? "border-orange-400 shadow-sm ring-2 ring-orange-100"
                                   : "hover:border-orange-300 hover:shadow-sm",
-                                !candidate.selected && "opacity-60",
+                                !candidateSelected && candidate.target !== "medication" && "opacity-60",
                               )}
                               onClick={() => setActiveCandidateId(candidate.id)}
                             >
@@ -1335,8 +2028,8 @@ export function ClinicalDocumentImportSheet({
                                 <input
                                   type="checkbox"
                                   className="mt-2 size-4 shrink-0 rounded border-border accent-orange-500"
-                                  checked={candidate.selected}
-                                  disabled={snapshotReadOnly}
+                                  checked={candidateSelected}
+                                  disabled={snapshotReadOnly || selectionBlocked}
                                   onChange={(event) =>
                                     patchCandidate(candidate.id, { selected: event.target.checked })
                                   }
@@ -1344,16 +2037,120 @@ export function ClinicalDocumentImportSheet({
                                   aria-label={tx("Импортировать запись", "Eintrag importieren")}
                                 />
                                 <div className="min-w-0 flex-1">
-                                  <textarea
-                                    value={candidate.value}
-                                    disabled={snapshotReadOnly || !candidate.selected}
-                                    className="min-h-14 w-full resize-y rounded-md border border-transparent bg-transparent px-2 py-1.5 text-sm font-medium leading-relaxed text-foreground outline-none transition-colors hover:border-white/90 hover:bg-white/60 focus:border-orange-300 focus:bg-white focus:ring-2 focus:ring-orange-100 disabled:cursor-default disabled:opacity-55"
-                                    onChange={(event) =>
-                                      patchCandidate(candidate.id, { value: event.target.value })
-                                    }
-                                    onFocus={() => setActiveCandidateId(candidate.id)}
-                                    onClick={(event) => event.stopPropagation()}
-                                  />
+                                  {candidate.target === "medication" && medicationDisposition ? (
+                                    <MedicationCandidateEditor
+                                      candidate={candidate}
+                                      disabled={snapshotReadOnly}
+                                      disposition={medicationDisposition}
+                                      defaultSourceCountry={sourceCountry}
+                                      onSourceCountryChange={updateSourceCountry}
+                                      seriesOptions={medicationSeriesOptionsFor(candidate)}
+                                      requiresExplicitSeries={
+                                        medicationSeriesOptionsFor(candidate).length > 1 ||
+                                        matchingBatchMedicationCountFor(candidate) > 1
+                                      }
+                                      tx={tx}
+                                      onFocus={() => setActiveCandidateId(candidate.id)}
+                                      onPatch={(patch) => patchCandidate(candidate.id, patch)}
+                                    />
+                                  ) : candidate.target === "lab_result" ? (
+                                    <div
+                                      data-clinical-import-candidate-editor
+                                      className="grid gap-3 rounded-lg border border-white/70 bg-white/55 p-3 sm:grid-cols-2 xl:grid-cols-4"
+                                      onClick={(event) => event.stopPropagation()}
+                                    >
+                                      {([
+                                        ["analyte_name", tx("Показатель", "Parameter")],
+                                        ["result_text", tx("Значение", "Wert")],
+                                        ["unit", tx("Единица", "Einheit")],
+                                        ["reference_text", tx("Референс", "Referenz")],
+                                      ] as const).map(([field, label]) => (
+                                        <label key={field} className="space-y-1">
+                                          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
+                                          <Input
+                                            value={typeof candidate.normalized[field] === "string" ? candidate.normalized[field] as string : ""}
+                                            disabled={snapshotReadOnly || !candidate.selected}
+                                            className="h-10 bg-white"
+                                            onFocus={() => setActiveCandidateId(candidate.id)}
+                                            onChange={(event) => {
+                                              const nextNormalized = { ...candidate.normalized, [field]: event.target.value };
+                                              if (field === "result_text") {
+                                                nextNormalized.numeric_result = localizedLabNumber(event.target.value.replace(/^(?:<=|>=|<|>|=)\s*/, ""));
+                                                nextNormalized.comparator = event.target.value.match(/^(<=|>=|<|>|=)/)?.[1] ?? null;
+                                              }
+                                              if (field === "reference_text") {
+                                                nextNormalized.reference_low = null;
+                                                nextNormalized.reference_high = null;
+                                                nextNormalized.abnormal_flag = "unknown";
+                                              }
+                                              patchCandidate(candidate.id, {
+                                                normalized: nextNormalized,
+                                                value: labCandidateDisplay(nextNormalized),
+                                              });
+                                            }}
+                                          />
+                                        </label>
+                                      ))}
+                                      <label className="space-y-1 sm:col-span-1">
+                                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{tx("Дата", "Datum")}</span>
+                                        <Input
+                                          type="date"
+                                          value={typeof candidate.normalized.measured_on === "string" ? candidate.normalized.measured_on : ""}
+                                          disabled={snapshotReadOnly || !candidate.selected}
+                                          className="h-10 bg-white"
+                                          onChange={(event) => {
+                                            const nextNormalized = { ...candidate.normalized, measured_on: event.target.value };
+                                            patchCandidate(candidate.id, { normalized: nextNormalized });
+                                          }}
+                                        />
+                                      </label>
+                                      <label className="space-y-1 sm:col-span-1 xl:col-span-2">
+                                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{tx("Группа", "Laborgruppe")}</span>
+                                        <Input
+                                          value={typeof candidate.normalized.panel === "string" ? candidate.normalized.panel : ""}
+                                          disabled={snapshotReadOnly || !candidate.selected}
+                                          className="h-10 bg-white"
+                                          onChange={(event) => {
+                                            const nextNormalized = { ...candidate.normalized, panel: event.target.value };
+                                            patchCandidate(candidate.id, { normalized: nextNormalized });
+                                          }}
+                                        />
+                                      </label>
+                                      <label className="space-y-1">
+                                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{tx("Статус", "Status")}</span>
+                                        <select
+                                          value={typeof candidate.normalized.abnormal_flag === "string" ? candidate.normalized.abnormal_flag : "unknown"}
+                                          disabled={snapshotReadOnly || !candidate.selected}
+                                          className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
+                                          onChange={(event) => {
+                                            const nextNormalized = { ...candidate.normalized, abnormal_flag: event.target.value };
+                                            patchCandidate(candidate.id, { normalized: nextNormalized });
+                                          }}
+                                        >
+                                          <option value="unknown">{tx("Не определён", "Unbekannt")}</option>
+                                          <option value="normal">{tx("Норма", "Normal")}</option>
+                                          <option value="low">{tx("Ниже", "Niedrig")}</option>
+                                          <option value="high">{tx("Выше", "Hoch")}</option>
+                                          <option value="abnormal">{tx("Отклонение", "Auffällig")}</option>
+                                        </select>
+                                      </label>
+                                    </div>
+                                  ) : (
+                                    <textarea
+                                      data-clinical-import-candidate-editor
+                                      value={candidate.value}
+                                      disabled={snapshotReadOnly || !candidate.selected}
+                                      className={cn(
+                                        "max-h-[55vh] w-full resize-y rounded-lg border border-white/70 bg-white/45 px-3 py-2.5 text-sm font-medium leading-6 text-foreground outline-none transition-colors hover:border-white hover:bg-white/70 focus:border-orange-300 focus:bg-white focus:ring-2 focus:ring-orange-100 disabled:cursor-default disabled:opacity-55",
+                                        active ? "min-h-44" : "min-h-32",
+                                      )}
+                                      onChange={(event) =>
+                                        patchCandidate(candidate.id, { value: event.target.value })
+                                      }
+                                      onFocus={() => setActiveCandidateId(candidate.id)}
+                                      onClick={(event) => event.stopPropagation()}
+                                    />
+                                  )}
                                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
                                     <Badge
                                       variant="outline"
@@ -1441,7 +2238,7 @@ export function ClinicalDocumentImportSheet({
               <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                 {tx("Фрагмент-основание", "Quellenausschnitt")}
               </p>
-              <p className="line-clamp-4 whitespace-pre-wrap text-xs leading-relaxed text-foreground">
+              <p className="max-h-56 overflow-y-auto whitespace-pre-wrap pr-2 text-xs leading-5 text-foreground">
                 {activeCandidate.source.text}
               </p>
             </div>

@@ -59,6 +59,13 @@ export const ru = {
   login_mfa_checking: "Проверка...",
   login_sign_in_subtitle:
     "Продолжить в операционное пространство для клиник, врачей и приёмов.",
+  login_brand_tagline: "Медицинское консьерж-агентство",
+  login_back_home: "На главную",
+  login_show_password: "Показать пароль",
+  login_hide_password: "Скрыть пароль",
+  login_confidentiality_notice: "Ваши данные защищены и конфиденциальны.",
+  login_pay_with_mollie: "Оплатить через Mollie",
+  login_secure_payments: "Безопасные платежи —",
 
   users_title: "Управление пользователями",
   users_subtitle: "Управление пользователями, ролями и правами доступа",

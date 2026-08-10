@@ -3042,6 +3042,7 @@ async fn load_patient_medication_expiry_candidates(
                  AND mee.status = 'pending_confirmation'
            WHERE m.category = 'dauer'
              AND m.status = 'aktiv'
+             AND m.superseded_at IS NULL
              AND m.einnahme_bis ~ '^\d{4}-\d{2}-\d{2}$'
              AND m.einnahme_bis::date < $1
              AND mee.id IS NULL

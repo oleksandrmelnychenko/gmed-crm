@@ -29,6 +29,58 @@
       "forbidden_diagnoses": [
         { "value": "Keine Herzinsuffizienz", "reason": "negated finding" }
       ]
+    },
+    {
+      "case_id": "synthetic-lab-001",
+      "cohorts": ["laboratory"],
+      "document": {
+        "path": "synthetic_lab.txt",
+        "mime_type": "text/plain"
+      },
+      "reference": {
+        "raw_text": "Laborbefund vom 08.08.2026\nKleines Blutbild\nParameter\tErgebnis\tEinheit\tReferenzbereich\nLeukozyten\t6,4\tG/l\t(3,7 - 9,9)\nHämoglobin\t11,2*\tg/dl\t(12,0 - 16,0)",
+        "candidates": [
+          {
+            "target": "lab_result",
+            "value": "Leukozyten: 6,4 G/l (Referenz: (3,7 - 9,9))"
+          },
+          {
+            "target": "lab_result",
+            "value": "Hämoglobin: 11,2* g/dl (Referenz: (12,0 - 16,0))"
+          }
+        ]
+      },
+      "section_rules": [
+        { "section": "Kleines Blutbild", "allowed_targets": ["lab_result"] }
+      ],
+      "forbidden_diagnoses": []
+    },
+    {
+      "case_id": "synthetic-medication-001",
+      "cohorts": ["medication"],
+      "document": {
+        "path": "synthetic_medication.txt",
+        "mime_type": "text/plain"
+      },
+      "reference": {
+        "raw_text": "Deutschland\nBundeseinheitlicher Medikationsplan vom 01.08.2026\nWirkstoff\tHandelsname\tStärke\tForm\tMorgens\tMittags\tAbends\tNachts\tEinheit\tATC\tPZN\nMetformin\tBeispiel-Metformin\t500 mg\tTablette\t1\t0\t1\t0\tStück\tA10BA02\t01234567\nBisoprolol\tBeispiel-Cardio\t5 mg\tTablette\t1\t0\t0\t0\tStück\tC07AB07\t07654321",
+        "candidates": [
+          {
+            "target": "medication",
+            "value": "Metformin Beispiel-Metformin 500 mg Tablette 1 0 1 0 Stück A10BA02 01234567",
+            "assertion": "active"
+          },
+          {
+            "target": "medication",
+            "value": "Bisoprolol Beispiel-Cardio 5 mg Tablette 1 0 0 0 Stück C07AB07 07654321",
+            "assertion": "active"
+          }
+        ]
+      },
+      "section_rules": [
+        { "section": "Bundeseinheitlicher Medikationsplan vom 01.08.2026", "allowed_targets": ["medication"] }
+      ],
+      "forbidden_diagnoses": []
     }
   ]
 }

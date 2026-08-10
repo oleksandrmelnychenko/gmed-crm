@@ -2,7 +2,7 @@ mod support;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -115,6 +115,125 @@ async fn seed_patient_assignment(
     .unwrap();
 }
 
+async fn seed_medication_review_import(
+    pool: &PgPool,
+    patient_id: Uuid,
+    requested_by: Uuid,
+    candidate_id: &str,
+    tag: &str,
+) -> Uuid {
+    let document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, patient_id, auto_name, original_filename, art, category,
+                status, visibility, is_medical, mime_type, file_size,
+                version_root_document_id, version_number, uploaded_by
+           ) VALUES (
+                $1, $2, $3, $4, 'medical_report', 'report',
+                'active', 'internal', true, 'application/pdf', 128,
+                $1, 1, $5
+           )"#,
+    )
+    .bind(document_id)
+    .bind(patient_id)
+    .bind(format!("Medication review {tag}"))
+    .bind(format!("medication-{tag}.pdf"))
+    .bind(requested_by)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    sqlx::query_scalar(
+        r#"INSERT INTO clinical_document_imports (
+                patient_id, document_id, status, draft, requested_by, completed_at
+           ) VALUES ($1, $2, 'review_required', $3, $4, now())
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(document_id)
+    .bind(json!({
+        "candidates": [{
+            "id": candidate_id,
+            "target": "medication",
+            "value": "Reviewed medication candidate",
+            "selected": true,
+        }],
+        "warnings": [],
+    }))
+    .bind(requested_by)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn prepare_medication_review_import(
+    app: &axum::Router,
+    bearer: &str,
+    patient_id: Uuid,
+    import_id: Uuid,
+    candidate_id: &str,
+    source_country: &str,
+    candidate_payload: Value,
+) -> Value {
+    let reviewed_draft = json!({
+        "candidates": [{
+            "id": candidate_id,
+            "target": "medication",
+            "value": "Reviewed medication candidate",
+            "selected": true,
+        }],
+        "warnings": [],
+    });
+    let mut candidate_payloads = Map::new();
+    candidate_payloads.insert(candidate_id.to_string(), candidate_payload);
+    let (status, body) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}/prepare"),
+        bearer,
+        Some(json!({
+            "reviewed_draft": reviewed_draft,
+            "source_country": source_country,
+            "candidate_payloads": candidate_payloads,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    reviewed_draft
+}
+
+async fn persist_reviewed_medication(
+    app: &axum::Router,
+    pool: &PgPool,
+    bearer: &str,
+    patient_id: Uuid,
+    user_id: Uuid,
+    candidate_id: &str,
+    source_country: &str,
+    payload: Value,
+) -> (StatusCode, Value) {
+    let import_id =
+        seed_medication_review_import(pool, patient_id, user_id, candidate_id, candidate_id).await;
+    prepare_medication_review_import(
+        app,
+        bearer,
+        patient_id,
+        import_id,
+        candidate_id,
+        source_country,
+        payload.clone(),
+    )
+    .await;
+    json_request(
+        app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}/medications"),
+        bearer,
+        Some(payload),
+    )
+    .await
+}
+
 #[tokio::test]
 async fn patient_notes_update_does_not_require_unrelated_minor_guardian_fix() {
     let Some((app, pool, admin_id)) = test_context().await else {
@@ -219,6 +338,1447 @@ async fn patient_medication_requires_active_ingredient_but_allows_no_trade_name(
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(clinical["medications"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn clinical_import_prepare_freezes_selection_country_and_blocks_live_writes_before_it() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("clinical-import-prepare");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let bearer = auth_header_for(pm_id, "patient_manager");
+    let import_id =
+        seed_medication_review_import(&pool, patient_id, pm_id, "prepare-med", &tag).await;
+    let medication_path =
+        format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}/medications");
+    let medication = json!({
+        "candidate_id": "prepare-med",
+        "wirkstoff": "Metformin",
+        "source_country": "DE",
+        "source_date": "2026-08-10",
+    });
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &medication_path,
+        &bearer,
+        Some(medication.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let reviewed_draft = json!({
+        "candidates": [{
+            "id": "prepare-med",
+            "target": "medication",
+            "value": "Reviewed medication candidate",
+            "selected": true,
+        }],
+        "warnings": [],
+    });
+    let prepare_path =
+        format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}/prepare");
+    let (status, invalid_country) = json_request(
+        &app,
+        "POST",
+        &prepare_path,
+        &bearer,
+        Some(json!({
+            "reviewed_draft": reviewed_draft,
+            "source_country": "ZZ",
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{invalid_country:?}"
+    );
+    let (status, missing_country) = json_request(
+        &app,
+        "POST",
+        &prepare_path,
+        &bearer,
+        Some(json!({ "reviewed_draft": reviewed_draft })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{missing_country:?}"
+    );
+
+    let prepared_payload = json!({
+        "reviewed_draft": reviewed_draft,
+        "source_country": "DE",
+        "candidate_payloads": {
+            "prepare-med": medication,
+        },
+    });
+    let (status, prepared) = json_request(
+        &app,
+        "POST",
+        &prepare_path,
+        &bearer,
+        Some(prepared_payload.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{prepared:?}");
+    assert_eq!(prepared["status"], "applying");
+    assert_eq!(prepared["idempotent"], false);
+
+    let (status, retry) =
+        json_request(&app, "POST", &prepare_path, &bearer, Some(prepared_payload)).await;
+    assert_eq!(status, StatusCode::OK, "{retry:?}");
+    assert_eq!(retry["idempotent"], true);
+
+    let mut changed_prepared_medication = medication.clone();
+    changed_prepared_medication["dose_morgens"] = json!("3");
+    let (status, changed_map) = json_request(
+        &app,
+        "POST",
+        &prepare_path,
+        &bearer,
+        Some(json!({
+            "reviewed_draft": reviewed_draft,
+            "source_country": "DE",
+            "candidate_payloads": {
+                "prepare-med": changed_prepared_medication,
+            },
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{changed_map:?}");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &prepare_path,
+        &bearer,
+        Some(json!({
+            "reviewed_draft": {
+                "candidates": [{
+                    "id": "prepare-med",
+                    "target": "medication",
+                    "value": "Changed after prepare",
+                    "selected": true,
+                }],
+                "warnings": [],
+            },
+            "source_country": "DE",
+            "candidate_payloads": {
+                "prepare-med": medication,
+            },
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let (status, _) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let mut mismatched_medication = medication.clone();
+    mismatched_medication["dose_morgens"] = json!("2");
+    let (status, mismatch) = json_request(
+        &app,
+        "POST",
+        &medication_path,
+        &bearer,
+        Some(mismatched_medication),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{mismatch:?}");
+
+    let mut semantically_equivalent_medication = medication.clone();
+    semantically_equivalent_medication["wirkstoff"] = json!(" metformin ");
+    let (status, semantically_equivalent_medication) = json_request(
+        &app,
+        "POST",
+        &medication_path,
+        &bearer,
+        Some(semantically_equivalent_medication),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "{semantically_equivalent_medication:?}"
+    );
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        &medication_path,
+        &bearer,
+        Some(medication.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created:?}");
+    let (status, exact_retry) = json_request(
+        &app,
+        "POST",
+        &medication_path,
+        &bearer,
+        Some(medication.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{exact_retry:?}");
+    assert_eq!(exact_retry["idempotent"], true);
+    let mut omitted_to_null = medication.clone();
+    omitted_to_null["dose_morgens"] = Value::Null;
+    let (status, omitted_to_null) = json_request(
+        &app,
+        "POST",
+        &medication_path,
+        &bearer,
+        Some(omitted_to_null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{omitted_to_null:?}");
+    let (status, mismatched_complete) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}/complete"),
+        &bearer,
+        Some(json!({
+            "reviewed_draft": {
+                "candidates": [{
+                    "id": "prepare-med",
+                    "target": "medication",
+                    "value": "Changed during completion",
+                    "selected": true,
+                }],
+                "warnings": [],
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{mismatched_complete:?}");
+
+    let null_import = seed_medication_review_import(
+        &pool,
+        patient_id,
+        pm_id,
+        "null-retry-med",
+        &format!("{tag}-null-retry"),
+    )
+    .await;
+    let null_payload = json!({
+        "candidate_id": "null-retry-med",
+        "wirkstoff": "Lisinopril",
+        "dose_morgens": null,
+        "source_country": "DE",
+        "source_date": "2026-08-10",
+    });
+    prepare_medication_review_import(
+        &app,
+        &bearer,
+        patient_id,
+        null_import,
+        "null-retry-med",
+        "DE",
+        null_payload.clone(),
+    )
+    .await;
+    let null_path = format!(
+        "/api/v1/patients/{patient_id}/clinical-document-imports/{null_import}/medications"
+    );
+    let (status, first_null) = json_request(
+        &app,
+        "POST",
+        &null_path,
+        &bearer,
+        Some(null_payload.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{first_null:?}");
+    let (status, retry_null) =
+        json_request(&app, "POST", &null_path, &bearer, Some(null_payload)).await;
+    assert_eq!(status, StatusCode::OK, "{retry_null:?}");
+    assert_eq!(retry_null["idempotent"], true);
+
+    let deselected_import = seed_medication_review_import(
+        &pool,
+        patient_id,
+        pm_id,
+        "deselected-med",
+        &format!("{tag}-deselected"),
+    )
+    .await;
+    let (status, prepared) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/patients/{patient_id}/clinical-document-imports/{deselected_import}/prepare"
+        ),
+        &bearer,
+        Some(json!({
+            "reviewed_draft": {
+                "candidates": [
+                    {
+                        "id": "deselected-med",
+                        "target": "medication",
+                        "value": "Reviewed medication candidate",
+                        "selected": false,
+                    },
+                    {
+                        "id": format!("manual:{}", Uuid::new_v4()),
+                        "target": "recommendation",
+                        "value": "Keep monitoring",
+                        "selected": true,
+                    }
+                ],
+                "warnings": [],
+            },
+            "source_country": "DE",
+            "candidate_payloads": {},
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{prepared:?}");
+    let (status, deselected) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/patients/{patient_id}/clinical-document-imports/{deselected_import}/medications"
+        ),
+        &bearer,
+        Some(json!({
+            "candidate_id": "deselected-med",
+            "wirkstoff": "Ramipril",
+            "source_country": "DE",
+            "source_date": "2026-08-10",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{deselected:?}");
+}
+
+#[tokio::test]
+async fn reviewed_medication_import_is_idempotent_and_keeps_regimen_history() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("ocr-medication-history");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let bearer = auth_header_for(pm_id, "patient_manager");
+
+    let first_import =
+        seed_medication_review_import(&pool, patient_id, pm_id, "med-1", &format!("{tag}-1")).await;
+    let first_payload = json!({
+        "candidate_id": "med-1",
+        "wirkstoff": "Atorvastatin",
+        "handelsname": "Atoris",
+        "staerke": "20 mg",
+        "form": "tablet",
+        "dose_abends": "1",
+        "einheit": "tablet",
+        "status": "active",
+        "einnahme_von": "2026-08-01",
+        "source_country": "UA",
+        "source_date": "2026-08-01",
+        "source_page": 1,
+        "raw_text": "Atoris 20 mg 0-0-1-0",
+        "identifiers": { "atc_code": "C10AA05" },
+        "field_confidence": { "wirkstoff": 0.99, "staerke": 0.96 },
+    });
+    prepare_medication_review_import(
+        &app,
+        &bearer,
+        patient_id,
+        first_import,
+        "med-1",
+        "UA",
+        first_payload.clone(),
+    )
+    .await;
+    let path = format!(
+        "/api/v1/patients/{patient_id}/clinical-document-imports/{first_import}/medications"
+    );
+    let (status, first) =
+        json_request(&app, "POST", &path, &bearer, Some(first_payload.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{first:?}");
+    assert_eq!(first["action"], "created");
+    assert_eq!(first["idempotent"], false);
+    let first_id = Uuid::parse_str(first["id"].as_str().unwrap()).unwrap();
+
+    let (status, retry) = json_request(&app, "POST", &path, &bearer, Some(first_payload)).await;
+    assert_eq!(status, StatusCode::OK, "{retry:?}");
+    assert_eq!(retry["id"], first_id.to_string());
+    assert_eq!(retry["action"], "created");
+    assert_eq!(retry["idempotent"], true);
+    assert_eq!(retry["medication_series_id"], first["medication_series_id"]);
+    let first_event_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM patient_medication_import_history WHERE source_import_id = $1",
+    )
+    .bind(first_import)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(first_event_count, 1);
+
+    let duplicate_import =
+        seed_medication_review_import(&pool, patient_id, pm_id, "med-2", &format!("{tag}-2")).await;
+    let duplicate_payload = json!({
+        "candidate_id": "med-2",
+        "wirkstoff": "atorvastatin",
+        "handelsname": "Atoris",
+        "staerke": "20 mg",
+        "form": "tablet",
+        "dose_abends": "1",
+        "einheit": "tablet",
+        "status": "aktiv",
+        "einnahme_von": "2026-08-01",
+        "source_country": "UA",
+    });
+    prepare_medication_review_import(
+        &app,
+        &bearer,
+        patient_id,
+        duplicate_import,
+        "med-2",
+        "UA",
+        duplicate_payload.clone(),
+    )
+    .await;
+    let (status, duplicate) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/patients/{patient_id}/clinical-document-imports/{duplicate_import}/medications"
+        ),
+        &bearer,
+        Some(duplicate_payload),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{duplicate:?}");
+    assert_eq!(duplicate["action"], "deduplicated");
+    assert_eq!(duplicate["id"], first_id.to_string());
+
+    let changed_import =
+        seed_medication_review_import(&pool, patient_id, pm_id, "med-3", &format!("{tag}-3")).await;
+    let changed_payload = json!({
+        "candidate_id": "med-3",
+        "wirkstoff": "Atorvastatin",
+        "handelsname": "Atoris",
+        "staerke": "40 mg",
+        "form": "tablet",
+        "dose_abends": "1",
+        "einheit": "tablet",
+        "status": "active",
+        "einnahme_von": "2026-08-10",
+        "source_country": "UA",
+        "source_date": "2026-08-10",
+    });
+    prepare_medication_review_import(
+        &app,
+        &bearer,
+        patient_id,
+        changed_import,
+        "med-3",
+        "UA",
+        changed_payload.clone(),
+    )
+    .await;
+    let (status, changed) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/patients/{patient_id}/clinical-document-imports/{changed_import}/medications"
+        ),
+        &bearer,
+        Some(changed_payload),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed:?}");
+    assert_eq!(changed["action"], "regimen_changed");
+    assert_eq!(changed["supersedes_medication_id"], first_id.to_string());
+    let changed_id = Uuid::parse_str(changed["id"].as_str().unwrap()).unwrap();
+    assert_ne!(changed_id, first_id);
+    let first_superseded: bool = sqlx::query_scalar(
+        "SELECT superseded_at IS NOT NULL FROM patient_medications WHERE id = $1",
+    )
+    .bind(first_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(first_superseded);
+
+    let stop_import =
+        seed_medication_review_import(&pool, patient_id, pm_id, "med-4", &format!("{tag}-4")).await;
+    let stop_payload = json!({
+        "candidate_id": "med-4",
+        "wirkstoff": "Atorvastatin",
+        "handelsname": "Atoris",
+        "status": "stopped",
+        "einnahme_bis": "2026-08-10",
+        "source_country": "UA",
+        "source_date": "2026-08-11",
+    });
+    let stop_reviewed_draft = prepare_medication_review_import(
+        &app,
+        &bearer,
+        patient_id,
+        stop_import,
+        "med-4",
+        "UA",
+        stop_payload.clone(),
+    )
+    .await;
+    let (status, stopped) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/patients/{patient_id}/clinical-document-imports/{stop_import}/medications"
+        ),
+        &bearer,
+        Some(stop_payload),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{stopped:?}");
+    assert_eq!(stopped["action"], "status_transition");
+    assert_eq!(stopped["id"], changed_id.to_string());
+    let current_status: String =
+        sqlx::query_scalar("SELECT status FROM patient_medications WHERE id = $1")
+            .bind(changed_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(current_status, "abgesetzt");
+
+    let (status, completed) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/clinical-document-imports/{stop_import}/complete"),
+        &bearer,
+        Some(json!({
+            "reviewed_draft": stop_reviewed_draft,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{completed:?}");
+    assert_eq!(completed["status"], "applied");
+    assert_eq!(completed["applied_counts"]["medications"], 1);
+
+    let combined_import =
+        seed_medication_review_import(&pool, patient_id, pm_id, "med-5", &format!("{tag}-5")).await;
+    let combined_payload = json!({
+        "candidate_id": "med-5",
+        "wirkstoff": "Atorvastatin",
+        "handelsname": "Atoris",
+        "dose_abends": "2",
+        "status": "stopped",
+        "einnahme_bis": "2026-08-12",
+        "source_country": "UA",
+        "effective_date": "2026-08-12",
+    });
+    prepare_medication_review_import(
+        &app,
+        &bearer,
+        patient_id,
+        combined_import,
+        "med-5",
+        "UA",
+        combined_payload.clone(),
+    )
+    .await;
+    let (status, combined) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/patients/{patient_id}/clinical-document-imports/{combined_import}/medications"
+        ),
+        &bearer,
+        Some(combined_payload),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{combined:?}");
+    assert_eq!(combined["action"], "regimen_changed");
+    assert_eq!(combined["supersedes_medication_id"], changed_id.to_string());
+    let combined_id = Uuid::parse_str(combined["id"].as_str().unwrap()).unwrap();
+    assert_ne!(combined_id, changed_id);
+    let combined_row = sqlx::query_as::<_, (String, Option<String>, Option<String>, String)>(
+        r#"SELECT staerke, dose_abends, form, status
+           FROM patient_medications WHERE id = $1"#,
+    )
+    .bind(combined_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(combined_row.0, "40 mg");
+    assert_eq!(combined_row.1.as_deref(), Some("2"));
+    assert_eq!(combined_row.2.as_deref(), Some("tablet"));
+    assert_eq!(combined_row.3, "abgesetzt");
+
+    let (status, history) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/medication-import-history"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{history:?}");
+    assert_eq!(history["items"].as_array().unwrap().len(), 5);
+    assert_eq!(history["items"][0]["source_date"], "2026-08-12");
+}
+
+#[tokio::test]
+async fn older_medication_documents_are_historical_and_never_replace_current_state() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("medication-chronology");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, current) = persist_reviewed_medication(
+        &app,
+        &pool,
+        &bearer,
+        patient_id,
+        pm_id,
+        "chronology-current",
+        "UA",
+        json!({
+            "candidate_id": "chronology-current",
+            "wirkstoff": "Bisoprolol",
+            "handelsname": "Concor",
+            "staerke": "5 mg",
+            "form": "tablet",
+            "dose_morgens": "1",
+            "status": "active",
+            "source_country": "UA",
+            "source_date": "2026-08-10",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{current:?}");
+    let current_id = Uuid::parse_str(current["id"].as_str().unwrap()).unwrap();
+    let series_id = current["medication_series_id"].as_str().unwrap();
+
+    let (status, old_regimen) = persist_reviewed_medication(
+        &app,
+        &pool,
+        &bearer,
+        patient_id,
+        pm_id,
+        "chronology-old-regimen",
+        "UA",
+        json!({
+            "candidate_id": "chronology-old-regimen",
+            "medication_series_id": series_id,
+            "wirkstoff": "Bisoprolol",
+            "staerke": "2.5 mg",
+            "source_country": "UA",
+            "source_date": "2026-08-01",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{old_regimen:?}");
+    assert_eq!(old_regimen["action"], "historical_observation");
+    assert_ne!(old_regimen["id"], current_id.to_string());
+
+    let (status, old_stop) = persist_reviewed_medication(
+        &app,
+        &pool,
+        &bearer,
+        patient_id,
+        pm_id,
+        "chronology-old-stop",
+        "UA",
+        json!({
+            "candidate_id": "chronology-old-stop",
+            "medication_series_id": series_id,
+            "wirkstoff": "Bisoprolol",
+            "status": "stopped",
+            "source_country": "UA",
+            "source_date": "2026-08-02",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{old_stop:?}");
+    assert_eq!(old_stop["action"], "historical_observation");
+
+    let current_row = sqlx::query_as::<_, (Uuid, String, String, chrono::NaiveDate)>(
+        r#"SELECT id, staerke, status, source_date
+           FROM patient_medications
+           WHERE patient_id = $1 AND medication_series_id = $2 AND superseded_at IS NULL"#,
+    )
+    .bind(patient_id)
+    .bind(Uuid::parse_str(series_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(current_row.0, current_id);
+    assert_eq!(current_row.1, "5 mg");
+    assert_eq!(current_row.2, "aktiv");
+    assert_eq!(current_row.3.to_string(), "2026-08-10");
+
+    let (status, undated_change) = persist_reviewed_medication(
+        &app,
+        &pool,
+        &bearer,
+        patient_id,
+        pm_id,
+        "chronology-undated",
+        "UA",
+        json!({
+            "candidate_id": "chronology-undated",
+            "medication_series_id": series_id,
+            "wirkstoff": "Bisoprolol",
+            "dose_morgens": "2",
+            "source_country": "UA",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{undated_change:?}");
+
+    let (status, history) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/medication-import-history?limit=2&offset=0"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{history:?}");
+    assert_eq!(history["total"], 3);
+    assert_eq!(history["limit"], 2);
+    assert_eq!(history["items"][0]["source_date"], "2026-08-10");
+    assert_eq!(history["items"][1]["source_date"], "2026-08-02");
+    assert_eq!(history["items"][1]["event_type"], "historical_observation");
+    assert_eq!(history["items"][0]["medication_series_id"], series_id);
+}
+
+#[tokio::test]
+async fn same_ingredient_siblings_in_one_prepare_require_explicit_series_choices() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("medication-batch-series-identity");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let bearer = auth_header_for(pm_id, "patient_manager");
+    let import_id = seed_medication_review_import(&pool, patient_id, pm_id, "batch-a", &tag).await;
+    let reviewed_draft = json!({
+        "candidates": [
+            {
+                "id": "batch-a",
+                "target": "medication",
+                "value": "First reviewed medication candidate",
+                "selected": true,
+            },
+            {
+                "id": "batch-b",
+                "target": "medication",
+                "value": "Second reviewed medication candidate",
+                "selected": true,
+            }
+        ],
+        "warnings": [],
+    });
+    sqlx::query("UPDATE clinical_document_imports SET draft = $2 WHERE id = $1")
+        .bind(import_id)
+        .bind(&reviewed_draft)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let mut first_payload = json!({
+        "candidate_id": "batch-a",
+        "wirkstoff": "Levothyroxin",
+        "handelsname": "L-Thyroxin A",
+        "staerke": "50 mcg",
+        "form": "tablet",
+        "source_country": "DE",
+        "source_date": "2026-08-10",
+    });
+    let mut second_payload = json!({
+        "candidate_id": "batch-b",
+        "wirkstoff": "Levothyroxin",
+        "handelsname": "L-Thyroxin B",
+        "staerke": "100 mcg",
+        "form": "capsule",
+        "source_country": "DE",
+        "source_date": "2026-08-10",
+    });
+    let prepare_path =
+        format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}/prepare");
+    let (status, unresolved) = json_request(
+        &app,
+        "POST",
+        &prepare_path,
+        &bearer,
+        Some(json!({
+            "reviewed_draft": reviewed_draft,
+            "source_country": "DE",
+            "candidate_payloads": {
+                "batch-a": first_payload,
+                "batch-b": second_payload,
+            },
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{unresolved:?}");
+
+    first_payload["create_new_series"] = json!(true);
+    second_payload["create_new_series"] = json!(true);
+    let (status, prepared) = json_request(
+        &app,
+        "POST",
+        &prepare_path,
+        &bearer,
+        Some(json!({
+            "reviewed_draft": reviewed_draft,
+            "source_country": "DE",
+            "candidate_payloads": {
+                "batch-a": first_payload,
+                "batch-b": second_payload,
+            },
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{prepared:?}");
+
+    let medication_path =
+        format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}/medications");
+    let (status, first) =
+        json_request(&app, "POST", &medication_path, &bearer, Some(first_payload)).await;
+    assert_eq!(status, StatusCode::OK, "{first:?}");
+    let (status, second) = json_request(
+        &app,
+        "POST",
+        &medication_path,
+        &bearer,
+        Some(second_payload),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second:?}");
+    assert_ne!(
+        first["medication_series_id"],
+        second["medication_series_id"]
+    );
+
+    let current_series_count: i64 = sqlx::query_scalar(
+        r#"SELECT count(DISTINCT medication_series_id)
+           FROM patient_medications
+           WHERE patient_id = $1 AND superseded_at IS NULL"#,
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(current_series_count, 2);
+}
+
+#[tokio::test]
+async fn sole_same_ingredient_series_rejects_mismatched_strong_selector() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("medication-sole-series-selector");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, first) = persist_reviewed_medication(
+        &app,
+        &pool,
+        &bearer,
+        patient_id,
+        pm_id,
+        "sole-series-first",
+        "DE",
+        json!({
+            "candidate_id": "sole-series-first",
+            "wirkstoff": "Atorvastatin",
+            "handelsname": "Sortis",
+            "staerke": "10 mg",
+            "form": "tablet",
+            "create_new_series": true,
+            "source_country": "DE",
+            "source_date": "2026-08-01",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{first:?}");
+
+    let (status, mismatch) = persist_reviewed_medication(
+        &app,
+        &pool,
+        &bearer,
+        patient_id,
+        pm_id,
+        "sole-series-mismatch",
+        "DE",
+        json!({
+            "candidate_id": "sole-series-mismatch",
+            "wirkstoff": "Atorvastatin",
+            "staerke": "20 mg",
+            "status": "stopped",
+            "source_country": "DE",
+            "source_date": "2026-08-02",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{mismatch:?}");
+
+    let current: (String, String) = sqlx::query_as(
+        r#"SELECT staerke, status
+           FROM patient_medications
+           WHERE patient_id = $1 AND superseded_at IS NULL"#,
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(current, ("10 mg".to_string(), "aktiv".to_string()));
+}
+
+#[tokio::test]
+async fn same_ingredient_series_require_unambiguous_review_or_explicit_new_series() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("medication-series-identity");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, first) = persist_reviewed_medication(
+        &app,
+        &pool,
+        &bearer,
+        patient_id,
+        pm_id,
+        "identity-first",
+        "DE",
+        json!({
+            "candidate_id": "identity-first",
+            "wirkstoff": "Levothyroxin",
+            "handelsname": "L-Thyroxin A",
+            "staerke": "50 mcg",
+            "form": "tablet",
+            "create_new_series": true,
+            "source_country": "DE",
+            "source_date": "2026-08-01",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{first:?}");
+    let first_series = first["medication_series_id"].as_str().unwrap();
+
+    let (status, second) = persist_reviewed_medication(
+        &app,
+        &pool,
+        &bearer,
+        patient_id,
+        pm_id,
+        "identity-second",
+        "DE",
+        json!({
+            "candidate_id": "identity-second",
+            "wirkstoff": "Levothyroxin",
+            "handelsname": "L-Thyroxin B",
+            "staerke": "100 mcg",
+            "form": "capsule",
+            "create_new_series": true,
+            "source_country": "DE",
+            "source_date": "2026-08-01",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second:?}");
+    let second_series = second["medication_series_id"].as_str().unwrap();
+    assert_ne!(first_series, second_series);
+
+    let (status, auto_selected) = persist_reviewed_medication(
+        &app,
+        &pool,
+        &bearer,
+        patient_id,
+        pm_id,
+        "identity-strong-match",
+        "DE",
+        json!({
+            "candidate_id": "identity-strong-match",
+            "wirkstoff": "Levothyroxin",
+            "handelsname": "L-Thyroxin B",
+            "staerke": "100 mcg",
+            "form": "capsule",
+            "status": "paused",
+            "source_country": "DE",
+            "source_date": "2026-08-02",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{auto_selected:?}");
+    assert_eq!(auto_selected["action"], "status_transition");
+    assert_eq!(auto_selected["medication_series_id"], second_series);
+
+    let (status, ambiguous) = persist_reviewed_medication(
+        &app,
+        &pool,
+        &bearer,
+        patient_id,
+        pm_id,
+        "identity-ambiguous-stop",
+        "DE",
+        json!({
+            "candidate_id": "identity-ambiguous-stop",
+            "wirkstoff": "Levothyroxin",
+            "status": "stopped",
+            "source_country": "DE",
+            "source_date": "2026-08-02",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{ambiguous:?}");
+
+    let (status, selected) = persist_reviewed_medication(
+        &app,
+        &pool,
+        &bearer,
+        patient_id,
+        pm_id,
+        "identity-explicit-stop",
+        "DE",
+        json!({
+            "candidate_id": "identity-explicit-stop",
+            "medication_series_id": first_series,
+            "wirkstoff": "Levothyroxin",
+            "status": "stopped",
+            "source_country": "DE",
+            "source_date": "2026-08-02",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{selected:?}");
+    assert_eq!(selected["action"], "status_transition");
+    assert_eq!(selected["medication_series_id"], first_series);
+
+    let (status, third) = persist_reviewed_medication(
+        &app,
+        &pool,
+        &bearer,
+        patient_id,
+        pm_id,
+        "identity-third-new",
+        "DE",
+        json!({
+            "candidate_id": "identity-third-new",
+            "wirkstoff": "Levothyroxin",
+            "handelsname": "L-Thyroxin C",
+            "staerke": "75 mcg",
+            "form": "drops",
+            "create_new_series": true,
+            "source_country": "DE",
+            "source_date": "2026-08-03",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{third:?}");
+    assert_eq!(third["action"], "created");
+    let current_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM patient_medications WHERE patient_id = $1 AND superseded_at IS NULL",
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(current_count, 3);
+}
+
+#[tokio::test]
+async fn explicit_null_clears_nullable_regimen_fields_instead_of_inheriting_them() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("medication-explicit-clear");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, first) = persist_reviewed_medication(
+        &app,
+        &pool,
+        &bearer,
+        patient_id,
+        pm_id,
+        "clear-first",
+        "DE",
+        json!({
+            "candidate_id": "clear-first",
+            "wirkstoff": "Ramipril",
+            "handelsname": "Delix",
+            "staerke": "5 mg",
+            "form": "tablet",
+            "dose_morgens": "1",
+            "hinweis": "with breakfast",
+            "source_country": "DE",
+            "source_date": "2026-08-01",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{first:?}");
+    let series_id = first["medication_series_id"].as_str().unwrap();
+
+    let (status, cleared) = persist_reviewed_medication(
+        &app,
+        &pool,
+        &bearer,
+        patient_id,
+        pm_id,
+        "clear-second",
+        "DE",
+        json!({
+            "candidate_id": "clear-second",
+            "medication_series_id": series_id,
+            "wirkstoff": "Ramipril",
+            "dose_morgens": null,
+            "form": null,
+            "hinweis": null,
+            "source_country": "DE",
+            "source_date": "2026-08-02",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cleared:?}");
+    assert_eq!(cleared["action"], "regimen_changed");
+    let row = sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>, String)>(
+        r#"SELECT dose_morgens, form, hinweis, staerke
+           FROM patient_medications
+           WHERE patient_id = $1 AND medication_series_id = $2 AND superseded_at IS NULL"#,
+    )
+    .bind(patient_id)
+    .bind(Uuid::parse_str(series_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0, None);
+    assert_eq!(row.1, None);
+    assert_eq!(row.2, None);
+    assert_eq!(row.3, "5 mg");
+}
+
+#[tokio::test]
+async fn reviewed_medication_import_scopes_drug_candidates_to_source_country() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("ocr-medication-country");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let bearer = auth_header_for(pm_id, "patient_manager");
+    let german_product_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM drug_products WHERE normalized_brand_name = 'sortis' AND country_code = 'DE' LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let rejected_payload = json!({
+        "candidate_id": "country-1",
+        "wirkstoff": "Atorvastatin",
+        "handelsname": "Atoris",
+        "staerke": "20 mg",
+        "source_country": "UA",
+        "drug_product_id": german_product_id,
+    });
+    let import_id =
+        seed_medication_review_import(&pool, patient_id, pm_id, "country-1", &tag).await;
+    prepare_medication_review_import(
+        &app,
+        &bearer,
+        patient_id,
+        import_id,
+        "country-1",
+        "UA",
+        rejected_payload.clone(),
+    )
+    .await;
+    let path =
+        format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}/medications");
+
+    let (status, rejected) =
+        json_request(&app, "POST", &path, &bearer, Some(rejected_payload)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{rejected:?}");
+
+    let successful_payload = json!({
+        "candidate_id": "country-2",
+        "wirkstoff": "Atorvastatin",
+        "handelsname": "Atoris",
+        "staerke": "20 mg",
+        "source_country": "UA",
+        "identifiers": { "atc_code": "C10AA05" },
+    });
+    let successful_import = seed_medication_review_import(
+        &pool,
+        patient_id,
+        pm_id,
+        "country-2",
+        &format!("{tag}-success"),
+    )
+    .await;
+    prepare_medication_review_import(
+        &app,
+        &bearer,
+        patient_id,
+        successful_import,
+        "country-2",
+        "UA",
+        successful_payload.clone(),
+    )
+    .await;
+    let (status, imported) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/patients/{patient_id}/clinical-document-imports/{successful_import}/medications"
+        ),
+        &bearer,
+        Some(successful_payload),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{imported:?}");
+    let medication_id = Uuid::parse_str(imported["id"].as_str().unwrap()).unwrap();
+    let matches = sqlx::query_as::<_, (String, String, String)>(
+        r#"SELECT p.country_code, m.verification_status, m.match_kind
+           FROM medication_drug_matches m
+           JOIN drug_products p ON p.id = m.drug_product_id
+           WHERE m.patient_medication_id = $1"#,
+    )
+    .bind(medication_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(!matches.is_empty());
+    assert!(matches.iter().all(|(country, status, kind)| {
+        country == "UA" && status == "candidate" && kind == "auto_candidate"
+    }));
+}
+
+#[tokio::test]
+async fn it_admin_can_persist_and_read_lab_results_during_clinical_import_review() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("it-admin-lab-import");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let it_admin_id = seed_user(&pool, &format!("{tag}-it"), "it_admin").await;
+    let bearer = auth_header_for(it_admin_id, "it_admin");
+
+    let import_id =
+        seed_medication_review_import(&pool, patient_id, it_admin_id, "mixed-med-1", &tag).await;
+    let medication_payload = json!({
+        "candidate_id": "mixed-med-1",
+        "wirkstoff": "Metformin",
+        "staerke": "500 mg",
+        "source_country": "DE",
+        "source_date": "2026-08-12",
+    });
+    prepare_medication_review_import(
+        &app,
+        &bearer,
+        patient_id,
+        import_id,
+        "mixed-med-1",
+        "DE",
+        medication_payload.clone(),
+    )
+    .await;
+    let (status, medication) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}/medications"),
+        &bearer,
+        Some(medication_payload),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{medication:?}");
+    assert_eq!(medication["action"], "created");
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/lab-results"),
+        &bearer,
+        Some(json!({
+            "measured_at": "2026-08-12T09:00:00Z",
+            "panel": "Blood count",
+            "analyte_name": "Leukocytes",
+            "result_text": "6.1",
+            "numeric_result": 6.1,
+            "unit": "10^9/L",
+            "abnormal_flag": "normal",
+            "source_country": "DE",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created:?}");
+
+    let (status, listed) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/lab-results"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed:?}");
+    assert_eq!(listed["count"], 1);
+    assert_eq!(listed["items"][0]["analyte_name"], "Leukocytes");
+}
+
+#[tokio::test]
+async fn imported_lab_requires_prepared_selection_and_matching_frozen_country() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("staged-lab-country");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let bearer = auth_header_for(pm_id, "patient_manager");
+    let import_id =
+        seed_medication_review_import(&pool, patient_id, pm_id, "lab-stage-1", &tag).await;
+    let reviewed_draft = json!({
+        "candidates": [{
+            "id": "lab-stage-1",
+            "target": "lab_result",
+            "value": "Leukocytes 6.1 G/L",
+            "selected": true,
+        }],
+        "warnings": [],
+    });
+    sqlx::query("UPDATE clinical_document_imports SET draft = $2 WHERE id = $1")
+        .bind(import_id)
+        .bind(&reviewed_draft)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let lab_payload = |country: &str| {
+        json!({
+            "measured_at": "2026-08-12T09:00:00Z",
+            "panel": "Blood count",
+            "analyte_name": "Leukocytes",
+            "result_text": "6.1",
+            "numeric_result": 6.1,
+            "unit": "G/L",
+            "abnormal_flag": "normal",
+            "source_country": country,
+            "source_import_id": import_id,
+            "source_candidate_id": "lab-stage-1",
+        })
+    };
+    let lab_path = format!("/api/v1/patients/{patient_id}/lab-results");
+    let (status, _) = json_request(&app, "POST", &lab_path, &bearer, Some(lab_payload("DE"))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let prepare_path =
+        format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}/prepare");
+    let mut bad_date = lab_payload("DE");
+    bad_date["measured_at"] = json!("12.08.2026");
+    let mut empty_required_text = lab_payload("DE");
+    empty_required_text["analyte_name"] = json!("   ");
+    empty_required_text["result_text"] = json!("");
+    let mut invalid_comparator = lab_payload("DE");
+    invalid_comparator["comparator"] = json!("approximately");
+    let mut invalid_range = lab_payload("DE");
+    invalid_range["reference_low"] = json!(10.0);
+    invalid_range["reference_high"] = json!(1.0);
+    let mut invalid_numeric_type = lab_payload("DE");
+    invalid_numeric_type["numeric_result"] = json!("6.1");
+    let mut invalid_abnormal_flag = lab_payload("DE");
+    invalid_abnormal_flag["abnormal_flag"] = json!("critical");
+    for (case, malformed_payload) in [
+        ("bad date", bad_date),
+        ("empty analyte/result", empty_required_text),
+        ("invalid comparator", invalid_comparator),
+        ("invalid range", invalid_range),
+        ("invalid numeric type", invalid_numeric_type),
+        ("invalid abnormal flag", invalid_abnormal_flag),
+    ] {
+        let (status, malformed) = json_request(
+            &app,
+            "POST",
+            &prepare_path,
+            &bearer,
+            Some(json!({
+                "reviewed_draft": reviewed_draft,
+                "source_country": "DE",
+                "candidate_payloads": {
+                    "lab-stage-1": malformed_payload,
+                },
+            })),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{case}: {malformed:?}"
+        );
+        let import_status: String =
+            sqlx::query_scalar("SELECT status FROM clinical_document_imports WHERE id = $1")
+                .bind(import_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(import_status, "review_required", "{case}");
+    }
+
+    let (status, prepared) = json_request(
+        &app,
+        "POST",
+        &prepare_path,
+        &bearer,
+        Some(json!({
+            "reviewed_draft": reviewed_draft,
+            "source_country": "DE",
+            "candidate_payloads": {
+                "lab-stage-1": lab_payload("DE"),
+            },
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{prepared:?}");
+
+    let (status, wrong_country) =
+        json_request(&app, "POST", &lab_path, &bearer, Some(lab_payload("UA"))).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{wrong_country:?}");
+
+    let (status, created) =
+        json_request(&app, "POST", &lab_path, &bearer, Some(lab_payload("DE"))).await;
+    assert_eq!(status, StatusCode::OK, "{created:?}");
+
+    let (status, retry) =
+        json_request(&app, "POST", &lab_path, &bearer, Some(lab_payload("DE"))).await;
+    assert_eq!(status, StatusCode::OK, "{retry:?}");
+
+    let mut changed_lab = lab_payload("DE");
+    changed_lab["result_text"] = json!("6.2");
+    changed_lab["numeric_result"] = json!(6.2);
+    let (status, changed) = json_request(&app, "POST", &lab_path, &bearer, Some(changed_lab)).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{changed:?}");
 }
 
 #[tokio::test]
@@ -463,6 +2023,99 @@ async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() 
     );
     assert_eq!(items[0]["notes"], "Pre-op baseline");
     assert_eq!(items[1]["measured_at"], "2026-04-13T08:15:00+00:00");
+
+    // Laboratory observations form an append-only, unit-preserving history:
+    // a repeated analyte adds a new dated point and new analytes need no schema change.
+    for payload in [
+        json!({
+            "measured_at": "2026-04-12",
+            "panel": "Blood count",
+            "analyte_name": "Leukocytes",
+            "result_text": "6.4",
+            "numeric_result": 6.4,
+            "unit": "G/L",
+            "reference_text": "3.7 - 9.9",
+            "reference_low": 3.7,
+            "reference_high": 9.9,
+            "abnormal_flag": "normal",
+            "source_country": "DE"
+        }),
+        json!({
+            "measured_at": "2026-04-14",
+            "panel": "Blood count",
+            "analyte_name": "Leukocytes",
+            "result_text": "6400",
+            "numeric_result": 6400.0,
+            "unit": "cells/µL",
+            "reference_text": "3700 - 9900",
+            "reference_low": 3700.0,
+            "reference_high": 9900.0,
+            "abnormal_flag": "normal",
+            "source_country": "US"
+        }),
+        json!({
+            "measured_at": "2026-04-14",
+            "panel": "Inflammation",
+            "analyte_name": "CRP",
+            "result_text": "< 0.5",
+            "numeric_result": 0.5,
+            "comparator": "<",
+            "unit": "mg/L",
+            "reference_text": "< 5",
+            "reference_high": 5.0,
+            "abnormal_flag": "unknown"
+        }),
+    ] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/patients/{patient_id}/lab-results"),
+            &pm_bearer,
+            Some(payload),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+
+    let (status, labs) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/lab-results"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{labs}");
+    assert_eq!(labs["count"], 3);
+    let lab_items = labs["items"].as_array().expect("lab result array");
+    assert_eq!(lab_items[0]["measured_at"], "2026-04-14T00:00:00+00:00");
+    assert_eq!(
+        lab_items
+            .iter()
+            .filter(|row| row["analyte_name"] == "Leukocytes")
+            .count(),
+        2
+    );
+    assert!(lab_items.iter().any(|row| row["unit"] == "cells/µL"));
+    assert!(lab_items.iter().any(|row| row["source_country"] == "US"));
+    assert!(lab_items.iter().any(|row| row["analyte_name"] == "CRP"));
+
+    let (status, timeline) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/timeline?entity_type=vital"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{timeline:?}");
+    let timeline_items = timeline["items"].as_array().expect("vital timeline items");
+    assert_eq!(timeline_items.len(), 2);
+    let latest_title = timeline_items[0]["title"]
+        .as_str()
+        .expect("latest vital timeline title");
+    assert!(latest_title.contains("72 kg"), "{latest_title}");
+    assert!(latest_title.contains("175 cm"), "{latest_title}");
 }
 
 #[tokio::test]

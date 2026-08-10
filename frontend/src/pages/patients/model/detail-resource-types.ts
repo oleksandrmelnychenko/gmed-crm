@@ -13,6 +13,30 @@ export type PatientVitalMeasurement = {
   created_at: string;
 };
 
+export type PatientLabResult = {
+  id: string;
+  measured_at: string;
+  panel?: string | null;
+  analyte_name: string;
+  result_text: string;
+  numeric_result?: number | null;
+  comparator?: "<" | "<=" | "=" | ">=" | ">" | null;
+  unit?: string | null;
+  reference_text?: string | null;
+  reference_low?: number | null;
+  reference_high?: number | null;
+  abnormal_flag: "normal" | "low" | "high" | "abnormal" | "unknown";
+  source_country?: string | null;
+  source_document_id?: string | null;
+  source_document_name?: string | null;
+  source_import_id?: string | null;
+  source_candidate_id?: string | null;
+  source_page?: number | null;
+  recorded_by?: string | null;
+  recorded_by_name?: string | null;
+  created_at: string;
+};
+
 export type PatientCardEntry = {
   id: string;
   entry_date: string;

@@ -110,6 +110,15 @@ export type ClinicalDiagnosis = ClinicalAttribution & {
 
 export type ClinicalMedication = ClinicalAttribution & {
   id?: string;
+  medication_series_id?: string | null;
+  supersedes_medication_id?: string | null;
+  regimen_fingerprint?: string | null;
+  source_country?: string | null;
+  source_date?: string | null;
+  source_page?: number | null;
+  source_document_id?: string | null;
+  source_import_id?: string | null;
+  source_candidate_id?: string | null;
   category: MedicationCategory;
   wirkstoff: string | null;
   handelsname: string;

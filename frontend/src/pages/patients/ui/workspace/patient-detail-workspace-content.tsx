@@ -207,6 +207,7 @@ const clinicalImportStatusTone: Record<ClinicalDocumentImportStatus, string> = {
   queued: "border-slate-200 bg-slate-50 text-slate-700",
   processing: "border-sky-200 bg-sky-50 text-sky-700",
   review_required: "border-amber-200 bg-amber-50 text-amber-800",
+  applying: "border-violet-200 bg-violet-50 text-violet-800",
   applied: "border-emerald-200 bg-emerald-50 text-emerald-700",
   failed: "border-rose-200 bg-rose-50 text-rose-700",
 };
@@ -548,7 +549,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
   const [clinicalImportsError, setClinicalImportsError] = useState(false);
 
   const clinicalImportAttentionCount = clinicalImports.filter((item) =>
-    ["queued", "processing", "review_required"].includes(item.status),
+    ["queued", "processing", "review_required", "applying"].includes(item.status),
   ).length;
 
   useEffect(() => {

@@ -84,6 +84,7 @@
       "enum": [
         "arztbrief",
         "laboratory",
+        "medication",
         "smartphone_photo",
         "fax_scan",
         "cyrillic",
@@ -91,7 +92,7 @@
       ]
     },
     "target": {
-      "enum": ["diagnosis", "anamnesis", "medication", "examination", "recommendation"]
+      "enum": ["diagnosis", "anamnesis", "medication", "examination", "lab_result", "recommendation"]
     },
     "candidate": {
       "type": "object",

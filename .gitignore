@@ -16,5 +16,8 @@ node_modules/
 /frontend/test-results/
 /frontend/playwright-report/
 /plans/
+/.audit/
+/tmp/
+/frontend/pnpm-lock.yaml
 /.vs
 /.idea

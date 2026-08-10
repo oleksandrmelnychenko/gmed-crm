@@ -1,4 +1,4 @@
-import { Fragment, lazy, Suspense, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, lazy, Suspense, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 import { apiFetch } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +22,7 @@ import { useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { cachedDateTimeFormat } from "@/lib/intl-cache";
-import { PauseCircle, Pencil, PlayCircle, Plus, Trash2 } from "lucide-react";
+import { LoaderCircle, PauseCircle, Pencil, PlayCircle, Plus, Trash2 } from "lucide-react";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import type { DoctorOption } from "@/pages/appointments/model/types";
 import { fetchProviders, fetchSpecializations } from "@/pages/providers/data/provider-api";
@@ -32,6 +32,7 @@ import {
 } from "@/pages/providers/model/specialization-labels";
 import type { ProviderSummary, SpecializationItem } from "@/pages/providers/model/types";
 import type {
+  PatientLabResult,
   PatientRiskScore,
   PatientVitalMeasurement,
 } from "../../model/detail-resource-types";
@@ -83,10 +84,21 @@ import {
   type GermanEquivalent,
 } from "@/lib/api/clinical";
 import { MedicationEquivalentsPanel } from "@/pages/case-workspace/medication-equivalents-panel";
-import type {
-  ClinicalDocumentImport,
-  ClinicalDocumentImportCandidate,
+import {
+  fetchPatientMedicationImportHistory,
+  persistClinicalDocumentMedication,
+  type ClinicalDocumentCandidatePayloads,
+  type ImportedMedicationResponse,
+  type ImportedLabResultPayload,
+  type ImportedMedicationPayload,
+  type ClinicalDocumentImport,
+  type ClinicalDocumentImportCandidate,
+  type MedicationImportHistoryEvent,
 } from "@/pages/patients/data/clinical-document-import";
+import {
+  groupMedicationImportHistory,
+  type MedicationHistorySeries,
+} from "@/pages/patients/data/medication-document-import";
 
 import { AnamneseSection } from "./anamnese-section";
 import { ClinicalDocumentImportSheet } from "./clinical-document-import-sheet";
@@ -167,6 +179,73 @@ function patientVitalDateTime(value: string | null | undefined, fallback: string
   } catch {
     return value;
   }
+}
+
+export function groupPatientLabResults(rows: PatientLabResult[]) {
+  const groups = new Map<string, { name: string; rows: PatientLabResult[] }>();
+  for (const row of rows) {
+    const key = row.analyte_name.trim().toLocaleLowerCase();
+    const group = groups.get(key) ?? { name: row.analyte_name.trim(), rows: [] };
+    group.rows.push(row);
+    groups.set(key, group);
+  }
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      rows: [...group.rows].sort(
+        (left, right) => Date.parse(right.measured_at) - Date.parse(left.measured_at),
+      ),
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+type PatientVitalMetricLabels = {
+  bloodPressure: string;
+  heartRate: string;
+  weight: string;
+  height: string;
+  bmi: string;
+  notSet: string;
+};
+
+export function patientVitalMetrics(
+  item: PatientVitalMeasurement,
+  labels: PatientVitalMetricLabels,
+): { label: string; value: string }[] {
+  return [
+    item.bp_systolic != null && item.bp_diastolic != null
+      ? {
+          label: labels.bloodPressure,
+          value: `${formatVitalNumber(item.bp_systolic, { maximumFractionDigits: 0 }) ?? labels.notSet}/${
+            formatVitalNumber(item.bp_diastolic, { maximumFractionDigits: 0 }) ?? labels.notSet
+          }`,
+        }
+      : null,
+    item.heart_rate != null
+      ? {
+          label: labels.heartRate,
+          value: formatVitalNumber(item.heart_rate, { maximumFractionDigits: 0 }) ?? labels.notSet,
+        }
+      : null,
+    item.weight_kg != null
+      ? {
+          label: labels.weight,
+          value: `${formatVitalNumber(item.weight_kg) ?? labels.notSet} kg`,
+        }
+      : null,
+    item.height_cm != null
+      ? {
+          label: labels.height,
+          value: `${formatVitalNumber(item.height_cm) ?? labels.notSet} cm`,
+        }
+      : null,
+    item.bmi != null
+      ? {
+          label: labels.bmi,
+          value: formatVitalNumber(item.bmi) ?? labels.notSet,
+        }
+      : null,
+  ].filter((metric): metric is { label: string; value: string } => Boolean(metric));
 }
 
 const inputClass =
@@ -1643,6 +1722,228 @@ function ClinicalWrapper({
   );
 }
 
+function medicationHistoryText(snapshot: Record<string, unknown>, key: string) {
+  const value = snapshot[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function medicationHistoryRegimen(snapshot: Record<string, unknown>) {
+  const dose = ["dose_morgens", "dose_mittags", "dose_abends", "dose_nachts"]
+    .map((key) => medicationHistoryText(snapshot, key) ?? "0")
+    .join("-");
+  const hasDose = ["dose_morgens", "dose_mittags", "dose_abends", "dose_nachts"]
+    .some((key) => medicationHistoryText(snapshot, key));
+  return [
+    medicationHistoryText(snapshot, "staerke"),
+    medicationHistoryText(snapshot, "form"),
+    medicationHistoryText(snapshot, "einnahmeform"),
+    hasDose
+      ? `${dose}${medicationHistoryText(snapshot, "einheit") ? ` ${medicationHistoryText(snapshot, "einheit")}` : ""}`
+      : null,
+  ].filter((value): value is string => Boolean(value)).join(" · ");
+}
+
+function MedicationHistoryTree({
+  series,
+  total,
+  loadingMore,
+  tx,
+  onLoadMore,
+}: {
+  series: MedicationHistorySeries[];
+  total: number;
+  loadingMore: boolean;
+  tx: Bilingual;
+  onLoadMore: () => void;
+}) {
+  const actionMeta = (action: MedicationImportHistoryEvent["event_type"]) => {
+    if (action === "deduplicated") {
+      return { label: tx("Підтверджено повторним документом", "Durch weiteres Dokument bestätigt"), tone: "border-slate-200 bg-slate-50 text-slate-700" };
+    }
+    if (action === "regimen_changed") {
+      return { label: tx("Зміна схеми", "Schemaänderung"), tone: "border-sky-200 bg-sky-50 text-sky-800" };
+    }
+    if (action === "status_transition") {
+      return { label: tx("Зміна статусу", "Statuswechsel"), tone: "border-amber-200 bg-amber-50 text-amber-800" };
+    }
+    if (action === "historical_observation") {
+      return { label: tx("Історичне спостереження", "Historische Beobachtung"), tone: "border-violet-200 bg-violet-50 text-violet-800" };
+    }
+    return { label: tx("Створено", "Erstellt"), tone: "border-emerald-200 bg-emerald-50 text-emerald-800" };
+  };
+
+  return (
+    <section className="rounded-xl border border-border/70 bg-card">
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 px-5 py-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-semibold text-foreground">
+              {tx("Дерево історії медикаментів", "Medikationsverlauf")}
+            </h3>
+            <CountBadge>{series.length} {tx("ліній", "Serien")}</CountBadge>
+          </div>
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
+            {tx(
+              "Кожна лінія показує поточний стан і незмінну хронологію OCR-документів, схем та статусів.",
+              "Jede Serie zeigt den aktuellen Stand und die unveränderliche Chronologie aus OCR-Dokumenten, Schemata und Statuswechseln.",
+            )}
+          </p>
+        </div>
+        <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-800">
+          {total} {tx("подій", "Ereignisse")}
+        </Badge>
+      </header>
+
+      <div className="space-y-3 p-4 lg:p-5">
+        {series.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 px-5 py-8 text-sm text-muted-foreground">
+            {tx(
+              "Історія з’явиться після підтвердженого OCR-імпорту медикаментів.",
+              "Der Verlauf erscheint nach einem bestätigten OCR-Medikamentenimport.",
+            )}
+          </div>
+        ) : null}
+        {series.map((group, index) => {
+          const current = group.current;
+          const currentRegimen = current
+            ? [
+                current.staerke,
+                current.form,
+                current.einnahmeform,
+                [current.dose_morgens, current.dose_mittags, current.dose_abends, current.dose_nachts]
+                  .some(Boolean)
+                  ? `${[current.dose_morgens ?? "0", current.dose_mittags ?? "0", current.dose_abends ?? "0", current.dose_nachts ?? "0"].join("-")}${current.einheit ? ` ${current.einheit}` : ""}`
+                  : null,
+              ].filter(Boolean).join(" · ")
+            : "";
+          return (
+            <details
+              key={group.key}
+              open={index < 3}
+              className="group rounded-xl border border-border/70 bg-background shadow-sm"
+            >
+              <summary className="grid cursor-pointer list-none gap-4 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center lg:px-5 [&::-webkit-details-marker]:hidden">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="truncate text-base font-semibold text-foreground">
+                      {current?.handelsname || group.identity || tx("Медикамент", "Medikament")}
+                    </p>
+                    {current?.wirkstoff && current.handelsname ? (
+                      <span className="text-xs text-muted-foreground">{current.wirkstoff}</span>
+                    ) : null}
+                    {current?.status ? (
+                      <Badge variant="outline" className="rounded-full border-emerald-200 bg-emerald-50 text-[10px] text-emerald-800">
+                        {current.status}
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">
+                    {currentRegimen || tx("Поточна схема відсутня", "Kein aktuelles Schema")}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 sm:justify-end">
+                  <span className="text-xs text-muted-foreground">
+                    {group.events.length} {tx("подій", "Ereignisse")}
+                  </span>
+                  <span aria-hidden className="text-lg text-muted-foreground transition-transform group-open:rotate-90">›</span>
+                </div>
+              </summary>
+
+              <div className="border-t border-border/60 p-4 lg:p-5">
+                {current ? (
+                  <div className="mb-4 grid gap-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 sm:grid-cols-2 xl:grid-cols-4">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Поточний стан", "Aktueller Stand")}</p>
+                      <p className="mt-1 text-sm font-semibold text-foreground">{current.status}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Схема", "Schema")}</p>
+                      <p className="mt-1 break-words text-sm text-foreground">{currentRegimen || "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Дата джерела", "Quelldatum")}</p>
+                      <p className="mt-1 text-sm text-foreground">{current.source_date || current.einnahme_von || "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Країна", "Land")}</p>
+                      <p className="mt-1 text-sm text-foreground">{current.source_country || "—"}</p>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="space-y-3">
+                  {group.events.map((event) => {
+                    const action = actionMeta(event.event_type);
+                    const regimen = medicationHistoryRegimen(event.new_value);
+                    const status = medicationHistoryText(event.new_value, "status");
+                    return (
+                      <article key={event.id} className="rounded-xl border border-border/60 bg-card px-4 py-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant="outline" className={cn("rounded-full text-[10px]", action.tone)}>
+                                {action.label}
+                              </Badge>
+                              <span className="text-xs font-semibold text-foreground">
+                                {event.source_date || new Date(event.created_at).toLocaleDateString()}
+                              </span>
+                              {status ? <span className="text-xs text-muted-foreground">{status}</span> : null}
+                            </div>
+                            <p className="mt-2 break-words text-sm font-medium leading-6 text-foreground">
+                              {regimen || tx("Схема не вказана", "Kein Schema angegeben")}
+                            </p>
+                          </div>
+                          <div className="max-w-full text-right text-[11px] leading-5 text-muted-foreground">
+                            <p className="max-w-[360px] truncate" title={event.source_document_name ?? undefined}>
+                              {event.source_document_name ?? tx("Документ", "Dokument")}
+                            </p>
+                            <p>
+                              {[event.source_country, event.source_page ? `S. ${event.source_page}` : null]
+                                .filter(Boolean).join(" · ") || "—"}
+                            </p>
+                          </div>
+                        </div>
+                        {event.reviewed_by_name ? (
+                          <p className="mt-2 text-[11px] text-muted-foreground">
+                            {tx("Перевірив", "Geprüft von")}: {event.reviewed_by_name}
+                          </p>
+                        ) : null}
+                        {event.source_raw_text ? (
+                          <details className="mt-3 rounded-lg border border-border/50 bg-muted/20 px-3 py-2">
+                            <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">
+                              {tx("OCR-фрагмент", "OCR-Quelltext")}
+                            </summary>
+                            <p className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-foreground">
+                              {event.source_raw_text}
+                            </p>
+                          </details>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                  {group.events.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-border/60 px-4 py-5 text-sm text-muted-foreground">
+                      {tx("Для поточного запису ще немає OCR-подій.", "Für den aktuellen Eintrag gibt es noch keine OCR-Ereignisse.")}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </details>
+          );
+        })}
+        {total > series.reduce((sum, group) => sum + group.events.length, 0) ? (
+          <div className="flex justify-center pt-2">
+            <Button type="button" variant="outline" disabled={loadingMore} onClick={onLoadMore}>
+              {loadingMore ? <LoaderCircle className="size-4 animate-spin" /> : null}
+              {tx("Завантажити старіші події", "Ältere Ereignisse laden")}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 export function PatientClinicalTab({
   patientId,
   canManage,
@@ -1663,6 +1964,9 @@ export function PatientClinicalTab({
   const [cave, setCave] = useState<ClinicalWarning[]>([]);
   const [diagnoses, setDiagnoses] = useState<ClinicalDiagnosis[]>([]);
   const [medications, setMedications] = useState<ClinicalMedication[]>([]);
+  const [medicationImportHistory, setMedicationImportHistory] = useState<MedicationImportHistoryEvent[]>([]);
+  const [medicationHistoryTotal, setMedicationHistoryTotal] = useState(0);
+  const [medicationHistoryLoadingMore, setMedicationHistoryLoadingMore] = useState(false);
   const [examinations, setExaminations] = useState<ClinicalExamination[]>([]);
   const [procedures, setProcedures] = useState<ClinicalProcedure[]>([]);
   const [verlauf, setVerlauf] = useState<ClinicalVerlaufEntry[]>([]);
@@ -1672,6 +1976,7 @@ export function PatientClinicalTab({
   const [impfstatusBusy, setImpfstatusBusy] = useState(false);
   const [recommendations, setRecommendations] = useState<PatientRecommendation[]>([]);
   const [vitalsHistory, setVitalsHistory] = useState<PatientVitalMeasurement[]>([]);
+  const [labResults, setLabResults] = useState<PatientLabResult[]>([]);
   const [riskScores, setRiskScores] = useState<PatientRiskScore[]>([]);
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
   const [allDoctors, setAllDoctors] = useState<AllDoctorOption[]>([]);
@@ -1714,11 +2019,20 @@ export function PatientClinicalTab({
       apiFetch<{ items: PatientVitalMeasurement[] }>(`/patients/${patientId}/vitals`).catch(() => ({
         items: [] as PatientVitalMeasurement[],
       })),
+      apiFetch<{ items: PatientLabResult[] }>(`/patients/${patientId}/lab-results`).catch(() => ({
+        items: [] as PatientLabResult[],
+      })),
       apiFetch<{ items: PatientRiskScore[] }>(`/patients/${patientId}/risk-scores`).catch(() => ({
         items: [] as PatientRiskScore[],
       })),
+      fetchPatientMedicationImportHistory(patientId).catch(() => ({
+        items: [] as MedicationImportHistoryEvent[],
+        total: 0,
+        limit: 200,
+        offset: 0,
+      })),
     ])
-      .then(([clinical, recs, providerRows, doctorRows, specializationRows, vitals, scores]) => {
+      .then(([clinical, recs, providerRows, doctorRows, specializationRows, vitals, labs, scores, medicationHistory]) => {
         if (!active) return;
         setAllergien(clinical.allergien ?? []);
         setCave(clinical.cave ?? []);
@@ -1735,7 +2049,10 @@ export function PatientClinicalTab({
         setAllDoctors(doctorRows ?? []);
         setSpecializations(specializationRows ?? []);
         setVitalsHistory(Array.isArray(vitals?.items) ? vitals.items : []);
+        setLabResults(Array.isArray(labs?.items) ? labs.items : []);
         setRiskScores(Array.isArray(scores?.items) ? scores.items : []);
+        setMedicationImportHistory(Array.isArray(medicationHistory.items) ? medicationHistory.items : []);
+        setMedicationHistoryTotal(medicationHistory.total ?? medicationHistory.items.length);
         setError("");
       })
       .catch((err: unknown) => {
@@ -1748,6 +2065,39 @@ export function PatientClinicalTab({
       active = false;
     };
   }, [patientId, version]);
+
+  const labResultGroups = useMemo(() => {
+    return groupPatientLabResults(labResults);
+  }, [labResults]);
+
+  const medicationHistorySeries = useMemo(
+    () => groupMedicationImportHistory(medications, medicationImportHistory),
+    [medicationImportHistory, medications],
+  );
+
+  async function loadMoreMedicationHistory() {
+    if (medicationHistoryLoadingMore || medicationImportHistory.length >= medicationHistoryTotal) return;
+    setMedicationHistoryLoadingMore(true);
+    try {
+      const page = await fetchPatientMedicationImportHistory(patientId, {
+        limit: 200,
+        offset: medicationImportHistory.length,
+      });
+      setMedicationImportHistory((current) => {
+        const existing = new Set(current.map((item) => item.id));
+        return [...current, ...page.items.filter((item) => !existing.has(item.id))];
+      });
+      setMedicationHistoryTotal(page.total);
+    } catch (historyError) {
+      toast.error(
+        historyError instanceof Error
+          ? historyError.message
+          : tx("Не вдалося завантажити історію медикаментів", "Medikationsverlauf konnte nicht geladen werden"),
+      );
+    } finally {
+      setMedicationHistoryLoadingMore(false);
+    }
+  }
 
   const attributionRow = (item: ClinicalAttribution) => {
     const label = attributionLabel(item, lang);
@@ -1792,6 +2142,7 @@ export function PatientClinicalTab({
     documentImport: ClinicalDocumentImport,
     candidates: ClinicalDocumentImportCandidate[],
     sourceCountry: string,
+    candidatePayloads: ClinicalDocumentCandidatePayloads,
   ): Promise<Record<string, number>> {
     const counts: Record<string, number> = {};
     const importMarker = (candidateId: string) =>
@@ -1838,53 +2189,65 @@ export function PatientClinicalTab({
       counts.diagnoses = importedDiagnoses.length;
     }
 
-    const importedMedications = candidates
-      .filter((item) => item.target === "medication" && item.value.trim())
-      .filter(
-        (item) =>
-          !medications.some((existing) => existing.hinweis?.includes(importMarker(item.id))),
-      )
-      .map((item): ClinicalMedication => ({
-        category: "dauer",
-        wirkstoff: item.value.trim(),
-        handelsname:
-          typeof item.normalized.handelsname === "string" ? item.normalized.handelsname : "",
-        staerke: typeof item.normalized.staerke === "string" ? item.normalized.staerke : null,
-        form: typeof item.normalized.form === "string" ? item.normalized.form : null,
-        einnahmeform:
-          typeof item.normalized.einnahmeform === "string" ? item.normalized.einnahmeform : null,
-        dose_morgens: null,
-        dose_mittags: null,
-        dose_abends: null,
-        dose_nachts: null,
-        einheit: null,
-        hinweis: `Import: ${documentImport.document_name ?? documentImport.document_id}\n${importMarker(item.id)}`,
-        grund: null,
-        verordnet_am: null,
-        einnahme_von: null,
-        einnahme_bis: null,
-        status: "aktiv",
-        apothekenpflichtig: false,
-        rezeptpflichtig: false,
-        btm: false,
-        aut_idem_sperre: false,
-        abgabebeschraenkung: false,
-        sonstige_vermerke: null,
-        on_hold: false,
-        hold_from: null,
-        hold_until: null,
-        hold_note: null,
-        provider_id: null,
-        provider_name: null,
-        doctor_id: null,
-        doctor_name: null,
-        doctor_title: null,
-        doctor_fachbereich: null,
-      }));
-    if (importedMedications.length > 0) {
-      await savePatientMedications(patientId, importedMedications, "merge");
-      setMedications((current) => [...current, ...importedMedications]);
-      counts.medications = importedMedications.length;
+    const importedMedicationResponses: ImportedMedicationResponse[] = [];
+    for (const item of candidates.filter((candidate) => candidate.target === "medication")) {
+      const payload = candidatePayloads[item.id];
+      if (!payload || !("candidate_id" in payload) || payload.candidate_id !== item.id) {
+        throw new Error(
+          tx(
+            "Для імпорту медикаменту потрібно вказати діючу речовину.",
+            "Für den Medikamentenimport muss ein Wirkstoff angegeben werden.",
+          ),
+        );
+      }
+      importedMedicationResponses.push(
+        await persistClinicalDocumentMedication(
+          patientId,
+          documentImport.id,
+          payload as ImportedMedicationPayload,
+        ),
+      );
+    }
+    if (importedMedicationResponses.length > 0) {
+      const [refreshedClinical, refreshedHistory] = await Promise.all([
+        fetchPatientClinical(patientId),
+        fetchPatientMedicationImportHistory(patientId),
+      ]);
+      setMedications(refreshedClinical.medications ?? []);
+      setMedicationImportHistory(refreshedHistory.items ?? []);
+      setMedicationHistoryTotal(refreshedHistory.total ?? refreshedHistory.items.length);
+      counts.medications = importedMedicationResponses.length;
+      const deduplicated = importedMedicationResponses.filter(
+        (response) => response.action === "deduplicated",
+      ).length;
+      const regimenChanged = importedMedicationResponses.filter(
+        (response) => response.action === "regimen_changed",
+      ).length;
+      const statusTransitions = importedMedicationResponses.filter(
+        (response) => response.action === "status_transition",
+      ).length;
+      if (deduplicated > 0 || regimenChanged > 0 || statusTransitions > 0) {
+        toast.info(
+          tx(
+            `Медикаменти: без дублювання — ${deduplicated}, нових схем — ${regimenChanged}, змін статусу — ${statusTransitions}.`,
+            `Medikation: dedupliziert ${deduplicated}, neue Schemata ${regimenChanged}, Statuswechsel ${statusTransitions}.`,
+          ),
+          6_000,
+        );
+      }
+      const matchCandidateCount = importedMedicationResponses.reduce(
+        (sum, response) => sum + response.match_candidate_count,
+        0,
+      );
+      if (matchCandidateCount > 0) {
+        toast.info(
+          tx(
+            `Знайдено ${matchCandidateCount} кандидатів у каталозі ліків. Вони потребують окремої перевірки.`,
+            `${matchCandidateCount} Arzneimittelkandidaten gefunden. Sie müssen separat geprüft werden.`,
+          ),
+          6_000,
+        );
+      }
     }
 
     const importedExaminations = candidates
@@ -1918,6 +2281,39 @@ export function PatientClinicalTab({
       await savePatientExaminations(patientId, next);
       setExaminations(next);
       counts.examinations = importedExaminations.length;
+    }
+
+    const importedLabResults = candidates
+      .filter((item) => item.target === "lab_result")
+      .filter(
+        (item) =>
+          !labResults.some(
+            (existing) =>
+              existing.source_import_id === documentImport.id &&
+              existing.source_candidate_id === item.id,
+          ),
+    );
+    for (const item of importedLabResults) {
+      const payload = candidatePayloads[item.id];
+      if (
+        !payload ||
+        !("analyte_name" in payload) ||
+        payload.source_candidate_id !== item.id
+      ) {
+        throw new Error(
+          tx(
+            "Зафіксований payload аналізу відсутній або не збігається.",
+            "Der vorbereitete Laborwert-Payload fehlt oder stimmt nicht überein.",
+          ),
+        );
+      }
+      await apiFetch(`/patients/${patientId}/lab-results`, {
+        method: "POST",
+        body: JSON.stringify(payload as ImportedLabResultPayload),
+      });
+    }
+    if (importedLabResults.length > 0) {
+      counts.lab_results = importedLabResults.length;
     }
 
     const importedAnamnesis = candidates
@@ -2335,11 +2731,18 @@ export function PatientClinicalTab({
             id: item.id ?? `medication-${index}`,
             primary: [item.handelsname, item.wirkstoff].filter(Boolean).join(" · "),
             secondary: [item.staerke, item.form].filter(Boolean).join(" · ") || null,
+            medicationSeriesId: item.medication_series_id,
+            medicationIdentity: item.wirkstoff,
           })),
           examination: examinations.map((item, index) => ({
             id: item.id ?? `examination-${index}`,
             primary: item.title,
             secondary: item.result,
+          })),
+          lab_result: labResults.map((item) => ({
+            id: item.id,
+            primary: `${item.analyte_name}: ${item.result_text}${item.unit ? ` ${item.unit}` : ""}`,
+            secondary: patientVitalDateTime(item.measured_at, item.measured_at),
           })),
           recommendation: recommendations.map((item) => ({
             id: item.id,
@@ -2840,6 +3243,13 @@ export function PatientClinicalTab({
         canManage={canManage}
         tx={tx}
       />
+      <MedicationHistoryTree
+        series={medicationHistorySeries}
+        total={medicationHistoryTotal}
+        loadingMore={medicationHistoryLoadingMore}
+        tx={tx}
+        onLoadMore={() => void loadMoreMedicationHistory()}
+      />
 
       {/* ---- Examinations / Befunde ---- */}
       <ClinicalSection<ClinicalExamination>
@@ -3090,40 +3500,14 @@ export function PatientClinicalTab({
             <div className="max-h-[540px] overflow-y-auto rounded-lg border border-border/70 bg-card">
               {vitalsHistory.map((item) => {
                 const notSet = tx("Не указано", "Nicht gesetzt");
-                const vitalMetrics = [
-                  item.bp_systolic != null && item.bp_diastolic != null
-                    ? {
-                        label: tx("АД", "RR"),
-                        value: `${formatVitalNumber(item.bp_systolic, { maximumFractionDigits: 0 }) ?? notSet}/${
-                          formatVitalNumber(item.bp_diastolic, { maximumFractionDigits: 0 }) ?? notSet
-                        }`,
-                      }
-                    : null,
-                  item.heart_rate != null
-                    ? {
-                        label: tx("ЧСС", "Herzfrequenz"),
-                        value: formatVitalNumber(item.heart_rate, { maximumFractionDigits: 0 }) ?? notSet,
-                      }
-                    : null,
-                  item.weight_kg != null
-                    ? {
-                        label: tx("Вес", "Gewicht"),
-                        value: `${formatVitalNumber(item.weight_kg) ?? notSet} kg`,
-                      }
-                    : null,
-                  item.height_cm != null
-                    ? {
-                        label: tx("Рост", "Größe"),
-                        value: `${formatVitalNumber(item.height_cm) ?? notSet} cm`,
-                      }
-                    : null,
-                  item.bmi != null
-                    ? {
-                        label: tx("BMI", "BMI"),
-                        value: formatVitalNumber(item.bmi) ?? notSet,
-                      }
-                    : null,
-                ].filter((metric): metric is { label: string; value: string } => Boolean(metric));
+                const vitalMetrics = patientVitalMetrics(item, {
+                  bloodPressure: tx("АД", "RR"),
+                  heartRate: tx("ЧСС", "Herzfrequenz"),
+                  weight: tx("Вес", "Gewicht"),
+                  height: tx("Рост", "Größe"),
+                  bmi: "BMI",
+                  notSet,
+                });
 
                 return (
                   <div
@@ -3200,6 +3584,111 @@ export function PatientClinicalTab({
         </div>
       </section>
       )}
+
+      {/* ---- Structured laboratory history ---- */}
+      {canManage || labResults.length > 0 ? (
+        <section className="rounded-xl border border-border/70 bg-card">
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-foreground">{tx("История анализов", "Laborverlauf")}</h3>
+                <CountBadge>{labResultGroups.length} {tx("показателей", "Parameter")}</CountBadge>
+              </div>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {tx(
+                  "Каждый показатель хранит отдельную хронологию; новые OCR-документы добавляют новые даты.",
+                  "Jeder Parameter hat einen eigenen Verlauf; neue OCR-Dokumente ergänzen weitere Messzeitpunkte.",
+                )}
+              </p>
+            </div>
+            <Badge variant="outline" className="rounded-full border-cyan-200 bg-cyan-50 text-cyan-800">
+              {labResults.length} {tx("результатов", "Ergebnisse")}
+            </Badge>
+          </header>
+
+          <div className="max-h-[680px] space-y-2 overflow-y-auto p-3">
+            {labResultGroups.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-6 text-sm text-muted-foreground">
+                {tx(
+                  "Анализов пока нет. Загрузите лабораторный документ через OCR-билдер, чтобы создать историю.",
+                  "Noch keine Laborwerte. Laden Sie einen Laborbefund über den OCR-Builder hoch, um den Verlauf anzulegen.",
+                )}
+              </div>
+            ) : null}
+            {labResultGroups.map((group, groupIndex) => {
+              const latest = group.rows[0];
+              return (
+                <details
+                  key={group.name.toLocaleLowerCase()}
+                  open={groupIndex < 3}
+                  className="group rounded-lg border border-border/60 bg-background"
+                >
+                  <summary className="grid cursor-pointer list-none gap-2 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center [&::-webkit-details-marker]:hidden">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-foreground">{group.name}</p>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                        {group.rows.length} {tx("измерений", "Messungen")} · {patientVitalDateTime(latest.measured_at, latest.measured_at)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 sm:justify-end">
+                      <span className="text-sm font-semibold text-foreground">
+                        {latest.result_text}{latest.unit ? ` ${latest.unit}` : ""}
+                      </span>
+                      {latest.abnormal_flag !== "normal" && latest.abnormal_flag !== "unknown" ? (
+                        <Badge variant="outline" className="border-rose-200 bg-rose-50 text-rose-700">
+                          {tx("Отклонение", "Auffällig")}
+                        </Badge>
+                      ) : null}
+                      <span aria-hidden className="text-xs text-muted-foreground transition-transform group-open:rotate-90">›</span>
+                    </div>
+                  </summary>
+
+                  <div className="overflow-x-auto border-t border-border/60">
+                    <table className="w-full min-w-[760px] text-left text-xs">
+                      <thead className="bg-muted/30 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <tr>
+                          <th className="px-3 py-2">{tx("Дата", "Datum")}</th>
+                          <th className="px-3 py-2">{tx("Значение", "Wert")}</th>
+                          <th className="px-3 py-2">{tx("Единица", "Einheit")}</th>
+                          <th className="px-3 py-2">{tx("Референс", "Referenz")}</th>
+                          <th className="px-3 py-2">{tx("Источник", "Quelle")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.rows.map((row) => (
+                          <tr key={row.id} className="border-t border-border/50 first:border-t-0">
+                            <td className="whitespace-nowrap px-3 py-2.5 text-muted-foreground">
+                              {patientVitalDateTime(row.measured_at, row.measured_at)}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <span className={cn(
+                                "font-semibold",
+                                row.abnormal_flag === "normal" && "text-emerald-700",
+                                (row.abnormal_flag === "low" || row.abnormal_flag === "high" || row.abnormal_flag === "abnormal") && "text-rose-700",
+                              )}>
+                                {row.result_text}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5 text-muted-foreground">{row.unit || "—"}</td>
+                            <td className="px-3 py-2.5 text-muted-foreground">{row.reference_text || "—"}</td>
+                            <td className="max-w-[260px] px-3 py-2.5 text-muted-foreground">
+                              <span className="block truncate" title={row.source_document_name ?? undefined}>
+                                {row.source_document_name ?? row.recorded_by_name ?? tx("Ручной ввод", "Manuelle Eingabe")}
+                                {row.source_country ? ` · ${row.source_country}` : ""}
+                                {row.source_page ? ` · S. ${row.source_page}` : ""}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
 
       {/* ---- Risikoscores (moved from Profile) ---- */}
       {(canManage || riskScores.length > 0) && (

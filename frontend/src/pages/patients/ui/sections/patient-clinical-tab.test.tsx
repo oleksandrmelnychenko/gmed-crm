@@ -7,6 +7,7 @@ import type {
   ClinicalMedication,
   PatientRecommendation,
 } from "@/pages/patients/data/patient-clinical";
+import type { PatientVitalMeasurement } from "@/pages/patients/model/detail-resource-types";
 import type { ProviderSummary } from "@/pages/providers/model/types";
 
 import { DiagnosisTreeSection } from "./diagnosis-tree";
@@ -19,6 +20,8 @@ import {
   clinicalMedicalProviderRows,
   medicationHasEnded,
   mergeVerlaufDoctorAttribution,
+  patientVitalMetrics,
+  groupPatientLabResults,
 } from "./patient-clinical-tab";
 import {
   PatientRecommendationOverviewItem,
@@ -246,6 +249,53 @@ describe("PatientMedicationTable", () => {
       medicationHasEndedForProfile({ einnahme_bis: "2026-07-16" }, "2026-07-17"),
     ).toBe(true);
     expect(medicationHasEndedForProfile({ einnahme_bis: null }, "2026-07-17")).toBe(false);
+  });
+});
+
+describe("patientVitalMetrics", () => {
+  it("keeps weight and height in the measurement history", () => {
+    const measurement: PatientVitalMeasurement = {
+      id: "vital-1",
+      measured_at: "2026-08-10T10:00:00Z",
+      weight_kg: 72.4,
+      height_cm: 175,
+      created_at: "2026-08-10T10:00:00Z",
+    };
+
+    const metrics = patientVitalMetrics(measurement, {
+      bloodPressure: "RR",
+      heartRate: "Herzfrequenz",
+      weight: "Gewicht",
+      height: "Größe",
+      bmi: "BMI",
+      notSet: "Nicht gesetzt",
+    });
+
+    expect(metrics).toHaveLength(2);
+    expect(metrics[0].label).toBe("Gewicht");
+    expect(metrics[0].value).toMatch(/^72[.,]4 kg$/);
+    expect(metrics[1]).toEqual({ label: "Größe", value: "175 cm" });
+  });
+});
+
+describe("groupPatientLabResults", () => {
+  it("appends repeated analytes by date and preserves different units", () => {
+    const base = {
+      panel: "Blood count",
+      reference_text: null,
+      abnormal_flag: "normal" as const,
+      created_at: "2026-08-10T00:00:00Z",
+    };
+    const groups = groupPatientLabResults([
+      { ...base, id: "new", analyte_name: "Leukocytes", result_text: "6400", unit: "cells/µL", measured_at: "2026-08-10T00:00:00Z" },
+      { ...base, id: "old", analyte_name: "leukocytes", result_text: "6.4", unit: "G/L", measured_at: "2026-07-10T00:00:00Z" },
+      { ...base, id: "crp", analyte_name: "CRP", result_text: "0.4", unit: "mg/L", measured_at: "2026-08-10T00:00:00Z" },
+    ]);
+
+    expect(groups).toHaveLength(2);
+    const leukocytes = groups.find((group) => group.name === "Leukocytes");
+    expect(leukocytes?.rows.map((row) => row.id)).toEqual(["new", "old"]);
+    expect(leukocytes?.rows.map((row) => row.unit)).toEqual(["cells/µL", "G/L"]);
   });
 });
 

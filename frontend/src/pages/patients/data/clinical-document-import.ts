@@ -5,6 +5,7 @@ export type ClinicalDocumentImportTarget =
   | "anamnesis"
   | "medication"
   | "examination"
+  | "lab_result"
   | "recommendation";
 
 export type ClinicalDocumentImportCandidate = {
@@ -57,6 +58,7 @@ export type ClinicalDocumentImportStatus =
   | "queued"
   | "processing"
   | "review_required"
+  | "applying"
   | "applied"
   | "failed";
 
@@ -73,6 +75,8 @@ export type ClinicalDocumentImportSummary = {
   candidate_count: number;
   applied_counts: Record<string, number>;
   error_message: string | null;
+  prepared_source_country?: string | null;
+  prepared_at?: string | null;
   completed_at: string | null;
   applied_at: string | null;
   created_at: string;
@@ -93,10 +97,144 @@ export type ClinicalDocumentImport = {
   reviewed_draft: ClinicalDocumentImportDraft | null;
   applied_counts: Record<string, number>;
   error_message: string | null;
+  prepared_source_country?: string | null;
+  prepared_at?: string | null;
   completed_at: string | null;
   applied_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type ImportedMedicationPayload = {
+  candidate_id: string;
+  wirkstoff: string;
+  handelsname?: string | null;
+  category?: string | null;
+  staerke?: string | null;
+  form?: string | null;
+  einnahmeform?: string | null;
+  dose_morgens?: string | null;
+  dose_mittags?: string | null;
+  dose_abends?: string | null;
+  dose_nachts?: string | null;
+  einheit?: string | null;
+  hinweis?: string | null;
+  grund?: string | null;
+  verordnet_am?: string | null;
+  einnahme_von?: string | null;
+  einnahme_bis?: string | null;
+  /** Clinical/document date that anchors this reviewed regimen in the medication history. */
+  source_date?: string | null;
+  status?: string | null;
+  on_hold?: boolean;
+  hold_from?: string | null;
+  hold_until?: string | null;
+  hold_note?: string | null;
+  apothekenpflichtig?: boolean;
+  rezeptpflichtig?: boolean;
+  btm?: boolean;
+  aut_idem_sperre?: boolean;
+  abgabebeschraenkung?: boolean;
+  sonstige_vermerke?: string | null;
+  source_country?: string | null;
+  source_page?: number | null;
+  source_raw_text?: string | null;
+  source_identifiers?: Record<string, unknown>;
+  source_field_confidence?: Record<string, number>;
+  drug_product_id?: string | null;
+  medication_series_id?: string | null;
+  create_new_series?: boolean;
+};
+
+export type ImportedLabResultPayload = {
+  measured_at: string;
+  panel: string | null;
+  analyte_name: string;
+  result_text: string;
+  numeric_result: number | null;
+  comparator: string | null;
+  unit: string | null;
+  reference_text: string | null;
+  reference_low: number | null;
+  reference_high: number | null;
+  abnormal_flag: string;
+  source_country: string;
+  source_import_id: string;
+  source_candidate_id: string;
+  source_page: number | null;
+};
+
+export type ClinicalDocumentCandidatePayloads = Record<
+  string,
+  ImportedMedicationPayload | ImportedLabResultPayload
+>;
+
+export function clinicalImportNeedsSourceCountry(
+  candidates: Pick<ClinicalDocumentImportCandidate, "target">[],
+) {
+  return candidates.some(
+    (candidate) =>
+      candidate.target === "diagnosis" ||
+      candidate.target === "lab_result" ||
+      candidate.target === "medication",
+  );
+}
+
+export type ImportedMedicationAction =
+  | "created"
+  | "deduplicated"
+  | "regimen_changed"
+  | "status_transition"
+  | "historical_observation";
+
+export type ImportedMedicationResponse = {
+  id: string;
+  action: ImportedMedicationAction;
+  idempotent: boolean;
+  supersedes_medication_id?: string | null;
+  medication_series_id?: string | null;
+  regimen_fingerprint: string;
+  match_candidate_count: number;
+  source_date: string | null;
+};
+
+export type MedicationImportHistoryEvent = {
+  id: string;
+  patient_medication_id: string | null;
+  prior_medication_id: string | null;
+  medication_series_id?: string | null;
+  event_type: ImportedMedicationAction;
+  regimen_fingerprint: string;
+  source_document_id: string | null;
+  source_document_name: string | null;
+  source_import_id: string;
+  source_candidate_id: string;
+  source_country: string | null;
+  source_date: string | null;
+  source_page: number | null;
+  source_raw_text: string | null;
+  source_identifiers: Record<string, unknown>;
+  source_field_confidence: Record<string, number>;
+  old_value: Record<string, unknown> | null;
+  new_value: Record<string, unknown>;
+  reviewed_by: string | null;
+  reviewed_by_name: string | null;
+  created_at: string;
+};
+
+export type MedicationImportHistoryPage = {
+  items: MedicationImportHistoryEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type PreparedClinicalDocumentImport = {
+  ok: true;
+  id: string;
+  status: "applying";
+  idempotent: boolean;
+  source_country: string | null;
 };
 
 export function fetchClinicalDocumentImports(patientId: string) {
@@ -134,6 +272,50 @@ export function retryClinicalDocumentImport(patientId: string, importId: string)
   return apiFetch<ClinicalDocumentImport>(
     `/patients/${patientId}/clinical-document-imports/${importId}/retry`,
     { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+export function persistClinicalDocumentMedication(
+  patientId: string,
+  importId: string,
+  payload: ImportedMedicationPayload,
+) {
+  return apiFetch<ImportedMedicationResponse>(
+    `/patients/${patientId}/clinical-document-imports/${importId}/medications`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+export function fetchPatientMedicationImportHistory(
+  patientId: string,
+  options: { limit?: number; offset?: number } = {},
+) {
+  const limit = options.limit ?? 200;
+  const offset = options.offset ?? 0;
+  const query = `?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`;
+  return apiFetch<MedicationImportHistoryPage>(
+    `/patients/${patientId}/medication-import-history${query}`,
+    { cache: "no-store" },
+  );
+}
+
+export function prepareClinicalDocumentImport(
+  patientId: string,
+  importId: string,
+  reviewedDraft: ClinicalDocumentImportDraft,
+  candidatePayloads: ClinicalDocumentCandidatePayloads,
+  sourceCountry?: string | null,
+) {
+  return apiFetch<PreparedClinicalDocumentImport>(
+    `/patients/${patientId}/clinical-document-imports/${importId}/prepare`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        reviewed_draft: reviewedDraft,
+        candidate_payloads: candidatePayloads,
+        source_country: sourceCountry || undefined,
+      }),
+    },
   );
 }
 
