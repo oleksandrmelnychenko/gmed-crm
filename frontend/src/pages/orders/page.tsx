@@ -1020,6 +1020,7 @@ function useOrdersPageContent() {
   } = ordersPageState;
   const [statusSaving, setStatusSaving] = useState<OrderStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [debtManagementSheetOpen, setDebtManagementSheetOpen] = useState(false);
   const setOrdersPageField = <K extends keyof OrdersPageState>(
     field: K,
     nextValue: SetStateAction<OrdersPageState[K]>,
@@ -2331,6 +2332,7 @@ function useOrdersPageContent() {
         ),
         resolution_note: optString(processGateForm.debtResolutionNote),
       });
+      setDebtManagementSheetOpen(false);
       triggerReload();
     } catch (error) {
       setProcessGateError(
@@ -2341,6 +2343,14 @@ function useOrdersPageContent() {
     } finally {
       setProcessGateBusy(false);
     }
+  }
+
+  function openDebtManagementSheet() {
+    if (!orderDetail?.process_gates) return;
+
+    setProcessGateForm(orderProcessGatesToForm(orderDetail.process_gates));
+    setProcessGateError(null);
+    setDebtManagementSheetOpen(true);
   }
 
   async function handleSaveBillingRelease() {
@@ -3753,161 +3763,98 @@ function useOrdersPageContent() {
                         />
                       ) : (
                         <div className="grid gap-4">
-                        {canManageDebt ? (
-                          <div className="rounded-2xl border border-border p-4">
-                            <div className="text-sm font-semibold text-foreground">
-                              {titleWithDot(l("orders_debt_management"))}
-                            </div>
-                            <div className="mt-1 text-sm text-muted-foreground">
-                              {l("orders_aktiven_debt_workflow_nachverfolgen_owner_zuweisen_und_d")}
-                            </div>
-                            <div className="mt-4 grid gap-3">
-                              <Field label={l("orders_debt_status")}>
-                                <NativeComboboxSelect
-                                  value={processGateForm.debtStatus}
-                                  onChange={(event) =>
-                                    setProcessGateForm((current) => ({
-                                      ...current,
-                                      debtStatus: event.target.value as OrderProcessGateFormState["debtStatus"],
-                                    }))
-                                  }
-                                  className={selectClassName}
-                                >
-                                  {[
-                                    "review_required",
-                                    "payment_plan",
-                                    "awaiting_payment",
-                                    "escalated",
-                                    "cleared",
-                                    "not_required",
-                                  ].map((status) => (
-                                    <option key={status} value={status}>
-                                      {debtStatusLabel(status)}
-                                    </option>
-                                  ))}
-                                </NativeComboboxSelect>
-                              </Field>
-                              <Field label={l("orders_owner")}>
-                                <NativeComboboxSelect
-                                  value={processGateForm.debtOwnerUserId}
-                                  onChange={(event) =>
-                                    setProcessGateForm((current) => ({
-                                      ...current,
-                                      debtOwnerUserId: event.target.value,
-                                    }))
-                                  }
-                                  className={selectClassName}
-                                >
-                                  <option value="">
-                                    {l("orders_aktuellen_owner_beibehalten")}
-                                  </option>
-                                  {debtOwnerOptions.map((item) => (
-                                    <option
-                                      key={item.user_id}
-                                      value={item.user_id}
-                                    >
-                                      {item.user_name} · {roleLabel(item.user_role)}
-                                    </option>
-                                  ))}
-                                </NativeComboboxSelect>
-                              </Field>
-                              <Field label={l("orders_nachstes_review")}>
-                                <Input
-                                  type="datetime-local"
-                                  value={processGateForm.debtNextReviewAt}
-                                  onChange={(event) =>
-                                    setProcessGateForm((current) => ({
-                                      ...current,
-                                      debtNextReviewAt: event.target.value,
-                                    }))
-                                  }
-                                  className={inputClassName}
-                                />
-                              </Field>
-                              <Field label={l("orders_letzter_kontakt")}>
-                                <Input
-                                  type="datetime-local"
-                                  value={processGateForm.debtLastContactAt}
-                                  onChange={(event) =>
-                                    setProcessGateForm((current) => ({
-                                      ...current,
-                                      debtLastContactAt: event.target.value,
-                                    }))
-                                  }
-                                  className={inputClassName}
-                                />
-                              </Field>
-                              <Field label={l("orders_debt_notiz")}>
-                                <textarea
-                                  value={processGateForm.debtNote}
-                                  onChange={(event) =>
-                                    setProcessGateForm((current) => ({
-                                      ...current,
-                                      debtNote: event.target.value,
-                                    }))
-                                  }
-                                  className={textareaClassName}
-                                  placeholder={l("orders_notiz_zum_debt_workflow")}
-                                />
-                              </Field>
-                              <Field label={l("orders_losungsnotiz")}>
-                                <textarea
-                                  value={processGateForm.debtResolutionNote}
-                                  onChange={(event) =>
-                                    setProcessGateForm((current) => ({
-                                      ...current,
-                                      debtResolutionNote: event.target.value,
-                                    }))
-                                  }
-                                  className={textareaClassName}
-                                  placeholder={l("orders_losungsnotiz")}
-                                />
-                              </Field>
-                              <div className="grid gap-2 rounded-2xl border border-border p-3 text-xs text-muted-foreground">
-                                <div>
-                                  {l("orders_owner")}:{" "}
-                                  {orderDetail.process_gates.debt_management
-                                    ?.owner_name ?? l("orders_nicht_zugewiesen")}
-                                </div>
-                                <div>
-                                  {l("orders_letzter_kontakt")}:{" "}
-                                  {formatDateTimeLabel(
-                                    orderDetail.process_gates.debt_management
-                                      ?.last_contact_at,
-                                  )}
-                                </div>
-                                <div>
-                                  {l("orders_nachstes_review")}:{" "}
-                                  {formatDateTimeLabel(
-                                    orderDetail.process_gates.debt_management
-                                      ?.next_review_at,
-                                  )}
-                                </div>
-                                <div>
-                                  {l("orders_erledigt")}:{" "}
-                                  {formatDateTimeLabel(
-                                    orderDetail.process_gates.debt_management
-                                      ?.resolved_at,
-                                  )}
-                                </div>
+                        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-foreground">
+                                {titleWithDot(l("orders_debt_management"))}
                               </div>
-                              <div className="flex justify-end">
-                                <Button
-                                  type="button"
-                                  onClick={() =>
-                                    void handleSaveDebtManagement()
-                                  }
-                                  disabled={processGateBusy}
-                                >
-                                  {processGateBusy ? (
-                                    <LoaderCircle className="mr-2 size-4 animate-spin" />
-                                  ) : null}
-                                  {l("orders_debt_workflow_speichern")}
-                                </Button>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {l("orders_aktiven_debt_workflow_nachverfolgen_owner_zuweisen_und_d")}
                               </div>
                             </div>
+                            {canManageDebt ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-8 rounded-lg"
+                                onClick={openDebtManagementSheet}
+                              >
+                                <ArrowUpRight className="size-3.5" />
+                                {lang === "de" ? "Bearbeiten" : "Редактировать"}
+                              </Button>
+                            ) : null}
                           </div>
-                        ) : null}
+
+                          <div className="overflow-x-auto">
+                            <table className="w-full min-w-[900px] text-left text-xs">
+                              <thead className="bg-muted/25 text-muted-foreground">
+                                <tr>
+                                  <th className="px-4 py-2.5 font-medium">{l("orders_debt_status")}</th>
+                                  <th className="px-4 py-2.5 font-medium">{l("orders_owner")}</th>
+                                  <th className="px-4 py-2.5 text-right font-medium">{l("orders_uberfallig_2")}</th>
+                                  <th className="px-4 py-2.5 text-right font-medium">{l("orders_open_balance")}</th>
+                                  <th className="px-4 py-2.5 font-medium">{l("orders_letzter_kontakt")}</th>
+                                  <th className="px-4 py-2.5 font-medium">{l("orders_nachstes_review")}</th>
+                                  <th className="px-4 py-2.5 font-medium">{l("orders_erledigt")}</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <tr className="border-t border-border/70">
+                                  <td className="px-4 py-3">
+                                    <Badge
+                                      variant="outline"
+                                      className={cn(
+                                        "whitespace-nowrap rounded-full",
+                                        statusClassName(
+                                          orderDetail.process_gates.debt_management
+                                            ?.effective_status ?? "not_required",
+                                        ),
+                                      )}
+                                    >
+                                      {debtStatusLabel(
+                                        orderDetail.process_gates.debt_management
+                                          ?.effective_status ?? "not_required",
+                                      )}
+                                    </Badge>
+                                  </td>
+                                  <td className="px-4 py-3 font-medium text-foreground">
+                                    {orderDetail.process_gates.debt_management
+                                      ?.owner_name ?? l("orders_nicht_zugewiesen")}
+                                  </td>
+                                  <td className="px-4 py-3 text-right font-mono font-semibold tabular-nums text-foreground">
+                                    {orderDetail.process_gates.overdue_invoice_count}
+                                  </td>
+                                  <td className="px-4 py-3 text-right font-mono font-semibold tabular-nums text-foreground">
+                                    {formatMoney(
+                                      orderDetail.process_gates.debt_management
+                                        ?.outstanding_balance ??
+                                        orderDetail.process_gates.outstanding_balance ??
+                                        0,
+                                    )}
+                                  </td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                                    {formatDateTimeLabel(orderDetail.process_gates.debt_management?.last_contact_at)}
+                                  </td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                                    {formatDateTimeLabel(orderDetail.process_gates.debt_management?.next_review_at)}
+                                  </td>
+                                  <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                                    {formatDateTimeLabel(orderDetail.process_gates.debt_management?.resolved_at)}
+                                  </td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {orderDetail.process_gates.debt_management?.note ? (
+                            <div className="border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+                              <span className="font-medium text-foreground">{l("orders_debt_notiz")}:</span>{" "}
+                              {orderDetail.process_gates.debt_management.note}
+                            </div>
+                          ) : null}
+                        </div>
 
                         {user?.role === "billing" || user?.role === "ceo" ? (
                           <div className="rounded-2xl border border-border p-4">
@@ -6298,6 +6245,200 @@ function useOrdersPageContent() {
             )}
           </AdminSheetScaffold>
       </SheetContent>
+      </Sheet>
+
+      <Sheet
+        open={debtManagementSheetOpen}
+        onOpenChange={(open) => {
+          if (!open && !processGateBusy) {
+            setDebtManagementSheetOpen(false);
+            setProcessGateError(null);
+          }
+        }}
+      >
+        <SheetContent
+          side="right"
+          className="w-full border-l border-border p-0 sm:max-w-xl"
+        >
+          <form
+            className="flex h-full min-h-0 flex-col"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleSaveDebtManagement();
+            }}
+          >
+            <AdminSheetScaffold
+              title={l("orders_debt_management")}
+              description={l("orders_aktiven_debt_workflow_nachverfolgen_owner_zuweisen_und_d")}
+              footer={
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  error={processGateError}
+                  submitLabel={l("orders_debt_workflow_speichern")}
+                  submittingLabel={l("orders_debt_workflow_speichern")}
+                  submitting={processGateBusy}
+                  submitDisabled={processGateBusy}
+                  onCancel={() => {
+                    setDebtManagementSheetOpen(false);
+                    setProcessGateError(null);
+                  }}
+                />
+              }
+              headerClassName="px-4 py-3"
+              bodyClassName="min-h-0 overscroll-y-contain px-5 py-4"
+            >
+              <div className="space-y-4 rounded-xl">
+                {orderDetail?.process_gates ? (
+                  <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-3">
+                    <div className="bg-card px-3 py-3">
+                      <div className="text-[11px] text-muted-foreground">
+                        {l("orders_uberfallig_2")}
+                      </div>
+                      <div className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground">
+                        {orderDetail.process_gates.overdue_invoice_count}
+                      </div>
+                    </div>
+                    <div className="bg-card px-3 py-3">
+                      <div className="text-[11px] text-muted-foreground">
+                        {l("orders_open_balance")}
+                      </div>
+                      <div className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground">
+                        {formatMoney(
+                          orderDetail.process_gates.debt_management
+                            ?.outstanding_balance ??
+                            orderDetail.process_gates.outstanding_balance ??
+                            0,
+                        )}
+                      </div>
+                    </div>
+                    <div className="col-span-2 bg-card px-3 py-3 sm:col-span-1">
+                      <div className="text-[11px] text-muted-foreground">
+                        {l("orders_erledigt")}
+                      </div>
+                      <div className="mt-1 text-sm font-medium text-foreground">
+                        {formatDateTimeLabel(
+                          orderDetail.process_gates.debt_management?.resolved_at,
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label={l("orders_debt_status")}>
+                    <NativeComboboxSelect
+                      value={processGateForm.debtStatus}
+                      onChange={(event) =>
+                        setProcessGateForm((current) => ({
+                          ...current,
+                          debtStatus: event.target.value as OrderProcessGateFormState["debtStatus"],
+                        }))
+                      }
+                      className={selectClassName}
+                    >
+                      {[
+                        "review_required",
+                        "payment_plan",
+                        "awaiting_payment",
+                        "escalated",
+                        "cleared",
+                        "not_required",
+                      ].map((status) => (
+                        <option key={status} value={status}>
+                          {debtStatusLabel(status)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+
+                  <Field label={l("orders_owner")}>
+                    <NativeComboboxSelect
+                      value={processGateForm.debtOwnerUserId}
+                      onChange={(event) =>
+                        setProcessGateForm((current) => ({
+                          ...current,
+                          debtOwnerUserId: event.target.value,
+                        }))
+                      }
+                      className={selectClassName}
+                    >
+                      <option value="">
+                        {l("orders_aktuellen_owner_beibehalten")}
+                      </option>
+                      {debtOwnerOptions.map((item) => (
+                        <option key={item.user_id} value={item.user_id}>
+                          {item.user_name} · {roleLabel(item.user_role)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+
+                  <Field label={l("orders_letzter_kontakt")}>
+                    <Input
+                      type="datetime-local"
+                      value={processGateForm.debtLastContactAt}
+                      onChange={(event) =>
+                        setProcessGateForm((current) => ({
+                          ...current,
+                          debtLastContactAt: event.target.value,
+                        }))
+                      }
+                      className={inputClassName}
+                    />
+                  </Field>
+
+                  <Field label={l("orders_nachstes_review")}>
+                    <Input
+                      type="datetime-local"
+                      value={processGateForm.debtNextReviewAt}
+                      onChange={(event) =>
+                        setProcessGateForm((current) => ({
+                          ...current,
+                          debtNextReviewAt: event.target.value,
+                        }))
+                      }
+                      className={inputClassName}
+                    />
+                  </Field>
+
+                  <Field
+                    label={l("orders_debt_notiz")}
+                    className="sm:col-span-2"
+                  >
+                    <textarea
+                      value={processGateForm.debtNote}
+                      onChange={(event) =>
+                        setProcessGateForm((current) => ({
+                          ...current,
+                          debtNote: event.target.value,
+                        }))
+                      }
+                      className={textareaClassName}
+                      placeholder={l("orders_notiz_zum_debt_workflow")}
+                    />
+                  </Field>
+
+                  <Field
+                    label={l("orders_losungsnotiz")}
+                    className="sm:col-span-2"
+                  >
+                    <textarea
+                      value={processGateForm.debtResolutionNote}
+                      onChange={(event) =>
+                        setProcessGateForm((current) => ({
+                          ...current,
+                          debtResolutionNote: event.target.value,
+                        }))
+                      }
+                      className={textareaClassName}
+                      placeholder={l("orders_losungsnotiz")}
+                    />
+                  </Field>
+                </div>
+              </div>
+            </AdminSheetScaffold>
+          </form>
+        </SheetContent>
       </Sheet>
 
       <Sheet open={externalInvoiceOpen} onOpenChange={resetExternalInvoiceDialog}>
