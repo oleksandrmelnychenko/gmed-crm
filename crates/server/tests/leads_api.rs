@@ -34,26 +34,6 @@ type ConvertedPatientRow = (
     Value,
 );
 
-type ConvertedMedicationRow = (
-    String,
-    Option<String>,
-    String,
-    bool,
-    Option<String>,
-    Option<String>,
-    bool,
-    Option<Uuid>,
-    Option<Uuid>,
-);
-
-type ConvertedNarrativeRow = (
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-);
-
 struct TestApp {
     suite: support::TestSuiteContext,
     sales_id: Uuid,
@@ -932,6 +912,19 @@ async fn full_lead_lifecycle() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+
+    let (status, prospect) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/prospect"),
+        &pm,
+        Some(json!({
+            "hauptanfragegrund": "Chronic knee pain",
+            "zuweiser": "Self referral"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{prospect}");
 
     seed_complete_lead_onboarding(&app, Uuid::parse_str(&lead_id).unwrap()).await;
 
@@ -1814,23 +1807,11 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     };
     let pool = &app.suite.pool;
     let email = format!("atomic-{}@example.com", Uuid::new_v4().simple());
-    let clinical_provider_id: Uuid = sqlx::query_scalar(
-        r#"INSERT INTO providers (name, provider_type)
-           VALUES ($1, 'medical') RETURNING id"#,
-    )
-    .bind(format!("Lead conversion clinic {email}"))
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    let clinical_doctor_id: Uuid = sqlx::query_scalar(
-        r#"INSERT INTO provider_doctors (provider_id, name, title, fachbereich)
-           VALUES ($1, 'Lead Conversion Doctor', 'Dr. med.', 'Orthopädie')
-           RETURNING id"#,
-    )
-    .bind(clinical_provider_id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
+    // Historical wizard snapshots can still contain the removed clinical_draft
+    // shape. Conversion preserves the snapshot but must not recreate clinical
+    // rows; clinical data now belongs to the prospect patient before conversion.
+    let clinical_provider_id = Uuid::new_v4();
+    let clinical_doctor_id = Uuid::new_v4();
     let lead_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO leads (
                 first_name, middle_name, last_name, suffix, email, email_consent,
@@ -2305,124 +2286,18 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
             .unwrap();
     assert_eq!(converted_patient_id, Some(patient_id));
 
-    let cave: (String, Option<String>) = sqlx::query_as(
-        "SELECT label, note FROM patient_clinical_warnings WHERE patient_id = $1 AND kind = 'cave'",
+    let legacy_clinical_rows: i64 = sqlx::query_scalar(
+        r#"SELECT
+               (SELECT count(*) FROM patient_clinical_warnings WHERE patient_id = $1)
+             + (SELECT count(*) FROM patient_diagnoses WHERE patient_id = $1)
+             + (SELECT count(*) FROM patient_medications WHERE patient_id = $1)
+             + (SELECT count(*) FROM patient_clinical_narrative WHERE patient_id = $1)"#,
     )
     .bind(patient_id)
     .fetch_one(pool)
     .await
     .unwrap();
-    assert_eq!(cave.0, "Antikoagulation");
-    assert_eq!(cave.1.as_deref(), Some("Vor Eingriff prüfen"));
-
-    let allergy: (String, Option<String>, Option<String>) = sqlx::query_as(
-        "SELECT label, reaction, severity FROM patient_clinical_warnings WHERE patient_id = $1 AND kind = 'allergie'",
-    )
-    .bind(patient_id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    assert_eq!(allergy.0, "Penicillin");
-    assert_eq!(allergy.1.as_deref(), Some("Exanthem"));
-    assert_eq!(allergy.2.as_deref(), Some("mittel"));
-
-    let diagnosis: (String, Option<String>, Option<String>, Option<Uuid>, Option<Uuid>) = sqlx::query_as(
-        "SELECT label, icd_code, chronifizierung, provider_id, doctor_id FROM patient_diagnoses WHERE patient_id = $1 AND label = 'Gonarthrose'",
-    )
-    .bind(patient_id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    assert_eq!(diagnosis.0, "Gonarthrose");
-    assert_eq!(diagnosis.1.as_deref(), Some("M17.9"));
-    assert_eq!(diagnosis.2.as_deref(), Some("chronisch"));
-    assert_eq!(diagnosis.3, Some(clinical_provider_id));
-    assert_eq!(diagnosis.4, Some(clinical_doctor_id));
-
-    let procedure: (String, Option<String>, Option<String>) = sqlx::query_as(
-        r#"SELECT procedure.label, procedure.ops_code, parent.label
-           FROM patient_diagnoses procedure
-           LEFT JOIN patient_diagnoses parent ON parent.id = procedure.parent_id
-           WHERE procedure.patient_id = $1 AND procedure.kind = 'prozedur'"#,
-    )
-    .bind(patient_id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    assert_eq!(procedure.0, "Kniearthroskopie");
-    assert_eq!(procedure.1.as_deref(), Some("5-810.0h"));
-    assert_eq!(procedure.2.as_deref(), Some("Gonarthrose"));
-
-    let external_diagnosis: (String, Option<String>, Option<String>, Option<String>) =
-        sqlx::query_as(
-            r#"SELECT source_mode, external_clinic, external_doctor, external_country
-               FROM patient_diagnoses
-               WHERE patient_id = $1 AND label = 'Hypertonie'"#,
-        )
-        .bind(patient_id)
-        .fetch_one(pool)
-        .await
-        .unwrap();
-    assert_eq!(external_diagnosis.0, "extern");
-    assert_eq!(external_diagnosis.1.as_deref(), Some("Kyiv Heart Center"));
-    assert_eq!(external_diagnosis.2.as_deref(), Some("Dr. Kovalenko"));
-    assert_eq!(external_diagnosis.3.as_deref(), Some("UA"));
-
-    let medication: (String, Option<String>, Option<String>, Option<String>, bool, bool) = sqlx::query_as(
-        "SELECT handelsname, einnahmeform, hinweis, dose_morgens, apothekenpflichtig, aut_idem_sperre FROM patient_medications WHERE patient_id = $1 AND handelsname = 'Ibuprofen'",
-    )
-    .bind(patient_id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    assert_eq!(medication.0, "Ibuprofen");
-    assert_eq!(medication.1.as_deref(), Some("Oral"));
-    assert_eq!(medication.2.as_deref(), Some("1-0-1"));
-    assert_eq!(medication.3.as_deref(), Some("1"));
-    assert!(medication.4);
-    assert!(medication.5);
-
-    let held_medication: ConvertedMedicationRow = sqlx::query_as(
-        r#"SELECT handelsname, staerke, status, on_hold, hold_until, hold_note,
-                  rezeptpflichtig, provider_id, doctor_id
-               FROM patient_medications
-               WHERE patient_id = $1 AND handelsname = 'Bisoprolol-ratiopharm'"#,
-    )
-    .bind(patient_id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    assert_eq!(held_medication.0, "Bisoprolol-ratiopharm");
-    assert_eq!(held_medication.1.as_deref(), Some("5 mg"));
-    assert_eq!(held_medication.2, "pausiert");
-    assert!(held_medication.3);
-    assert_eq!(held_medication.4.as_deref(), Some("2026-08-01"));
-    assert_eq!(held_medication.5.as_deref(), Some("Vor Eingriff pausieren"));
-    assert!(held_medication.6);
-    assert_eq!(held_medication.7, Some(clinical_provider_id));
-    assert_eq!(held_medication.8, Some(clinical_doctor_id));
-
-    let narrative: ConvertedNarrativeRow = sqlx::query_as(
-        r#"SELECT anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative,
-                  anamnese_sozial, beurteilung
-           FROM patient_clinical_narrative
-           WHERE patient_id = $1 AND is_active"#,
-    )
-    .bind(patient_id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    assert_eq!(
-        narrative.0.as_deref(),
-        Some("Belastungsabhängige Knieschmerzen")
-    );
-    assert_eq!(narrative.1.as_deref(), Some("Arthroskopie 2018"));
-    assert_eq!(narrative.2.as_deref(), Some("Unauffällig"));
-    assert_eq!(narrative.3.as_deref(), Some("Lebt selbstständig"));
-    assert_eq!(
-        narrative.4.as_deref(),
-        Some("Orthopädische Abklärung empfohlen")
-    );
+    assert_eq!(legacy_clinical_rows, 0);
 
     let (delete_status, delete_body) = json_request(
         &app,
