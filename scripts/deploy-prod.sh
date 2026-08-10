@@ -322,6 +322,51 @@ compose_up_or_diagnose() {
   return "$compose_rc"
 }
 
+verify_sanitized_production_database() {
+  local counts=""
+  local users admins patients leads cases orders invoices documents appointments tasks
+
+  counts="$(docker exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" gmed-postgres \
+    psql \
+      --quiet \
+      --tuples-only \
+      --no-align \
+      --field-separator='|' \
+      -v ON_ERROR_STOP=1 \
+      -v admin_email="$PROD_ADMIN_EMAIL" \
+      -U "$POSTGRES_USER" \
+      -d "${POSTGRES_DB:-gmed}" <<'SQL'
+SELECT
+  (SELECT count(*) FROM users),
+  (SELECT count(*) FROM users
+     WHERE lower(email) = lower(:'admin_email')
+       AND role = 'ceo'
+       AND is_active = true),
+  (SELECT count(*) FROM patients),
+  (SELECT count(*) FROM leads),
+  (SELECT count(*) FROM cases),
+  (SELECT count(*) FROM orders),
+  (SELECT count(*) FROM invoices),
+  (SELECT count(*) FROM documents),
+  (SELECT count(*) FROM appointments),
+  (SELECT count(*) FROM tasks);
+SQL
+)"
+
+  IFS='|' read -r users admins patients leads cases orders invoices documents appointments tasks \
+    <<<"$counts"
+
+  if [[ "$users" != "1" || "$admins" != "1" || "$patients" != "0" || \
+        "$leads" != "0" || "$cases" != "0" || "$orders" != "0" || \
+        "$invoices" != "0" || "$documents" != "0" || \
+        "$appointments" != "0" || "$tasks" != "0" ]]; then
+    echo "ERROR: production DB empty-state verification failed: users=$users admins=$admins patients=$patients leads=$leads cases=$cases orders=$orders invoices=$invoices documents=$documents appointments=$appointments tasks=$tasks" >&2
+    return 1
+  fi
+
+  echo "Production DB verified: users=1 active_ceo=1 patients=0 leads=0 cases=0 orders=0 invoices=0 documents=0 appointments=0 tasks=0"
+}
+
 # Bring (or keep) services up. No --build: PROD pulls cosign-verified
 # images, never builds them locally. The ghcr override is layered LAST
 # so its `image:` directives win over any inherited `build:` block.
@@ -339,11 +384,25 @@ if [[ "${PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY:-false}" == "true" ]]; then
   else
     echo "Production DB sanitizer marker exists ($sanitizer_marker); data sanitizer skipped."
   fi
+
+  verify_sanitized_production_database
 fi
 
 if [[ -x "$REPO_DIR/scripts/ensure-prod-metrics-user.sh" ]]; then
   "$REPO_DIR/scripts/ensure-prod-metrics-user.sh"
   docker restart gmed-postgres-exporter >/dev/null 2>&1 || true
+fi
+
+# Capture a recoverable encrypted baseline immediately after the first
+# production bootstrap. Daily backups continue through /etc/cron.d/gmed-backup.
+bootstrap_backup_marker="${PROD_BOOTSTRAP_BACKUP_MARKER:-/etc/gmed/prod-bootstrap-backup}"
+if [[ ! -e "$bootstrap_backup_marker" ]]; then
+  bash "$REPO_DIR/scripts/backup-postgres.sh"
+  date -u +%Y-%m-%dT%H:%M:%SZ > "$bootstrap_backup_marker"
+  chmod 600 "$bootstrap_backup_marker"
+  echo "Production bootstrap backup completed."
+else
+  echo "Production bootstrap backup marker exists ($bootstrap_backup_marker); skipped."
 fi
 
 # Prune dangling images so the host doesn't accumulate layers from
