@@ -91,6 +91,7 @@ SQL
     --quiet \
     -v ON_ERROR_STOP=1 \
     -v admin_email="$PROD_ADMIN_EMAIL" \
+    -v admin_name="$PROD_ADMIN_NAME" \
     -U "$POSTGRES_USER" \
     -d "${POSTGRES_DB:-gmed}"
 
@@ -103,4 +104,4 @@ printf 'completed_at=%s\nsha256=%s\nproviders=191\ndoctors=60\npatients=6\n' \
 chmod 600 "$MARKER_PATH"
 shred -u "$BUNDLE_PATH"
 
-echo "Production directory seed imported: providers=191 doctors=60 patients=6 clinical_or_operational_rows=0"
+echo "Production directory seed imported: providers=191 doctors=60 patients=6 provider_contacts=337 doctor_contacts=38 provider_links=67 provider_specializations=356 doctor_specializations=87 taxonomy_assignments=191 provider_insurances=161 doctor_insurances=34 doctor_relationships=4 users=1 clinical_or_operational_rows=0"

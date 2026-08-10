@@ -2,8 +2,12 @@ CREATE TEMP VIEW bootstrap_payload AS
 SELECT convert_from(decode(encoded, 'base64'), 'UTF8')::jsonb AS doc
 FROM bootstrap_payload_base64;
 
-CREATE TEMP TABLE bootstrap_context (admin_email text NOT NULL);
-INSERT INTO bootstrap_context (admin_email) VALUES (:'admin_email');
+CREATE TEMP TABLE bootstrap_context (
+  admin_email text NOT NULL,
+  admin_name text NOT NULL
+);
+INSERT INTO bootstrap_context (admin_email, admin_name)
+VALUES (:'admin_email', :'admin_name');
 
 DO $$
 DECLARE
@@ -13,6 +17,8 @@ DECLARE
   approved_email_count bigint;
   ceo_role_count bigint;
   active_user_count bigint;
+  retained_ceo_id uuid;
+  user_fk record;
 BEGIN
   IF (payload->>'version')::integer <> 1
      OR jsonb_array_length(payload->'providers') <> 191
@@ -29,9 +35,14 @@ BEGIN
 
   SELECT count(*) INTO ceo_count
   FROM users
-  WHERE lower(email) = lower((SELECT admin_email FROM bootstrap_context))
-    AND role = 'ceo'
+  WHERE role = 'ceo'
     AND is_active = true;
+
+  SELECT id INTO retained_ceo_id
+  FROM users
+  WHERE role = 'ceo'
+    AND is_active = true
+  LIMIT 1;
 
   SELECT
     count(*),
@@ -43,14 +54,79 @@ BEGIN
   INTO total_user_count, approved_email_count, ceo_role_count, active_user_count
   FROM users;
 
-  IF total_user_count <> 1 OR ceo_count <> 1 THEN
+  IF ceo_count <> 1 THEN
     RAISE EXCEPTION
-      'production must contain exactly the approved active CEO account (users=%, approved_email=%, ceo_role=%, active=%, approved_active_ceo=%)',
+      'production must contain exactly one active CEO before account normalization (users=%, approved_email=%, ceo_role=%, active=%, active_ceo=%)',
       total_user_count,
       approved_email_count,
       ceo_role_count,
       active_user_count,
       ceo_count;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM users
+    WHERE lower(email) = lower((SELECT admin_email FROM bootstrap_context))
+      AND id <> retained_ceo_id
+  ) THEN
+    RAISE EXCEPTION 'approved CEO email belongs to a different account';
+  END IF;
+
+  -- The approved production shape is one account only. Preserve the sole
+  -- active CEO (including the current password and MFA state), detach nullable
+  -- references from any stale account, then remove those stale accounts.
+  FOR user_fk IN
+    SELECT
+      kcu.table_schema,
+      kcu.table_name,
+      kcu.column_name
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON tc.constraint_schema = kcu.constraint_schema
+     AND tc.constraint_name = kcu.constraint_name
+    JOIN information_schema.constraint_column_usage ccu
+      ON ccu.constraint_schema = tc.constraint_schema
+     AND ccu.constraint_name = tc.constraint_name
+    JOIN information_schema.columns cols
+      ON cols.table_schema = kcu.table_schema
+     AND cols.table_name = kcu.table_name
+     AND cols.column_name = kcu.column_name
+    WHERE tc.constraint_type = 'FOREIGN KEY'
+      AND ccu.table_schema = 'public'
+      AND ccu.table_name = 'users'
+      AND kcu.table_schema = 'public'
+      AND cols.is_nullable = 'YES'
+  LOOP
+    EXECUTE format(
+      'UPDATE %I.%I SET %I = NULL WHERE %I IS NOT NULL AND %I <> $1',
+      user_fk.table_schema,
+      user_fk.table_name,
+      user_fk.column_name,
+      user_fk.column_name,
+      user_fk.column_name
+    )
+    USING retained_ceo_id;
+  END LOOP;
+
+  DELETE FROM users WHERE id <> retained_ceo_id;
+
+  UPDATE users
+  SET email = (SELECT admin_email FROM bootstrap_context),
+      name = (SELECT admin_name FROM bootstrap_context),
+      role = 'ceo',
+      is_active = true,
+      updated_at = now()
+  WHERE id = retained_ceo_id;
+
+  SELECT count(*) INTO ceo_count
+  FROM users
+  WHERE lower(email) = lower((SELECT admin_email FROM bootstrap_context))
+    AND role = 'ceo'
+    AND is_active = true;
+
+  IF (SELECT count(*) FROM users) <> 1 OR ceo_count <> 1 THEN
+    RAISE EXCEPTION 'production account normalization did not leave exactly the approved active CEO';
   END IF;
 END $$;
 
@@ -211,6 +287,23 @@ BEGIN
   IF (SELECT count(*) FROM providers) <> 191
      OR (SELECT count(*) FROM provider_doctors) <> 60
      OR (SELECT count(*) FROM patients) <> 6
+     OR (SELECT count(*) FROM provider_contacts) <> 337
+     OR (SELECT count(*) FROM provider_person_contacts) <> 38
+     OR (SELECT count(*) FROM provider_doctor_links) <> 67
+     OR (SELECT count(*) FROM provider_specializations) <> 356
+     OR (SELECT count(*) FROM provider_doctor_specializations) <> 87
+     OR (SELECT count(*) FROM provider_taxonomy_assignments) <> 191
+     OR (SELECT count(*) FROM provider_insurances) <> 161
+     OR (SELECT count(*) FROM provider_doctor_insurances) <> 34
+     OR (SELECT count(*) FROM provider_doctor_relationships) <> 4
+     OR (SELECT count(*) FROM users) <> 1
+     OR (SELECT count(*) FROM users
+           WHERE lower(email) = lower((SELECT admin_email FROM bootstrap_context))
+             AND role = 'ceo'
+             AND is_active = true) <> 1
+     OR (SELECT count(*) FROM audit_log
+           WHERE action = 'bootstrap_directory_import'
+             AND entity_type = 'system') <> 1
      OR EXISTS (SELECT 1 FROM providers WHERE id = '54b7f99a-ab6d-48d3-9da0-38c3d0dc9f76' OR name = '454545')
      OR (SELECT array_agg(patient_id ORDER BY patient_id) FROM patients) <> ARRAY[
        'P-20260628-0019',
