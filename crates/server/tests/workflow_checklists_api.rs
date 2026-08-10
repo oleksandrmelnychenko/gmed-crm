@@ -359,18 +359,20 @@ async fn completing_linked_task_updates_workflow_item_state() {
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
     let patient_id = create_patient(&app, &pm_bearer, &tag).await;
 
-    let (status, checklist_body) = json_request(
+    let (status, created_item) = json_request(
         &app,
-        "GET",
+        "POST",
         &format!("/api/v1/patients/{patient_id}/workflow-checklist"),
         &pm_bearer,
-        None,
+        Some(json!({
+            "item_text": "Verify task completion synchronization",
+            "priority": "normal"
+        })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    let item = checklist_body["items"].as_array().unwrap()[0].clone();
-    let task_id = item["linked_task_id"].as_str().unwrap();
-    let item_id = item["id"].as_str().unwrap().to_string();
+    assert_eq!(status, StatusCode::CREATED, "{created_item}");
+    let task_id = created_item["task_id"].as_str().unwrap();
+    let item_id = created_item["id"].as_str().unwrap().to_string();
 
     let (status, _) = json_request(
         &app,
