@@ -4,6 +4,7 @@ use std::path::Path as FsPath;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use chrono::NaiveDate;
 use serde_json::{Value, json};
 use sqlx::{PgPool, Row};
 use tower::ServiceExt;
@@ -334,62 +335,41 @@ async fn seed_appointment(
     .unwrap()
 }
 
-async fn seed_case(
+#[allow(clippy::too_many_arguments)]
+async fn seed_patient_medication(
     pool: &PgPool,
     patient_id: Uuid,
-    manager_id: Uuid,
-    case_code: &str,
-    status: &str,
-    reason: &str,
-) -> Uuid {
-    sqlx::query_scalar(
-        r#"INSERT INTO cases (
-                case_id, patient_id, manager_id, status, hauptanfragegrund
-           ) VALUES (
-                $1, $2, $3, $4, $5
-           ) RETURNING id"#,
-    )
-    .bind(case_code)
-    .bind(patient_id)
-    .bind(manager_id)
-    .bind(status)
-    .bind(reason)
-    .fetch_one(pool)
-    .await
-    .unwrap()
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn seed_case_medication(
-    pool: &PgPool,
-    case_id: Uuid,
+    doctor_id: Option<Uuid>,
     trade_name: &str,
     ingredient: &str,
-    dose: &str,
-    dose_unit: &str,
-    schedule: &str,
-    prescribing_doctor: &str,
-    medication_type: &str,
+    strength: &str,
+    morning_dose: &str,
+    unit: &str,
+    category: &str,
+    status: &str,
     reason: &str,
+    expiry_date: Option<NaiveDate>,
 ) {
     sqlx::query(
-        r#"INSERT INTO medikamente (
-                case_id, handelsname, wirkstoff, dosis, dosis_einheit, einnahmeschema,
-                verordnender_arzt, med_typ, grund
+        r#"INSERT INTO patient_medications (
+                patient_id, doctor_id, handelsname, wirkstoff, staerke, form,
+                dose_morgens, einheit, category, status, grund, einnahme_bis
            ) VALUES (
-                $1, $2, $3, $4, $5, $6,
-                $7, $8, $9
+                $1, $2, $3, $4, $5, 'Tablette',
+                $6, $7, $8, $9, $10, $11
            )"#,
     )
-    .bind(case_id)
+    .bind(patient_id)
+    .bind(doctor_id)
     .bind(trade_name)
     .bind(ingredient)
-    .bind(dose)
-    .bind(dose_unit)
-    .bind(schedule)
-    .bind(prescribing_doctor)
-    .bind(medication_type)
+    .bind(strength)
+    .bind(morning_dose)
+    .bind(unit)
+    .bind(category)
+    .bind(status)
     .bind(reason)
+    .bind(expiry_date)
     .execute(pool)
     .await
     .unwrap();
@@ -3011,6 +2991,9 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
     };
     let tag = unique_tag("admin-docs");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let contract_id = seed_framework_contract(&pool, patient_id, admin_id, &tag).await;
+    let order_id = seed_order_with_contract(&pool, patient_id, contract_id, admin_id, &tag).await;
+    let _quote_id = seed_quote_for_order(&pool, order_id, admin_id, &tag).await;
 
     let cases: [(&str, &str, serde_json::Value); 7] = [
         (
@@ -3108,17 +3091,24 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
 
     for (template_id, expected_category, bindings) in cases {
         let expected_bindings = bindings.clone();
+        let mut payload = json!({
+            "template_id": template_id,
+            "patient_id": patient_id,
+            "language": "de",
+            "bindings": bindings,
+        });
+        if matches!(
+            template_id,
+            "single_order" | "order_cost_estimate" | "cost_coverage_declaration" | "cost_estimate"
+        ) {
+            payload["order_id"] = json!(order_id);
+        }
         let (status, body) = json_request(
             &app,
             "POST",
             "/api/v1/documents/generate",
             &admin_bearer,
-            Some(json!({
-                "template_id": template_id,
-                "patient_id": patient_id,
-                "language": "de",
-                "bindings": bindings,
-            })),
+            Some(payload),
         )
         .await;
         assert_eq!(status, StatusCode::OK, "generate {template_id}: {body:?}");
@@ -3371,8 +3361,14 @@ async fn consent_child_autofills_guardians_from_patient_relations() {
         pdf_text.contains(guardian_one),
         "first guardian must be auto-filled from relations; got: {pdf_text:?}"
     );
-    assert!(pdf_text.contains("Sorgeberechtigte/r 1"), "{pdf_text:?}");
-    assert!(pdf_text.contains("Sorgeberechtigte/r 2"), "{pdf_text:?}");
+    assert!(
+        pdf_text.contains("Personensorgeberechtigte/r 1"),
+        "{pdf_text:?}"
+    );
+    assert!(
+        pdf_text.contains("Personensorgeberechtigte/r 2"),
+        "{pdf_text:?}"
+    );
     assert!(
         pdf_text.contains(guardian_two),
         "second guardian must be auto-filled from relations; got: {pdf_text:?}"
@@ -3504,26 +3500,22 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
     let contract_id = seed_framework_contract(&pool, patient_id, admin_id, &tag).await;
     let order_id = seed_order_with_contract(&pool, patient_id, contract_id, admin_id, &tag).await;
     let _quote_id = seed_quote_for_order(&pool, order_id, admin_id, &tag).await;
-    let case_id = seed_case(
+    let medication_provider_id = seed_provider(&pool, &format!("{tag}-medication")).await;
+    let medication_doctor_id =
+        seed_doctor(&pool, medication_provider_id, &format!("{tag}-medication")).await;
+    seed_patient_medication(
         &pool,
         patient_id,
-        admin_id,
-        &format!("C-{tag}-ACTIVE"),
-        "open",
-        "Template coverage medication case",
-    )
-    .await;
-    seed_case_medication(
-        &pool,
-        case_id,
+        Some(medication_doctor_id),
         "Bisoprolol 2.5",
         "Bisoprolol",
         "2.5",
+        "1",
         "mg",
-        "1x morgens",
-        "Dr. Template",
-        "permanent",
+        "dauer",
+        "aktiv",
         "Template coverage",
+        None,
     )
     .await;
 
@@ -3607,7 +3599,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             bindings: json!({}),
             text_block_keys: vec!["contract_scope_clause"],
             min_pdf_size: 1000,
-            expected_pdf_text: "Rahmendienstleistungsvertrag",
+            expected_pdf_text: "RAHMENDIENSTLEISTUNGSVERTRAG",
         },
         TemplateCase {
             template_id: "visa_invitation_letter",
@@ -3784,11 +3776,16 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             "template_id": case.template_id,
             "patient_id": patient_id,
             "language": "de",
-            "introduction": format!("Intro for {}", case.template_id),
-            "closing_note": format!("Closing for {}", case.template_id),
             "bindings": case.bindings,
             "text_block_keys": case.text_block_keys,
         });
+        if !matches!(
+            case.template_id,
+            "framework_contract" | "single_order" | "order_cost_estimate" | "cost_estimate"
+        ) {
+            payload["introduction"] = json!(format!("Intro for {}", case.template_id));
+            payload["closing_note"] = json!(format!("Closing for {}", case.template_id));
+        }
         if let Some(order_id) = case.order_id {
             payload["order_id"] = json!(order_id);
         }
@@ -3966,7 +3963,10 @@ async fn cost_coverage_declaration_includes_contract_obligations_and_annexes() {
     assert!(pdf_text.contains("Bestandteile der Kostenübernahmeerklärung"));
     assert!(pdf_text.contains("3. Einzelauftrag"));
     assert!(pdf_text.contains("Anlage 1"));
-    assert!(pdf_text.contains("KV77777777"));
+    assert!(
+        pdf_text.contains(&format!("KV-{tag}")),
+        "stored order quote must remain the source of truth: {pdf_text:?}"
+    );
 }
 
 #[tokio::test]
@@ -4032,7 +4032,7 @@ async fn single_order_and_order_cost_estimate_are_generated_as_separate_document
     assert!(pdf_text.contains(&format!("KV-{tag}")), "{pdf_text:?}");
     assert!(pdf_text.contains("separates Dokument"), "{pdf_text:?}");
     assert!(pdf_text.contains("Koordination vor stationärer Aufnahme"));
-    assert!(pdf_text.contains("Honorar*"));
+    assert!(pdf_text.contains("HONORAR*"));
     assert!(!pdf_text.contains("Leistung — Einzelpreis — Menge — Summe"));
     assert!(!pdf_text.contains(
         "Der angegebene Gesamtbetrag ist vor Behandlungs-/Auftragsbeginn zu überweisen an"
@@ -4203,8 +4203,16 @@ async fn cost_estimate_uses_order_quote_when_manual_lines_are_omitted() {
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 800);
     let pdf_text = extract_pdf_text(&bytes);
-    assert!(pdf_text.contains("Medizinische Leistungen"));
-    assert!(pdf_text.contains("Unverbindliche Kostenschätzung"));
+    assert!(pdf_text.contains("MEDIZINISCHE LEISTUNGEN"), "{pdf_text}");
+    assert!(
+        pdf_text.contains("UNVERBINDLICHE KOSTENSCHÄTZUNG"),
+        "{pdf_text}"
+    );
+    assert!(
+        pdf_text.contains("Koordination vor stationärer Aufnahme"),
+        "{pdf_text}"
+    );
+    assert!(pdf_text.contains("1.428,00 EUR"), "{pdf_text}");
     assert!(!pdf_text.contains("???"), "{pdf_text}");
 }
 
@@ -4598,82 +4606,53 @@ async fn document_templates_can_generate_medication_summary_pdf_document() {
     };
     let tag = unique_tag("doc-med-summary");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let active_case = seed_case(
-        &pool,
-        patient_id,
-        admin_id,
-        &format!("C-{tag}-ACTIVE"),
-        "open",
-        "Cardiology follow-up",
-    )
-    .await;
-    let active_case_two = seed_case(
-        &pool,
-        patient_id,
-        admin_id,
-        &format!("C-{tag}-ACTIVE-2"),
-        "in_progress",
-        "Endocrinology review",
-    )
-    .await;
-    let closed_case = seed_case(
-        &pool,
-        patient_id,
-        admin_id,
-        &format!("C-{tag}-CLOSED"),
-        "closed",
-        "Legacy discharge",
-    )
-    .await;
+    let provider_id = seed_provider(&pool, &format!("{tag}-medication")).await;
+    let active_doctor_id = seed_doctor(&pool, provider_id, &format!("{tag}-active")).await;
+    let review_doctor_id = seed_doctor(&pool, provider_id, &format!("{tag}-review")).await;
 
-    seed_case_medication(
+    seed_patient_medication(
         &pool,
-        active_case,
+        patient_id,
+        Some(active_doctor_id),
         "",
         "Ramipril",
         "5",
+        "1",
         "mg",
-        "1x morgens",
-        "Dr. Active",
-        "permanent",
+        "dauer",
+        "aktiv",
         "Blood pressure",
+        None,
     )
     .await;
-    seed_case_medication(
+    seed_patient_medication(
         &pool,
-        active_case_two,
+        patient_id,
+        Some(review_doctor_id),
         "Metformin 500",
         "Metformin",
         "500",
+        "2",
         "mg",
-        "2x täglich",
-        "Dr. Review",
-        "temporary",
+        "besondere",
+        "pausiert",
         "Glucose control",
+        Some(NaiveDate::from_ymd_opt(2026, 7, 31).unwrap()),
     )
     .await;
-    let update_result = sqlx::query(
-        r#"UPDATE medikamente
-           SET expiry_date = '2026-07-31'
-           WHERE case_id = $1 AND handelsname = $2"#,
-    )
-    .bind(active_case_two)
-    .bind("Metformin 500")
-    .execute(&pool)
-    .await
-    .unwrap();
-    assert_eq!(update_result.rows_affected(), 1);
-    seed_case_medication(
+    seed_patient_medication(
         &pool,
-        closed_case,
+        patient_id,
+        None,
         "Legacy Closed Med",
         "Ibuprofen",
         "400",
+        "3",
         "mg",
-        "3x täglich",
-        "Dr. Closed",
-        "temporary",
+        "besondere",
+        "abgesetzt",
         "Old pain episode",
+        None,
     )
     .await;
 
@@ -4716,8 +4695,8 @@ async fn document_templates_can_generate_medication_summary_pdf_document() {
     assert!(preview_html.contains("Ramipril"));
     assert!(preview_html.contains("Metformin 500"));
     assert!(preview_html.contains("Bis: 31.07.2026"));
-    assert!(preview_html.contains("Dr. Active"));
-    assert!(preview_html.contains("Alle aktiven Patientencases"));
+    assert!(preview_html.contains(&format!("Doctor {tag}-active")));
+    assert!(preview_html.contains("Quelle: Medikationsplan der Patientenakte."));
     assert!(!preview_html.contains("Legacy Closed Med"));
 
     let (status, detail_body) = json_request(
@@ -4792,8 +4771,6 @@ async fn document_templates_can_generate_framework_contract_pdf_document() {
             "patient_id": patient_id,
             "order_id": order_id,
             "language": "de",
-            "introduction": "Dieser Rahmenvertrag bündelt den aktuellen Leistungs- und Abwicklungsstand.",
-            "closing_note": "Bitte prüfen Sie alle Positionen vor finaler Freigabe.",
             "text_block_keys": ["contract_scope_clause", "quote_reference_clause"],
             "bindings": {
                 "contract_date": "2025-11-11",
