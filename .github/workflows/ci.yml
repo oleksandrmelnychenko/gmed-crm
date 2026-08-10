@@ -33,8 +33,10 @@ jobs:
         run: |
           set -o pipefail
           test_log="$(mktemp)"
+          set +e
           cargo test --workspace --locked 2>&1 | tee "$test_log"
           test_status="${PIPESTATUS[0]}"
+          set -e
           if [ "$test_status" -ne 0 ]; then
             details="$(grep -E '^---- .* stdout ----$|panicked at|assertion|^  left:|^ right:|^failures:$|^    [[:alnum:]_].*::|^test result: FAILED|^error: test failed' "$test_log" | tail -n 80)"
             if [ -z "$details" ]; then
