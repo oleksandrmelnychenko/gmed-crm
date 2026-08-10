@@ -12289,25 +12289,26 @@ async fn patient_owned_pain_and_symptoms_do_not_require_a_case() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{symptoms}");
-    assert_eq!(symptoms["items"][0]["beschreibung"], "Intermittent numbness");
+    assert_eq!(
+        symptoms["items"][0]["beschreibung"],
+        "Intermittent numbness"
+    );
     assert!(symptoms["items"][0]["case_id"].is_null());
 
-    let pain_owner: (Uuid, Option<Uuid>) = sqlx::query_as(
-        "SELECT patient_id, case_id FROM pain_records WHERE patient_id = $1",
-    )
-    .bind(patient_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let pain_owner: (Uuid, Option<Uuid>) =
+        sqlx::query_as("SELECT patient_id, case_id FROM pain_records WHERE patient_id = $1")
+            .bind(patient_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(pain_owner, (patient_id, None));
 
-    let symptom_owner: (Uuid, Option<Uuid>) = sqlx::query_as(
-        "SELECT patient_id, case_id FROM symptome WHERE patient_id = $1",
-    )
-    .bind(patient_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let symptom_owner: (Uuid, Option<Uuid>) =
+        sqlx::query_as("SELECT patient_id, case_id FROM symptome WHERE patient_id = $1")
+            .bind(patient_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(symptom_owner, (patient_id, None));
 
     let sections: Vec<String> = sqlx::query_scalar(

@@ -8,8 +8,8 @@ use axum::{
 };
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use printpdf::{
-    Color, Mm, Op, PaintMode, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point, Pt,
-    Rect, Rgb, WindingOrder,
+    Color, Mm, Op, PaintMode, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point, Pt, Rect,
+    Rgb, WindingOrder,
 };
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -1372,7 +1372,7 @@ impl InvoicePdfLayout {
         let reference_x_mm = (INVOICE_PDF_PAGE_WIDTH_MM
             - INVOICE_PDF_RIGHT_MARGIN_MM
             - invoice_pdf_text_width_mm(&reference, reference_size_pt))
-            .max(INVOICE_PDF_LEFT_MARGIN_MM);
+        .max(INVOICE_PDF_LEFT_MARGIN_MM);
         append_invoice_pdf_text_line(
             &mut self.page_ops,
             &reference,
@@ -1406,9 +1406,8 @@ impl InvoicePdfLayout {
             logo_height_mm,
             Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None)),
         ));
-        let footer_x_mm = INVOICE_PDF_LEFT_MARGIN_MM
-            + logo_height_mm * crate::pdf_logo::GMED_LOGO_ASPECT
-            + 4.0;
+        let footer_x_mm =
+            INVOICE_PDF_LEFT_MARGIN_MM + logo_height_mm * crate::pdf_logo::GMED_LOGO_ASPECT + 4.0;
         for (index, line) in self.footer_lines.iter().take(3).enumerate() {
             let line = truncate_invoice_pdf_text(line, 6.3, 112.0);
             append_invoice_pdf_text_line(
@@ -1600,12 +1599,11 @@ impl InvoicePdfLayout {
         for (index, (label, value)) in cells.iter().enumerate() {
             let row = index / 2;
             let column = index % 2;
-            let column_left_mm = INVOICE_PDF_LEFT_MARGIN_MM
-                + column as f32 * (column_width_mm + COLUMN_GAP_MM);
+            let column_left_mm =
+                INVOICE_PDF_LEFT_MARGIN_MM + column as f32 * (column_width_mm + COLUMN_GAP_MM);
             let text_x_mm = column_left_mm + CARD_PADDING_X_MM;
             let column_right_mm = column_left_mm + column_width_mm - CARD_PADDING_X_MM;
-            let baseline_y_mm =
-                card_top_mm - CARD_PADDING_Y_MM - 3.2 - row as f32 * ROW_HEIGHT_MM;
+            let baseline_y_mm = card_top_mm - CARD_PADDING_Y_MM - 3.2 - row as f32 * ROW_HEIGHT_MM;
             let label_size_pt = 7.0;
             let value_size_pt = 9.5;
             let value_width_mm = invoice_pdf_text_width_mm(value, value_size_pt);
@@ -1763,7 +1761,7 @@ impl InvoicePdfLayout {
             let label_x_mm = (INVOICE_PDF_PAGE_WIDTH_MM
                 - INVOICE_PDF_RIGHT_MARGIN_MM
                 - invoice_pdf_text_width_mm(&label, 7.0))
-                .max(INVOICE_PDF_LEFT_MARGIN_MM);
+            .max(INVOICE_PDF_LEFT_MARGIN_MM);
             append_invoice_pdf_text_line(
                 &mut page.ops,
                 &label,
@@ -2043,14 +2041,23 @@ fn format_invoice_pdf_date(value: Option<NaiveDate>) -> String {
 
 fn invoice_pdf_agency_footer_lines(agency: &InvoicePdfAgency) -> Vec<String> {
     let mut identity = agency.name.trim().to_string();
-    if let Some(care_of) = agency.care_of.as_deref().map(str::trim).filter(|v| !v.is_empty())
+    if let Some(care_of) = agency
+        .care_of
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
         && !identity.to_lowercase().contains(&care_of.to_lowercase())
     {
         identity.push(' ');
         identity.push_str(care_of);
     }
     let mut lines = vec![identity];
-    if let Some(address) = agency.address.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+    if let Some(address) = agency
+        .address
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         lines.push(
             address
                 .lines()
@@ -2061,13 +2068,28 @@ fn invoice_pdf_agency_footer_lines(agency: &InvoicePdfAgency) -> Vec<String> {
         );
     }
     let mut contacts = Vec::new();
-    if let Some(phone) = agency.phone.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+    if let Some(phone) = agency
+        .phone
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         contacts.push(format!("Tel.: {phone}"));
     }
-    if let Some(email) = agency.email.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+    if let Some(email) = agency
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         contacts.push(format!("E-Mail: {email}"));
     }
-    if let Some(website) = agency.website.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+    if let Some(website) = agency
+        .website
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
         let website = website
             .strip_prefix("https://")
             .or_else(|| website.strip_prefix("http://"))

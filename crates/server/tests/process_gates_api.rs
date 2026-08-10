@@ -1246,12 +1246,17 @@ async fn order_status_machine_blocks_phase_changes_and_terminal_reopen() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(detail["status"], "paused");
-    assert_eq!(detail["lifecycle"]["allowed_transitions"][0]["blocked"], true);
-    assert!(detail["lifecycle"]["allowed_status_transitions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|transition| transition["status"] == "active"));
+    assert_eq!(
+        detail["lifecycle"]["allowed_transitions"][0]["blocked"],
+        true
+    );
+    assert!(
+        detail["lifecycle"]["allowed_status_transitions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|transition| transition["status"] == "active")
+    );
 
     let (status, body) = json_request(
         &app,
@@ -1262,10 +1267,12 @@ async fn order_status_machine_blocks_phase_changes_and_terminal_reopen() {
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(body["message"]
-        .as_str()
-        .unwrap_or_default()
-        .contains("must be active"));
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("must be active")
+    );
 
     let (status, _) = json_request(
         &app,
@@ -1286,14 +1293,16 @@ async fn order_status_machine_blocks_phase_changes_and_terminal_reopen() {
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(body["blocking_reasons"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|reason| reason
-            .as_str()
-            .unwrap_or_default()
-            .contains("follow-up phase")));
+    assert!(
+        body["blocking_reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason
+                .as_str()
+                .unwrap_or_default()
+                .contains("follow-up phase"))
+    );
 
     let (status, _) = json_request(
         &app,

@@ -26,8 +26,7 @@ use crate::state::AppState;
 use gmed_domain::role::Role;
 
 const IMPORT_ROLES: &[Role] = &[Role::Ceo, Role::PatientManager, Role::ItAdmin];
-const UNSUPPORTED_IMPORT_FILE: &str =
-    "Clinical import supports only PDF, PNG, and JPEG documents";
+const UNSUPPORTED_IMPORT_FILE: &str = "Clinical import supports only PDF, PNG, and JPEG documents";
 const MAX_IMPORT_FILE_BYTES: usize = 25 * 1024 * 1024;
 
 fn validate_clinical_import_file(
@@ -134,7 +133,10 @@ async fn ensure_access(
         Ok(false) => Err(err(StatusCode::FORBIDDEN, "Insufficient permissions")),
         Err(error) => {
             tracing::error!(error = %error, patient_id = %patient_id, "validate clinical document import access");
-            Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate patient access"))
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate patient access",
+            ))
         }
     }
 }
@@ -215,11 +217,9 @@ async fn create_import(
             "Document exceeds the clinical import size limit",
         );
     }
-    if let Err(message) = validate_clinical_import_file(
-        original_filename.as_deref(),
-        mime_type.as_deref(),
-        &data,
-    ) {
+    if let Err(message) =
+        validate_clinical_import_file(original_filename.as_deref(), mime_type.as_deref(), &data)
+    {
         return err(StatusCode::UNPROCESSABLE_ENTITY, message);
     }
 
@@ -427,7 +427,10 @@ async fn complete_import(
             )
             || !reviewed_ids.insert(candidate.id.clone())
         {
-            return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid reviewed candidate");
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid reviewed candidate",
+            );
         }
         reviewed.push(candidate);
     }
@@ -446,7 +449,10 @@ async fn complete_import(
         Ok(tx) => tx,
         Err(error) => {
             tracing::error!(error = %error, import_id = %import_id, "begin clinical document import completion");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to complete import");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to complete import",
+            );
         }
     };
     let import_row = match sqlx::query(
@@ -465,7 +471,10 @@ async fn complete_import(
         Ok(None) => return err(StatusCode::CONFLICT, "Import is not ready for review"),
         Err(error) => {
             tracing::error!(error = %error, import_id = %import_id, "lock clinical document import");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to complete import");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to complete import",
+            );
         }
     };
     let document_id: Uuid = import_row.get("document_id");
@@ -612,7 +621,10 @@ async fn complete_import(
             }
             Err(error) => {
                 tracing::error!(error = %error, import_id = %import_id, candidate_id = %candidate.id, "attach clinical import provenance");
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to complete import");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to complete import",
+                );
             }
         }
     }
@@ -645,7 +657,10 @@ async fn complete_import(
     };
     if let Err(error) = tx.commit().await {
         tracing::error!(error = %error, import_id = %import_id, "commit clinical document import completion");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to complete import");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to complete import",
+        );
     }
 
     state.audit_sender.try_send(audit::domain_event(
@@ -671,14 +686,14 @@ async fn fetch_import(
         "{} WHERE i.id = $1 AND i.patient_id = $2 AND i.deleted_at IS NULL",
         import_select()
     ))
-        .bind(import_id)
-        .bind(patient_id)
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|error| {
-            tracing::error!(error = %error, import_id = %import_id, "load clinical document import");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load import")
-        })
+    .bind(import_id)
+    .bind(patient_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, import_id = %import_id, "load clinical document import");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load import")
+    })
 }
 
 fn import_select() -> &'static str {

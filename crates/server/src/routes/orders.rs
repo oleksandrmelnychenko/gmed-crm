@@ -834,7 +834,10 @@ async fn load_order_completion_blockers(
     let results_handoff_status: String = followup
         .try_get("results_handoff_status")
         .unwrap_or_default();
-    if !matches!(results_handoff_status.as_str(), "completed" | "not_required") {
+    if !matches!(
+        results_handoff_status.as_str(),
+        "completed" | "not_required"
+    ) {
         reasons.push("Results handoff must be completed or marked not required".to_string());
     }
 
@@ -980,9 +983,8 @@ async fn load_order_lifecycle(
             if current_phase != "followup" {
                 reasons.push("Order must reach the follow-up phase before completion".to_string());
             } else {
-                reasons.extend(
-                    load_order_completion_blockers(state, order_id, process_gates).await?,
-                );
+                reasons
+                    .extend(load_order_completion_blockers(state, order_id, process_gates).await?);
             }
         }
         status_transitions.push(serde_json::json!({
@@ -3317,9 +3319,7 @@ async fn update_status(
     if !allowed_order_statuses(&current_status).contains(&requested_status.as_str()) {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            &format!(
-                "Order status cannot change from {current_status} to {requested_status}"
-            ),
+            &format!("Order status cannot change from {current_status} to {requested_status}"),
         );
     }
 
@@ -3339,12 +3339,13 @@ async fn update_status(
                 "Order must be linked to a patient before completion",
             );
         };
-        let process_gates = match load_order_process_readiness(&state, order_id, Some(patient_id)).await
+        let process_gates =
+            match load_order_process_readiness(&state, order_id, Some(patient_id)).await {
+                Ok(value) => value,
+                Err(response) => return response,
+            };
+        let blockers = match load_order_completion_blockers(&state, order_id, &process_gates).await
         {
-            Ok(value) => value,
-            Err(response) => return response,
-        };
-        let blockers = match load_order_completion_blockers(&state, order_id, &process_gates).await {
             Ok(value) => value,
             Err(response) => return response,
         };

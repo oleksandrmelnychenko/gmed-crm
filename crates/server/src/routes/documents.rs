@@ -2929,9 +2929,7 @@ fn parse_document_ocr_max_concurrency(value: Option<&str>) -> usize {
 fn document_ocr_semaphore() -> &'static tokio::sync::Semaphore {
     DOCUMENT_OCR_SEMAPHORE.get_or_init(|| {
         let configured = std::env::var("DOCUMENT_OCR_MAX_CONCURRENCY").ok();
-        tokio::sync::Semaphore::new(parse_document_ocr_max_concurrency(
-            configured.as_deref(),
-        ))
+        tokio::sync::Semaphore::new(parse_document_ocr_max_concurrency(configured.as_deref()))
     })
 }
 
@@ -3922,9 +3920,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         (_, "medication_scope_latest") => {
             "Kein aktives Case gefunden, daher wurde das zuletzt erfasste Patientencase verwendet."
         }
-        (_, "medication_scope_patient") => {
-            "Quelle: Medikationsplan der Patientenakte."
-        }
+        (_, "medication_scope_patient") => "Quelle: Medikationsplan der Patientenakte.",
         (_, "medication_source_patient") => "Patientenakte",
         (_, "document_title") => "Behandlungsplan für",
         (_, "created_on") => "Datum",
@@ -12067,15 +12063,23 @@ async fn generate_document(
                 medications.push(GeneratedMedicationLine {
                     trade_name,
                     ingredient: Some(wirkstoff),
-                    dose: row.try_get::<Option<String>, _>("staerke").unwrap_or_default(),
+                    dose: row
+                        .try_get::<Option<String>, _>("staerke")
+                        .unwrap_or_default(),
                     dose_unit: None,
                     schedule: row
                         .try_get::<Option<String>, _>("schedule")
                         .unwrap_or_default(),
                     dosage_form: row.try_get::<Option<String>, _>("form").unwrap_or_default(),
-                    unit: row.try_get::<Option<String>, _>("einheit").unwrap_or_default(),
-                    note: row.try_get::<Option<String>, _>("hinweis").unwrap_or_default(),
-                    reason: row.try_get::<Option<String>, _>("grund").unwrap_or_default(),
+                    unit: row
+                        .try_get::<Option<String>, _>("einheit")
+                        .unwrap_or_default(),
+                    note: row
+                        .try_get::<Option<String>, _>("hinweis")
+                        .unwrap_or_default(),
+                    reason: row
+                        .try_get::<Option<String>, _>("grund")
+                        .unwrap_or_default(),
                     since: row
                         .try_get::<Option<String>, _>("einnahme_von")
                         .unwrap_or_default(),
@@ -21862,16 +21866,15 @@ mod tests {
         build_enhanced_due_diligence_pdf, build_framework_contract_pdf,
         build_manual_generated_text_pdf, build_order_cost_estimate_pdf, build_patient_sticker_pdf,
         build_single_order_pdf, compute_line_item_totals, consent_type_for_compliance_kind,
-        cost_coverage_money_cell, cost_estimate_price_text, document_attachment_response,
-        document_satisfies_compliance_kind, document_template_by_id, finalize_admin_pdf,
-        generated_binding_snapshot,
-        generated_cost_estimate_document_number, generated_document_number_for_template,
-        generated_typed_document_number, german_document_country, is_fixed_legal_document_template,
+        cost_coverage_money_cell, cost_estimate_price_text, create_private_ocr_temp_file,
+        document_attachment_response, document_satisfies_compliance_kind, document_template_by_id,
+        finalize_admin_pdf, generated_binding_snapshot, generated_cost_estimate_document_number,
+        generated_document_number_for_template, generated_typed_document_number,
+        german_document_country, is_fixed_legal_document_template,
         is_lead_allowed_document_template, legal_agency_block_lines, legal_document_reference,
-        localized_estimate_work_type_sections, new_admin_pdf, patient_sticker_agency_line,
-        create_private_ocr_temp_file, parse_document_ocr_max_concurrency,
-        parse_document_ocr_timeout_seconds, pdf_mm_to_pt, tesseract_input_extension,
-        trusted_contact_recipients_binding,
+        localized_estimate_work_type_sections, new_admin_pdf, parse_document_ocr_max_concurrency,
+        parse_document_ocr_timeout_seconds, patient_sticker_agency_line, pdf_mm_to_pt,
+        tesseract_input_extension, trusted_contact_recipients_binding,
         valid_tesseract_language_spec,
     };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};

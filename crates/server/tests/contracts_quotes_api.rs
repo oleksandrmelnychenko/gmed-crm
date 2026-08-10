@@ -1384,10 +1384,12 @@ async fn agency_service_catalog_supports_create_read_only_visibility_and_update(
     let items = body.as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"], service_id);
-    assert!(items[0]["service_key"]
-        .as_str()
-        .unwrap_or_default()
-        .starts_with("interpreter_hours_"));
+    assert!(
+        items[0]["service_key"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("interpreter_hours_")
+    );
     assert_eq!(items[0]["unit_label"], "hour");
     assert_eq!(items[0]["unit_price"].as_str(), Some("89.5"));
     assert_eq!(items[0]["is_active"], true);

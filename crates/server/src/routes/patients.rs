@@ -9234,7 +9234,7 @@ async fn save_patient_diagnoses(
                     return err(
                         StatusCode::UNPROCESSABLE_ENTITY,
                         "Invalid medical specialization id",
-                    )
+                    );
                 }
             };
             if seen_specialization_ids.insert(specialization_id) {
@@ -9425,12 +9425,11 @@ async fn save_patient_diagnoses(
             tracing::error!(error = %e, patient_id = %patient_uuid, "insert patient diagnosis");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
-        if let Err(e) = sqlx::query(
-            "DELETE FROM patient_diagnosis_specializations WHERE diagnosis_id = $1",
-        )
-        .bind(new_id)
-        .execute(&mut *tx)
-        .await
+        if let Err(e) =
+            sqlx::query("DELETE FROM patient_diagnosis_specializations WHERE diagnosis_id = $1")
+                .bind(new_id)
+                .execute(&mut *tx)
+                .await
         {
             tracing::error!(error = %e, diagnosis_id = %new_id, "clear diagnosis specializations");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
@@ -10193,23 +10192,30 @@ async fn save_patient_narrative(
         }
     };
 
-    if let Err(e) = sqlx::query(
-        "DELETE FROM patient_narrative_specializations WHERE narrative_id = $1",
-    )
-    .bind(saved_id)
-    .execute(&mut *tx)
-    .await
+    if let Err(e) =
+        sqlx::query("DELETE FROM patient_narrative_specializations WHERE narrative_id = $1")
+            .bind(saved_id)
+            .execute(&mut *tx)
+            .await
     {
         tracing::error!(error = %e, narrative_id = %saved_id, "clear narrative specializations");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     let specialization_narratives = specialization_ids
         .iter()
-        .map(|id| specialization_text.get(id).and_then(|values| values.0.clone()))
+        .map(|id| {
+            specialization_text
+                .get(id)
+                .and_then(|values| values.0.clone())
+        })
         .collect::<Vec<Option<String>>>();
     let specialization_assessments = specialization_ids
         .iter()
-        .map(|id| specialization_text.get(id).and_then(|values| values.1.clone()))
+        .map(|id| {
+            specialization_text
+                .get(id)
+                .and_then(|values| values.1.clone())
+        })
         .collect::<Vec<Option<String>>>();
     if !specialization_ids.is_empty()
         && let Err(e) = sqlx::query(

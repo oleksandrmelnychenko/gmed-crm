@@ -354,13 +354,7 @@ fn generate_agency_service_key(service_name: &str) -> String {
         .trim()
         .to_lowercase()
         .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() {
-                ch
-            } else {
-                '_'
-            }
-        })
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
         .collect::<String>();
     while base.contains("__") {
         base = base.replace("__", "_");

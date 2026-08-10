@@ -1582,19 +1582,19 @@ async fn require_patient_clinical_access(
     auth: &AuthUser,
     patient_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    if let Err(response) =
-        auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin])
+    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin])
     {
         return Err(response);
     }
-    let exists = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
-        .bind(patient_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|error| {
-            tracing::error!(error = %error, patient_id = %patient_id, "load patient subject");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
-        })?;
+    let exists =
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
+            .bind(patient_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, patient_id = %patient_id, "load patient subject");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+            })?;
     if !exists {
         return Err(err(StatusCode::NOT_FOUND, "Patient not found"));
     }
@@ -1628,7 +1628,10 @@ where
         }
         _ => return Ok(serde_json::json!([])),
     };
-    sqlx::query_scalar(sql).bind(patient_id).fetch_one(executor).await
+    sqlx::query_scalar(sql)
+        .bind(patient_id)
+        .fetch_one(executor)
+        .await
 }
 
 async fn append_patient_owned_version(
@@ -1695,8 +1698,12 @@ async fn save_patient_pain_records(
         return response;
     }
     for item in &body.items {
-        if item.nrs_aktuell.is_some_and(|value| !(0..=10).contains(&value))
-            || item.nrs_anfang.is_some_and(|value| !(0..=10).contains(&value))
+        if item
+            .nrs_aktuell
+            .is_some_and(|value| !(0..=10).contains(&value))
+            || item
+                .nrs_anfang
+                .is_some_and(|value| !(0..=10).contains(&value))
         {
             return err(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -1712,13 +1719,14 @@ async fn save_patient_pain_records(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    let old_value = match load_patient_owned_case_section(&mut *tx, patient_id, "pain_records").await {
-        Ok(value) => value,
-        Err(error) => {
-            tracing::error!(error = %error, patient_id = %patient_id, "snapshot patient pain");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
+    let old_value =
+        match load_patient_owned_case_section(&mut *tx, patient_id, "pain_records").await {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(error = %error, patient_id = %patient_id, "snapshot patient pain");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
     if let Err(error) = sqlx::query("DELETE FROM pain_records WHERE patient_id = $1")
         .bind(patient_id)
         .execute(&mut *tx)
@@ -1756,7 +1764,9 @@ async fn save_patient_pain_records(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }
-    let new_value = match load_patient_owned_case_section(&mut *tx, patient_id, "pain_records").await {
+    let new_value = match load_patient_owned_case_section(&mut *tx, patient_id, "pain_records")
+        .await
+    {
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, patient_id = %patient_id, "resnapshot patient pain");
