@@ -1582,10 +1582,7 @@ async fn require_patient_clinical_access(
     auth: &AuthUser,
     patient_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin])
-    {
-        return Err(response);
-    }
+    auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin])?;
     let exists =
         sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
             .bind(patient_id)

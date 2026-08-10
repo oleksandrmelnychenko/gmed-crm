@@ -1225,6 +1225,7 @@ async fn load_providers_enrichment(
     Ok(enrichment)
 }
 
+#[allow(clippy::result_large_err)]
 fn provider_row_json(
     row: PgRow,
     enrichment: &ProvidersEnrichment,

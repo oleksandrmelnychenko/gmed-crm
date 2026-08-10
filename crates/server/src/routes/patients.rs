@@ -9098,6 +9098,7 @@ pub(crate) async fn load_patient_clinical_retention_years(state: &AppState, defa
 /// Transactional twin of cases.rs::version_log for the patient clinical record:
 /// the version row commits (or rolls back) together with the section save, so
 /// the trail can never claim a change that was not persisted.
+#[allow(clippy::too_many_arguments)]
 async fn patient_version_log(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     patient_uuid: Uuid,
@@ -9434,8 +9435,8 @@ async fn save_patient_diagnoses(
             tracing::error!(error = %e, diagnosis_id = %new_id, "clear diagnosis specializations");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
-        if !specialization_ids.is_empty() {
-            if let Err(e) = sqlx::query(
+        if !specialization_ids.is_empty()
+            && let Err(e) = sqlx::query(
                 r#"INSERT INTO patient_diagnosis_specializations
                        (diagnosis_id, specialization_id, sort_order)
                    SELECT $1, specialization_id, ordinality::integer - 1
@@ -9448,7 +9449,6 @@ async fn save_patient_diagnoses(
             {
                 tracing::error!(error = %e, diagnosis_id = %new_id, "save diagnosis specializations");
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-            }
         }
         if let Some(cid) = item
             .cid
@@ -9711,17 +9711,16 @@ async fn save_patient_medications(
         }
         saved += 1;
     }
-    if !query.merge_only() {
-        if let Err(e) =
+    if !query.merge_only()
+        && let Err(e) =
             sqlx::query("DELETE FROM patient_medications WHERE patient_id = $1 AND id <> ALL($2)")
                 .bind(patient_uuid)
                 .bind(&written_ids)
                 .execute(&mut *tx)
                 .await
-        {
-            tracing::error!(error = %e, patient_id = %patient_uuid, "prune patient medications");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "prune patient medications");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     let new_value = match load_patient_section_snapshot(
         &mut tx,
@@ -10964,17 +10963,16 @@ async fn save_patient_clinical_warnings(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    if !merge_only {
-        if let Err(e) =
+    if !merge_only
+        && let Err(e) =
             sqlx::query("DELETE FROM patient_clinical_warnings WHERE patient_id = $1 AND kind = $2")
                 .bind(patient_uuid)
                 .bind(&kind)
                 .execute(&mut *tx)
                 .await
-        {
-            tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient clinical warnings");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient clinical warnings");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     let mut saved = 0i32;
     for item in body.items {

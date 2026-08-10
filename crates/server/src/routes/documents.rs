@@ -15145,7 +15145,7 @@ fn build_cost_estimate_pdf(
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let document_reference = fallback_document_reference.trim();
-    let mut layout = legal_document_pdf_layout(&document_reference, &context.agency, regular, bold);
+    let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
 
     let title = context
         .title_override
