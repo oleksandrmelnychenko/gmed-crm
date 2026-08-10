@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { Download, Eye, FileWarning, LoaderCircle } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import {
@@ -9,12 +10,18 @@ import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { TabsContent } from "@/components/ui/tabs";
 import {
   EmptyCell,
   TabLoader,
 } from "@/components/ui-shell";
-import { downloadApiFile } from "@/lib/api";
 import {
   localizeDocumentCode,
   localizeRequiredDocumentLabel,
@@ -23,6 +30,11 @@ import { useLang, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { formatBusinessDocumentNumber } from "@/pages/documents/model/document-model";
 import type { PatientOption as DocumentPatientOption } from "@/pages/documents/model/types";
+import {
+  createDocumentPreviewObjectUrl,
+  downloadDocumentFile,
+  revokeDocumentPreviewObjectUrl,
+} from "@/pages/documents/data/document-api";
 
 import type { DocumentAlerts, DocumentItem } from "../../model/detail-tab-types";
 import { PatientDocumentGenerateDialog } from "../sheets/patient-document-generate-dialog";
@@ -37,6 +49,13 @@ type PatientDocumentContext = {
   first_name?: string | null;
   last_name?: string | null;
   languages?: string[];
+};
+
+type PatientDocumentPreview = {
+  id: string;
+  title: string;
+  contentType?: string;
+  url?: string;
 };
 
 type PatientDocumentsTabProps = {
@@ -116,6 +135,16 @@ function compactParty(...parts: Array<string | null | undefined>) {
     .join(", ");
 }
 
+function supportsInlinePreview(contentType?: string) {
+  const mimeType = contentType?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  return (
+    mimeType === "application/pdf" ||
+    mimeType.startsWith("image/") ||
+    mimeType === "text/html" ||
+    mimeType === "text/plain"
+  );
+}
+
 export function PatientDocumentsTab({
   l,
   patientId,
@@ -148,6 +177,12 @@ export function PatientDocumentsTab({
 }: PatientDocumentsTabProps) {
   const { lang, t } = useLang();
   const [generateOpen, setGenerateOpen] = useState(false);
+  const [documentPreview, setDocumentPreview] =
+    useState<PatientDocumentPreview | null>(null);
+  const [documentPreviewBusy, setDocumentPreviewBusy] = useState(false);
+  const [documentPreviewError, setDocumentPreviewError] = useState("");
+  const documentPreviewUrlRef = useRef<string | null>(null);
+  const documentPreviewRequestRef = useRef(0);
   const documentPagination = useDataTablePagination(
     filteredDocuments,
     `${patientId ?? ""}:${documentStatusFilter}:${documentCategoryFilter}`,
@@ -165,6 +200,68 @@ export function PatientDocumentsTab({
         : undefined,
     [patient],
   );
+
+  useEffect(
+    () => () => {
+      documentPreviewRequestRef.current += 1;
+      if (documentPreviewUrlRef.current) {
+        revokeDocumentPreviewObjectUrl(documentPreviewUrlRef.current);
+        documentPreviewUrlRef.current = null;
+      }
+    },
+    [],
+  );
+
+  function closeDocumentPreview() {
+    documentPreviewRequestRef.current += 1;
+    if (documentPreviewUrlRef.current) {
+      revokeDocumentPreviewObjectUrl(documentPreviewUrlRef.current);
+      documentPreviewUrlRef.current = null;
+    }
+    setDocumentPreview(null);
+    setDocumentPreviewBusy(false);
+    setDocumentPreviewError("");
+  }
+
+  async function openPatientDocumentPreview(doc: DocumentItem) {
+    const requestId = documentPreviewRequestRef.current + 1;
+    documentPreviewRequestRef.current = requestId;
+    if (documentPreviewUrlRef.current) {
+      revokeDocumentPreviewObjectUrl(documentPreviewUrlRef.current);
+      documentPreviewUrlRef.current = null;
+    }
+
+    setDocumentPreview({
+      id: doc.id,
+      title: doc.filename || "document",
+    });
+    setDocumentPreviewBusy(true);
+    setDocumentPreviewError("");
+
+    try {
+      const preview = await createDocumentPreviewObjectUrl(doc.id);
+      if (documentPreviewRequestRef.current !== requestId) {
+        revokeDocumentPreviewObjectUrl(preview.url);
+        return;
+      }
+      documentPreviewUrlRef.current = preview.url;
+      setDocumentPreview({
+        id: doc.id,
+        title: doc.filename || "document",
+        contentType: preview.contentType,
+        url: preview.url,
+      });
+    } catch {
+      if (documentPreviewRequestRef.current === requestId) {
+        setDocumentPreviewError(t.documents_failed_open_preview);
+      }
+    } finally {
+      if (documentPreviewRequestRef.current === requestId) {
+        setDocumentPreviewBusy(false);
+      }
+    }
+  }
+
   const documentPartyRows = (doc: DocumentItem) => [
     {
       label: metaLabel("source", lang),
@@ -377,12 +474,37 @@ export function PatientDocumentsTab({
             columns={documentColumns}
             rowId={(doc) => doc.id}
             defaultDensity="comfortable"
-            onRowClick={(doc) =>
-              void downloadApiFile(
-                `/documents/${doc.id}/download`,
-                doc.filename || "document",
-              )
-            }
+            onRowClick={(doc) => void openPatientDocumentPreview(doc)}
+            rowActions={(doc) => (
+              <>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  title={t.documents_preview}
+                  aria-label={t.documents_preview}
+                  onClick={() => void openPatientDocumentPreview(doc)}
+                >
+                  <Eye className="size-3.5" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  title={t.documents_download}
+                  aria-label={t.documents_download}
+                  onClick={() =>
+                    void downloadDocumentFile(
+                      doc.id,
+                      doc.filename || "document",
+                    )
+                  }
+                >
+                  <Download className="size-3.5" />
+                </Button>
+              </>
+            )}
+            rowActionsWidth={82}
             emptyState={
               <EmptyCell>
                 {l("patients_no_document_matches_the_current_filters")}
@@ -469,6 +591,78 @@ export function PatientDocumentsTab({
             }
           />
         )}
+      <Dialog
+        open={Boolean(documentPreview)}
+        onOpenChange={(open) => {
+          if (!open) closeDocumentPreview();
+        }}
+      >
+        <DialogContent className="flex h-[86vh] w-[94vw] max-w-none flex-col overflow-hidden rounded-xl p-0 duration-0 data-closed:animate-none data-open:animate-none sm:w-[78vw] sm:max-w-[1500px]">
+          <DialogHeader className="border-b border-border/70 px-5 py-4">
+            <div className="flex min-w-0 items-start justify-between gap-4 pr-10">
+              <div className="min-w-0">
+                <DialogTitle className="truncate text-base">
+                  {documentPreview?.title ?? t.documents_preview}
+                </DialogTitle>
+                <DialogDescription className="truncate">
+                  {documentPreviewBusy
+                    ? t.documents_loading_document
+                    : documentPreview?.contentType || t.documents_preview}
+                </DialogDescription>
+              </div>
+              {documentPreview ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 shrink-0 gap-1.5 rounded-lg"
+                  onClick={() =>
+                    void downloadDocumentFile(
+                      documentPreview.id,
+                      documentPreview.title,
+                    )
+                  }
+                >
+                  <Download className="size-3.5" />
+                  {t.documents_download}
+                </Button>
+              ) : null}
+            </div>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 bg-slate-50 p-3">
+            {documentPreviewBusy ? (
+              <div className="flex h-full min-h-80 items-center justify-center rounded-lg border border-border bg-white text-sm text-muted-foreground">
+                <LoaderCircle className="mr-2 size-4 animate-spin" />
+                {t.documents_loading_document}
+              </div>
+            ) : documentPreviewError ? (
+              <div className="flex h-full min-h-80 items-center justify-center rounded-lg border border-destructive/30 bg-white p-8 text-center text-sm text-destructive">
+                {documentPreviewError}
+              </div>
+            ) : documentPreview?.url &&
+              supportsInlinePreview(documentPreview.contentType) ? (
+              <iframe
+                title={documentPreview.title || t.documents_preview}
+                src={documentPreview.url}
+                sandbox={
+                  documentPreview.contentType?.startsWith("text/html")
+                    ? ""
+                    : undefined
+                }
+                className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
+              />
+            ) : documentPreview?.url ? (
+              <div className="flex h-full min-h-80 flex-col items-center justify-center rounded-lg border border-border bg-white p-8 text-center">
+                <FileWarning className="mb-3 size-8 text-muted-foreground" />
+                <p className="max-w-md text-sm text-muted-foreground">
+                  {lang === "de"
+                    ? "Dieses Dateiformat kann nicht direkt im Browser angezeigt werden. Laden Sie die Datei herunter, um sie zu öffnen."
+                    : "Этот формат нельзя показать прямо в браузере. Скачайте файл, чтобы открыть его."}
+                </p>
+              </div>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
       {canManageDocuments ? (
         <PatientDocumentGenerateDialog
           open={generateOpen}
