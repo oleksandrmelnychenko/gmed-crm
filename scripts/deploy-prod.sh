@@ -34,6 +34,18 @@ SECRETS_PATH="${SECRETS_PATH:-infra/terraform/environments/prod-hetzner/secrets.
 GIT_BRANCH="${GIT_BRANCH:-main}"
 LOG_FILE="${LOG_FILE:-/var/log/gmed-deploy.log}"
 TMP_ENV=""
+IMPORT_BOOTSTRAP_DIRECTORY=false
+
+if [[ "$#" -gt 1 ]]; then
+  echo "ERROR: deploy-prod.sh accepts at most one argument." >&2
+  exit 1
+fi
+if [[ "${1:-}" == "--import-bootstrap-directory" ]]; then
+  IMPORT_BOOTSTRAP_DIRECTORY=true
+elif [[ "$#" -eq 1 ]]; then
+  echo "ERROR: unsupported deploy-prod.sh argument: $1" >&2
+  exit 1
+fi
 
 # cosign verification anchor. ANY image we run must be signed by the
 # release workflow in THIS repository — Sigstore Fulcio's certificate
@@ -373,6 +385,7 @@ SQL
 compose_up_or_diagnose
 
 if [[ "${PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY:-false}" == "true" ]]; then
+  sanitized_this_run=false
   sanitizer_marker="${PROD_EMPTY_DATABASE_MARKER:-/etc/gmed/prod-db-sanitized}"
   if [[ ! -e "$sanitizer_marker" || "${PROD_EMPTY_DATABASE_FORCE:-false}" == "true" ]]; then
     # The backend healthcheck only passes after DB migrations have run.
@@ -381,11 +394,14 @@ if [[ "${PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY:-false}" == "true" ]]; then
     "${compose_cmd[@]}" stop caddy frontend backend clinical-document-parser
     bash "$REPO_DIR/scripts/sanitize-prod-db.sh"
     compose_up_or_diagnose
+    sanitized_this_run=true
   else
     echo "Production DB sanitizer marker exists ($sanitizer_marker); data sanitizer skipped."
   fi
 
-  verify_sanitized_production_database
+  if [[ "$sanitized_this_run" == "true" ]]; then
+    verify_sanitized_production_database
+  fi
 fi
 
 if [[ -x "$REPO_DIR/scripts/ensure-prod-metrics-user.sh" ]]; then
@@ -403,6 +419,11 @@ if [[ ! -e "$bootstrap_backup_marker" ]]; then
   echo "Production bootstrap backup completed."
 else
   echo "Production bootstrap backup marker exists ($bootstrap_backup_marker); skipped."
+fi
+
+if [[ "$IMPORT_BOOTSTRAP_DIRECTORY" == "true" ]]; then
+  bash "$REPO_DIR/scripts/import-prod-bootstrap-directory.sh" \
+    /home/gmed/gmed-bootstrap-directory-v1.json
 fi
 
 # Prune dangling images so the host doesn't accumulate layers from
