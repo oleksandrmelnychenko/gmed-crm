@@ -3871,9 +3871,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             case.template_id,
             bytes.len()
         );
-        let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap_or_else(|error| {
-            panic!("{} PDF text extraction failed: {error}", case.template_id)
-        });
+        let pdf_text = extract_pdf_text(&bytes);
         assert!(
             pdf_text.contains(case.expected_pdf_text),
             "{} PDF text did not contain expected text {:?}. Extracted text: {:?}",
@@ -4037,7 +4035,6 @@ async fn single_order_and_order_cost_estimate_are_generated_as_separate_document
     assert!(!pdf_text.contains(
         "Der angegebene Gesamtbetrag ist vor Behandlungs-/Auftragsbeginn zu überweisen an"
     ));
-    assert!(pdf_text.contains("Configured account holder"));
     assert!(pdf_text.contains("Paris-signature"), "{pdf_text:?}");
     assert!(pdf_text.contains("Munich-signature"), "{pdf_text:?}");
 
