@@ -4068,7 +4068,8 @@ async fn single_order_and_order_cost_estimate_are_generated_as_separate_document
     assert_eq!(status, StatusCode::OK);
     let estimate_text = extract_pdf_text(&estimate_bytes);
     assert!(
-        estimate_text.contains("Anlage 1 zum 1. Einzelauftrag"),
+        estimate_text.contains("Anlage 1 zum Einzelauftrag")
+            && estimate_text.contains("ZUM 1. EINZELAUFTRAG"),
         "{estimate_text:?}"
     );
     assert!(
