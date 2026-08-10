@@ -193,11 +193,13 @@ sudo bash /opt/gmed/repo/scripts/deploy-dev.sh
 [`crates/server/src/routes/key_rotation.rs`](../../../../crates/server/src/routes/key_rotation.rs))
 to migrate stored ciphertexts.
 
-### Deploy the same release image as PROD
+### Deploy a CI-approved DEV image
 
 By default `scripts/deploy-dev.sh` builds images on the DEV host from
-the checked-out branch. To smoke-test the exact GHCR release that will
-go to PROD, set all three optional image pins in the DEV SOPS bundle:
+the checked-out branch. After CI succeeds on `main`, the `Dev Build`
+workflow publishes signed `:dev` and `:dev-sha-<commit>` images. Copy the
+three digest-pinned values from that workflow's summary into the DEV SOPS
+bundle:
 
 ```bash
 GMED_BACKEND_IMAGE=ghcr.io/oleksandrmelnychenko/gmed-crm-server@sha256:...
@@ -212,6 +214,10 @@ ssh gmed@console-dev.gmed-health.com sudo /opt/gmed/repo/scripts/deploy-dev.sh
 ```
 
 Leave all three values empty to return DEV to local host builds.
+
+To smoke-test an exact production candidate, the same fields may instead
+point at digests emitted by the manually dispatched or `v*`-tagged
+`Release Build` workflow.
 
 ### Reset cloud-init
 

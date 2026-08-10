@@ -1,8 +1,9 @@
-name: Release
+name: Release Build
 
-# Builds and pushes signed container images to GHCR. Triggered on:
-#   - every push to main → `:main` floating tag + `:sha-<short>`
-#   - git tags `v*`       → `:vX.Y.Z` and `:sha-<short>` (PROD promotion)
+# Builds and pushes production-approved, signed container images to GHCR.
+# Triggered only by a version tag (`v*`) or an explicit manual promotion.
+# Ordinary pushes to main are handled by dev.yml and can never produce an
+# image signed by this production trust identity.
 #
 # Why a separate workflow:
 #   - The CI workflow (.github/workflows/ci.yml) does a smoke `docker
@@ -20,8 +21,8 @@ name: Release
 
 on:
   push:
-    branches: [main]
     tags: ['v*']
+  workflow_dispatch:
 
 concurrency:
   group: release-${{ github.ref }}
@@ -186,9 +187,9 @@ jobs:
           # own ghcr.io/<fork-owner>/<repo>-* scope automatically.
           images: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}
           tags: |
-            type=ref,event=branch
+            type=raw,value=release
             type=ref,event=tag
-            type=sha,prefix=sha-,format=short
+            type=sha,prefix=release-sha-,format=short
           # SPDX provenance + OCI labels for traceability from a
           # registry browser back to this run.
           labels: |

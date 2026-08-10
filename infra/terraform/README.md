@@ -54,13 +54,17 @@ run:
 sudo /opt/gmed/repo/scripts/deploy-dev.sh
 ```
 
+Every successful CI run on `main` also starts `.github/workflows/dev.yml`.
+It publishes signed `:dev` and `:dev-sha-<commit>` images and prints the
+three digest-pinned `GMED_*_IMAGE` values in the run summary.
+
 ## PROD Publish
 
 PROD uses digest-pinned GHCR release images built by
 `.github/workflows/release.yml`. Terraform creates the host and volume
 only. Application deployment is:
 
-1. Build/sign images through the release workflow.
+1. Push a `v*` tag or explicitly dispatch the Release Build workflow.
 2. Put `GMED_BACKEND_IMAGE`, `GMED_FRONTEND_IMAGE`, and
    `GMED_PARSER_IMAGE` digest refs into the PROD SOPS bundle.
 3. Re-run:

@@ -199,9 +199,7 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
     let (status, body) = json_request(
         &app,
         "POST",
-        &format!(
-            "/api/v1/patients/{patient_id}/medications/{medication_id}/expiry-confirm"
-        ),
+        &format!("/api/v1/patients/{patient_id}/medications/{medication_id}/expiry-confirm"),
         &pm_bearer,
         None,
     )

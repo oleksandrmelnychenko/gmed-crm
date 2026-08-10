@@ -1,0 +1,162 @@
+name: Dev Build
+
+# A successful CI run on main produces the deployable DEV image set. The
+# separate workflow identity is intentional: PROD accepts only images signed
+# by release.yml, so a DEV digest cannot be promoted accidentally.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: dev-build
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  security-events: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-and-sign:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: server
+            env_name: BACKEND
+            dockerfile: Dockerfile.backend
+            context: .
+          - name: frontend
+            env_name: FRONTEND
+            dockerfile: frontend/Dockerfile
+            context: frontend
+          - name: clinical-document-parser
+            env_name: PARSER
+            dockerfile: services/clinical-document-parser/Dockerfile
+            context: services/clinical-document-parser
+    steps:
+      - name: Resolve source revision
+        id: source
+        env:
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          DISPATCH_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          sha="${WORKFLOW_RUN_SHA:-$DISPATCH_SHA}"
+          test -n "$sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${sha:0:12}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout verified revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}
+          tags: |
+            type=raw,value=dev
+            type=raw,value=dev-sha-${{ steps.source.outputs.short_sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.source.outputs.sha }}
+            org.opencontainers.image.licenses=UNLICENSED
+            org.opencontainers.image.version=dev-sha-${{ steps.source.outputs.short_sha }}
+
+      - name: Build and push DEV image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=dev-${{ matrix.name }}
+          cache-to: type=gha,scope=dev-${{ matrix.name }},mode=max
+
+      - name: Verify parser runtime before signing
+        if: matrix.name == 'clinical-document-parser'
+        env:
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}@${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint id "$IMAGE_REF" -u)" -ne 0
+          docker run --rm --entrypoint python "$IMAGE_REF" -c "import time; from PIL import Image,ImageDraw,ImageFont; from app.extraction import _get_paddle_runtime, _run_paddle; from app.parser import parse_clinical_text; image=Image.new('RGB',(1600,420),'white'); font=ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',72); ImageDraw.Draw(image).multiline_text((60,60),'Diagnosen\nArterielle Hypertonie',font=font,fill='black',spacing=28); outcome=_run_paddle(image,time.monotonic()+120); image.close(); _get_paddle_runtime().close(); draft=parse_clinical_text(outcome.text); recognized=outcome.text.casefold(); assert outcome.engine == 'paddle' and not outcome.timed_out and all(token in recognized for token in ('diagnosen','hypertonie')) and any(candidate.target == 'diagnosis' and 'hypertonie' in candidate.value.casefold() for candidate in draft.candidates)"
+
+      - name: Trivy scan (HIGH+CRITICAL, fixable only)
+        id: trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}@${{ steps.build.outputs.digest }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          format: sarif
+          limit-severities-for-sarif: true
+          output: trivy-dev-${{ matrix.name }}.sarif
+
+      - name: Upload Trivy SARIF
+        if: always() && hashFiles(format('trivy-dev-{0}.sarif', matrix.name)) != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-dev-${{ matrix.name }}.sarif
+          category: trivy-dev-${{ matrix.name }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign DEV image (keyless)
+        env:
+          COSIGN_EXPERIMENTAL: '1'
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          for tag in $TAGS; do
+            ref="${tag%%:*}@${DIGEST}"
+            cosign sign --yes "$ref"
+          done
+
+      - name: Output DEV digest
+        run: |
+          {
+            echo "## DEV ${{ matrix.name }}"
+            echo "Source: \`${{ steps.source.outputs.sha }}\`"
+            echo "Digest: \`${{ steps.build.outputs.digest }}\`"
+            echo ""
+            echo "Pin in DEV release.env:"
+            echo '```'
+            echo "GMED_${{ matrix.env_name }}_IMAGE=${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}@${{ steps.build.outputs.digest }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
