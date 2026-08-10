@@ -9,6 +9,10 @@ DO $$
 DECLARE
   payload jsonb := (SELECT doc FROM bootstrap_payload);
   ceo_count bigint;
+  total_user_count bigint;
+  approved_email_count bigint;
+  ceo_role_count bigint;
+  active_user_count bigint;
 BEGIN
   IF (payload->>'version')::integer <> 1
      OR jsonb_array_length(payload->'providers') <> 191
@@ -28,8 +32,25 @@ BEGIN
   WHERE lower(email) = lower((SELECT admin_email FROM bootstrap_context))
     AND role = 'ceo'
     AND is_active = true;
-  IF (SELECT count(*) FROM users) <> 1 OR ceo_count <> 1 THEN
-    RAISE EXCEPTION 'production must contain exactly the approved active CEO account';
+
+  SELECT
+    count(*),
+    count(*) FILTER (
+      WHERE lower(email) = lower((SELECT admin_email FROM bootstrap_context))
+    ),
+    count(*) FILTER (WHERE role = 'ceo'),
+    count(*) FILTER (WHERE is_active = true)
+  INTO total_user_count, approved_email_count, ceo_role_count, active_user_count
+  FROM users;
+
+  IF total_user_count <> 1 OR ceo_count <> 1 THEN
+    RAISE EXCEPTION
+      'production must contain exactly the approved active CEO account (users=%, approved_email=%, ceo_role=%, active=%, approved_active_ceo=%)',
+      total_user_count,
+      approved_email_count,
+      ceo_role_count,
+      active_user_count,
+      ceo_count;
   END IF;
 END $$;
 
