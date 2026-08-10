@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { de } from "./de";
 import { ru } from "./ru";
+import { resolveDefaultLanguage } from "./default-language";
 import type { AdminSystemTranslations } from "./catalogs/admin-system";
 import type { CasesClinicalTranslations } from "./catalogs/cases-clinical";
 import type { ClinicalTranslations } from "./catalogs/clinical";
@@ -1465,11 +1466,13 @@ export type Lang = "de" | "ru";
 
 const LANG_KEY = "gmed_lang";
 const LANG_EVENT = "gmed:lang-change";
+const DEFAULT_LANG = resolveDefaultLanguage(import.meta.env.VITE_DEFAULT_LANG);
 
 export function getLang(): Lang {
-  if (typeof window === "undefined") return "ru";
+  if (typeof window === "undefined") return DEFAULT_LANG;
   const stored = localStorage.getItem(LANG_KEY);
-  return stored === "de" ? "de" : "ru";
+  if (stored === "de" || stored === "ru") return stored;
+  return DEFAULT_LANG;
 }
 
 function setLang(lang: Lang): void {
