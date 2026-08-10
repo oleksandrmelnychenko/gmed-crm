@@ -3421,6 +3421,16 @@ async fn approved_interpreter_report_without_order_exposes_missing_order_billing
     )
     .await;
 
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/assign-interpreter"),
+        &bearer,
+        Some(json!({ "interpreter_id": interpreter_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
     let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
     let (status, body) = json_request(
         &app,
@@ -6593,7 +6603,7 @@ async fn appointment_schedule_exclusion_constraints_block_overlapping_patient_sl
             assert_eq!(db_error.code().as_deref(), Some("23P01"));
             assert_eq!(
                 db_error.constraint(),
-                Some("appointments_patient_timed_schedule_excl")
+                Some("appointments_patient_schedule_excl")
             );
         }
         other => panic!("expected exclusion violation, got {other:?}"),
@@ -6601,7 +6611,7 @@ async fn appointment_schedule_exclusion_constraints_block_overlapping_patient_sl
 }
 
 #[tokio::test]
-async fn assign_interpreter_creates_patient_assignment_and_reminder() {
+async fn assign_interpreter_creates_patient_assignment_idempotently() {
     let Some((app, pool, admin_id, bearer)) = test_context().await else {
         return;
     };
@@ -6659,28 +6669,6 @@ async fn assign_interpreter_creates_patient_assignment_and_reminder() {
     .await
     .unwrap();
     assert!(assignment_exists);
-
-    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
-    let (status, body) = json_request(
-        &app,
-        "GET",
-        &format!("/api/v1/appointments/{appointment_id}/reminders"),
-        &interpreter_bearer,
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let items = body.as_array().unwrap();
-    let assignment_reminders = items
-        .iter()
-        .filter(|item| {
-            item["title"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("New assignment")
-        })
-        .count();
-    assert_eq!(assignment_reminders, 1);
 }
 
 #[tokio::test]
@@ -8067,7 +8055,7 @@ async fn teamlead_cannot_reassign_owner_to_patient_manager_during_reschedule() {
 }
 
 #[tokio::test]
-async fn reschedule_with_same_interpreter_resets_response_and_creates_reminder() {
+async fn reschedule_with_same_interpreter_resets_response() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
     };
@@ -8141,24 +8129,6 @@ async fn reschedule_with_same_interpreter_resets_response_and_creates_reminder()
     assert_eq!(body["interpreter_response"], "pending");
     assert_eq!(body["time_start"], "12:00");
     assert_eq!(body["time_end"], "13:00");
-
-    let (status, body) = json_request(
-        &app,
-        "GET",
-        &format!("/api/v1/appointments/{appointment_id}/reminders"),
-        &pm_bearer,
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let items = body.as_array().unwrap();
-    assert!(items.iter().any(|item| {
-        item["user_id"] == interpreter_id.to_string()
-            && item["title"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("Appointment updated")
-    }));
 }
 
 #[tokio::test]

@@ -7689,6 +7689,7 @@ async fn insert_task_record(
     appointment_id: Uuid,
     due_date: Option<chrono::DateTime<chrono::Utc>>,
     priority: &str,
+    allow_terminal_appointment: bool,
 ) -> Result<(), axum::response::Response> {
     let mut tx = state.db.begin().await.map_err(|e| {
         tracing::error!(error = %e, appointment_id = %appointment_id, "bootstrap task: begin tx");
@@ -7707,7 +7708,7 @@ async fn insert_task_record(
     let Some(status) = status else {
         return Ok(());
     };
-    if matches!(status.as_str(), "completed" | "cancelled") {
+    if !allow_terminal_appointment && matches!(status.as_str(), "completed" | "cancelled") {
         return Ok(());
     }
 
@@ -7851,6 +7852,7 @@ async fn bootstrap_concierge_workflow(
             appointment_id,
             Some(prep_due),
             "high",
+            false,
         )
         .await?;
 
@@ -7864,6 +7866,7 @@ async fn bootstrap_concierge_workflow(
             appointment_id,
             Some(followup_due),
             "normal",
+            false,
         )
         .await?;
     }
@@ -8259,6 +8262,7 @@ async fn bootstrap_billing_handoff(
         appointment_id,
         Some(chrono::Utc::now()),
         "normal",
+        true,
     )
     .await
 }
