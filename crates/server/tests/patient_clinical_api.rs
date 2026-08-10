@@ -714,6 +714,7 @@ async fn reviewed_medication_import_is_idempotent_and_keeps_regimen_history() {
     assert_eq!(first["action"], "created");
     assert_eq!(first["idempotent"], false);
     let first_id = Uuid::parse_str(first["id"].as_str().unwrap()).unwrap();
+    let first_series_id = first["medication_series_id"].as_str().unwrap().to_owned();
 
     let (status, retry) = json_request(&app, "POST", &path, &bearer, Some(first_payload)).await;
     assert_eq!(status, StatusCode::OK, "{retry:?}");
@@ -782,6 +783,7 @@ async fn reviewed_medication_import_is_idempotent_and_keeps_regimen_history() {
         "einnahme_von": "2026-08-10",
         "source_country": "UA",
         "source_date": "2026-08-10",
+        "medication_series_id": first_series_id,
     });
     prepare_medication_review_import(
         &app,
