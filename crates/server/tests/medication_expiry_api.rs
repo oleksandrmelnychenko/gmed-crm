@@ -108,61 +108,47 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
         return;
     };
 
-    let tag = unique_tag("case-medication-expiry");
+    let tag = unique_tag("patient-medication-expiry");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
 
-    let (status, created_body) = json_request(
-        &app,
-        "POST",
-        "/api/v1/cases",
-        &pm_bearer,
-        Some(json!({
-            "patient_id": patient_id,
-            "hauptanfragegrund": "Medication expiry review"
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED);
-    let case_id = Uuid::parse_str(created_body["id"].as_str().expect("created case id")).unwrap();
-
     let expired_on = (chrono::Utc::now().date_naive() - chrono::Duration::days(2)).to_string();
     let (status, body) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_id}/medikamente"),
+        &format!("/api/v1/patients/{patient_id}/medications"),
         &pm_bearer,
         Some(json!({
             "items": [{
                 "handelsname": "Atorvastatin",
                 "wirkstoff": "Atorvastatin",
-                "med_typ": "permanent",
-                "expiry_date": expired_on,
-                "dosis": "20",
-                "dosis_einheit": "mg"
+                "category": "dauer",
+                "status": "aktiv",
+                "einnahme_bis": expired_on,
+                "staerke": "20 mg"
             }]
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["count"], 1);
 
     let (status, detail) = json_request(
         &app,
         "GET",
-        &format!("/api/v1/cases/{case_id}"),
+        &format!("/api/v1/patients/{patient_id}/clinical"),
         &pm_bearer,
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    let medications = detail["medikamente"].as_array().expect("medication array");
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let medications = detail["medications"].as_array().expect("medication array");
     assert_eq!(medications.len(), 1);
-    assert_eq!(medications[0]["expiry_date"], expired_on);
-    assert_eq!(medications[0]["is_expired"], true);
-    assert_eq!(medications[0]["pending_expiry_confirmation"], false);
+    assert_eq!(medications[0]["einnahme_bis"], expired_on);
+    assert_eq!(medications[0]["category"], "dauer");
+    assert_eq!(medications[0]["status"], "aktiv");
     let medication_id =
         Uuid::parse_str(medications[0]["id"].as_str().expect("medication id")).unwrap();
 
@@ -186,7 +172,7 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
     let pending_events: i64 = sqlx::query_scalar(
         r#"SELECT count(*)
            FROM medication_expiry_events
-           WHERE medication_id = $1
+           WHERE patient_medication_id = $1
              AND status = 'pending_confirmation'"#,
     )
     .bind(medication_id)
@@ -200,34 +186,22 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
            FROM user_notifications
            WHERE user_id = $1
              AND kind = 'medication_expiry_confirmation'
-             AND entity_type = 'case'
+             AND entity_type = 'patient'
              AND entity_id = $2"#,
     )
     .bind(pm_id)
-    .bind(case_id)
+    .bind(patient_id)
     .fetch_one(&pool)
     .await
     .unwrap();
     assert_eq!(notification_count, 1);
 
-    let (status, detail) = json_request(
-        &app,
-        "GET",
-        &format!("/api/v1/cases/{case_id}"),
-        &pm_bearer,
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        detail["medikamente"][0]["pending_expiry_confirmation"],
-        true
-    );
-
     let (status, body) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_id}/medikamente/{medication_id}/expiry-confirm"),
+        &format!(
+            "/api/v1/patients/{patient_id}/medications/{medication_id}/expiry-confirm"
+        ),
         &pm_bearer,
         None,
     )
@@ -238,7 +212,7 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
     let confirmed_events: i64 = sqlx::query_scalar(
         r#"SELECT count(*)
            FROM medication_expiry_events
-           WHERE medication_id = $1
+           WHERE patient_medication_id = $1
              AND status = 'confirmed'"#,
     )
     .bind(medication_id)
@@ -246,19 +220,4 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
     .await
     .unwrap();
     assert_eq!(confirmed_events, 1);
-
-    let (status, detail) = json_request(
-        &app,
-        "GET",
-        &format!("/api/v1/cases/{case_id}"),
-        &pm_bearer,
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        detail["medikamente"][0]["pending_expiry_confirmation"],
-        false
-    );
-    assert_eq!(detail["medikamente"][0]["is_expired"], true);
 }

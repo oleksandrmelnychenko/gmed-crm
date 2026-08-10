@@ -2050,14 +2050,16 @@ async fn case_doctor_registry_metadata_and_fk_round_trip_work() {
     let (status, body) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_id}/operationen"),
+        &format!("/api/v1/patients/{patient_id}/procedures"),
         &pm_bearer,
         Some(json!({
             "items": [{
-                "datum": "2026-04-01",
-                "grund": "Shoulder surgery",
-                "arzt_id": doctor_id,
-                "notiz": "registry linked"
+                "case_id": case_id,
+                "performed_on": "2026-04-01",
+                "label": "Shoulder surgery",
+                "provider_id": provider_id,
+                "doctor_id": doctor_id,
+                "note": "registry linked"
             }]
         })),
     )
@@ -2068,14 +2070,16 @@ async fn case_doctor_registry_metadata_and_fk_round_trip_work() {
     let (status, body) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_id}/medikamente"),
+        &format!("/api/v1/patients/{patient_id}/medications"),
         &pm_bearer,
         Some(json!({
             "items": [{
                 "handelsname": "Medication A",
                 "wirkstoff": "Medication A",
-                "med_typ": "permanent",
-                "verordnender_arzt_id": doctor_id
+                "category": "dauer",
+                "status": "aktiv",
+                "provider_id": provider_id,
+                "doctor_id": doctor_id
             }]
         })),
     )
@@ -2094,14 +2098,30 @@ async fn case_doctor_registry_metadata_and_fk_round_trip_work() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["zuweiser_doctor_id"], doctor_id.to_string());
     assert_eq!(body["zuweiser"], format!("Doctor {tag}"));
-    assert_eq!(body["operationen"][0]["arzt_id"], doctor_id.to_string());
-    assert_eq!(body["operationen"][0]["arzt"], format!("Doctor {tag}"));
+
+    let (status, clinical) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        body["medikamente"][0]["verordnender_arzt_id"],
+        clinical["procedures"][0]["doctor_id"],
         doctor_id.to_string()
     );
     assert_eq!(
-        body["medikamente"][0]["verordnender_arzt"],
+        clinical["procedures"][0]["doctor_name"],
+        format!("Doctor {tag}")
+    );
+    assert_eq!(
+        clinical["medications"][0]["doctor_id"],
+        doctor_id.to_string()
+    );
+    assert_eq!(
+        clinical["medications"][0]["doctor_name"],
         format!("Doctor {tag}")
     );
 }
@@ -2112,61 +2132,47 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
         return;
     };
 
-    let tag = unique_tag("case-medication-expiry");
+    let tag = unique_tag("patient-medication-expiry");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
 
-    let (status, created_body) = json_request(
-        &app,
-        "POST",
-        "/api/v1/cases",
-        &pm_bearer,
-        Some(json!({
-            "patient_id": patient_id,
-            "hauptanfragegrund": "Medication expiry review"
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED);
-    let case_id = Uuid::parse_str(created_body["id"].as_str().expect("created case id")).unwrap();
-
     let expired_on = (chrono::Utc::now().date_naive() - chrono::Duration::days(2)).to_string();
     let (status, body) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_id}/medikamente"),
+        &format!("/api/v1/patients/{patient_id}/medications"),
         &pm_bearer,
         Some(json!({
             "items": [{
                 "handelsname": "Atorvastatin",
                 "wirkstoff": "Atorvastatin",
-                "med_typ": "permanent",
-                "expiry_date": expired_on,
-                "dosis": "20",
-                "dosis_einheit": "mg"
+                "category": "dauer",
+                "status": "aktiv",
+                "einnahme_bis": expired_on,
+                "staerke": "20 mg"
             }]
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["count"], 1);
 
     let (status, detail) = json_request(
         &app,
         "GET",
-        &format!("/api/v1/cases/{case_id}"),
+        &format!("/api/v1/patients/{patient_id}/clinical"),
         &pm_bearer,
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    let medications = detail["medikamente"].as_array().expect("medication array");
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let medications = detail["medications"].as_array().expect("medication array");
     assert_eq!(medications.len(), 1);
-    assert_eq!(medications[0]["expiry_date"], expired_on);
-    assert_eq!(medications[0]["is_expired"], true);
-    assert_eq!(medications[0]["pending_expiry_confirmation"], false);
+    assert_eq!(medications[0]["einnahme_bis"], expired_on);
+    assert_eq!(medications[0]["category"], "dauer");
+    assert_eq!(medications[0]["status"], "aktiv");
     let medication_id =
         Uuid::parse_str(medications[0]["id"].as_str().expect("medication id")).unwrap();
 
@@ -2190,7 +2196,7 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
     let pending_events: i64 = sqlx::query_scalar(
         r#"SELECT count(*)
            FROM medication_expiry_events
-           WHERE medication_id = $1
+           WHERE patient_medication_id = $1
              AND status = 'pending_confirmation'"#,
     )
     .bind(medication_id)
@@ -2204,34 +2210,22 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
            FROM user_notifications
            WHERE user_id = $1
              AND kind = 'medication_expiry_confirmation'
-             AND entity_type = 'case'
+             AND entity_type = 'patient'
              AND entity_id = $2"#,
     )
     .bind(pm_id)
-    .bind(case_id)
+    .bind(patient_id)
     .fetch_one(&pool)
     .await
     .unwrap();
     assert_eq!(notification_count, 1);
 
-    let (status, detail) = json_request(
-        &app,
-        "GET",
-        &format!("/api/v1/cases/{case_id}"),
-        &pm_bearer,
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        detail["medikamente"][0]["pending_expiry_confirmation"],
-        true
-    );
-
     let (status, body) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_id}/medikamente/{medication_id}/expiry-confirm"),
+        &format!(
+            "/api/v1/patients/{patient_id}/medications/{medication_id}/expiry-confirm"
+        ),
         &pm_bearer,
         None,
     )
@@ -2242,7 +2236,7 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
     let confirmed_events: i64 = sqlx::query_scalar(
         r#"SELECT count(*)
            FROM medication_expiry_events
-           WHERE medication_id = $1
+           WHERE patient_medication_id = $1
              AND status = 'confirmed'"#,
     )
     .bind(medication_id)
@@ -2250,21 +2244,6 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
     .await
     .unwrap();
     assert_eq!(confirmed_events, 1);
-
-    let (status, detail) = json_request(
-        &app,
-        "GET",
-        &format!("/api/v1/cases/{case_id}"),
-        &pm_bearer,
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        detail["medikamente"][0]["pending_expiry_confirmation"],
-        false
-    );
-    assert_eq!(detail["medikamente"][0]["is_expired"], true);
 }
 
 #[tokio::test]
@@ -2789,8 +2768,7 @@ async fn case_history_exposes_system_uuid_retention_and_append_only_versions() {
         &pm_bearer,
         Some(json!({
             "patient_id": patient_id,
-            "hauptanfragegrund": "Clinical retention case",
-            "aktuelle_anamnese": "Initial narrative"
+            "hauptanfragegrund": "Clinical retention case"
         })),
     )
     .await;
@@ -2805,23 +2783,7 @@ async fn case_history_exposes_system_uuid_retention_and_append_only_versions() {
         &format!("/api/v1/cases/{case_id}/anamnesis"),
         &pm_bearer,
         Some(json!({
-            "aktuelle_anamnese": "Updated narrative"
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-
-    let (status, _) = json_request(
-        &app,
-        "POST",
-        &format!("/api/v1/cases/{case_id}/vegetative"),
-        &pm_bearer,
-        Some(json!({
-            "appetit_durst": "Reduced appetite",
-            "koerpergroesse": 172.0,
-            "gewicht": 68.5,
-            "gewichtsveraenderung": "Recent loss",
-            "grund": "Stress"
+            "hauptanfragegrund": "Updated clinical retention case"
         })),
     )
     .await;
@@ -2839,7 +2801,7 @@ async fn case_history_exposes_system_uuid_retention_and_append_only_versions() {
     assert_eq!(body["case_uuid"], case_id.to_string());
     assert!(body["retention_until"].as_str().is_some());
     assert!(body["last_clinical_update_at"].as_str().is_some());
-    assert!(body["version_count"].as_i64().unwrap_or_default() >= 3);
+    assert!(body["version_count"].as_i64().unwrap_or_default() >= 2);
     assert!(
         body["history"]
             .as_array()
@@ -2861,12 +2823,12 @@ async fn case_history_exposes_system_uuid_retention_and_append_only_versions() {
         .find(|entry| entry["section"] == "overview" && entry["old_value"].is_object())
         .expect("overview history entry with old/new payload");
     assert_eq!(
-        overview_entry["old_value"]["aktuelle_anamnese"],
-        "Initial narrative"
+        overview_entry["old_value"]["hauptanfragegrund"],
+        "Clinical retention case"
     );
     assert_eq!(
-        overview_entry["new_value"]["aktuelle_anamnese"],
-        "Updated narrative"
+        overview_entry["new_value"]["hauptanfragegrund"],
+        "Updated clinical retention case"
     );
 
     let version_id = history[0]["id"].as_i64().expect("history row id");
@@ -11948,7 +11910,7 @@ async fn patient_id_sequence_generates_unique_human_readable_codes() {
 }
 
 #[tokio::test]
-async fn case_vorerkrankungen_section_round_trip_via_api() {
+async fn patient_diagnoses_section_round_trip_via_api() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
     };
@@ -11976,19 +11938,23 @@ async fn case_vorerkrankungen_section_round_trip_via_api() {
     let (status, body) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_id}/vorerkrankungen"),
+        &format!("/api/v1/patients/{patient_id}/diagnoses"),
         &pm_bearer,
         Some(json!({
             "items": [
                 {
-                    "erkrankung": "Hypertonie",
-                    "erstdiagnose": "2020-05",
-                    "notiz": "Dauermedikation seit 5 Jahren",
+                    "case_id": case_id,
+                    "kind": "secondary",
+                    "label": "Hypertonie",
+                    "diagnosed_on": "2020-05-01",
+                    "note": "Dauermedikation seit 5 Jahren",
                 },
                 {
-                    "erkrankung": "Typ-2-Diabetes",
-                    "erstdiagnose": "2022-11",
-                    "notiz": null,
+                    "case_id": case_id,
+                    "kind": "secondary",
+                    "label": "Typ-2-Diabetes",
+                    "diagnosed_on": "2022-11-01",
+                    "note": null,
                 }
             ]
         })),
@@ -12000,31 +11966,29 @@ async fn case_vorerkrankungen_section_round_trip_via_api() {
     let (status, detail) = json_request(
         &app,
         "GET",
-        &format!("/api/v1/cases/{case_id}"),
+        &format!("/api/v1/patients/{patient_id}/clinical"),
         &pm_bearer,
         None,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let items = detail["vorerkrankungen"]
-        .as_array()
-        .expect("vorerkrankungen array");
+    let items = detail["diagnoses"].as_array().expect("diagnoses array");
     assert_eq!(items.len(), 2);
     let hypertension = items
         .iter()
-        .find(|row| row["erkrankung"] == "Hypertonie")
+        .find(|row| row["label"] == "Hypertonie")
         .expect("Hypertonie row present");
-    assert_eq!(hypertension["erstdiagnose"], "2020-05");
-    assert_eq!(hypertension["notiz"], "Dauermedikation seit 5 Jahren");
+    assert_eq!(hypertension["diagnosed_on"], "2020-05-01");
+    assert_eq!(hypertension["note"], "Dauermedikation seit 5 Jahren");
     let diabetes = items
         .iter()
-        .find(|row| row["erkrankung"] == "Typ-2-Diabetes")
+        .find(|row| row["label"] == "Typ-2-Diabetes")
         .expect("Diabetes row present");
-    assert_eq!(diabetes["erstdiagnose"], "2022-11");
+    assert_eq!(diabetes["diagnosed_on"], "2022-11-01");
 }
 
 #[tokio::test]
-async fn case_allergien_section_round_trip_via_api() {
+async fn patient_allergies_section_round_trip_via_api() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
     };
@@ -12035,34 +11999,21 @@ async fn case_allergien_section_round_trip_via_api() {
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
 
-    let (status, created) = json_request(
-        &app,
-        "POST",
-        "/api/v1/cases",
-        &pm_bearer,
-        Some(json!({
-            "patient_id": patient_id,
-            "hauptanfragegrund": "Allergie-Anamnese",
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED);
-    let case_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
-
     let (status, body) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_id}/allergien"),
+        &format!("/api/v1/patients/{patient_id}/clinical-warnings"),
         &pm_bearer,
         Some(json!({
+            "kind": "allergie",
             "items": [
                 {
-                    "allergie": "Penicillin",
-                    "reaktion": "Hautausschlag und Atemnot innerhalb 30 Minuten",
+                    "label": "Penicillin",
+                    "reaction": "Hautausschlag und Atemnot innerhalb 30 Minuten",
                 },
                 {
-                    "allergie": "Latex",
-                    "reaktion": "Hautrötung beim Kontakt",
+                    "label": "Latex",
+                    "reaction": "Hautrötung beim Kontakt",
                 }
             ]
         })),
@@ -12074,7 +12025,7 @@ async fn case_allergien_section_round_trip_via_api() {
     let (status, detail) = json_request(
         &app,
         "GET",
-        &format!("/api/v1/cases/{case_id}"),
+        &format!("/api/v1/patients/{patient_id}/clinical"),
         &pm_bearer,
         None,
     )
@@ -12084,17 +12035,17 @@ async fn case_allergien_section_round_trip_via_api() {
     assert_eq!(items.len(), 2);
     let penicillin = items
         .iter()
-        .find(|row| row["allergie"] == "Penicillin")
+        .find(|row| row["label"] == "Penicillin")
         .expect("Penicillin row present");
     assert_eq!(
-        penicillin["reaktion"],
+        penicillin["reaction"],
         "Hautausschlag und Atemnot innerhalb 30 Minuten"
     );
-    assert!(items.iter().any(|row| row["allergie"] == "Latex"));
+    assert!(items.iter().any(|row| row["label"] == "Latex"));
 }
 
 #[tokio::test]
-async fn case_impfstatus_section_round_trip_via_api() {
+async fn patient_impfstatus_section_round_trip_via_api() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
     };
@@ -12105,25 +12056,11 @@ async fn case_impfstatus_section_round_trip_via_api() {
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
 
-    let (status, created) = json_request(
-        &app,
-        "POST",
-        "/api/v1/cases",
-        &pm_bearer,
-        Some(json!({
-            "patient_id": patient_id,
-            "hauptanfragegrund": "Impfstatus",
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED);
-    let case_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
-
     let status_text = "Tetanus 2023, Grippe 2024, MMR vollständig";
     let (status, _) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/cases/{case_id}/impfstatus"),
+        &format!("/api/v1/patients/{patient_id}/impfstatus"),
         &pm_bearer,
         Some(json!({ "status_text": status_text })),
     )
@@ -12133,13 +12070,13 @@ async fn case_impfstatus_section_round_trip_via_api() {
     let (status, detail) = json_request(
         &app,
         "GET",
-        &format!("/api/v1/cases/{case_id}"),
+        &format!("/api/v1/patients/{patient_id}/impfstatus"),
         &pm_bearer,
         None,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(detail["impfstatus"], status_text);
+    assert_eq!(detail["impfstatus"]["status_text"], status_text);
 }
 
 #[tokio::test]
