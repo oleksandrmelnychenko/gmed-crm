@@ -23,7 +23,8 @@ BEGIN
   IF (payload->>'version')::integer <> 1
      OR jsonb_array_length(payload->'providers') <> 191
      OR jsonb_array_length(payload->'provider_doctors') <> 60
-     OR jsonb_array_length(payload->'patients') <> 6 THEN
+     OR jsonb_array_length(payload->'patients') <> 6
+     OR jsonb_array_length(payload->'medical_specializations') <> 67 THEN
     RAISE EXCEPTION 'bootstrap directory bundle count validation failed';
   END IF;
 
@@ -159,6 +160,46 @@ INSERT INTO provider_person_contacts
 SELECT imported.*
 FROM bootstrap_payload payload,
 LATERAL jsonb_populate_recordset(NULL::provider_person_contacts, payload.doc->'provider_person_contacts') imported;
+
+INSERT INTO medical_specializations (
+  code,
+  name_en,
+  name_de,
+  name_ru,
+  name_es,
+  is_active,
+  sort_order,
+  deleted_at
+)
+SELECT
+  imported.code,
+  imported.name_en,
+  imported.name_de,
+  imported.name_ru,
+  imported.name_es,
+  imported.is_active,
+  imported.sort_order,
+  imported.deleted_at
+FROM bootstrap_payload payload,
+LATERAL jsonb_to_recordset(payload.doc->'medical_specializations') AS imported(
+  code text,
+  name_en text,
+  name_de text,
+  name_ru text,
+  name_es text,
+  is_active boolean,
+  sort_order integer,
+  deleted_at timestamptz
+)
+ON CONFLICT (code) DO UPDATE
+SET name_en = EXCLUDED.name_en,
+    name_de = EXCLUDED.name_de,
+    name_ru = EXCLUDED.name_ru,
+    name_es = EXCLUDED.name_es,
+    is_active = EXCLUDED.is_active,
+    sort_order = EXCLUDED.sort_order,
+    deleted_at = EXCLUDED.deleted_at,
+    updated_at = now();
 
 INSERT INTO provider_specializations (provider_id, specialization_id, is_primary, created_at)
 SELECT imported.provider_id, specialization.id, imported.is_primary, imported.created_at
@@ -315,6 +356,13 @@ BEGIN
      OR (SELECT count(*) FROM provider_contacts) <> 337
      OR (SELECT count(*) FROM provider_person_contacts) <> 38
      OR (SELECT count(*) FROM provider_doctor_links) <> 67
+     OR (SELECT count(*)
+           FROM medical_specializations specialization
+           WHERE specialization.code IN (
+             SELECT imported.code
+             FROM bootstrap_payload payload,
+             LATERAL jsonb_to_recordset(payload.doc->'medical_specializations') AS imported(code text)
+           )) <> 67
      OR (SELECT count(*) FROM provider_specializations) <> 356
      OR (SELECT count(*) FROM provider_doctor_specializations) <> 87
      OR (SELECT count(*) FROM provider_taxonomy_assignments) <> 191

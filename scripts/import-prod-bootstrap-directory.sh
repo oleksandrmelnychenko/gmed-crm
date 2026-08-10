@@ -42,9 +42,24 @@ jq -e '
   .manifest.provider_count == 191 and
   .manifest.doctor_count == 60 and
   .manifest.patient_count == 6 and
+  .manifest.medical_specialization_count == 67 and
   (.providers | length) == 191 and
   (.provider_doctors | length) == 60 and
   (.patients | length) == 6 and
+  (.medical_specializations | length) == 67 and
+  ([.medical_specializations[].code] | unique | length) == 67 and
+  ([.medical_specializations[] | select(
+      (.code | type) != "string" or
+      (.code | length) == 0 or
+      (.name_en | type) != "string" or
+      (.name_en | length) == 0
+    )] | length) == 0 and
+  (([
+      .provider_specializations[].specialization_code,
+      .provider_doctor_specializations[].specialization_code
+    ] | unique) as $used |
+    ([.medical_specializations[].code] | unique) as $available |
+    (($used - $available) | length) == 0) and
   .manifest.provider_contact_count == (.provider_contacts | length) and
   .manifest.doctor_contact_count == (.provider_person_contacts | length) and
   .manifest.provider_link_count == (.provider_doctor_links | length) and
@@ -104,4 +119,4 @@ printf 'completed_at=%s\nsha256=%s\nproviders=191\ndoctors=60\npatients=6\n' \
 chmod 600 "$MARKER_PATH"
 shred -u "$BUNDLE_PATH"
 
-echo "Production directory seed imported: providers=191 doctors=60 patients=6 provider_contacts=337 doctor_contacts=38 provider_links=67 provider_specializations=356 doctor_specializations=87 taxonomy_assignments=191 provider_insurances=161 doctor_insurances=34 doctor_relationships=4 users=1 clinical_or_operational_rows=0"
+echo "Production directory seed imported: providers=191 doctors=60 patients=6 specialization_catalog_refs=67 provider_contacts=337 doctor_contacts=38 provider_links=67 provider_specializations=356 doctor_specializations=87 taxonomy_assignments=191 provider_insurances=161 doctor_insurances=34 doctor_relationships=4 users=1 clinical_or_operational_rows=0"
