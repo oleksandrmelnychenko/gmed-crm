@@ -5,25 +5,21 @@ import {
   type SetStateAction,
 } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
-import { ArrowRight, Globe, AlertCircle, Clock } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowRight,
+  ArrowUpLeft,
+  Clock,
+  Eye,
+  EyeOff,
+  Globe,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useAuth, PendingLoginError } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { getBuildLoginDefaults } from "@/pages/login-defaults";
-
-function LogoMark() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 76 65"
-      className="size-8 text-primary"
-      fill="none"
-    >
-      <path d="M37.53 0 75.05 65H0L37.53 0Z" fill="currentColor" />
-    </svg>
-  );
-}
+import "./login.css";
 
 type LoginFieldErrors = {
   email?: string;
@@ -42,6 +38,7 @@ type LoginState = {
   loading: boolean;
   fieldErrors: LoginFieldErrors;
   pendingLogin: PendingLoginState;
+  showPassword: boolean;
 };
 
 type LoginStatePatch =
@@ -58,6 +55,7 @@ function createLoginState(): LoginState {
     loading: false,
     fieldErrors: {},
     pendingLogin: null,
+    showPassword: false,
   };
 }
 
@@ -84,6 +82,7 @@ export function LoginPage() {
     loading,
     fieldErrors,
     pendingLogin,
+    showPassword,
   } = loginState;
   const { lang, setLang: switchLang, t: tr } = useLang();
 
@@ -103,6 +102,17 @@ export function LoginPage() {
     typeof location.state.from === "string"
       ? location.state.from
       : "/";
+
+  const requestedLanguage = new URLSearchParams(location.search).get("lang");
+
+  useEffect(() => {
+    if (!requestedLanguage) return;
+
+    const nextLanguage = requestedLanguage.toLowerCase() === "ru" ? "ru" : "de";
+    if (nextLanguage !== lang) {
+      switchLang(nextLanguage);
+    }
+  }, [lang, requestedLanguage, switchLang]);
 
   const toggleLang = () => {
     switchLang(lang === "de" ? "ru" : "de");
@@ -206,161 +216,135 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex h-dvh items-center justify-center overflow-y-auto bg-[linear-gradient(135deg,#f4f7fb_0%,#eef2f7_36%,#ffffff_100%)] px-4 py-6 text-foreground">
-      <div className="relative w-full max-w-lg rounded-3xl bg-white p-10 xl:p-12">
-        <div className="mb-8 flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-semibold text-slate-950">{tr.login_title}</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              {tr.login_sign_in_subtitle}
-            </p>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-slate-700">
-            <LogoMark />
-          </div>
-        </div>
+    <main className="gmed-login-page">
+      <section className="gmed-login-shell">
+        <a className="gmed-login-brand" href="https://gmed-health.com/" aria-label="GMED home">
+          <img src="/gmed-logo.png" alt="GMED Medical Concierge Agency" />
+        </a>
+        <p className="gmed-login-tagline">Medical Concierge Agency</p>
 
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="space-y-2.5">
-                <label htmlFor="email" className="text-sm font-medium text-slate-700">
-                  {tr.login_email}
-                </label>
-                <input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  placeholder={tr.uiText.login_email_example_placeholder}
-                  value={email}
-                  onChange={(e) =>
-                    dispatchLoginState((current) => ({
-                      email: e.target.value,
-                      fieldErrors: { ...current.fieldErrors, email: undefined },
-                    }))
-                  }
-                  className={`h-12 w-full rounded-xl border bg-white px-4 text-sm text-slate-950 outline-none transition-all duration-200 ${
-                    fieldErrors.email
-                      ? "border-red-400 ring-4 ring-red-100"
-                      : "border-slate-300 focus:border-ring focus:ring-2 focus:ring-ring/30"
-                  }`}
-                />
-                <FieldError message={fieldErrors.email} />
-              </div>
+        <div className="gmed-login-card">
+          <form onSubmit={handleSubmit} className="gmed-login-form" noValidate>
+            <div className="gmed-login-heading">
+              <h1>{tr.login_title}</h1>
+              <p>{tr.login_sign_in_subtitle}</p>
+            </div>
 
-              <div className="space-y-2.5">
-                <label htmlFor="password" className="text-sm font-medium text-slate-700">
-                  {tr.login_password}
-                </label>
+            <div className="gmed-login-field">
+              <label className="gmed-login-sr-only" htmlFor="email">{tr.login_email}</label>
+              <input
+                id="email"
+                type="email"
+                autoComplete="email"
+                placeholder={tr.login_email}
+                value={email}
+                aria-invalid={Boolean(fieldErrors.email)}
+                aria-describedby={fieldErrors.email ? "login-email-error" : undefined}
+                onChange={(event) =>
+                  dispatchLoginState((current) => ({
+                    email: event.target.value,
+                    fieldErrors: { ...current.fieldErrors, email: undefined },
+                  }))
+                }
+                className={fieldErrors.email ? "gmed-login-input is-error" : "gmed-login-input"}
+              />
+              <FieldError id="login-email-error" message={fieldErrors.email} />
+            </div>
+
+            <div className="gmed-login-field">
+              <label className="gmed-login-sr-only" htmlFor="password">{tr.login_password}</label>
+              <div className="gmed-login-password">
                 <input
                   id="password"
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   autoComplete="current-password"
-                  placeholder="••••••••"
+                  placeholder={tr.login_password}
                   value={password}
-                  onChange={(e) =>
+                  aria-invalid={Boolean(fieldErrors.password)}
+                  aria-describedby={fieldErrors.password ? "login-password-error" : undefined}
+                  onChange={(event) =>
                     dispatchLoginState((current) => ({
-                      password: e.target.value,
+                      password: event.target.value,
                       fieldErrors: { ...current.fieldErrors, password: undefined },
                     }))
                   }
-                  className={`h-12 w-full rounded-xl border bg-white px-4 text-sm text-slate-950 outline-none transition-all duration-200 ${
-                    fieldErrors.password
-                      ? "border-red-400 ring-4 ring-red-100"
-                      : "border-slate-300 focus:border-ring focus:ring-2 focus:ring-ring/30"
-                  }`}
+                  className={fieldErrors.password ? "gmed-login-input is-error" : "gmed-login-input"}
                 />
-                <FieldError message={fieldErrors.password} />
+                <button
+                  type="button"
+                  className="gmed-login-password-toggle"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  onClick={() => dispatchLoginState((current) => ({ showPassword: !current.showPassword }))}
+                >
+                  {showPassword ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+                </button>
               </div>
-
-              {error ? (
-                <div className="flex items-center gap-2.5 rounded-xl border border-red-300 bg-white px-4 py-3 text-sm text-red-600 animate-in fade-in slide-in-from-top-1 duration-200">
-                  <AlertCircle className="size-4 shrink-0" />
-                  {error}
-                </div>
-              ) : null}
-
-              <Button
-                type="submit"
-                size="lg"
-                className="h-12 w-full rounded-xl bg-slate-950 text-white hover:bg-slate-800"
-                disabled={loading}
-              >
-                <span>{loading ? tr.login_loading : tr.login_submit}</span>
-                <ArrowRight className="size-4" />
-              </Button>
-            </form>
-
-            <div className="mt-5 flex justify-center">
-              <button
-                onClick={toggleLang}
-                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <Globe className="size-3.5" />
-                {tr.common_lang_native}
-              </button>
+              <FieldError id="login-password-error" message={fieldErrors.password} />
             </div>
 
-            {/* Pending MFA overlay */}
-            {pendingLogin && (
-              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-[2rem] bg-white/95 backdrop-blur animate-in fade-in duration-300">
-                {pendingLogin.status === "rejected" ? (
-                  <div className="flex flex-col items-center gap-4 px-8 text-center">
-                    <div className="flex items-center justify-center size-16 rounded-2xl bg-red-50">
-                      <AlertCircle className="size-8 text-red-500" />
-                    </div>
-                    <h3 className="text-lg font-semibold text-slate-950">
-                      {tr.login_mfa_rejected_title}
-                    </h3>
-                    <p className="text-sm text-slate-500 max-w-xs">
-                      {tr.login_mfa_rejected_msg}
-                    </p>
-                    <Button
-                      variant="outline"
-                      className="mt-2 rounded-xl"
-                      onClick={() => setPendingLogin(null)}
-                    >
-                      {tr.common_back}
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-4 px-8 text-center">
-                    <div className="flex items-center justify-center size-16 rounded-2xl bg-sky-50">
-                      <Clock className="size-8 text-sky-500 animate-pulse" />
-                    </div>
-                    <h3 className="text-lg font-semibold text-slate-950">
-                      {tr.mfa_pending}
-                    </h3>
-                    <p className="text-sm text-slate-500 max-w-xs">
-                      {tr.login_mfa_pending_msg}
-                    </p>
-                    <div className="flex items-center gap-2 mt-2">
-                      <div className="size-2 rounded-full bg-sky-400 animate-pulse" />
-                      <span className="text-xs text-slate-400">
-                        {tr.login_mfa_checking}
-                      </span>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="mt-2 text-slate-400"
-                      onClick={() => setPendingLogin(null)}
-                    >
-                      {tr.common_cancel}
-                    </Button>
-                  </div>
-                )}
+            {error ? (
+              <div className="gmed-login-error" role="alert">
+                <AlertCircle aria-hidden="true" />
+                <span>{error}</span>
               </div>
-            )}
-      </div>
-    </div>
+            ) : null}
+
+            <button className="gmed-login-submit" type="submit" disabled={loading}>
+              <span>{loading ? tr.login_loading : tr.login_submit}</span>
+              <ArrowRight aria-hidden="true" />
+            </button>
+          </form>
+
+          <a className="gmed-login-home" href="https://gmed-health.com/">
+            <ArrowUpLeft aria-hidden="true" />
+            <span>Back to home</span>
+          </a>
+          <p className="gmed-login-security">Your data is secure and will be kept strictly confidential.</p>
+          <button type="button" onClick={toggleLang} className="gmed-login-language">
+            <Globe aria-hidden="true" />
+            {tr.common_lang_native}
+          </button>
+
+          {pendingLogin && (
+            <div className="gmed-login-mfa">
+              {pendingLogin.status === "rejected" ? (
+                <div className="flex flex-col items-center gap-4 px-8 text-center">
+                  <div className="flex size-16 items-center justify-center rounded-2xl bg-red-50">
+                    <AlertCircle className="size-8 text-red-500" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-slate-950">{tr.login_mfa_rejected_title}</h3>
+                  <p className="max-w-xs text-sm text-slate-500">{tr.login_mfa_rejected_msg}</p>
+                  <Button variant="outline" className="mt-2 rounded-xl" onClick={() => setPendingLogin(null)}>
+                    {tr.common_back}
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-4 px-8 text-center">
+                  <div className="flex size-16 items-center justify-center rounded-2xl bg-sky-50">
+                    <Clock className="size-8 animate-pulse text-sky-500" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-slate-950">{tr.mfa_pending}</h3>
+                  <p className="max-w-xs text-sm text-slate-500">{tr.login_mfa_pending_msg}</p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <div className="size-2 animate-pulse rounded-full bg-sky-400" />
+                    <span className="text-xs text-slate-400">{tr.login_mfa_checking}</span>
+                  </div>
+                  <Button variant="ghost" size="sm" className="mt-2 text-slate-400" onClick={() => setPendingLogin(null)}>
+                    {tr.common_cancel}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+    </main>
   );
 }
 
-function FieldError({ message }: { message?: string }) {
+function FieldError({ id, message }: { id: string; message?: string }) {
   if (!message) return null;
   return (
-    <div className="flex items-center gap-1.5 pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
-      <AlertCircle className="size-3.5 text-red-500 shrink-0" />
-      <span className="text-xs text-red-500">{message}</span>
-    </div>
+    <span id={id} className="gmed-login-field-error">{message}</span>
   );
 }
