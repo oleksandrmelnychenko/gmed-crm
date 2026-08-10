@@ -121,16 +121,12 @@ struct PrepareImportRequest {
     candidate_payloads: Value,
 }
 
+#[derive(Default)]
 enum NullableField<T> {
+    #[default]
     Missing,
     Null,
     Value(T),
-}
-
-impl<T> Default for NullableField<T> {
-    fn default() -> Self {
-        Self::Missing
-    }
 }
 
 impl<'de, T> Deserialize<'de> for NullableField<T>
@@ -1668,8 +1664,8 @@ async fn persist_imported_medication(
             );
         }
     };
-    if old_section != new_section {
-        if let Err(error) = sqlx::query(
+    if old_section != new_section
+        && let Err(error) = sqlx::query(
             r#"INSERT INTO patient_clinical_versions
                    (patient_id, changed_by, section, old_value, new_value)
                VALUES ($1, $2, 'medications', $3, $4)"#,
@@ -1680,13 +1676,12 @@ async fn persist_imported_medication(
         .bind(new_section)
         .execute(&mut *tx)
         .await
-        {
-            tracing::error!(error = %error, patient_id = %patient_id, "version imported medication");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to persist imported medication",
-            );
-        }
+    {
+        tracing::error!(error = %error, patient_id = %patient_id, "version imported medication");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to persist imported medication",
+        );
     }
     if let Err(error) = sqlx::query(
         r#"UPDATE patients
