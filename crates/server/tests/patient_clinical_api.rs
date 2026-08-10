@@ -202,6 +202,7 @@ async fn prepare_medication_review_import(
     reviewed_draft
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn persist_reviewed_medication(
     app: &axum::Router,
     pool: &PgPool,
