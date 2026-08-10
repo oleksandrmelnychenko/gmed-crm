@@ -29,7 +29,20 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Test
-        run: cargo test --workspace --locked
+        shell: bash
+        run: |
+          set -o pipefail
+          test_log="$(mktemp)"
+          cargo test --workspace --locked 2>&1 | tee "$test_log"
+          test_status="${PIPESTATUS[0]}"
+          if [ "$test_status" -ne 0 ]; then
+            details="$(tail -n 250 "$test_log")"
+            details="${details//'%'/'%25'}"
+            details="${details//$'\r'/'%0D'}"
+            details="${details//$'\n'/'%0A'}"
+            echo "::error file=.github/workflows/ci.yml,title=Rust tests failed::$details"
+          fi
+          exit "$test_status"
 
   rust-security:
     runs-on: ubuntu-latest
