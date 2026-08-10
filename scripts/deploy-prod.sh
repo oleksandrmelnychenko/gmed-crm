@@ -301,10 +301,24 @@ wait_for_compose_service_healthy() {
   done
 }
 
+compose_up_or_diagnose() {
+  if "${compose_cmd[@]}" up -d --remove-orphans; then
+    return 0
+  fi
+
+  echo "ERROR: docker compose failed to start the production stack." >&2
+  "${compose_cmd[@]}" ps --all || true
+  # Postgres is the root dependency for backend, parser and exporters.
+  # Its logs do not contain the configured password and are the most
+  # useful first diagnostic when Compose reports a dependency failure.
+  "${compose_cmd[@]}" logs --no-color --tail=150 postgres || true
+  return 1
+}
+
 # Bring (or keep) services up. No --build: PROD pulls cosign-verified
 # images, never builds them locally. The ghcr override is layered LAST
 # so its `image:` directives win over any inherited `build:` block.
-"${compose_cmd[@]}" up -d --remove-orphans
+compose_up_or_diagnose
 
 if [[ "${PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY:-false}" == "true" ]]; then
   sanitizer_marker="${PROD_EMPTY_DATABASE_MARKER:-/etc/gmed/prod-db-sanitized}"
@@ -314,7 +328,7 @@ if [[ "${PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY:-false}" == "true" ]]; then
     wait_for_compose_service_healthy backend
     "${compose_cmd[@]}" stop caddy frontend backend clinical-document-parser
     bash "$REPO_DIR/scripts/sanitize-prod-db.sh"
-    "${compose_cmd[@]}" up -d --remove-orphans
+    compose_up_or_diagnose
   else
     echo "Production DB sanitizer marker exists ($sanitizer_marker); data sanitizer skipped."
   fi
