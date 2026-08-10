@@ -56,11 +56,12 @@ done
 
 docker exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" "$POSTGRES_CONTAINER" \
   psql \
+    --quiet \
     -v ON_ERROR_STOP=1 \
     -v metrics_user="$POSTGRES_METRICS_USER" \
     -v metrics_password="$POSTGRES_METRICS_PASSWORD" \
     -U "$POSTGRES_USER" \
-    -d "$POSTGRES_DB" <<'SQL'
+    -d "$POSTGRES_DB" >/dev/null <<'SQL'
 SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'metrics_user', :'metrics_password')
 WHERE NOT EXISTS (
   SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = :'metrics_user'
