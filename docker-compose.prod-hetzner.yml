@@ -23,7 +23,8 @@
 #     -f docker-compose.release.yml \
 #     -f docker-compose.hetzner.yml \
 #     -f docker-compose.prod-hetzner.yml \
-#     up -d --build
+#     -f docker-compose.ghcr.yml \
+#     up -d
 
 services:
   postgres:
@@ -60,6 +61,13 @@ services:
         max-file: "5"
 
   frontend:
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  clinical-document-parser:
     logging:
       driver: json-file
       options:

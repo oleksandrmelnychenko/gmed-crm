@@ -214,6 +214,7 @@ ALERTMANAGER_TO_EMAIL=ops@gmed-health.com
 # GHCR release image pins
 GMED_BACKEND_IMAGE=
 GMED_FRONTEND_IMAGE=
+GMED_PARSER_IMAGE=
 EOF
 chmod 600 "$OUT_DIR/external-values.env"
 

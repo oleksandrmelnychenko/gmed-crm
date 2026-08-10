@@ -1,4 +1,5 @@
 import sys
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -11,10 +12,17 @@ from app.extraction import (
     PADDLE_DETECTION_MODEL,
     PADDLE_DETECTION_SIDE_LENGTH,
     PADDLE_RECOGNITION_MODEL,
+    _detect_orientation,
     _estimate_skew_angle,
     _extract_native_page_text,
     _get_paddle_ocr,
     _normalize_ocr_confidence,
+    _ocr_pil_image,
+    _outcome_from_paddle_results,
+    _outcome_from_tesseract_data,
+    _run_tesseract,
+    _scale_paddle_outcome,
+    _select_ocr_languages,
     extract_document,
     extract_text,
 )
@@ -25,8 +33,14 @@ class ExtractionLimitsTest(unittest.TestCase):
         # Unit tests never import or download real Paddle models. Individual
         # Paddle tests opt in with a mocked pipeline.
         engine_patch = patch("app.extraction.OCR_ENGINE", "tesseract")
+        isolate_patch = patch("app.extraction.PADDLE_ISOLATE_PROCESS", False)
+        multipass_patch = patch("app.extraction.OCR_MULTIPASS_ENABLED", False)
         engine_patch.start()
+        isolate_patch.start()
+        multipass_patch.start()
         self.addCleanup(engine_patch.stop)
+        self.addCleanup(isolate_patch.stop)
+        self.addCleanup(multipass_patch.stop)
 
     def test_parser_rejects_documents_over_the_size_limit(self) -> None:
         with self.assertRaisesRegex(ValueError, "size limit"):
@@ -76,6 +90,81 @@ class ExtractionLimitsTest(unittest.TestCase):
         self.assertEqual(rendered_pages[0].render.call_count, 0)
         self.assertEqual(rendered_pages[1].render.call_count, 1)
         ocr.assert_called_once()
+
+    def test_document_deadline_exhaustion_is_preserved_in_page_metadata(self) -> None:
+        rendered_page = FakeRenderedPage()
+        ocr = Mock(return_value="unused")
+
+        with (
+            patch("app.extraction.OCR_DOCUMENT_TIMEOUT_SECONDS", -1),
+            mocked_pdf_modules([FakeNativePage("")], [rendered_page], ocr),
+        ):
+            result = extract_document(b"%PDF-deadline", "application/pdf")
+
+        self.assertEqual(
+            result.metadata.pages[0].route_reason,
+            "document_ocr_deadline_exhausted",
+        )
+        self.assertEqual(result.metadata.pages[0].source, "native_fallback")
+        rendered_page.render.assert_not_called()
+        ocr.assert_not_called()
+
+    def test_tesseract_timeout_never_exceeds_remaining_page_deadline(self) -> None:
+        data_ocr = Mock(return_value=fake_tesseract_data())
+        fake_tesseract = SimpleNamespace(
+            Output=SimpleNamespace(DICT="dict"), image_to_data=data_ocr
+        )
+        with (
+            patch("app.extraction.time.monotonic", return_value=100.0),
+            patch.dict(sys.modules, {"pytesseract": fake_tesseract}),
+        ):
+            _run_tesseract(object(), "deu+eng", 100.025)
+
+        timeout = data_ocr.call_args.kwargs["timeout"]
+        self.assertGreater(timeout, 0)
+        self.assertAlmostEqual(timeout, 0.025, places=6)
+
+    def test_orientation_timeout_never_exceeds_remaining_page_deadline(self) -> None:
+        osd = Mock(return_value="Orientation in degrees: 0")
+        fake_tesseract = SimpleNamespace(image_to_osd=osd)
+        with (
+            patch("app.extraction.time.monotonic", return_value=200.0),
+            patch.dict(sys.modules, {"pytesseract": fake_tesseract}),
+        ):
+            _detect_orientation(object(), 200.02)
+
+        timeout = osd.call_args.kwargs["timeout"]
+        self.assertGreater(timeout, 0)
+        self.assertAlmostEqual(timeout, 0.02, places=6)
+
+    def test_tesseract_never_retries_without_timeout_support(self) -> None:
+        image_to_string = Mock(side_effect=TypeError("timeout is unsupported"))
+        fake_tesseract = SimpleNamespace(image_to_string=image_to_string)
+        with (
+            patch("app.extraction.time.monotonic", return_value=300.0),
+            patch.dict(sys.modules, {"pytesseract": fake_tesseract}),
+        ):
+            outcome = _run_tesseract(object(), "deu+eng", 301.0)
+
+        self.assertTrue(outcome.timed_out)
+        self.assertEqual(image_to_string.call_count, 1)
+        self.assertIn("timeout", image_to_string.call_args.kwargs)
+
+    def test_page_render_failure_is_marked_as_incomplete_ocr(self) -> None:
+        rendered_page = FakeRenderedPage()
+        rendered_page.render.side_effect = RuntimeError("malformed page image")
+
+        with mocked_pdf_modules(
+            [FakeNativePage("Diagnose")], [rendered_page], Mock(return_value="unused")
+        ):
+            result = extract_document(b"%PDF-render-failure", "application/pdf")
+
+        self.assertEqual(result.text, "Diagnose")
+        self.assertEqual(result.metadata.pages[0].source, "native_fallback")
+        self.assertEqual(
+            result.metadata.pages[0].route_reason,
+            "ocr_failed_native_fragment_preserved",
+        )
 
     def test_short_but_clean_native_page_is_not_needlessly_ocred(self) -> None:
         native_text = "Diagnose\nArterielle Hypertonie"
@@ -227,6 +316,145 @@ class ExtractionLimitsTest(unittest.TestCase):
         self.assertEqual(_normalize_ocr_confidence(0.934), 93.4)
         self.assertEqual(_normalize_ocr_confidence(82), 82.0)
         self.assertEqual(_normalize_ocr_confidence(125), 100.0)
+
+    def test_missing_paddle_confidence_counts_as_low_confidence_text(self) -> None:
+        result = SimpleNamespace(
+            json={
+                "res": {
+                    "rec_texts": ["High score", "Missing score"],
+                    "rec_scores": [0.96],
+                    "rec_boxes": [[10, 10, 100, 20], [10, 40, 100, 20]],
+                }
+            }
+        )
+
+        outcome = _outcome_from_paddle_results([result])
+
+        self.assertEqual(outcome.confidence, 96.0)
+        self.assertEqual(outcome.low_confidence_word_ratio, 0.5)
+        self.assertIsNone(outcome.blocks[1].confidence)
+
+    def test_missing_tesseract_confidence_counts_as_low_confidence_word(self) -> None:
+        data = {
+            "text": ["Diagnosen", "Hypertonie"],
+            "conf": ["95", ""],
+            "block_num": [1, 1],
+            "par_num": [1, 1],
+            "line_num": [1, 1],
+            "left": [10, 100],
+            "top": [10, 10],
+            "width": [80, 80],
+            "height": [20, 20],
+        }
+
+        outcome = _outcome_from_tesseract_data(data, "deu+eng")
+
+        self.assertEqual(outcome.confidence, 95.0)
+        self.assertEqual(outcome.low_confidence_word_ratio, 0.5)
+
+    def test_paddle_blocks_are_sorted_in_two_column_reading_order(self) -> None:
+        result = SimpleNamespace(
+            json={
+                "res": {
+                    "rec_texts": ["Right 2", "Left 1", "Right 1", "Left 2"],
+                    "rec_scores": [0.9, 0.9, 0.9, 0.9],
+                    "rec_boxes": [
+                        [320, 80, 490, 100],
+                        [10, 10, 180, 30],
+                        [320, 10, 490, 30],
+                        [10, 80, 180, 100],
+                    ],
+                }
+            }
+        )
+
+        outcome = _outcome_from_paddle_results([result])
+
+        self.assertEqual(outcome.text, "Left 1\n\nLeft 2\nRight 1\n\nRight 2")
+
+    def test_numeric_lab_table_keeps_row_major_cell_order(self) -> None:
+        result = SimpleNamespace(
+            json={
+                "res": {
+                    "rec_texts": [
+                        "7.1",
+                        "CRP",
+                        "g/dL",
+                        "Hemoglobin",
+                        "3.0",
+                        "G/L",
+                        "Leukocytes",
+                        "12.4",
+                        "mg/L",
+                    ],
+                    "rec_scores": [0.95] * 9,
+                    "rec_boxes": [
+                        [250, 52, 310, 72],
+                        [10, 90, 180, 110],
+                        [400, 11, 470, 31],
+                        [10, 10, 180, 30],
+                        [250, 92, 310, 112],
+                        [400, 51, 470, 71],
+                        [10, 50, 180, 70],
+                        [250, 12, 310, 32],
+                        [400, 91, 470, 111],
+                    ],
+                }
+            }
+        )
+
+        outcome = _outcome_from_paddle_results([result])
+
+        self.assertEqual(
+            outcome.text,
+            "Hemoglobin\t12.4\tg/dL\nLeukocytes\t7.1\tG/L\nCRP\t3.0\tmg/L",
+        )
+
+    def test_paddle_boxes_are_scaled_back_to_ocr_image_coordinates(self) -> None:
+        outcome = _outcome_from_paddle_results([fake_paddle_result()])
+        source = SimpleNamespace(size=(2560, 1280))
+        paddle_input = SimpleNamespace(shape=(640, 1280, 3))
+
+        scaled = _scale_paddle_outcome(outcome, source, paddle_input)
+
+        self.assertEqual(scaled.blocks[0].bbox, (20, 20, 340, 40))
+
+    def test_text_hint_selects_specific_cyrillic_language_pack(self) -> None:
+        self.assertEqual(_select_ocr_languages("Зміни відсутні і є", None), "deu+eng+ukr")
+        self.assertEqual(_select_ocr_languages("Изменения были", None), "deu+eng+rus")
+
+    def test_weak_first_pass_uses_bounded_binarized_retry(self) -> None:
+        from PIL import Image
+
+        weak = _outcome_from_tesseract_data(
+            {
+                "text": ["x"],
+                "conf": ["20"],
+                "block_num": [1],
+                "par_num": [1],
+                "line_num": [1],
+                "left": [10],
+                "top": [10],
+                "width": [10],
+                "height": [10],
+            },
+            "deu+eng",
+        )
+        strong = _outcome_from_tesseract_data(fake_tesseract_data(), "deu+eng")
+        image = Image.new("RGB", (1000, 1000), "white")
+        try:
+            with (
+                patch("app.extraction.OCR_MULTIPASS_ENABLED", True),
+                patch("app.extraction.OCR_DESKEW_ENABLED", False),
+                patch("app.extraction._detect_orientation", return_value=(0, None)),
+                patch("app.extraction._run_ocr_engine", side_effect=[weak, strong]) as run,
+            ):
+                outcome = _ocr_pil_image(image, time.monotonic() + 10, "")
+        finally:
+            image.close()
+
+        self.assertEqual(outcome.text, strong.text)
+        self.assertEqual(run.call_count, 2)
 
     def test_cyrillic_osd_selects_cyrillic_fallback_languages_first(self) -> None:
         rendered_page = FakeRenderedPage()

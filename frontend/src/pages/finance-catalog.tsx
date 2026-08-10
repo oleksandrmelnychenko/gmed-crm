@@ -35,7 +35,6 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { ToolbarField } from "@/components/data-table/toolbar-field";
 import {
   Banner,
-  CountBadge,
   EmptyCell,
   Field,
   PageHeader,
@@ -1583,12 +1582,11 @@ function useFinanceCatalogPageContent() {
         emptyState={<EmptyCell>{t.finance_catalog_empty_tax_profiles}</EmptyCell>}
         toolbarStart={
           <>
-            <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+            <span className="flex h-8 shrink-0 items-center gap-2 self-end text-[13px] font-semibold tracking-tight text-foreground">
               <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
               {t.finance_catalog_tax_profiles}
             </span>
-            <CountBadge>{taxProfiles.length}</CountBadge>
-            <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+            <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
             {canManageTaxProfiles ? (
               <Button
                 type="button"
@@ -1630,11 +1628,21 @@ function useFinanceCatalogPageContent() {
         tableClassName="max-h-[560px]"
         toolbarStart={
           <>
-            <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+            <span className="flex h-8 shrink-0 items-center gap-2 self-end text-[13px] font-semibold tracking-tight text-foreground">
               <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
               {t.revenue_agency_service_catalog_items}
             </span>
-            <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+            <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
+            {canManageTaxProfiles ? (
+              <Button
+                type="button"
+                className="h-8 rounded-md px-3"
+                onClick={openCreateAgencyService}
+              >
+                <Plus className="size-4" />
+                {t.revenue_agency_service_new_title}
+              </Button>
+            ) : null}
             <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -1654,16 +1662,6 @@ function useFinanceCatalogPageContent() {
                   />
                 </div>
             </ToolbarField>
-            {canManageTaxProfiles ? (
-              <Button
-                type="button"
-                className="h-8 rounded-md px-3"
-                onClick={openCreateAgencyService}
-              >
-                <Plus className="size-4" />
-                {t.revenue_agency_service_new_title}
-              </Button>
-            ) : null}
             {catalogSearch ? (
               <Button
                 type="button"
@@ -1707,11 +1705,21 @@ function useFinanceCatalogPageContent() {
         }
       />
 
-      <Section
-        title={t.finance_catalog_service_package_catalog}
-        accessory={
-          <div className="flex items-center gap-2">
-            <CountBadge>{servicePackages.length}</CountBadge>
+      <DataTableSurface
+        loading={loading}
+        rows={packageTableRows}
+        columns={packageTableColumns}
+        dictionary={t as unknown as Record<string, string>}
+        rowId={(row) => row.rowId}
+        expandRow={expandPackageRow}
+        emptyState={<EmptyCell>{t.finance_catalog_empty_packages}</EmptyCell>}
+        toolbarStart={
+          <>
+            <span className="flex h-8 shrink-0 items-center gap-2 self-end text-[13px] font-semibold tracking-tight text-foreground">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+              {t.finance_catalog_service_package_catalog}
+            </span>
+            <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
             {canManageTaxProfiles ? (
               <Button
                 type="button"
@@ -1722,71 +1730,57 @@ function useFinanceCatalogPageContent() {
                 {t.finance_catalog_new_package}
               </Button>
             ) : null}
-          </div>
+          </>
         }
-      >
-        {!loading && servicePackages.length === 0 ? (
-          <EmptyCell>{t.finance_catalog_empty_packages}</EmptyCell>
-        ) : (
-          <DataTableSurface
-            loading={loading}
-            rows={packageTableRows}
-            columns={packageTableColumns}
-            dictionary={t as unknown as Record<string, string>}
-            rowId={(row) => row.rowId}
-            expandRow={expandPackageRow}
-            emptyState={<EmptyCell>{t.finance_catalog_empty_packages}</EmptyCell>}
-            rowActions={
-              canManageTaxProfiles
-                ? (row) =>
-                    row.kind === "package" && row.pkg ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        className="size-7 rounded-full text-muted-foreground hover:text-foreground"
-                        onClick={() => row.pkg && openEditPackage(row.pkg)}
-                        aria-label={t.finance_catalog_edit}
-                        title={t.finance_catalog_edit}
-                      >
-                        <Pencil className="size-3.5" />
-                      </Button>
-                    ) : null
-                : undefined
-            }
-          />
-        )}
-      </Section>
+        rowActions={
+          canManageTaxProfiles
+            ? (row) =>
+                row.kind === "package" && row.pkg ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                    onClick={() => row.pkg && openEditPackage(row.pkg)}
+                    aria-label={t.finance_catalog_edit}
+                    title={t.finance_catalog_edit}
+                  >
+                    <Pencil className="size-3.5" />
+                  </Button>
+                ) : null
+            : undefined
+        }
+      />
 
-      <Section
-        title={t.finance_catalog_agency_service_vat_mapping}
-        accessory={<CountBadge>{catalogRows.length}</CountBadge>}
-      >
-        {!loading && catalogRows.length === 0 ? (
-          <EmptyCell>{t.finance_catalog_empty_mapping}</EmptyCell>
-        ) : (
-          <DataTableSurface
-            loading={loading}
-            rows={vatMappingPagination.pagedRows}
-            columns={vatMappingColumns}
-            dictionary={t as unknown as Record<string, string>}
-            rowId={(row) => row.catalog_id}
-            emptyState={<EmptyCell>{t.finance_catalog_empty_mapping}</EmptyCell>}
-            tableClassName="max-h-[560px]"
-            toolbarAfter={
-              <DataTablePager
-                pageIndex={vatMappingPagination.pageIndex}
-                pageSize={vatMappingPagination.pageSize}
-                totalPages={vatMappingPagination.totalPages}
-                totalRows={vatMappingPagination.totalRows}
-                previousLabel={t.pagination_previous}
-                nextLabel={t.pagination_next}
-                onPageChange={vatMappingPagination.onPageChange}
-              />
-            }
+      <DataTableSurface
+        loading={loading}
+        rows={vatMappingPagination.pagedRows}
+        columns={vatMappingColumns}
+        dictionary={t as unknown as Record<string, string>}
+        rowId={(row) => row.catalog_id}
+        emptyState={<EmptyCell>{t.finance_catalog_empty_mapping}</EmptyCell>}
+        tableClassName="max-h-[560px]"
+        toolbarStart={
+          <>
+            <span className="flex h-8 shrink-0 items-center gap-2 self-end text-[13px] font-semibold tracking-tight text-foreground">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+              {t.finance_catalog_agency_service_vat_mapping}
+            </span>
+            <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
+          </>
+        }
+        toolbarAfter={
+          <DataTablePager
+            pageIndex={vatMappingPagination.pageIndex}
+            pageSize={vatMappingPagination.pageSize}
+            totalPages={vatMappingPagination.totalPages}
+            totalRows={vatMappingPagination.totalRows}
+            previousLabel={t.pagination_previous}
+            nextLabel={t.pagination_next}
+            onPageChange={vatMappingPagination.onPageChange}
           />
-        )}
-      </Section>
+        }
+      />
       <Sheet
         open={createOpen && canManageTaxProfiles}
         onOpenChange={(open) => {

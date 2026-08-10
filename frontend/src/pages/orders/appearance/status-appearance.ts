@@ -70,11 +70,14 @@ export function statusClassName(status: string) {
     case "cancelled":
       return "border-rose-200 bg-rose-100 text-rose-700";
     case "draft":
+    case "planned":
       return "border-slate-200 bg-slate-100 text-slate-700";
     case "delivered":
       return "border-amber-200 bg-amber-100 text-amber-700";
     case "approved":
       return "border-emerald-200 bg-emerald-100 text-emerald-700";
+    case "invoiced":
+      return "border-sky-200 bg-sky-100 text-sky-700";
     case "received":
       return "border-sky-200 bg-sky-100 text-sky-700";
     case "overdue":

@@ -21,6 +21,7 @@ pub fn router() -> Router<AppState> {
         .route("/orders", get(list_orders).post(create_order))
         .route("/orders/debt-management", get(list_debt_management_queue))
         .route("/orders/{order_id}", get(get_order))
+        .route("/orders/{order_id}/status", post(update_status))
         .route(
             "/orders/{order_id}/debt-management",
             post(update_debt_management),
@@ -117,6 +118,12 @@ struct UpdateOrderCommercialBasisRequest {
 #[derive(Deserialize)]
 struct PhaseRequest {
     phase: String,
+    note: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct StatusRequest {
+    status: String,
     note: Option<String>,
 }
 
@@ -257,6 +264,17 @@ fn is_valid_external_invoice_status(value: &str) -> bool {
         value,
         "expected" | "received" | "approved" | "paid" | "overdue" | "cancelled"
     )
+}
+
+fn is_valid_external_invoice_transition(current: &str, next: &str) -> bool {
+    current == next
+        || matches!(
+            (current, next),
+            ("expected", "received" | "cancelled")
+                | ("received", "approved" | "overdue" | "cancelled")
+                | ("approved", "paid" | "overdue" | "cancelled")
+                | ("overdue", "paid" | "cancelled")
+        )
 }
 
 #[allow(clippy::result_large_err)]
@@ -761,6 +779,113 @@ fn next_order_phase(current: &str) -> Option<&'static str> {
     }
 }
 
+fn allowed_order_statuses(current: &str) -> &'static [&'static str] {
+    match current {
+        "active" => &["paused", "completed", "cancelled"],
+        "paused" => &["active", "cancelled"],
+        _ => &[],
+    }
+}
+
+async fn load_order_completion_blockers(
+    state: &AppState,
+    order_id: Uuid,
+    process_gates: &OrderProcessReadiness,
+) -> Result<Vec<String>, axum::response::Response> {
+    let mut reasons = Vec::new();
+    if !process_gates.execution_ready {
+        reasons.extend(process_gates.blocking_reasons.clone());
+    }
+
+    let followup = sqlx::query(
+        r#"SELECT doctor_followup_status, followup_1w_status, followup_1m_status,
+                  followup_6m_status, package_end_status, results_handoff_status
+           FROM order_followup_flows
+           WHERE order_id = $1"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, order_id = %order_id, "load order completion follow-up state");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate order completion",
+        )
+    })?;
+
+    let Some(followup) = followup else {
+        reasons.push("Follow-up state has not been prepared".to_string());
+        return Ok(reasons);
+    };
+
+    for (column, label) in [
+        ("doctor_followup_status", "Doctor follow-up"),
+        ("followup_1w_status", "1-week follow-up"),
+        ("followup_1m_status", "1-month follow-up"),
+        ("followup_6m_status", "6-month follow-up"),
+        ("package_end_status", "Package-end follow-up"),
+    ] {
+        let value: String = followup.try_get(column).unwrap_or_default();
+        if !matches!(value.as_str(), "completed" | "not_required") {
+            reasons.push(format!("{label} must be completed or marked not required"));
+        }
+    }
+    let results_handoff_status: String = followup
+        .try_get("results_handoff_status")
+        .unwrap_or_default();
+    if !matches!(results_handoff_status.as_str(), "completed" | "not_required") {
+        reasons.push("Results handoff must be completed or marked not required".to_string());
+    }
+
+    let open_checklist_count: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*)
+           FROM workflow_checklist_items
+           WHERE scope_type = 'order'
+             AND order_id = $1
+             AND is_completed = false"#,
+    )
+    .bind(order_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, order_id = %order_id, "count open order checklist items before completion");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate order completion",
+        )
+    })?;
+    if open_checklist_count > 0 {
+        reasons.push(format!(
+            "{open_checklist_count} workflow checklist item(s) are still open"
+        ));
+    }
+
+    let unsettled_service_count: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*)
+           FROM order_leistungen
+           WHERE order_id = $1
+             AND status IN ('planned', 'delivered')"#,
+    )
+    .bind(order_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, order_id = %order_id, "count unsettled order services before completion");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate order completion",
+        )
+    })?;
+    if unsettled_service_count > 0 {
+        reasons.push(format!(
+            "{unsettled_service_count} service item(s) are not approved or invoiced"
+        ));
+    }
+
+    Ok(reasons)
+}
+
 struct OrderLifecycleGate {
     blocked: bool,
     reasons: Vec<String>,
@@ -809,6 +934,7 @@ async fn load_order_lifecycle(
     state: &AppState,
     order_id: Uuid,
     current_phase: &str,
+    current_status: &str,
     created_at: chrono::DateTime<chrono::Utc>,
     process_gates: &OrderProcessReadiness,
 ) -> Result<serde_json::Value, axum::response::Response> {
@@ -827,8 +953,15 @@ async fn load_order_lifecycle(
     }
 
     let next_phase = next_order_phase(current_phase);
-    let transition_gate =
+    let mut transition_gate =
         load_order_transition_gate(state, order_id, current_phase, process_gates).await?;
+    if current_status != "active" && next_phase.is_some() {
+        transition_gate.blocked = true;
+        transition_gate.reasons.insert(
+            0,
+            format!("Order status must be active (currently {current_status})"),
+        );
+    }
 
     let allowed_transitions = next_phase
         .map(|phase| {
@@ -840,12 +973,32 @@ async fn load_order_lifecycle(
         })
         .unwrap_or_default();
 
+    let mut status_transitions = Vec::new();
+    for status in allowed_order_statuses(current_status) {
+        let mut reasons = Vec::new();
+        if *status == "completed" {
+            if current_phase != "followup" {
+                reasons.push("Order must reach the follow-up phase before completion".to_string());
+            } else {
+                reasons.extend(
+                    load_order_completion_blockers(state, order_id, process_gates).await?,
+                );
+            }
+        }
+        status_transitions.push(serde_json::json!({
+            "status": status,
+            "blocked": !reasons.is_empty(),
+            "reasons": reasons,
+        }));
+    }
+
     Ok(serde_json::json!({
         "current_stage": current_phase,
         "stage_entered_at": crate::routes::workflow_lifecycle::stage_entered_at(&history, current_phase)
             .or_else(|| Some(created_at.to_rfc3339())),
         "next_stage": next_phase,
         "allowed_transitions": allowed_transitions,
+        "allowed_status_transitions": status_transitions,
         "history": history,
     }))
 }
@@ -2820,6 +2973,7 @@ async fn get_order(
         &state,
         order_id,
         &phase,
+        &status,
         created_at,
         &process_gate_readiness,
     )
@@ -3114,6 +3268,138 @@ async fn update_order_commercial_basis(
     }
 }
 
+async fn update_status(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+    Json(body): Json<StatusRequest>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+        return response;
+    }
+    match can_access_order(&state, &auth, order_id, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
+    }
+
+    let requested_status = body.status.trim().to_lowercase();
+    if !is_valid_order_status(&requested_status) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid order status");
+    }
+
+    let context = match sqlx::query(
+        r#"SELECT phase, status,
+                  COALESCE(o.patient_id, l.converted_patient_id) AS patient_id
+           FROM orders o
+           LEFT JOIN leads l ON l.id = o.source_lead_id
+           WHERE o.id = $1"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "load order status context");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update order status",
+            );
+        }
+    };
+    let current_status: String = context.try_get("status").unwrap_or_default();
+    let current_phase: String = context.try_get("phase").unwrap_or_default();
+    if current_status == requested_status {
+        return Json(serde_json::json!({"ok": true})).into_response();
+    }
+    if !allowed_order_statuses(&current_status).contains(&requested_status.as_str()) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!(
+                "Order status cannot change from {current_status} to {requested_status}"
+            ),
+        );
+    }
+
+    if requested_status == "completed" {
+        if current_phase != "followup" {
+            return lifecycle_gate_err(
+                "completed",
+                &["Order must reach the follow-up phase before completion".to_string()],
+            );
+        }
+        let patient_id = context
+            .try_get::<Option<Uuid>, _>("patient_id")
+            .unwrap_or_default();
+        let Some(patient_id) = patient_id else {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Order must be linked to a patient before completion",
+            );
+        };
+        let process_gates = match load_order_process_readiness(&state, order_id, Some(patient_id)).await
+        {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+        let blockers = match load_order_completion_blockers(&state, order_id, &process_gates).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+        if !blockers.is_empty() {
+            return lifecycle_gate_err("completed", &blockers);
+        }
+    }
+
+    let note = body
+        .note
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    match sqlx::query("UPDATE orders SET status = $2 WHERE id = $1")
+        .bind(order_id)
+        .bind(&requested_status)
+        .execute(&state.db)
+        .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {
+            let payload = serde_json::json!({
+                "from_status": current_status,
+                "status": requested_status,
+                "phase": current_phase,
+                "note": note,
+            });
+            state.audit_sender.try_send(audit::domain_event(
+                "update_order_status",
+                Some(auth.user_id),
+                "order",
+                Some(order_id),
+                payload.clone(),
+            ));
+            crate::realtime::publish_order_event(
+                &state,
+                Some(auth.user_id),
+                "order.status_changed",
+                order_id,
+                payload,
+            )
+            .await;
+            Json(serde_json::json!({"ok": true})).into_response()
+        }
+        Ok(_) => err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "update order status");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update order status",
+            )
+        }
+    }
+}
+
 async fn update_phase(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -3140,7 +3426,7 @@ async fn update_phase(
 
     let order_context = match sqlx::query(
         r#"SELECT COALESCE(o.patient_id, l.converted_patient_id) AS patient_id,
-                  o.phase, o.created_at
+                  o.phase, o.status, o.created_at
            FROM orders o
            LEFT JOIN leads l ON l.id = o.source_lead_id
            WHERE o.id = $1"#,
@@ -3167,6 +3453,15 @@ async fn update_phase(
         );
     };
     let current_phase: String = order_context.try_get("phase").unwrap_or_default();
+    let current_status: String = order_context.try_get("status").unwrap_or_default();
+    if current_status != "active" {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!(
+                "Order status must be active before changing phase (currently {current_status})"
+            ),
+        );
+    }
     let created_at: chrono::DateTime<chrono::Utc> = order_context
         .try_get("created_at")
         .unwrap_or_else(|_| chrono::Utc::now());
@@ -4470,6 +4765,35 @@ async fn update_external_invoice(
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Invalid external invoice status",
+        );
+    }
+
+    let current_status = match sqlx::query_scalar::<_, String>(
+        "SELECT status FROM external_invoices WHERE id = $1 AND order_id = $2",
+    )
+    .bind(external_invoice_id)
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "External invoice not found"),
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, external_invoice_id = %external_invoice_id, "load external invoice status");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update external invoice",
+            );
+        }
+    };
+    if let Some(next_status) = status
+        && !is_valid_external_invoice_transition(&current_status, next_status)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!(
+                "External invoice status cannot change from {current_status} to {next_status}"
+            ),
         );
     }
     if let Err(resp) = validate_provider_doctor_context(&state, body.provider_id, None).await {

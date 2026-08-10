@@ -18,7 +18,6 @@ export function PageHeader({ title, actions }: PageHeaderProps) {
   );
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTopbarSlot(document.getElementById("topbar-page-slot"));
   }, []);
 

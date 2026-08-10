@@ -31,7 +31,8 @@
 
 4. `scripts/resolve-ghcr-digests.sh <tag>`
    - дістає digest-pinned GHCR refs без Docker daemon;
-   - друкує готові `GMED_BACKEND_IMAGE` / `GMED_FRONTEND_IMAGE` для
+   - друкує готові `GMED_BACKEND_IMAGE` / `GMED_FRONTEND_IMAGE` /
+     `GMED_PARSER_IMAGE` для
      DEV smoke test і PROD SOPS bundle.
 
 ## Що лишається ручним або token-driven

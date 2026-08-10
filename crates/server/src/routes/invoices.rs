@@ -7,7 +7,10 @@ use axum::{
     routing::{get, post},
 };
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
-use printpdf::{Color, Mm, Op, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point, Pt, Rgb};
+use printpdf::{
+    Color, Mm, Op, PaintMode, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point, Pt,
+    Rect, Rgb, WindingOrder,
+};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::{Number as JsonNumber, Value, json};
@@ -28,9 +31,12 @@ const INVOICE_PDF_PAGE_WIDTH_MM: f32 = 210.0;
 const INVOICE_PDF_PAGE_HEIGHT_MM: f32 = 297.0;
 const INVOICE_PDF_LEFT_MARGIN_MM: f32 = 18.0;
 const INVOICE_PDF_RIGHT_MARGIN_MM: f32 = 18.0;
-const INVOICE_PDF_TOP_MARGIN_MM: f32 = 18.0;
-const INVOICE_PDF_BOTTOM_MARGIN_MM: f32 = 16.0;
-const INVOICE_PDF_FOOTER_GAP_MM: f32 = 10.0;
+const INVOICE_PDF_TOP_MARGIN_MM: f32 = 36.5;
+const INVOICE_PDF_CONTENT_BOTTOM_MM: f32 = 34.0;
+const INVOICE_PDF_HEADER_REFERENCE_Y_MM: f32 = 278.0;
+const INVOICE_PDF_HEADER_RULE_Y_MM: f32 = 274.5;
+const INVOICE_PDF_FOOTER_RULE_Y_MM: f32 = 21.5;
+const INVOICE_PDF_FOOTER_CONTENT_TOP_MM: f32 = 18.5;
 const INVOICE_PDF_CONTENT_WIDTH_MM: f32 =
     INVOICE_PDF_PAGE_WIDTH_MM - INVOICE_PDF_LEFT_MARGIN_MM - INVOICE_PDF_RIGHT_MARGIN_MM;
 const AUTO_DUNNING_CHECK_INTERVAL_SECS: u64 = 60 * 60;
@@ -249,18 +255,22 @@ struct InvoicePdfLineItem {
     unit_price: String,
     vat_rate: String,
     is_cost_passthrough: bool,
-    line_net: String,
-    line_vat: String,
     line_gross: String,
     notes: Option<String>,
 }
 
 #[derive(Clone)]
-struct InvoicePdfDunningEvent {
-    level: String,
-    balance_due: String,
-    sent_at: DateTime<Utc>,
-    note: Option<String>,
+struct InvoicePdfAgency {
+    name: String,
+    care_of: Option<String>,
+    address: Option<String>,
+    phone: Option<String>,
+    email: Option<String>,
+    website: Option<String>,
+    bank_holder: Option<String>,
+    bank_name: Option<String>,
+    bank_swift: Option<String>,
+    bank_iban: Option<String>,
 }
 
 struct InvoicePdfContext {
@@ -288,7 +298,7 @@ struct InvoicePdfContext {
     quote_number: Option<String>,
     language: String,
     line_items: Vec<InvoicePdfLineItem>,
-    dunning_events: Vec<InvoicePdfDunningEvent>,
+    agency: InvoicePdfAgency,
 }
 
 #[derive(Clone, Copy)]
@@ -298,12 +308,19 @@ enum InvoicePdfColor {
     Muted,
 }
 
+#[derive(Clone, Copy)]
+enum InvoicePdfCellAlign {
+    Left,
+    Right,
+}
+
 struct InvoicePdfLayout {
     pages: Vec<PdfPage>,
     page_ops: Vec<Op>,
-    page_number: usize,
     y_mm: f32,
-    footer_text: String,
+    document_reference: String,
+    footer_lines: Vec<String>,
+    page_label: String,
     regular_font: PdfFontHandle,
     bold_font: PdfFontHandle,
 }
@@ -1169,9 +1186,9 @@ pub fn spawn_auto_dunning_scheduler(state: AppState) {
 
 fn invoice_pdf_color(kind: InvoicePdfColor) -> Color {
     match kind {
-        InvoicePdfColor::Primary => Color::Rgb(Rgb::new(0.10, 0.31, 0.85, None)),
-        InvoicePdfColor::Muted => Color::Rgb(Rgb::new(0.40, 0.46, 0.54, None)),
-        InvoicePdfColor::Body => Color::Rgb(Rgb::new(0.07, 0.13, 0.22, None)),
+        InvoicePdfColor::Primary => Color::Rgb(Rgb::new(0.95, 0.35, 0.06, None)),
+        InvoicePdfColor::Muted => Color::Rgb(Rgb::new(0.46, 0.44, 0.42, None)),
+        InvoicePdfColor::Body => Color::Rgb(Rgb::new(0.12, 0.11, 0.10, None)),
     }
 }
 
@@ -1181,6 +1198,62 @@ fn pt_to_mm(value: f32) -> f32 {
 
 fn invoice_pdf_line_height_mm(size_pt: f32, multiplier: f32) -> f32 {
     pt_to_mm(size_pt * multiplier)
+}
+
+fn invoice_pdf_mm_to_pt(value: f32) -> Pt {
+    Pt(value * 2.834_646)
+}
+
+fn append_invoice_pdf_filled_rect(
+    ops: &mut Vec<Op>,
+    x_mm: f32,
+    y_mm: f32,
+    width_mm: f32,
+    height_mm: f32,
+    color: Color,
+) {
+    let rect = Rect {
+        x: invoice_pdf_mm_to_pt(x_mm),
+        y: invoice_pdf_mm_to_pt(y_mm),
+        width: invoice_pdf_mm_to_pt(width_mm),
+        height: invoice_pdf_mm_to_pt(height_mm),
+        mode: Some(PaintMode::Fill),
+        winding_order: Some(WindingOrder::NonZero),
+    };
+    ops.push(Op::SetFillColor { col: color });
+    ops.push(Op::DrawPolygon {
+        polygon: rect.to_polygon(),
+    });
+}
+
+fn invoice_pdf_text_width_mm(text: &str, font_size_pt: f32) -> f32 {
+    let em_total: f32 = text
+        .chars()
+        .map(|character| match character {
+            ' ' => 0.28,
+            '.' | ',' | ':' | ';' | '!' | '|' | 'i' | 'j' | 'l' => 0.28,
+            '-' | '/' | '(' | ')' | 'f' | 't' | 'r' | 'I' => 0.36,
+            '0'..='9' => 0.556,
+            'm' | 'w' | 'M' | 'W' => 0.86,
+            'A'..='Z' | 'Ä' | 'Ö' | 'Ü' => 0.70,
+            'a'..='z' | 'ä' | 'ö' | 'ü' | 'ß' => 0.52,
+            _ => 0.58,
+        })
+        .sum();
+    pt_to_mm(font_size_pt) * em_total
+}
+
+fn truncate_invoice_pdf_text(text: &str, font_size_pt: f32, width_mm: f32) -> String {
+    let original = text.trim();
+    let mut value = original.to_string();
+    while !value.is_empty() && invoice_pdf_text_width_mm(&value, font_size_pt) > width_mm {
+        value.pop();
+    }
+    if value.len() < original.len() && value.len() > 3 {
+        value.truncate(value.len().saturating_sub(3));
+        value.push_str("...");
+    }
+    value
 }
 
 fn wrap_invoice_text(text: &str, font_size_pt: f32, available_width_mm: f32) -> Vec<String> {
@@ -1261,18 +1334,25 @@ fn append_invoice_pdf_text_line(
     ops.push(Op::EndTextSection);
 }
 
-fn invoice_pdf_footer_line(footer_text: &str, page_number: usize, total_pages: usize) -> String {
-    format!("{footer_text} · Page {page_number} of {total_pages}")
+fn invoice_pdf_footer_line(page_label: &str, page_number: usize, total_pages: usize) -> String {
+    format!("{page_label}: {page_number}/{total_pages}")
 }
 
 impl InvoicePdfLayout {
-    fn new(footer_text: String, regular_font: PdfFontHandle, bold_font: PdfFontHandle) -> Self {
+    fn new(
+        document_reference: String,
+        footer_lines: Vec<String>,
+        page_label: String,
+        regular_font: PdfFontHandle,
+        bold_font: PdfFontHandle,
+    ) -> Self {
         Self {
             pages: Vec::new(),
             page_ops: Vec::new(),
-            page_number: 1,
             y_mm: INVOICE_PDF_PAGE_HEIGHT_MM - INVOICE_PDF_TOP_MARGIN_MM,
-            footer_text,
+            document_reference,
+            footer_lines,
+            page_label,
             regular_font,
             bold_font,
         }
@@ -1287,17 +1367,71 @@ impl InvoicePdfLayout {
             return;
         }
 
+        let reference = format!("Dokument-Nr.: {}", self.document_reference);
+        let reference_size_pt = 8.5;
+        let reference_x_mm = (INVOICE_PDF_PAGE_WIDTH_MM
+            - INVOICE_PDF_RIGHT_MARGIN_MM
+            - invoice_pdf_text_width_mm(&reference, reference_size_pt))
+            .max(INVOICE_PDF_LEFT_MARGIN_MM);
+        append_invoice_pdf_text_line(
+            &mut self.page_ops,
+            &reference,
+            reference_x_mm,
+            INVOICE_PDF_HEADER_REFERENCE_Y_MM,
+            reference_size_pt,
+            &self.regular_font,
+            InvoicePdfColor::Body,
+        );
+        append_invoice_pdf_filled_rect(
+            &mut self.page_ops,
+            INVOICE_PDF_LEFT_MARGIN_MM,
+            INVOICE_PDF_HEADER_RULE_Y_MM,
+            INVOICE_PDF_CONTENT_WIDTH_MM,
+            0.25,
+            invoice_pdf_color(InvoicePdfColor::Primary),
+        );
+        append_invoice_pdf_filled_rect(
+            &mut self.page_ops,
+            INVOICE_PDF_LEFT_MARGIN_MM,
+            INVOICE_PDF_FOOTER_RULE_Y_MM,
+            INVOICE_PDF_CONTENT_WIDTH_MM,
+            0.25,
+            invoice_pdf_color(InvoicePdfColor::Primary),
+        );
+
+        let logo_height_mm = 8.5;
+        self.page_ops.extend(crate::pdf_logo::gmed_logo_ops(
+            INVOICE_PDF_LEFT_MARGIN_MM,
+            INVOICE_PDF_FOOTER_CONTENT_TOP_MM,
+            logo_height_mm,
+            Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None)),
+        ));
+        let footer_x_mm = INVOICE_PDF_LEFT_MARGIN_MM
+            + logo_height_mm * crate::pdf_logo::GMED_LOGO_ASPECT
+            + 4.0;
+        for (index, line) in self.footer_lines.iter().take(3).enumerate() {
+            let line = truncate_invoice_pdf_text(line, 6.3, 112.0);
+            append_invoice_pdf_text_line(
+                &mut self.page_ops,
+                &line,
+                footer_x_mm,
+                16.8 - index as f32 * 3.35,
+                6.3,
+                &self.regular_font,
+                InvoicePdfColor::Muted,
+            );
+        }
+
         self.pages.push(PdfPage::new(
             Mm(INVOICE_PDF_PAGE_WIDTH_MM),
             Mm(INVOICE_PDF_PAGE_HEIGHT_MM),
             std::mem::take(&mut self.page_ops),
         ));
-        self.page_number += 1;
         self.y_mm = INVOICE_PDF_PAGE_HEIGHT_MM - INVOICE_PDF_TOP_MARGIN_MM;
     }
 
     fn ensure_space(&mut self, needed_mm: f32) {
-        if self.y_mm - needed_mm < INVOICE_PDF_BOTTOM_MARGIN_MM + INVOICE_PDF_FOOTER_GAP_MM {
+        if self.y_mm - needed_mm < INVOICE_PDF_CONTENT_BOTTOM_MM {
             self.finish_page();
         }
     }
@@ -1357,18 +1491,285 @@ impl InvoicePdfLayout {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn text_block_centered(
+        &mut self,
+        text: &str,
+        size_pt: f32,
+        bold: bool,
+        color: InvoicePdfColor,
+        before_mm: f32,
+        after_mm: f32,
+    ) {
+        let lines = wrap_invoice_text(text, size_pt, self.available_width(0.0));
+        if lines.is_empty() {
+            return;
+        }
+        if before_mm > 0.0 {
+            self.spacer(before_mm);
+        }
+        let line_height_mm = invoice_pdf_line_height_mm(size_pt, 1.45);
+        let font = if bold {
+            self.bold_font.clone()
+        } else {
+            self.regular_font.clone()
+        };
+        for line in lines {
+            self.ensure_space(line_height_mm);
+            let x_mm = INVOICE_PDF_LEFT_MARGIN_MM
+                + ((INVOICE_PDF_CONTENT_WIDTH_MM - invoice_pdf_text_width_mm(&line, size_pt))
+                    / 2.0)
+                    .max(0.0);
+            append_invoice_pdf_text_line(
+                &mut self.page_ops,
+                &line,
+                x_mm,
+                self.y_mm,
+                size_pt,
+                &font,
+                color,
+            );
+            self.y_mm -= line_height_mm;
+        }
+        if after_mm > 0.0 {
+            self.spacer(after_mm);
+        }
+    }
+
+    fn meta_grid(&mut self, cells: &[(&str, String)]) {
+        if cells.is_empty() {
+            return;
+        }
+        const COLUMN_GAP_MM: f32 = 10.0;
+        const CARD_PADDING_X_MM: f32 = 5.0;
+        const CARD_PADDING_Y_MM: f32 = 4.0;
+        const ROW_HEIGHT_MM: f32 = 8.5;
+
+        self.spacer(4.0);
+        let row_count = cells.len().div_ceil(2);
+        let card_height_mm = CARD_PADDING_Y_MM * 2.0 + row_count as f32 * ROW_HEIGHT_MM;
+        self.ensure_space(card_height_mm);
+        let card_top_mm = self.y_mm;
+        let card_bottom_mm = card_top_mm - card_height_mm;
+        append_invoice_pdf_filled_rect(
+            &mut self.page_ops,
+            INVOICE_PDF_LEFT_MARGIN_MM,
+            card_bottom_mm,
+            INVOICE_PDF_CONTENT_WIDTH_MM,
+            card_height_mm,
+            Color::Rgb(Rgb::new(0.98, 0.976, 0.973, None)),
+        );
+        let border = Color::Rgb(Rgb::new(0.91, 0.90, 0.89, None));
+        for (x_mm, y_mm, width_mm, height_mm) in [
+            (
+                INVOICE_PDF_LEFT_MARGIN_MM,
+                card_top_mm - 0.2,
+                INVOICE_PDF_CONTENT_WIDTH_MM,
+                0.2,
+            ),
+            (
+                INVOICE_PDF_LEFT_MARGIN_MM,
+                card_bottom_mm,
+                INVOICE_PDF_CONTENT_WIDTH_MM,
+                0.2,
+            ),
+            (
+                INVOICE_PDF_LEFT_MARGIN_MM,
+                card_bottom_mm,
+                0.2,
+                card_height_mm,
+            ),
+            (
+                INVOICE_PDF_LEFT_MARGIN_MM + INVOICE_PDF_CONTENT_WIDTH_MM - 0.2,
+                card_bottom_mm,
+                0.2,
+                card_height_mm,
+            ),
+        ] {
+            append_invoice_pdf_filled_rect(
+                &mut self.page_ops,
+                x_mm,
+                y_mm,
+                width_mm,
+                height_mm,
+                border.clone(),
+            );
+        }
+
+        let column_width_mm = (INVOICE_PDF_CONTENT_WIDTH_MM - COLUMN_GAP_MM) / 2.0;
+        for (index, (label, value)) in cells.iter().enumerate() {
+            let row = index / 2;
+            let column = index % 2;
+            let column_left_mm = INVOICE_PDF_LEFT_MARGIN_MM
+                + column as f32 * (column_width_mm + COLUMN_GAP_MM);
+            let text_x_mm = column_left_mm + CARD_PADDING_X_MM;
+            let column_right_mm = column_left_mm + column_width_mm - CARD_PADDING_X_MM;
+            let baseline_y_mm =
+                card_top_mm - CARD_PADDING_Y_MM - 3.2 - row as f32 * ROW_HEIGHT_MM;
+            let label_size_pt = 7.0;
+            let value_size_pt = 9.5;
+            let value_width_mm = invoice_pdf_text_width_mm(value, value_size_pt);
+            let value_x_mm = (column_right_mm - value_width_mm).max(text_x_mm + 18.0);
+            append_invoice_pdf_text_line(
+                &mut self.page_ops,
+                label,
+                text_x_mm,
+                baseline_y_mm,
+                label_size_pt,
+                &self.regular_font,
+                InvoicePdfColor::Muted,
+            );
+            append_invoice_pdf_text_line(
+                &mut self.page_ops,
+                &truncate_invoice_pdf_text(
+                    value,
+                    value_size_pt,
+                    (column_right_mm - value_x_mm).max(24.0),
+                ),
+                value_x_mm,
+                baseline_y_mm,
+                value_size_pt,
+                &self.bold_font,
+                InvoicePdfColor::Body,
+            );
+        }
+        self.y_mm = card_bottom_mm;
+        self.spacer(6.0);
+    }
+
+    fn table_row(
+        &mut self,
+        cells: &[(&str, f32, InvoicePdfCellAlign)],
+        bold: bool,
+        header: bool,
+        emphasized: bool,
+    ) {
+        if cells.is_empty() {
+            return;
+        }
+        let total_width_mm: f32 = cells.iter().map(|(_, width_mm, _)| width_mm).sum();
+        let width_scale = if total_width_mm > 0.0 {
+            INVOICE_PDF_CONTENT_WIDTH_MM / total_width_mm
+        } else {
+            1.0
+        };
+        let normalized = cells
+            .iter()
+            .map(|(text, width_mm, align)| (*text, width_mm * width_scale, *align))
+            .collect::<Vec<_>>();
+        let font_size_pt = if header { 7.2 } else { 9.3 };
+        let line_height_mm = invoice_pdf_line_height_mm(font_size_pt, 1.25);
+        let wrapped = normalized
+            .iter()
+            .map(|(text, width_mm, _)| {
+                let text = if header {
+                    text.to_uppercase()
+                } else {
+                    (*text).to_string()
+                };
+                wrap_invoice_text(&text, font_size_pt, (width_mm - 4.0).max(12.0))
+            })
+            .collect::<Vec<_>>();
+        let line_count = wrapped.iter().map(Vec::len).max().unwrap_or(1).max(1);
+        let row_height_mm = line_count as f32 * line_height_mm + 4.0;
+        self.ensure_space(row_height_mm + 0.4);
+        let row_top_mm = self.y_mm;
+        let row_bottom_mm = row_top_mm - row_height_mm;
+        if emphasized {
+            append_invoice_pdf_filled_rect(
+                &mut self.page_ops,
+                INVOICE_PDF_LEFT_MARGIN_MM,
+                row_bottom_mm,
+                INVOICE_PDF_CONTENT_WIDTH_MM,
+                row_height_mm,
+                Color::Rgb(Rgb::new(1.0, 0.957, 0.929, None)),
+            );
+            append_invoice_pdf_filled_rect(
+                &mut self.page_ops,
+                INVOICE_PDF_LEFT_MARGIN_MM,
+                row_top_mm - 0.4,
+                INVOICE_PDF_CONTENT_WIDTH_MM,
+                0.4,
+                invoice_pdf_color(InvoicePdfColor::Primary),
+            );
+        } else {
+            append_invoice_pdf_filled_rect(
+                &mut self.page_ops,
+                INVOICE_PDF_LEFT_MARGIN_MM,
+                row_bottom_mm,
+                INVOICE_PDF_CONTENT_WIDTH_MM,
+                if header { 0.4 } else { 0.2 },
+                if header {
+                    invoice_pdf_color(InvoicePdfColor::Body)
+                } else {
+                    Color::Rgb(Rgb::new(0.84, 0.83, 0.82, None))
+                },
+            );
+        }
+        let font = if bold {
+            self.bold_font.clone()
+        } else {
+            self.regular_font.clone()
+        };
+        let mut x_mm = INVOICE_PDF_LEFT_MARGIN_MM;
+        for ((_, width_mm, align), lines) in normalized.iter().zip(wrapped.iter()) {
+            for (line_index, line) in lines.iter().enumerate() {
+                let text_x_mm = match align {
+                    InvoicePdfCellAlign::Left => x_mm + 2.0,
+                    InvoicePdfCellAlign::Right => {
+                        (x_mm + width_mm - 2.0 - invoice_pdf_text_width_mm(line, font_size_pt))
+                            .max(x_mm + 2.0)
+                    }
+                };
+                append_invoice_pdf_text_line(
+                    &mut self.page_ops,
+                    line,
+                    text_x_mm,
+                    row_top_mm - 3.6 - line_index as f32 * line_height_mm,
+                    font_size_pt,
+                    &font,
+                    if header {
+                        InvoicePdfColor::Muted
+                    } else {
+                        InvoicePdfColor::Body
+                    },
+                );
+            }
+            x_mm += *width_mm;
+        }
+        self.y_mm = row_bottom_mm;
+    }
+
+    fn summary_row(&mut self, label: &str, value: &str, bold: bool, emphasized: bool) {
+        self.table_row(
+            &[
+                ("", 96.0, InvoicePdfCellAlign::Left),
+                (label, 42.0, InvoicePdfCellAlign::Right),
+                (value, 36.0, InvoicePdfCellAlign::Right),
+            ],
+            bold,
+            false,
+            emphasized,
+        );
+    }
+
     fn finish(mut self) -> Vec<PdfPage> {
         self.finish_page();
         let total_pages = self.pages.len();
-        let footer_text = self.footer_text.clone();
+        let page_label = self.page_label.clone();
         let regular_font = self.regular_font.clone();
         for (index, page) in self.pages.iter_mut().enumerate() {
+            let label = invoice_pdf_footer_line(&page_label, index + 1, total_pages);
+            let label_x_mm = (INVOICE_PDF_PAGE_WIDTH_MM
+                - INVOICE_PDF_RIGHT_MARGIN_MM
+                - invoice_pdf_text_width_mm(&label, 7.0))
+                .max(INVOICE_PDF_LEFT_MARGIN_MM);
             append_invoice_pdf_text_line(
                 &mut page.ops,
-                &invoice_pdf_footer_line(&footer_text, index + 1, total_pages),
-                INVOICE_PDF_LEFT_MARGIN_MM,
-                INVOICE_PDF_BOTTOM_MARGIN_MM,
-                8.0,
+                &label,
+                label_x_mm,
+                16.8,
+                7.0,
                 &regular_font,
                 InvoicePdfColor::Muted,
             );
@@ -1383,6 +1784,10 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "invoice_title") => "Счёт",
         ("en", "invoice_title") => "Invoice",
         (_, "invoice_title") => "Rechnung",
+        ("uk", "page_label") => "Сторінка",
+        ("ru", "page_label") => "Страница",
+        ("en", "page_label") => "Page",
+        (_, "page_label") => "Seite",
         ("uk", "issued_on") => "Виставлено",
         ("ru", "issued_on") => "Выставлен",
         ("en", "issued_on") => "Issued on",
@@ -1447,6 +1852,10 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "items_heading") => "Позиции",
         ("en", "items_heading") => "Line items",
         (_, "items_heading") => "Positionen",
+        ("uk", "item_description") => "Опис",
+        ("ru", "item_description") => "Описание",
+        ("en", "item_description") => "Description",
+        (_, "item_description") => "Leistung",
         ("uk", "item_quantity") => "К-сть",
         ("ru", "item_quantity") => "Кол-во",
         ("en", "item_quantity") => "Qty",
@@ -1475,6 +1884,26 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "cost_passthrough") => "Без НДС как перевыставленные расходы",
         ("en", "cost_passthrough") => "VAT-free cost passthrough item",
         (_, "cost_passthrough") => "MwSt-freie Durchlaufkostenposition",
+        ("uk", "payment_details") => "Платіжні реквізити",
+        ("ru", "payment_details") => "Платёжные реквизиты",
+        ("en", "payment_details") => "Payment details",
+        (_, "payment_details") => "Zahlungsdaten",
+        ("uk", "bank_holder") => "Одержувач",
+        ("ru", "bank_holder") => "Получатель",
+        ("en", "bank_holder") => "Account holder",
+        (_, "bank_holder") => "Kontoinhaber",
+        ("uk", "bank_name") => "Банк",
+        ("ru", "bank_name") => "Банк",
+        ("en", "bank_name") => "Bank",
+        (_, "bank_name") => "Bank",
+        ("uk", "bank_swift") => "SWIFT",
+        ("ru", "bank_swift") => "SWIFT",
+        ("en", "bank_swift") => "SWIFT",
+        (_, "bank_swift") => "SWIFT-Code",
+        ("uk", "bank_iban") => "IBAN",
+        ("ru", "bank_iban") => "IBAN",
+        ("en", "bank_iban") => "IBAN",
+        (_, "bank_iban") => "IBAN",
         ("uk", "notes_heading") => "Примітки",
         ("ru", "notes_heading") => "Примечания",
         ("en", "notes_heading") => "Notes",
@@ -1547,24 +1976,6 @@ fn invoice_pdf_type_label(language: &str, value: &str) -> &'static str {
     }
 }
 
-fn invoice_pdf_dunning_level_label(language: &str, value: &str) -> &'static str {
-    match (language, value) {
-        ("uk", "first") => "1-ше нагадування",
-        ("uk", "second") => "2-ге нагадування",
-        ("uk", "collections") => "Інкасо",
-        ("ru", "first") => "1-е напоминание",
-        ("ru", "second") => "2-е напоминание",
-        ("ru", "collections") => "Инкассо",
-        ("en", "first") => "First reminder",
-        ("en", "second") => "Second reminder",
-        ("en", "collections") => "Collections",
-        (_, "first") => "1. Mahnung",
-        (_, "second") => "2. Mahnung",
-        (_, "collections") => "Inkasso",
-        _ => "Dunning",
-    }
-}
-
 fn normalize_invoice_pdf_language(value: &str) -> Option<&'static str> {
     match value.trim().to_ascii_lowercase().as_str() {
         "de" | "de-de" | "de_at" | "de-at" => Some("de"),
@@ -1608,8 +2019,6 @@ fn parse_invoice_pdf_line_items(line_items: &Value) -> Vec<InvoicePdfLineItem> {
                 .get("is_cost_passthrough")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
-            line_net: invoice_pdf_value_to_string(item.get("line_net")),
-            line_vat: invoice_pdf_value_to_string(item.get("line_vat")),
             line_gross: invoice_pdf_value_to_string(item.get("line_gross")),
             notes: item
                 .get("notes")
@@ -1632,8 +2041,62 @@ fn format_invoice_pdf_date(value: Option<NaiveDate>) -> String {
         .unwrap_or_else(|| "n/a".to_string())
 }
 
-fn format_invoice_pdf_datetime(value: DateTime<Utc>) -> String {
-    value.format("%d.%m.%Y %H:%M UTC").to_string()
+fn invoice_pdf_agency_footer_lines(agency: &InvoicePdfAgency) -> Vec<String> {
+    let mut identity = agency.name.trim().to_string();
+    if let Some(care_of) = agency.care_of.as_deref().map(str::trim).filter(|v| !v.is_empty())
+        && !identity.to_lowercase().contains(&care_of.to_lowercase())
+    {
+        identity.push(' ');
+        identity.push_str(care_of);
+    }
+    let mut lines = vec![identity];
+    if let Some(address) = agency.address.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        lines.push(
+            address
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join(" · "),
+        );
+    }
+    let mut contacts = Vec::new();
+    if let Some(phone) = agency.phone.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        contacts.push(format!("Tel.: {phone}"));
+    }
+    if let Some(email) = agency.email.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        contacts.push(format!("E-Mail: {email}"));
+    }
+    if let Some(website) = agency.website.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        let website = website
+            .strip_prefix("https://")
+            .or_else(|| website.strip_prefix("http://"))
+            .unwrap_or(website)
+            .trim_end_matches('/');
+        contacts.push(format!("Web: {website}"));
+    }
+    if !contacts.is_empty() {
+        lines.push(contacts.join(" · "));
+    }
+    lines
+}
+
+fn invoice_pdf_bank_cells(
+    language: &str,
+    agency: &InvoicePdfAgency,
+) -> Vec<(&'static str, String)> {
+    let mut cells = Vec::new();
+    for (key, value) in [
+        ("bank_holder", agency.bank_holder.as_deref()),
+        ("bank_name", agency.bank_name.as_deref()),
+        ("bank_swift", agency.bank_swift.as_deref()),
+        ("bank_iban", agency.bank_iban.as_deref()),
+    ] {
+        if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+            cells.push((invoice_pdf_label(language, key), value.to_string()));
+        }
+    }
+    cells
 }
 
 fn invoice_pdf_filename(context: &InvoicePdfContext) -> String {
@@ -2598,7 +3061,17 @@ async fn load_invoice_pdf_context(
                   i.portal_visible, i.hide_amounts_from_patient, i.pdf_visible_to_patient,
                   o.order_number, q.quote_number,
                   p.patient_id AS patient_pid, p.title, p.first_name, p.last_name,
-                  p.birth_date, p.languages
+                  p.birth_date, p.languages,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_name') AS agency_name,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_care_of') AS agency_care_of,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_address') AS agency_address,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_phone') AS agency_phone,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_email') AS agency_email,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_website') AS agency_website,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_holder') AS agency_bank_holder,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_name') AS agency_bank_name,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_swift') AS agency_bank_swift,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_iban') AS agency_bank_iban
            FROM invoices i
            JOIN orders o ON o.id = i.order_id
            JOIN patients p ON p.id = i.patient_id
@@ -2633,23 +3106,6 @@ async fn load_invoice_pdf_context(
     let languages = row
         .try_get::<Vec<String>, _>("languages")
         .unwrap_or_default();
-
-    let dunning_rows = sqlx::query(
-        r#"SELECT level, balance_due, sent_at, note
-           FROM invoice_dunning_events
-           WHERE invoice_id = $1
-           ORDER BY sent_at, created_at"#,
-    )
-    .bind(invoice_id)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice dunning pdf context");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to load invoice PDF dunning context",
-        )
-    })?;
 
     Ok(Some(InvoicePdfContext {
         invoice_id,
@@ -2710,108 +3166,55 @@ async fn load_invoice_pdf_context(
             .unwrap_or_default(),
         language: resolve_invoice_pdf_language(&languages),
         line_items: parse_invoice_pdf_line_items(&line_items),
-        dunning_events: dunning_rows
-            .into_iter()
-            .map(|row| InvoicePdfDunningEvent {
-                level: row.try_get::<String, _>("level").unwrap_or_default(),
-                balance_due: decimal_to_string(
-                    row.try_get::<Decimal, _>("balance_due")
-                        .unwrap_or(Decimal::ZERO),
-                ),
-                sent_at: row
-                    .try_get::<DateTime<Utc>, _>("sent_at")
-                    .unwrap_or_else(|_| Utc::now()),
-                note: row
-                    .try_get::<Option<String>, _>("note")
-                    .unwrap_or_default()
-                    .map(|value| value.trim().to_string())
-                    .filter(|value| !value.is_empty()),
-            })
-            .collect(),
+        agency: InvoicePdfAgency {
+            name: row
+                .try_get::<Option<String>, _>("agency_name")
+                .unwrap_or_default()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "GMED - Agentur für Patientenbetreuung".to_string()),
+            care_of: row
+                .try_get::<Option<String>, _>("agency_care_of")
+                .unwrap_or_default()
+                .filter(|value| !value.trim().is_empty()),
+            address: row
+                .try_get::<Option<String>, _>("agency_address")
+                .unwrap_or_default()
+                .filter(|value| !value.trim().is_empty()),
+            phone: row
+                .try_get::<Option<String>, _>("agency_phone")
+                .unwrap_or_default()
+                .filter(|value| !value.trim().is_empty()),
+            email: row
+                .try_get::<Option<String>, _>("agency_email")
+                .unwrap_or_default()
+                .filter(|value| !value.trim().is_empty()),
+            website: row
+                .try_get::<Option<String>, _>("agency_website")
+                .unwrap_or_default()
+                .filter(|value| !value.trim().is_empty()),
+            bank_holder: row
+                .try_get::<Option<String>, _>("agency_bank_holder")
+                .unwrap_or_default()
+                .filter(|value| !value.trim().is_empty()),
+            bank_name: row
+                .try_get::<Option<String>, _>("agency_bank_name")
+                .unwrap_or_default()
+                .filter(|value| !value.trim().is_empty()),
+            bank_swift: row
+                .try_get::<Option<String>, _>("agency_bank_swift")
+                .unwrap_or_default()
+                .filter(|value| !value.trim().is_empty()),
+            bank_iban: row
+                .try_get::<Option<String>, _>("agency_bank_iban")
+                .unwrap_or_default()
+                .filter(|value| !value.trim().is_empty()),
+        },
     }))
 }
 
 fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static str> {
     let mut document = PdfDocument::new(&context.invoice_number);
     let (regular_handle, bold_handle) = add_unicode_pdf_fonts(&mut document)?;
-
-    let footer_text = format!(
-        "{}: {}",
-        invoice_pdf_label(&context.language, "generated_footer"),
-        format_invoice_pdf_datetime(Utc::now())
-    );
-    let mut layout = InvoicePdfLayout::new(footer_text, regular_handle, bold_handle);
-
-    layout.text_block(
-        &context.invoice_number,
-        10.0,
-        true,
-        0.0,
-        InvoicePdfColor::Primary,
-        0.0,
-        4.0,
-    );
-    layout.text_block(
-        invoice_pdf_label(&context.language, "invoice_title"),
-        22.0,
-        true,
-        0.0,
-        InvoicePdfColor::Body,
-        0.0,
-        5.0,
-    );
-    layout.text_block(
-        &format!(
-            "{}: {}",
-            invoice_pdf_label(&context.language, "issued_on"),
-            format_invoice_pdf_datetime(context.issued_at)
-        ),
-        11.0,
-        false,
-        0.0,
-        InvoicePdfColor::Muted,
-        0.0,
-        1.0,
-    );
-    layout.text_block(
-        &format!(
-            "{}: {}",
-            invoice_pdf_label(&context.language, "due_date"),
-            format_invoice_pdf_date(context.due_date)
-        ),
-        11.0,
-        false,
-        0.0,
-        InvoicePdfColor::Muted,
-        0.0,
-        1.0,
-    );
-    layout.text_block(
-        &format!(
-            "{}: {}",
-            invoice_pdf_label(&context.language, "status"),
-            invoice_pdf_status_label(&context.language, &context.status)
-        ),
-        11.0,
-        false,
-        0.0,
-        InvoicePdfColor::Muted,
-        0.0,
-        1.0,
-    );
-    layout.text_block(
-        &format!(
-            "{}: {}",
-            invoice_pdf_label(&context.language, "invoice_type"),
-            invoice_pdf_type_label(&context.language, &context.invoice_type)
-        ),
-        11.0,
-        false,
-        0.0,
-        InvoicePdfColor::Muted,
-        0.0,
-        4.0,
-    );
 
     let patient_line = match context
         .patient_title
@@ -2822,146 +3225,68 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
         Some(title) => format!("{title} {}", context.patient_name),
         None => context.patient_name.clone(),
     };
-    layout.text_block(
-        &format!(
-            "{}: {}",
-            invoice_pdf_label(&context.language, "patient_name"),
-            patient_line
-        ),
-        12.0,
-        true,
-        0.0,
-        InvoicePdfColor::Body,
-        0.0,
-        1.0,
-    );
-    layout.text_block(
-        &format!(
-            "{}: {}",
-            invoice_pdf_label(&context.language, "patient_id"),
-            context.patient_pid
-        ),
-        11.0,
-        false,
-        0.0,
-        InvoicePdfColor::Muted,
-        0.0,
-        1.0,
-    );
-    layout.text_block(
-        &format!(
-            "{}: {}",
-            invoice_pdf_label(&context.language, "birth_date"),
-            format_invoice_pdf_date(context.birth_date)
-        ),
-        11.0,
-        false,
-        0.0,
-        InvoicePdfColor::Muted,
-        0.0,
-        1.0,
-    );
-    layout.text_block(
-        &format!(
-            "{}: {}",
-            invoice_pdf_label(&context.language, "order_number"),
-            context.order_number
-        ),
-        11.0,
-        false,
-        0.0,
-        InvoicePdfColor::Muted,
-        0.0,
-        1.0,
-    );
-    layout.text_block(
-        &format!(
-            "{}: {}",
-            invoice_pdf_label(&context.language, "quote_number"),
-            context.quote_number.as_deref().unwrap_or("n/a")
-        ),
-        11.0,
-        false,
-        0.0,
-        InvoicePdfColor::Muted,
-        0.0,
-        5.0,
-    );
 
-    layout.text_block(
-        invoice_pdf_label(&context.language, "totals_heading"),
-        14.0,
+    let mut layout = InvoicePdfLayout::new(
+        context.invoice_number.clone(),
+        invoice_pdf_agency_footer_lines(&context.agency),
+        invoice_pdf_label(&context.language, "page_label").to_string(),
+        regular_handle,
+        bold_handle,
+    );
+    layout.text_block_centered(
+        invoice_pdf_type_label(&context.language, &context.invoice_type),
+        10.5,
         true,
-        0.0,
-        InvoicePdfColor::Body,
-        0.0,
-        3.0,
-    );
-    layout.text_block(
-        &format!(
-            "{}: {}",
-            invoice_pdf_label(&context.language, "total_net"),
-            format_invoice_pdf_money(&context.total_net)
-        ),
-        11.0,
-        false,
-        0.0,
-        InvoicePdfColor::Body,
-        0.0,
-        1.0,
-    );
-    layout.text_block(
-        &format!(
-            "{}: {}",
-            invoice_pdf_label(&context.language, "total_vat"),
-            format_invoice_pdf_money(&context.total_vat)
-        ),
-        11.0,
-        false,
-        0.0,
-        InvoicePdfColor::Body,
-        0.0,
-        1.0,
-    );
-    layout.text_block(
-        &format!(
-            "{}: {}",
-            invoice_pdf_label(&context.language, "total_gross"),
-            format_invoice_pdf_money(&context.total_gross)
-        ),
-        11.0,
-        true,
-        0.0,
-        InvoicePdfColor::Body,
-        0.0,
-        1.0,
-    );
-    layout.text_block(
-        &format!(
-            "{}: {}",
-            invoice_pdf_label(&context.language, "paid_amount"),
-            format_invoice_pdf_money(&context.paid_amount)
-        ),
-        11.0,
-        false,
-        0.0,
-        InvoicePdfColor::Body,
-        0.0,
-        1.0,
-    );
-    layout.text_block(
-        &format!(
-            "{}: {}",
-            invoice_pdf_label(&context.language, "balance_due"),
-            format_invoice_pdf_money(&context.balance_due)
-        ),
-        11.0,
-        true,
-        0.0,
         InvoicePdfColor::Primary,
         0.0,
-        5.0,
+        1.0,
     );
+    layout.text_block_centered(
+        &invoice_pdf_label(&context.language, "invoice_title").to_uppercase(),
+        18.0,
+        true,
+        InvoicePdfColor::Body,
+        0.0,
+        2.0,
+    );
+
+    let mut meta_cells = vec![
+        (
+            invoice_pdf_label(&context.language, "issued_on"),
+            format_invoice_pdf_date(Some(context.issued_at.date_naive())),
+        ),
+        (
+            invoice_pdf_label(&context.language, "patient_name"),
+            patient_line,
+        ),
+        (
+            invoice_pdf_label(&context.language, "due_date"),
+            format_invoice_pdf_date(context.due_date),
+        ),
+        (
+            invoice_pdf_label(&context.language, "order_number"),
+            context.order_number.clone(),
+        ),
+        (
+            invoice_pdf_label(&context.language, "status"),
+            invoice_pdf_status_label(&context.language, &context.status).to_string(),
+        ),
+        (
+            invoice_pdf_label(&context.language, "patient_id"),
+            context.patient_pid.clone(),
+        ),
+    ];
+    if let Some(quote_number) = context.quote_number.as_deref() {
+        meta_cells.push((
+            invoice_pdf_label(&context.language, "quote_number"),
+            quote_number.to_string(),
+        ));
+        meta_cells.push((
+            invoice_pdf_label(&context.language, "birth_date"),
+            format_invoice_pdf_date(context.birth_date),
+        ));
+    }
+    layout.meta_grid(&meta_cells);
 
     layout.text_block(
         invoice_pdf_label(&context.language, "items_heading"),
@@ -2984,114 +3309,119 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
             4.0,
         );
     } else {
-        for (index, item) in context.line_items.iter().enumerate() {
-            layout.text_block(
-                &format!("{}. {}", index + 1, item.description),
-                12.0,
-                true,
-                0.0,
-                InvoicePdfColor::Body,
-                if index == 0 { 0.0 } else { 1.5 },
-                1.0,
-            );
-            layout.text_block(
-                &format!(
-                    "{}: {} · {}: {} · {}: {}",
+        layout.table_row(
+            &[
+                (
+                    invoice_pdf_label(&context.language, "item_description"),
+                    82.0,
+                    InvoicePdfCellAlign::Left,
+                ),
+                (
                     invoice_pdf_label(&context.language, "item_quantity"),
-                    item.quantity,
+                    18.0,
+                    InvoicePdfCellAlign::Right,
+                ),
+                (
                     invoice_pdf_label(&context.language, "item_unit_price"),
-                    format_invoice_pdf_money(&item.unit_price),
-                    invoice_pdf_label(&context.language, "item_total"),
-                    format_invoice_pdf_money(&item.line_gross),
+                    27.0,
+                    InvoicePdfCellAlign::Right,
                 ),
-                10.5,
-                false,
-                4.0,
-                InvoicePdfColor::Muted,
-                0.0,
-                0.8,
-            );
-            layout.text_block(
-                &format!(
-                    "{}: {} · {}: {} · {}: {}",
-                    invoice_pdf_label(&context.language, "item_net"),
-                    format_invoice_pdf_money(&item.line_net),
-                    invoice_pdf_label(&context.language, "item_vat"),
-                    format_invoice_pdf_money(&item.line_vat),
+                (
                     invoice_pdf_label(&context.language, "item_vat_rate"),
-                    if item.vat_rate.trim().is_empty() {
-                        "n/a".to_string()
-                    } else {
-                        format!("{}%", item.vat_rate.trim())
-                    },
+                    18.0,
+                    InvoicePdfCellAlign::Right,
                 ),
-                10.5,
-                false,
-                4.0,
-                InvoicePdfColor::Muted,
-                0.0,
-                0.8,
-            );
+                (
+                    invoice_pdf_label(&context.language, "item_total"),
+                    29.0,
+                    InvoicePdfCellAlign::Right,
+                ),
+            ],
+            true,
+            true,
+            false,
+        );
+        for item in &context.line_items {
+            let mut description = item.description.trim().to_string();
             if item.is_cost_passthrough {
-                layout.text_block(
-                    invoice_pdf_label(&context.language, "cost_passthrough"),
-                    10.0,
-                    true,
-                    4.0,
-                    InvoicePdfColor::Primary,
-                    0.0,
-                    0.8,
-                );
+                description.push_str(" · ");
+                description.push_str(invoice_pdf_label(&context.language, "cost_passthrough"));
             }
-            if let Some(note) = &item.notes {
-                layout.text_block(
-                    &format!(
-                        "{}: {}",
-                        invoice_pdf_label(&context.language, "note_label"),
-                        note
-                    ),
-                    10.0,
-                    false,
-                    4.0,
-                    InvoicePdfColor::Body,
-                    0.0,
-                    1.0,
-                );
+            if let Some(note) = item.notes.as_deref() {
+                description.push_str(" · ");
+                description.push_str(note.trim());
             }
+            let quantity = if item.quantity.trim().is_empty() {
+                "1"
+            } else {
+                item.quantity.trim()
+            };
+            let vat_rate = if item.vat_rate.trim().is_empty() {
+                "n/a".to_string()
+            } else {
+                format!("{}%", item.vat_rate.trim())
+            };
+            let unit_price = format_invoice_pdf_money(&item.unit_price);
+            let total = format_invoice_pdf_money(&item.line_gross);
+            layout.table_row(
+                &[
+                    (&description, 82.0, InvoicePdfCellAlign::Left),
+                    (quantity, 18.0, InvoicePdfCellAlign::Right),
+                    (&unit_price, 27.0, InvoicePdfCellAlign::Right),
+                    (&vat_rate, 18.0, InvoicePdfCellAlign::Right),
+                    (&total, 29.0, InvoicePdfCellAlign::Right),
+                ],
+                false,
+                false,
+                false,
+            );
         }
-        layout.spacer(2.0);
+        layout.spacer(4.0);
     }
 
-    if !context.dunning_events.is_empty() {
+    layout.summary_row(
+        invoice_pdf_label(&context.language, "total_net"),
+        &format_invoice_pdf_money(&context.total_net),
+        false,
+        false,
+    );
+    layout.summary_row(
+        invoice_pdf_label(&context.language, "total_vat"),
+        &format_invoice_pdf_money(&context.total_vat),
+        false,
+        false,
+    );
+    layout.summary_row(
+        invoice_pdf_label(&context.language, "total_gross"),
+        &format_invoice_pdf_money(&context.total_gross),
+        true,
+        false,
+    );
+    layout.summary_row(
+        invoice_pdf_label(&context.language, "paid_amount"),
+        &format_invoice_pdf_money(&context.paid_amount),
+        false,
+        false,
+    );
+    layout.summary_row(
+        invoice_pdf_label(&context.language, "balance_due"),
+        &format_invoice_pdf_money(&context.balance_due),
+        true,
+        true,
+    );
+
+    let bank_cells = invoice_pdf_bank_cells(&context.language, &context.agency);
+    if !bank_cells.is_empty() {
         layout.text_block(
-            invoice_pdf_label(&context.language, "dunning_heading"),
-            14.0,
+            invoice_pdf_label(&context.language, "payment_details"),
+            13.0,
             true,
             0.0,
             InvoicePdfColor::Body,
+            6.0,
             0.0,
-            3.0,
         );
-        for event in &context.dunning_events {
-            layout.text_block(
-                &format!(
-                    "{} · {} · {}",
-                    invoice_pdf_dunning_level_label(&context.language, &event.level),
-                    format_invoice_pdf_datetime(event.sent_at),
-                    format_invoice_pdf_money(&event.balance_due),
-                ),
-                10.5,
-                true,
-                0.0,
-                InvoicePdfColor::Body,
-                0.0,
-                0.8,
-            );
-            if let Some(note) = &event.note {
-                layout.text_block(note, 10.0, false, 4.0, InvoicePdfColor::Muted, 0.0, 0.8);
-            }
-        }
-        layout.spacer(2.0);
+        layout.meta_grid(&bank_cells);
     }
 
     if let Some(notes) = &context.notes {
@@ -4756,14 +5086,15 @@ async fn update_invoice_status(
 #[cfg(test)]
 mod tests {
     use super::{
-        InvoicePdfContext, InvoicePdfLineItem, build_invoice_pdf, invoice_pdf_footer_line,
+        InvoicePdfAgency, InvoicePdfContext, InvoicePdfLineItem, build_invoice_pdf,
+        invoice_pdf_footer_line,
     };
     use chrono::{NaiveDate, Utc};
     use uuid::Uuid;
 
     #[test]
     fn invoice_footer_includes_current_and_total_pages() {
-        assert_eq!(invoice_pdf_footer_line("GMED", 2, 5), "GMED · Page 2 of 5");
+        assert_eq!(invoice_pdf_footer_line("Page", 2, 5), "Page: 2/5");
     }
 
     #[test]
@@ -4798,12 +5129,21 @@ mod tests {
                 unit_price: "145.00".to_string(),
                 vat_rate: "0".to_string(),
                 is_cost_passthrough: false,
-                line_net: "145.00".to_string(),
-                line_vat: "0.00".to_string(),
                 line_gross: "145.00".to_string(),
                 notes: None,
             }],
-            dunning_events: Vec::new(),
+            agency: InvoicePdfAgency {
+                name: "GMED - Agentur für Patientenbetreuung".to_string(),
+                care_of: Some("Heorhii Hudiiev".to_string()),
+                address: Some("Albert-Schweitzer-Straße 56\n81735 München".to_string()),
+                phone: Some("+49 151 20943768".to_string()),
+                email: Some("contact@gmed-health.com".to_string()),
+                website: Some("https://gmed-health.com".to_string()),
+                bank_holder: Some("GMED".to_string()),
+                bank_name: Some("Test Bank".to_string()),
+                bank_swift: Some("TESTDEFF".to_string()),
+                bank_iban: Some("DE02120300000000202051".to_string()),
+            },
         };
 
         let bytes = build_invoice_pdf(&context).unwrap();

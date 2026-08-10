@@ -1383,6 +1383,16 @@ async fn external_invoices_round_trip_through_order_detail_and_status_update() {
     assert_eq!(items[0]["status"], "received");
     assert_eq!(items[0]["amount_gross"].as_str(), Some("119"));
 
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/external-invoices/{external_invoice_id}/update"),
+        &billing_bearer,
+        Some(json!({ "status": "approved" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
     let (status, body) = json_request(
         &app,
         "POST",

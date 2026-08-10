@@ -49,8 +49,8 @@ for key in "${required[@]}"; do
 done
 
 POSTGRES_DB="${POSTGRES_DB:-gmed}"
-PROD_ADMIN_EMAIL="${PROD_ADMIN_EMAIL:-admin@gmed.de}"
-PROD_ADMIN_NAME="${PROD_ADMIN_NAME:-System Admin}"
+PROD_ADMIN_EMAIL="${PROD_ADMIN_EMAIL:-h.hudiiev@gmed-health.com}"
+PROD_ADMIN_NAME="${PROD_ADMIN_NAME:-Heorhii Hudiiev}"
 
 echo "Waiting for Postgres before production data sanitizer"
 for attempt in {1..60}; do
@@ -239,6 +239,29 @@ SET
   password_changed_at = now(),
   updated_at = now()
 WHERE email = :'admin_email';
+
+DO $$
+DECLARE
+  total_users integer;
+  expected_admins integer;
+BEGIN
+  SELECT
+    count(*),
+    count(*) FILTER (
+      WHERE email = current_setting('gmed.sanitize.admin_email')
+        AND role = 'ceo'
+        AND is_active = true
+    )
+  INTO total_users, expected_admins
+  FROM users;
+
+  IF total_users <> 1 OR expected_admins <> 1 THEN
+    RAISE EXCEPTION
+      'Production bootstrap must leave exactly one active CEO admin (users=%, matching_admins=%)',
+      total_users,
+      expected_admins;
+  END IF;
+END $$;
 
 INSERT INTO system_settings (key, value, description, updated_by, updated_at)
 SELECT

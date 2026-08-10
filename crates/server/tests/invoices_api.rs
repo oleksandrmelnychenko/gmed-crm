@@ -1818,6 +1818,16 @@ async fn paid_invoice_and_external_invoice_materialize_accounting_ledger_without
         "POST",
         &format!("/api/v1/orders/{order_id}/external-invoices/{external_invoice_id}/update"),
         &billing_bearer,
+        Some(json!({ "status": "approved" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/external-invoices/{external_invoice_id}/update"),
+        &billing_bearer,
         Some(json!({
             "status": "paid"
         })),

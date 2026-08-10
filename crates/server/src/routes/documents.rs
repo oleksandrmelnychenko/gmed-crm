@@ -3,6 +3,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     path::{Path as FsPath, PathBuf},
+    sync::OnceLock,
 };
 
 use axum::{
@@ -2880,18 +2881,125 @@ async fn extract_text_from_image_bytes_windows(
     Ok(normalize_extracted_text(&text))
 }
 
-/// Upper bound for a single tesseract process. The child is run with
-/// `kill_on_drop`, so a timeout tears it down instead of just abandoning
-/// the waiter and leaving the OCR process running in the background.
-const OCR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+#[cfg(windows)]
+async fn extract_text_from_image_bytes_windows_bounded(
+    bytes: &[u8],
+) -> Result<Option<String>, &'static str> {
+    let timeout = document_ocr_timeout();
+    match tokio::time::timeout(timeout, extract_text_from_image_bytes_windows(bytes)).await {
+        Ok(result) => result,
+        Err(_) => {
+            tracing::warn!(
+                timeout_secs = timeout.as_secs(),
+                "Windows OCR timed out; trying local Tesseract"
+            );
+            Err(IMAGE_OCR_FAILED_MESSAGE)
+        }
+    }
+}
+
+/// The child is run with `kill_on_drop`, so a timeout tears it down instead of
+/// just abandoning the waiter and leaving the OCR process in the background.
+const DEFAULT_DOCUMENT_OCR_TIMEOUT_SECONDS: u64 = 30;
+const MAX_DOCUMENT_OCR_TIMEOUT_SECONDS: u64 = 120;
+const DEFAULT_DOCUMENT_OCR_MAX_CONCURRENCY: usize = 2;
+const MAX_DOCUMENT_OCR_MAX_CONCURRENCY: usize = 8;
+const DEFAULT_DOCUMENT_OCR_LANGUAGES: &str = "deu+eng+ukr+rus";
+static DOCUMENT_OCR_SEMAPHORE: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
+
+fn parse_document_ocr_timeout_seconds(value: Option<&str>) -> u64 {
+    value
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|seconds| (1..=MAX_DOCUMENT_OCR_TIMEOUT_SECONDS).contains(seconds))
+        .unwrap_or(DEFAULT_DOCUMENT_OCR_TIMEOUT_SECONDS)
+}
+
+fn document_ocr_timeout() -> std::time::Duration {
+    let configured = std::env::var("DOCUMENT_OCR_TIMEOUT_SECONDS").ok();
+    std::time::Duration::from_secs(parse_document_ocr_timeout_seconds(configured.as_deref()))
+}
+
+fn parse_document_ocr_max_concurrency(value: Option<&str>) -> usize {
+    value
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|value| (1..=MAX_DOCUMENT_OCR_MAX_CONCURRENCY).contains(value))
+        .unwrap_or(DEFAULT_DOCUMENT_OCR_MAX_CONCURRENCY)
+}
+
+fn document_ocr_semaphore() -> &'static tokio::sync::Semaphore {
+    DOCUMENT_OCR_SEMAPHORE.get_or_init(|| {
+        let configured = std::env::var("DOCUMENT_OCR_MAX_CONCURRENCY").ok();
+        tokio::sync::Semaphore::new(parse_document_ocr_max_concurrency(
+            configured.as_deref(),
+        ))
+    })
+}
+
+fn valid_tesseract_language_spec(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value.split('+').all(|language| {
+            !language.is_empty()
+                && language
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        })
+}
+
+fn document_ocr_languages() -> String {
+    std::env::var("DOCUMENT_OCR_LANGUAGES")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| valid_tesseract_language_spec(value))
+        .unwrap_or_else(|| DEFAULT_DOCUMENT_OCR_LANGUAGES.to_string())
+}
+
+fn tesseract_input_extension(original_filename: Option<&str>) -> &'static str {
+    match document_file_extension(original_filename).as_deref() {
+        Some("jpg" | "jpeg") => "jpg",
+        Some("bmp") => "bmp",
+        Some("tif" | "tiff") => "tiff",
+        Some("gif") => "gif",
+        Some("webp") => "webp",
+        _ => "png",
+    }
+}
+
+fn create_private_ocr_temp_file(path: &FsPath) -> std::io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path).map(drop)
+}
 
 async fn extract_text_from_image_bytes_tesseract(
     bytes: &[u8],
     original_filename: Option<&str>,
 ) -> Result<Option<String>, &'static str> {
-    let extension = document_file_extension(original_filename).unwrap_or_else(|| "png".to_string());
+    let timeout = document_ocr_timeout();
+    let deadline = tokio::time::Instant::now() + timeout;
+    let queue_started = std::time::Instant::now();
+    let _permit = match tokio::time::timeout(timeout, document_ocr_semaphore().acquire()).await {
+        Ok(Ok(permit)) => permit,
+        Ok(Err(_)) => return Err(IMAGE_OCR_UNAVAILABLE_MESSAGE),
+        Err(_) => {
+            tracing::warn!(
+                timeout_secs = timeout.as_secs(),
+                "tesseract OCR concurrency queue timed out"
+            );
+            return Err(IMAGE_OCR_FAILED_MESSAGE);
+        }
+    };
+    let queue_wait_ms = u64::try_from(queue_started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    let extension = tesseract_input_extension(original_filename);
     let mut temp_path = std::env::temp_dir();
     temp_path.push(format!("gmed-doc-ocr-{}.{}", Uuid::new_v4(), extension));
+    let languages = document_ocr_languages();
+    create_private_ocr_temp_file(&temp_path).map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?;
 
     let result = async {
         tokio::fs::write(&temp_path, bytes)
@@ -2905,15 +3013,31 @@ async fn extract_text_from_image_bytes_tesseract(
         };
 
         for executable in executables {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                tracing::warn!(
+                    timeout_secs = timeout.as_secs(),
+                    queue_wait_ms,
+                    "tesseract OCR deadline exhausted before process start"
+                );
+                return Err(IMAGE_OCR_FAILED_MESSAGE);
+            }
             let mut command = tokio::process::Command::new(executable);
             command
+                .env("OMP_THREAD_LIMIT", "1")
                 .arg(&temp_path)
                 .arg("stdout")
+                .arg("--oem")
+                .arg("1")
                 .arg("--psm")
-                .arg("6")
+                .arg("3")
+                .arg("-l")
+                .arg(&languages)
+                .arg("-c")
+                .arg("preserve_interword_spaces=1")
                 .kill_on_drop(true);
 
-            match tokio::time::timeout(OCR_TIMEOUT, command.output()).await {
+            match tokio::time::timeout(remaining, command.output()).await {
                 Ok(Ok(output)) => {
                     if output.status.success() {
                         let text = String::from_utf8_lossy(&output.stdout);
@@ -2929,7 +3053,8 @@ async fn extract_text_from_image_bytes_tesseract(
                 }
                 Err(_) => {
                     tracing::warn!(
-                        timeout_secs = OCR_TIMEOUT.as_secs(),
+                        timeout_secs = timeout.as_secs(),
+                        queue_wait_ms,
                         executable,
                         "tesseract OCR timed out"
                     );
@@ -2952,7 +3077,7 @@ async fn extract_text_from_image_bytes(
 ) -> (&'static str, Result<Option<String>, &'static str>) {
     #[cfg(windows)]
     {
-        match extract_text_from_image_bytes_windows(bytes).await {
+        match extract_text_from_image_bytes_windows_bounded(bytes).await {
             Ok(Some(extracted_text)) => ("windows_ocr", Ok(Some(extracted_text))),
             Ok(None) => {
                 match extract_text_from_image_bytes_tesseract(bytes, original_filename).await {
@@ -9856,8 +9981,8 @@ async fn extract_document_text_and_store(
         original_filename,
     )
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, document_id = %document_id, storage_key = %storage_key, "read document file for text extraction");
+    .map_err(|_| {
+        tracing::error!("read document file for text extraction failed");
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to read document file for text extraction",
@@ -21744,7 +21869,10 @@ mod tests {
         generated_typed_document_number, german_document_country, is_fixed_legal_document_template,
         is_lead_allowed_document_template, legal_agency_block_lines, legal_document_reference,
         localized_estimate_work_type_sections, new_admin_pdf, patient_sticker_agency_line,
-        pdf_mm_to_pt, trusted_contact_recipients_binding,
+        create_private_ocr_temp_file, parse_document_ocr_max_concurrency,
+        parse_document_ocr_timeout_seconds, pdf_mm_to_pt, tesseract_input_extension,
+        trusted_contact_recipients_binding,
+        valid_tesseract_language_spec,
     };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
     use chrono::{NaiveDate, TimeZone, Utc};
@@ -21785,6 +21913,58 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("no-cache")
         );
+    }
+
+    #[test]
+    fn tesseract_language_spec_rejects_cli_like_or_malformed_values() {
+        assert!(valid_tesseract_language_spec("deu+eng+ukr+rus"));
+        assert!(valid_tesseract_language_spec("deu_frak"));
+        assert!(!valid_tesseract_language_spec(""));
+        assert!(!valid_tesseract_language_spec("deu++eng"));
+        assert!(!valid_tesseract_language_spec("deu --psm 12"));
+        assert!(!valid_tesseract_language_spec("../../tmp/model"));
+    }
+
+    #[test]
+    fn document_ocr_timeout_rejects_zero_invalid_and_excessive_values() {
+        assert_eq!(parse_document_ocr_timeout_seconds(Some("45")), 45);
+        assert_eq!(parse_document_ocr_timeout_seconds(Some(" 120 ")), 120);
+        assert_eq!(parse_document_ocr_timeout_seconds(Some("0")), 30);
+        assert_eq!(parse_document_ocr_timeout_seconds(Some("121")), 30);
+        assert_eq!(parse_document_ocr_timeout_seconds(Some("invalid")), 30);
+        assert_eq!(parse_document_ocr_timeout_seconds(None), 30);
+    }
+
+    #[test]
+    fn document_ocr_concurrency_is_small_and_bounded() {
+        assert_eq!(parse_document_ocr_max_concurrency(Some("1")), 1);
+        assert_eq!(parse_document_ocr_max_concurrency(Some(" 8 ")), 8);
+        assert_eq!(parse_document_ocr_max_concurrency(Some("0")), 2);
+        assert_eq!(parse_document_ocr_max_concurrency(Some("9")), 2);
+        assert_eq!(parse_document_ocr_max_concurrency(Some("invalid")), 2);
+        assert_eq!(parse_document_ocr_max_concurrency(None), 2);
+    }
+
+    #[test]
+    fn tesseract_temp_extension_is_restricted_to_supported_images() {
+        assert_eq!(tesseract_input_extension(Some("scan.JPEG")), "jpg");
+        assert_eq!(tesseract_input_extension(Some("scan.tif")), "tiff");
+        assert_eq!(tesseract_input_extension(Some("scan.webp")), "webp");
+        assert_eq!(tesseract_input_extension(Some("scan.exe")), "png");
+        assert_eq!(tesseract_input_extension(None), "png");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tesseract_temp_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = std::env::temp_dir().join(format!("gmed-ocr-mode-test-{}", Uuid::new_v4()));
+        create_private_ocr_temp_file(&path).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        std::fs::remove_file(&path).unwrap();
+
+        assert_eq!(mode, 0o600);
     }
 
     fn legal_test_agency() -> AgencyContractSettings {

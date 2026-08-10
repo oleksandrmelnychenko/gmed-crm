@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass
 from io import BytesIO
+import logging
 import math
 import os
 import re
@@ -32,6 +33,12 @@ OCR_PRIMARY_LANGUAGES = os.environ.get("PARSER_OCR_PRIMARY_LANGUAGES", "deu+eng"
 OCR_CYRILLIC_LANGUAGES = os.environ.get(
     "PARSER_OCR_CYRILLIC_LANGUAGES", "deu+eng+rus+ukr"
 )
+OCR_UKRAINIAN_LANGUAGES = os.environ.get(
+    "PARSER_OCR_UKRAINIAN_LANGUAGES", "deu+eng+ukr"
+)
+OCR_RUSSIAN_LANGUAGES = os.environ.get(
+    "PARSER_OCR_RUSSIAN_LANGUAGES", "deu+eng+rus"
+)
 # Backwards-compatible name for deployments which introspect this module.
 OCR_LANGUAGES = OCR_CYRILLIC_LANGUAGES
 OCR_LOW_CONFIDENCE_THRESHOLD = float(
@@ -40,6 +47,11 @@ OCR_LOW_CONFIDENCE_THRESHOLD = float(
 OCR_MIN_IMAGE_DIMENSION = int(os.environ.get("PARSER_OCR_MIN_IMAGE_DIMENSION", "1000"))
 SCAN_SPARSE_TEXT_CHARS = int(os.environ.get("PARSER_SCAN_SPARSE_TEXT_CHARS", "240"))
 OCR_DESKEW_ENABLED = os.environ.get("PARSER_OCR_DESKEW", "true").lower() not in {
+    "0",
+    "false",
+    "no",
+}
+OCR_MULTIPASS_ENABLED = os.environ.get("PARSER_OCR_MULTIPASS", "true").lower() not in {
     "0",
     "false",
     "no",
@@ -54,14 +66,29 @@ PADDLE_DETECTION_MODEL = "PP-OCRv5_mobile_det"
 PADDLE_RECOGNITION_MODEL = "latin_PP-OCRv5_mobile_rec"
 PADDLE_DETECTION_SIDE_LENGTH = 1280
 PADDLE_CPU_THREADS = int(os.environ.get("PARSER_PADDLE_CPU_THREADS", "4"))
+PADDLE_FAILURE_THRESHOLD = int(
+    os.environ.get("PARSER_PADDLE_FAILURE_THRESHOLD", "2")
+)
+PADDLE_COOLDOWN_SECONDS = float(
+    os.environ.get("PARSER_PADDLE_COOLDOWN_SECONDS", "60")
+)
+PADDLE_ISOLATE_PROCESS = os.environ.get(
+    "PARSER_PADDLE_ISOLATE_PROCESS", "true"
+).lower() not in {"0", "false", "no"}
 
 _PADDLE_OCR: Any | None = None
 _PADDLE_OCR_INIT_FAILED = False
 _PADDLE_OCR_LOCK = threading.Lock()
 _PADDLE_INFERENCE_LOCK = threading.Lock()
+_PADDLE_RUNTIME: Any | None = None
+_PADDLE_RUNTIME_LOCK = threading.Lock()
+
+LOGGER = logging.getLogger("gmed.clinical_document_parser.extraction")
 
 _WORD_PATTERN = re.compile(r"[^\W\d_]{2,}", re.UNICODE)
 _CYRILLIC_PATTERN = re.compile(r"[\u0400-\u052f]")
+_UKRAINIAN_DISTINCTIVE_PATTERN = re.compile(r"[іїєґІЇЄҐ]")
+_RUSSIAN_DISTINCTIVE_PATTERN = re.compile(r"[ыэёъЫЭЁЪ]")
 _OSD_ROTATE_PATTERN = re.compile(r"^Rotate:\s*(\d+)", re.MULTILINE)
 _OSD_ORIENTATION_CONF_PATTERN = re.compile(
     r"^Orientation confidence:\s*([\d.]+)", re.MULTILINE
@@ -364,6 +391,8 @@ def _ocr_weak_pdf_pages(
             _native_fallback_metadata(index + 1, page_text, "pdf_render_failed")
             for index, page_text in enumerate(recovered)
         )
+        if not pages:
+            pages = (_native_fallback_metadata(None, "", "pdf_render_failed"),)
         return _make_result(text, len(recovered), pages)
 
     extracted_pages: list[str] = []
@@ -431,6 +460,7 @@ def _ocr_weak_pdf_pages(
                 # A short native fragment is still more useful than dropping
                 # the page when only its OCR path is malformed.
                 outcome = None
+                route_reason = "ocr_failed_native_fragment_preserved"
             finally:
                 _close_resource(image)
                 _close_resource(bitmap)
@@ -443,11 +473,14 @@ def _ocr_weak_pdf_pages(
                 )
             else:
                 page_text = native_text
-                fallback_reason = (
-                    "ocr_timeout_native_fragment_preserved"
-                    if outcome is not None and outcome.timed_out
-                    else "ocr_not_better_native_fragment_preserved"
-                )
+                if route_reason == "document_ocr_deadline_exhausted":
+                    fallback_reason = route_reason
+                elif outcome is not None and outcome.timed_out:
+                    fallback_reason = "ocr_timeout_native_fragment_preserved"
+                elif route_reason == "ocr_failed_native_fragment_preserved":
+                    fallback_reason = route_reason
+                else:
+                    fallback_reason = "ocr_not_better_native_fragment_preserved"
                 page_metadata.append(
                     PageExtractionMetadata(
                         page_number=page_number + 1,
@@ -501,7 +534,9 @@ def _ocr_pil_image(image: object, deadline: float, text_hint: str) -> _OcrOutcom
     prepared = None
     oriented = None
     deskewed = None
+    thresholded = None
     try:
+        page_deadline = min(deadline, time.monotonic() + OCR_PAGE_TIMEOUT_SECONDS)
         try:
             prepared = _prepare_image(image)
         except Exception:
@@ -509,7 +544,7 @@ def _ocr_pil_image(image: object, deadline: float, text_hint: str) -> _OcrOutcom
             # Tesseract directly; preprocessing is an accuracy enhancement.
             prepared = image
 
-        rotation, script = _detect_orientation(prepared, deadline)
+        rotation, script = _detect_orientation(prepared, page_deadline)
         oriented = prepared
         if rotation:
             try:
@@ -538,16 +573,32 @@ def _ocr_pil_image(image: object, deadline: float, text_hint: str) -> _OcrOutcom
                 deskew_angle = 0.0
 
         primary_languages = _select_ocr_languages(text_hint, script)
-        primary = _run_ocr_engine(deskewed, primary_languages, deadline)
+        primary = _run_ocr_engine(deskewed, primary_languages, page_deadline)
         primary = _replace_ocr_geometry(primary, rotation, deskew_angle)
 
         if (
-            primary_languages != OCR_CYRILLIC_LANGUAGES
+            OCR_MULTIPASS_ENABLED
+            and _should_retry_preprocessing(primary)
+            and time.monotonic() < page_deadline
+        ):
+            try:
+                thresholded = _binarize_image(deskewed)
+                alternate = _run_ocr_engine(
+                    thresholded, primary_languages, page_deadline
+                )
+                alternate = _replace_ocr_geometry(alternate, rotation, deskew_angle)
+                if alternate.combined_quality > primary.combined_quality + 0.01:
+                    primary = alternate
+            except Exception:
+                LOGGER.warning("Alternate OCR preprocessing failed", exc_info=False)
+
+        if (
+            not _languages_include_cyrillic(primary_languages)
             and _should_try_cyrillic_fallback(primary)
-            and time.monotonic() < deadline
+            and time.monotonic() < page_deadline
         ):
             fallback = _run_ocr_engine(
-                deskewed, OCR_CYRILLIC_LANGUAGES, deadline
+                deskewed, OCR_CYRILLIC_LANGUAGES, page_deadline
             )
             fallback = _replace_ocr_geometry(fallback, rotation, deskew_angle)
             if fallback.combined_quality > primary.combined_quality + 0.02:
@@ -555,7 +606,7 @@ def _ocr_pil_image(image: object, deadline: float, text_hint: str) -> _OcrOutcom
         return primary
     finally:
         closed_resources: set[int] = set()
-        for resource in (deskewed, oriented, prepared):
+        for resource in (thresholded, deskewed, oriented, prepared):
             if resource is None or resource is image or id(resource) in closed_resources:
                 continue
             closed_resources.add(id(resource))
@@ -590,6 +641,39 @@ def _prepare_image(image: object) -> object:
     return prepared
 
 
+def _binarize_image(image: object) -> object:
+    from PIL import ImageOps
+
+    grayscale = ImageOps.grayscale(image)  # type: ignore[arg-type]
+    try:
+        histogram = grayscale.histogram()
+        total = sum(histogram)
+        weighted_sum = sum(index * count for index, count in enumerate(histogram))
+        background_weight = 0
+        background_sum = 0.0
+        best_variance = -1.0
+        threshold = 180
+        for value, count in enumerate(histogram):
+            background_weight += count
+            if background_weight == 0:
+                continue
+            foreground_weight = total - background_weight
+            if foreground_weight == 0:
+                break
+            background_sum += value * count
+            background_mean = background_sum / background_weight
+            foreground_mean = (weighted_sum - background_sum) / foreground_weight
+            variance = background_weight * foreground_weight * (
+                background_mean - foreground_mean
+            ) ** 2
+            if variance > best_variance:
+                best_variance = variance
+                threshold = value
+        return grayscale.point(lambda pixel: 255 if pixel > threshold else 0)
+    finally:
+        grayscale.close()
+
+
 def _detect_orientation(image: object, deadline: float) -> tuple[int, str | None]:
     import pytesseract
 
@@ -599,7 +683,7 @@ def _detect_orientation(image: object, deadline: float) -> tuple[int, str | None
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         return 0, None
-    timeout = max(0.1, min(OCR_OSD_TIMEOUT_SECONDS, remaining))
+    timeout = min(OCR_OSD_TIMEOUT_SECONDS, remaining)
     try:
         output = image_to_osd(image, timeout=timeout)
     except (RuntimeError, TypeError, ValueError):
@@ -680,6 +764,10 @@ def _projection_score(image: object, angle: float) -> float:
 
 
 def _select_ocr_languages(text_hint: str, script: str | None) -> str:
+    if _UKRAINIAN_DISTINCTIVE_PATTERN.search(text_hint):
+        return OCR_UKRAINIAN_LANGUAGES
+    if _RUSSIAN_DISTINCTIVE_PATTERN.search(text_hint):
+        return OCR_RUSSIAN_LANGUAGES
     if _CYRILLIC_PATTERN.search(text_hint):
         return OCR_CYRILLIC_LANGUAGES
     if script and "cyrillic" in script.casefold():
@@ -687,18 +775,23 @@ def _select_ocr_languages(text_hint: str, script: str | None) -> str:
     return OCR_PRIMARY_LANGUAGES
 
 
+def _languages_include_cyrillic(languages: str) -> bool:
+    configured = set(languages.casefold().split("+"))
+    return bool(configured & {"rus", "ukr", "bel", "bul", "srp", "mkd"})
+
+
 def _run_ocr_engine(image: object, languages: str, deadline: float) -> _OcrOutcome:
     # The configured Paddle recognition model is Latin-only. Cyrillic pages
     # retain the existing local Tesseract language route.
-    if OCR_ENGINE == "paddle" and languages != OCR_CYRILLIC_LANGUAGES:
+    if OCR_ENGINE == "paddle" and not _languages_include_cyrillic(languages):
         try:
             paddle_outcome = _run_paddle(image, deadline)
             if paddle_outcome.text.strip():
                 return paddle_outcome
-        except Exception:
+        except Exception as exc:
             # Model import, initialization, download, and inference failures
             # are page-local. Tesseract remains the deterministic fallback.
-            pass
+            LOGGER.warning("Paddle OCR failed; using Tesseract (%s)", type(exc).__name__)
     return _run_tesseract(image, languages, deadline)
 
 
@@ -735,29 +828,109 @@ def _get_paddle_ocr() -> object:
         return _PADDLE_OCR
 
 
+def _get_paddle_runtime() -> object:
+    global _PADDLE_RUNTIME
+
+    if _PADDLE_RUNTIME is not None:
+        return _PADDLE_RUNTIME
+    with _PADDLE_RUNTIME_LOCK:
+        if _PADDLE_RUNTIME is None:
+            from .paddle_runtime import PaddleProcessRuntime, PaddleRuntimeOptions
+
+            _PADDLE_RUNTIME = PaddleProcessRuntime(
+                PaddleRuntimeOptions(
+                    detection_model=PADDLE_DETECTION_MODEL,
+                    recognition_model=PADDLE_RECOGNITION_MODEL,
+                    detection_side_length=PADDLE_DETECTION_SIDE_LENGTH,
+                    cpu_threads=PADDLE_CPU_THREADS,
+                ),
+                failure_threshold=PADDLE_FAILURE_THRESHOLD,
+                cooldown_seconds=PADDLE_COOLDOWN_SECONDS,
+            )
+        return _PADDLE_RUNTIME
+
+
 def _run_paddle(image: object, deadline: float) -> _OcrOutcome:
     remaining = min(OCR_PAGE_TIMEOUT_SECONDS, deadline - time.monotonic())
     if remaining <= 0:
         return _empty_ocr_outcome("latin", engine="paddle", timed_out=True)
-    acquired = _PADDLE_INFERENCE_LOCK.acquire(timeout=max(0.1, remaining))
+    acquired = _PADDLE_INFERENCE_LOCK.acquire(timeout=remaining)
     if not acquired:
         return _empty_ocr_outcome("latin", engine="paddle", timed_out=True)
 
     try:
-        call_deadline = min(deadline, time.monotonic() + OCR_PAGE_TIMEOUT_SECONDS)
-        pipeline = _get_paddle_ocr()
         paddle_input = _paddle_image_array(image)
-        results = pipeline.predict(  # type: ignore[attr-defined]
-            paddle_input,
-            text_det_limit_side_len=PADDLE_DETECTION_SIDE_LENGTH,
-            text_det_limit_type="max",
-        )
+        call_deadline = min(deadline, time.monotonic() + OCR_PAGE_TIMEOUT_SECONDS)
+        if PADDLE_ISOLATE_PROCESS:
+            runtime = _get_paddle_runtime()
+            results = runtime.predict(  # type: ignore[attr-defined]
+                paddle_input, max(0.0, call_deadline - time.monotonic())
+            )
+        else:
+            pipeline = _get_paddle_ocr()
+            results = pipeline.predict(  # type: ignore[attr-defined]
+                paddle_input,
+                text_det_limit_side_len=PADDLE_DETECTION_SIDE_LENGTH,
+                text_det_limit_type="max",
+            )
         outcome = _outcome_from_paddle_results(results)
         if time.monotonic() > call_deadline:
             return _empty_ocr_outcome("latin", engine="paddle", timed_out=True)
-        return outcome
+        return _scale_paddle_outcome(outcome, image, paddle_input)
+    except TimeoutError:
+        LOGGER.warning("Paddle OCR exceeded its page deadline")
+        return _empty_ocr_outcome("latin", engine="paddle", timed_out=True)
     finally:
         _PADDLE_INFERENCE_LOCK.release()
+
+
+def _scale_paddle_outcome(
+    outcome: _OcrOutcome, source_image: object, paddle_input: object
+) -> _OcrOutcome:
+    source_size = getattr(source_image, "size", None)
+    input_shape = getattr(paddle_input, "shape", None)
+    if (
+        not isinstance(source_size, tuple)
+        or len(source_size) != 2
+        or not isinstance(input_shape, tuple)
+        or len(input_shape) < 2
+        or not input_shape[0]
+        or not input_shape[1]
+    ):
+        return outcome
+    scale_x = float(source_size[0]) / float(input_shape[1])
+    scale_y = float(source_size[1]) / float(input_shape[0])
+    if abs(scale_x - 1.0) < 0.001 and abs(scale_y - 1.0) < 0.001:
+        return outcome
+    blocks = tuple(
+        OcrBlockMetadata(
+            block_number=block.block_number,
+            bbox=(
+                round(block.bbox[0] * scale_x),
+                round(block.bbox[1] * scale_y),
+                round(block.bbox[2] * scale_x),
+                round(block.bbox[3] * scale_y),
+            ),
+            start_char=block.start_char,
+            end_char=block.end_char,
+            confidence=block.confidence,
+            word_count=block.word_count,
+        )
+        for block in outcome.blocks
+    )
+    return _OcrOutcome(
+        text=outcome.text,
+        confidence=outcome.confidence,
+        low_confidence_word_ratio=outcome.low_confidence_word_ratio,
+        languages=outcome.languages,
+        engine=outcome.engine,
+        word_count=outcome.word_count,
+        blocks=blocks,
+        text_quality=outcome.text_quality,
+        rotation=outcome.rotation,
+        deskew_angle=outcome.deskew_angle,
+        timed_out=outcome.timed_out,
+    )
 
 
 def _paddle_image_array(image: object) -> object:
@@ -807,6 +980,8 @@ def _outcome_from_paddle_results(results: object) -> _OcrOutcome:
             bbox = _paddle_bbox(boxes[index]) if index < len(boxes) else (0, 0, 0, 0)
             rows.append({"text": text, "confidence": confidence, "bbox": bbox})
 
+    rows = _sort_paddle_rows(rows)
+
     output_parts: list[str] = []
     blocks: list[OcrBlockMetadata] = []
     confidence_weights: list[tuple[float, int]] = []
@@ -827,7 +1002,9 @@ def _outcome_from_paddle_results(results: object) -> _OcrOutcome:
         confidence = row["confidence"]
         word_count = max(1, len(_WORD_PATTERN.findall(text)))
         total_words += word_count
-        if confidence is not None:
+        if confidence is None:
+            low_confidence_words += word_count
+        else:
             confidence_weights.append((float(confidence), max(1, len(text))))
             if confidence < OCR_LOW_CONFIDENCE_THRESHOLD:
                 low_confidence_words += word_count
@@ -850,8 +1027,7 @@ def _outcome_from_paddle_results(results: object) -> _OcrOutcome:
         confidence=_weighted_confidence(confidence_weights),
         low_confidence_word_ratio=(
             low_confidence_words / total_words
-            if confidence_weights and total_words
-            else None
+            if total_words else None
         ),
         languages="latin",
         engine="paddle",
@@ -859,6 +1035,124 @@ def _outcome_from_paddle_results(results: object) -> _OcrOutcome:
         blocks=tuple(blocks),
         text_quality=quality,
     )
+
+
+def _sort_paddle_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return stable reading order for tables and common two-column letters."""
+
+    if len(rows) < 2 or any(row["bbox"] == (0, 0, 0, 0) for row in rows):
+        return rows
+    top_sorted = _row_major_order(rows)
+    if len(rows) < 4:
+        return top_sorted
+    if _looks_like_table(top_sorted):
+        return top_sorted
+
+    left_edge = min(row["bbox"][0] for row in rows)
+    right_edge = max(row["bbox"][0] + row["bbox"][2] for row in rows)
+    page_span = max(1, right_edge - left_edge)
+    narrow = [row for row in rows if row["bbox"][2] < page_span * 0.58]
+    if len(narrow) < 4:
+        return top_sorted
+
+    centers = sorted(
+        (row["bbox"][0] + row["bbox"][2] / 2, index)
+        for index, row in enumerate(narrow)
+    )
+    gaps = [
+        centers[index + 1][0] - centers[index][0]
+        for index in range(len(centers) - 1)
+    ]
+    split_index = max(range(len(gaps)), key=gaps.__getitem__)
+    if gaps[split_index] < page_span * 0.18:
+        return top_sorted
+    split = (centers[split_index][0] + centers[split_index + 1][0]) / 2
+    left_column = [
+        row for row in narrow if row["bbox"][0] + row["bbox"][2] / 2 <= split
+    ]
+    right_column = [
+        row for row in narrow if row["bbox"][0] + row["bbox"][2] / 2 > split
+    ]
+    if len(left_column) < 2 or len(right_column) < 2:
+        return top_sorted
+
+    left_range = (
+        min(row["bbox"][1] for row in left_column),
+        max(row["bbox"][1] + row["bbox"][3] for row in left_column),
+    )
+    right_range = (
+        min(row["bbox"][1] for row in right_column),
+        max(row["bbox"][1] + row["bbox"][3] for row in right_column),
+    )
+    overlap = min(left_range[1], right_range[1]) - max(left_range[0], right_range[0])
+    shorter_height = max(
+        1,
+        min(left_range[1] - left_range[0], right_range[1] - right_range[0]),
+    )
+    if overlap / shorter_height < 0.35:
+        return top_sorted
+
+    column_top = min(left_range[0], right_range[0])
+    column_bottom = max(left_range[1], right_range[1])
+    spanning = [row for row in rows if row not in narrow]
+    if any(column_top < row["bbox"][1] < column_bottom for row in spanning):
+        return top_sorted
+    prefix = [row for row in spanning if row["bbox"][1] <= column_top]
+    suffix = [row for row in spanning if row not in prefix]
+    def sort_key(row: dict[str, Any]) -> tuple[int, int]:
+        return (row["bbox"][1], row["bbox"][0])
+
+    return (
+        sorted(prefix, key=sort_key)
+        + sorted(left_column, key=sort_key)
+        + sorted(right_column, key=sort_key)
+        + sorted(suffix, key=sort_key)
+    )
+
+
+def _looks_like_table(rows: list[dict[str, Any]]) -> bool:
+    """Detect repeated numeric cells aligned on shared row baselines."""
+
+    groups = _aligned_row_groups(rows)
+    numeric_rows = 0
+    for group in groups:
+        if len(group) < 2:
+            continue
+        ordered = sorted(group, key=lambda row: row["bbox"][0])
+        if any(re.search(r"(?<!\w)[<>]?\d+(?:[.,]\d+)?", str(row["text"])) for row in ordered[1:]):
+            numeric_rows += 1
+    return numeric_rows >= 3
+
+
+def _row_major_order(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    groups = _aligned_row_groups(rows)
+    groups.sort(key=lambda group: min(row["bbox"][1] for row in group))
+    return [
+        row
+        for group in groups
+        for row in sorted(group, key=lambda item: item["bbox"][0])
+    ]
+
+
+def _aligned_row_groups(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    groups: list[list[dict[str, Any]]] = []
+    for row in sorted(rows, key=lambda item: item["bbox"][1]):
+        top = row["bbox"][1]
+        height = max(1, row["bbox"][3])
+        center = top + height / 2
+        matched: list[dict[str, Any]] | None = None
+        for group in groups:
+            group_row = group[0]
+            group_height = max(1, group_row["bbox"][3])
+            group_center = group_row["bbox"][1] + group_height / 2
+            if abs(center - group_center) <= max(height, group_height) * 0.65:
+                matched = group
+                break
+        if matched is None:
+            groups.append([row])
+        else:
+            matched.append(row)
+    return groups
 
 
 def _paddle_result_payload(result: object) -> dict[str, Any]:
@@ -937,6 +1231,16 @@ def _paddle_block_separator(
 ) -> str:
     if previous is None or previous == (0, 0, 0, 0) or current == (0, 0, 0, 0):
         return "\n"
+    previous_top, previous_height = previous[1], max(1, previous[3])
+    current_top, current_height = current[1], max(1, current[3])
+    vertical_overlap = min(
+        previous_top + previous_height, current_top + current_height
+    ) - max(previous_top, current_top)
+    if (
+        vertical_overlap / min(previous_height, current_height) >= 0.50
+        and current[0] >= previous[0] + previous[2]
+    ):
+        return "\t"
     previous_bottom = previous[1] + previous[3]
     gap = current[1] - previous_bottom
     typical_height = max(1, previous[3], current[3])
@@ -949,7 +1253,7 @@ def _run_tesseract(image: object, languages: str, deadline: float) -> _OcrOutcom
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         return _empty_ocr_outcome(languages, timed_out=True)
-    timeout = max(0.1, min(OCR_PAGE_TIMEOUT_SECONDS, remaining))
+    timeout = min(OCR_PAGE_TIMEOUT_SECONDS, remaining)
     image_to_data = getattr(pytesseract, "image_to_data", None)
     output = getattr(getattr(pytesseract, "Output", None), "DICT", None)
     if callable(image_to_data) and output is not None:
@@ -973,8 +1277,9 @@ def _run_tesseract(image: object, languages: str, deadline: float) -> _OcrOutcom
     try:
         text = image_to_string(image, lang=languages, timeout=timeout).strip()
     except TypeError:
-        # Compatibility for lightweight mocks and pytesseract <0.3.9.
-        text = image_to_string(image, lang=languages).strip()
+        # Never retry without a timeout. An older or incompatible pytesseract
+        # cannot provide the hard page-deadline guarantee required here.
+        return _empty_ocr_outcome(languages, timed_out=True)
     except RuntimeError as exc:
         return _empty_ocr_outcome(languages, timed_out="timeout" in str(exc).casefold())
     quality = _assess_text_quality(text)
@@ -1048,10 +1353,13 @@ def _outcome_from_tesseract_data(data: dict[str, Any], languages: str) -> _OcrOu
             for word in block_words
             if word["confidence"] is not None
         ]
-        for confidence, weight in confidences:
-            all_confidences.append((confidence, weight))
-            if confidence < OCR_LOW_CONFIDENCE_THRESHOLD:
-                low_confidence_words += 1
+        all_confidences.extend(confidences)
+        low_confidence_words += sum(
+            1
+            for word in block_words
+            if word["confidence"] is None
+            or float(word["confidence"]) < OCR_LOW_CONFIDENCE_THRESHOLD
+        )
         total_words += len(block_words)
         block_metadata.append(
             OcrBlockMetadata(
@@ -1171,6 +1479,15 @@ def _should_try_cyrillic_fallback(outcome: _OcrOutcome) -> bool:
             and outcome.confidence < OCR_LOW_CONFIDENCE_THRESHOLD
         )
         or (outcome.low_confidence_word_ratio or 0.0) > 0.35
+    )
+
+
+def _should_retry_preprocessing(outcome: _OcrOutcome) -> bool:
+    return bool(
+        not outcome.text_quality.reliable
+        or outcome.confidence is None
+        or outcome.confidence < 78.0
+        or (outcome.low_confidence_word_ratio or 0.0) > 0.20
     )
 
 
@@ -1333,10 +1650,11 @@ def _metadata_for_ocr(
     page_number: int, route_reason: str, native_text: str, outcome: _OcrOutcome
 ) -> PageExtractionMetadata:
     native_quality = _assess_text_quality(native_text)
+    effective_reason = "ocr_timeout_no_text" if outcome.timed_out else route_reason
     return PageExtractionMetadata(
         page_number=page_number,
         source="ocr",
-        route_reason=route_reason,
+        route_reason=effective_reason,
         native_quality=native_quality.score,
         native_char_count=native_quality.char_count,
         ocr_confidence=outcome.confidence,
@@ -1351,7 +1669,7 @@ def _metadata_for_ocr(
 
 
 def _native_fallback_metadata(
-    page_number: int, text: str, route_reason: str
+    page_number: int | None, text: str, route_reason: str
 ) -> PageExtractionMetadata:
     quality = _assess_text_quality(text)
     return PageExtractionMetadata(

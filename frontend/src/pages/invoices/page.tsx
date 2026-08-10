@@ -15,6 +15,7 @@ import { useSearchParams } from "react-router-dom";
 import {
   ArrowUpRight,
   Download,
+  Eye,
   FileText,
   Pencil,
   LoaderCircle,
@@ -39,6 +40,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -220,22 +222,6 @@ function quoteOptionLabel(quote: QuoteOption) {
   ]
     .filter((value) => value.trim().length > 0)
     .join(" | ");
-}
-
-function openPdfBlobPreview(blob: Blob, popupMessage: string) {
-  const url = URL.createObjectURL(blob);
-  const previewWindow = window.open(url, "_blank", "noopener,noreferrer");
-  if (!previewWindow) {
-    URL.revokeObjectURL(url);
-    throw new Error(popupMessage);
-  }
-
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
-
-async function openInvoicePdfPreview(invoiceId: string, popupMessage: string) {
-  const blob = await fetchInvoicePdfBlob(invoiceId);
-  openPdfBlobPreview(blob, popupMessage);
 }
 
 async function downloadInvoicePdf(
@@ -457,7 +443,6 @@ function useStaffInvoicesPageContent() {
     noSupportingDocumentsDescription: t.invoices_workspace_no_supporting_documents_description,
     linkedOrderDocument: t.invoices_workspace_linked_order_document,
     openDocuments: t.invoices_workspace_open_documents,
-    popupBlocked: t.invoices_workspace_popup_blocked,
     pdfOpenError: t.invoices_workspace_pdf_open_error,
     pdfDownloadError: t.invoices_workspace_pdf_download_error,
     system: t.invoices_workspace_system,
@@ -706,6 +691,11 @@ function useStaffInvoicesPageContent() {
     setInvoiceUiField("dunningForm", value);
   const setDunningDialogOpen = (value: SetStateAction<boolean>) =>
     setInvoiceUiField("dunningDialogOpen", value);
+  const [invoicePdfPreview, setInvoicePdfPreview] = useState<{
+    url: string;
+    title: string;
+  } | null>(null);
+  const [invoicePdfPreviewBusy, setInvoicePdfPreviewBusy] = useState(false);
   const deferredSearch = useDeferredValue(filters.search);
   const effectiveFilters = useMemo(() => ({ ...filters, search: deferredSearch }), [filters, deferredSearch]);
 
@@ -739,6 +729,33 @@ function useStaffInvoicesPageContent() {
     filters.status !== "" ||
     filters.invoiceType !== "";
   const invoiceParam = searchParams.get("invoice") ?? "";
+
+  useEffect(() => {
+    return () => {
+      if (invoicePdfPreview?.url) {
+        URL.revokeObjectURL(invoicePdfPreview.url);
+      }
+    };
+  }, [invoicePdfPreview?.url]);
+
+  async function handleOpenInvoicePdfPreview(invoice: InvoiceItem) {
+    setInvoicePdfPreviewBusy(true);
+    setDetailError(null);
+    try {
+      const blob = await fetchInvoicePdfBlob(invoice.id);
+      const url = URL.createObjectURL(blob);
+      setInvoicePdfPreview({
+        url,
+        title: invoice.invoice_number
+          ? `${invoice.invoice_number}.pdf`
+          : t.revenue_invoices_pdf_fallback_filename,
+      });
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : text.pdfOpenError);
+    } finally {
+      setInvoicePdfPreviewBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (selectedInvoiceId === invoiceParam) return;
@@ -1472,10 +1489,10 @@ function useStaffInvoicesPageContent() {
                   maxFrozenColumns={ACCOUNTING_MAX_FROZEN_COLUMNS}
                   toolbarStart={
                     <>
-                      <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                      <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
                         {titleWithDot(text.accountingTitle)}
                       </span>
-                      <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+                      <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
                       <ToolbarField label={t.dash_this_year}>
                       <Input
                         type="number"
@@ -1539,9 +1556,12 @@ function useStaffInvoicesPageContent() {
               <section>
                   <DataTableSurface
                     toolbarStart={
-                      <span className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
-                        {titleWithDot(text.monthlyEuer)}
-                      </span>
+                      <>
+                        <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
+                          {titleWithDot(text.monthlyEuer)}
+                        </span>
+                        <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
+                      </>
                     }
                     rows={accountingMonthlyPagination.pagedRows}
                     columns={accountingMonthlyTableColumns}
@@ -1597,10 +1617,10 @@ function useStaffInvoicesPageContent() {
             maxFrozenColumns={INVOICE_MAX_FROZEN_COLUMNS}
             toolbarStart={
               <>
-            <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+            <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
               {titleWithDot(t.invoices_title)}
             </span>
-            <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+            <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
             <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -1942,6 +1962,7 @@ function useStaffInvoicesPageContent() {
           setVisibilityError(null);
           setPayerError(null);
           setDetailError(null);
+          setInvoicePdfPreview(null);
           syncQuery({ invoice: null }, { replace: false });
         }
       }}>
@@ -1966,7 +1987,7 @@ function useStaffInvoicesPageContent() {
                               : "bg-sky-500",
                       )}
                     />
-                    <div className="grid gap-3 pl-3 md:grid-cols-[minmax(0,1fr)_180px]">
+                    <div className="grid gap-4 pl-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="h-px w-8 bg-border" />
@@ -1988,29 +2009,39 @@ function useStaffInvoicesPageContent() {
                           </Badge>
                         </div>
                       </div>
-                      <div className="flex flex-col justify-between gap-4 border-l border-dashed border-border pl-4">
-                        <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                          {text.previewPdf}
-                        </span>
-                        <div className="flex flex-col gap-2">
+                      <div className="flex flex-wrap items-center gap-3 border-t border-dashed border-border pt-3">
+                        <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-orange-50 text-orange-700">
+                          <FileText aria-hidden="true" className="size-4" />
+                        </div>
+                        <div className="min-w-[12rem] flex-1">
+                          <p className="truncate text-sm font-medium text-foreground">
+                            {detail.invoice_number}.pdf
+                          </p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {invoiceTypeLabel(detail.invoice_type)} · PDF
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
-                            className="justify-center rounded-lg"
-                            onClick={() =>
-                              void openInvoicePdfPreview(detail.id, text.popupBlocked).catch((error) =>
-                                setDetailError(error instanceof Error ? error.message : text.pdfOpenError),
-                              )
-                            }
+                            className="h-8 gap-1.5 rounded-lg"
+                            disabled={invoicePdfPreviewBusy}
+                            onClick={() => void handleOpenInvoicePdfPreview(detail)}
                           >
+                            {invoicePdfPreviewBusy ? (
+                              <LoaderCircle className="size-3.5 animate-spin" />
+                            ) : (
+                              <Eye className="size-3.5" />
+                            )}
                             {text.previewPdf}
                           </Button>
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
-                            className="justify-center rounded-lg"
+                            className="h-8 gap-1.5 rounded-lg"
                             onClick={() =>
                               void downloadInvoicePdf(
                                 detail.id,
@@ -2560,6 +2591,59 @@ function useStaffInvoicesPageContent() {
           </AdminSheetScaffold>
         </SheetContent>
       </Sheet>
+
+      <Dialog
+        open={Boolean(invoicePdfPreview)}
+        onOpenChange={(open) => {
+          if (!open) setInvoicePdfPreview(null);
+        }}
+      >
+        <DialogContent className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 duration-0 data-closed:animate-none data-open:animate-none sm:h-[min(88vh,52rem)] sm:w-[min(96vw,84rem)] sm:max-w-[84rem]">
+          <DialogHeader className="border-b border-border px-4 py-3 pr-14 sm:px-5 sm:pr-14">
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <div className="min-w-0">
+                <DialogTitle className="truncate text-base">
+                  {invoicePdfPreview?.title ?? text.previewPdf}
+                </DialogTitle>
+                <DialogDescription className="truncate">
+                  application/pdf
+                </DialogDescription>
+              </div>
+              {detail ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 shrink-0 gap-1.5 rounded-lg"
+                  onClick={() =>
+                    void downloadInvoicePdf(
+                      detail.id,
+                      detail.invoice_number ? `${detail.invoice_number}.pdf` : "",
+                      t.revenue_invoices_pdf_fallback_filename,
+                    ).catch((error) =>
+                      setDetailError(
+                        error instanceof Error ? error.message : text.pdfDownloadError,
+                      ),
+                    )
+                  }
+                >
+                  <Download className="size-3.5" />
+                  {text.downloadPdf}
+                </Button>
+              ) : null}
+            </div>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 bg-slate-50 p-3">
+            {invoicePdfPreview ? (
+              <iframe
+                title={invoicePdfPreview.title}
+                src={invoicePdfPreview.url}
+                className="h-full min-h-[32rem] w-full rounded-lg border border-border bg-white"
+              />
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={dunningDialogOpen} onOpenChange={setDunningDialogOpen}>
         <DialogContent className="sm:max-w-xl">

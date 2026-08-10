@@ -197,11 +197,12 @@ to migrate stored ciphertexts.
 
 By default `scripts/deploy-dev.sh` builds images on the DEV host from
 the checked-out branch. To smoke-test the exact GHCR release that will
-go to PROD, set both optional image pins in the DEV SOPS bundle:
+go to PROD, set all three optional image pins in the DEV SOPS bundle:
 
 ```bash
 GMED_BACKEND_IMAGE=ghcr.io/oleksandrmelnychenko/gmed-crm-server@sha256:...
 GMED_FRONTEND_IMAGE=ghcr.io/oleksandrmelnychenko/gmed-crm-frontend@sha256:...
+GMED_PARSER_IMAGE=ghcr.io/oleksandrmelnychenko/gmed-crm-clinical-document-parser@sha256:...
 ```
 
 Then re-run:
@@ -210,7 +211,7 @@ Then re-run:
 ssh gmed@console-dev.gmed-health.com sudo /opt/gmed/repo/scripts/deploy-dev.sh
 ```
 
-Leave both values empty to return DEV to local host builds.
+Leave all three values empty to return DEV to local host builds.
 
 ### Reset cloud-init
 

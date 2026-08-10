@@ -225,6 +225,161 @@ class WorkerHardeningTest(unittest.TestCase):
         self.assertEqual(candidate.normalized["extraction_pages"], [2])
         self.assertNotIn("low_ocr_confidence", candidate.normalized["review_reasons"])
 
+    def test_incomplete_document_ocr_disables_all_auto_selection(self) -> None:
+        metadata = ExtractionMetadata(
+            page_count=2,
+            text_chars=120,
+            used_ocr=False,
+            pages=(
+                PageExtractionMetadata(
+                    page_number=1,
+                    source="native",
+                    route_reason="native_text_passed_quality_checks",
+                    native_quality=0.95,
+                    native_char_count=120,
+                    word_count=20,
+                ),
+                PageExtractionMetadata(
+                    page_number=2,
+                    source="native_fallback",
+                    route_reason="document_ocr_deadline_exhausted",
+                    native_quality=0.0,
+                    native_char_count=0,
+                    word_count=0,
+                ),
+            ),
+        )
+
+        enriched = worker.enrich_draft_with_extraction(
+            draft_with_candidate(page=1), metadata
+        )
+
+        candidate = enriched.candidates[0]
+        self.assertFalse(candidate.selected)
+        self.assertFalse(candidate.normalized["document_extraction_complete"])
+        self.assertIn(
+            "incomplete_document_extraction",
+            candidate.normalized["review_reasons"],
+        )
+        self.assertIn(worker.INCOMPLETE_OCR_WARNING, enriched.warnings)
+
+    def test_all_incomplete_extraction_routes_are_fail_closed(self) -> None:
+        for route_reason in sorted(worker.INCOMPLETE_OCR_ROUTE_REASONS):
+            with self.subTest(route_reason=route_reason):
+                metadata = extraction_metadata(
+                    PageExtractionMetadata(
+                        page_number=1,
+                        source="native_fallback",
+                        route_reason=route_reason,
+                        native_quality=0.95,
+                        native_char_count=120,
+                        word_count=20,
+                    )
+                )
+
+                enriched = worker.enrich_draft_with_extraction(
+                    draft_with_candidate(page=1), metadata
+                )
+
+                self.assertFalse(enriched.candidates[0].selected)
+                self.assertIn(worker.INCOMPLETE_OCR_WARNING, enriched.warnings)
+
+    def test_candidate_uses_matching_block_not_low_confidence_page_average(self) -> None:
+        extracted_text = "Stamp noise\n\nDiagnosen Arterielle Hypertonie"
+        diagnosis_start = extracted_text.index("Diagnosen")
+        metadata = extraction_metadata(
+            PageExtractionMetadata(
+                page_number=1,
+                source="ocr",
+                route_reason="native_text_empty",
+                native_quality=0.0,
+                native_char_count=0,
+                ocr_confidence=55.0,
+                low_confidence_word_ratio=0.5,
+                word_count=5,
+                blocks=(
+                    OcrBlockMetadata(
+                        block_number=1,
+                        bbox=(10, 10, 100, 20),
+                        start_char=0,
+                        end_char=len("Stamp noise"),
+                        confidence=20.0,
+                        word_count=2,
+                    ),
+                    OcrBlockMetadata(
+                        block_number=2,
+                        bbox=(10, 80, 300, 20),
+                        start_char=diagnosis_start,
+                        end_char=len(extracted_text),
+                        confidence=96.0,
+                        word_count=3,
+                    ),
+                ),
+            )
+        )
+
+        enriched = worker.enrich_draft_with_extraction(
+            draft_with_candidate(), metadata, extracted_text
+        )
+
+        candidate = enriched.candidates[0]
+        self.assertTrue(candidate.selected)
+        self.assertEqual(candidate.normalized["ocr_confidence"], 96.0)
+        self.assertEqual(candidate.normalized["ocr_block_numbers"], [2])
+        self.assertNotIn("low_ocr_confidence", candidate.normalized["review_reasons"])
+
+    def test_block_matching_distinguishes_single_digit_medication_dose(self) -> None:
+        extracted_text = "10 mg\n\n5 mg"
+        second_start = extracted_text.index("5 mg")
+        draft = ParseDraft(
+            document_type="medical_report",
+            parser_version="test",
+            candidates=[
+                ClinicalCandidate(
+                    id="dose-candidate",
+                    target="medication",
+                    value="5 mg",
+                    normalized={"assertion": "active", "auto_select": True},
+                    confidence=0.9,
+                    source=SourceEvidence(page=1, section="Medikation", text="5 mg"),
+                )
+            ],
+        )
+        metadata = extraction_metadata(
+            PageExtractionMetadata(
+                page_number=1,
+                source="ocr",
+                route_reason="native_text_empty",
+                native_quality=0.0,
+                native_char_count=0,
+                ocr_confidence=55.0,
+                word_count=4,
+                blocks=(
+                    OcrBlockMetadata(
+                        block_number=1,
+                        bbox=(10, 10, 80, 20),
+                        start_char=0,
+                        end_char=len("10 mg"),
+                        confidence=30.0,
+                        word_count=2,
+                    ),
+                    OcrBlockMetadata(
+                        block_number=2,
+                        bbox=(10, 60, 80, 20),
+                        start_char=second_start,
+                        end_char=len(extracted_text),
+                        confidence=97.0,
+                        word_count=2,
+                    ),
+                ),
+            )
+        )
+
+        enriched = worker.enrich_draft_with_extraction(draft, metadata, extracted_text)
+
+        self.assertEqual(enriched.candidates[0].normalized["ocr_block_numbers"], [2])
+        self.assertTrue(enriched.candidates[0].selected)
+
     def test_semantically_risky_candidate_stays_unselected_with_good_ocr(self) -> None:
         draft = draft_with_candidate(
             selected=False,
@@ -292,6 +447,41 @@ class WorkerHardeningTest(unittest.TestCase):
         assert_no_text_key(payload)
         self.assertEqual(payload["pages"][0]["blocks"][0]["bbox"], (10, 20, 100, 30))
         self.assertEqual(payload["pages"][0]["ocr_engine"], "paddle")
+
+    def test_operational_metrics_are_aggregate_and_phi_free(self) -> None:
+        metadata = extraction_metadata(
+            PageExtractionMetadata(
+                page_number=1,
+                source="ocr",
+                route_reason="native_text_empty",
+                native_quality=0.0,
+                native_char_count=0,
+                ocr_confidence=91.0,
+                low_confidence_word_ratio=0.05,
+                ocr_engine="paddle",
+                word_count=20,
+            )
+        )
+
+        with patch.object(worker.LOGGER, "info") as info:
+            worker.log_extraction_metrics(metadata, 1.234)
+
+        logged = repr(info.call_args)
+        self.assertIn("clinical_document_extraction", logged)
+        self.assertIn("1234", logged)
+        self.assertIn("paddle", logged)
+        self.assertNotIn("Arterielle Hypertonie", logged)
+        self.assertNotIn("candidate-1", logged)
+
+    def test_candidate_metrics_are_aggregate_and_phi_free(self) -> None:
+        with patch.object(worker.LOGGER, "info") as info:
+            worker.log_candidate_metrics(draft_with_candidate())
+
+        logged = repr(info.call_args)
+        self.assertIn("clinical_candidate_review", logged)
+        self.assertIn("candidate_count", logged)
+        self.assertNotIn("Arterielle Hypertonie", logged)
+        self.assertNotIn("candidate-1", logged)
 
 
 def sample_draft() -> dict:

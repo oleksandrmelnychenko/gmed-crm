@@ -22,6 +22,14 @@ export default defineConfig([
     rules: {
       'react-refresh/only-export-components': 'off',
       'react-hooks/exhaustive-deps': 'off',
+      // React Hooks 7 adds compiler diagnostics to its recommended preset.
+      // The current application has not enabled the React Compiler yet; keep
+      // the established Rules of Hooks gate while that migration is handled
+      // separately from release stabilization.
+      'react-hooks/preserve-manual-memoization': 'off',
+      'react-hooks/purity': 'off',
+      'react-hooks/refs': 'off',
+      'react-hooks/set-state-in-effect': 'off',
     },
   },
   {

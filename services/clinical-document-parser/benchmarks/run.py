@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 from typing import Any, Mapping
 
-from benchmarks.evaluator import evaluate_dataset, report_passes_gates
+from benchmarks.evaluator import ALLOWED_COHORTS, evaluate_dataset, report_passes_gates
 
 
 def _load_json(path: Path) -> Any:
@@ -88,6 +88,20 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--section-match-threshold", type=float, default=0.86)
     parser.add_argument("--minimum-candidate-f1", type=float)
     parser.add_argument("--minimum-ocr-similarity", type=float)
+    parser.add_argument("--minimum-cohort-candidate-f1", type=float)
+    parser.add_argument("--minimum-cohort-ocr-similarity", type=float)
+    parser.add_argument(
+        "--required-cohort",
+        action="append",
+        default=[],
+        choices=sorted(ALLOWED_COHORTS),
+        help="Require a fixed cohort to be present; repeat for multiple cohorts",
+    )
+    parser.add_argument(
+        "--minimum-required-cohort-cases",
+        type=int,
+        help="Minimum case count for each cohort named by --required-cohort",
+    )
     parser.add_argument("--fail-on-unsafe", action="store_true")
     return parser
 
@@ -112,6 +126,10 @@ def main(argv: list[str] | None = None) -> int:
             report,
             minimum_candidate_f1=args.minimum_candidate_f1,
             minimum_ocr_similarity=args.minimum_ocr_similarity,
+            minimum_cohort_candidate_f1=args.minimum_cohort_candidate_f1,
+            minimum_cohort_ocr_similarity=args.minimum_cohort_ocr_similarity,
+            required_cohorts=args.required_cohort,
+            minimum_required_cohort_cases=args.minimum_required_cohort_cases,
             fail_on_unsafe=args.fail_on_unsafe,
         )
         report["gates"] = {"passed": passed, "failures": failures}

@@ -408,8 +408,8 @@ Dependabot / `cargo deny` instead of blocking every release.
 #### Promoting a release
 
 **Step 1.** Push to `main` (or push a `v*` tag for a tagged release).
-The workflow runs `Build and push` + `Sign image (keyless)` for both
-images and prints the digests in the run summary:
+The workflow runs `Build and push` + `Sign image (keyless)` for all
+three application images and prints the digests in the run summary:
 
 ```text
 ## server
@@ -421,11 +421,16 @@ Pin in PROD release.env:
 Digest: `sha256:def456...`
 Pin in PROD release.env:
   GMED_FRONTEND_IMAGE=ghcr.io/oleksandrmelnychenko/gmed-crm-frontend@sha256:def456...
+
+## clinical-document-parser
+Digest: `sha256:789abc...`
+Pin in PROD release.env:
+  GMED_PARSER_IMAGE=ghcr.io/oleksandrmelnychenko/gmed-crm-clinical-document-parser@sha256:789abc...
 ```
 
 **Step 2.** Optional but recommended: promote the same digest-pinned
-refs to DEV first by setting `GMED_BACKEND_IMAGE` and
-`GMED_FRONTEND_IMAGE` in the DEV SOPS bundle, then running
+refs to DEV first by setting `GMED_BACKEND_IMAGE`,
+`GMED_FRONTEND_IMAGE`, and `GMED_PARSER_IMAGE` in the DEV SOPS bundle, then running
 `scripts/deploy-dev.sh` on the DEV host.
 
 **Step 3.** Update PROD `secrets.sops.yaml`:
@@ -433,8 +438,8 @@ refs to DEV first by setting `GMED_BACKEND_IMAGE` and
 ```bash
 cd infra/terraform/environments/prod-hetzner
 sops secrets.sops.yaml
-# Paste the digest-pinned refs into GMED_BACKEND_IMAGE and
-# GMED_FRONTEND_IMAGE.
+# Paste the digest-pinned refs into GMED_BACKEND_IMAGE,
+# GMED_FRONTEND_IMAGE, and GMED_PARSER_IMAGE.
 
 git commit -am "prod: pin release sha-abc123"
 git push
@@ -452,7 +457,7 @@ The script will:
 1. Pull the repo with the updated pin.
 2. Decrypt secrets, validate required keys.
 3. Install `cosign` (idempotent, pinned version `v2.4.1`).
-4. `cosign verify` both digests against the repo's release workflow
+4. `cosign verify` all three digests against the repo's release workflow
    identity. **Refuses to proceed if verification fails or if a pin
    is not digest-form (`@sha256:...`).**
 5. `docker compose ... up -d` (no `--build`, no local image building).

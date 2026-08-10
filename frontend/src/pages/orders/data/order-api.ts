@@ -259,6 +259,10 @@ export function updateOrderPhase(orderId: string, phase: string) {
   return postJson<void>(`/orders/${orderId}/phase`, { phase });
 }
 
+export function updateOrderStatus(orderId: string, status: string, note?: string) {
+  return postJson<void>(`/orders/${orderId}/status`, { status, note });
+}
+
 export function updateOrderDebtManagement(orderId: string, payload: JsonPayload) {
   return postJson<void>(`/orders/${orderId}/debt-management`, payload);
 }

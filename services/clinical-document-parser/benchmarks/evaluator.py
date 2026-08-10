@@ -9,6 +9,14 @@ from typing import Any, Mapping, Sequence
 
 
 TARGETS = ("diagnosis", "anamnesis", "medication", "examination", "recommendation")
+ALLOWED_COHORTS = {
+    "arztbrief",
+    "laboratory",
+    "smartphone_photo",
+    "fax_scan",
+    "cyrillic",
+    "negative",
+}
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
 
 
@@ -231,6 +239,57 @@ def _forbidden_diagnosis_values(case: Mapping[str, Any]) -> list[object]:
     return [item for item in values if _normalized_text(item)]
 
 
+def _cohort_summaries(case_reports: list[dict[str, Any]]) -> dict[str, Any]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for report in case_reports:
+        for cohort in report.get("cohorts", []):
+            grouped[str(cohort)].append(report)
+
+    summaries: dict[str, Any] = {}
+    for cohort, reports in sorted(grouped.items()):
+        ocr_scores = [
+            float(report["ocr"]["character_similarity"])
+            for report in reports
+            if isinstance(report.get("ocr"), Mapping)
+        ]
+        tp = fp = fn = candidate_cases = unsafe = diagnoses = 0
+        for report in reports:
+            candidates = report.get("candidates")
+            if isinstance(candidates, Mapping) and candidates.get("evaluated") is True:
+                candidate_cases += 1
+                by_target = candidates.get("by_target")
+                if isinstance(by_target, Mapping):
+                    for metrics in by_target.values():
+                        if not isinstance(metrics, Mapping):
+                            continue
+                        tp += int(metrics.get("true_positive", 0))
+                        fp += int(metrics.get("false_positive", 0))
+                        fn += int(metrics.get("false_negative", 0))
+            safety = report.get("safety")
+            if isinstance(safety, Mapping):
+                unsafe += int(safety.get("unsafe_false_positive_diagnoses", 0))
+                diagnoses += int(safety.get("diagnosis_predictions", 0))
+        summaries[cohort] = {
+            "case_count": len(reports),
+            "ocr": {
+                "cases_evaluated": len(ocr_scores),
+                "mean_character_similarity": round(sum(ocr_scores) / len(ocr_scores), 6)
+                if ocr_scores
+                else None,
+            },
+            "candidates": {
+                "cases_evaluated": candidate_cases,
+                "micro": _prf(tp, fp, fn),
+            },
+            "safety": {
+                "unsafe_false_positive_diagnoses": unsafe,
+                "diagnosis_predictions": diagnoses,
+                "passed": unsafe == 0,
+            },
+        }
+    return summaries
+
+
 def evaluate_dataset(
     ground_truth: Mapping[str, Any],
     predictions: Mapping[str, Mapping[str, Any]],
@@ -277,6 +336,13 @@ def evaluate_dataset(
         if case_id in seen_case_ids:
             raise ValueError("ground truth case_id values must be unique")
         seen_case_ids.add(case_id)
+        raw_cohorts = raw_case.get("cohorts", [])
+        if not isinstance(raw_cohorts, list) or any(
+            not isinstance(cohort, str) or cohort not in ALLOWED_COHORTS
+            for cohort in raw_cohorts
+        ):
+            raise ValueError(f"case at index {case_index} contains invalid cohorts")
+        cohorts = list(dict.fromkeys(raw_cohorts))
         prediction = predictions.get(case_id)
         if not isinstance(prediction, Mapping):
             prediction = {}
@@ -379,6 +445,7 @@ def evaluate_dataset(
         case_reports.append(
             {
                 "case_ref": _case_reference(case_index),
+                "cohorts": cohorts,
                 "prediction_present": bool(prediction),
                 "ocr": ocr_metrics,
                 "candidates": {
@@ -475,6 +542,7 @@ def evaluate_dataset(
                 "cases_with_unsafe_false_positives": cases_with_unsafe,
                 "passed": unsafe_diagnoses == 0,
             },
+            "cohorts": _cohort_summaries(case_reports),
         },
         "cases": case_reports,
     }
@@ -485,6 +553,10 @@ def report_passes_gates(
     *,
     minimum_candidate_f1: float | None = None,
     minimum_ocr_similarity: float | None = None,
+    minimum_cohort_candidate_f1: float | None = None,
+    minimum_cohort_ocr_similarity: float | None = None,
+    required_cohorts: Sequence[str] = (),
+    minimum_required_cohort_cases: int | None = None,
     fail_on_unsafe: bool = False,
 ) -> tuple[bool, list[str]]:
     failures: list[str] = []
@@ -506,6 +578,60 @@ def report_passes_gates(
             or similarity < minimum_ocr_similarity
         ):
             failures.append("ocr_similarity_below_minimum")
+    cohorts = summary.get("cohorts")
+    invalid_required = sorted(set(required_cohorts) - ALLOWED_COHORTS)
+    if invalid_required:
+        raise ValueError(f"invalid required cohorts: {', '.join(invalid_required)}")
+    available_cohorts = set(cohorts) if isinstance(cohorts, Mapping) else set()
+    for cohort in sorted(set(required_cohorts) - available_cohorts):
+        failures.append(f"required_cohort_missing:{cohort}")
+    if minimum_required_cohort_cases is not None:
+        if minimum_required_cohort_cases < 1:
+            raise ValueError("minimum required cohort cases must be positive")
+        if not required_cohorts:
+            raise ValueError("minimum required cohort cases needs a required cohort")
+        for cohort in sorted(set(required_cohorts) & available_cohorts):
+            metrics = cohorts.get(cohort) if isinstance(cohorts, Mapping) else None
+            case_count = metrics.get("case_count") if isinstance(metrics, Mapping) else None
+            if not isinstance(case_count, int) or case_count < minimum_required_cohort_cases:
+                failures.append(f"required_cohort_too_small:{cohort}")
+    if minimum_cohort_candidate_f1 is not None:
+        if not isinstance(cohorts, Mapping) or not cohorts:
+            failures.append("cohort_candidate_f1_unavailable")
+        else:
+            for cohort, metrics in sorted(cohorts.items()):
+                candidates = metrics.get("candidates") if isinstance(metrics, Mapping) else None
+                micro = candidates.get("micro") if isinstance(candidates, Mapping) else None
+                f1 = micro.get("f1") if isinstance(micro, Mapping) else None
+                evaluated = (
+                    candidates.get("cases_evaluated")
+                    if isinstance(candidates, Mapping)
+                    else 0
+                )
+                if (
+                    not evaluated
+                    or not isinstance(f1, (int, float))
+                    or not math.isfinite(f1)
+                    or f1 < minimum_cohort_candidate_f1
+                ):
+                    failures.append(f"cohort_candidate_f1_below_minimum:{cohort}")
+    if minimum_cohort_ocr_similarity is not None:
+        if not isinstance(cohorts, Mapping) or not cohorts:
+            failures.append("cohort_ocr_similarity_unavailable")
+        else:
+            for cohort, metrics in sorted(cohorts.items()):
+                ocr = metrics.get("ocr") if isinstance(metrics, Mapping) else None
+                similarity = (
+                    ocr.get("mean_character_similarity")
+                    if isinstance(ocr, Mapping)
+                    else None
+                )
+                if (
+                    not isinstance(similarity, (int, float))
+                    or not math.isfinite(similarity)
+                    or similarity < minimum_cohort_ocr_similarity
+                ):
+                    failures.append(f"cohort_ocr_similarity_below_minimum:{cohort}")
     if fail_on_unsafe:
         safety = summary.get("safety")
         passed = safety.get("passed") if isinstance(safety, Mapping) else False

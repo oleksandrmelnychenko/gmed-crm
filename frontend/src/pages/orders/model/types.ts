@@ -2,7 +2,32 @@ import type { SpecializationItem } from "@/pages/providers/model/types";
 
 export type OrderPhase = "discovery" | "intake" | "execution" | "closure" | "followup";
 export type OrderStatus = "active" | "paused" | "completed" | "cancelled";
-type LeistungStatus = "draft" | "delivered" | "approved" | "cancelled";
+export type LeistungStatus = "planned" | "delivered" | "approved" | "invoiced";
+export type BillingReleaseStatus = "pending" | "granted" | "denied";
+export type PackageCoverageStatus = "unknown" | "covered" | "not_covered";
+export type DebtManagementStatus =
+  | "not_required"
+  | "review_required"
+  | "payment_plan"
+  | "awaiting_payment"
+  | "escalated"
+  | "cleared";
+export type TreatmentPlanStatus =
+  | "draft"
+  | "agreed"
+  | "correction_requested"
+  | "finalized";
+export type PreparationDocumentsStatus = "pending" | "sent" | "not_required";
+export type InterpreterBriefingStatus = "not_needed" | "pending" | "completed";
+export type ArrivalStatus = "pending" | "arrived" | "not_required";
+export type ExecutionStepStatus =
+  | "pending"
+  | "in_progress"
+  | "completed"
+  | "not_required";
+export type ExecutionIssueStatus = "pending" | "monitoring" | "resolved" | "not_required";
+export type FollowupStatus = "pending" | "scheduled" | "completed" | "not_required";
+export type ResultsHandoffStatus = "pending" | "completed" | "not_required";
 export type ExternalInvoiceStatus =
   | "expected"
   | "received"
@@ -20,8 +45,8 @@ export type OrderSummary = {
   case_code?: string | null;
   patient_name: string;
   patient_pid: string;
-  phase: OrderPhase | string;
-  status: OrderStatus | string;
+  phase: OrderPhase;
+  status: OrderStatus;
   total_estimated?: unknown;
   signed_patient?: boolean;
   signed_agency?: boolean;
@@ -41,7 +66,7 @@ export type Leistung = {
   currency: string;
   vat_rate: unknown;
   is_cost_passthrough: boolean;
-  status: LeistungStatus | string;
+  status: LeistungStatus;
   delivered_at?: string | null;
   approved_at?: string | null;
   notes: string | null;
@@ -78,7 +103,7 @@ type ExternalInvoice = {
   amount_vat: unknown;
   amount_gross: unknown;
   currency: string;
-  status: ExternalInvoiceStatus | string;
+  status: ExternalInvoiceStatus;
   received_at?: string | null;
   paid_at?: string | null;
   notes?: string | null;
@@ -97,8 +122,8 @@ export type OrderDetail = {
   case_code?: string | null;
   patient_name: string;
   patient_pid: string | null;
-  phase: OrderPhase | string;
-  status: OrderStatus | string;
+  phase: OrderPhase;
+  status: OrderStatus;
   needs_description: string | null;
   date_from?: string | null;
   date_to?: string | null;
@@ -123,11 +148,11 @@ export type OrderProcessGates = {
   overdue_invoice_count: number;
   outstanding_balance?: string | null;
   debt_management?: OrderDebtManagement | null;
-  billing_release_status: string;
+  billing_release_status: BillingReleaseStatus;
   billing_release_note: string | null;
   billing_released_by: string | null;
   billing_released_at: string | null;
-  package_coverage_status: string;
+  package_coverage_status: PackageCoverageStatus;
   package_coverage_note: string | null;
   package_coverage_decided_by: string | null;
   package_coverage_decided_at: string | null;
@@ -143,8 +168,8 @@ export type OrderProcessGates = {
 };
 
 type OrderDebtManagement = {
-  status: string;
-  effective_status: string;
+  status: DebtManagementStatus;
+  effective_status: DebtManagementStatus;
   workflow_required: boolean;
   blocking: boolean;
   blocking_reason: string | null;
@@ -165,12 +190,12 @@ type OrderDebtManagement = {
 
 export type OrderPlanningPreparation = {
   planning_ready: boolean;
-  treatment_plan_status: string;
+  treatment_plan_status: TreatmentPlanStatus;
   treatment_plan_note: string | null;
   non_medical_required: boolean;
   interpreter_required: boolean;
-  preparation_documents_status: string;
-  interpreter_briefing_status: string;
+  preparation_documents_status: PreparationDocumentsStatus;
+  interpreter_briefing_status: InterpreterBriefingStatus;
   treatment_plan_ready: boolean;
   medical_bookings_ready: boolean;
   medical_total: number;
@@ -198,11 +223,11 @@ export type OrderPlanningPreparation = {
 
 export type OrderExecutionFlow = {
   closure_ready: boolean;
-  arrival_status: string;
-  medical_execution_status: string;
-  non_medical_execution_status: string;
-  interpreter_service_status: string;
-  issue_status: string;
+  arrival_status: ArrivalStatus;
+  medical_execution_status: ExecutionStepStatus;
+  non_medical_execution_status: ExecutionStepStatus;
+  interpreter_service_status: ExecutionStepStatus;
+  issue_status: ExecutionIssueStatus;
   deviation_note: string | null;
   execution_summary: string | null;
   non_medical_required: boolean;
@@ -232,14 +257,14 @@ export type OrderExecutionFlow = {
 
 export type OrderFollowupFlow = {
   followup_ready: boolean;
-  doctor_followup_status: string;
-  followup_1w_status: string;
-  followup_1m_status: string;
-  followup_6m_status: string;
+  doctor_followup_status: FollowupStatus;
+  followup_1w_status: FollowupStatus;
+  followup_1m_status: FollowupStatus;
+  followup_6m_status: FollowupStatus;
   package_end_date: string | null;
   suggested_package_end_date: string | null;
-  package_end_status: string;
-  results_handoff_status: string;
+  package_end_status: FollowupStatus;
+  results_handoff_status: ResultsHandoffStatus;
   followup_summary: string | null;
   doctor_followup_ready: boolean;
   followup_1w_ready: boolean;
@@ -278,16 +303,23 @@ type LifecycleEvent = {
 };
 
 type OrderLifecycleTransition = {
-  phase: string;
+  phase: OrderPhase;
+  blocked: boolean;
+  reasons: string[];
+};
+
+export type OrderStatusTransition = {
+  status: OrderStatus;
   blocked: boolean;
   reasons: string[];
 };
 
 type OrderLifecycle = {
-  current_stage: string;
+  current_stage: OrderPhase;
   stage_entered_at: string | null;
-  next_stage: string | null;
+  next_stage: OrderPhase | null;
   allowed_transitions: OrderLifecycleTransition[];
+  allowed_status_transitions: OrderStatusTransition[];
   history: LifecycleEvent[];
 };
 
@@ -327,45 +359,45 @@ export type WorkflowChecklistFormState = {
 };
 
 export type OrderProcessGateFormState = {
-  debtStatus: string;
+  debtStatus: DebtManagementStatus;
   debtNote: string;
   debtOwnerUserId: string;
   debtNextReviewAt: string;
   debtLastContactAt: string;
   debtResolutionNote: string;
-  billingReleaseStatus: string;
+  billingReleaseStatus: BillingReleaseStatus;
   billingReleaseNote: string;
-  packageCoverageStatus: string;
+  packageCoverageStatus: PackageCoverageStatus;
   packageCoverageNote: string;
 };
 
 export type OrderPlanningFormState = {
-  treatmentPlanStatus: string;
+  treatmentPlanStatus: TreatmentPlanStatus;
   treatmentPlanNote: string;
   nonMedicalRequired: boolean;
   interpreterRequired: boolean;
-  preparationDocumentsStatus: string;
-  interpreterBriefingStatus: string;
+  preparationDocumentsStatus: PreparationDocumentsStatus;
+  interpreterBriefingStatus: InterpreterBriefingStatus;
 };
 
 export type OrderExecutionFormState = {
-  arrivalStatus: string;
-  medicalExecutionStatus: string;
-  nonMedicalExecutionStatus: string;
-  interpreterServiceStatus: string;
-  issueStatus: string;
+  arrivalStatus: ArrivalStatus;
+  medicalExecutionStatus: ExecutionStepStatus;
+  nonMedicalExecutionStatus: ExecutionStepStatus;
+  interpreterServiceStatus: ExecutionStepStatus;
+  issueStatus: ExecutionIssueStatus;
   deviationNote: string;
   executionSummary: string;
 };
 
 export type OrderFollowupFormState = {
-  doctorFollowupStatus: string;
-  followup1wStatus: string;
-  followup1mStatus: string;
-  followup6mStatus: string;
+  doctorFollowupStatus: FollowupStatus;
+  followup1wStatus: FollowupStatus;
+  followup1mStatus: FollowupStatus;
+  followup6mStatus: FollowupStatus;
   packageEndDate: string;
-  packageEndStatus: string;
-  resultsHandoffStatus: string;
+  packageEndStatus: FollowupStatus;
+  resultsHandoffStatus: ResultsHandoffStatus;
   followupSummary: string;
 };
 
@@ -498,13 +530,13 @@ export type PatientOrderRecheck = {
 export type OrderDebtQueueItem = {
   order_id: string;
   order_number: string;
-  phase: string;
-  order_status: string;
+  phase: OrderPhase;
+  order_status: OrderStatus;
   patient_id: string;
   patient_code: string;
   patient_name: string;
-  status: string;
-  effective_status: string;
+  status: DebtManagementStatus;
+  effective_status: DebtManagementStatus;
   blocking_reason: string | null;
   note: string | null;
   owner_user_id: string | null;

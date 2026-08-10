@@ -106,7 +106,6 @@ export function CaseItemList<T>({
     if (sheet.mode !== "closed" && sectionError) {
       // Mirror the section-level error into the open sheet so the user sees it
       // without losing their in-progress form.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSheetError(sectionError);
     }
   }, [sectionError, sheet.mode]);

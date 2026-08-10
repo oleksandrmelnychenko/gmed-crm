@@ -30,6 +30,15 @@ PATIENT_DOCUMENT_FORM_PATH = (
     / "sheets"
     / "patient-document-generate-dialog.tsx"
 )
+DOCUMENT_BINDING_FIELDS_FORM_PATH = (
+    ROOT
+    / "frontend"
+    / "src"
+    / "pages"
+    / "documents"
+    / "ui"
+    / "document-template-binding-fields.tsx"
+)
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NS = {"w": WORD_NS}
 YELLOW_VALUES = {"yellow", "darkYellow"}
@@ -133,6 +142,7 @@ def main() -> int:
         (
             DOCUMENTS_PAGE_PATH.read_text(encoding="utf-8"),
             PATIENT_DOCUMENT_FORM_PATH.read_text(encoding="utf-8"),
+            DOCUMENT_BINDING_FIELDS_FORM_PATH.read_text(encoding="utf-8"),
         )
     )
     manifest_files = {entry.get("file") for entry in entries}

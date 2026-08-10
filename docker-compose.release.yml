@@ -29,6 +29,9 @@ services:
       LEAD_INTAKE_TOKEN: "${GMED_LEAD_INTAKE_TOKEN:-}"
       RUST_LOG: "${GMED_RUST_LOG:-info,gmed_server=debug}"
       LOG_FORMAT: "${GMED_LOG_FORMAT:-json}"
+      DOCUMENT_OCR_TIMEOUT_SECONDS: "${GMED_DOCUMENT_OCR_TIMEOUT_SECONDS:-30}"
+      DOCUMENT_OCR_MAX_CONCURRENCY: "${GMED_DOCUMENT_OCR_MAX_CONCURRENCY:-2}"
+      DOCUMENT_OCR_LANGUAGES: "${GMED_DOCUMENT_OCR_LANGUAGES:-deu+eng+ukr+rus}"
     ports:
       - "${BACKEND_PORT:-3000}:3000"
     restart: unless-stopped
@@ -39,6 +42,7 @@ services:
     build:
       context: ./services/clinical-document-parser
       dockerfile: Dockerfile
+    init: true
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,10 +61,22 @@ services:
       PARSER_OCR_ENGINE: "${GMED_PARSER_OCR_ENGINE:-paddle}"
       PARSER_OCR_PAGE_TIMEOUT_SECONDS: "${GMED_PARSER_OCR_PAGE_TIMEOUT_SECONDS:-45}"
       PARSER_OCR_DOCUMENT_TIMEOUT_SECONDS: "${GMED_PARSER_OCR_DOCUMENT_TIMEOUT_SECONDS:-300}"
+      PARSER_PADDLE_ISOLATE_PROCESS: "${GMED_PARSER_PADDLE_ISOLATE_PROCESS:-true}"
+      PARSER_PADDLE_FAILURE_THRESHOLD: "${GMED_PARSER_PADDLE_FAILURE_THRESHOLD:-2}"
+      PARSER_PADDLE_COOLDOWN_SECONDS: "${GMED_PARSER_PADDLE_COOLDOWN_SECONDS:-60}"
+      PARSER_OCR_MULTIPASS: "${GMED_PARSER_OCR_MULTIPASS:-true}"
+      PARSER_OCR_PRIMARY_LANGUAGES: "${GMED_PARSER_OCR_PRIMARY_LANGUAGES:-deu+eng}"
+      PARSER_OCR_CYRILLIC_LANGUAGES: "${GMED_PARSER_OCR_CYRILLIC_LANGUAGES:-deu+eng+rus+ukr}"
+      PARSER_OCR_UKRAINIAN_LANGUAGES: "${GMED_PARSER_OCR_UKRAINIAN_LANGUAGES:-deu+eng+ukr}"
+      PARSER_OCR_RUSSIAN_LANGUAGES: "${GMED_PARSER_OCR_RUSSIAN_LANGUAGES:-deu+eng+rus}"
     restart: unless-stopped
     mem_limit: "${GMED_PARSER_MEMORY_LIMIT:-3g}"
     cpus: "${GMED_PARSER_CPUS:-3.0}"
     pids_limit: 256
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - uploads:/app/uploads:ro
 

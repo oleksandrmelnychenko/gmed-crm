@@ -31,6 +31,16 @@ models for Latin text and falls back to local Tesseract for failures and
 Cyrillic pages. Set `PARSER_OCR_ENGINE=tesseract` to disable PaddleOCR. No
 document content leaves the host.
 
+Paddle inference runs in a persistent local child process by default. A page
+deadline terminates and recreates that process, so a stuck native inference
+call cannot hold the queue worker indefinitely. Set
+`PARSER_PADDLE_ISOLATE_PROCESS=false` only for local diagnostics. Weak first
+passes may use one additional Otsu-binarized image within the same page
+deadline; disable this bounded retry with `PARSER_OCR_MULTIPASS=false`.
+After repeated Paddle startup/inference failures, a local circuit breaker sends
+subsequent pages directly to Tesseract for a cooldown period. Tune it with
+`PARSER_PADDLE_FAILURE_THRESHOLD` and `PARSER_PADDLE_COOLDOWN_SECONDS`.
+
 Drafts include page-level extraction provenance, OCR confidence and block
 geometry without duplicating recognized text. Candidate confidence is a
 review-prioritization signal, not a probability that a clinical statement is
@@ -38,10 +48,43 @@ true. Suspected, negated, rule-out and low-confidence statements are left
 unselected until a user confirms them. Every result remains subject to human
 review.
 
+Paddle block coordinates are scaled back from the model's 1280-pixel input to
+the post-orientation/post-deskew OCR image. `orientation_rotation` and
+`deskew_angle` describe that coordinate-space transformation. Paddle output is
+geometrically ordered and handles the common two-column medical-letter layout.
+Repeated aligned numeric cells are treated as a table and kept in row-major
+order with tab-separated cells, so laboratory names remain attached to values
+and units.
+During draft enrichment, candidate source evidence is matched to these blocks
+in memory. Review confidence then uses the matching blocks instead of a noisy
+page-wide average; only block numbers and aggregate confidence are persisted.
+If matching is ambiguous, the conservative page-level calculation remains in
+effect.
+
+If a page or document OCR deadline is exhausted, page rendering fails, OCR
+raises, or the PDF readers disagree about page count, that provenance is
+retained. The draft receives an incomplete-extraction warning, and every
+proposed clinical candidate is left unselected until the user verifies the
+source document.
+
 Production limits are configurable with `PARSER_MAX_FILE_BYTES`,
 `PARSER_MAX_PDF_PAGES`, `PARSER_MAX_IMAGE_PIXELS`,
 `PARSER_MAX_EXTRACTED_TEXT_CHARS`, `PARSER_MAX_DRAFT_CANDIDATES`,
 `PARSER_MAX_SOURCE_EVIDENCE_CHARS`, `PARSER_MAX_SERIALIZED_DRAFT_BYTES`, and
 `PARSER_LEASE_SECONDS`. OCR timeouts and CPU use are controlled with
 `PARSER_OCR_PAGE_TIMEOUT_SECONDS`, `PARSER_OCR_DOCUMENT_TIMEOUT_SECONDS`, and
-`PARSER_PADDLE_CPU_THREADS`.
+`PARSER_PADDLE_CPU_THREADS`. Language routing can be tuned with
+`PARSER_OCR_PRIMARY_LANGUAGES`, `PARSER_OCR_CYRILLIC_LANGUAGES`,
+`PARSER_OCR_UKRAINIAN_LANGUAGES`, and `PARSER_OCR_RUSSIAN_LANGUAGES`.
+
+The worker emits `parser_metric` JSON objects after extraction and candidate
+review routing. They contain only duration, counts, engines, route reasons,
+block-match coverage, and confidence/timeout counts; they contain no recognized
+text, paths, candidate values, or document IDs.
+
+## Test
+
+```bash
+python -m pytest -q
+python -m unittest benchmarks.test_evaluator -v
+```

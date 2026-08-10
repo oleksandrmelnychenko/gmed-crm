@@ -3,6 +3,11 @@
   "cases": [
     {
       "case_id": "synthetic-cardio-001",
+      "cohorts": ["arztbrief"],
+      "document": {
+        "path": "synthetic_cardio.txt",
+        "mime_type": "text/plain"
+      },
       "reference": {
         "raw_text": "Diagnosen\nLeichte Hypertonie\nAnamnese\nKontrolltermin ohne Beschwerden.",
         "candidates": [

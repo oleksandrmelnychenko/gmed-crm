@@ -19,6 +19,7 @@ Example:
 Outputs:
   GMED_BACKEND_IMAGE=ghcr.io/...@sha256:...
   GMED_FRONTEND_IMAGE=ghcr.io/...@sha256:...
+  GMED_PARSER_IMAGE=ghcr.io/...@sha256:...
 EOF
   [[ -z "$TAG" ]] && exit 1 || exit 0
 fi
@@ -58,15 +59,18 @@ resolve_digest() {
 
 backend_image="${REPO}-server"
 frontend_image="${REPO}-frontend"
+parser_image="${REPO}-clinical-document-parser"
 backend_digest="$(resolve_digest "$backend_image")"
 frontend_digest="$(resolve_digest "$frontend_image")"
+parser_digest="$(resolve_digest "$parser_image")"
 
-if [[ -z "$backend_digest" || -z "$frontend_digest" ]]; then
-  echo "ERROR: failed to resolve one or both digests for tag '$TAG'." >&2
+if [[ -z "$backend_digest" || -z "$frontend_digest" || -z "$parser_digest" ]]; then
+  echo "ERROR: failed to resolve one or more release digests for tag '$TAG'." >&2
   exit 1
 fi
 
 cat <<EOF
 GMED_BACKEND_IMAGE=ghcr.io/${OWNER}/${backend_image}@${backend_digest}
 GMED_FRONTEND_IMAGE=ghcr.io/${OWNER}/${frontend_image}@${frontend_digest}
+GMED_PARSER_IMAGE=ghcr.io/${OWNER}/${parser_image}@${parser_digest}
 EOF

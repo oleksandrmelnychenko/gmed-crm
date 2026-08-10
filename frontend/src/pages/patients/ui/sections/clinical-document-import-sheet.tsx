@@ -124,6 +124,10 @@ const reviewReasonLabels: Record<string, { ru: string; de: string }> = {
     ru: "Качество фрагмента не удалось оценить",
     de: "Fragmentqualität konnte nicht bewertet werden",
   },
+  incomplete_document_extraction: {
+    ru: "OCR обработал не все страницы документа",
+    de: "OCR hat nicht alle Dokumentseiten verarbeitet",
+  },
 };
 
 const semanticLabels: Record<string, { ru: string; de: string }> = {
@@ -140,6 +144,10 @@ const draftWarningLabels: Record<string, { ru: string; de: string }> = {
   "Low-confidence OCR evidence requires manual review.": {
     ru: "Часть OCR-текста распознана неуверенно и требует ручной сверки с документом.",
     de: "Ein Teil des OCR-Texts hat niedrige Konfidenz und muss mit dem Dokument geprüft werden.",
+  },
+  "OCR did not finish for every page; all proposed clinical facts require manual review.": {
+    ru: "OCR обработал не все страницы. Все предложенные клинические данные необходимо сверить с документом вручную.",
+    de: "OCR hat nicht alle Seiten verarbeitet. Alle vorgeschlagenen klinischen Angaben müssen manuell mit dem Dokument geprüft werden.",
   },
 };
 
@@ -1356,8 +1364,12 @@ export function ClinicalDocumentImportSheet({
                                     <Badge
                                       variant="outline"
                                       className="rounded-full border-border/60 bg-white/80 text-[10px] font-medium text-muted-foreground"
+                                      title={tx(
+                                        "Качество распознавания и классификации для ручной проверки, а не медицинская достоверность.",
+                                        "Qualität von Erkennung und Klassifikation für die manuelle Prüfung, keine medizinische Gewissheit.",
+                                      )}
                                     >
-                                      {tx("Уверенность", "Konfidenz")} {Math.round(candidate.confidence * 100)}%
+                                      {tx("Качество проверки", "Prüfqualität")} {Math.round(candidate.confidence * 100)}%
                                     </Badge>
                                     {semanticLabel ? (
                                       <Badge

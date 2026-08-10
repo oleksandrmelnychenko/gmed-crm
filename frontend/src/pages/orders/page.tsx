@@ -22,6 +22,8 @@ import {
   Circle,
   ClipboardList,
   LoaderCircle,
+  Pause,
+  Play,
   Plus,
   RefreshCw,
   Search,
@@ -118,6 +120,7 @@ import {
   updateOrderExecutionFlow,
   updateOrderFollowupFlow,
   updateOrderPhase,
+  updateOrderStatus,
   updateOrderPlanningPreparation,
   updateOrderProcessGates,
 } from "./data/order-api";
@@ -142,6 +145,7 @@ import {
   formatDateOnly,
   formatDateTime,
   formatNumber,
+  externalInvoiceStatusTransitions,
   inputDateTimeToApiValue,
   nextPhase,
   numberFromUnknown,
@@ -174,6 +178,7 @@ import type {
   PatientOption,
   PatientOrderRecheck,
   ProviderOption,
+  OrderStatus,
   SupportingDocumentOption,
   WorkflowChecklistItem,
   WorkflowChecklistFormState,
@@ -189,6 +194,7 @@ import {
 const ORDER_REALTIME_EVENTS = [
   "order.created",
   "order.phase_changed",
+  "order.status_changed",
   "order.process_gates_updated",
   "order.debt_management_updated",
   "order.planning_preparation_updated",
@@ -436,6 +442,46 @@ function providerTaxonomyLabel(
   );
 }
 
+function orderBlockingReasonSection(reason: string): OrderSectionKey {
+  if (
+    reason === "Treatment plan must be finalized before execution" ||
+    reason === "At least one confirmed medical appointment is required" ||
+    reason === "Required non-medical services still need a confirmed booking" ||
+    reason === "Interpreter is required but not assigned yet" ||
+    reason === "Assigned interpreter has not confirmed yet" ||
+    reason === "Interpreter briefing is still pending" ||
+    reason === "Preparation documents still need to be sent" ||
+    /required patient document\(s\) are missing$/.test(reason)
+  ) {
+    return "planning";
+  }
+
+  if (
+    reason === "Patient arrival or execution start is not recorded yet" ||
+    reason === "Medical execution must be completed and backed by delivered appointments or services" ||
+    reason === "Required non-medical services still need execution confirmation" ||
+    reason === "Interpreter-supported execution still needs completion or report confirmation" ||
+    reason === "Execution deviations or incidents must be resolved or marked as not required" ||
+    reason === "Results, Arztbrief or final patient handoff still need to be released" ||
+    /execution checklist item\(s\) remain open$/.test(reason)
+  ) {
+    return "execution";
+  }
+
+  if (
+    reason === "Doctor-directed follow-up is required but not scheduled yet" ||
+    reason === "1-week follow-up is not scheduled yet" ||
+    reason === "1-month follow-up is not scheduled yet" ||
+    reason === "6-month follow-up is not scheduled yet" ||
+    reason === "Package-end follow-up is required but not scheduled yet" ||
+    reason === "No follow-up reminder, task or appointment has been launched yet"
+  ) {
+    return "followup";
+  }
+
+  return "gates";
+}
+
 type OrdersPageState = {
   filters: OrdersFilters;
   orders: OrderSummary[];
@@ -680,10 +726,10 @@ function useOrdersPageContent() {
     labelFor(value, packageCoverageLabels);
   const leistungStatusLabel = (value: string) =>
     labelFor(value, {
-      draft: l("orders_entwurf"),
+      planned: l("orders_geplant"),
       delivered: l("orders_erbracht"),
       approved: l("orders_freigegeben_2"),
-      cancelled: l("orders_storniert_2"),
+      invoiced: lang === "de" ? "Abgerechnet" : "Выставлен счёт",
     });
   const externalInvoiceStatusLabel = (value: string) =>
     labelFor(value, {
@@ -783,6 +829,58 @@ function useOrdersPageContent() {
     return l(key);
   };
   const localizedBlockingReason = (reason: string) => {
+    const completionLabels: Record<string, [string, string]> = {
+      "Order must reach the follow-up phase before completion": [
+        "Der Auftrag muss vor dem Abschluss die Nachsorgephase erreichen.",
+        "Перед завершением заказ должен перейти в этап наблюдения.",
+      ],
+      "Follow-up state has not been prepared": [
+        "Die Nachsorge wurde noch nicht vorbereitet.",
+        "Этап наблюдения ещё не подготовлен.",
+      ],
+      "Doctor follow-up must be completed or marked not required": [
+        "Die ärztliche Nachsorge muss abgeschlossen oder als nicht erforderlich markiert sein.",
+        "Врачебное наблюдение нужно завершить или отметить как необязательное.",
+      ],
+      "1-week follow-up must be completed or marked not required": [
+        "Die 1-Wochen-Nachsorge muss abgeschlossen oder als nicht erforderlich markiert sein.",
+        "Наблюдение через неделю нужно завершить или отметить как необязательное.",
+      ],
+      "1-month follow-up must be completed or marked not required": [
+        "Die 1-Monats-Nachsorge muss abgeschlossen oder als nicht erforderlich markiert sein.",
+        "Наблюдение через месяц нужно завершить или отметить как необязательное.",
+      ],
+      "6-month follow-up must be completed or marked not required": [
+        "Die 6-Monats-Nachsorge muss abgeschlossen oder als nicht erforderlich markiert sein.",
+        "Наблюдение через шесть месяцев нужно завершить или отметить как необязательное.",
+      ],
+      "Package-end follow-up must be completed or marked not required": [
+        "Die Nachsorge zum Paketende muss abgeschlossen oder als nicht erforderlich markiert sein.",
+        "Наблюдение по окончании пакета нужно завершить или отметить как необязательное.",
+      ],
+      "Results handoff must be completed or marked not required": [
+        "Die Ergebnisübergabe muss abgeschlossen oder als nicht erforderlich markiert sein.",
+        "Передачу результатов нужно завершить или отметить как необязательную.",
+      ],
+    };
+    const completionLabel = completionLabels[reason];
+    if (completionLabel) return lang === "de" ? completionLabel[0] : completionLabel[1];
+    const openWorkflowItems = reason.match(
+      /^(\d+) workflow checklist item\(s\) are still open$/,
+    );
+    if (openWorkflowItems) {
+      return lang === "de"
+        ? `${openWorkflowItems[1]} Workflow-Punkt(e) sind noch offen.`
+        : `В чеклисте ещё открыто пунктов: ${openWorkflowItems[1]}.`;
+    }
+    const unsettledServices = reason.match(
+      /^(\d+) service item\(s\) are not approved or invoiced$/,
+    );
+    if (unsettledServices) {
+      return lang === "de"
+        ? `${unsettledServices[1]} Leistung(en) sind noch nicht freigegeben oder abgerechnet.`
+        : `Не согласовано или не выставлено в счёт услуг: ${unsettledServices[1]}.`;
+    }
     const translation = resolveOrderBlockingReason(reason);
     if (translation) return l(translation.key, translation.values);
     return formatUnknownValue(reason, t);
@@ -920,6 +1018,8 @@ function useOrdersPageContent() {
     workflowCreateOpen,
     workflowForm,
   } = ordersPageState;
+  const [statusSaving, setStatusSaving] = useState<OrderStatus | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const setOrdersPageField = <K extends keyof OrdersPageState>(
     field: K,
     nextValue: SetStateAction<OrdersPageState[K]>,
@@ -1222,8 +1322,10 @@ function useOrdersPageContent() {
     return {
       total: items.length,
       delivered: items.filter((item) => item.status === "delivered").length,
-      approved: items.filter((item) => item.status === "approved").length,
-      gross: sumLeistungTotals(items),
+      approved: items.filter((item) =>
+        item.status === "approved" || item.status === "invoiced"
+      ).length,
+      net: sumLeistungTotals(items),
     };
   }, [orderDetail]);
   const serviceGroupMetrics = useMemo(
@@ -2178,6 +2280,37 @@ function useOrdersPageContent() {
           error instanceof Error ? error.message : l("orders_error_advance_phase"),
         );
       });
+  }
+
+  async function handleOrderStatusChange(status: OrderStatus) {
+    if (!orderDetail || status === orderDetail.status || statusSaving) return;
+    if (
+      status === "cancelled" &&
+      !window.confirm(
+        lang === "de"
+          ? "Diesen Auftrag wirklich stornieren? Dieser Status kann nicht wieder geöffnet werden."
+          : "Действительно отменить этот заказ? После этого его нельзя будет открыть снова.",
+      )
+    ) {
+      return;
+    }
+
+    setStatusSaving(status);
+    setStatusError(null);
+    try {
+      await updateOrderStatus(orderDetail.id, status);
+      triggerReload();
+    } catch (error) {
+      setStatusError(
+        error instanceof Error
+          ? error.message
+          : lang === "de"
+            ? "Der Auftragsstatus konnte nicht aktualisiert werden."
+            : "Не удалось обновить статус заказа.",
+      );
+    } finally {
+      setStatusSaving(null);
+    }
   }
 
   async function handleSaveDebtManagement() {
@@ -3172,7 +3305,7 @@ function useOrdersPageContent() {
                         </p>
                         <div className="mt-3 flex flex-wrap items-center gap-2">
                           <Badge variant="outline" className="rounded-full">
-                            {formatMoney(orderDetail.total_estimated)}
+                            {lang === "de" ? "Brutto" : "Брутто"}: {formatMoney(orderDetail.total_estimated)}
                           </Badge>
                           <Badge variant="outline" className="rounded-full">
                             {leistungMetrics.total} {tx.providers_services}
@@ -3218,8 +3351,78 @@ function useOrdersPageContent() {
                             <ArrowUpRight className="size-3.5" />
                             {l("orders_dokumente")}
                           </Button>
+                          {permissions.canManagePhase
+                            ? (orderDetail.lifecycle?.allowed_status_transitions ?? []).map(
+                                (transition) => {
+                                  const label =
+                                    transition.status === "active"
+                                      ? lang === "de"
+                                        ? "Fortsetzen"
+                                        : "Продолжить"
+                                      : transition.status === "paused"
+                                        ? lang === "de"
+                                          ? "Pausieren"
+                                          : "Приостановить"
+                                        : transition.status === "completed"
+                                          ? lang === "de"
+                                            ? "Abschließen"
+                                            : "Завершить"
+                                          : lang === "de"
+                                            ? "Stornieren"
+                                            : "Отменить";
+                                  const icon =
+                                    transition.status === "active" ? (
+                                      <Play className="size-3.5" />
+                                    ) : transition.status === "paused" ? (
+                                      <Pause className="size-3.5" />
+                                    ) : transition.status === "completed" ? (
+                                      <CheckCircle2 className="size-3.5" />
+                                    ) : (
+                                      <X className="size-3.5" />
+                                    );
+                                  return (
+                                    <Button
+                                      key={transition.status}
+                                      type="button"
+                                      size="sm"
+                                      variant={
+                                        transition.status === "cancelled"
+                                          ? "destructive"
+                                          : transition.status === "completed"
+                                            ? "default"
+                                            : "outline"
+                                      }
+                                      className="justify-center rounded-lg"
+                                      disabled={
+                                        statusSaving != null || transition.blocked
+                                      }
+                                      title={
+                                        transition.reasons
+                                          .map(localizedBlockingReason)
+                                          .join("\n") || undefined
+                                      }
+                                      onClick={() =>
+                                        void handleOrderStatusChange(transition.status)
+                                      }
+                                    >
+                                      {statusSaving === transition.status ? (
+                                        <LoaderCircle className="size-3.5 animate-spin" />
+                                      ) : (
+                                        icon
+                                      )}
+                                      {label}
+                                    </Button>
+                                  );
+                                },
+                              )
+                            : null}
                       </div>
                     </div>
+                    {statusError ? (
+                      <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                        {statusError}
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="border-t border-border/70 bg-slate-50/70 px-5 py-4">
@@ -3267,7 +3470,11 @@ function useOrdersPageContent() {
                           type="button"
                           className="h-9 shrink-0 rounded-lg"
                           onClick={() => void handleAdvancePhase()}
-                          disabled={phaseSaving || Boolean(nextLifecycleTransition?.blocked)}
+                          disabled={
+                            phaseSaving ||
+                            orderDetail.status !== "active" ||
+                            Boolean(nextLifecycleTransition?.blocked)
+                          }
                         >
                           {phaseSaving ? <LoaderCircle className="size-4 animate-spin" /> : null}
                           {l("orders_weiter_zu")} {phaseLabel(orderDetail.lifecycle.next_stage)}
@@ -3312,19 +3519,41 @@ function useOrdersPageContent() {
                     </div>
 
                     {nextLifecycleTransition?.blocked ? (
-                      <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
-                        <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                        <div className="min-w-0">
-                          <span className="font-semibold">{l("orders_blockierende_grunde")}:</span>{" "}
-                          <span>
-                            {nextLifecycleTransition.reasons
-                              .slice(0, 3)
-                              .map(localizedBlockingReason)
-                              .join("; ")}
-                            {nextLifecycleTransition.reasons.length > 3
-                              ? ` +${nextLifecycleTransition.reasons.length - 3}`
-                              : ""}
-                          </span>
+                      <div className="mt-3 overflow-hidden rounded-lg border border-amber-200 bg-amber-50 text-amber-950">
+                        <div className="flex items-center gap-2 px-3 py-2.5 text-xs">
+                          <AlertTriangle className="size-4 shrink-0" />
+                          <span className="font-semibold">{l("orders_blockierende_grunde")}</span>
+                          <Badge
+                            variant="outline"
+                            className="ml-auto rounded-full border-amber-300 bg-white/70 text-amber-900"
+                          >
+                            {nextLifecycleTransition.reasons.length}
+                          </Badge>
+                        </div>
+                        <div className="grid border-t border-amber-200/80 p-1.5 sm:grid-cols-2">
+                          {nextLifecycleTransition.reasons.map((reason) => {
+                            const targetSection = orderBlockingReasonSection(reason);
+                            return (
+                              <button
+                                key={reason}
+                                type="button"
+                                className="group flex min-h-10 min-w-0 items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs leading-4 transition-colors hover:bg-amber-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                                onClick={() =>
+                                  staffGo(
+                                    buildOrderWorkspaceHref(
+                                      orderDetail.id,
+                                      targetSection,
+                                      detailPatientId || "",
+                                    ),
+                                  )
+                                }
+                              >
+                                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-amber-500" />
+                                <span className="min-w-0 flex-1">{localizedBlockingReason(reason)}</span>
+                                <ChevronRight className="size-3.5 shrink-0 text-amber-700 transition-transform group-hover:translate-x-0.5" />
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     ) : null}
@@ -3335,7 +3564,7 @@ function useOrdersPageContent() {
                   <>
                     <section className="rounded-lg border border-border/70 bg-card p-6">
                       <h2 className={tokens.text.sectionTitle}>
-                        {titleWithDot(tx.orders_title)}
+                        {titleWithDot(lang === "de" ? "Auftrag" : "Заказ")}
                       </h2>
                       <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
                         <div className="space-y-1">
@@ -3539,7 +3768,7 @@ function useOrdersPageContent() {
                                   onChange={(event) =>
                                     setProcessGateForm((current) => ({
                                       ...current,
-                                      debtStatus: event.target.value,
+                                      debtStatus: event.target.value as OrderProcessGateFormState["debtStatus"],
                                     }))
                                   }
                                   className={selectClassName}
@@ -3694,7 +3923,7 @@ function useOrdersPageContent() {
                                 onChange={(event) =>
                                   setProcessGateForm((current) => ({
                                     ...current,
-                                    billingReleaseStatus: event.target.value,
+                                    billingReleaseStatus: event.target.value as OrderProcessGateFormState["billingReleaseStatus"],
                                   }))
                                 }
                                 className={selectClassName}
@@ -3747,7 +3976,7 @@ function useOrdersPageContent() {
                                 onChange={(event) =>
                                   setProcessGateForm((current) => ({
                                     ...current,
-                                    packageCoverageStatus: event.target.value,
+                                    packageCoverageStatus: event.target.value as OrderProcessGateFormState["packageCoverageStatus"],
                                   }))
                                 }
                                 className={selectClassName}
@@ -3952,7 +4181,7 @@ function useOrdersPageContent() {
                                 onChange={(event) =>
                                   setPlanningForm((current) => ({
                                     ...current,
-                                    treatmentPlanStatus: event.target.value,
+                                    treatmentPlanStatus: event.target.value as OrderPlanningFormState["treatmentPlanStatus"],
                                   }))
                                 }
                                 className={selectClassName}
@@ -4016,7 +4245,7 @@ function useOrdersPageContent() {
                                   setPlanningForm((current) => ({
                                     ...current,
                                     preparationDocumentsStatus:
-                                      event.target.value,
+                                      event.target.value as OrderPlanningFormState["preparationDocumentsStatus"],
                                   }))
                                 }
                                 className={selectClassName}
@@ -4037,7 +4266,7 @@ function useOrdersPageContent() {
                                   setPlanningForm((current) => ({
                                     ...current,
                                     interpreterBriefingStatus:
-                                      event.target.value,
+                                      event.target.value as OrderPlanningFormState["interpreterBriefingStatus"],
                                   }))
                                 }
                                 className={selectClassName}
@@ -4293,7 +4522,7 @@ function useOrdersPageContent() {
                               onChange={(event) =>
                                 setExecutionForm((current) => ({
                                   ...current,
-                                  arrivalStatus: event.target.value,
+                                  arrivalStatus: event.target.value as OrderExecutionFormState["arrivalStatus"],
                                 }))
                               }
                               className={selectClassName}
@@ -4307,7 +4536,7 @@ function useOrdersPageContent() {
                               onChange={(event) =>
                                 setExecutionForm((current) => ({
                                   ...current,
-                                  medicalExecutionStatus: event.target.value,
+                                  medicalExecutionStatus: event.target.value as OrderExecutionFormState["medicalExecutionStatus"],
                                 }))
                               }
                               className={selectClassName}
@@ -4328,7 +4557,7 @@ function useOrdersPageContent() {
                               onChange={(event) =>
                                 setExecutionForm((current) => ({
                                   ...current,
-                                  nonMedicalExecutionStatus: event.target.value,
+                                  nonMedicalExecutionStatus: event.target.value as OrderExecutionFormState["nonMedicalExecutionStatus"],
                                 }))
                               }
                               className={selectClassName}
@@ -4354,7 +4583,7 @@ function useOrdersPageContent() {
                               onChange={(event) =>
                                 setExecutionForm((current) => ({
                                   ...current,
-                                  interpreterServiceStatus: event.target.value,
+                                  interpreterServiceStatus: event.target.value as OrderExecutionFormState["interpreterServiceStatus"],
                                 }))
                               }
                               className={selectClassName}
@@ -4380,7 +4609,7 @@ function useOrdersPageContent() {
                               onChange={(event) =>
                                 setExecutionForm((current) => ({
                                   ...current,
-                                  issueStatus: event.target.value,
+                                  issueStatus: event.target.value as OrderExecutionFormState["issueStatus"],
                                 }))
                               }
                               className={selectClassName}
@@ -4653,7 +4882,7 @@ function useOrdersPageContent() {
                               onChange={(event) =>
                                 setFollowupForm((current) => ({
                                   ...current,
-                                  doctorFollowupStatus: event.target.value,
+                                  doctorFollowupStatus: event.target.value as OrderFollowupFormState["doctorFollowupStatus"],
                                 }))
                               }
                               className={selectClassName}
@@ -4677,7 +4906,7 @@ function useOrdersPageContent() {
                                 onChange={(event) =>
                                   setFollowupForm((current) => ({
                                     ...current,
-                                    followup1wStatus: event.target.value,
+                                    followup1wStatus: event.target.value as OrderFollowupFormState["followup1wStatus"],
                                   }))
                                 }
                                 className={selectClassName}
@@ -4694,7 +4923,7 @@ function useOrdersPageContent() {
                                 onChange={(event) =>
                                   setFollowupForm((current) => ({
                                     ...current,
-                                    followup1mStatus: event.target.value,
+                                    followup1mStatus: event.target.value as OrderFollowupFormState["followup1mStatus"],
                                   }))
                                 }
                                 className={selectClassName}
@@ -4711,7 +4940,7 @@ function useOrdersPageContent() {
                                 onChange={(event) =>
                                   setFollowupForm((current) => ({
                                     ...current,
-                                    followup6mStatus: event.target.value,
+                                    followup6mStatus: event.target.value as OrderFollowupFormState["followup6mStatus"],
                                   }))
                                 }
                                 className={selectClassName}
@@ -4744,7 +4973,7 @@ function useOrdersPageContent() {
                                   onChange={(event) =>
                                     setFollowupForm((current) => ({
                                       ...current,
-                                      packageEndStatus: event.target.value,
+                                      packageEndStatus: event.target.value as OrderFollowupFormState["packageEndStatus"],
                                     }))
                                   }
                                   className={selectClassName}
@@ -4769,7 +4998,7 @@ function useOrdersPageContent() {
                               onChange={(event) =>
                                 setFollowupForm((current) => ({
                                   ...current,
-                                  resultsHandoffStatus: event.target.value,
+                                  resultsHandoffStatus: event.target.value as OrderFollowupFormState["resultsHandoffStatus"],
                                 }))
                               }
                               className={selectClassName}
@@ -4922,7 +5151,10 @@ function useOrdersPageContent() {
                           variant="outline"
                           className="h-8 rounded-lg"
                           onClick={() => void handleAdvancePhase()}
-                          disabled={Boolean(nextLifecycleTransition?.blocked)}
+                          disabled={
+                            orderDetail.status !== "active" ||
+                            Boolean(nextLifecycleTransition?.blocked)
+                          }
                         >
                           <ChevronRight className="size-4" />
                           {l("orders_weiter_zu")}{" "}
@@ -4992,6 +5224,7 @@ function useOrdersPageContent() {
                           const isNext = orderDetail.lifecycle?.next_stage === phase;
                           const disabled =
                             detailRequiresPatient ||
+                            orderDetail.status !== "active" ||
                             !permissions.canManagePhase ||
                             (!isCurrent && !isNext);
                           const selected = phaseDraft === phase;
@@ -5057,6 +5290,7 @@ function useOrdersPageContent() {
                             onClick={() => void handleSavePhase()}
                             disabled={
                               phaseSaving ||
+                              orderDetail.status !== "active" ||
                               !phaseDraft ||
                               phaseDraft === orderDetail.phase ||
                               (orderDetail.lifecycle?.next_stage != null &&
@@ -5488,8 +5722,8 @@ function useOrdersPageContent() {
                           value={String(leistungMetrics.approved)}
                         />
                         <MiniMetric
-                          label={tx.contracts_total}
-                          value={formatMoney(leistungMetrics.gross)}
+                          label={lang === "de" ? "Leistungssumme netto" : "Сумма услуг нетто"}
+                          value={formatMoney(leistungMetrics.net)}
                         />
                         <MiniMetric
                           label={t.orders_service_group_split_title}
@@ -5857,7 +6091,7 @@ function useOrdersPageContent() {
                       </div>
                     </SectionCard>
 
-                    <SectionCard title={l("orders_rechnungen")}>
+                    <SectionCard title={lang === "de" ? "Eingangsrechnungen" : "Входящие счета"}>
                       {(orderDetail.external_invoices ?? []).length === 0 ? (
                         <EmptyState
                           title={
@@ -5955,15 +6189,21 @@ function useOrdersPageContent() {
                                     <div className="space-y-3">
                                       {permissions.canManageExternalInvoices ? (
                                         <div className="flex flex-col gap-2">
-                                          {invoice.status !== "approved" ? (
+                                          {externalInvoiceStatusTransitions(invoice.status).map(
+                                            (nextStatus) => (
                                             <Button
-                                              variant="outline"
+                                              key={nextStatus}
+                                              variant={
+                                                nextStatus === "cancelled"
+                                                  ? "destructive"
+                                                  : "outline"
+                                              }
                                               size="sm"
                                               className="h-auto min-h-8 w-full whitespace-normal rounded-lg px-3 text-center"
                                               onClick={() =>
                                                 void handleUpdateExternalInvoiceStatus(
                                                   invoice.id,
-                                                  "approved",
+                                                  nextStatus,
                                                 )
                                               }
                                               disabled={invoiceUpdating}
@@ -5971,47 +6211,18 @@ function useOrdersPageContent() {
                                               {invoiceUpdating ? (
                                                 <LoaderCircle className="mr-2 size-4 animate-spin" />
                                               ) : null}
-                                              {t.orders_external_invoice_mark_approved}
+                                              {nextStatus === "received"
+                                                ? lang === "de"
+                                                  ? "Als eingegangen markieren"
+                                                  : "Отметить как полученный"
+                                                : nextStatus === "approved"
+                                                  ? t.orders_external_invoice_mark_approved
+                                                  : nextStatus === "paid"
+                                                    ? t.orders_external_invoice_mark_paid
+                                                    : t.orders_external_invoice_cancel}
                                             </Button>
-                                          ) : null}
-                                          {invoice.status !== "paid" ? (
-                                            <Button
-                                              variant="outline"
-                                              size="sm"
-                                              className="h-auto min-h-8 w-full whitespace-normal rounded-lg px-3 text-center"
-                                              onClick={() =>
-                                                void handleUpdateExternalInvoiceStatus(
-                                                  invoice.id,
-                                                  "paid",
-                                                )
-                                              }
-                                              disabled={invoiceUpdating}
-                                            >
-                                              {invoiceUpdating ? (
-                                                <LoaderCircle className="mr-2 size-4 animate-spin" />
-                                              ) : null}
-                                              {t.orders_external_invoice_mark_paid}
-                                            </Button>
-                                          ) : null}
-                                          {invoice.status !== "cancelled" ? (
-                                            <Button
-                                              variant="outline"
-                                              size="sm"
-                                              className="h-auto min-h-8 w-full whitespace-normal rounded-lg px-3 text-center"
-                                              onClick={() =>
-                                                void handleUpdateExternalInvoiceStatus(
-                                                  invoice.id,
-                                                  "cancelled",
-                                                )
-                                              }
-                                              disabled={invoiceUpdating}
-                                            >
-                                              {invoiceUpdating ? (
-                                                <LoaderCircle className="mr-2 size-4 animate-spin" />
-                                              ) : null}
-                                              {t.orders_external_invoice_cancel}
-                                            </Button>
-                                          ) : null}
+                                            ),
+                                          )}
                                         </div>
                                       ) : null}
                                     </div>

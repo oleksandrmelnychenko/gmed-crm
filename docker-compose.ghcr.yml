@@ -1,6 +1,6 @@
-# GHCR override — switches backend and frontend from build-on-host to
-# pulling pre-built, cosign-signed images from GitHub Container
-# Registry. Layered AFTER docker-compose.prod-hetzner.yml so the
+# GHCR override — switches backend, frontend, and the clinical document
+# parser from build-on-host to pulling pre-built, cosign-signed images
+# from GitHub Container Registry. Layered AFTER docker-compose.prod-hetzner.yml so the
 # Postgres bind mount and credential overrides still apply.
 #
 # Compose layering for PROD:
@@ -31,4 +31,9 @@ services:
   frontend:
     build: !reset null
     image: "${GMED_FRONTEND_IMAGE:?Set GMED_FRONTEND_IMAGE in release.env (sops) to a digest-pinned ghcr.io/... reference}"
+    pull_policy: always
+
+  clinical-document-parser:
+    build: !reset null
+    image: "${GMED_PARSER_IMAGE:?Set GMED_PARSER_IMAGE in release.env (sops) to a digest-pinned ghcr.io/... reference}"
     pull_policy: always

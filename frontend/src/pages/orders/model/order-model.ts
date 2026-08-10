@@ -65,6 +65,23 @@ export const EXTERNAL_INVOICE_STATUSES: ExternalInvoiceStatus[] = [
   "cancelled",
 ];
 
+export function externalInvoiceStatusTransitions(
+  current: ExternalInvoiceStatus,
+): ExternalInvoiceStatus[] {
+  switch (current) {
+    case "expected":
+      return ["received", "cancelled"];
+    case "received":
+      return ["approved", "cancelled"];
+    case "approved":
+    case "overdue":
+      return ["paid", "cancelled"];
+    case "paid":
+    case "cancelled":
+      return [];
+  }
+}
+
 export const DEFAULT_FILTERS: OrdersFilters = {
   search: "",
   phase: "",

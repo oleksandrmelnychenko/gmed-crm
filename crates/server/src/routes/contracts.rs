@@ -124,7 +124,7 @@ struct UpdateQuoteStatusRequest {
 
 #[derive(Deserialize)]
 struct UpsertAgencyServiceRequest {
-    service_key: String,
+    service_key: Option<String>,
     service_name: String,
     description: Option<String>,
     unit_label: Option<String>,
@@ -137,7 +137,7 @@ struct UpsertAgencyServiceRequest {
 }
 
 struct NormalizedAgencyServicePayload {
-    service_key: String,
+    service_key: Option<String>,
     service_name: String,
     description: Option<String>,
     unit_label: String,
@@ -280,7 +280,6 @@ fn normalize_agency_service_key(value: &str) -> Result<String, &'static str> {
 fn normalize_agency_service_payload(
     body: UpsertAgencyServiceRequest,
 ) -> Result<NormalizedAgencyServicePayload, &'static str> {
-    let service_key = normalize_agency_service_key(&body.service_key)?;
     let service_name = body.service_name.trim();
     if service_name.is_empty() {
         return Err("Service name is required");
@@ -288,6 +287,11 @@ fn normalize_agency_service_payload(
     if service_name.len() > 160 {
         return Err("Service name cannot exceed 160 characters");
     }
+    let service_key = body
+        .service_key
+        .as_deref()
+        .map(normalize_agency_service_key)
+        .transpose()?;
 
     let description = body
         .description
@@ -343,6 +347,29 @@ fn normalize_agency_service_payload(
         valid_from,
         valid_to,
     })
+}
+
+fn generate_agency_service_key(service_name: &str) -> String {
+    let mut base = service_name
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    while base.contains("__") {
+        base = base.replace("__", "_");
+    }
+    let base = base.trim_matches('_');
+    let base = if base.is_empty() { "service" } else { base };
+    let base = base.chars().take(56).collect::<String>();
+    let suffix = Uuid::new_v4().simple().to_string();
+    format!("{base}_{}", &suffix[..8])
 }
 
 async fn insert_quote_version_snapshot(
@@ -534,6 +561,9 @@ async fn create_agency_service(
         Ok(payload) => payload,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    let service_key = payload
+        .service_key
+        .unwrap_or_else(|| generate_agency_service_key(&payload.service_name));
 
     match sqlx::query(
         r#"INSERT INTO agency_service_catalog (
@@ -545,7 +575,7 @@ async fn create_agency_service(
            )
            RETURNING id, created_at, updated_at"#,
     )
-    .bind(payload.service_key)
+    .bind(service_key)
     .bind(payload.service_name)
     .bind(payload.description)
     .bind(payload.unit_label)
@@ -613,7 +643,7 @@ async fn update_agency_service(
 
     match sqlx::query(
         r#"UPDATE agency_service_catalog
-           SET service_key = $2,
+           SET service_key = COALESCE($2, service_key),
                service_name = $3,
                description = $4,
                unit_label = $5,

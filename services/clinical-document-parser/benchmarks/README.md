@@ -7,6 +7,9 @@ external identifiers without the separately protected ground truth. Ground
 truth remains an external JSON file. Do not commit real
 documents, extracted text, or real ground-truth files.
 
+The recommended corpus composition, initial release gates, and canary rollout
+are documented in `docs/ocr-production-readiness_ua.md` at the repository root.
+
 ## Metrics
 
 - OCR character and word similarity after Unicode and whitespace normalization.
@@ -27,8 +30,11 @@ is `0.84` and is recorded in every report.
 ## Ground truth
 
 Validate files against `schema.json`. A synthetic, non-PHI example lives in
-`examples/synthetic_ground_truth.json`. A real external file can point to a PDF
-using `document.path`, or benchmark precomputed output using `--predictions`.
+`examples/synthetic_ground_truth.json`; CI runs its committed text document
+through the current extraction and parser pipeline. The accompanying static
+predictions file exists only for evaluator tests. A real external file can
+point to a PDF using `document.path`, or benchmark precomputed output using
+`--predictions`.
 
 Keep real ground truth outside the repository, ideally in an encrypted clinical
 evaluation store with access logging. Use opaque random `case_id` values. Even
@@ -41,6 +47,7 @@ contain patient names or medical record numbers.
   "cases": [
     {
       "case_id": "opaque-random-id",
+      "cohorts": ["arztbrief", "fax_scan"],
       "document": { "path": "D:/secure/input.pdf", "mime_type": "application/pdf" },
       "reference": {
         "raw_text": "human-corrected text stays only in this external file",
@@ -75,6 +82,15 @@ python -m benchmarks.run `
   --fail-on-unsafe `
   --minimum-candidate-f1 0.90 `
   --minimum-ocr-similarity 0.95 `
+  --minimum-cohort-candidate-f1 0.90 `
+  --minimum-cohort-ocr-similarity 0.90 `
+  --required-cohort arztbrief `
+  --required-cohort laboratory `
+  --required-cohort smartphone_photo `
+  --required-cohort fax_scan `
+  --required-cohort cyrillic `
+  --required-cohort negative `
+  --minimum-required-cohort-cases 10 `
   --output D:\secure\reports\parser-metrics.json
 ```
 
@@ -91,6 +107,15 @@ The process exits with `2` when a configured quality gate fails and `64` for an
 invalid configuration. Reports intentionally contain only aggregate/per-case
 counts, ratios, and ordinal case references. Never add a debug mode that emits
 source or candidate text in CI logs.
+
+`cohorts` accepts only the fixed PHI-safe labels `arztbrief`, `laboratory`,
+`smartphone_photo`, `fax_scan`, `cyrillic`, and `negative`. Cohort gates prevent
+a strong majority category from hiding a regression in a smaller document
+class. Pass every expected category with repeated `--required-cohort` flags;
+the gate then fails if a category silently disappears from the corpus. Do not
+add clinic, provider, geography, or patient-derived cohort names. Use
+`--minimum-required-cohort-cases` so a one-document category cannot satisfy a
+release gate accidentally.
 
 ## Test
 

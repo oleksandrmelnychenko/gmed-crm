@@ -61,8 +61,8 @@ PROD uses digest-pinned GHCR release images built by
 only. Application deployment is:
 
 1. Build/sign images through the release workflow.
-2. Put `GMED_BACKEND_IMAGE` and `GMED_FRONTEND_IMAGE` digest refs into
-   the PROD SOPS bundle.
+2. Put `GMED_BACKEND_IMAGE`, `GMED_FRONTEND_IMAGE`, and
+   `GMED_PARSER_IMAGE` digest refs into the PROD SOPS bundle.
 3. Re-run:
 
 ```bash

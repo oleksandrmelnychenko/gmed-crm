@@ -335,7 +335,6 @@ function useContractsPageContent() {
       editCatalogItem: t.revenue_agency_service_edit_title,
       newCatalogItem: t.revenue_agency_service_new_title,
       catalogHelp: t.revenue_agency_service_help,
-      serviceKey: t.revenue_agency_service_service_key,
       serviceName: t.revenue_agency_service_service_name,
       unitLabel: t.revenue_agency_service_unit_label,
       currency: t.revenue_agency_service_currency,
@@ -1773,7 +1772,7 @@ function useContractsPageContent() {
     setAgencyServiceFormError(null);
     try {
       const payload = {
-        service_key: agencyServiceForm.serviceKey,
+        service_key: agencyServiceForm.serviceKey || null,
         service_name: agencyServiceForm.serviceName,
         description: toOptional(agencyServiceForm.description),
         unit_label: toOptional(agencyServiceForm.unitLabel),
@@ -1968,10 +1967,10 @@ function useContractsPageContent() {
             onRowClick={permissions.canManageCatalog ? handleEditAgencyService : undefined}
             toolbarStart={
               <>
-                <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
                   {titleWithDot(text.agencyServiceTitle)}
                 </span>
-                <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+                <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
                 <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -2066,10 +2065,10 @@ function useContractsPageContent() {
                 onRowClick={(row) => openContract(row.id)}
                 toolbarStart={
                   <>
-                    <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                    <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
                       {titleWithDot(text.contractsTab)}
                     </span>
-                    <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+                    <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
                     <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
                     <div className="relative">
                       <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -2196,10 +2195,10 @@ function useContractsPageContent() {
                 onRowClick={(row) => openQuote(row.id)}
                 toolbarStart={
                   <>
-                  <span className="shrink-0 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                  <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
                     {titleWithDot(text.quotesTab)}
                   </span>
-                  <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+                  <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
                   <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
                   <div className="relative">
                     <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -2362,17 +2361,7 @@ function useContractsPageContent() {
                 <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.basicData)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                    <Field label={text.serviceKey}>
-                      <Input
-                        required
-                        className={shellInputClassName}
-                        value={agencyServiceForm.serviceKey}
-                        onChange={(event) =>
-                          setAgencyServiceForm((current) => ({ ...current, serviceKey: event.target.value }))
-                        }
-                      />
-                    </Field>
-                    <Field label={text.serviceName}>
+                    <Field label={text.serviceName} className="sm:col-span-2">
                       <Input
                         required
                         className={shellInputClassName}

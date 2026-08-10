@@ -213,8 +213,8 @@ export function buildPatientColumns(
       cellClassName: "min-w-0 whitespace-normal",
       group: "identity",
       render: (p: PatientSummary) => (
-        <div className="flex h-full min-w-0 items-center overflow-hidden">
-          <div className="min-w-0 truncate font-mono text-xs font-medium text-foreground">
+        <div className="flex h-full min-w-0 items-center justify-center overflow-hidden">
+          <div className="line-clamp-2 min-w-0 break-words text-center font-mono text-xs font-medium text-foreground">
             {patientDisplayName(p)}
           </div>
         </div>

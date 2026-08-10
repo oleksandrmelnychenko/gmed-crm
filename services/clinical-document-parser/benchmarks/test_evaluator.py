@@ -32,6 +32,7 @@ class EvaluatorTests(unittest.TestCase):
             "cases": [
                 {
                     "case_id": "private-case-name",
+                    "cohorts": ["arztbrief", "fax_scan"],
                     "reference": {
                         "raw_text": "Diagnosis alpha. History beta.",
                         "candidates": [
@@ -83,6 +84,11 @@ class EvaluatorTests(unittest.TestCase):
         self.assertEqual(summary["section_contamination"]["contaminated"], 1)
         self.assertEqual(summary["safety"]["unsafe_false_positive_diagnoses"], 1)
         self.assertFalse(summary["safety"]["passed"])
+        self.assertEqual(summary["cohorts"]["fax_scan"]["case_count"], 1)
+        self.assertEqual(
+            summary["cohorts"]["arztbrief"]["ocr"]["mean_character_similarity"],
+            1.0,
+        )
 
         encoded = json.dumps(report)
         self.assertNotIn("private-case-name", encoded)
@@ -112,6 +118,98 @@ class EvaluatorTests(unittest.TestCase):
                 "unsafe_false_positive_diagnosis",
             ],
         )
+
+    def test_cohort_gates_expose_small_category_regressions(self) -> None:
+        report = {
+            "summary": {
+                "cohorts": {
+                    "fax_scan": {
+                        "ocr": {"mean_character_similarity": 0.8},
+                        "candidates": {"cases_evaluated": 1, "micro": {"f1": 0.7}},
+                    }
+                }
+            }
+        }
+
+        passed, failures = report_passes_gates(
+            report,
+            minimum_cohort_candidate_f1=0.9,
+            minimum_cohort_ocr_similarity=0.9,
+        )
+
+        self.assertFalse(passed)
+        self.assertEqual(
+            failures,
+            [
+                "cohort_candidate_f1_below_minimum:fax_scan",
+                "cohort_ocr_similarity_below_minimum:fax_scan",
+            ],
+        )
+
+    def test_unknown_cohort_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "invalid cohorts"):
+            evaluate_dataset(
+                {
+                    "schema_version": 1,
+                    "cases": [
+                        {
+                            "case_id": "opaque",
+                            "cohorts": ["clinic-name-must-not-be-reported"],
+                            "reference": {"raw_text": "Reference"},
+                        }
+                    ],
+                },
+                {"opaque": {"raw_text": "Reference"}},
+            )
+
+    def test_required_cohort_cannot_silently_disappear(self) -> None:
+        report = {
+            "summary": {
+                "cohorts": {
+                    "arztbrief": {
+                        "case_count": 1,
+                        "ocr": {"mean_character_similarity": 1.0},
+                        "candidates": {"cases_evaluated": 1, "micro": {"f1": 1.0}},
+                    }
+                }
+            }
+        }
+
+        passed, failures = report_passes_gates(
+            report,
+            required_cohorts=("arztbrief", "cyrillic", "fax_scan"),
+        )
+
+        self.assertFalse(passed)
+        self.assertEqual(
+            failures,
+            ["required_cohort_missing:cyrillic", "required_cohort_missing:fax_scan"],
+        )
+
+    def test_required_cohort_must_have_enough_cases(self) -> None:
+        report = {
+            "summary": {
+                "cohorts": {
+                    "cyrillic": {
+                        "case_count": 2,
+                        "ocr": {"mean_character_similarity": 1.0},
+                        "candidates": {"cases_evaluated": 2, "micro": {"f1": 1.0}},
+                    }
+                }
+            }
+        }
+
+        passed, failures = report_passes_gates(
+            report,
+            required_cohorts=("cyrillic",),
+            minimum_required_cohort_cases=10,
+        )
+
+        self.assertFalse(passed)
+        self.assertEqual(failures, ["required_cohort_too_small:cyrillic"])
+
+        with self.assertRaisesRegex(ValueError, "needs a required cohort"):
+            report_passes_gates(report, minimum_required_cohort_cases=1)
 
     def test_partially_annotated_case_does_not_turn_all_predictions_into_false_positives(self) -> None:
         ground_truth = {

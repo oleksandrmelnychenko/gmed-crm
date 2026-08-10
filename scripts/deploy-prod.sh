@@ -104,6 +104,7 @@ required_keys=(
   POSTGRES_PASSWORD
   GMED_BACKEND_IMAGE
   GMED_FRONTEND_IMAGE
+  GMED_PARSER_IMAGE
   POSTGRES_METRICS_USER
   POSTGRES_METRICS_PASSWORD
   LOKI_URL
@@ -125,9 +126,11 @@ set -a
 . "$RELEASE_ENV"
 set +a
 
-if [[ "${PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY:-false}" == "true" && -z "${PROD_ADMIN_PASSWORD:-}" ]]; then
-  echo "ERROR: PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY=true requires PROD_ADMIN_PASSWORD in secrets.sops.yaml" >&2
-  exit 1
+if [[ "${PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY:-false}" == "true" ]]; then
+  if [[ -z "${PROD_ADMIN_EMAIL:-}" || -z "${PROD_ADMIN_NAME:-}" || -z "${PROD_ADMIN_PASSWORD:-}" ]]; then
+    echo "ERROR: PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY=true requires PROD_ADMIN_EMAIL, PROD_ADMIN_NAME, and PROD_ADMIN_PASSWORD in secrets.sops.yaml" >&2
+    exit 1
+  fi
 fi
 
 # Ensure backup tooling is present. rclone and age are tiny; apt-get
@@ -151,7 +154,7 @@ fi
 # (`@sha256:...`). Floating tags would race the verify/pull window —
 # we'd verify one digest and `docker pull` could resolve a different
 # one if the tag rotated between calls.
-for image_var in GMED_BACKEND_IMAGE GMED_FRONTEND_IMAGE; do
+for image_var in GMED_BACKEND_IMAGE GMED_FRONTEND_IMAGE GMED_PARSER_IMAGE; do
   ref="${!image_var}"
   if [[ "$ref" != *"@sha256:"* ]]; then
     echo "ERROR: $image_var must be digest-pinned (ends with @sha256:...). Got: $ref" >&2
@@ -173,13 +176,13 @@ done
 if [[ -n "${TAILSCALE_AUTH_KEY:-}" ]] && command -v tailscale >/dev/null 2>&1; then
   if ! tailscale status --json 2>/dev/null | grep -q '"BackendState":"Running"'; then
     echo "Bringing up Tailscale"
-    HOSTNAME_FLAG=""
+    hostname_args=()
     if [[ -n "${TAILSCALE_HOSTNAME:-}" ]]; then
-      HOSTNAME_FLAG="--hostname=${TAILSCALE_HOSTNAME}"
+      hostname_args=("--hostname=${TAILSCALE_HOSTNAME}")
     fi
     tailscale up \
       --authkey="$TAILSCALE_AUTH_KEY" \
-      $HOSTNAME_FLAG \
+      "${hostname_args[@]}" \
       --accept-routes=false \
       --accept-dns=false \
       --ssh=false
@@ -260,7 +263,7 @@ if [[ "${PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY:-false}" == "true" ]]; then
     # The backend healthcheck only passes after DB migrations have run.
     # Stop public app services while the one-time data wipe executes.
     wait_for_compose_service_healthy backend
-    "${compose_cmd[@]}" stop caddy frontend backend
+    "${compose_cmd[@]}" stop caddy frontend backend clinical-document-parser
     bash "$REPO_DIR/scripts/sanitize-prod-db.sh"
     "${compose_cmd[@]}" up -d --remove-orphans
   else
