@@ -87,8 +87,15 @@ git reset --hard "origin/$GIT_BRANCH"
 # never replaces the live env file.
 TMP_ENV="$(mktemp -p "$(dirname "$RELEASE_ENV")" release.env.XXXXXX)"
 
+# SOPS' dotenv renderer does not reliably quote whitespace or shell
+# metacharacters (for example `PROD_ADMIN_NAME: "Heorhii Hudiiev"`). Render
+# JSON and let jq produce shell-safe single-quoted assignments. The result is
+# valid both for `source` below and Docker Compose's env-file parser.
 SOPS_AGE_KEY_FILE="$AGE_KEY_FILE" \
-  sops -d --output-type dotenv "$REPO_DIR/$SECRETS_PATH" > "$TMP_ENV"
+  sops -d --output-type json "$REPO_DIR/$SECRETS_PATH" \
+  | jq -r \
+    'to_entries[] | select(.value != null) | "\(.key)=\(.value | tostring | @sh)"' \
+    > "$TMP_ENV"
 
 # Sanity check before we go live: required keys must be present.
 required_keys=(
