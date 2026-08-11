@@ -4553,12 +4553,12 @@ async fn sales_cannot_open_patient_registry() {
 }
 
 #[tokio::test]
-async fn it_admin_can_open_patient_registry_case_and_reports_workspace() {
+async fn ceo_can_open_patient_registry_case_and_reports_workspace() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
     };
 
-    let tag = unique_tag("it-admin-rbac-full");
+    let tag = unique_tag("ceo-rbac-full");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let case_id = seed_case(
         &pool,
@@ -4569,24 +4569,23 @@ async fn it_admin_can_open_patient_registry_case_and_reports_workspace() {
         "Restricted clinical context",
     )
     .await;
-    let it_admin_id = seed_user(&pool, &tag, "it_admin").await;
-    let it_admin_bearer = auth_header_for(it_admin_id, "it_admin");
+    let ceo_bearer = auth_header_for(admin_id, "ceo");
 
     let (status, body) =
-        json_request(&app, "GET", "/api/v1/patients", &it_admin_bearer, None).await;
+        json_request(&app, "GET", "/api/v1/patients", &ceo_bearer, None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(
         body.as_array().is_some_and(|patients| patients
             .iter()
             .any(|patient| patient["id"] == json!(patient_id.to_string()))),
-        "IT admin should see the seeded patient in the registry: {body}"
+        "CEO should see the seeded patient in the registry: {body}"
     );
 
     let (status, body) = json_request(
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}"),
-        &it_admin_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -4597,7 +4596,7 @@ async fn it_admin_can_open_patient_registry_case_and_reports_workspace() {
         &app,
         "GET",
         &format!("/api/v1/cases/{case_id}"),
-        &it_admin_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -4608,7 +4607,7 @@ async fn it_admin_can_open_patient_registry_case_and_reports_workspace() {
         &app,
         "GET",
         "/api/v1/stats/reports/workspace",
-        &it_admin_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -4619,7 +4618,7 @@ async fn it_admin_can_open_patient_registry_case_and_reports_workspace() {
             .is_some_and(|sections| sections
                 .iter()
                 .any(|section| section.as_str() == Some("provider_costs"))),
-        "IT admin should receive full reports workspace sections: {body}"
+        "CEO should receive full reports workspace sections: {body}"
     );
 }
 
@@ -6987,7 +6986,7 @@ async fn concierge_cannot_access_communications_for_blocked_medical_slots() {
 }
 
 #[tokio::test]
-async fn it_admin_can_load_and_manage_appointment_workflow_resources() {
+async fn ceo_can_load_and_manage_appointment_workflow_resources() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
     };
@@ -6996,7 +6995,6 @@ async fn it_admin_can_load_and_manage_appointment_workflow_resources() {
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let provider_id = seed_provider(&pool, &tag).await;
     let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
-    let it_admin_id = seed_user(&pool, &tag, "it_admin").await;
     let billing_id = seed_user(&pool, &tag, "billing").await;
     let appointment_id = seed_appointment(
         &pool,
@@ -7009,7 +7007,7 @@ async fn it_admin_can_load_and_manage_appointment_workflow_resources() {
         "2026-08-10",
     )
     .await;
-    let bearer = auth_header_for(it_admin_id, "it_admin");
+    let bearer = auth_header_for(admin_id, "ceo");
 
     for path in [
         format!("/api/v1/appointments/{appointment_id}/checklist"),
@@ -7039,7 +7037,7 @@ async fn it_admin_can_load_and_manage_appointment_workflow_resources() {
         Some(json!({
             "user_id": billing_id,
             "remind_at": "2026-08-10T12:00:00Z",
-            "title": "IT admin workflow reminder"
+            "title": "CEO workflow reminder"
         })),
     )
     .await;
@@ -10997,7 +10995,7 @@ async fn non_medical_provider_rejects_provider_specializations() {
 
 #[tokio::test]
 async fn create_provider_is_forbidden_for_operational_non_admin_roles() {
-    let Some((app, pool, _admin_id, _)) = test_context().await else {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
     };
 
@@ -11013,6 +11011,7 @@ async fn create_provider_is_forbidden_for_operational_non_admin_roles() {
         "concierge",
         "interpreter",
         "teamlead_interpreter",
+        "it_admin",
     ] {
         let user_id = seed_user(&pool, &format!("{tag}-{role}"), role).await;
         let bearer = auth_header_for(user_id, role);
@@ -11031,15 +11030,14 @@ async fn create_provider_is_forbidden_for_operational_non_admin_roles() {
         );
     }
 
-    let it_admin_id = seed_user(&pool, &format!("{tag}-it-admin"), "it_admin").await;
-    let it_admin_bearer = auth_header_for(it_admin_id, "it_admin");
+    let ceo_bearer = auth_header_for(admin_id, "ceo");
     let (status, body) = json_request(
         &app,
         "POST",
         "/api/v1/providers",
-        &it_admin_bearer,
+        &ceo_bearer,
         Some(json!({
-            "name": format!("Clinic It Admin {tag}"),
+            "name": format!("Clinic CEO {tag}"),
             "provider_type": "medical",
         })),
     )
