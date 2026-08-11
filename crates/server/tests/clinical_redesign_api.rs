@@ -52,21 +52,6 @@ fn unique_tag(prefix: &str) -> String {
     format!("{prefix}-{}", Uuid::new_v4().simple())
 }
 
-async fn seed_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
-    sqlx::query_scalar(
-        r#"INSERT INTO users (email, password_hash, name, role)
-           VALUES ($1, $2, $3, $4)
-           RETURNING id"#,
-    )
-    .bind(format!("{tag}-{role}@example.com"))
-    .bind("test-password-hash")
-    .bind(format!("{role} {tag}"))
-    .bind(role)
-    .fetch_one(pool)
-    .await
-    .unwrap()
-}
-
 async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by, languages)
@@ -82,32 +67,10 @@ async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     .unwrap()
 }
 
-async fn seed_patient_assignment(
-    pool: &PgPool,
-    patient_id: Uuid,
-    assigned_user_id: Uuid,
-    assigned_by: Uuid,
-) {
-    sqlx::query(
-        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
-           VALUES ($1, $2, $3)"#,
-    )
-    .bind(patient_id)
-    .bind(assigned_user_id)
-    .bind(assigned_by)
-    .execute(pool)
-    .await
-    .unwrap();
-}
-
-/// Seed a patient assigned to a fresh patient_manager and return the pieces a
-/// clinical round-trip needs: the patient id and that manager's bearer token.
+/// Seed a patient and return the CEO release actor used for clinical round-trips.
 async fn seed_clinical_patient(pool: &PgPool, admin_id: Uuid, tag: &str) -> (Uuid, String) {
     let patient_id = seed_patient(pool, admin_id, tag).await;
-    let pm_id = seed_user(pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
-    (patient_id, pm_bearer)
+    (patient_id, auth_header_for(admin_id, "ceo"))
 }
 
 async fn seed_provider_with_type(pool: &PgPool, tag: &str, provider_type: &str) -> Uuid {

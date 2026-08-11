@@ -67,6 +67,16 @@ longitudinal tables with several date columns are supported. Narrative
 admission/discharge laboratory blocks inherit the matching encounter boundary
 date. Text results such as `neg.` remain textual and are compared with textual
 references rather than being coerced into numbers.
+Vertical German OCR tables may use either
+`Parameter/Ergebnis/Einheit/Referenzbereich` or
+`Bezeichnung/Wert/Einheit/Normbereich`. Repeated letterheads and unrelated
+sidebar cells are excluded from clinical values while the unmodified OCR text
+remains available to the reviewer.
+Document-subject evidence is extracted only from anchored identity labels or a
+supported letter salutation. Generic `Patienten-ID`/`Patienten-Nr.` values are
+marked with the `source_document` namespace: they belong to the issuing clinic
+and must never be hard-compared with GMed's internal patient ID. Missing,
+conflicting, or non-comparable identity evidence remains review-gated.
 Medication sections and BMP-like tables emit one structured `medication`
 candidate per row. The draft preserves the raw row and extracts explicitly
 supported active/trade names, strength, form, route, four-slot dose schedule,

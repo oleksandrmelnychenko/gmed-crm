@@ -1,13 +1,23 @@
 export type PatientVitalMeasurement = {
   id: string;
   measured_at: string;
+  measured_at_precision?: "date" | "datetime";
   bp_systolic?: number | null;
   bp_diastolic?: number | null;
   heart_rate?: number | null;
+  temperature_c?: number | null;
+  oxygen_saturation?: number | null;
+  respiratory_rate?: number | null;
   weight_kg?: number | null;
   height_cm?: number | null;
   bmi?: number | null;
   notes?: string | null;
+  source_country?: string | null;
+  source_document_id?: string | null;
+  source_document_name?: string | null;
+  source_import_id?: string | null;
+  source_candidate_id?: string | null;
+  source_page?: number | null;
   recorded_by?: string | null;
   recorded_by_name?: string | null;
   created_at: string;
@@ -16,6 +26,7 @@ export type PatientVitalMeasurement = {
 export type PatientLabResult = {
   id: string;
   measured_at: string;
+  measured_at_precision?: "date" | "datetime";
   panel?: string | null;
   analyte_name: string;
   result_text: string;

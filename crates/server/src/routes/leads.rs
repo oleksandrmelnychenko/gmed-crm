@@ -270,7 +270,7 @@ async fn list_leads(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListLeadsQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales, Role::Concierge]) {
         return e;
     }
 
@@ -289,12 +289,11 @@ async fn list_leads(
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
     let source_pattern = format!("%{}%", query.source.unwrap_or_default());
     let country_pattern = format!("%{}%", query.country.unwrap_or_default());
+    let concierge_grid_only = auth.role == Role::Concierge;
 
     match sqlx::query(
         r#"SELECT id, first_name, last_name, email, phone, source, country,
                   intake_source, flow, qualification_status, compliance_status,
-                  converted_patient_id, date_of_birth, legal_sex,
-                  consent_privacy_practices, consent_healthcare,
                   submitted_at, created_at, console_promoted_at, console_promoted_by,
                   failed_outcome_status, failed_reason, failed_processed_at, status_changed_at,
                   (SELECT COUNT(*) FROM lead_attachments a WHERE a.lead_id = leads.id) AS attachment_count
@@ -304,15 +303,32 @@ async fn list_leads(
              AND ($2::text IS NULL OR qualification_status = $2)
              AND (
                 $3::text = '%%'
-                OR de_normalize(concat_ws(' ',
-                     first_name, middle_name, last_name,
-                     email, phone, whatsapp_number,
-                     city, country, source,
-                     notes, message, primary_concern_text,
-                     additional_concerns, selected_program
-                   )) LIKE de_normalize($3)
-                OR (length(regexp_replace($3, '\D', '', 'g')) >= 3
-                    AND phone_digits(concat_ws(' ', phone, whatsapp_number)) LIKE '%' || regexp_replace($3, '\D', '', 'g') || '%')
+                OR (
+                    $9::bool = false
+                    AND (
+                        de_normalize(concat_ws(' ',
+                             first_name, middle_name, last_name,
+                             email, phone, whatsapp_number,
+                             city, country, source,
+                             notes, message, primary_concern_text,
+                             additional_concerns, selected_program
+                           )) LIKE de_normalize($3)
+                        OR (length(regexp_replace($3, '\D', '', 'g')) >= 3
+                            AND phone_digits(concat_ws(' ', phone, whatsapp_number)) LIKE '%' || regexp_replace($3, '\D', '', 'g') || '%')
+                    )
+                )
+                OR (
+                    $9::bool = true
+                    AND (
+                        de_normalize(concat_ws(' ',
+                             first_name, middle_name, last_name,
+                             email, phone, whatsapp_number,
+                             city, country, source
+                           )) LIKE de_normalize($3)
+                        OR (length(regexp_replace($3, '\D', '', 'g')) >= 3
+                            AND phone_digits(concat_ws(' ', phone, whatsapp_number)) LIKE '%' || regexp_replace($3, '\D', '', 'g') || '%')
+                    )
+                )
              )
              AND ($4::text = '%%' OR COALESCE(source, '') ILIKE $4)
              AND ($5::text = '%%' OR COALESCE(country, '') ILIKE $5)
@@ -340,6 +356,7 @@ async fn list_leads(
     .bind(query.intake_source)
     .bind(query.lead_type)
     .bind(query.flow)
+    .bind(concierge_grid_only)
     .fetch_all(&state.db)
     .await
     {
@@ -353,6 +370,41 @@ async fn list_leads(
                 // stays on the detail endpoint — we only lift the single
                 // boolean here to keep the list payload light.
                 let lead_id = r.try_get::<Uuid, _>("id").unwrap_or_default();
+                if concierge_grid_only {
+                    leads.push(json!({
+                        "id": lead_id,
+                        "first_name": r.try_get::<String, _>("first_name").unwrap_or_default(),
+                        "last_name": r.try_get::<String, _>("last_name").unwrap_or_default(),
+                        "email": r.try_get::<Option<String>, _>("email").unwrap_or_default(),
+                        "phone": r.try_get::<Option<String>, _>("phone").unwrap_or_default(),
+                        "source": r.try_get::<Option<String>, _>("source").unwrap_or_default(),
+                        "country": r.try_get::<Option<String>, _>("country").unwrap_or_default(),
+                        "intake_source": Value::Null,
+                        "flow": Value::Null,
+                        "lead_type": lead_type_from_origin(
+                            r.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("console_promoted_at")
+                                .unwrap_or_default()
+                                .is_some(),
+                            r.try_get::<Option<String>, _>("intake_source").unwrap_or_default().as_deref(),
+                            r.try_get::<Option<String>, _>("source").unwrap_or_default().as_deref(),
+                            r.try_get::<Option<String>, _>("flow").unwrap_or_default().as_deref(),
+                        ),
+                        "qualification_status": r.try_get::<String, _>("qualification_status").unwrap_or_default(),
+                        "status_changed_at": r
+                            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("status_changed_at")
+                            .unwrap_or_default()
+                            .map(|value| value.to_rfc3339()),
+                        "submitted_at": r
+                            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("submitted_at")
+                            .unwrap_or_default()
+                            .map(|value| value.to_rfc3339()),
+                        "created_at": r
+                            .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+                            .map(|value| value.to_rfc3339())
+                            .unwrap_or_default(),
+                    }));
+                    continue;
+                }
                 let readiness = match load_lead_conversion_readiness(&state, lead_id).await {
                     Ok(Some(readiness)) => readiness,
                     Ok(None) => continue,

@@ -189,6 +189,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Resolve build metadata
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "short_sha=${GITHUB_SHA:0:12}" >> "$GITHUB_OUTPUT"
+          echo "build_timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -227,6 +235,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VITE_RELEASE_CHANNEL=production
+            VITE_BUILD_NUMBER=release-sha-${{ steps.source.outputs.short_sha }}
+            VITE_BUILD_TIMESTAMP=${{ steps.source.outputs.build_timestamp }}
           # SLSA-style provenance attached to the image. The
           # `mode=max` setting includes the build invocation graph
           # so `cosign tree` shows full lineage.

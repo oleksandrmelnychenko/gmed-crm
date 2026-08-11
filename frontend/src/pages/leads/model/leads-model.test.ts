@@ -6,10 +6,31 @@ import {
   formatDateTime,
   leadErrorBlockingReasons,
   leadErrorMessage,
+  leadPermissions,
   normalizeLeadServiceSelection,
   normalizeLeadServiceValue,
   updateLeadServiceSelection,
 } from "./leads-model";
+
+describe("lead release permissions", () => {
+  it("keeps Concierge on the read-only grid", () => {
+    expect(leadPermissions("concierge")).toEqual({
+      canViewPage: true,
+      canOpen: false,
+      canCreate: false,
+      canConvert: false,
+    });
+  });
+
+  it("keeps full lead operations for CEO", () => {
+    expect(leadPermissions("ceo")).toEqual({
+      canViewPage: true,
+      canOpen: true,
+      canCreate: true,
+      canConvert: true,
+    });
+  });
+});
 
 describe("lead questionnaire services", () => {
   it("keeps every service option from the questionnaire contract", () => {

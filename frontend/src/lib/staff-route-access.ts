@@ -15,95 +15,68 @@ export const ALL_STAFF_ROLES = [
   "it_admin",
 ] as const;
 
+export const RELEASE_STAFF_ROLES = ["ceo", "concierge", "billing"] as const;
+
 type StaffRole = (typeof ALL_STAFF_ROLES)[number];
 
 const ROLES_CHAT = [
   "ceo",
-  "ceo_assistant",
-  "patient_manager",
-  "teamlead_interpreter",
-  "interpreter",
   "concierge",
   "billing",
-  "it_admin",
 ] as const satisfies readonly StaffRole[];
 
 const ROLES_FEEDBACK = [
   "ceo",
-  "ceo_assistant",
-  "patient_manager",
-  "teamlead_interpreter",
-  "concierge",
 ] as const satisfies readonly StaffRole[];
 
 const ROLES_REPORTS = [
   "ceo",
-  "ceo_assistant",
-  "patient_manager",
   "billing",
-  "sales",
 ] as const satisfies readonly StaffRole[];
 
 const ROLES_CONTRACTS_INVOICES = [
   "ceo",
-  "ceo_assistant",
-  "patient_manager",
   "billing",
 ] as const satisfies readonly StaffRole[];
 
 const ROLES_FINANCE_CATALOG = [
   "ceo",
-  "ceo_assistant",
-  "patient_manager",
   "billing",
 ] as const satisfies readonly StaffRole[];
 
 const ROLES_DOCUMENTS = [
   "ceo",
-  "ceo_assistant",
-  "patient_manager",
-  "teamlead_interpreter",
-  "interpreter",
   "concierge",
   "billing",
 ] as const satisfies readonly StaffRole[];
 
 const ROLES_APPOINTMENTS = [
   "ceo",
-  "patient_manager",
-  "teamlead_interpreter",
-  "interpreter",
   "concierge",
-  "it_admin",
 ] as const satisfies readonly StaffRole[];
 
 const ROLES_INTERPRETERS = [
   "ceo",
-  "patient_manager",
-  "teamlead_interpreter",
-  "it_admin",
 ] as const satisfies readonly StaffRole[];
+
+const ROLES_EMPLOYEES = ["ceo", "concierge"] as const satisfies readonly StaffRole[];
+const ROLES_SPECIALIZATIONS = ["ceo"] as const satisfies readonly StaffRole[];
 
 // CEO has full access by policy — `AuthUser::require_any_role` in
 // `crates/server/src/auth/middleware.rs` short-circuits to Ok for Ceo,
 // so the frontend guard mirrors that by including "ceo" everywhere.
-const ROLES_ADMIN = ["ceo", "it_admin"] as const satisfies readonly StaffRole[];
+const ROLES_ADMIN = ["ceo"] as const satisfies readonly StaffRole[];
 
 const ROLES_COMPLIANCE = [
   "ceo",
-  "patient_manager",
 ] as const satisfies readonly StaffRole[];
 
 const ROLES_ADMIN_USERS = [
   "ceo",
-  "it_admin",
 ] as const satisfies readonly StaffRole[];
 
 const ROLES_ADMIN_CUSTOM_FIELDS = [
   "ceo",
-  "it_admin",
-  "patient_manager",
-  "sales",
 ] as const satisfies readonly StaffRole[];
 
 // Role constants below are aligned with the canonical "list" handler each
@@ -113,49 +86,37 @@ const ROLES_ADMIN_CUSTOM_FIELDS = [
 /** `crates/server/src/routes/leads.rs:114` (`list_leads`) — CEO passes via `require_any_role` bypass. */
 const ROLES_LEADS = [
   "ceo",
-  "patient_manager",
-  "sales",
+  "concierge",
 ] as const satisfies readonly StaffRole[];
 
 /** `crates/server/src/routes/cases.rs:275` (`list_cases`) */
 const ROLES_CASES = [
   "ceo",
-  "patient_manager",
 ] as const satisfies readonly StaffRole[];
 
 /** `crates/server/src/routes/orders.rs:157` (`list_orders`) */
 const ROLES_ORDERS = [
   "ceo",
-  "patient_manager",
   "billing",
 ] as const satisfies readonly StaffRole[];
 
 /** `crates/server/src/routes/patients.rs:445` (`list_patients`) */
 const ROLES_PATIENTS = [
   "ceo",
-  "ceo_assistant",
-  "patient_manager",
   "billing",
-  "teamlead_interpreter",
-  "interpreter",
   "concierge",
-  "it_admin",
 ] as const satisfies readonly StaffRole[];
 
 /** `crates/server/src/routes/providers.rs:132` (`list_providers`) */
 const ROLES_PROVIDERS = [
   "ceo",
-  "patient_manager",
   "concierge",
   "billing",
-  "sales",
-  "it_admin",
 ] as const satisfies readonly StaffRole[];
 
 /** `crates/server/src/routes/concierge_services.rs:564` (`list_concierge_services`) */
 const ROLES_SERVICES = [
   "ceo",
-  "patient_manager",
   "concierge",
   "billing",
 ] as const satisfies readonly StaffRole[];
@@ -276,17 +237,23 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     nav: { section: "medicine", labelKey: "appointments_title" },
   },
   {
+    id: "employees",
+    match: "exact",
+    path: "/employees",
+    roles: ROLES_EMPLOYEES,
+    nav: { section: "medicine", labelKey: "nav_interpreters" },
+  },
+  {
     id: "interpreters",
     match: "prefix",
     path: "/interpreters",
     roles: ROLES_INTERPRETERS,
-    nav: { section: "medicine", labelKey: "nav_interpreters" },
   },
   {
     id: "specializations",
     match: "exact",
     path: "/specializations",
-    roles: ROLES_PROVIDERS,
+    roles: ROLES_SPECIALIZATIONS,
     nav: {
       section: "crm",
       labelKey: "nav_specializations",
@@ -372,7 +339,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     id: "sops",
     match: "exact",
     path: "/sops",
-    roles: ALL_STAFF_ROLES,
+    roles: RELEASE_STAFF_ROLES,
     nav: { section: "main", labelKey: "nav_learning" },
   },
   {
@@ -455,6 +422,9 @@ export function canAccessStaffRoute(role: string, pathname: string): boolean {
   if (role === "patient") {
     return false;
   }
+  if (!(ALL_STAFF_ROLES as readonly string[]).includes(role)) {
+    return false;
+  }
   const p = normalizePathname(pathname);
   for (const rule of STAFF_ROUTE_RULES) {
     if (!pathMatches(p, rule)) {
@@ -500,6 +470,9 @@ export function staffHrefIfAllowed(role: string, href: string): string {
 
 export function listStaffNavItems(role: string): StaffNavItem[] {
   if (role === "patient") {
+    return [];
+  }
+  if (!(ALL_STAFF_ROLES as readonly string[]).includes(role)) {
     return [];
   }
   const items: StaffNavItem[] = [];

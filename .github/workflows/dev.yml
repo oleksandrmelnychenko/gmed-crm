@@ -60,6 +60,7 @@ jobs:
           test -n "$sha"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "short_sha=${sha:0:12}" >> "$GITHUB_OUTPUT"
+          echo "build_timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
       - name: Checkout verified revision
         uses: actions/checkout@v6
@@ -100,6 +101,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VITE_RELEASE_CHANNEL=development
+            VITE_BUILD_NUMBER=dev-sha-${{ steps.source.outputs.short_sha }}
+            VITE_BUILD_TIMESTAMP=${{ steps.source.outputs.build_timestamp }}
           provenance: mode=max
           sbom: true
           cache-from: type=gha,scope=dev-${{ matrix.name }}

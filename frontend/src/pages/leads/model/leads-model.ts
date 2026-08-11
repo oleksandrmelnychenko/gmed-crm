@@ -479,7 +479,9 @@ function leadDateTimeFormatter(locale: string) {
 
 export function leadPermissions(role?: string): LeadPermissions {
   return {
-    canViewPage: role === "ceo" || role === "patient_manager" || role === "sales",
+    canViewPage:
+      role === "ceo" || role === "patient_manager" || role === "sales" || role === "concierge",
+    canOpen: role === "ceo" || role === "patient_manager" || role === "sales",
     canCreate: role === "ceo" || role === "patient_manager" || role === "sales",
     canConvert: role === "ceo" || role === "patient_manager",
   };

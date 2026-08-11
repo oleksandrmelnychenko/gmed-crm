@@ -23,7 +23,7 @@ pub struct AuthUser {
 }
 
 impl AuthUser {
-    /// Full-access admin roles always pass by design.
+    /// The CEO always passes by design.
     #[allow(clippy::result_large_err)]
     pub fn require_any_role(&self, allowed: &[Role]) -> Result<(), Response> {
         if self.role.has_full_access() {
@@ -77,7 +77,29 @@ fn extract_bearer_token(req: &Request) -> Option<&str> {
         .strip_prefix("Bearer ")
 }
 
-pub async fn require_auth(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
+pub async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    require_auth_with_workspace_policy(state, req, next, true).await
+}
+
+/// Test-only router seam for exercising latent role-specific route contracts.
+///
+/// Production must always use [`require_auth`], which enforces the current
+/// release workspace allowlist before dispatching business APIs.
+#[doc(hidden)]
+pub async fn require_auth_for_role_contract_tests(
+    State(state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Response {
+    require_auth_with_workspace_policy(state, req, next, false).await
+}
+
+async fn require_auth_with_workspace_policy(
+    state: AppState,
+    mut req: Request,
+    next: Next,
+    enforce_release_workspace_roles: bool,
+) -> Response {
     let Some(token) = extract_bearer_token(&req) else {
         return unauthorized();
     };
@@ -86,6 +108,19 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
         Ok(value) => value,
         Err(response) => return response,
     };
+
+    if enforce_release_workspace_roles
+        && is_empty_workspace_role(auth_user.role)
+        && !is_empty_workspace_session_path(req.uri().path())
+    {
+        tracing::warn!(
+            role = %auth_user.role,
+            user_id = %auth_user.user_id,
+            path = %req.uri().path(),
+            "Blocked business API access for an unconfigured staff role"
+        );
+        return forbidden();
+    }
 
     req.extensions_mut().insert(auth_user);
 
@@ -148,6 +183,18 @@ pub async fn auth_user_from_access_token(
     })
 }
 
+fn is_empty_workspace_role(role: Role) -> bool {
+    role != Role::Patient && !role.is_release_staff_role()
+}
+
+fn is_empty_workspace_session_path(path: &str) -> bool {
+    let path = path.strip_prefix("/api/v1").unwrap_or(path);
+    matches!(
+        path,
+        "/me" | "/auth/logout" | "/auth/logout-all" | "/auth/sessions" | "/stats/my-kpis"
+    ) || path.starts_with("/auth/sessions/")
+}
+
 fn unauthorized() -> Response {
     (
         StatusCode::UNAUTHORIZED,
@@ -179,7 +226,7 @@ mod tests {
     }
 
     #[test]
-    fn full_access_roles_pass_any_role_check() {
+    fn only_ceo_auto_passes_any_role_check() {
         let u = user(Role::Ceo);
         assert!(u.require_any_role(&[Role::Sales]).is_ok());
         assert!(u.require_any_role(&[Role::PatientManager]).is_ok());
@@ -187,10 +234,10 @@ mod tests {
         assert!(u.require_any_role(&[]).is_ok());
 
         let u = user(Role::ItAdmin);
-        assert!(u.require_any_role(&[Role::Sales]).is_ok());
-        assert!(u.require_any_role(&[Role::PatientManager]).is_ok());
-        assert!(u.require_any_role(&[Role::Billing]).is_ok());
-        assert!(u.require_any_role(&[]).is_ok());
+        assert!(u.require_any_role(&[Role::Sales]).is_err());
+        assert!(u.require_any_role(&[Role::PatientManager]).is_err());
+        assert!(u.require_any_role(&[Role::Billing]).is_err());
+        assert!(u.require_any_role(&[]).is_err());
     }
 
     #[test]
@@ -300,5 +347,30 @@ mod tests {
         assert_eq!(parse_role("patient"), Some(Role::Patient));
         assert_eq!(parse_role("unknown"), None);
         assert_eq!(parse_role(""), None);
+    }
+
+    #[test]
+    fn legacy_staff_sessions_only_reach_identity_and_session_endpoints() {
+        assert!(is_empty_workspace_role(Role::ItAdmin));
+        assert!(is_empty_workspace_role(Role::PatientManager));
+        assert!(!is_empty_workspace_role(Role::Ceo));
+        assert!(!is_empty_workspace_role(Role::Concierge));
+        assert!(!is_empty_workspace_role(Role::Billing));
+        assert!(!is_empty_workspace_role(Role::Patient));
+
+        for path in [
+            "/me",
+            "/api/v1/me",
+            "/auth/logout",
+            "/api/v1/auth/logout-all",
+            "/auth/sessions",
+            "/api/v1/auth/sessions/family-id/revoke",
+            "/api/v1/stats/my-kpis",
+        ] {
+            assert!(is_empty_workspace_session_path(path), "{path}");
+        }
+        for path in ["/", "/patients", "/api/v1/leads", "/messages/unread-total"] {
+            assert!(!is_empty_workspace_session_path(path), "{path}");
+        }
     }
 }

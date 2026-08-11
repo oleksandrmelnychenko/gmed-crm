@@ -16,6 +16,7 @@ use sqlx::Row;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/staff-directory", get(list_staff_directory))
         .route("/users", get(list_users).post(create_user))
         .route("/users/{user_id}", get(get_user))
         .route("/users/{user_id}/update", post(update_user))
@@ -33,6 +34,14 @@ struct UserResponse {
     is_active: bool,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+struct StaffDirectoryEntry {
+    id: Uuid,
+    email: String,
+    name: String,
+    role: String,
 }
 
 #[derive(Deserialize)]
@@ -115,7 +124,7 @@ async fn list_users(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListUsersQuery>,
 ) -> impl IntoResponse {
-    auth.require_any_role(&[Role::Ceo, Role::ItAdmin])?;
+    auth.require_exact_role(&[Role::Ceo])?;
 
     if let Some(ref role) = query.role
         && !VALID_ROLES.contains(&role.as_str())
@@ -224,12 +233,52 @@ async fn list_users(
     }
 }
 
+async fn list_staff_directory(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<ListUsersQuery>,
+) -> Result<Json<Vec<StaffDirectoryEntry>>, axum::response::Response> {
+    auth.require_any_role(&[Role::Ceo, Role::Concierge])?;
+
+    let search_pattern = format!("%{}%", query.search.unwrap_or_default());
+    let rows = sqlx::query(
+        r#"SELECT id, email, name, role
+           FROM users
+           WHERE is_active = true
+             AND role IN ('ceo', 'concierge', 'billing')
+             AND ($1::text = '%%' OR name ILIKE $1 OR email ILIKE $1)
+           ORDER BY name ASC"#,
+    )
+    .bind(search_pattern)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to list staff directory");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to list staff directory",
+        )
+    })?;
+
+    let entries = rows
+        .into_iter()
+        .map(|row| StaffDirectoryEntry {
+            id: row.try_get("id").unwrap_or_else(|_| Uuid::nil()),
+            email: row.try_get("email").unwrap_or_default(),
+            name: row.try_get("name").unwrap_or_default(),
+            role: row.try_get("role").unwrap_or_default(),
+        })
+        .collect::<Vec<_>>();
+
+    Ok(Json(entries))
+}
+
 async fn get_user(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(user_id): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_any_role(&[Role::Ceo, Role::ItAdmin])?;
+    auth.require_exact_role(&[Role::Ceo])?;
 
     match sqlx::query!(
         "SELECT id, email, name, role, is_active, created_at, updated_at FROM users WHERE id = $1",
@@ -260,7 +309,7 @@ async fn create_user(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<CreateUserRequest>,
 ) -> impl IntoResponse {
-    auth.require_exact_role(&[Role::Ceo, Role::ItAdmin])?;
+    auth.require_exact_role(&[Role::Ceo])?;
 
     if let Err(msg) = validate_create(&body) {
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, msg));
@@ -351,7 +400,7 @@ async fn update_user(
     Path(user_id): Path<Uuid>,
     Json(body): Json<UpdateUserRequest>,
 ) -> impl IntoResponse {
-    auth.require_exact_role(&[Role::Ceo, Role::ItAdmin])?;
+    auth.require_exact_role(&[Role::Ceo])?;
 
     if let Some(ref role) = body.role
         && !VALID_ROLES.contains(&role.as_str())
@@ -443,7 +492,7 @@ async fn deactivate_user(
     Extension(auth): Extension<AuthUser>,
     Path(user_id): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_exact_role(&[Role::Ceo, Role::ItAdmin])?;
+    auth.require_exact_role(&[Role::Ceo])?;
 
     if user_id == auth.user_id {
         return Err(err(
@@ -493,7 +542,7 @@ async fn activate_user(
     Extension(auth): Extension<AuthUser>,
     Path(user_id): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_exact_role(&[Role::Ceo, Role::ItAdmin])?;
+    auth.require_exact_role(&[Role::Ceo])?;
 
     let result = sqlx::query!(
         "UPDATE users SET is_active = true WHERE id = $1 AND is_active = false",
@@ -536,7 +585,7 @@ async fn reset_password(
     Path(user_id): Path<Uuid>,
     Json(body): Json<ResetPasswordRequest>,
 ) -> impl IntoResponse {
-    auth.require_exact_role(&[Role::Ceo, Role::ItAdmin])?;
+    auth.require_exact_role(&[Role::Ceo])?;
 
     if let Err(msg) = validate_password_policy(&body.new_password) {
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, msg));

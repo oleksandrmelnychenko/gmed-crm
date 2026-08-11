@@ -1377,10 +1377,13 @@ async fn billing_can_access_financial_documents_but_not_medical_ones() {
 }
 
 #[tokio::test]
-async fn sales_cannot_access_documents_workspace_or_meta_routes_but_it_admin_can() {
-    let Some((app, pool, admin_id, _admin_bearer)) = test_context().await else {
+async fn sales_and_it_admin_cannot_access_documents_workspace_or_meta_routes() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
         return;
     };
+    let app = ctx.release_app.clone();
+    let pool = ctx.pool.clone();
+    let admin_id = ctx.admin_id;
     let tag = unique_tag("doc-deny-surface");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let provider_id = seed_provider(&pool, &tag).await;
@@ -1399,7 +1402,7 @@ async fn sales_cannot_access_documents_workspace_or_meta_routes_but_it_admin_can
     )
     .await;
 
-    for role in ["sales"] {
+    for role in ["sales", "it_admin"] {
         let user_id = seed_user(&pool, &format!("{tag}-{role}"), role).await;
         let bearer = auth_header_for(user_id, role);
 
@@ -1418,23 +1421,6 @@ async fn sales_cannot_access_documents_workspace_or_meta_routes_but_it_admin_can
             );
             assert_eq!(body["message"], "Insufficient permissions");
         }
-    }
-
-    let it_admin_id = seed_user(&pool, &format!("{tag}-it-admin"), "it_admin").await;
-    let it_admin_bearer = auth_header_for(it_admin_id, "it_admin");
-    for path in [
-        "/api/v1/documents",
-        "/api/v1/documents/meta/staff",
-        "/api/v1/documents/meta/categories",
-        "/api/v1/documents/templates",
-        &format!("/api/v1/documents/{document_id}"),
-    ] {
-        let (status, _) = json_request(&app, "GET", path, &it_admin_bearer, None).await;
-        assert_eq!(
-            status,
-            StatusCode::OK,
-            "IT admin should be allowed on {path}"
-        );
     }
 }
 

@@ -1433,6 +1433,7 @@ async fn operational_roles_can_fetch_their_own_kpi_scorecards() {
     let tag = unique_tag("my-kpis");
     let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
     let teamlead_id = seed_user(&pool, &format!("{tag}-teamlead"), "teamlead_interpreter").await;
+    let teamlead_auth = auth_header_for(teamlead_id, "teamlead_interpreter");
     let concierge_id = seed_user(&pool, &format!("{tag}-concierge"), "concierge").await;
     let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
 
@@ -1472,6 +1473,23 @@ async fn operational_roles_can_fetch_their_own_kpi_scorecards() {
         true,
     )
     .await;
+
+    let (baseline_status, baseline_teamlead_body) =
+        json_request(&app, "GET", "/api/v1/stats/my-kpis", &teamlead_auth, None).await;
+    assert_eq!(baseline_status, StatusCode::OK);
+    assert_eq!(baseline_teamlead_body["section"], "teamlead_interpreter");
+    let team_hours = |body: &Value, key: &str| {
+        body["kpi"][key]
+            .as_str()
+            .expect("team KPI hour metric")
+            .parse::<f64>()
+            .expect("numeric team KPI hour metric")
+    };
+    let baseline_approved_hours = team_hours(&baseline_teamlead_body, "approved_hours_30d");
+    let baseline_booked_hours = team_hours(&baseline_teamlead_body, "booked_hours_30d");
+    let baseline_completed = baseline_teamlead_body["kpi"]["completed_appointments_30d"]
+        .as_i64()
+        .expect("baseline completed appointment count");
 
     let appointment_id = seed_appointment(
         &pool,
@@ -1541,21 +1559,28 @@ async fn operational_roles_can_fetch_their_own_kpi_scorecards() {
     assert_eq!(pm_body["kpi"]["checklist_completed"], 1);
     assert_eq!(pm_body["kpi"]["checklist_completion_rate_pct"], 50.0);
 
-    let (teamlead_status, teamlead_body) = json_request(
-        &app,
-        "GET",
-        "/api/v1/stats/my-kpis",
-        &auth_header_for(teamlead_id, "teamlead_interpreter"),
-        None,
-    )
-    .await;
+    let (teamlead_status, teamlead_body) =
+        json_request(&app, "GET", "/api/v1/stats/my-kpis", &teamlead_auth, None).await;
     assert_eq!(teamlead_status, StatusCode::OK);
-    assert_eq!(teamlead_body["section"], "interpreter");
-    assert_eq!(teamlead_body["kpi"]["user_id"], teamlead_id.to_string());
-    assert_eq!(teamlead_body["kpi"]["approved_hours_30d"], "2");
-    assert_eq!(teamlead_body["kpi"]["booked_hours_30d"], "2");
-    assert_eq!(teamlead_body["kpi"]["completed_appointments_30d"], 1);
-    assert_eq!(teamlead_body["kpi"]["utilization_rate_pct"], 100.0);
+    assert_eq!(teamlead_body["section"], "teamlead_interpreter");
+    assert!(
+        teamlead_body["kpi"]["team_size"]
+            .as_i64()
+            .is_some_and(|team_size| team_size >= 1)
+    );
+    let approved_hours = team_hours(&teamlead_body, "approved_hours_30d");
+    let booked_hours = team_hours(&teamlead_body, "booked_hours_30d");
+    assert!((approved_hours - baseline_approved_hours - 2.0).abs() < 0.001);
+    assert!((booked_hours - baseline_booked_hours - 2.0).abs() < 0.001);
+    assert_eq!(
+        teamlead_body["kpi"]["completed_appointments_30d"],
+        baseline_completed + 1
+    );
+    let expected_utilization = ((approved_hours / booked_hours) * 1000.0).round() / 10.0;
+    let utilization = teamlead_body["kpi"]["utilization_rate_pct"]
+        .as_f64()
+        .expect("team utilization percentage");
+    assert!((utilization - expected_utilization).abs() < 0.001);
 
     let (concierge_status, concierge_body) = json_request(
         &app,
@@ -1573,7 +1598,7 @@ async fn operational_roles_can_fetch_their_own_kpi_scorecards() {
     assert_eq!(concierge_body["kpi"]["ready_for_billing"], 1);
     assert_eq!(concierge_body["kpi"]["portal_requests_30d"], 1);
 
-    let (billing_status, _) = json_request(
+    let (billing_status, billing_body) = json_request(
         &app,
         "GET",
         "/api/v1/stats/my-kpis",
@@ -1581,7 +1606,10 @@ async fn operational_roles_can_fetch_their_own_kpi_scorecards() {
         None,
     )
     .await;
-    assert_eq!(billing_status, StatusCode::FORBIDDEN);
+    assert_eq!(billing_status, StatusCode::OK);
+    assert_eq!(billing_body["section"], "billing");
+    assert!(billing_body["kpi"].is_object());
+    assert!(billing_body["kpi"]["tracked_invoice_count"].is_number());
 }
 
 #[tokio::test]

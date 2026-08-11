@@ -33,6 +33,7 @@ import {
   type Notification,
 } from "@/components/topbar-data";
 import { GmedWordmark } from "@/components/gmed-wordmark";
+import { BuildReleaseWidget } from "@/components/build-release-widget";
 
 const TOPBAR_REALTIME_EVENTS = [
   "notification.created",
@@ -254,6 +255,13 @@ export function Topbar() {
         />
 
         <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+          <BuildReleaseWidget
+            onOpen={() => {
+              setNotifOpen(false);
+              setUsersOpen(false);
+            }}
+          />
+
           <RealtimeConnectionIndicator
             status={realtimeConnection.status}
             attempt={realtimeConnection.attempt}

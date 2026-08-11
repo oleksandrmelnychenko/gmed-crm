@@ -7,7 +7,15 @@ from datetime import date
 from typing import Any
 
 from . import PARSER_VERSION
-from .models import ClinicalCandidate, ParseDraft, SourceEvidence, Target
+from .models import (
+    ClinicalCandidate,
+    DocumentSubject,
+    MAX_SOURCE_EVIDENCE_CHARS,
+    ParseDraft,
+    SourceEvidence,
+    SubjectSourceEvidence,
+    Target,
+)
 from .rules import load_rules
 
 
@@ -17,6 +25,7 @@ SUPPORTED_TARGETS = {
     "medication",
     "examination",
     "lab_result",
+    "vital",
     "recommendation",
 }
 DATE_AT_START_RE = re.compile(
@@ -158,10 +167,17 @@ def parse_clinical_text(text: str) -> ParseDraft:
     document_type = _detect_document_type(clean)
     sections = _split_sections(layout)
     admission_date, discharge_date = _document_stay_dates(clean)
-    candidates: list[ClinicalCandidate] = _laboratory_candidates(
-        layout,
+    candidates: list[ClinicalCandidate] = _vital_candidates(
+        sections,
+        document_text=clean,
         admission_date=admission_date,
-        discharge_date=discharge_date,
+    )
+    candidates.extend(
+        _laboratory_candidates(
+            layout,
+            admission_date=admission_date,
+            discharge_date=discharge_date,
+        )
     )
     warnings: list[str] = []
 
@@ -229,6 +245,7 @@ def parse_clinical_text(text: str) -> ParseDraft:
         source_language=language,
         parser_version=PARSER_VERSION,
         raw_text=clean,
+        subject=_extract_document_subject(layout),
         candidates=candidates,
         warnings=list(dict.fromkeys(warnings)),
     )
@@ -244,9 +261,180 @@ def _normalize_text(text: str) -> str:
 
 
 def _normalize_layout_text(text: str) -> str:
+    # OCR engines can occasionally return an unpaired UTF-16 surrogate. It is
+    # not valid Unicode and Pydantic/JSON cannot safely serialize it. Preserve
+    # the rest of the document and mark only the damaged code point.
+    text = re.sub(r"[\ud800-\udfff]", "\ufffd", text)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+SUBJECT_NAME_TOKEN_PATTERN = r"[A-ZÄÖÜ][A-Za-zÄÖÜäöüßÀ-ÖØ-öø-ÿ'’-]{1,}"
+SUBJECT_DOB_RAW_RE = re.compile(
+    r"\b(?:Geburtsdatum|geb(?:oren)?\.?)"
+    r"(?:\s*/\s*[^:\n]{1,40})?\s*:?\s*"
+    r"(?P<date>\d{1,2}\.\d{1,2}\.[0-9Xx-]{2,4})(?!\d)",
+    re.IGNORECASE,
+)
+
+
+def _subject_name(value: str) -> tuple[str, str] | None:
+    compact = " ".join(value.strip().strip(",;:").split())
+    compact = re.sub(
+        r"^(?:Herr|Frau|Patient(?:in)?|Dr\.?|Prof\.?)\s+",
+        "",
+        compact,
+        flags=re.IGNORECASE,
+    )
+    if "," in compact:
+        last, first = (part.strip() for part in compact.split(",", 1))
+        first_tokens = first.split()
+        last_tokens = last.split()
+    else:
+        tokens = compact.split()
+        if len(tokens) < 2:
+            return None
+        first_tokens = tokens[:-1]
+        last_tokens = tokens[-1:]
+    token_re = re.compile(rf"^{SUBJECT_NAME_TOKEN_PATTERN}$")
+    if not first_tokens or not last_tokens:
+        return None
+    if not all(token_re.fullmatch(token) for token in (*first_tokens, *last_tokens)):
+        return None
+    # Initials, redaction placeholders, and generic identity markers must not
+    # become patient-match evidence.
+    lowered = {token.casefold().strip(".'’-") for token in (*first_tokens, *last_tokens)}
+    if lowered & {"nn", "redacted", "anonym", "unbekannt", "patient"}:
+        return None
+    return " ".join(first_tokens), " ".join(last_tokens)
+
+
+def _extract_document_subject(text: str) -> DocumentSubject | None:
+    occurrences: dict[str, list[tuple[str, float, int, str]]] = {}
+    evidence: list[tuple[int, str]] = []
+    invalid_birth_date = False
+
+    def add(field: str, value: str, confidence: float, page: int, line: str) -> None:
+        occurrences.setdefault(field, []).append((value, confidence, page, line))
+        evidence.append((page, line))
+
+    inspected_lines = 0
+    for page_number, page_text in enumerate(text.split("\f"), start=1):
+        if page_number > 4 or inspected_lines > 120:
+            break
+        for raw_line in page_text.splitlines():
+            line = " ".join(raw_line.split()).strip()
+            if not line:
+                continue
+            inspected_lines += 1
+            if inspected_lines > 120:
+                break
+
+            first_match = re.match(
+                rf"^(?:Vorname|first\s+name)\s*:\s*(?P<value>{SUBJECT_NAME_TOKEN_PATTERN}(?:\s+{SUBJECT_NAME_TOKEN_PATTERN})*)\s*$",
+                line,
+                re.IGNORECASE,
+            )
+            if first_match:
+                add("first_name", first_match.group("value"), 0.99, page_number, line)
+
+            last_match = re.match(
+                rf"^(?:Nachname|Familienname|surname|last\s+name)\s*:\s*(?P<value>{SUBJECT_NAME_TOKEN_PATTERN}(?:\s+{SUBJECT_NAME_TOKEN_PATTERN})*)\s*$",
+                line,
+                re.IGNORECASE,
+            )
+            if last_match:
+                add("last_name", last_match.group("value"), 0.99, page_number, line)
+
+            full_match = re.match(
+                r"^(?:Patient(?:in)?|Patientenname|Name)\s*:\s*(?P<value>.+?)"
+                r"(?=\s*,?\s*(?:geb(?:oren)?\.?|Geburtsdatum)\s*:|$)",
+                line,
+                re.IGNORECASE,
+            )
+            if full_match:
+                name = _subject_name(full_match.group("value"))
+                if name:
+                    add("first_name", name[0], 0.96, page_number, line)
+                    add("last_name", name[1], 0.96, page_number, line)
+
+            salutation = re.match(
+                r"^(?!Sehr\b)(?:Herrn?|Frau)\s+(?P<name>.+?)\s*,?\s+"
+                r"(?:geb(?:oren)?\.?)\s*:?\s*(?P<date>[^,;\s]{6,14})(?:[\s,]|$)",
+                line,
+                re.IGNORECASE,
+            )
+            salutation_identity_rejected = False
+            if salutation:
+                name = _subject_name(salutation.group("name"))
+                birth_date = _normalize_german_date(salutation.group("date"))
+                if name and birth_date:
+                    add("first_name", name[0], 0.92, page_number, line)
+                    add("last_name", name[1], 0.92, page_number, line)
+                    add("birth_date", birth_date, 0.98, page_number, line)
+                elif name:
+                    evidence.append((page_number, line))
+                    invalid_birth_date = True
+                else:
+                    salutation_identity_rejected = True
+
+            dob_match = SUBJECT_DOB_RAW_RE.search(line)
+            if dob_match and not salutation_identity_rejected:
+                birth_date = _normalize_german_date(dob_match.group("date"))
+                if birth_date:
+                    add("birth_date", birth_date, 0.99, page_number, line)
+                elif re.match(r"^(?:Geburtsdatum|DOB)\b", line, re.IGNORECASE) or full_match:
+                    evidence.append((page_number, line))
+                    invalid_birth_date = True
+
+            identifier = re.match(
+                r"^(?:Patienten(?:nummer|-?ID)|Patient(?:en)?-?Nr\.?|Pat\.?-?Nr\.?)\s*:\s*"
+                r"(?P<value>[A-Za-z0-9][A-Za-z0-9./_-]{2,63})\s*$",
+                line,
+                re.IGNORECASE,
+            )
+            if identifier:
+                add("patient_identifier", identifier.group("value"), 0.99, page_number, line)
+
+    if not occurrences and not invalid_birth_date:
+        return None
+
+    result: dict[str, str] = {}
+    confidence: dict[str, float] = {}
+    conflicting_fields: list[str] = []
+    for field, field_occurrences in occurrences.items():
+        distinct = list(dict.fromkeys(item[0] for item in field_occurrences))
+        if len(distinct) != 1:
+            conflicting_fields.append(field)
+            continue
+        result[field] = distinct[0]
+        confidence[field] = max(item[1] for item in field_occurrences)
+
+    unique_evidence = list(dict.fromkeys(evidence))
+    pages = list(dict.fromkeys(page for page, _ in unique_evidence))
+    source_text = "\n".join(line for _, line in unique_evidence)[:MAX_SOURCE_EVIDENCE_CHARS]
+    review_reasons: list[str] = []
+    if conflicting_fields:
+        review_reasons.append("conflicting_subject_identity")
+        review_reasons.extend(f"conflicting_subject_field:{field}" for field in conflicting_fields)
+    if invalid_birth_date:
+        review_reasons.append("invalid_subject_birth_date")
+    conflict = bool(review_reasons)
+    return DocumentSubject(
+        status="conflict" if conflict else "extracted",
+        conflict=conflict,
+        **result,
+        patient_identifier_namespace=(
+            "source_document" if "patient_identifier" in result else None
+        ),
+        field_confidence=confidence,
+        source=SubjectSourceEvidence(
+            page=pages[0] if len(pages) == 1 else None,
+            text=source_text,
+        ),
+        review_reasons=review_reasons,
+    )
 
 
 LAB_RESULT_RE = re.compile(
@@ -320,6 +508,611 @@ def _document_stay_dates(text: str) -> tuple[str | None, str | None]:
     return start, end
 
 
+VITAL_NUMBER_PATTERN = r"[+-]?\d+(?:[.,]\d+)?"
+VITAL_PLAUSIBLE_RANGES: dict[str, tuple[float, float]] = {
+    "bp_systolic": (40.0, 300.0),
+    "bp_diastolic": (20.0, 200.0),
+    "heart_rate": (20.0, 300.0),
+    "temperature_c": (25.0, 45.0),
+    "oxygen_saturation": (20.0, 100.0),
+    "respiratory_rate": (3.0, 80.0),
+    "weight_kg": (1.0, 500.0),
+    "height_cm": (20.0, 250.0),
+    "bmi": (5.0, 100.0),
+}
+VITAL_CANONICAL_UNITS = {
+    "bp_systolic": "mmHg",
+    "bp_diastolic": "mmHg",
+    "heart_rate": "bpm",
+    "temperature_c": "°C",
+    "oxygen_saturation": "%",
+    "respiratory_rate": "/min",
+    "weight_kg": "kg",
+    "height_cm": "cm",
+    "bmi": "kg/m²",
+}
+VITAL_LABEL_RE = re.compile(
+    r"\b(?:RR|Blutdruck|blood\s+pressure|Puls|Herzfrequenz|heart\s+rate|HF|Hf|"
+    r"Temperatur|temperature|Temp\.?|SpO\s*2|Sauerstoffs[aä]ttigung|oxygen\s+saturation|"
+    r"Atemfrequenz|respiratory\s+rate|AF|Gewicht|weight|Entlassgewicht|"
+    r"Gr[oö](?:ß|ss)e|Groesse|K[oö]rpergr[oö](?:ß|ss)e|height|BMI)\b",
+    re.IGNORECASE,
+)
+VITAL_DATE_RE = re.compile(
+    r"(?<!\d)(?P<date>\d{1,2}\.\d{1,2}\.(?:\d{4}|\d{2}))(?!\d)"
+    r"(?:\s*(?:um|,)?\s*(?P<hour>[01]?\d|2[0-3])[:.]"
+    r"(?P<minute>[0-5]\d)(?:[:.](?P<second>[0-5]\d))?\s*(?:Uhr)?"
+    r"\s*(?P<timezone>Z|[+-]\d{2}:?\d{2})?)?",
+    re.IGNORECASE,
+)
+VITAL_DATE_BINDING_RE = re.compile(
+    r"(?:\b(?:gemessen|erhoben)\s+(?:am|vom)\s*|"
+    r"\b(?:Messung|Messdatum|Erhebungsdatum)\s*:?\s*|"
+    r"\b(?:K[oö]rperliche\s+Untersuchung|K[oö]rperma(?:ß|ss)e|"
+    r"Vitalwerte|Vitalparameter|RR|Blutdruck|Puls|Herzfrequenz|"
+    r"Temperatur|SpO\s*2|Sauerstoffs[aä]ttigung|Atemfrequenz|"
+    r"Gewicht|Gr[oö](?:ß|ss)e|BMI)\s+(?:am|vom)\s*)$",
+    re.IGNORECASE,
+)
+
+
+def _document_authored_date(text: str) -> str | None:
+    """Return only a date explicitly presented as document/letter metadata."""
+
+    patterns = (
+        r"(?:Berichtsdatum|Briefdatum|Dokumentdatum|Datum)\s*:?\s*"
+        r"(?P<date>\d{1,2}\.\d{1,2}\.(?:\d{4}|\d{2}))(?!\d)",
+        r"^[^\n\f,]{2,80},\s*(?P<date>\d{1,2}\.\d{1,2}\.\d{4})(?!\d)\s*$",
+    )
+    dates: list[str] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, re.IGNORECASE | re.MULTILINE):
+            normalized = _normalize_german_date(match.group("date"))
+            if normalized:
+                dates.append(normalized)
+    unique = list(dict.fromkeys(dates))
+    return unique[0] if len(unique) == 1 else None
+
+
+def _vital_lines(section: Section) -> list[tuple[str, int | None]]:
+    raw_lines = section.text.splitlines()
+    pages = section.line_pages or [section.page] * len(raw_lines)
+    rows: list[tuple[str, int | None]] = []
+    index = 0
+    while index < len(raw_lines):
+        line = _repair_native_pdf_spacing_artifacts(" ".join(raw_lines[index].split()))
+        page = pages[index] if index < len(pages) else section.page
+        while (
+            line.endswith("-")
+            and index + 1 < len(raw_lines)
+            and re.match(r"^[a-zäöüß]", raw_lines[index + 1].lstrip(), re.IGNORECASE)
+        ):
+            index += 1
+            line = f"{line[:-1]}{_repair_native_pdf_spacing_artifacts(' '.join(raw_lines[index].split()))}"
+        if line:
+            rows.append((line, page))
+        index += 1
+    return rows
+
+
+def _looks_like_vital_source(value: str) -> bool:
+    if VITAL_LABEL_RE.search(value):
+        return True
+    # German reports frequently put an unlabeled height/weight pair in the
+    # opening physical-examination sentence: ``(185 cm, 72,2 kg, BMI ...)``.
+    return bool(
+        re.search(
+            rf"\b{VITAL_NUMBER_PATTERN}\s*(?:cm|m)\b.{0,50}\b{VITAL_NUMBER_PATTERN}\s*kg\b|"
+            rf"\b{VITAL_NUMBER_PATTERN}\s*kg\b.{0,50}\b{VITAL_NUMBER_PATTERN}\s*(?:cm|m)\b",
+            value,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _vital_source_clusters(section: Section) -> list[tuple[str, int | None]]:
+    lines = _vital_lines(section)
+    clusters: list[tuple[str, int | None]] = []
+    index = 0
+    while index < len(lines):
+        line, page = lines[index]
+        if not _looks_like_vital_source(line):
+            index += 1
+            continue
+        parts = [line]
+        # OCR/native text may wrap exactly between a label and its numeric
+        # value (``spO2:\n92%`` or ``AF\n19/min``). Join only that immediate
+        # continuation; never merge distant measurements by page or date.
+        if index + 1 < len(lines) and (
+            re.search(
+                r"(?:SpO\s*2|Sauerstoffs[aä]ttigung|Puls|Herzfrequenz|HF|Hf|"
+                r"Atemfrequenz|AF|Temperatur|Temp\.?|Gewicht|Gr[oö](?:ß|ss)e)\s*:?\s*$",
+                line,
+                re.IGNORECASE,
+            )
+            or re.match(rf"^\s*{VITAL_NUMBER_PATTERN}\s*(?:%|/\s*min|bpm|°?\s*C|kg|cm)\b", lines[index + 1][0], re.IGNORECASE)
+        ):
+            index += 1
+            parts.append(lines[index][0])
+        clusters.append((" ".join(parts).strip(), page))
+        index += 1
+    return clusters
+
+
+def _clean_vital_number(value: float) -> int | float:
+    rounded = round(value, 2)
+    return int(rounded) if rounded.is_integer() else rounded
+
+
+def _vital_date(
+    source_text: str,
+    section: Section,
+    *,
+    admission_date: str | None,
+    document_date: str | None,
+) -> tuple[str | None, list[str], str | None]:
+    def explicitly_bound_matches(value: str) -> list[re.Match[str]]:
+        matches: list[re.Match[str]] = []
+        for match in VITAL_DATE_RE.finditer(value):
+            prefix = value[: match.start()]
+            suffix = value[match.end() :].lstrip(" \t|,;:-")
+            structured_suffix = bool(
+                VITAL_LABEL_RE.match(suffix)
+                or re.match(
+                    rf"^{VITAL_NUMBER_PATTERN}\s*(?:cm|m|kg)\b.{0,50}"
+                    rf"{VITAL_NUMBER_PATTERN}\s*(?:cm|m|kg)\b",
+                    suffix,
+                    re.IGNORECASE,
+                )
+            )
+            # A leading date in a dedicated vital row is structured evidence.
+            # Otherwise require an explicit measurement-date binding. This
+            # excludes OCR-joined letter headers such as ``Berlin, 01.01.2022
+            # RR ...`` from longitudinal history.
+            if (not prefix.strip() and structured_suffix) or VITAL_DATE_BINDING_RE.search(prefix):
+                matches.append(match)
+        return matches
+
+    matches = explicitly_bound_matches(source_text)
+    if not matches:
+        matches = explicitly_bound_matches(section.heading)
+    resolved: list[tuple[str, str | None, bool]] = []
+    for match in matches:
+        normalized = _normalize_german_date(match.group("date"))
+        if not normalized:
+            continue
+        if match.group("hour") is not None:
+            clock = (
+                f"{int(match.group('hour')):02d}:"
+                f"{int(match.group('minute')):02d}:"
+                f"{int(match.group('second') or 0):02d}"
+            )
+            timezone = match.group("timezone")
+            if timezone and timezone != "Z" and ":" not in timezone:
+                timezone = f"{timezone[:3]}:{timezone[3:]}"
+            if timezone:
+                resolved.append((f"{normalized}T{clock}{timezone}", f"{clock}{timezone}", True))
+            else:
+                # A wall-clock value without an offset must never be silently
+                # interpreted as UTC. Preserve it as evidence, retain only the
+                # safe date in measured_at, and force review.
+                resolved.append((normalized, clock, False))
+        else:
+            resolved.append((normalized, None, True))
+    unique = list(dict.fromkeys(resolved))
+    if len(unique) > 1:
+        return None, ["conflicting_measured_at"], None
+    if unique:
+        measured_at, source_time, timezone_safe = unique[0]
+        return (
+            measured_at,
+            [] if timezone_safe else ["ambiguous_measured_at_timezone"],
+            source_time,
+        )
+
+    heading_key = _heading_key(section.heading)
+    if "aufnahme" in heading_key and admission_date:
+        return admission_date, [], None
+    if document_date and not admission_date and any(
+        marker in heading_key
+        for marker in (
+            "korperlicheuntersuchung",
+            "koerperlicheuntersuchung",
+            "körperlicheuntersuchung",
+            "korpermaße",
+            "koerpermasse",
+            "körpermaße",
+            "vital",
+        )
+    ):
+        # An authored/letter date is useful provenance, but it is not proof
+        # that the observation happened that day. Keep it editable and force
+        # an explicit reviewer decision before it can enter vital history.
+        return document_date, ["inferred_measured_at_from_document_date"], None
+    return None, ["missing_measured_at"], None
+
+
+def _vital_candidates(
+    sections: list[Section],
+    *,
+    document_text: str,
+    admission_date: str | None,
+) -> list[ClinicalCandidate]:
+    rows: list[ClinicalCandidate] = []
+    document_date = _document_authored_date(document_text)
+    for section in sections:
+        if section.target != "examination":
+            continue
+        for source_text, page in _vital_source_clusters(section):
+            normalized, review_reasons = _normalized_vital_measurements(source_text)
+            if not normalized:
+                continue
+            measured_at, date_reasons, source_measured_time = _vital_date(
+                source_text,
+                section,
+                admission_date=admission_date,
+                document_date=document_date,
+            )
+            review_reasons.extend(date_reasons)
+            if measured_at:
+                normalized["measured_at"] = measured_at
+            if source_measured_time:
+                normalized["source_measured_time"] = source_measured_time
+            normalized.update(
+                {
+                    "assertion": "documented",
+                    "semantic_role": "vital_measurement",
+                    "auto_select": not review_reasons,
+                    "review_reasons": list(dict.fromkeys(review_reasons)),
+                }
+            )
+            candidate_section = _section_at_page(section, page)
+            rows.append(
+                _candidate(
+                    "vital",
+                    source_text,
+                    normalized,
+                    candidate_section,
+                    (
+                        "recognized_heading",
+                        "specific_section_role",
+                        *(('structured_date',) if measured_at else ()),
+                        *(('requires_clinical_confirmation',) if review_reasons else ()),
+                    ),
+                )
+            )
+    return rows
+
+
+def _normalized_vital_measurements(
+    source_text: str,
+) -> tuple[dict[str, Any], list[str]]:
+    values: dict[str, list[tuple[float, str | None, str]]] = {}
+    unsupported_values: dict[str, list[dict[str, str | None]]] = {}
+    review_reasons: list[str] = []
+
+    def add(field: str, raw_number: str, raw_unit: str | None, canonical_value: float) -> None:
+        values.setdefault(field, []).append((canonical_value, raw_unit, raw_number))
+
+    bp_pattern = re.compile(
+        rf"\b(?:RR|Blutdruck|blood\s+pressure|BD)\s*:?\s*"
+        rf"(?P<sys>{VITAL_NUMBER_PATTERN})\s*/\s*(?P<dia>{VITAL_NUMBER_PATTERN})"
+        r"\s*(?P<unit>mm\s*Hg|kPa)?(?!\s*[A-Za-z])",
+        re.IGNORECASE,
+    )
+    for match in bp_pattern.finditer(source_text):
+        systolic = _parse_localized_number(match.group("sys"))
+        diastolic = _parse_localized_number(match.group("dia"))
+        if systolic is None or diastolic is None:
+            continue
+        unit = (match.group("unit") or "").replace(" ", "").casefold()
+        if not unit:
+            review_reasons.append("ambiguous_unit:blood_pressure")
+        elif unit == "kpa":
+            systolic *= 7.50062
+            diastolic *= 7.50062
+        add("bp_systolic", match.group("sys"), match.group("unit"), systolic)
+        add("bp_diastolic", match.group("dia"), match.group("unit"), diastolic)
+
+    composite_spans: dict[str, list[tuple[int, int]]] = {}
+    composite_patterns: tuple[tuple[str, re.Pattern[str]], ...] = (
+        (
+            "height_cm",
+            re.compile(
+                rf"\b(?:Gr[oö](?:ß|ss)e|Groesse|K[oö]rpergr[oö](?:ß|ss)e|height)\b\s*:?\s*"
+                rf"(?P<major>{VITAL_NUMBER_PATTERN})\s*(?:ft|feet|foot)\s*"
+                rf"(?P<minor>{VITAL_NUMBER_PATTERN})\s*(?:in|inch(?:es)?|Zoll)\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "weight_kg",
+            re.compile(
+                rf"\b(?:Gewicht|weight|Entlassgewicht)\b\s*:?\s*"
+                rf"(?P<major>{VITAL_NUMBER_PATTERN})\s*(?:st|stone)\s*"
+                rf"(?P<minor>{VITAL_NUMBER_PATTERN})\s*(?:lb|lbs|pounds?)\b",
+                re.IGNORECASE,
+            ),
+        ),
+    )
+    for field, pattern in composite_patterns:
+        for match in pattern.finditer(source_text):
+            major = _parse_localized_number(match.group("major"))
+            minor = _parse_localized_number(match.group("minor"))
+            if major is None or minor is None:
+                continue
+            if field == "height_cm":
+                canonical = major * 30.48 + minor * 2.54
+                raw_unit = "ft+in"
+                if not 0 <= minor < 12:
+                    review_reasons.append("invalid_composite_unit:height_cm")
+            else:
+                canonical = major * 6.35029318 + minor * 0.45359237
+                raw_unit = "st+lb"
+                if not 0 <= minor < 14:
+                    review_reasons.append("invalid_composite_unit:weight_kg")
+            add(
+                field,
+                f"{match.group('major')} {match.group('minor')}",
+                raw_unit,
+                canonical,
+            )
+            composite_spans.setdefault(field, []).append(match.span())
+
+    scalar_patterns: tuple[tuple[str, re.Pattern[str]], ...] = (
+        (
+            "heart_rate",
+            re.compile(
+                rf"\b(?:Puls|Herzfrequenz|heart\s+rate|HF|Hf)\b\s*:?\s*"
+                rf"(?P<number>{VITAL_NUMBER_PATTERN})\s*(?P<unit>bpm|/\s*min|min-?1|Hz)?(?!\s*[A-Za-z])",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "temperature_c",
+            re.compile(
+                rf"\b(?:Temperatur|temperature|Temp\.?)\s*:?\s*"
+                rf"(?P<number>{VITAL_NUMBER_PATTERN})\s*°?\s*(?P<unit>[CF])?\b(?!\s*[A-Za-z])",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "oxygen_saturation",
+            re.compile(
+                rf"\b(?:SpO\s*2(?:\s*\([^)]*\))?|Sauerstoffs[aä]ttigung(?:\s*\([^)]*\))?|oxygen\s+saturation)"
+                rf"\s*:?\s*(?P<number>{VITAL_NUMBER_PATTERN})\s*(?P<unit>%)?(?!\s*[A-Za-z])",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "respiratory_rate",
+            re.compile(
+                rf"\b(?:Atemfrequenz|respiratory\s+rate|AF)\b\s*:?\s*"
+                rf"(?P<number>{VITAL_NUMBER_PATTERN})\s*(?P<unit>/\s*min|min-?1|rpm)?(?!\s*[A-Za-z])",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "weight_kg",
+            re.compile(
+                rf"\b(?:Gewicht|weight|Entlassgewicht)\b\s*:?\s*"
+                rf"(?P<number>{VITAL_NUMBER_PATTERN})\s*(?P<unit>kg|g|lb(?:s)?|st(?:one)?)\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "height_cm",
+            re.compile(
+                rf"\b(?:Gr[oö](?:ß|ss)e|Groesse|K[oö]rpergr[oö](?:ß|ss)e|height)\b\s*:?\s*"
+                rf"(?P<number>{VITAL_NUMBER_PATTERN})\s*(?P<unit>cm|mm|m|in(?:ch)?|Zoll|ft)\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "bmi",
+            re.compile(
+                rf"\bBMI\b\s*:?\s*(?P<number>{VITAL_NUMBER_PATTERN})"
+                r"\s*(?P<unit>kg\s*/\s*m(?:2|²))?(?!\s*[A-Za-z])",
+                re.IGNORECASE,
+            ),
+        ),
+    )
+
+    for field, pattern in scalar_patterns:
+        for match in pattern.finditer(source_text):
+            if any(
+                not (match.end() <= start or match.start() >= end)
+                for start, end in composite_spans.get(field, [])
+            ):
+                continue
+            number = _parse_localized_number(match.group("number"))
+            if number is None:
+                continue
+            raw_unit = match.group("unit")
+            unit = (raw_unit or "").replace(" ", "").casefold()
+            canonical = number
+            if field == "heart_rate":
+                if unit == "hz":
+                    canonical *= 60.0
+                # A value explicitly labelled pulse/heart rate is intrinsically
+                # a rate even when the source omits the conventional /min.
+            elif field == "temperature_c":
+                if not unit:
+                    review_reasons.append("ambiguous_unit:temperature_c")
+                elif unit == "f":
+                    canonical = (canonical - 32.0) * 5.0 / 9.0
+            elif field == "weight_kg":
+                if unit == "g":
+                    canonical /= 1000.0
+                elif unit in {"lb", "lbs"}:
+                    canonical *= 0.45359237
+                elif unit in {"st", "stone"}:
+                    canonical *= 6.35029318
+            elif field == "height_cm":
+                if unit == "m":
+                    canonical *= 100.0
+                elif unit == "mm":
+                    canonical /= 10.0
+                elif unit in {"in", "inch", "zoll"}:
+                    canonical *= 2.54
+                elif unit == "ft":
+                    canonical *= 30.48
+            add(field, match.group("number"), raw_unit, canonical)
+
+    unsupported_patterns: tuple[tuple[str, re.Pattern[str]], ...] = (
+        (
+            "blood_pressure",
+            re.compile(
+                rf"\b(?:RR|Blutdruck|blood\s+pressure|BD)\s*:?\s*"
+                rf"(?P<number>{VITAL_NUMBER_PATTERN}\s*/\s*{VITAL_NUMBER_PATTERN})\s*"
+                r"(?P<unit>[A-Za-z][A-Za-z0-9/²-]*)",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "heart_rate",
+            re.compile(
+                rf"\b(?:Puls|Herzfrequenz|heart\s+rate|HF|Hf)\b\s*:?\s*"
+                rf"(?P<number>{VITAL_NUMBER_PATTERN})\s*(?P<unit>[A-Za-z][A-Za-z0-9/²-]*)",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "temperature_c",
+            re.compile(
+                rf"\b(?:Temperatur|temperature|Temp\.?)\s*:?\s*"
+                rf"(?P<number>{VITAL_NUMBER_PATTERN})\s*°?\s*(?P<unit>[A-Za-z]+)",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "oxygen_saturation",
+            re.compile(
+                rf"\b(?:SpO\s*2(?:\s*\([^)]*\))?|Sauerstoffs[aä]ttigung(?:\s*\([^)]*\))?|oxygen\s+saturation)"
+                rf"\s*:?\s*(?P<number>{VITAL_NUMBER_PATTERN})\s*(?P<unit>[A-Za-z]+)",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "respiratory_rate",
+            re.compile(
+                rf"\b(?:Atemfrequenz|respiratory\s+rate|AF)\b\s*:?\s*"
+                rf"(?P<number>{VITAL_NUMBER_PATTERN})\s*(?P<unit>[A-Za-z][A-Za-z0-9/²-]*)",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "weight_kg",
+            re.compile(
+                rf"\b(?:Gewicht|weight|Entlassgewicht)\b\s*:?\s*"
+                rf"(?P<number>{VITAL_NUMBER_PATTERN})\s*(?P<unit>[A-Za-z][A-Za-z0-9/²-]*)",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "height_cm",
+            re.compile(
+                rf"\b(?:Gr[oö](?:ß|ss)e|Groesse|K[oö]rpergr[oö](?:ß|ss)e|height)\b\s*:?\s*"
+                rf"(?P<number>{VITAL_NUMBER_PATTERN})\s*(?P<unit>[A-Za-z][A-Za-z0-9/²-]*)",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "bmi",
+            re.compile(
+                rf"\bBMI\b\s*:?\s*(?P<number>{VITAL_NUMBER_PATTERN})\s*"
+                r"(?P<unit>[A-Za-z][A-Za-z0-9/²-]*)",
+                re.IGNORECASE,
+            ),
+        ),
+    )
+    allowed_units = {
+        "blood_pressure": {"mmhg", "kpa"},
+        "heart_rate": {"bpm", "min-1", "hz"},
+        "temperature_c": {"c", "f"},
+        "oxygen_saturation": set(),
+        "respiratory_rate": {"min-1", "rpm"},
+        "weight_kg": {"kg", "g", "lb", "lbs", "st", "stone"},
+        "height_cm": {"cm", "mm", "m", "in", "inch", "zoll", "ft"},
+        "bmi": {"kg/m2", "kg/m²"},
+    }
+    for field, pattern in unsupported_patterns:
+        for match in pattern.finditer(source_text):
+            raw_unit = match.group("unit")
+            compact_unit = raw_unit.replace(" ", "").casefold()
+            if compact_unit in allowed_units[field]:
+                continue
+            review_reasons.append(f"unsupported_unit:{field}")
+            unsupported_values.setdefault(field, []).append(
+                {"value": match.group("number"), "unit": raw_unit}
+            )
+
+    # Unlabeled height/weight pairs are accepted only when both conventional
+    # units occur close together, as in physical-examination parentheses.
+    dimension_patterns = (
+        re.compile(
+            rf"(?P<height>{VITAL_NUMBER_PATTERN})\s*(?P<height_unit>cm|m)\b"
+            rf"(?:(?!\bBMI\b).){{0,50}}?(?P<weight>{VITAL_NUMBER_PATTERN})\s*(?P<weight_unit>kg)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            rf"(?P<weight>{VITAL_NUMBER_PATTERN})\s*(?P<weight_unit>kg)\b"
+            rf"(?:(?!\bBMI\b).){{0,50}}?(?P<height>{VITAL_NUMBER_PATTERN})\s*(?P<height_unit>cm|m)\b",
+            re.IGNORECASE,
+        ),
+    )
+    if "height_cm" not in values and "weight_kg" not in values:
+        for pattern in dimension_patterns:
+            for match in pattern.finditer(source_text):
+                height = _parse_localized_number(match.group("height"))
+                weight = _parse_localized_number(match.group("weight"))
+                if height is None or weight is None:
+                    continue
+                if match.group("height_unit").casefold() == "m":
+                    height *= 100.0
+                add("height_cm", match.group("height"), match.group("height_unit"), height)
+                add("weight_kg", match.group("weight"), match.group("weight_unit"), weight)
+
+    if not values and not unsupported_values:
+        return {}, []
+
+    normalized: dict[str, Any] = {"units": {}, "raw_measurements": {}}
+    for field, occurrences in values.items():
+        normalized["raw_measurements"][field] = [
+            {"value": raw_number, "unit": raw_unit}
+            for _, raw_unit, raw_number in occurrences
+        ]
+        distinct: list[float] = []
+        for value, _, _ in occurrences:
+            if not any(abs(value - existing) <= 0.05 for existing in distinct):
+                distinct.append(value)
+        if len(distinct) > 1:
+            review_reasons.append(f"conflicting_measurements:{field}")
+        value = occurrences[0][0]
+        lower, upper = VITAL_PLAUSIBLE_RANGES[field]
+        if not lower <= value <= upper:
+            review_reasons.append(f"implausible_measurement:{field}")
+        normalized[field] = _clean_vital_number(value)
+        normalized["units"][field] = VITAL_CANONICAL_UNITS[field]
+    for field, occurrences in unsupported_values.items():
+        normalized["raw_measurements"].setdefault(field, []).extend(occurrences)
+
+    systolic = normalized.get("bp_systolic")
+    diastolic = normalized.get("bp_diastolic")
+    if (systolic is None) != (diastolic is None):
+        review_reasons.append("incomplete_blood_pressure")
+    elif systolic is not None and diastolic is not None and systolic <= diastolic:
+        review_reasons.append("invalid_blood_pressure_order")
+
+    if all(field in normalized for field in ("bmi", "weight_kg", "height_cm")):
+        height_m = float(normalized["height_cm"]) / 100.0
+        calculated = float(normalized["weight_kg"]) / (height_m * height_m)
+        if abs(float(normalized["bmi"]) - calculated) > 0.5:
+            review_reasons.append("bmi_conflict")
+
+    return normalized, list(dict.fromkeys(review_reasons))
+
+
 def _lab_cells(line: str) -> list[str]:
     if "\t" in line:
         cells = [cell.strip() for cell in line.split("\t")]
@@ -373,11 +1166,35 @@ def _looks_like_lab_unit(value: str) -> bool:
     return bool(
         re.fullmatch(
             r"(?:%|s|fl|fL|pg|g|mg|ng|µg|μg|µmol|μmol|mmol|mol|U|IU|I\.E\.|G|T|"
-            r"/(?:nl|nL|µl|μl)|(?:g|mg|ng|µg|μg|µmol|μmol|mmol|mol|U|IU|µIU|μIU|G|T)/(?:l|L|dl|ml))",
+            r"/(?:nl|nL|pl|pL|µl|μl)|ml/min|"
+            r"(?:AU|m?IU|m?IE|g|mg|ng|µg|μg|µmol|μmol|mmol|mol|U|IU|µIU|μIU|G|T)/(?:l|L|I|dl|ml))",
             compact,
             re.IGNORECASE,
         )
     )
+
+
+def _looks_like_lab_sidebar_noise(value: str) -> bool:
+    lowered = value.casefold().strip()
+    return bool(
+        "@" in lowered
+        or re.search(r"\b(?:dr\.|facharzt|fachärzt|klinik|telefon|sekretariat)\b", lowered)
+        or re.search(r"\b(?:t|f)\s*\d{3,}[/-]", lowered)
+    )
+
+
+LAB_PANEL_HEADING_RE = re.compile(
+    r"^(?:kleines\s+|gro(?:ß|ss)es\s+)?blutbild$|"
+    r"^(?:hämatologie|klinische\s+chemie|enzyme|leberwerte|nierenfunktion|"
+    r"gerinnung|immunsystem|immunologie|impftiter|serologie|infektionsserologie|"
+    r"sonstiges|stoffwechsel|wasser\s*[-/](?:\s*[-/])?\s*elektrolythaushalt|elektrolyte|"
+    r"lipid(?:e|status)|schilddrüse|entzündung)$",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_lab_panel_heading(value: str) -> bool:
+    return bool(LAB_PANEL_HEADING_RE.fullmatch(value.strip().rstrip(":")))
 
 
 def _lab_row_metadata(
@@ -424,6 +1241,60 @@ def _lab_row_metadata(
     return analyte, unit, reference_text or None
 
 
+def _trailing_lab_result_cells(
+    raw_line: str,
+    minimum_metadata_cells: int = 2,
+) -> tuple[list[str], list[str]]:
+    """Separate metadata from the trailing result cells of a table row."""
+
+    cells = _lab_cells(raw_line)
+    results: list[str] = []
+    while len(cells) > minimum_metadata_cells and (
+        LAB_RESULT_RE.fullmatch(cells[-1]) or LAB_TEXT_RESULT_RE.fullmatch(cells[-1])
+    ):
+        results.append(cells.pop())
+    results.reverse()
+    return cells, results
+
+
+def _lab_result_starts(raw_line: str, results: list[str]) -> list[int]:
+    """Return result-cell starts without matching identical reference values."""
+
+    starts: list[int] = []
+    cursor = len(raw_line)
+    for result in reversed(results):
+        start = raw_line.rfind(result, 0, cursor)
+        if start < 0:
+            return []
+        starts.append(start)
+        cursor = start
+    starts.reverse()
+    return starts
+
+
+def _continuation_lab_column_positions(
+    page: str,
+    column_count: int,
+    metadata_column_count: int,
+) -> list[int]:
+    """Infer shifted date columns when a longitudinal table continues on a new page."""
+
+    best: list[int] = []
+    for raw_line in page.splitlines():
+        heading_key = _heading_key(raw_line.strip().rstrip(":"))
+        if heading_key in {"wichtigerhinweis", "hinweis"}:
+            break
+        _, results = _trailing_lab_result_cells(raw_line, metadata_column_count)
+        if len(results) <= len(best) or len(results) > column_count:
+            continue
+        starts = _lab_result_starts(raw_line, results)
+        if starts:
+            best = starts
+        if len(best) == column_count:
+            break
+    return best if len(best) == column_count else []
+
+
 def _lab_candidate(
     *,
     analyte: str,
@@ -434,6 +1305,7 @@ def _lab_candidate(
     panel: str,
     page_number: int,
     source_text: str,
+    review_reasons: tuple[str, ...] = (),
 ) -> ClinicalCandidate:
     result_match = LAB_RESULT_RE.fullmatch(result_text)
     numeric_result = _parse_localized_number(result_match.group("number")) if result_match else None
@@ -472,6 +1344,9 @@ def _lab_candidate(
         text=source_text.strip(),
         page=page_number,
     )
+    reasons = list(review_reasons)
+    if measured_on is None:
+        reasons.append("laboratory_date_requires_confirmation")
     return _candidate(
         "lab_result",
         value,
@@ -487,8 +1362,8 @@ def _lab_candidate(
             "reference_high": reference_high,
             "abnormal_flag": abnormal_flag,
             "measured_on": measured_on,
-            "auto_select": measured_on is not None,
-            "review_reasons": [] if measured_on is not None else ["laboratory_date_requires_confirmation"],
+            "auto_select": measured_on is not None and not reasons,
+            "review_reasons": reasons,
             "semantic_role": "laboratory_observation",
         },
         section,
@@ -593,11 +1468,6 @@ def _single_result_laboratory_candidates(text: str) -> list[ClinicalCandidate]:
                 laboratory_mode = True
                 current_panel = line.rstrip(":")
                 continue
-            if len(cells) == 1:
-                if laboratory_mode and len(line) <= 80 and not LAB_RESULT_RE.fullmatch(line):
-                    current_panel = line.rstrip(":")
-                continue
-
             lowered = " ".join(cells).casefold()
             if LAB_COLUMN_DATE_RE.search(raw_line) and "ergebnis" not in lowered:
                 laboratory_table = False
@@ -606,11 +1476,20 @@ def _single_result_laboratory_candidates(text: str) -> list[ClinicalCandidate]:
                 laboratory_mode = False
                 laboratory_table = False
                 continue
-            if "referenzbereich" in lowered or "ergebnis" in lowered or (
+            if (
+                ("referenzbereich" in lowered or "normbereich" in lowered)
+                and ("ergebnis" in lowered or re.search(r"\bwert\b", lowered))
+            ) or (
                 cells
-                and _heading_key(cells[0]) in {"parameter", "messwert", "analyt", "untersuchung"}
+                and _heading_key(cells[0])
+                in {"parameter", "messwert", "analyt", "untersuchung", "bezeichnung"}
             ):
+                laboratory_mode = True
                 laboratory_table = True
+                continue
+            if len(cells) == 1:
+                if laboratory_mode and _looks_like_lab_panel_heading(line):
+                    current_panel = line.rstrip(":")
                 continue
             if not laboratory_table:
                 continue
@@ -625,6 +1504,8 @@ def _single_result_laboratory_candidates(text: str) -> list[ClinicalCandidate]:
                 None,
             )
             if result_index is None:
+                if laboratory_mode and cells and _looks_like_lab_panel_heading(cells[0]):
+                    current_panel = cells[0].rstrip(":")
                 continue
             analyte = " ".join(cells[:result_index]).strip(" -*•")
             if not analyte or len(analyte) > 160 or not any(char.isalpha() for char in analyte):
@@ -641,16 +1522,18 @@ def _single_result_laboratory_candidates(text: str) -> list[ClinicalCandidate]:
                 ),
                 None,
             )
-            unit = (
-                " ".join(trailing[:reference_index]).strip()
-                if reference_index is not None
-                else " ".join(trailing).strip()
+            unit_cells = trailing[:reference_index] if reference_index is not None else trailing
+            unit = next((cell.strip() for cell in unit_cells if _looks_like_lab_unit(cell)), "")
+            unit_requires_review = bool(
+                not unit
+                and any(
+                    cell.strip() and not _looks_like_lab_sidebar_noise(cell)
+                    for cell in unit_cells
+                )
             )
-            reference_text = (
-                " ".join(trailing[reference_index:]).strip()
-                if reference_index is not None
-                else ""
-            )
+            # OCR often places unrelated sidebar/footer text in later table
+            # cells. Keep only the cell that actually contains the reference.
+            reference_text = trailing[reference_index].strip() if reference_index is not None else ""
             candidates.append(
                 _lab_candidate(
                     analyte=analyte,
@@ -661,6 +1544,9 @@ def _single_result_laboratory_candidates(text: str) -> list[ClinicalCandidate]:
                     panel=current_panel,
                     page_number=page_number,
                     source_text=line,
+                    review_reasons=("laboratory_unit_requires_confirmation",)
+                    if unit_requires_review
+                    else (),
                 )
             )
     return candidates
@@ -699,6 +1585,16 @@ def _laboratory_candidates(
     )
 
     for page_number, page in enumerate(text.split("\f"), start=1):
+        continued_table = laboratory_mode and bool(column_dates)
+        continuation_positions = (
+            _continuation_lab_column_positions(
+                page,
+                len(column_dates),
+                max(2, len(metadata_headers)),
+            )
+            if continued_table
+            else []
+        )
         for raw_line in page.splitlines():
             line = raw_line.strip()
             if not line:
@@ -733,6 +1629,45 @@ def _laboratory_candidates(
                     continue
             if not laboratory_mode or not column_dates or not column_positions:
                 continue
+
+            if continued_table:
+                metadata_cells, result_cells = _trailing_lab_result_cells(
+                    raw_line,
+                    max(2, len(metadata_headers)),
+                )
+                metadata = _lab_row_metadata("\t".join(metadata_cells), metadata_headers)
+                result_starts = _lab_result_starts(raw_line, result_cells)
+                if metadata is not None and result_cells and result_starts:
+                    analyte, unit, reference_text = metadata
+                    if continuation_positions:
+                        date_indexes = [
+                            min(
+                                range(len(continuation_positions)),
+                                key=lambda index: abs(continuation_positions[index] - start),
+                            )
+                            for start in result_starts
+                        ]
+                    else:
+                        date_indexes = list(range(len(result_cells)))
+                    if len(set(date_indexes)) == len(date_indexes) and all(
+                        index < len(column_dates) for index in date_indexes
+                    ):
+                        for result_text, date_index in zip(
+                            result_cells, date_indexes, strict=True
+                        ):
+                            candidates.append(
+                                _lab_candidate(
+                                    analyte=analyte,
+                                    result_text=result_text,
+                                    unit=unit,
+                                    reference_text=reference_text,
+                                    measured_on=column_dates[date_index],
+                                    panel=current_panel,
+                                    page_number=page_number,
+                                    source_text=line,
+                                )
+                            )
+                        continue
 
             metadata = _lab_row_metadata(raw_line[: column_positions[0]], metadata_headers)
             if metadata is None:
@@ -793,6 +1728,13 @@ def _detect_document_type(text: str) -> str:
         )
     ):
         return "administrative_cost_estimate"
+    if re.search(
+        r"(?:Bezeichnung|Parameter|Messwert)[^\n\f]*(?:Wert|Ergebnis)"
+        r"[^\n\f]*Einheit[^\n\f]*(?:Normbereich|Referenzbereich)",
+        text,
+        re.IGNORECASE,
+    ):
+        return "laboratory_report"
     if "onkologische diagnosen" in lowered or "nichtonkologische diagnosen" in lowered:
         return "oncology_report"
     if "kardiologie" in lowered and any(
@@ -900,6 +1842,22 @@ def _match_heading(line: str, aliases: dict[str, Target]) -> tuple[Target, str, 
         target = aliases.get(_heading_key(prefix))
         if target:
             return target, prefix.strip(), remainder.strip()
+
+    dated_heading = re.match(
+        r"^(?P<heading>.+?)\s+(?:vom|am)\s+"
+        r"(?P<date>\d{1,2}\.\d{1,2}\.(?:\d{4}|\d{2}))(?!\d)\s*:?[ \t]*"
+        r"(?P<remainder>.*)$",
+        stripped,
+        re.IGNORECASE,
+    )
+    if dated_heading:
+        target = aliases.get(_heading_key(dated_heading.group("heading")))
+        if target:
+            return (
+                target,
+                f"{dated_heading.group('heading').strip()} vom {dated_heading.group('date')}",
+                dated_heading.group("remainder").strip(),
+            )
 
     medication_dated = re.match(
         r"^(?P<heading>(?:(?:Aktuelle|Dauer|Entlassungs|H[aä]usliche)\s+)?"
@@ -1030,6 +1988,13 @@ def _is_repeated_page_noise(line: str, line_index: int, line_count: int) -> bool
             "iban ",
             "bic ",
         )
+    ):
+        return True
+    if line_index <= 4 and (
+        normalized == "privatpraxis"
+        or normalized.startswith("facharzt für ")
+        or normalized.startswith("sportmedizin - notfallmedizin")
+        or re.fullmatch(r"dr\.\s*med\.\s+[\wäöüß .'-]+", normalized)
     ):
         return True
     if (line_index <= 4 or line_index >= max(0, line_count - 4)) and any(

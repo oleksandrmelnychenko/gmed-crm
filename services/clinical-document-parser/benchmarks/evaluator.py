@@ -8,7 +8,15 @@ import unicodedata
 from typing import Any, Mapping, Sequence
 
 
-TARGETS = ("diagnosis", "anamnesis", "medication", "examination", "lab_result", "recommendation")
+TARGETS = (
+    "diagnosis",
+    "anamnesis",
+    "medication",
+    "examination",
+    "lab_result",
+    "vital",
+    "recommendation",
+)
 ALLOWED_COHORTS = {
     "arztbrief",
     "laboratory",

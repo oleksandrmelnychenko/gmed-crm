@@ -1998,7 +1998,7 @@ async fn cases_list_supports_search_and_status_filters() {
 
 #[tokio::test]
 async fn case_doctor_registry_metadata_and_fk_round_trip_work() {
-    let Some((app, pool, admin_id, _)) = test_context().await else {
+    let Some((app, pool, admin_id, ceo_bearer)) = test_context().await else {
         return;
     };
 
@@ -2051,7 +2051,7 @@ async fn case_doctor_registry_metadata_and_fk_round_trip_work() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/procedures"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [{
                 "case_id": case_id,
@@ -2071,7 +2071,7 @@ async fn case_doctor_registry_metadata_and_fk_round_trip_work() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/medications"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [{
                 "handelsname": "Medication A",
@@ -2103,7 +2103,7 @@ async fn case_doctor_registry_metadata_and_fk_round_trip_work() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -2128,7 +2128,7 @@ async fn case_doctor_registry_metadata_and_fk_round_trip_work() {
 
 #[tokio::test]
 async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without_duplicates() {
-    let Some((app, pool, admin_id, _)) = test_context().await else {
+    let Some((app, pool, admin_id, ceo_bearer)) = test_context().await else {
         return;
     };
 
@@ -2136,14 +2136,13 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
 
     let expired_on = (chrono::Utc::now().date_naive() - chrono::Duration::days(2)).to_string();
     let (status, body) = json_request(
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/medications"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [{
                 "handelsname": "Atorvastatin",
@@ -2163,7 +2162,7 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -2224,7 +2223,7 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/medications/{medication_id}/expiry-confirm"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -3678,7 +3677,7 @@ async fn patient_assignment_creates_assign_and_revoke_notifications_without_dupl
 
 #[tokio::test]
 async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() {
-    let Some((app, pool, admin_id, _)) = test_context().await else {
+    let Some((app, pool, admin_id, ceo_bearer)) = test_context().await else {
         return;
     };
 
@@ -3704,7 +3703,7 @@ async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() 
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/vitals"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "measured_at": "2026-04-14T09:45:00Z",
             "bp_systolic": 125.0,
@@ -3722,7 +3721,7 @@ async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() 
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/vitals"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "measured_at": "2026-04-13T08:15:00Z",
             "weight_kg": 71.2,
@@ -3751,7 +3750,7 @@ async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() 
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/vitals"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -4554,12 +4553,12 @@ async fn sales_cannot_open_patient_registry() {
 }
 
 #[tokio::test]
-async fn it_admin_can_open_patient_registry_case_and_reports_workspace() {
+async fn ceo_can_open_patient_registry_case_and_reports_workspace() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
     };
 
-    let tag = unique_tag("it-admin-rbac-full");
+    let tag = unique_tag("ceo-rbac-full");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let case_id = seed_case(
         &pool,
@@ -4570,24 +4569,22 @@ async fn it_admin_can_open_patient_registry_case_and_reports_workspace() {
         "Restricted clinical context",
     )
     .await;
-    let it_admin_id = seed_user(&pool, &tag, "it_admin").await;
-    let it_admin_bearer = auth_header_for(it_admin_id, "it_admin");
+    let ceo_bearer = auth_header_for(admin_id, "ceo");
 
-    let (status, body) =
-        json_request(&app, "GET", "/api/v1/patients", &it_admin_bearer, None).await;
+    let (status, body) = json_request(&app, "GET", "/api/v1/patients", &ceo_bearer, None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(
         body.as_array().is_some_and(|patients| patients
             .iter()
             .any(|patient| patient["id"] == json!(patient_id.to_string()))),
-        "IT admin should see the seeded patient in the registry: {body}"
+        "CEO should see the seeded patient in the registry: {body}"
     );
 
     let (status, body) = json_request(
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}"),
-        &it_admin_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -4598,7 +4595,7 @@ async fn it_admin_can_open_patient_registry_case_and_reports_workspace() {
         &app,
         "GET",
         &format!("/api/v1/cases/{case_id}"),
-        &it_admin_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -4609,7 +4606,7 @@ async fn it_admin_can_open_patient_registry_case_and_reports_workspace() {
         &app,
         "GET",
         "/api/v1/stats/reports/workspace",
-        &it_admin_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -4620,7 +4617,7 @@ async fn it_admin_can_open_patient_registry_case_and_reports_workspace() {
             .is_some_and(|sections| sections
                 .iter()
                 .any(|section| section.as_str() == Some("provider_costs"))),
-        "IT admin should receive full reports workspace sections: {body}"
+        "CEO should receive full reports workspace sections: {body}"
     );
 }
 
@@ -6988,7 +6985,7 @@ async fn concierge_cannot_access_communications_for_blocked_medical_slots() {
 }
 
 #[tokio::test]
-async fn it_admin_can_load_and_manage_appointment_workflow_resources() {
+async fn ceo_can_load_and_manage_appointment_workflow_resources() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
     };
@@ -6997,7 +6994,6 @@ async fn it_admin_can_load_and_manage_appointment_workflow_resources() {
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let provider_id = seed_provider(&pool, &tag).await;
     let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
-    let it_admin_id = seed_user(&pool, &tag, "it_admin").await;
     let billing_id = seed_user(&pool, &tag, "billing").await;
     let appointment_id = seed_appointment(
         &pool,
@@ -7010,7 +7006,7 @@ async fn it_admin_can_load_and_manage_appointment_workflow_resources() {
         "2026-08-10",
     )
     .await;
-    let bearer = auth_header_for(it_admin_id, "it_admin");
+    let bearer = auth_header_for(admin_id, "ceo");
 
     for path in [
         format!("/api/v1/appointments/{appointment_id}/checklist"),
@@ -7040,7 +7036,7 @@ async fn it_admin_can_load_and_manage_appointment_workflow_resources() {
         Some(json!({
             "user_id": billing_id,
             "remind_at": "2026-08-10T12:00:00Z",
-            "title": "IT admin workflow reminder"
+            "title": "CEO workflow reminder"
         })),
     )
     .await;
@@ -10998,7 +10994,7 @@ async fn non_medical_provider_rejects_provider_specializations() {
 
 #[tokio::test]
 async fn create_provider_is_forbidden_for_operational_non_admin_roles() {
-    let Some((app, pool, _admin_id, _)) = test_context().await else {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
     };
 
@@ -11014,6 +11010,7 @@ async fn create_provider_is_forbidden_for_operational_non_admin_roles() {
         "concierge",
         "interpreter",
         "teamlead_interpreter",
+        "it_admin",
     ] {
         let user_id = seed_user(&pool, &format!("{tag}-{role}"), role).await;
         let bearer = auth_header_for(user_id, role);
@@ -11032,15 +11029,14 @@ async fn create_provider_is_forbidden_for_operational_non_admin_roles() {
         );
     }
 
-    let it_admin_id = seed_user(&pool, &format!("{tag}-it-admin"), "it_admin").await;
-    let it_admin_bearer = auth_header_for(it_admin_id, "it_admin");
+    let ceo_bearer = auth_header_for(admin_id, "ceo");
     let (status, body) = json_request(
         &app,
         "POST",
         "/api/v1/providers",
-        &it_admin_bearer,
+        &ceo_bearer,
         Some(json!({
-            "name": format!("Clinic It Admin {tag}"),
+            "name": format!("Clinic CEO {tag}"),
             "provider_type": "medical",
         })),
     )
@@ -11879,7 +11875,7 @@ async fn patient_id_sequence_generates_unique_human_readable_codes() {
 
 #[tokio::test]
 async fn patient_diagnoses_section_round_trip_via_api() {
-    let Some((app, pool, admin_id, _)) = test_context().await else {
+    let Some((app, pool, admin_id, ceo_bearer)) = test_context().await else {
         return;
     };
 
@@ -11907,7 +11903,7 @@ async fn patient_diagnoses_section_round_trip_via_api() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/diagnoses"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [
                 {
@@ -11935,7 +11931,7 @@ async fn patient_diagnoses_section_round_trip_via_api() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -11957,7 +11953,7 @@ async fn patient_diagnoses_section_round_trip_via_api() {
 
 #[tokio::test]
 async fn patient_allergies_section_round_trip_via_api() {
-    let Some((app, pool, admin_id, _)) = test_context().await else {
+    let Some((app, pool, admin_id, ceo_bearer)) = test_context().await else {
         return;
     };
 
@@ -11965,13 +11961,12 @@ async fn patient_allergies_section_round_trip_via_api() {
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
 
     let (status, body) = json_request(
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/clinical-warnings"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "kind": "allergie",
             "items": [
@@ -11994,7 +11989,7 @@ async fn patient_allergies_section_round_trip_via_api() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -12014,7 +12009,7 @@ async fn patient_allergies_section_round_trip_via_api() {
 
 #[tokio::test]
 async fn patient_impfstatus_section_round_trip_via_api() {
-    let Some((app, pool, admin_id, _)) = test_context().await else {
+    let Some((app, pool, admin_id, ceo_bearer)) = test_context().await else {
         return;
     };
 
@@ -12022,14 +12017,13 @@ async fn patient_impfstatus_section_round_trip_via_api() {
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
 
     let status_text = "Tetanus 2023, Grippe 2024, MMR vollständig";
     let (status, _) = json_request(
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/impfstatus"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({ "status_text": status_text })),
     )
     .await;
@@ -12039,7 +12033,7 @@ async fn patient_impfstatus_section_round_trip_via_api() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/impfstatus"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;

@@ -87,10 +87,12 @@ import { MedicationEquivalentsPanel } from "@/pages/case-workspace/medication-eq
 import {
   fetchPatientMedicationImportHistory,
   persistClinicalDocumentMedication,
+  persistClinicalDocumentVital,
   type ClinicalDocumentCandidatePayloads,
   type ImportedMedicationResponse,
   type ImportedLabResultPayload,
   type ImportedMedicationPayload,
+  type ImportedVitalPayload,
   type ClinicalDocumentImport,
   type ClinicalDocumentImportCandidate,
   type MedicationImportHistoryEvent,
@@ -166,9 +168,23 @@ function patientRiskScoreTypeLabel(scoreType: string, tx: Bilingual): string {
   return scoreType;
 }
 
-function patientVitalDateTime(value: string | null | undefined, fallback: string): string {
+export function patientVitalDateTime(
+  value: string | null | undefined,
+  fallback: string,
+  precision?: PatientVitalMeasurement["measured_at_precision"],
+): string {
   if (!value) return fallback;
   try {
+    if (precision === "date") {
+      const datePart = value.slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return fallback;
+      return cachedDateTimeFormat("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+      }).format(new Date(`${datePart}T00:00:00Z`));
+    }
     return cachedDateTimeFormat("en-GB", {
       day: "2-digit",
       month: "short",
@@ -179,6 +195,12 @@ function patientVitalDateTime(value: string | null | undefined, fallback: string
   } catch {
     return value;
   }
+}
+
+export function patientVitalIsImported(
+  item: Pick<PatientVitalMeasurement, "source_candidate_id">,
+): boolean {
+  return Boolean(item.source_candidate_id);
 }
 
 export function groupPatientLabResults(rows: PatientLabResult[]) {
@@ -202,6 +224,9 @@ export function groupPatientLabResults(rows: PatientLabResult[]) {
 type PatientVitalMetricLabels = {
   bloodPressure: string;
   heartRate: string;
+  temperature?: string;
+  oxygenSaturation?: string;
+  respiratoryRate?: string;
   weight: string;
   height: string;
   bmi: string;
@@ -225,6 +250,24 @@ export function patientVitalMetrics(
       ? {
           label: labels.heartRate,
           value: formatVitalNumber(item.heart_rate, { maximumFractionDigits: 0 }) ?? labels.notSet,
+        }
+      : null,
+    item.temperature_c != null
+      ? {
+          label: labels.temperature ?? "Temp.",
+          value: `${formatVitalNumber(item.temperature_c) ?? labels.notSet} °C`,
+        }
+      : null,
+    item.oxygen_saturation != null
+      ? {
+          label: labels.oxygenSaturation ?? "SpO₂",
+          value: `${formatVitalNumber(item.oxygen_saturation) ?? labels.notSet} %`,
+        }
+      : null,
+    item.respiratory_rate != null
+      ? {
+          label: labels.respiratoryRate ?? "AF",
+          value: `${formatVitalNumber(item.respiratory_rate, { maximumFractionDigits: 0 }) ?? labels.notSet} /min`,
         }
       : null,
     item.weight_kg != null
@@ -1946,12 +1989,19 @@ function MedicationHistoryTree({
 
 export function PatientClinicalTab({
   patientId,
+  patientIdentity,
   canManage,
   documentImportOpen,
   onDocumentImportOpenChange,
   embedded = false,
 }: {
   patientId: string;
+  patientIdentity: {
+    firstName?: string | null;
+    lastName?: string | null;
+    birthDate?: string | null;
+    patientIdentifier?: string | null;
+  };
   canManage: boolean;
   documentImportOpen: boolean;
   onDocumentImportOpenChange: (open: boolean) => void;
@@ -2316,6 +2366,33 @@ export function PatientClinicalTab({
       counts.lab_results = importedLabResults.length;
     }
 
+    const importedVitals = candidates.filter((item) => item.target === "vital");
+    for (const item of importedVitals) {
+      const payload = candidatePayloads[item.id];
+      if (
+        !payload
+        || !("bp_systolic" in payload)
+        || payload.source_import_id !== documentImport.id
+        || payload.source_candidate_id !== item.id
+      ) {
+        throw new Error(
+          tx(
+            "Зафиксированный payload показателей отсутствует или не совпадает.",
+            "Der vorbereitete Vitalwert-Payload fehlt oder stimmt nicht überein.",
+          ),
+        );
+      }
+      await persistClinicalDocumentVital(patientId, payload as ImportedVitalPayload);
+    }
+    if (importedVitals.length > 0) {
+      const refreshedVitals = await apiFetch<{ items: PatientVitalMeasurement[] }>(
+        `/patients/${patientId}/vitals`,
+        { cache: "no-store" },
+      );
+      setVitalsHistory(Array.isArray(refreshedVitals.items) ? refreshedVitals.items : []);
+      counts.vitals = importedVitals.length;
+    }
+
     const importedAnamnesis = candidates
       .filter((item) => item.target === "anamnesis" && item.value.trim())
       .map((item) => item.value.trim())
@@ -2431,6 +2508,16 @@ export function PatientClinicalTab({
 
   async function deleteVitalMeasurement() {
     if (!vitalDeleteTarget) return;
+    if (patientVitalIsImported(vitalDeleteTarget)) {
+      setVitalDeleteTarget(null);
+      toast.error(
+        tx(
+          "Импортированные показатели нельзя удалить из истории документа.",
+          "Importierte Vitalwerte können nicht aus dem Dokumentverlauf gelöscht werden.",
+        ),
+      );
+      return;
+    }
     setClinicalDeleteBusy(true);
     try {
       await apiFetch(
@@ -2708,6 +2795,7 @@ export function PatientClinicalTab({
         open={documentImportOpen}
         onOpenChange={onDocumentImportOpenChange}
         patientId={patientId}
+        patientIdentity={patientIdentity}
         lang={lang}
         existingItems={{
           diagnosis: diagnoses.map((item, index) => ({
@@ -2739,10 +2827,33 @@ export function PatientClinicalTab({
             primary: item.title,
             secondary: item.result,
           })),
+          vital: vitalsHistory.map((item) => ({
+            id: item.id,
+            primary: patientVitalMetrics(item, {
+              bloodPressure: tx("АД", "RR"),
+              heartRate: tx("ЧСС", "Herzfrequenz"),
+              temperature: tx("Темп.", "Temp."),
+              oxygenSaturation: "SpO₂",
+              respiratoryRate: tx("ЧД", "AF"),
+              weight: tx("Вес", "Gewicht"),
+              height: tx("Рост", "Größe"),
+              bmi: "BMI",
+              notSet: "—",
+            }).map((metric) => `${metric.label}: ${metric.value}`).join(" · "),
+            secondary: patientVitalDateTime(
+              item.measured_at,
+              item.measured_at,
+              item.measured_at_precision,
+            ),
+          })),
           lab_result: labResults.map((item) => ({
             id: item.id,
             primary: `${item.analyte_name}: ${item.result_text}${item.unit ? ` ${item.unit}` : ""}`,
-            secondary: patientVitalDateTime(item.measured_at, item.measured_at),
+            secondary: patientVitalDateTime(
+              item.measured_at,
+              item.measured_at,
+              item.measured_at_precision,
+            ),
           })),
           recommendation: recommendations.map((item) => ({
             id: item.id,
@@ -3503,6 +3614,9 @@ export function PatientClinicalTab({
                 const vitalMetrics = patientVitalMetrics(item, {
                   bloodPressure: tx("АД", "RR"),
                   heartRate: tx("ЧСС", "Herzfrequenz"),
+                  temperature: tx("Темп.", "Temp."),
+                  oxygenSaturation: "SpO₂",
+                  respiratoryRate: tx("ЧД", "AF"),
                   weight: tx("Вес", "Gewicht"),
                   height: tx("Рост", "Größe"),
                   bmi: "BMI",
@@ -3517,12 +3631,18 @@ export function PatientClinicalTab({
                     <div className="min-w-0">
                       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                         <p className="text-sm font-medium text-foreground">
-                          {patientVitalDateTime(item.measured_at, notSet)}
+                          {patientVitalDateTime(item.measured_at, notSet, item.measured_at_precision)}
                         </p>
                         <span className="size-1 rounded-full bg-muted-foreground/35" />
                         <span className="text-xs text-muted-foreground">
                           {tx("Записал", "Erfasst von")} {item.recorded_by_name ?? tx("Неизвестно", "Unbekannt")}
                         </span>
+                        {item.source_document_name || item.source_page ? (
+                          <Badge variant="outline" className="rounded-full border-pink-200 bg-pink-50 text-[10px] text-pink-800">
+                            {item.source_document_name ?? tx("Медицинский документ", "Medizinisches Dokument")}
+                            {item.source_page ? ` · S. ${item.source_page}` : ""}
+                          </Badge>
+                        ) : null}
                       </div>
                       {item.notes ? (
                         <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
@@ -3546,7 +3666,7 @@ export function PatientClinicalTab({
                           <span className="text-xs text-muted-foreground">{notSet}</span>
                         )}
                       </div>
-                      {canManage ? (
+                      {canManage && !patientVitalIsImported(item) ? (
                         <div className="flex shrink-0 items-center gap-1">
                           <Button
                             type="button"
@@ -3574,6 +3694,17 @@ export function PatientClinicalTab({
                             <Trash2 className="size-3.5" />
                           </Button>
                         </div>
+                      ) : patientVitalIsImported(item) ? (
+                        <Badge
+                          variant="outline"
+                          className="shrink-0 rounded-full border-violet-200 bg-violet-50 text-[10px] text-violet-800"
+                          title={tx(
+                            "Импортированная запись остаётся неизменяемым снимком документа.",
+                            "Der importierte Eintrag bleibt ein unveränderlicher Dokument-Snapshot.",
+                          )}
+                        >
+                          {tx("Из документа", "Aus Dokument")}
+                        </Badge>
                       ) : null}
                     </div>
                   </div>
@@ -3627,7 +3758,11 @@ export function PatientClinicalTab({
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-foreground">{group.name}</p>
                       <p className="mt-0.5 text-[11px] text-muted-foreground">
-                        {group.rows.length} {tx("измерений", "Messungen")} · {patientVitalDateTime(latest.measured_at, latest.measured_at)}
+                        {group.rows.length} {tx("измерений", "Messungen")} · {patientVitalDateTime(
+                          latest.measured_at,
+                          latest.measured_at,
+                          latest.measured_at_precision,
+                        )}
                       </p>
                     </div>
                     <div className="flex items-center gap-2 sm:justify-end">
@@ -3658,7 +3793,11 @@ export function PatientClinicalTab({
                         {group.rows.map((row) => (
                           <tr key={row.id} className="border-t border-border/50 first:border-t-0">
                             <td className="whitespace-nowrap px-3 py-2.5 text-muted-foreground">
-                              {patientVitalDateTime(row.measured_at, row.measured_at)}
+                              {patientVitalDateTime(
+                                row.measured_at,
+                                row.measured_at,
+                                row.measured_at_precision,
+                              )}
                             </td>
                             <td className="px-3 py-2.5">
                               <span className={cn(

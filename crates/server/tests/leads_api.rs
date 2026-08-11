@@ -1670,6 +1670,7 @@ async fn failed_lead_purges_only_unconverted_prospect_and_preserves_attached_pat
     };
     let pool = &app.suite.pool;
     let pm = app.auth_header("patient_manager");
+    let ceo = app.auth_header("ceo");
     let tag = Uuid::new_v4().simple().to_string();
 
     let prospect_lead_id: Uuid = sqlx::query_scalar(
@@ -1702,7 +1703,7 @@ async fn failed_lead_purges_only_unconverted_prospect_and_preserves_attached_pat
         &app,
         "POST",
         &format!("/api/v1/patients/{prospect_patient_id}/diagnoses"),
-        &pm,
+        &ceo,
         Some(json!({ "items": [{ "kind": "main", "label": "Temporary diagnosis" }] })),
     )
     .await;

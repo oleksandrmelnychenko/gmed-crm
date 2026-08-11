@@ -12,6 +12,7 @@ Target = Literal[
     "medication",
     "examination",
     "lab_result",
+    "vital",
     "recommendation",
 ]
 ExtractionSource = Literal["native", "ocr", "native_fallback", "existing", "text"]
@@ -28,6 +29,24 @@ class SourceEvidence(BaseModel):
     page: int | None = None
     section: str
     text: str = Field(max_length=MAX_SOURCE_EVIDENCE_CHARS)
+
+
+class SubjectSourceEvidence(BaseModel):
+    page: int | None = None
+    text: str = Field(max_length=MAX_SOURCE_EVIDENCE_CHARS)
+
+
+class DocumentSubject(BaseModel):
+    status: Literal["extracted", "conflict"]
+    conflict: bool = False
+    first_name: str | None = None
+    last_name: str | None = None
+    birth_date: str | None = None
+    patient_identifier: str | None = None
+    patient_identifier_namespace: Literal["source_document", "gmed_patient_id"] | None = None
+    field_confidence: dict[str, float] = Field(default_factory=dict)
+    source: SubjectSourceEvidence
+    review_reasons: list[str] = Field(default_factory=list)
 
 
 class ClinicalCandidate(BaseModel):
@@ -87,6 +106,7 @@ class ParseDraft(BaseModel):
     source_language: str | None = None
     parser_version: str
     raw_text: str = Field(default="", max_length=MAX_DRAFT_RAW_TEXT_CHARS)
+    subject: DocumentSubject | None = None
     candidates: list[ClinicalCandidate] = Field(default_factory=list, max_length=MAX_DRAFT_CANDIDATES)
     warnings: list[str] = Field(default_factory=list)
     extraction: DraftExtractionMetadata | None = None

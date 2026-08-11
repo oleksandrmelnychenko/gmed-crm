@@ -7,7 +7,10 @@ import type {
   ClinicalMedication,
   PatientRecommendation,
 } from "@/pages/patients/data/patient-clinical";
-import type { PatientVitalMeasurement } from "@/pages/patients/model/detail-resource-types";
+import type {
+  PatientLabResult,
+  PatientVitalMeasurement,
+} from "@/pages/patients/model/detail-resource-types";
 import type { ProviderSummary } from "@/pages/providers/model/types";
 
 import { DiagnosisTreeSection } from "./diagnosis-tree";
@@ -20,6 +23,8 @@ import {
   clinicalMedicalProviderRows,
   medicationHasEnded,
   mergeVerlaufDoctorAttribution,
+  patientVitalDateTime,
+  patientVitalIsImported,
   patientVitalMetrics,
   groupPatientLabResults,
 } from "./patient-clinical-tab";
@@ -276,9 +281,68 @@ describe("patientVitalMetrics", () => {
     expect(metrics[0].value).toMatch(/^72[.,]4 kg$/);
     expect(metrics[1]).toEqual({ label: "Größe", value: "175 cm" });
   });
+
+  it("renders temperature, oxygen saturation and respiratory rate in history", () => {
+    const measurement: PatientVitalMeasurement = {
+      id: "vital-2",
+      measured_at: "2026-08-10T10:00:00Z",
+      temperature_c: 36.7,
+      oxygen_saturation: 98,
+      respiratory_rate: 15,
+      created_at: "2026-08-10T10:00:00Z",
+    };
+
+    expect(patientVitalMetrics(measurement, {
+      bloodPressure: "RR",
+      heartRate: "Herzfrequenz",
+      temperature: "Temp.",
+      oxygenSaturation: "SpO₂",
+      respiratoryRate: "AF",
+      weight: "Gewicht",
+      height: "Größe",
+      bmi: "BMI",
+      notSet: "Nicht gesetzt",
+    })).toEqual([
+      { label: "Temp.", value: expect.stringMatching(/^36[.,]7 °C$/) },
+      { label: "SpO₂", value: "98 %" },
+      { label: "AF", value: "15 /min" },
+    ]);
+  });
+
+  it("renders date-precision measurements without inventing a midnight time", () => {
+    const rendered = patientVitalDateTime(
+      "2026-08-10T00:00:00Z",
+      "fallback",
+      "date",
+    );
+
+    expect(rendered).toBe("10 Aug 2026");
+    expect(rendered).not.toMatch(/00[:.]00/);
+  });
+
+  it("keeps imported measurements immutable by candidate provenance after import unlinking", () => {
+    expect(patientVitalIsImported({ source_candidate_id: "vital-1" })).toBe(true);
+    expect(patientVitalIsImported({ source_candidate_id: null })).toBe(false);
+  });
 });
 
 describe("groupPatientLabResults", () => {
+  it("renders an OCR lab date without inventing a midnight time", () => {
+    const lab = {
+      measured_at: "2026-08-10T00:00:00Z",
+      measured_at_precision: "date" as const,
+    } satisfies Pick<PatientLabResult, "measured_at" | "measured_at_precision">;
+
+    const rendered = patientVitalDateTime(
+      lab.measured_at,
+      "fallback",
+      lab.measured_at_precision,
+    );
+
+    expect(rendered).toBe("10 Aug 2026");
+    expect(rendered).not.toMatch(/00[:.]00/);
+  });
+
   it("appends repeated analytes by date and preserves different units", () => {
     const base = {
       panel: "Blood count",

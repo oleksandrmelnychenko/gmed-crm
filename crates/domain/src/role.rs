@@ -17,6 +17,14 @@ pub enum Role {
 }
 
 impl Role {
+    /// Staff roles that currently have a configured business workspace.
+    ///
+    /// Other staff roles remain valid accounts and may sign in, but their
+    /// workspace and business API access stay empty until explicitly enabled.
+    pub fn is_release_staff_role(&self) -> bool {
+        matches!(self, Role::Ceo | Role::Concierge | Role::Billing)
+    }
+
     pub fn has_full_access(&self) -> bool {
         match self {
             Role::Ceo => true,
@@ -27,7 +35,7 @@ impl Role {
             Role::Concierge => false,
             Role::Billing => false,
             Role::Sales => false,
-            Role::ItAdmin => true,
+            Role::ItAdmin => false,
             Role::Patient => false,
         }
     }
@@ -42,7 +50,7 @@ impl Role {
             Role::Concierge => false,
             Role::Billing => false,
             Role::Sales => false,
-            Role::ItAdmin => true,
+            Role::ItAdmin => false,
             Role::Patient => false,
         }
     }
@@ -57,7 +65,7 @@ impl Role {
             Role::Concierge => false,
             Role::Billing => true,
             Role::Sales => false,
-            Role::ItAdmin => true,
+            Role::ItAdmin => false,
             Role::Patient => false,
         }
     }
@@ -72,7 +80,7 @@ impl Role {
             Role::Concierge => false,
             Role::Billing => false,
             Role::Sales => false,
-            Role::ItAdmin => true,
+            Role::ItAdmin => false,
             Role::Patient => false,
         }
     }
@@ -104,9 +112,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ceo_and_it_admin_have_full_access() {
+    fn first_release_has_three_staff_roles() {
+        assert!(Role::Ceo.is_release_staff_role());
+        assert!(Role::Concierge.is_release_staff_role());
+        assert!(Role::Billing.is_release_staff_role());
+        assert!(!Role::ItAdmin.is_release_staff_role());
+        assert!(!Role::PatientManager.is_release_staff_role());
+        assert!(!Role::Patient.is_release_staff_role());
+    }
+
+    #[test]
+    fn only_ceo_has_full_access() {
         assert!(Role::Ceo.has_full_access());
-        assert!(Role::ItAdmin.has_full_access());
+        assert!(!Role::ItAdmin.has_full_access());
         assert!(!Role::CeoAssistant.has_full_access());
         assert!(!Role::PatientManager.has_full_access());
         assert!(!Role::Sales.has_full_access());
@@ -121,11 +139,11 @@ mod tests {
         assert!(Role::PatientManager.can_see_medical_data());
         assert!(Role::TeamleadInterpreter.can_see_medical_data());
         assert!(Role::Interpreter.can_see_medical_data());
-        // Non-clinical roles cannot, except IT admin as a full-access admin role.
+        // Non-clinical and legacy technical roles cannot see medical data.
         assert!(!Role::Concierge.can_see_medical_data());
         assert!(!Role::Billing.can_see_medical_data());
         assert!(!Role::Sales.can_see_medical_data());
-        assert!(Role::ItAdmin.can_see_medical_data());
+        assert!(!Role::ItAdmin.can_see_medical_data());
         assert!(!Role::Patient.can_see_medical_data());
     }
 
@@ -134,16 +152,16 @@ mod tests {
         assert!(Role::Ceo.can_see_financial_data());
         assert!(Role::Billing.can_see_financial_data());
         assert!(Role::PatientManager.can_see_financial_data());
-        assert!(Role::ItAdmin.can_see_financial_data());
+        assert!(!Role::ItAdmin.can_see_financial_data());
         assert!(!Role::Sales.can_see_financial_data());
         assert!(!Role::Interpreter.can_see_financial_data());
         assert!(!Role::Patient.can_see_financial_data());
     }
 
     #[test]
-    fn full_admins_can_assign_patients() {
+    fn only_ceo_can_assign_patients() {
         assert!(Role::Ceo.can_assign_patients());
-        assert!(Role::ItAdmin.can_assign_patients());
+        assert!(!Role::ItAdmin.can_assign_patients());
         assert!(!Role::PatientManager.can_assign_patients());
         assert!(!Role::Sales.can_assign_patients());
     }
@@ -216,8 +234,8 @@ mod tests {
             let full = role.has_full_access();
             let assign = role.can_assign_patients();
 
-            assert_eq!(full, matches!(role, Role::Ceo | Role::ItAdmin));
-            assert_eq!(assign, matches!(role, Role::Ceo | Role::ItAdmin));
+            assert_eq!(full, matches!(role, Role::Ceo));
+            assert_eq!(assign, matches!(role, Role::Ceo));
 
             match role {
                 Role::Concierge | Role::Billing | Role::Sales => {
@@ -225,19 +243,15 @@ mod tests {
                 }
                 Role::Patient => assert!(!medical),
                 Role::Ceo
-                | Role::ItAdmin
                 | Role::CeoAssistant
                 | Role::PatientManager
                 | Role::TeamleadInterpreter
                 | Role::Interpreter => assert!(medical),
+                Role::ItAdmin => assert!(!medical),
             }
 
             match role {
-                Role::Ceo
-                | Role::ItAdmin
-                | Role::CeoAssistant
-                | Role::PatientManager
-                | Role::Billing => {
+                Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing => {
                     assert!(financial, "{role:?} expects financial visibility");
                 }
                 _ => assert!(

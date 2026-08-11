@@ -194,6 +194,7 @@ async fn prepare_medication_review_import(
         Some(json!({
             "reviewed_draft": reviewed_draft,
             "source_country": source_country,
+            "patient_identity_confirmed": true,
             "candidate_payloads": candidate_payloads,
         })),
     )
@@ -243,15 +244,15 @@ async fn patient_notes_update_does_not_require_unrelated_minor_guardian_fix() {
 
     let tag = unique_tag("minor-notes-update");
     let patient_id = seed_minor_patient_without_guardian(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
 
     let (status, _) = json_request(
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/update"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "notes": "Metadata note can be edited without changing guardian fields",
         })),
@@ -263,7 +264,7 @@ async fn patient_notes_update_does_not_require_unrelated_minor_guardian_fix() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -281,15 +282,15 @@ async fn patient_medication_requires_active_ingredient_but_allows_no_trade_name(
     };
     let tag = unique_tag("patient-med-required-ingredient");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
 
     let (status, body) = json_request(
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/medications"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [{
                 "wirkstoff": "Ibuprofen",
@@ -305,7 +306,7 @@ async fn patient_medication_requires_active_ingredient_but_allows_no_trade_name(
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -317,7 +318,7 @@ async fn patient_medication_requires_active_ingredient_but_allows_no_trade_name(
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/medications"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [{ "handelsname": "Optional brand only" }]
         })),
@@ -333,7 +334,7 @@ async fn patient_medication_requires_active_ingredient_but_allows_no_trade_name(
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -348,11 +349,10 @@ async fn clinical_import_prepare_freezes_selection_country_and_blocks_live_write
     };
     let tag = unique_tag("clinical-import-prepare");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = admin_id;
+    let bearer = auth_header_for(admin_id, "ceo");
     let import_id =
-        seed_medication_review_import(&pool, patient_id, pm_id, "prepare-med", &tag).await;
+        seed_medication_review_import(&pool, patient_id, ceo_id, "prepare-med", &tag).await;
     let medication_path =
         format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}/medications");
     let medication = json!({
@@ -415,6 +415,7 @@ async fn clinical_import_prepare_freezes_selection_country_and_blocks_live_write
     let prepared_payload = json!({
         "reviewed_draft": reviewed_draft,
         "source_country": "DE",
+        "patient_identity_confirmed": true,
         "candidate_payloads": {
             "prepare-med": medication,
         },
@@ -446,6 +447,7 @@ async fn clinical_import_prepare_freezes_selection_country_and_blocks_live_write
         Some(json!({
             "reviewed_draft": reviewed_draft,
             "source_country": "DE",
+            "patient_identity_confirmed": true,
             "candidate_payloads": {
                 "prepare-med": changed_prepared_medication,
             },
@@ -470,6 +472,7 @@ async fn clinical_import_prepare_freezes_selection_country_and_blocks_live_write
                 "warnings": [],
             },
             "source_country": "DE",
+            "patient_identity_confirmed": true,
             "candidate_payloads": {
                 "prepare-med": medication,
             },
@@ -569,7 +572,7 @@ async fn clinical_import_prepare_freezes_selection_country_and_blocks_live_write
     let null_import = seed_medication_review_import(
         &pool,
         patient_id,
-        pm_id,
+        ceo_id,
         "null-retry-med",
         &format!("{tag}-null-retry"),
     )
@@ -611,7 +614,7 @@ async fn clinical_import_prepare_freezes_selection_country_and_blocks_live_write
     let deselected_import = seed_medication_review_import(
         &pool,
         patient_id,
-        pm_id,
+        ceo_id,
         "deselected-med",
         &format!("{tag}-deselected"),
     )
@@ -642,6 +645,7 @@ async fn clinical_import_prepare_freezes_selection_country_and_blocks_live_write
                 "warnings": [],
             },
             "source_country": "DE",
+            "patient_identity_confirmed": true,
             "candidate_payloads": {},
         })),
     )
@@ -672,12 +676,12 @@ async fn reviewed_medication_import_is_idempotent_and_keeps_regimen_history() {
     };
     let tag = unique_tag("ocr-medication-history");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = admin_id;
+    let bearer = auth_header_for(admin_id, "ceo");
 
     let first_import =
-        seed_medication_review_import(&pool, patient_id, pm_id, "med-1", &format!("{tag}-1")).await;
+        seed_medication_review_import(&pool, patient_id, ceo_id, "med-1", &format!("{tag}-1"))
+            .await;
     let first_payload = json!({
         "candidate_id": "med-1",
         "wirkstoff": "Atorvastatin",
@@ -732,7 +736,8 @@ async fn reviewed_medication_import_is_idempotent_and_keeps_regimen_history() {
     assert_eq!(first_event_count, 1);
 
     let duplicate_import =
-        seed_medication_review_import(&pool, patient_id, pm_id, "med-2", &format!("{tag}-2")).await;
+        seed_medication_review_import(&pool, patient_id, ceo_id, "med-2", &format!("{tag}-2"))
+            .await;
     let duplicate_payload = json!({
         "candidate_id": "med-2",
         "wirkstoff": "atorvastatin",
@@ -770,7 +775,8 @@ async fn reviewed_medication_import_is_idempotent_and_keeps_regimen_history() {
     assert_eq!(duplicate["id"], first_id.to_string());
 
     let changed_import =
-        seed_medication_review_import(&pool, patient_id, pm_id, "med-3", &format!("{tag}-3")).await;
+        seed_medication_review_import(&pool, patient_id, ceo_id, "med-3", &format!("{tag}-3"))
+            .await;
     let changed_payload = json!({
         "candidate_id": "med-3",
         "wirkstoff": "Atorvastatin",
@@ -820,7 +826,8 @@ async fn reviewed_medication_import_is_idempotent_and_keeps_regimen_history() {
     assert!(first_superseded);
 
     let stop_import =
-        seed_medication_review_import(&pool, patient_id, pm_id, "med-4", &format!("{tag}-4")).await;
+        seed_medication_review_import(&pool, patient_id, ceo_id, "med-4", &format!("{tag}-4"))
+            .await;
     let stop_payload = json!({
         "candidate_id": "med-4",
         "wirkstoff": "Atorvastatin",
@@ -876,7 +883,8 @@ async fn reviewed_medication_import_is_idempotent_and_keeps_regimen_history() {
     assert_eq!(completed["applied_counts"]["medications"], 1);
 
     let combined_import =
-        seed_medication_review_import(&pool, patient_id, pm_id, "med-5", &format!("{tag}-5")).await;
+        seed_medication_review_import(&pool, patient_id, ceo_id, "med-5", &format!("{tag}-5"))
+            .await;
     let combined_payload = json!({
         "candidate_id": "med-5",
         "wirkstoff": "Atorvastatin",
@@ -945,16 +953,15 @@ async fn older_medication_documents_are_historical_and_never_replace_current_sta
     };
     let tag = unique_tag("medication-chronology");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = admin_id;
+    let bearer = auth_header_for(admin_id, "ceo");
 
     let (status, current) = persist_reviewed_medication(
         &app,
         &pool,
         &bearer,
         patient_id,
-        pm_id,
+        ceo_id,
         "chronology-current",
         "UA",
         json!({
@@ -979,7 +986,7 @@ async fn older_medication_documents_are_historical_and_never_replace_current_sta
         &pool,
         &bearer,
         patient_id,
-        pm_id,
+        ceo_id,
         "chronology-old-regimen",
         "UA",
         json!({
@@ -1001,7 +1008,7 @@ async fn older_medication_documents_are_historical_and_never_replace_current_sta
         &pool,
         &bearer,
         patient_id,
-        pm_id,
+        ceo_id,
         "chronology-old-stop",
         "UA",
         json!({
@@ -1037,7 +1044,7 @@ async fn older_medication_documents_are_historical_and_never_replace_current_sta
         &pool,
         &bearer,
         patient_id,
-        pm_id,
+        ceo_id,
         "chronology-undated",
         "UA",
         json!({
@@ -1075,10 +1082,9 @@ async fn same_ingredient_siblings_in_one_prepare_require_explicit_series_choices
     };
     let tag = unique_tag("medication-batch-series-identity");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let bearer = auth_header_for(pm_id, "patient_manager");
-    let import_id = seed_medication_review_import(&pool, patient_id, pm_id, "batch-a", &tag).await;
+    let ceo_id = admin_id;
+    let bearer = auth_header_for(admin_id, "ceo");
+    let import_id = seed_medication_review_import(&pool, patient_id, ceo_id, "batch-a", &tag).await;
     let reviewed_draft = json!({
         "candidates": [
             {
@@ -1131,6 +1137,7 @@ async fn same_ingredient_siblings_in_one_prepare_require_explicit_series_choices
         Some(json!({
             "reviewed_draft": reviewed_draft,
             "source_country": "DE",
+            "patient_identity_confirmed": true,
             "candidate_payloads": {
                 "batch-a": first_payload,
                 "batch-b": second_payload,
@@ -1150,6 +1157,7 @@ async fn same_ingredient_siblings_in_one_prepare_require_explicit_series_choices
         Some(json!({
             "reviewed_draft": reviewed_draft,
             "source_country": "DE",
+            "patient_identity_confirmed": true,
             "candidate_payloads": {
                 "batch-a": first_payload,
                 "batch-b": second_payload,
@@ -1197,16 +1205,15 @@ async fn sole_same_ingredient_series_rejects_mismatched_strong_selector() {
     };
     let tag = unique_tag("medication-sole-series-selector");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = admin_id;
+    let bearer = auth_header_for(admin_id, "ceo");
 
     let (status, first) = persist_reviewed_medication(
         &app,
         &pool,
         &bearer,
         patient_id,
-        pm_id,
+        ceo_id,
         "sole-series-first",
         "DE",
         json!({
@@ -1228,7 +1235,7 @@ async fn sole_same_ingredient_series_rejects_mismatched_strong_selector() {
         &pool,
         &bearer,
         patient_id,
-        pm_id,
+        ceo_id,
         "sole-series-mismatch",
         "DE",
         json!({
@@ -1262,16 +1269,15 @@ async fn same_ingredient_series_require_unambiguous_review_or_explicit_new_serie
     };
     let tag = unique_tag("medication-series-identity");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = admin_id;
+    let bearer = auth_header_for(admin_id, "ceo");
 
     let (status, first) = persist_reviewed_medication(
         &app,
         &pool,
         &bearer,
         patient_id,
-        pm_id,
+        ceo_id,
         "identity-first",
         "DE",
         json!({
@@ -1294,7 +1300,7 @@ async fn same_ingredient_series_require_unambiguous_review_or_explicit_new_serie
         &pool,
         &bearer,
         patient_id,
-        pm_id,
+        ceo_id,
         "identity-second",
         "DE",
         json!({
@@ -1318,7 +1324,7 @@ async fn same_ingredient_series_require_unambiguous_review_or_explicit_new_serie
         &pool,
         &bearer,
         patient_id,
-        pm_id,
+        ceo_id,
         "identity-strong-match",
         "DE",
         json!({
@@ -1342,7 +1348,7 @@ async fn same_ingredient_series_require_unambiguous_review_or_explicit_new_serie
         &pool,
         &bearer,
         patient_id,
-        pm_id,
+        ceo_id,
         "identity-ambiguous-stop",
         "DE",
         json!({
@@ -1361,7 +1367,7 @@ async fn same_ingredient_series_require_unambiguous_review_or_explicit_new_serie
         &pool,
         &bearer,
         patient_id,
-        pm_id,
+        ceo_id,
         "identity-explicit-stop",
         "DE",
         json!({
@@ -1383,7 +1389,7 @@ async fn same_ingredient_series_require_unambiguous_review_or_explicit_new_serie
         &pool,
         &bearer,
         patient_id,
-        pm_id,
+        ceo_id,
         "identity-third-new",
         "DE",
         json!({
@@ -1417,16 +1423,15 @@ async fn explicit_null_clears_nullable_regimen_fields_instead_of_inheriting_them
     };
     let tag = unique_tag("medication-explicit-clear");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = admin_id;
+    let bearer = auth_header_for(admin_id, "ceo");
 
     let (status, first) = persist_reviewed_medication(
         &app,
         &pool,
         &bearer,
         patient_id,
-        pm_id,
+        ceo_id,
         "clear-first",
         "DE",
         json!({
@@ -1450,7 +1455,7 @@ async fn explicit_null_clears_nullable_regimen_fields_instead_of_inheriting_them
         &pool,
         &bearer,
         patient_id,
-        pm_id,
+        ceo_id,
         "clear-second",
         "DE",
         json!({
@@ -1490,9 +1495,8 @@ async fn reviewed_medication_import_scopes_drug_candidates_to_source_country() {
     };
     let tag = unique_tag("ocr-medication-country");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = admin_id;
+    let bearer = auth_header_for(admin_id, "ceo");
     let german_product_id: Uuid = sqlx::query_scalar(
         "SELECT id FROM drug_products WHERE normalized_brand_name = 'sortis' AND country_code = 'DE' LIMIT 1",
     )
@@ -1508,7 +1512,7 @@ async fn reviewed_medication_import_scopes_drug_candidates_to_source_country() {
         "drug_product_id": german_product_id,
     });
     let import_id =
-        seed_medication_review_import(&pool, patient_id, pm_id, "country-1", &tag).await;
+        seed_medication_review_import(&pool, patient_id, ceo_id, "country-1", &tag).await;
     prepare_medication_review_import(
         &app,
         &bearer,
@@ -1537,7 +1541,7 @@ async fn reviewed_medication_import_scopes_drug_candidates_to_source_country() {
     let successful_import = seed_medication_review_import(
         &pool,
         patient_id,
-        pm_id,
+        ceo_id,
         "country-2",
         &format!("{tag}-success"),
     )
@@ -1581,17 +1585,16 @@ async fn reviewed_medication_import_scopes_drug_candidates_to_source_country() {
 }
 
 #[tokio::test]
-async fn it_admin_can_persist_and_read_lab_results_during_clinical_import_review() {
+async fn ceo_can_persist_and_read_lab_results_during_clinical_import_review() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
-    let tag = unique_tag("it-admin-lab-import");
+    let tag = unique_tag("ceo-lab-import");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let it_admin_id = seed_user(&pool, &format!("{tag}-it"), "it_admin").await;
-    let bearer = auth_header_for(it_admin_id, "it_admin");
+    let bearer = auth_header_for(admin_id, "ceo");
 
     let import_id =
-        seed_medication_review_import(&pool, patient_id, it_admin_id, "mixed-med-1", &tag).await;
+        seed_medication_review_import(&pool, patient_id, admin_id, "mixed-med-1", &tag).await;
     let medication_payload = json!({
         "candidate_id": "mixed-med-1",
         "wirkstoff": "Metformin",
@@ -1650,6 +1653,7 @@ async fn it_admin_can_persist_and_read_lab_results_during_clinical_import_review
     assert_eq!(status, StatusCode::OK, "{listed:?}");
     assert_eq!(listed["count"], 1);
     assert_eq!(listed["items"][0]["analyte_name"], "Leukocytes");
+    assert_eq!(listed["items"][0]["measured_at_precision"], "datetime");
 }
 
 #[tokio::test]
@@ -1659,11 +1663,9 @@ async fn imported_lab_requires_prepared_selection_and_matching_frozen_country() 
     };
     let tag = unique_tag("staged-lab-country");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let bearer = auth_header_for(pm_id, "patient_manager");
+    let bearer = auth_header_for(admin_id, "ceo");
     let import_id =
-        seed_medication_review_import(&pool, patient_id, pm_id, "lab-stage-1", &tag).await;
+        seed_medication_review_import(&pool, patient_id, admin_id, "lab-stage-1", &tag).await;
     let reviewed_draft = json!({
         "candidates": [{
             "id": "lab-stage-1",
@@ -1729,6 +1731,7 @@ async fn imported_lab_requires_prepared_selection_and_matching_frozen_country() 
             Some(json!({
                 "reviewed_draft": reviewed_draft,
                 "source_country": "DE",
+                "patient_identity_confirmed": true,
                 "candidate_payloads": {
                     "lab-stage-1": malformed_payload,
                 },
@@ -1757,6 +1760,7 @@ async fn imported_lab_requires_prepared_selection_and_matching_frozen_country() 
         Some(json!({
             "reviewed_draft": reviewed_draft,
             "source_country": "DE",
+            "patient_identity_confirmed": true,
             "candidate_payloads": {
                 "lab-stage-1": lab_payload("DE"),
             },
@@ -1764,6 +1768,24 @@ async fn imported_lab_requires_prepared_selection_and_matching_frozen_country() 
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{prepared:?}");
+
+    sqlx::query(
+        "UPDATE clinical_document_imports SET prepared_identity_gate_version = 0 WHERE id = $1",
+    )
+    .bind(import_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, gate_blocked) =
+        json_request(&app, "POST", &lab_path, &bearer, Some(lab_payload("DE"))).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{gate_blocked:?}");
+    sqlx::query(
+        "UPDATE clinical_document_imports SET prepared_identity_gate_version = 1 WHERE id = $1",
+    )
+    .bind(import_id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let (status, wrong_country) =
         json_request(&app, "POST", &lab_path, &bearer, Some(lab_payload("UA"))).await;
@@ -1785,6 +1807,435 @@ async fn imported_lab_requires_prepared_selection_and_matching_frozen_country() 
 }
 
 #[tokio::test]
+async fn imported_vital_is_prevalidated_idempotent_and_keeps_immutable_provenance() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("staged-vital");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let import_id =
+        seed_medication_review_import(&pool, patient_id, admin_id, "vital-stage-1", &tag).await;
+    let bearer = auth_header_for(admin_id, "ceo");
+    let reviewed_draft = json!({
+        "candidates": [{
+            "id": "vital-stage-1",
+            "target": "vital",
+            "value": "RR 128/76, Puls 68, SpO2 98%, Temperatur 36.7 C",
+            "selected": true,
+        }],
+        "warnings": [],
+    });
+    sqlx::query("UPDATE clinical_document_imports SET draft = $2 WHERE id = $1")
+        .bind(import_id)
+        .bind(&reviewed_draft)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let payload = json!({
+        "measured_at": "2026-08-11T09:00:00Z",
+        "bp_systolic": 128.0,
+        "bp_diastolic": 76.0,
+        "heart_rate": 68,
+        "temperature_c": 36.7,
+        "oxygen_saturation": 98.0,
+        "respiratory_rate": 14,
+        "weight_kg": 72.0,
+        "height_cm": 175.0,
+        "bmi": 23.5,
+        "notes": "OCR reviewed baseline",
+        "source_country": "DE",
+        "source_import_id": import_id,
+        "source_candidate_id": "vital-stage-1",
+        "source_page": 2,
+    });
+    let vital_path = format!("/api/v1/patients/{patient_id}/vitals");
+    let prepare_path =
+        format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}/prepare");
+
+    let (status, before_prepare) =
+        json_request(&app, "POST", &vital_path, &bearer, Some(payload.clone())).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{before_prepare:?}");
+
+    let mut invalid_saturation = payload.clone();
+    invalid_saturation["oxygen_saturation"] = json!(10.0);
+    let mut conflicting_bmi = payload.clone();
+    conflicting_bmi["bmi"] = json!(40.0);
+    let mut invalid_page = payload.clone();
+    invalid_page["source_page"] = json!(0);
+    let mut unknown_field = payload.clone();
+    unknown_field["unreviewed_value"] = json!(true);
+    for (case, invalid_payload) in [
+        ("saturation range", invalid_saturation),
+        ("conflicting bmi", conflicting_bmi),
+        ("source page", invalid_page),
+        ("unknown field", unknown_field),
+    ] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &prepare_path,
+            &bearer,
+            Some(json!({
+                "reviewed_draft": reviewed_draft,
+                "source_country": "DE",
+                "patient_identity_confirmed": true,
+                "candidate_payloads": { "vital-stage-1": invalid_payload },
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{case}: {body:?}");
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM clinical_document_imports WHERE id = $1")
+                .bind(import_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(status, "review_required", "{case}");
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM patient_vital_measurements WHERE source_import_id = $1",
+        )
+        .bind(import_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 0, "{case} must not create an orphan vital");
+    }
+
+    let (status, identity_confirmation_required) = json_request(
+        &app,
+        "POST",
+        &prepare_path,
+        &bearer,
+        Some(json!({
+            "reviewed_draft": reviewed_draft,
+            "source_country": "DE",
+            "patient_identity_confirmed": false,
+            "candidate_payloads": { "vital-stage-1": payload },
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "{identity_confirmation_required:?}"
+    );
+    let import_status: String =
+        sqlx::query_scalar("SELECT status FROM clinical_document_imports WHERE id = $1")
+            .bind(import_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(import_status, "review_required");
+
+    let (status, prepared) = json_request(
+        &app,
+        "POST",
+        &prepare_path,
+        &bearer,
+        Some(json!({
+            "reviewed_draft": reviewed_draft,
+            "source_country": "DE",
+            "patient_identity_confirmed": true,
+            "candidate_payloads": { "vital-stage-1": payload },
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{prepared:?}");
+
+    sqlx::query(
+        "UPDATE clinical_document_imports SET prepared_identity_gate_version = 0 WHERE id = $1",
+    )
+    .bind(import_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, gate_blocked) =
+        json_request(&app, "POST", &vital_path, &bearer, Some(payload.clone())).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{gate_blocked:?}");
+    sqlx::query(
+        "UPDATE clinical_document_imports SET prepared_identity_gate_version = 1 WHERE id = $1",
+    )
+    .bind(import_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut changed = payload.clone();
+    changed["heart_rate"] = json!(69);
+    let (status, changed_body) =
+        json_request(&app, "POST", &vital_path, &bearer, Some(changed)).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{changed_body:?}");
+
+    let (status, created) =
+        json_request(&app, "POST", &vital_path, &bearer, Some(payload.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{created:?}");
+    assert_eq!(created["idempotent"], false);
+    let measurement_id = created["id"].as_str().expect("created vital id");
+
+    let (status, retry) =
+        json_request(&app, "POST", &vital_path, &bearer, Some(payload.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{retry:?}");
+    assert_eq!(retry["id"], measurement_id);
+    assert_eq!(retry["idempotent"], true);
+
+    let (status, listed) = json_request(&app, "GET", &vital_path, &bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{listed:?}");
+    assert_eq!(listed["count"], 1);
+    assert_eq!(listed["items"][0]["temperature_c"], 36.7);
+    assert_eq!(listed["items"][0]["oxygen_saturation"], 98.0);
+    assert_eq!(listed["items"][0]["respiratory_rate"], 14);
+    assert_eq!(listed["items"][0]["source_country"], "DE");
+    assert_eq!(
+        listed["items"][0]["source_import_id"],
+        import_id.to_string()
+    );
+    assert_eq!(listed["items"][0]["source_candidate_id"], "vital-stage-1");
+    assert_eq!(listed["items"][0]["source_page"], 2);
+    assert_eq!(listed["items"][0]["measured_at_precision"], "datetime");
+    assert!(listed["items"][0]["source_document_id"].is_string());
+    assert!(listed["items"][0]["source_document_name"].is_string());
+
+    let complete_path =
+        format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}/complete");
+    sqlx::query(
+        "UPDATE clinical_document_imports SET prepared_identity_gate_version = 0 WHERE id = $1",
+    )
+    .bind(import_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, gate_blocked) = json_request(
+        &app,
+        "POST",
+        &complete_path,
+        &bearer,
+        Some(json!({ "reviewed_draft": reviewed_draft })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{gate_blocked:?}");
+    sqlx::query(
+        "UPDATE clinical_document_imports SET prepared_identity_gate_version = 1 WHERE id = $1",
+    )
+    .bind(import_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, completed) = json_request(
+        &app,
+        "POST",
+        &complete_path,
+        &bearer,
+        Some(json!({ "reviewed_draft": reviewed_draft })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{completed:?}");
+    assert_eq!(completed["status"], "applied");
+    assert_eq!(completed["applied_counts"]["vitals"], 1);
+
+    let (status, applied_retry) =
+        json_request(&app, "POST", &vital_path, &bearer, Some(payload.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{applied_retry:?}");
+    assert_eq!(applied_retry["id"], measurement_id);
+    assert_eq!(applied_retry["idempotent"], true);
+
+    let ceo_bearer = bearer.clone();
+    let update_path = format!("/api/v1/patients/{patient_id}/vitals/{measurement_id}/update");
+    let (status, update_body) = json_request(
+        &app,
+        "POST",
+        &update_path,
+        &ceo_bearer,
+        Some(json!({
+            "measured_at": "2026-08-11T09:00:00Z",
+            "heart_rate": 70,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{update_body:?}");
+    let delete_path = format!("/api/v1/patients/{patient_id}/vitals/{measurement_id}/delete");
+    let (status, delete_body) =
+        json_request(&app, "POST", &delete_path, &ceo_bearer, Some(json!({}))).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{delete_body:?}");
+
+    let persisted_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM patient_vital_measurements WHERE source_import_id = $1 AND source_candidate_id = $2",
+    )
+    .bind(import_id)
+    .bind("vital-stage-1")
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(persisted_count, 1);
+}
+
+#[tokio::test]
+async fn clinical_import_prepare_uses_authoritative_subject_and_freezes_name_confirmation() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("import-subject-gate");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let bearer = auth_header_for(admin_id, "ceo");
+    let import_id =
+        seed_medication_review_import(&pool, patient_id, admin_id, "subject-med-1", &tag).await;
+    let reviewed_draft = json!({
+        "subject": {
+            "status": "extracted",
+            "conflict": false,
+            "first_name": format!("First {tag}"),
+            "last_name": format!("Last {tag}"),
+            "birth_date": "1990-01-01",
+            "patient_identifier": format!("PT-{tag}"),
+        },
+        "candidates": [{
+            "id": "subject-med-1",
+            "target": "medication",
+            "value": "Metformin 500 mg",
+            "selected": true,
+        }],
+        "warnings": [],
+    });
+    let medication_payload = json!({
+        "candidate_id": "subject-med-1",
+        "wirkstoff": "Metformin",
+        "staerke": "500 mg",
+        "source_country": "DE",
+        "source_date": "2026-08-11",
+    });
+    let prepare_path =
+        format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}/prepare");
+    let prepare_body = |patient_identity_confirmed: bool| {
+        json!({
+            "reviewed_draft": reviewed_draft.clone(),
+            "source_country": "DE",
+            "patient_identity_confirmed": patient_identity_confirmed,
+            "candidate_payloads": { "subject-med-1": medication_payload.clone() },
+        })
+    };
+
+    let hard_conflict_draft = json!({
+        "subject": {
+            "status": "conflict",
+            "conflict": true,
+            "first_name": null,
+            "last_name": format!("Last {tag}"),
+            "birth_date": "1991-01-01",
+            "patient_identifier": format!("PT-{tag}"),
+            "field_confidence": {},
+            "source": { "page": 1, "text": "conflicting subject" },
+            "review_reasons": ["conflicting_subject_identity"],
+        },
+        "candidates": reviewed_draft["candidates"].clone(),
+        "warnings": [],
+    });
+    sqlx::query("UPDATE clinical_document_imports SET draft = $2 WHERE id = $1")
+        .bind(import_id)
+        .bind(hard_conflict_draft)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, hard_conflict) = json_request(
+        &app,
+        "POST",
+        &prepare_path,
+        &bearer,
+        Some(prepare_body(true)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{hard_conflict:?}");
+    let import_status: String =
+        sqlx::query_scalar("SELECT status FROM clinical_document_imports WHERE id = $1")
+            .bind(import_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(import_status, "review_required");
+
+    let name_mismatch_draft = json!({
+        "subject": {
+            "status": "extracted",
+            "conflict": false,
+            "first_name": format!("First {tag}"),
+            "last_name": "Different",
+            "birth_date": "1990-01-01",
+            "patient_identifier": format!("PT-{tag}"),
+            "field_confidence": {},
+            "source": { "page": 1, "text": "name-only mismatch" },
+            "review_reasons": [],
+        },
+        "candidates": reviewed_draft["candidates"].clone(),
+        "warnings": [],
+    });
+    sqlx::query("UPDATE clinical_document_imports SET draft = $2 WHERE id = $1")
+        .bind(import_id)
+        .bind(name_mismatch_draft)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, confirmation_required) = json_request(
+        &app,
+        "POST",
+        &prepare_path,
+        &bearer,
+        Some(prepare_body(false)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{confirmation_required:?}");
+    let import_status: String =
+        sqlx::query_scalar("SELECT status FROM clinical_document_imports WHERE id = $1")
+            .bind(import_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(import_status, "review_required");
+
+    let (status, prepared) = json_request(
+        &app,
+        "POST",
+        &prepare_path,
+        &bearer,
+        Some(prepare_body(true)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{prepared:?}");
+    assert_eq!(prepared["idempotent"], false);
+    assert_eq!(prepared["patient_identity_confirmed"], true);
+
+    let (status, different_retry) = json_request(
+        &app,
+        "POST",
+        &prepare_path,
+        &bearer,
+        Some(prepare_body(false)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{different_retry:?}");
+    let (status, idempotent_retry) = json_request(
+        &app,
+        "POST",
+        &prepare_path,
+        &bearer,
+        Some(prepare_body(true)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{idempotent_retry:?}");
+    assert_eq!(idempotent_retry["idempotent"], true);
+    assert_eq!(idempotent_retry["patient_identity_confirmed"], true);
+
+    let (status, fetched) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{fetched:?}");
+    assert_eq!(fetched["prepared_patient_identity_confirmed"], true);
+    assert_eq!(fetched["prepared_identity_gate_version"], 1);
+}
+
+#[tokio::test]
 async fn patient_passport_round_trips_and_flags_expiry() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
@@ -1792,16 +2243,16 @@ async fn patient_passport_round_trips_and_flags_expiry() {
 
     let tag = unique_tag("passport");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
 
     // Record a passport that expired in the past.
     let (status, _) = json_request(
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/update"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({ "passport_number": "X1234567", "passport_expiry": "2020-01-01" })),
     )
     .await;
@@ -1811,7 +2262,7 @@ async fn patient_passport_round_trips_and_flags_expiry() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -1829,7 +2280,7 @@ async fn patient_passport_round_trips_and_flags_expiry() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/update"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({ "passport_expiry": "2999-12-31" })),
     )
     .await;
@@ -1839,7 +2290,7 @@ async fn patient_passport_round_trips_and_flags_expiry() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -1857,7 +2308,7 @@ async fn patient_passport_round_trips_and_flags_expiry() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/update"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({ "passport_expiry": "31.12.2030" })),
     )
     .await;
@@ -1872,9 +2323,9 @@ async fn patient_passport_expiring_soon_is_a_non_blocking_compliance_warning() {
 
     let tag = unique_tag("passport-expiring");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
 
     // A passport expiring inside the 90-day warning window (30 days out).
     let soon = (chrono::Utc::now().date_naive() + chrono::Duration::days(30)).to_string();
@@ -1882,7 +2333,7 @@ async fn patient_passport_expiring_soon_is_a_non_blocking_compliance_warning() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/update"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({ "passport_number": "Y7654321", "passport_expiry": soon })),
     )
     .await;
@@ -1893,7 +2344,7 @@ async fn patient_passport_expiring_soon_is_a_non_blocking_compliance_warning() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -1908,7 +2359,7 @@ async fn patient_passport_expiring_soon_is_a_non_blocking_compliance_warning() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/recheck"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -1938,15 +2389,15 @@ async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() 
 
     let tag = unique_tag("patient-vitals");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
 
     let (status, _) = json_request(
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/update"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "clinical_warnings": "Latex allergy\nMonitor blood pressure before sedation",
         })),
@@ -1958,12 +2409,15 @@ async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() 
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/vitals"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "measured_at": "2026-04-14T09:45:00Z",
             "bp_systolic": 125.0,
             "bp_diastolic": 82.0,
             "heart_rate": 71,
+            "temperature_c": 36.6,
+            "oxygen_saturation": 99.0,
+            "respiratory_rate": 13,
             "weight_kg": 72.0,
             "height_cm": 175.0,
             "notes": "Pre-op baseline",
@@ -1976,7 +2430,7 @@ async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() 
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/vitals"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "measured_at": "2026-04-13T08:15:00Z",
             "weight_kg": 71.2,
@@ -1991,7 +2445,7 @@ async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() 
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -2005,7 +2459,7 @@ async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() 
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/vitals"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -2017,6 +2471,9 @@ async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() 
     assert_eq!(items[0]["bp_systolic"], 125.0);
     assert_eq!(items[0]["bp_diastolic"], 82.0);
     assert_eq!(items[0]["heart_rate"], 71);
+    assert_eq!(items[0]["temperature_c"], 36.6);
+    assert_eq!(items[0]["oxygen_saturation"], 99.0);
+    assert_eq!(items[0]["respiratory_rate"], 13);
     assert_eq!(items[0]["weight_kg"], 72.0);
     assert_eq!(items[0]["height_cm"], 175.0);
     let bmi = items[0]["bmi"].as_f64().expect("bmi");
@@ -2025,6 +2482,8 @@ async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() 
         "expected auto-computed bmi close to 23.5, got {bmi}"
     );
     assert_eq!(items[0]["notes"], "Pre-op baseline");
+    assert!(items[0]["source_import_id"].is_null());
+    assert!(items[0]["source_candidate_id"].is_null());
     assert_eq!(items[1]["measured_at"], "2026-04-13T08:15:00+00:00");
 
     // Laboratory observations form an append-only, unit-preserving history:
@@ -2073,7 +2532,7 @@ async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() 
             &app,
             "POST",
             &format!("/api/v1/patients/{patient_id}/lab-results"),
-            &pm_bearer,
+            &ceo_bearer,
             Some(payload),
         )
         .await;
@@ -2084,7 +2543,7 @@ async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() 
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/lab-results"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -2107,7 +2566,7 @@ async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() 
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/timeline?entity_type=vital"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -2164,15 +2623,15 @@ async fn patient_card_entries_round_trip_and_appear_in_timeline() {
 
     let tag = unique_tag("patient-card-entry");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
 
     let (status, _) = json_request(
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/card-entries"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "entry_date": "2026-04-14T11:30:00Z",
             "category": "medical_update",
@@ -2187,7 +2646,7 @@ async fn patient_card_entries_round_trip_and_appear_in_timeline() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/card-entries"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "entry_date": "2026-04-13T16:10:00Z",
             "category": "followup_note",
@@ -2202,7 +2661,7 @@ async fn patient_card_entries_round_trip_and_appear_in_timeline() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/card-entries"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -2222,7 +2681,7 @@ async fn patient_card_entries_round_trip_and_appear_in_timeline() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/timeline?entity_type=card_entry"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -2236,7 +2695,7 @@ async fn patient_card_entries_round_trip_and_appear_in_timeline() {
         .as_str()
         .expect("source label");
     assert!(source_label.contains("Clinic intake call"));
-    assert!(source_label.contains(&format!("patient_manager {tag}-pm")));
+    assert!(source_label.contains(&format!("ceo {tag}-ceo")));
 }
 
 #[tokio::test]
@@ -2283,15 +2742,15 @@ async fn patient_medical_orders_round_trip_status_update_and_timeline() {
 
     let tag = unique_tag("patient-medical-order");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
 
     let (status, create_body) = json_request(
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/medical-orders"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "order_date": "2026-04-14T12:00:00Z",
             "order_type": "physiotherapy",
@@ -2309,7 +2768,7 @@ async fn patient_medical_orders_round_trip_status_update_and_timeline() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/medical-orders"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -2325,7 +2784,7 @@ async fn patient_medical_orders_round_trip_status_update_and_timeline() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/medical-orders/{medical_order_id}/update"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "status": "completed",
         })),
@@ -2337,7 +2796,7 @@ async fn patient_medical_orders_round_trip_status_update_and_timeline() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/medical-orders"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -2349,7 +2808,7 @@ async fn patient_medical_orders_round_trip_status_update_and_timeline() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/timeline?entity_type=medical_order"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -2407,15 +2866,15 @@ async fn patient_risk_scores_round_trip_and_timeline() {
 
     let tag = unique_tag("patient-risk-score");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
 
     let (status, _) = json_request(
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/risk-scores"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "computed_at": "2026-04-14T14:15:00Z",
             "score_type": "cha2ds2_vasc",
@@ -2438,7 +2897,7 @@ async fn patient_risk_scores_round_trip_and_timeline() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/risk-scores"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "computed_at": "2026-04-13T09:00:00Z",
             "score_type": "fall_risk",
@@ -2455,7 +2914,7 @@ async fn patient_risk_scores_round_trip_and_timeline() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/risk-scores"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -2473,7 +2932,7 @@ async fn patient_risk_scores_round_trip_and_timeline() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/timeline?entity_type=risk_score"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -2487,7 +2946,7 @@ async fn patient_risk_scores_round_trip_and_timeline() {
         .as_str()
         .expect("source label");
     assert!(source_label.contains("Cardiology review"));
-    assert!(source_label.contains(&format!("patient_manager {tag}-pm")));
+    assert!(source_label.contains(&format!("ceo {tag}-ceo")));
 }
 
 #[tokio::test]
@@ -2570,10 +3029,10 @@ async fn all_doctors_list_excludes_non_medical_contact_people() {
         seed_provider_with_type(&pool, &format!("{tag}-restaurant"), "non_medical").await;
     let non_medical_contact_id =
         seed_provider_doctor(&pool, non_medical_provider_id, &format!("{tag}-restaurant")).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
 
-    let (status, body) = json_request(&app, "GET", "/api/v1/doctors", &pm_bearer, None).await;
+    let (status, body) = json_request(&app, "GET", "/api/v1/doctors", &ceo_bearer, None).await;
     assert_eq!(status, StatusCode::OK);
 
     let rows = body.as_array().expect("doctors array");
@@ -2598,9 +3057,9 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
 
     let tag = unique_tag("patient-clinical");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
 
     let provider_id = seed_provider(&pool, &tag).await;
     let doctor_id = seed_provider_doctor(&pool, provider_id, &tag).await;
@@ -2624,7 +3083,7 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/diagnoses"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [
                 {
@@ -2656,7 +3115,7 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/medications"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [
                 {
@@ -2688,7 +3147,7 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/examinations"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [
                 {
@@ -2712,7 +3171,7 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -2778,7 +3237,7 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/diagnoses"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({ "items": [] })),
     )
     .await;
@@ -2788,7 +3247,7 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -2811,9 +3270,9 @@ async fn patient_clinical_merge_preserves_rows_omitted_by_returning_patient_inta
     };
     let tag = unique_tag("patient-clinical-merge");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let bearer = auth_header_for(ceo_id, "ceo");
 
     for (path, body) in [
         (
@@ -2933,9 +3392,9 @@ async fn patient_clinical_rejects_invalid_provider_doctor_attribution() {
 
     let tag = unique_tag("patient-clinical-attr");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
 
     let provider_id = seed_provider(&pool, &tag).await;
     let other_provider_id = seed_provider(&pool, &format!("{tag}-other")).await;
@@ -2944,7 +3403,7 @@ async fn patient_clinical_rejects_invalid_provider_doctor_attribution() {
 
     let post_diagnosis = |attribution: serde_json::Value| {
         let app = app.clone();
-        let bearer = pm_bearer.clone();
+        let bearer = ceo_bearer.clone();
         async move {
             let mut item = json!({ "kind": "main", "label": "Test" });
             item.as_object_mut()
@@ -2987,7 +3446,7 @@ async fn patient_clinical_rejects_invalid_provider_doctor_attribution() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -3003,9 +3462,9 @@ async fn patient_medications_reject_non_medical_provider_attribution() {
 
     let tag = unique_tag("patient-med-non-med-provider");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
 
     let non_medical_provider_id =
         seed_provider_with_type(&pool, &format!("{tag}-travel"), "non_medical").await;
@@ -3016,7 +3475,7 @@ async fn patient_medications_reject_non_medical_provider_attribution() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/medications"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [
                 {
@@ -3035,7 +3494,7 @@ async fn patient_medications_reject_non_medical_provider_attribution() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/medications"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [
                 {
@@ -3054,7 +3513,7 @@ async fn patient_medications_reject_non_medical_provider_attribution() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -3105,9 +3564,9 @@ async fn patient_clinical_narrative_upserts() {
 
     let tag = unique_tag("patient-narrative");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
     let narrative_specializations = sqlx::query_as::<_, (Uuid, String)>(
         "SELECT id, code FROM medical_specializations
          WHERE deleted_at IS NULL AND is_active = TRUE
@@ -3128,7 +3587,7 @@ async fn patient_clinical_narrative_upserts() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -3144,7 +3603,7 @@ async fn patient_clinical_narrative_upserts() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/narrative"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "anamnese_aktuelle": "Fieber und Husten seit zwei Tagen.",
             "anamnese_sozial": "Lebt allein, mobil mit Gehstock.",
@@ -3171,7 +3630,7 @@ async fn patient_clinical_narrative_upserts() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -3218,7 +3677,7 @@ async fn patient_clinical_narrative_upserts() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/narrative"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "anamnese_aktuelle": "Beschwerden gebessert.",
         })),
@@ -3230,7 +3689,7 @@ async fn patient_clinical_narrative_upserts() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -3260,7 +3719,7 @@ async fn patient_clinical_narrative_upserts() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/verlauf"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [{
                 "occurred_on": "2026-06-24",
@@ -3277,7 +3736,7 @@ async fn patient_clinical_narrative_upserts() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -3322,7 +3781,7 @@ async fn patient_clinical_narrative_upserts() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/narrative/history"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -3363,7 +3822,7 @@ async fn patient_clinical_narrative_upserts() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/narrative/{active_id}/delete"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -3384,7 +3843,7 @@ async fn patient_clinical_narrative_upserts() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -3396,7 +3855,7 @@ async fn patient_clinical_narrative_upserts() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/narrative/{inactive_id}/delete"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -3407,7 +3866,7 @@ async fn patient_clinical_narrative_upserts() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -3423,9 +3882,9 @@ async fn patient_procedures_round_trip_with_ops_code() {
 
     let tag = unique_tag("patient-procedures");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
 
     let provider_id = seed_provider(&pool, &tag).await;
     let doctor_id = seed_provider_doctor(&pool, provider_id, &tag).await;
@@ -3434,7 +3893,7 @@ async fn patient_procedures_round_trip_with_ops_code() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/procedures"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [
                 {
@@ -3454,7 +3913,7 @@ async fn patient_procedures_round_trip_with_ops_code() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -3472,7 +3931,7 @@ async fn patient_procedures_round_trip_with_ops_code() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/procedures"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({ "items": [] })),
     )
     .await;
@@ -3482,7 +3941,7 @@ async fn patient_procedures_round_trip_with_ops_code() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -3498,16 +3957,16 @@ async fn patient_clinical_pdf_export_returns_pdf() {
 
     let tag = unique_tag("patient-clinical-pdf");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
 
     // Seed some content so the Arztbrief is non-empty.
     let (status, _) = json_request(
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/diagnoses"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({ "items": [{ "kind": "main", "label": "Ambulant erworbene Pneumonie", "icd_code": "J15.9" }] })),
     )
     .await;
@@ -3516,7 +3975,7 @@ async fn patient_clinical_pdf_export_returns_pdf() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/narrative"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({ "beurteilung": "Verdacht auf Pneumonie." })),
     )
     .await;
@@ -3525,7 +3984,7 @@ async fn patient_clinical_pdf_export_returns_pdf() {
     let request = Request::builder()
         .method("GET")
         .uri(format!("/api/v1/patients/{patient_id}/clinical.pdf"))
-        .header("Authorization", &pm_bearer)
+        .header("Authorization", &ceo_bearer)
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(request).await.unwrap();
@@ -3556,15 +4015,15 @@ async fn patient_medikationsplan_pdf_excludes_on_hold_medications() {
 
     let tag = unique_tag("patient-medikationsplan-hold");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
 
     let (status, _) = json_request(
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/medications"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [
                 {
@@ -3595,7 +4054,7 @@ async fn patient_medikationsplan_pdf_excludes_on_hold_medications() {
     let request = Request::builder()
         .method("GET")
         .uri(format!("/api/v1/patients/{patient_id}/medikationsplan.pdf"))
-        .header("Authorization", &pm_bearer)
+        .header("Authorization", &ceo_bearer)
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(request).await.unwrap();

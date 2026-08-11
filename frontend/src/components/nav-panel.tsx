@@ -79,6 +79,7 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   privacy: Shield,
   cases: FileHeart,
   appointments: CalendarClock,
+  employees: UsersRound,
   "admin/users": UserCog,
   "admin/access": KeyRound,
   "admin/settings": Settings2,

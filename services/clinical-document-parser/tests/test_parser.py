@@ -256,6 +256,55 @@ def test_unknown_layout_is_reviewable_instead_of_guessing() -> None:
     assert draft.warnings
 
 
+def test_physical_examination_and_further_findings_do_not_leak_into_anamnesis() -> None:
+    text = """
+Anamnese
+Seit gestern Husten und Fieber.
+Sozialanamnese
+Lebt allein, kein Pflegegrad.
+Körperlicher Untersuchungsbefund bei Aufnahme
+Blutdruck 150/90 mmHg. Pulmo rechtsseitig feuchte Rasselgeräusche.
+Weitere Diagnostik/Befunde
+Röntgen-Thorax: Infiltrat im rechten Oberlappen.
+Beurteilung und Verlauf
+Antibiotische Therapie wurde begonnen.
+"""
+
+    draft = parse_clinical_text(text)
+    anamnesis = [item for item in draft.candidates if item.target == "anamnesis"]
+    examinations = [item for item in draft.candidates if item.target == "examination"]
+
+    assert len(anamnesis) == 2
+    assert all("Blutdruck" not in item.value for item in anamnesis)
+    assert all("Röntgen-Thorax" not in item.value for item in anamnesis)
+    assert [item.source.section for item in examinations] == [
+        "Körperlicher Untersuchungsbefund bei Aufnahme",
+        "Weitere Diagnostik/Befunde",
+        "Beurteilung und Verlauf",
+    ]
+
+
+def test_repeated_letterhead_does_not_leak_into_cross_page_examination() -> None:
+    text = """
+Carotisduplex
+Keine relevante Stenose.
+\f
+PRIVATPRAXIS
+FACHARZT FÜR INNERE MEDIZIN UND KARDIOLOGIE
+DR. MED. ULRICH HÖLZENBEIN
+SPORTMEDIZIN - NOTFALLMEDIZIN - LABORDIAGNOSTIK
+Echokardiographie
+Gute linksventrikuläre Pumpfunktion.
+"""
+
+    rows = [
+        item for item in parse_clinical_text(text).candidates if item.target == "examination"
+    ]
+
+    assert [row.source.section for row in rows] == ["Carotisduplex", "Echokardiographie"]
+    assert rows[0].value == "Keine relevante Stenose."
+
+
 def test_tabular_laboratory_report_creates_structured_observations() -> None:
     text = """
 Laborbefund vom 08.08.2026
@@ -282,6 +331,85 @@ Nierenfunktion\nGeschätzte GFR\t> 60\tml/min\t(> 60)
     assert rows[2].normalized["result_text"] == "negativ"
     assert rows[3].normalized["comparator"] == ">"
     assert rows[3].source.page == 1
+
+
+def test_german_ocr_lab_header_and_sidebar_noise_create_observations() -> None:
+    text = """
+München, den 28.05.2026
+Ihre Laborbefund
+nachfolgend erhalten Sie den Bericht zur Untersuchung vom 26.05.2026
+Bezeichnung\tWert\tEinheit\tNormbereich
+muenchen-klinik.de
+Blutbild\tAkademisches
+Leuko\t6,4\t/nl\t( 3,7 - 9,9 )\tLehrkrankenhaus der
+Ludwig-Maximilians-Universität
+Ery\t5,8\t/pl\t( 4,4 - 5,9 )
+Hämoglobin\t17,2\tg/dl\t( 13,5 - 17,8 )\tQualitätsmanagementsystem zertifiziert
+Enzyme
+GGT\t15\tU/I\t( 12 - 64 )
+Immunsystem
+Mas-IgG-AK i.S.\t85,9\tAU/ml
+Mumps-IgG i.S.\t16,6\tAU/ml
+München Klinik gGmbH\tGeschäftsführung:\tHandelsregister
+\f
+VZV IgG-AK\t2.470\tтіЕ/ті\t(100 - 10000)\tT 089/9270-2447
+Anti-HCV\tnegativ
+HIV-AG/AK CMIA\tnegativ\tbetriebsarzt@muenchen-klinik.de
+Impftiter\tDr. Rosa Lancier
+Anti-HBs-Ak\t1.391,4\tmIE/ml\t(100 - 10000)\tFÄ für Arbeitsmedizin
+Sonstiges
+CRP\t<0.5\tmg/l\t(< 5,0)\tDr. Michael Berchtenbreiter
+Stoffwechsel\ta
+Glucose\t99\tmg/dl\t(70 - 100)\tklausmichael.berchtenbreiter
+Cholesterin\t209\tmg/dl\t(< 200)\tx @muenchen-klinik.de
+Wasser- / Elektrolythaushalt
+Creatinin\t1.6\tmg/dl\t(0,7-1,2)\tx
+GFR CKD-EPI\t59\tml/min\t(> 60)\t*
+"""
+
+    draft = parse_clinical_text(text)
+    rows = [item for item in draft.candidates if item.target == "lab_result"]
+
+    assert draft.document_type == "laboratory_report"
+    assert len(rows) == 15
+    assert {row.normalized["measured_on"] for row in rows} == {"2026-05-26"}
+    assert all("muenchen-klinik" not in (row.normalized["unit"] or "") for row in rows)
+    leuko = next(row for row in rows if row.normalized["analyte_name"] == "Leuko")
+    assert leuko.normalized["unit"] == "/nl"
+    assert leuko.normalized["reference_text"] == "( 3,7 - 9,9 )"
+    assert leuko.normalized["abnormal_flag"] == "normal"
+    hcv = next(row for row in rows if row.normalized["analyte_name"] == "Anti-HCV")
+    assert hcv.normalized["result_text"] == "negativ"
+    assert hcv.normalized["unit"] is None
+    assert hcv.selected is True
+    vzv = next(row for row in rows if row.normalized["analyte_name"] == "VZV IgG-AK")
+    assert vzv.normalized["unit"] is None
+    assert vzv.selected is False
+    assert "laboratory_unit_requires_confirmation" in vzv.normalized["review_reasons"]
+    cholesterol = next(
+        row for row in rows if row.normalized["analyte_name"] == "Cholesterin"
+    )
+    assert cholesterol.normalized["panel"] == "Stoffwechsel"
+    assert cholesterol.normalized["abnormal_flag"] == "high"
+    gfr = next(row for row in rows if row.normalized["analyte_name"] == "GFR CKD-EPI")
+    assert gfr.normalized["panel"] == "Wasser- / Elektrolythaushalt"
+    assert gfr.normalized["unit"] == "ml/min"
+    assert gfr.normalized["abnormal_flag"] == "low"
+    assert gfr.source.page == 2
+
+
+def test_unpaired_ocr_surrogate_is_sanitized_without_losing_lab_rows() -> None:
+    draft = parse_clinical_text(
+        "Laborbefund vom 26.05.2026\n"
+        "Bezeichnung\tWert\tEinheit\tNormbereich\n"
+        "CRP\t2,1\tmg/l\t(< 5,0)\udc96"
+    )
+
+    row = next(item for item in draft.candidates if item.target == "lab_result")
+    assert row.normalized["analyte_name"] == "CRP"
+    assert row.normalized["numeric_result"] == 2.1
+    assert "\udc96" not in draft.raw_text
+    assert "\ufffd" in draft.raw_text
 
 
 def test_laboratory_observation_without_date_requires_review() -> None:
@@ -318,6 +446,45 @@ CRP              ng/ml      <0,5           9,9          1,5
         ("Hämoglobin", "2021-08-03", "14,5", "g/dl", "12-15", "normal"),
         ("CRP", "2021-08-01", "9,9", "ng/ml", "<0,5", "high"),
         ("CRP", "2021-08-03", "1,5", "ng/ml", "<0,5", "high"),
+    ]
+
+
+def test_longitudinal_laboratory_table_continuation_realigns_shifted_columns() -> None:
+    text = """
+Laborwerte
+Messgröße                              Referenzbereich           01.08.2021         03.08.2021
+CRP                                    0,0 - 0,5 mg/dl           0,3                0,2
+\f
+Troponin T                      0,0 - 0,1 ng/ml       0,02
+Calcium                         2,2 - 2,6 mmol/l      2,21
+Natrium                         135 - 145 mmol/l      140
+Kalium                          3,5 - 5,0 mmol/l      3,9            4,1
+Magnesium                       1,7 - 2,4 mmol/l      1,8
+
+Wichtiger Hinweis
+Dies ist kein echter Arztbrief.
+"""
+
+    rows = [item for item in parse_clinical_text(text).candidates if item.target == "lab_result"]
+
+    assert [
+        (
+            row.normalized["analyte_name"],
+            row.normalized["measured_on"],
+            row.normalized["result_text"],
+            row.normalized["unit"],
+            row.normalized["reference_text"],
+        )
+        for row in rows
+    ] == [
+        ("CRP", "2021-08-01", "0,3", "mg/dl", "0,0 - 0,5"),
+        ("CRP", "2021-08-03", "0,2", "mg/dl", "0,0 - 0,5"),
+        ("Troponin T", "2021-08-01", "0,02", "ng/ml", "0,0 - 0,1"),
+        ("Calcium", "2021-08-01", "2,21", "mmol/l", "2,2 - 2,6"),
+        ("Natrium", "2021-08-01", "140", "mmol/l", "135 - 145"),
+        ("Kalium", "2021-08-01", "3,9", "mmol/l", "3,5 - 5,0"),
+        ("Kalium", "2021-08-03", "4,1", "mmol/l", "3,5 - 5,0"),
+        ("Magnesium", "2021-08-01", "1,8", "mmol/l", "1,7 - 2,4"),
     ]
 
 
@@ -579,3 +746,342 @@ Dr. Beispiel
     assert not any("Lungenprobleme" in item.value for item in draft.candidates)
     assert "Lungenprobleme" in draft.raw_text
     assert any("adverse-effect catalogue" in warning for warning in draft.warnings)
+
+
+def test_vital_candidate_keeps_kardio_document_date_as_review_only_provenance() -> None:
+    text = """
+Musterstadt, 04.05.2015
+Körperliche Untersuchung
+RR: 170/91 mmHg, Puls: 72, Sauerstoffsättigung(%): 96
+"""
+
+    draft = parse_clinical_text(text)
+    vital = next(item for item in draft.candidates if item.target == "vital")
+
+    assert vital.selected is False
+    assert vital.value == "RR: 170/91 mmHg, Puls: 72, Sauerstoffsättigung(%): 96"
+    assert vital.normalized["measured_at"] == "2015-05-04"
+    assert vital.normalized["bp_systolic"] == 170
+    assert vital.normalized["bp_diastolic"] == 91
+    assert vital.normalized["heart_rate"] == 72
+    assert vital.normalized["oxygen_saturation"] == 96
+    assert vital.normalized["units"] == {
+        "bp_systolic": "mmHg",
+        "bp_diastolic": "mmHg",
+        "heart_rate": "bpm",
+        "oxygen_saturation": "%",
+    }
+    assert vital.normalized["review_reasons"] == [
+        "inferred_measured_at_from_document_date"
+    ]
+
+
+def test_vital_candidate_rejects_ocr_joined_letter_date_as_measurement_date() -> None:
+    text = """
+Körperliche Untersuchung
+Musterstadt, 04.05.2015 RR: 120/80 mmHg
+"""
+
+    vital = next(
+        item for item in parse_clinical_text(text).candidates if item.target == "vital"
+    )
+
+    assert vital.selected is False
+    assert "measured_at" not in vital.normalized
+    assert vital.normalized["review_reasons"] == ["missing_measured_at"]
+
+
+def test_vital_candidate_rejects_authored_date_phrases_joined_to_measurements() -> None:
+    for row in (
+        "Arztbrief vom 04.05.2015 RR: 120/80 mmHg",
+        "Dokument erstellt am 04.05.2015 RR: 120/80 mmHg",
+        "04.05.2015 Musterstadt RR: 120/80 mmHg",
+        "04.05.2015 Arztbrief RR: 120/80 mmHg",
+    ):
+        vital = next(
+            item
+            for item in parse_clinical_text(
+                f"Körperliche Untersuchung\n{row}"
+            ).candidates
+            if item.target == "vital"
+        )
+
+        assert vital.selected is False
+        assert "measured_at" not in vital.normalized
+        assert vital.normalized["review_reasons"] == ["missing_measured_at"]
+
+
+def test_vital_candidate_accepts_explicit_measurement_date_binding() -> None:
+    vital = next(
+        item
+        for item in parse_clinical_text(
+            "Körperliche Untersuchung\nMessdatum: 04.05.2015 RR: 120/80 mmHg"
+        ).candidates
+        if item.target == "vital"
+    )
+
+    assert vital.selected is True
+    assert vital.normalized["measured_at"] == "2015-05-04"
+    assert vital.normalized["review_reasons"] == []
+
+
+def test_vital_candidate_uses_admission_date_and_normalizes_decimal_commas() -> None:
+    text = """
+Stationäre Behandlung vom 01.03.2017 bis 05.03.2017
+
+Körperlicher Untersuchungsbefund bei Aufnahme
+Blutdruck: 150/90 mmHg, Temperatur: 38,9 °C, Puls 95/min, spO2:
+92%. Gewicht: 82 kg, Größe: 1,68 m, BMI: 29,1 kg/m2.
+"""
+
+    vitals = [item for item in parse_clinical_text(text).candidates if item.target == "vital"]
+
+    assert len(vitals) == 1
+    vital = vitals[0]
+    assert vital.selected is True
+    assert vital.source.page == 2
+    assert vital.normalized["measured_at"] == "2017-03-01"
+    assert vital.normalized["temperature_c"] == 38.9
+    assert vital.normalized["heart_rate"] == 95
+    assert vital.normalized["oxygen_saturation"] == 92
+    assert vital.normalized["weight_kg"] == 82
+    assert vital.normalized["height_cm"] == 168
+    assert vital.normalized["bmi"] == 29.1
+
+
+def test_vital_candidate_accepts_dot_decimals_and_exact_unit_conversions() -> None:
+    text = """
+Körpermaße
+19.04.2022 Gewicht: 168.7 lb, Größe: 68 in, BMI: 25.6 kg/m2
+"""
+
+    vital = next(
+        item for item in parse_clinical_text(text).candidates if item.target == "vital"
+    )
+
+    assert vital.selected is True
+    assert vital.normalized["measured_at"] == "2022-04-19"
+    assert vital.normalized["weight_kg"] == 76.52
+    assert vital.normalized["height_cm"] == 172.72
+    assert vital.normalized["bmi"] == 25.6
+    assert vital.normalized["raw_measurements"]["weight_kg"] == [
+        {"value": "168.7", "unit": "lb"}
+    ]
+
+
+def test_vital_candidate_fails_closed_without_date_or_for_conflicts() -> None:
+    text = """
+Körperliche Untersuchung
+RR: 170/91 mmHg, Puls: 72, Sauerstoffsättigung(%): 96
+Gewicht: 76,5 kg, Gewicht: 180 lb, Größe: 173 cm, BMI: 20,0 kg/m2
+Temperatur: 38,9
+"""
+
+    vitals = [item for item in parse_clinical_text(text).candidates if item.target == "vital"]
+
+    assert len(vitals) == 3
+    assert all(item.selected is False for item in vitals)
+    assert all("missing_measured_at" in item.normalized["review_reasons"] for item in vitals)
+    body_measurement = next(item for item in vitals if "180 lb" in item.value)
+    assert "conflicting_measurements:weight_kg" in body_measurement.normalized["review_reasons"]
+    assert "bmi_conflict" in body_measurement.normalized["review_reasons"]
+    temperature = next(item for item in vitals if item.value.startswith("Temperatur"))
+    assert "ambiguous_unit:temperature_c" in temperature.normalized["review_reasons"]
+
+
+def test_vital_candidate_rejects_implausible_values_and_invalid_bp_order() -> None:
+    text = """
+Körperliche Untersuchung vom 01.01.2022
+RR: 60/90 mmHg, Puls: 400/min, SpO2: 108%, AF: 2/min
+"""
+
+    vital = next(
+        item for item in parse_clinical_text(text).candidates if item.target == "vital"
+    )
+
+    assert vital.selected is False
+    assert vital.normalized["review_reasons"] == [
+        "implausible_measurement:heart_rate",
+        "implausible_measurement:oxygen_saturation",
+        "implausible_measurement:respiratory_rate",
+        "invalid_blood_pressure_order",
+    ]
+
+
+def test_vital_candidate_preserves_unsupported_units_and_fails_closed() -> None:
+    text = """
+Körperliche Untersuchung vom 01.01.2022
+Gewicht: 180 oz
+"""
+
+    vital = next(
+        item for item in parse_clinical_text(text).candidates if item.target == "vital"
+    )
+
+    assert vital.selected is False
+    assert "weight_kg" not in vital.normalized
+    assert vital.normalized["raw_measurements"] == {
+        "weight_kg": [{"value": "180", "unit": "oz"}]
+    }
+    assert vital.normalized["review_reasons"] == ["unsupported_unit:weight_kg"]
+
+
+def test_vital_candidate_combines_composite_imperial_dimensions() -> None:
+    text = """
+Körpermaße
+19.04.2022 Größe: 5 ft 10 in, Gewicht: 12 st 3 lb
+"""
+
+    vital = next(
+        item for item in parse_clinical_text(text).candidates if item.target == "vital"
+    )
+
+    assert vital.selected is True
+    assert vital.normalized["height_cm"] == 177.8
+    assert vital.normalized["weight_kg"] == 77.56
+    assert vital.normalized["raw_measurements"] == {
+        "height_cm": [{"value": "5 10", "unit": "ft+in"}],
+        "weight_kg": [{"value": "12 3", "unit": "st+lb"}],
+    }
+    assert vital.normalized["review_reasons"] == []
+
+
+def test_vital_candidate_fails_closed_for_invalid_composite_components() -> None:
+    text = """
+Körpermaße
+19.04.2022 Größe: 5 ft 14 in, Gewicht: 12 st 15 lb
+"""
+
+    vital = next(
+        item for item in parse_clinical_text(text).candidates if item.target == "vital"
+    )
+
+    assert vital.selected is False
+    assert vital.normalized["review_reasons"] == [
+        "invalid_composite_unit:height_cm",
+        "invalid_composite_unit:weight_kg",
+    ]
+
+
+def test_vital_candidate_fails_closed_for_local_time_without_timezone() -> None:
+    text = """
+Körperliche Untersuchung
+01.01.2022 14:30 Uhr RR: 120/80 mmHg
+"""
+
+    vital = next(
+        item for item in parse_clinical_text(text).candidates if item.target == "vital"
+    )
+
+    assert vital.selected is False
+    assert vital.normalized["measured_at"] == "2022-01-01"
+    assert vital.normalized["source_measured_time"] == "14:30:00"
+    assert vital.normalized["review_reasons"] == ["ambiguous_measured_at_timezone"]
+
+
+def test_vital_candidate_accepts_offset_aware_explicit_time() -> None:
+    text = """
+Körperliche Untersuchung
+01.01.2022 14:30 Uhr +0200 RR: 120/80 mmHg
+"""
+
+    vital = next(
+        item for item in parse_clinical_text(text).candidates if item.target == "vital"
+    )
+
+    assert vital.selected is True
+    assert vital.normalized["measured_at"] == "2022-01-01T14:30:00+02:00"
+    assert vital.normalized["source_measured_time"] == "14:30:00+02:00"
+    assert vital.normalized["review_reasons"] == []
+
+
+def test_document_subject_extracts_labeled_header_and_deduplicates_repeats() -> None:
+    text = """
+Patient: Erika Beispiel, Geburtsdatum: 01.02.1980
+Patienten-ID: TEST-1234
+
+Patient: Erika Beispiel, Geburtsdatum: 01.02.1980
+Diagnosen
+Musterdiagnose
+"""
+
+    subject = parse_clinical_text(text).subject
+
+    assert subject is not None
+    assert subject.status == "extracted"
+    assert subject.conflict is False
+    assert subject.first_name == "Erika"
+    assert subject.last_name == "Beispiel"
+    assert subject.birth_date == "1980-02-01"
+    assert subject.patient_identifier == "TEST-1234"
+    assert subject.patient_identifier_namespace == "source_document"
+    assert subject.field_confidence == {
+        "first_name": 0.96,
+        "last_name": 0.96,
+        "birth_date": 0.99,
+        "patient_identifier": 0.99,
+    }
+
+
+def test_document_subject_accepts_header_salutation_but_rejects_narrative_name() -> None:
+    header = parse_clinical_text(
+        "Frau Erika Beispiel, geb. 01.02.1980\nDiagnosen\nMusterdiagnose"
+    ).subject
+    narrative = parse_clinical_text(
+        "Anamnese\nDie Patientin Erika Beispiel berichtet über Beschwerden."
+    ).subject
+
+    assert header is not None
+    assert header.first_name == "Erika"
+    assert header.last_name == "Beispiel"
+    assert header.birth_date == "1980-02-01"
+    assert narrative is None
+
+
+def test_document_subject_is_null_for_redacted_or_missing_identity() -> None:
+    redacted = "Herr X. Y. geb. 01.01.198-\nDiagnosen\nMusterdiagnose"
+    redacted_with_valid_dob = "Herr A. K. geb. 01.01.1980\nDiagnosen\nMusterdiagnose"
+    missing = "Diagnosen\nMusterdiagnose\nAnamnese\nKeine Beschwerden."
+
+    assert parse_clinical_text(redacted).subject is None
+    assert parse_clinical_text(redacted_with_valid_dob).subject is None
+    assert parse_clinical_text(missing).subject is None
+
+
+def test_document_subject_accepts_declined_salutation_and_bilingual_dob_label() -> None:
+    salutation = parse_clinical_text(
+        "Herrn Max Beispiel, geb. 09.06.1984, wohnhaft in Musterstadt"
+    ).subject
+    bilingual = parse_clinical_text(
+        "Geburtsdatum/Дата рождения: 08.08.2005"
+    ).subject
+
+    assert salutation is not None
+    assert salutation.first_name == "Max"
+    assert salutation.last_name == "Beispiel"
+    assert salutation.birth_date == "1984-06-09"
+    assert bilingual is not None
+    assert bilingual.status == "extracted"
+    assert bilingual.birth_date == "2005-08-08"
+
+
+def test_document_subject_fails_closed_on_dob_conflict_or_invalid_date() -> None:
+    conflicting = parse_clinical_text(
+        "Geburtsdatum: 01.02.1980\nGeburtsdatum: 02.02.1980"
+    ).subject
+    invalid = parse_clinical_text(
+        "Patient: Erika Beispiel, Geburtsdatum: 32.13.2020"
+    ).subject
+
+    assert conflicting is not None
+    assert conflicting.status == "conflict"
+    assert conflicting.conflict is True
+    assert conflicting.birth_date is None
+    assert conflicting.review_reasons == [
+        "conflicting_subject_identity",
+        "conflicting_subject_field:birth_date",
+    ]
+    assert invalid is not None
+    assert invalid.status == "conflict"
+    assert invalid.birth_date is None
+    assert invalid.review_reasons == ["invalid_subject_birth_date"]
