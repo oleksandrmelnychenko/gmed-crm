@@ -66,7 +66,7 @@ async fn create_user_rejects_password_without_required_character_classes() {
     let Some((app, _pool, admin_id)) = test_context().await else {
         return;
     };
-    let bearer = auth_header_for(admin_id, "it_admin");
+    let bearer = auth_header_for(admin_id, "ceo");
 
     let (status, body) = json_request(
         &app,
@@ -94,7 +94,7 @@ async fn create_user_accepts_password_matching_policy() {
     let Some((app, _pool, admin_id)) = test_context().await else {
         return;
     };
-    let bearer = auth_header_for(admin_id, "it_admin");
+    let bearer = auth_header_for(admin_id, "ceo");
 
     let (status, body) = json_request(
         &app,
@@ -118,7 +118,7 @@ async fn external_interpreter_profiles_are_hidden_from_users_and_roles() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
-    let bearer = auth_header_for(admin_id, "it_admin");
+    let bearer = auth_header_for(admin_id, "ceo");
     let target_id = seed_user(&pool, "users-api-external-interpreter", "interpreter").await;
 
     sqlx::query(
@@ -163,7 +163,7 @@ async fn create_user_rejects_external_standalone_staff_email() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
-    let bearer = auth_header_for(admin_id, "it_admin");
+    let bearer = auth_header_for(admin_id, "ceo");
     let email = format!("external-{}@example.com", Uuid::new_v4().simple());
 
     sqlx::query(
@@ -202,7 +202,7 @@ async fn reset_password_rejects_password_without_required_character_classes() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
-    let bearer = auth_header_for(admin_id, "it_admin");
+    let bearer = auth_header_for(admin_id, "ceo");
     let target_id = seed_user(&pool, "users-api-reset", "patient_manager").await;
 
     let (status, body) = json_request(
@@ -226,7 +226,7 @@ async fn reset_password_accepts_password_matching_policy() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
-    let bearer = auth_header_for(admin_id, "it_admin");
+    let bearer = auth_header_for(admin_id, "ceo");
     let target_id = seed_user(&pool, "users-api-reset-valid", "patient_manager").await;
 
     let (status, body) = json_request(
