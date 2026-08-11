@@ -87,8 +87,7 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
         Err(response) => return response,
     };
 
-    if is_empty_workspace_role(auth_user.role)
-        && !is_empty_workspace_session_path(req.uri().path())
+    if is_empty_workspace_role(auth_user.role) && !is_empty_workspace_session_path(req.uri().path())
     {
         tracing::warn!(
             role = %auth_user.role,
@@ -168,11 +167,7 @@ fn is_empty_workspace_session_path(path: &str) -> bool {
     let path = path.strip_prefix("/api/v1").unwrap_or(path);
     matches!(
         path,
-        "/me"
-            | "/auth/logout"
-            | "/auth/logout-all"
-            | "/auth/sessions"
-            | "/stats/my-kpis"
+        "/me" | "/auth/logout" | "/auth/logout-all" | "/auth/sessions" | "/stats/my-kpis"
     ) || path.starts_with("/auth/sessions/")
 }
 

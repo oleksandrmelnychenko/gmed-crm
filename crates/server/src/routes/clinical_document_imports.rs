@@ -192,7 +192,10 @@ fn evaluate_document_subject_identity(
     if subject.conflict || subject.status != "extracted" {
         return SubjectIdentityDecision::HardMismatch;
     }
-    let subject_birth_date = subject.birth_date.as_deref().filter(|value| !value.trim().is_empty());
+    let subject_birth_date = subject
+        .birth_date
+        .as_deref()
+        .filter(|value| !value.trim().is_empty());
     if let Some(birth_date) = subject_birth_date {
         let Ok(birth_date) = chrono::NaiveDate::parse_from_str(birth_date, "%Y-%m-%d") else {
             return SubjectIdentityDecision::HardMismatch;
@@ -2525,8 +2528,7 @@ async fn prepare_import(
     let status = import.get::<String, _>("status");
     let stored_draft = import.get::<Value, _>("draft");
     if status == "applying" {
-        let stored_fingerprint = import
-            .get::<Option<String>, _>("prepared_payload_fingerprint");
+        let stored_fingerprint = import.get::<Option<String>, _>("prepared_payload_fingerprint");
         let prepared_identity_confirmed =
             import.get::<bool, _>("prepared_patient_identity_confirmed");
         let identity_gate_version = import.get::<i16, _>("prepared_identity_gate_version");
@@ -2977,7 +2979,10 @@ async fn complete_import(
         Ok(None) => return err(StatusCode::CONFLICT, "Import is not in the applying stage"),
         Err(error) => {
             tracing::error!(error = %error, import_id = %import_id, "complete clinical document import");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to complete import");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to complete import",
+            );
         }
     };
     if let Err(error) = tx.commit().await {

@@ -680,7 +680,8 @@ async fn reviewed_medication_import_is_idempotent_and_keeps_regimen_history() {
     let bearer = auth_header_for(admin_id, "ceo");
 
     let first_import =
-        seed_medication_review_import(&pool, patient_id, ceo_id, "med-1", &format!("{tag}-1")).await;
+        seed_medication_review_import(&pool, patient_id, ceo_id, "med-1", &format!("{tag}-1"))
+            .await;
     let first_payload = json!({
         "candidate_id": "med-1",
         "wirkstoff": "Atorvastatin",
@@ -735,7 +736,8 @@ async fn reviewed_medication_import_is_idempotent_and_keeps_regimen_history() {
     assert_eq!(first_event_count, 1);
 
     let duplicate_import =
-        seed_medication_review_import(&pool, patient_id, ceo_id, "med-2", &format!("{tag}-2")).await;
+        seed_medication_review_import(&pool, patient_id, ceo_id, "med-2", &format!("{tag}-2"))
+            .await;
     let duplicate_payload = json!({
         "candidate_id": "med-2",
         "wirkstoff": "atorvastatin",
@@ -773,7 +775,8 @@ async fn reviewed_medication_import_is_idempotent_and_keeps_regimen_history() {
     assert_eq!(duplicate["id"], first_id.to_string());
 
     let changed_import =
-        seed_medication_review_import(&pool, patient_id, ceo_id, "med-3", &format!("{tag}-3")).await;
+        seed_medication_review_import(&pool, patient_id, ceo_id, "med-3", &format!("{tag}-3"))
+            .await;
     let changed_payload = json!({
         "candidate_id": "med-3",
         "wirkstoff": "Atorvastatin",
@@ -823,7 +826,8 @@ async fn reviewed_medication_import_is_idempotent_and_keeps_regimen_history() {
     assert!(first_superseded);
 
     let stop_import =
-        seed_medication_review_import(&pool, patient_id, ceo_id, "med-4", &format!("{tag}-4")).await;
+        seed_medication_review_import(&pool, patient_id, ceo_id, "med-4", &format!("{tag}-4"))
+            .await;
     let stop_payload = json!({
         "candidate_id": "med-4",
         "wirkstoff": "Atorvastatin",
@@ -879,7 +883,8 @@ async fn reviewed_medication_import_is_idempotent_and_keeps_regimen_history() {
     assert_eq!(completed["applied_counts"]["medications"], 1);
 
     let combined_import =
-        seed_medication_review_import(&pool, patient_id, ceo_id, "med-5", &format!("{tag}-5")).await;
+        seed_medication_review_import(&pool, patient_id, ceo_id, "med-5", &format!("{tag}-5"))
+            .await;
     let combined_payload = json!({
         "candidate_id": "med-5",
         "wirkstoff": "Atorvastatin",
@@ -1980,7 +1985,10 @@ async fn imported_vital_is_prevalidated_idempotent_and_keeps_immutable_provenanc
     assert_eq!(listed["items"][0]["oxygen_saturation"], 98.0);
     assert_eq!(listed["items"][0]["respiratory_rate"], 14);
     assert_eq!(listed["items"][0]["source_country"], "DE");
-    assert_eq!(listed["items"][0]["source_import_id"], import_id.to_string());
+    assert_eq!(
+        listed["items"][0]["source_import_id"],
+        import_id.to_string()
+    );
     assert_eq!(listed["items"][0]["source_candidate_id"], "vital-stage-1");
     assert_eq!(listed["items"][0]["source_page"], 2);
     assert_eq!(listed["items"][0]["measured_at_precision"], "datetime");
@@ -2031,8 +2039,7 @@ async fn imported_vital_is_prevalidated_idempotent_and_keeps_immutable_provenanc
     assert_eq!(applied_retry["idempotent"], true);
 
     let ceo_bearer = bearer.clone();
-    let update_path =
-        format!("/api/v1/patients/{patient_id}/vitals/{measurement_id}/update");
+    let update_path = format!("/api/v1/patients/{patient_id}/vitals/{measurement_id}/update");
     let (status, update_body) = json_request(
         &app,
         "POST",
@@ -2045,8 +2052,7 @@ async fn imported_vital_is_prevalidated_idempotent_and_keeps_immutable_provenanc
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{update_body:?}");
-    let delete_path =
-        format!("/api/v1/patients/{patient_id}/vitals/{measurement_id}/delete");
+    let delete_path = format!("/api/v1/patients/{patient_id}/vitals/{measurement_id}/delete");
     let (status, delete_body) =
         json_request(&app, "POST", &delete_path, &ceo_bearer, Some(json!({}))).await;
     assert_eq!(status, StatusCode::CONFLICT, "{delete_body:?}");

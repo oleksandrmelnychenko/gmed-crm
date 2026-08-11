@@ -315,29 +315,20 @@ pub(crate) fn normalize_patient_vital_measurement_payload(
             )
         })?;
     let measured_at = parse_vital_measurement_timestamp(&body.measured_at)?;
-    let measured_at_precision = if chrono::NaiveDate::parse_from_str(
-        body.measured_at.trim(),
-        "%Y-%m-%d",
-    )
-    .is_ok()
-    {
-        "date"
-    } else {
-        "datetime"
-    };
-    let bp_systolic =
-        validate_optional_float_range("bp_systolic", body.bp_systolic, 40.0, 300.0)?;
+    let measured_at_precision =
+        if chrono::NaiveDate::parse_from_str(body.measured_at.trim(), "%Y-%m-%d").is_ok() {
+            "date"
+        } else {
+            "datetime"
+        };
+    let bp_systolic = validate_optional_float_range("bp_systolic", body.bp_systolic, 40.0, 300.0)?;
     let bp_diastolic =
         validate_optional_float_range("bp_diastolic", body.bp_diastolic, 20.0, 200.0)?;
     let heart_rate = validate_optional_int_range("heart_rate", body.heart_rate, 20, 300)?;
     let temperature_c =
         validate_optional_float_range("temperature_c", body.temperature_c, 25.0, 45.0)?;
-    let oxygen_saturation = validate_optional_float_range(
-        "oxygen_saturation",
-        body.oxygen_saturation,
-        20.0,
-        100.0,
-    )?;
+    let oxygen_saturation =
+        validate_optional_float_range("oxygen_saturation", body.oxygen_saturation, 20.0, 100.0)?;
     let respiratory_rate =
         validate_optional_int_range("respiratory_rate", body.respiratory_rate, 3, 80)?;
     let weight_kg = validate_optional_float_range("weight_kg", body.weight_kg, 1.0, 500.0)?;
@@ -356,8 +347,7 @@ pub(crate) fn normalize_patient_vital_measurement_payload(
     if matches!(
         (bp_systolic, bp_diastolic),
         (Some(systolic), Some(diastolic)) if systolic <= diastolic
-    )
-    {
+    ) {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "bp_systolic must be greater than bp_diastolic",
@@ -367,16 +357,14 @@ pub(crate) fn normalize_patient_vital_measurement_payload(
     let calculated_bmi = match (weight_kg, height_cm) {
         (Some(weight), Some(height_cm)) => {
             let height_m = height_cm / 100.0;
-            (height_m > 0.0)
-                .then(|| ((weight / (height_m * height_m)) * 10.0).round() / 10.0)
+            (height_m > 0.0).then(|| ((weight / (height_m * height_m)) * 10.0).round() / 10.0)
         }
         _ => None,
     };
     if matches!(
         (provided_bmi, calculated_bmi),
         (Some(provided), Some(calculated)) if (provided - calculated).abs() > 0.5
-    )
-    {
+    ) {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "bmi conflicts with weight_kg and height_cm",
@@ -508,16 +496,12 @@ pub(crate) fn normalize_patient_lab_result_payload(
         },
     )?;
     let measured_at = parse_clinical_timestamp(&body.measured_at, "measured_at")?;
-    let measured_at_precision = if chrono::NaiveDate::parse_from_str(
-        body.measured_at.trim(),
-        "%Y-%m-%d",
-    )
-    .is_ok()
-    {
-        "date"
-    } else {
-        "datetime"
-    };
+    let measured_at_precision =
+        if chrono::NaiveDate::parse_from_str(body.measured_at.trim(), "%Y-%m-%d").is_ok() {
+            "date"
+        } else {
+            "datetime"
+        };
     let analyte_name = body.analyte_name.trim().to_string();
     let result_text = body.result_text.trim().to_string();
     if analyte_name.is_empty() || analyte_name.len() > 160 {
@@ -13232,9 +13216,8 @@ async fn get_patient_medikationsplan_pdf(
 #[cfg(test)]
 mod unicode_pdf_tests {
     use super::{
-        ClinPdf, MedPlan, add_unicode_pdf_fonts, mp_ink,
-        normalize_patient_lab_result_payload, normalize_patient_vital_measurement_payload,
-        pdf_text_save_options,
+        ClinPdf, MedPlan, add_unicode_pdf_fonts, mp_ink, normalize_patient_lab_result_payload,
+        normalize_patient_vital_measurement_payload, pdf_text_save_options,
     };
     use printpdf::{PdfDocument, PdfWarnMsg};
     use serde_json::json;

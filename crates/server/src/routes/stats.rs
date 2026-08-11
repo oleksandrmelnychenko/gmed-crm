@@ -395,13 +395,12 @@ async fn my_kpis(
 ) -> axum::response::Response {
     let user_id = auth.user_id.to_string();
     let (section, kpi_result) = match auth.role {
-        Role::Ceo => (
-            "ceo",
-            load_ceo_summary(&state).await.map(Some),
-        ),
+        Role::Ceo => ("ceo", load_ceo_summary(&state).await.map(Some)),
         Role::CeoAssistant => (
             "ceo_assistant",
-            load_ceo_assistant_kpis(&state, auth.user_id).await.map(Some),
+            load_ceo_assistant_kpis(&state, auth.user_id)
+                .await
+                .map(Some),
         ),
         Role::PatientManager => (
             "patient_manager",
@@ -428,18 +427,9 @@ async fn my_kpis(
                     .find(|item| item["user_id"].as_str() == Some(user_id.as_str()))
             }),
         ),
-        Role::Billing => (
-            "billing",
-            load_billing_kpis(&state).await.map(Some),
-        ),
-        Role::Sales => (
-            "sales",
-            load_sales_kpis(&state).await.map(Some),
-        ),
-        Role::ItAdmin => (
-            "it_admin",
-            load_it_admin_kpis(&state).await.map(Some),
-        ),
+        Role::Billing => ("billing", load_billing_kpis(&state).await.map(Some)),
+        Role::Sales => ("sales", load_sales_kpis(&state).await.map(Some)),
+        Role::ItAdmin => ("it_admin", load_it_admin_kpis(&state).await.map(Some)),
         _ => return err(StatusCode::FORBIDDEN, "Forbidden"),
     };
 
