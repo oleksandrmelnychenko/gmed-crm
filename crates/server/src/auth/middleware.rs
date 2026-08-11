@@ -77,7 +77,29 @@ fn extract_bearer_token(req: &Request) -> Option<&str> {
         .strip_prefix("Bearer ")
 }
 
-pub async fn require_auth(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
+pub async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    require_auth_with_workspace_policy(state, req, next, true).await
+}
+
+/// Test-only router seam for exercising latent role-specific route contracts.
+///
+/// Production must always use [`require_auth`], which enforces the current
+/// release workspace allowlist before dispatching business APIs.
+#[doc(hidden)]
+pub async fn require_auth_for_role_contract_tests(
+    State(state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Response {
+    require_auth_with_workspace_policy(state, req, next, false).await
+}
+
+async fn require_auth_with_workspace_policy(
+    state: AppState,
+    mut req: Request,
+    next: Next,
+    enforce_release_workspace_roles: bool,
+) -> Response {
     let Some(token) = extract_bearer_token(&req) else {
         return unauthorized();
     };
@@ -87,7 +109,9 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
         Err(response) => return response,
     };
 
-    if is_empty_workspace_role(auth_user.role) && !is_empty_workspace_session_path(req.uri().path())
+    if enforce_release_workspace_roles
+        && is_empty_workspace_role(auth_user.role)
+        && !is_empty_workspace_session_path(req.uri().path())
     {
         tracing::warn!(
             role = %auth_user.role,

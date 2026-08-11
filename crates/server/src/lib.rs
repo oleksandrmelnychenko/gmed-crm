@@ -49,6 +49,23 @@ async fn api_not_found() -> impl IntoResponse {
 ///    response — including 429 responses from the limiters — carries the
 ///    hardened header baseline.
 pub fn build_app(app_state: state::AppState) -> Router {
+    build_app_with_workspace_gate(app_state, true)
+}
+
+/// Build the application for integration suites that verify latent role route
+/// contracts independently of the current release-workspace allowlist.
+///
+/// This is deliberately separate from [`build_app`], which always enables the
+/// production gate.
+#[doc(hidden)]
+pub fn build_app_for_role_contract_tests(app_state: state::AppState) -> Router {
+    build_app_with_workspace_gate(app_state, false)
+}
+
+fn build_app_with_workspace_gate(
+    app_state: state::AppState,
+    enforce_release_workspace_roles: bool,
+) -> Router {
     let auth_public = rate_limit::apply_auth_tight(routes::auth::public_router());
 
     let misc_public = rate_limit::apply_general(
@@ -65,17 +82,22 @@ pub fn build_app(app_state: state::AppState) -> Router {
     //   2. audit::middleware — records one audit_log row per request,
     //      using the AuthUser left behind by require_auth
     //   3. rate_limit::apply_general — per-IP token bucket
-    let protected = rate_limit::apply_general(
-        routes::protected_router()
-            .layer(middleware::from_fn_with_state(
-                app_state.clone(),
-                audit::middleware,
-            ))
-            .layer(middleware::from_fn_with_state(
-                app_state.clone(),
-                auth::middleware::require_auth,
-            )),
-    );
+    let protected_routes = routes::protected_router().layer(middleware::from_fn_with_state(
+        app_state.clone(),
+        audit::middleware,
+    ));
+    let protected_routes = if enforce_release_workspace_roles {
+        protected_routes.layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            auth::middleware::require_auth,
+        ))
+    } else {
+        protected_routes.layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            auth::middleware::require_auth_for_role_contract_tests,
+        ))
+    };
+    let protected = rate_limit::apply_general(protected_routes);
 
     let api_router = auth_public
         .merge(misc_public)

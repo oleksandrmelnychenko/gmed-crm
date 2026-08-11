@@ -103,6 +103,34 @@ async fn audit_analytics_requires_it_admin() {
 }
 
 #[tokio::test]
+async fn release_router_blocks_unconfigured_staff_workspaces() {
+    let Some(app) = test_context().await else {
+        return;
+    };
+    let pm_id = seed_user(&app.suite.pool, "release-gate", "patient_manager").await;
+
+    let (status, _) = json_request(
+        &app.suite.release_app,
+        "GET",
+        "/api/v1/admin/audit-analytics",
+        &auth_header_for("patient_manager", pm_id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = json_request(
+        &app.suite.release_app,
+        "GET",
+        "/api/v1/admin/audit-analytics",
+        &auth_header_for("it_admin", app.it_admin_id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn audit_analytics_surfaces_summary_recent_events_and_top_readers() {
     let Some(app) = test_context().await else {
         return;
