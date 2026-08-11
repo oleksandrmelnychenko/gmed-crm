@@ -1474,14 +1474,8 @@ async fn operational_roles_can_fetch_their_own_kpi_scorecards() {
     )
     .await;
 
-    let (baseline_status, baseline_teamlead_body) = json_request(
-        &app,
-        "GET",
-        "/api/v1/stats/my-kpis",
-        &teamlead_auth,
-        None,
-    )
-    .await;
+    let (baseline_status, baseline_teamlead_body) =
+        json_request(&app, "GET", "/api/v1/stats/my-kpis", &teamlead_auth, None).await;
     assert_eq!(baseline_status, StatusCode::OK);
     assert_eq!(baseline_teamlead_body["section"], "teamlead_interpreter");
     let team_hours = |body: &Value, key: &str| {
@@ -1565,14 +1559,8 @@ async fn operational_roles_can_fetch_their_own_kpi_scorecards() {
     assert_eq!(pm_body["kpi"]["checklist_completed"], 1);
     assert_eq!(pm_body["kpi"]["checklist_completion_rate_pct"], 50.0);
 
-    let (teamlead_status, teamlead_body) = json_request(
-        &app,
-        "GET",
-        "/api/v1/stats/my-kpis",
-        &teamlead_auth,
-        None,
-    )
-    .await;
+    let (teamlead_status, teamlead_body) =
+        json_request(&app, "GET", "/api/v1/stats/my-kpis", &teamlead_auth, None).await;
     assert_eq!(teamlead_status, StatusCode::OK);
     assert_eq!(teamlead_body["section"], "teamlead_interpreter");
     assert!(
