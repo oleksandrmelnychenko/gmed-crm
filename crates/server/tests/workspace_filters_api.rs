@@ -4571,8 +4571,7 @@ async fn ceo_can_open_patient_registry_case_and_reports_workspace() {
     .await;
     let ceo_bearer = auth_header_for(admin_id, "ceo");
 
-    let (status, body) =
-        json_request(&app, "GET", "/api/v1/patients", &ceo_bearer, None).await;
+    let (status, body) = json_request(&app, "GET", "/api/v1/patients", &ceo_bearer, None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(
         body.as_array().is_some_and(|patients| patients
