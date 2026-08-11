@@ -1419,7 +1419,6 @@ async fn sales_and_it_admin_cannot_access_documents_workspace_or_meta_routes() {
             assert_eq!(body["message"], "Insufficient permissions");
         }
     }
-
 }
 
 #[tokio::test]
