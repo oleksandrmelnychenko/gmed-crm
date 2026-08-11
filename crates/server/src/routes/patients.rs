@@ -4528,20 +4528,6 @@ fn validate_optional_positive_float(
 }
 
 #[allow(clippy::result_large_err)]
-fn validate_optional_positive_int(
-    field_name: &str,
-    value: Option<i32>,
-) -> Result<Option<i32>, axum::response::Response> {
-    match value {
-        Some(value) if value <= 0 => Err(err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            &format!("{field_name} must be a positive integer"),
-        )),
-        other => Ok(other),
-    }
-}
-
-#[allow(clippy::result_large_err)]
 fn validate_optional_float_range(
     field_name: &str,
     value: Option<f64>,
