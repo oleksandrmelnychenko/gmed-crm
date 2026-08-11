@@ -1598,7 +1598,7 @@ async fn operational_roles_can_fetch_their_own_kpi_scorecards() {
     assert_eq!(concierge_body["kpi"]["ready_for_billing"], 1);
     assert_eq!(concierge_body["kpi"]["portal_requests_30d"], 1);
 
-    let (billing_status, _) = json_request(
+    let (billing_status, billing_body) = json_request(
         &app,
         "GET",
         "/api/v1/stats/my-kpis",
@@ -1606,7 +1606,10 @@ async fn operational_roles_can_fetch_their_own_kpi_scorecards() {
         None,
     )
     .await;
-    assert_eq!(billing_status, StatusCode::FORBIDDEN);
+    assert_eq!(billing_status, StatusCode::OK);
+    assert_eq!(billing_body["section"], "billing");
+    assert!(billing_body["kpi"].is_object());
+    assert!(billing_body["kpi"]["tracked_invoice_count"].is_number());
 }
 
 #[tokio::test]
