@@ -112,14 +112,14 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let ceo_bearer = auth_header_for(admin_id, "ceo");
 
     let expired_on = (chrono::Utc::now().date_naive() - chrono::Duration::days(2)).to_string();
     let (status, body) = json_request(
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/medications"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [{
                 "handelsname": "Atorvastatin",
@@ -139,7 +139,7 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -200,7 +200,7 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/medications/{medication_id}/expiry-confirm"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;

@@ -1998,7 +1998,7 @@ async fn cases_list_supports_search_and_status_filters() {
 
 #[tokio::test]
 async fn case_doctor_registry_metadata_and_fk_round_trip_work() {
-    let Some((app, pool, admin_id, _)) = test_context().await else {
+    let Some((app, pool, admin_id, ceo_bearer)) = test_context().await else {
         return;
     };
 
@@ -2051,7 +2051,7 @@ async fn case_doctor_registry_metadata_and_fk_round_trip_work() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/procedures"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [{
                 "case_id": case_id,
@@ -2071,7 +2071,7 @@ async fn case_doctor_registry_metadata_and_fk_round_trip_work() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/medications"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [{
                 "handelsname": "Medication A",
@@ -2103,7 +2103,7 @@ async fn case_doctor_registry_metadata_and_fk_round_trip_work() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -2128,7 +2128,7 @@ async fn case_doctor_registry_metadata_and_fk_round_trip_work() {
 
 #[tokio::test]
 async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without_duplicates() {
-    let Some((app, pool, admin_id, _)) = test_context().await else {
+    let Some((app, pool, admin_id, ceo_bearer)) = test_context().await else {
         return;
     };
 
@@ -2136,14 +2136,13 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
 
     let expired_on = (chrono::Utc::now().date_naive() - chrono::Duration::days(2)).to_string();
     let (status, body) = json_request(
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/medications"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [{
                 "handelsname": "Atorvastatin",
@@ -2163,7 +2162,7 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -2224,7 +2223,7 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/medications/{medication_id}/expiry-confirm"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -3678,7 +3677,7 @@ async fn patient_assignment_creates_assign_and_revoke_notifications_without_dupl
 
 #[tokio::test]
 async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() {
-    let Some((app, pool, admin_id, _)) = test_context().await else {
+    let Some((app, pool, admin_id, ceo_bearer)) = test_context().await else {
         return;
     };
 
@@ -3704,7 +3703,7 @@ async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() 
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/vitals"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "measured_at": "2026-04-14T09:45:00Z",
             "bp_systolic": 125.0,
@@ -3722,7 +3721,7 @@ async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() 
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/vitals"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "measured_at": "2026-04-13T08:15:00Z",
             "weight_kg": 71.2,
@@ -3751,7 +3750,7 @@ async fn patient_vitals_round_trip_and_clinical_warnings_flow_through_profile() 
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/vitals"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -11879,7 +11878,7 @@ async fn patient_id_sequence_generates_unique_human_readable_codes() {
 
 #[tokio::test]
 async fn patient_diagnoses_section_round_trip_via_api() {
-    let Some((app, pool, admin_id, _)) = test_context().await else {
+    let Some((app, pool, admin_id, ceo_bearer)) = test_context().await else {
         return;
     };
 
@@ -11907,7 +11906,7 @@ async fn patient_diagnoses_section_round_trip_via_api() {
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/diagnoses"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "items": [
                 {
@@ -11935,7 +11934,7 @@ async fn patient_diagnoses_section_round_trip_via_api() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -11957,7 +11956,7 @@ async fn patient_diagnoses_section_round_trip_via_api() {
 
 #[tokio::test]
 async fn patient_allergies_section_round_trip_via_api() {
-    let Some((app, pool, admin_id, _)) = test_context().await else {
+    let Some((app, pool, admin_id, ceo_bearer)) = test_context().await else {
         return;
     };
 
@@ -11965,13 +11964,12 @@ async fn patient_allergies_section_round_trip_via_api() {
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
 
     let (status, body) = json_request(
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/clinical-warnings"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({
             "kind": "allergie",
             "items": [
@@ -11994,7 +11992,7 @@ async fn patient_allergies_section_round_trip_via_api() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/clinical"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
@@ -12014,7 +12012,7 @@ async fn patient_allergies_section_round_trip_via_api() {
 
 #[tokio::test]
 async fn patient_impfstatus_section_round_trip_via_api() {
-    let Some((app, pool, admin_id, _)) = test_context().await else {
+    let Some((app, pool, admin_id, ceo_bearer)) = test_context().await else {
         return;
     };
 
@@ -12022,14 +12020,13 @@ async fn patient_impfstatus_section_round_trip_via_api() {
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
 
     let status_text = "Tetanus 2023, Grippe 2024, MMR vollständig";
     let (status, _) = json_request(
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/impfstatus"),
-        &pm_bearer,
+        &ceo_bearer,
         Some(json!({ "status_text": status_text })),
     )
     .await;
@@ -12039,7 +12036,7 @@ async fn patient_impfstatus_section_round_trip_via_api() {
         &app,
         "GET",
         &format!("/api/v1/patients/{patient_id}/impfstatus"),
-        &pm_bearer,
+        &ceo_bearer,
         None,
     )
     .await;
