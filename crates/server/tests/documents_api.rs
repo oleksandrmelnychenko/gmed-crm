@@ -1378,9 +1378,12 @@ async fn billing_can_access_financial_documents_but_not_medical_ones() {
 
 #[tokio::test]
 async fn sales_and_it_admin_cannot_access_documents_workspace_or_meta_routes() {
-    let Some((app, pool, admin_id, _admin_bearer)) = test_context().await else {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
         return;
     };
+    let app = ctx.release_app.clone();
+    let pool = ctx.pool.clone();
+    let admin_id = ctx.admin_id;
     let tag = unique_tag("doc-deny-surface");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let provider_id = seed_provider(&pool, &tag).await;
