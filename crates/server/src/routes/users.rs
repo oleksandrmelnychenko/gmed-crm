@@ -237,7 +237,7 @@ async fn list_staff_directory(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListUsersQuery>,
-) -> impl IntoResponse {
+) -> Result<Json<Vec<StaffDirectoryEntry>>, axum::response::Response> {
     auth.require_any_role(&[Role::Ceo, Role::Concierge])?;
 
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
